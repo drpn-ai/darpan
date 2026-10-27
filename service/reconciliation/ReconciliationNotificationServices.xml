@@ -75,12 +75,13 @@
             <else>
                 <set field="voiceCounts" from="[onlyInFile1Count: onlyInFile1Count, onlyInFile2Count: onlyInFile2Count,
                         ruleDifferenceCount: ruleDifferenceCount, runFailed: runFailed, hasWarnings: (warningList ? true : false)]"/>
-                <!-- DAR-BE-107/108: the stored streak, and the badge or side quest this run's slot earned. -->
+                <!-- DAR-BE-107/108: the stored streak, and the badge or side quest this run's slot earned; DAR-BE-138: its astronomy fact. -->
                 <set field="streakFacts" from="darpan.reconciliation.streak.AutomationStreakSupport.notificationFacts(ec, companyUserGroupId, resultIdValue)"/>
                 <set field="voiceModel" from="darpan.reconciliation.notification.RunNotificationVoice.classify(voiceCounts) + [
                         runName: runNameValue, file1SystemLabel: file1SystemLabelValue, file2SystemLabel: file2SystemLabelValue,
                         priorCleanRuns: darpan.reconciliation.notification.RunNotificationStreak.countConsecutiveCleanRuns(ec, savedRunId, companyUserGroupId, resultIdValue),
                         storedStreakDays: streakFacts.streakDays, badgeLine: streakFacts.badgeLine, questLine: streakFacts.questLine,
+                        factLine: streakFacts.factLine,
                         completedMoment: darpan.reconciliation.notification.TenantNotificationSupport.resolveCompletedMoment(ec, companyUserGroupId, resultIdValue)]"/>
                 <set field="lines" from="darpan.reconciliation.notification.RunNotificationVoice.renderLines(voiceModel)"/>
                 <!-- The GIF only ever rides on good news. -->

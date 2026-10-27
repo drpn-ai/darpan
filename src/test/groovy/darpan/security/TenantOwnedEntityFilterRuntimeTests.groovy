@@ -95,6 +95,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.reconciliation.AutomationStreak"             : "automationId",
             "darpan.reconciliation.AutomationStreakBadge"        : "automationId",
             "darpan.reconciliation.TenantStreakQuest"            : "questKey",
+            "darpan.reconciliation.TenantStreakFact"             : "factId",
     ].asImmutable()
 
     /** Entities whose companyUserGroupId is not-null: they get no unstamped fixture row. */
@@ -116,6 +117,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.reconciliation.AutomationStreak",
             "darpan.reconciliation.AutomationStreakBadge",
             "darpan.reconciliation.TenantStreakQuest",
+            "darpan.reconciliation.TenantStreakFact",
     ].toSet().asImmutable()
 
     private ExecutionContext ec
@@ -684,6 +686,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.reconciliation.AutomationStreak": return "STRK"
             case "darpan.reconciliation.AutomationStreakBadge": return "STRKB"
             case "darpan.reconciliation.TenantStreakQuest": return "STRKQ"
+            case "darpan.reconciliation.TenantStreakFact": return "STRKF"
             case "darpan.reconciliation.ReconciliationRunStep": return "STEP"
             case "darpan.reconciliation.SlackOAuthState": return "STATE"
             case "darpan.reconciliation.SlackWorkspaceInstall": return "SWI"
@@ -749,6 +752,8 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.reconciliation.AutomationStreakBadge": return [automationId: id, badgeKey: "HIGH_FIVE", timesEarned: 1L]
             // The tenant is part of this entity's primary key, so the PK read needs it on the fixture too.
             case "darpan.reconciliation.TenantStreakQuest": return [questKey: id, earnedDate: FROM_DATE,
+                    companyUserGroupId: [K: KREWE, G: GORJANA][s]]
+            case "darpan.reconciliation.TenantStreakFact": return [factId: id, awardKey: "HIGH_FIVE", usedDate: FROM_DATE,
                     companyUserGroupId: [K: KREWE, G: GORJANA][s]]
             case "darpan.audit.AuditDigest": return [auditDigestId: id, auditId: "TOEF_AUD_${s}".toString(),
                     chatSpaceId: "TOEF_SPACE_${s}".toString(), kindEnumId: "AUDDK_DAILY", sendTime: "07:00"]

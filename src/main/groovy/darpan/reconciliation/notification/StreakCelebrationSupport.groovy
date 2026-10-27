@@ -25,20 +25,23 @@ class StreakCelebrationSupport {
     static final String KIND_QUEST = "quest"
     static final String GIF_PATH = "/streaks/"
 
-    /** Badges that earn a GIF (first earn per automation only) and every side quest. */
+    /**
+     * Badges that earn a GIF (first earn per automation only) and every side quest. The keys are the stored badge and
+     * quest keys; titles and files follow the DAR-BE-138 astronomy names. Source: tools/streak-gifs in the wrapper repo.
+     */
     static final Map<String, Map<String, String>> CATALOG = [
-            MONTH_DOZE           : [file: "darpan-doze.gif", title: "Month Doze",
-                                    altText: "Tara pulls her sleep mask down and dozes off. Milestone: 30 days clean, Month Doze."],
-            QUARTER_CLEAN        : [file: "darpan-quarter.gif", title: "Quarter Clean",
-                                    altText: "Tara's sunglasses pop off and drop back on as confetti falls. Milestone: 90 days clean, Quarter Clean."],
-            HALF_YEAR_HIBERNATION: [file: "darpan-hibernation.gif", title: "Half-Year Hibernation",
-                                    altText: "Tara curls up and hibernates under falling snow. Milestone: 180 days clean, Half-Year Hibernation."],
-            GLORIOUSLY_BORING    : [file: "darpan-boring.gif", title: "Gloriously Boring",
-                                    altText: "Tara's crown bounces and sparkles under a burst of confetti. Milestone: 365 days clean, Gloriously Boring."],
-            BIG_HAUL             : [file: "darpan-haul.gif", title: "Big Haul",
-                                    altText: "Parcels drop into a pile in front of Tara until it tops out. Side quest: Big Haul."],
-            BLACK_FRIDAY_SURVIVOR: [file: "darpan-bfcm.gif", title: "Black Friday Survivor",
-                                    altText: "Boxes rain down while Tara dodges in a hard hat, then a SURVIVED stamp slams in. Side quest: Black Friday Survivor."],
+            MONTH_DOZE           : [file: "darpan-lunar-lap.gif", title: "Lunar Lap",
+                                    altText: "The Moon runs a lap round Tara's head through every phase, then parks and winks. Milestone: 30 days clean, Lunar Lap."],
+            QUARTER_CLEAN        : [file: "darpan-solstice.gif", title: "Solstice",
+                                    altText: "The sun sets and rises again, Tara squints, and a pair of sunglasses lowers onto her face. Milestone: 90 days clean, Solstice."],
+            HALF_YEAR_HIBERNATION: [file: "darpan-far-side.gif", title: "Far Side of the Sun",
+                                    altText: "Tara, in a space helmet, orbits halfway round the Sun and peeks out from the far side. Milestone: 180 days clean, Far Side of the Sun."],
+            GLORIOUSLY_BORING    : [file: "darpan-full-orbit.gif", title: "Full Orbit",
+                                    altText: "Tara races one full lap round the Sun, crosses a chequered flag and gets a crown. Milestone: 365 days clean, Full Orbit."],
+            BIG_HAUL             : [file: "darpan-meteor-shower.gif", title: "Meteor Shower",
+                                    altText: "Shooting stars streak past, Tara makes a wish, and the last one lands on her head as a star. Side quest: Meteor Shower."],
+            BLACK_FRIDAY_SURVIVOR: [file: "darpan-black-hole.gif", title: "Black Hole Survivor",
+                                    altText: "A black hole swallows a stream of boxes and stretches Tara toward it, then pops, and a SURVIVED stamp slams in. Side quest: Black Hole Survivor."],
     ].asImmutable()
 
     /**

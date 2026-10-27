@@ -130,6 +130,9 @@ class AutomationStreakSupport {
                 facts.questLine = StreakMilestoneVoice.questLine(quest.questKey as String, slotRecords(ec, automationId, tenant, slotDate))
                 facts.questGifKey = quest.questKey
             }
+            // DAR-BE-138: one astronomy fact per celebrating message, for the quest when there is one.
+            String award = (quest != null ? quest.questKey : (facts.badgeLine ? badge.badgeKey : null)) as String
+            if (award) facts.factLine = StreakMilestoneVoice.factLine(StreakFactSupport.factFor(ec, tenant, award, automationId, slotDate))
             return facts
         } catch (Throwable t) {
             logger.warn("Streak facts failed for result {}: {}", result, t.message)
@@ -363,7 +366,8 @@ class AutomationStreakSupport {
             String spaceId = setting?.streaksChatSpaceId?.toString()?.trim()
             if (!spaceId) return
             String label = TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenant)
-            List<String> lines = [StreakMilestoneVoice.questLine(quest.questKey as String, 0L)]
+            List<String> lines = [StreakMilestoneVoice.questLine(quest.questKey as String, 0L),
+                                  StreakMilestoneVoice.factLine(StreakFactSupport.factFor(ec, tenant, quest.questKey as String, null, null))]
             if (label) lines << "Tenant: ${label}".toString()
             Map<String, Object> payload = [text: lines.findAll { it }.join("\n")]
             Map<String, Object> celebration = StreakCelebrationSupport.celebration(TenantNotificationSupport.resolveAppBaseUrl(ec), quest.questKey as String)

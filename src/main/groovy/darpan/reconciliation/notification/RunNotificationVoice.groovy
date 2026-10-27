@@ -1119,7 +1119,8 @@ class RunNotificationVoice {
 
         // DAR-BE-108: a badge or side quest this run earned takes the closer's place; it already says the streak.
         List<String> earned = [model.get("badgeLine"), model.get("questLine")].findAll { it } as List<String>
-        if (earned) return [verdict + "."] + earned
+        // DAR-BE-138: the celebration's astronomy fact closes it.
+        if (earned) return [verdict + "."] + earned + ([model.get("factLine")].findAll { it } as List<String>)
 
         // DAR-BE-107: past the lookback the stored streak speaks, in days and with no ceiling.
         String streak = StreakMilestoneVoice.longStreakLine(toCount(model.get("storedStreakDays"))) ?:

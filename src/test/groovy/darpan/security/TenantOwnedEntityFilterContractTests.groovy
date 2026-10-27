@@ -87,6 +87,11 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.rule.TenantConclusion": "DARPAN_SCOPE_TENANT_CONCLUSION",
     ].asImmutable()
 
+    /** DAR-BE-138 — the astronomy facts a tenant has been told. */
+    static final Map<String, String> DAR_BE_138_FILTERS = [
+            "darpan.reconciliation.TenantStreakFact": "DARPAN_SCOPE_TENANT_STREAK_FACT",
+    ].asImmutable()
+
     /**
      * Filter rows added since the last release cut. No pack carries them yet: the next cut generates its pack from
      * the previous tag, and data/upgrade-data.xml is not hand-edited between cuts. Remove an entry once a pack ships it.
@@ -95,10 +100,11 @@ class TenantOwnedEntityFilterContractTests {
             "DARPAN_SCOPE_AUTOMATION_STREAK_BADGE": "DAR-BE-108, committed after the 2.1.0 cut (5b7038c)",
             "DARPAN_SCOPE_TENANT_STREAK_QUEST"    : "DAR-BE-108, committed after the 2.1.0 cut (5b7038c)",
             "DARPAN_SCOPE_TENANT_CONCLUSION"      : "DAR-BE-135, the entity shipped in 2.1.0 without a filter",
+            "DARPAN_SCOPE_TENANT_STREAK_FACT"     : "DAR-BE-138, committed after the 2.1.0 cut",
     ].asImmutable()
 
     /** Every filter row this class pins by id, with its entity. */
-    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS).asImmutable()
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS).asImmutable()
 
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [

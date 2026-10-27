@@ -1,6 +1,7 @@
 package darpan.reconciliation.streak
 
 import darpan.facade.common.TenantAccessSupport
+import darpan.reconciliation.notification.AstronomyFacts
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -26,7 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-BE-107 / DAR-BE-108 against a real Moqui: slots folded into the stored streak, the badges and side quests they
- * earn, the run message that carries them, the badge GIF cap, and the read the Streaks page calls.
+ * earn, the run message that carries them, the badge GIF cap, and the read the Streaks page calls. DAR-BE-138: the
+ * astronomy fact each celebrating message carries, never the same one twice for a tenant.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AutomationStreakSupportSmokeTests {
@@ -45,7 +47,7 @@ class AutomationStreakSupportSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "automation-streak-support-smoke")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        ["GORJANA", "STRK_BF", "STRK_BF_BROKEN", "STRK_CAP"].each { String tenant ->
+        ["GORJANA", "STRK_BF", "STRK_BF_BROKEN", "STRK_CAP", "STRK_FACT", "STRK_FACT_2"].each { String tenant ->
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: tenant, description: tenant,
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
         }
@@ -91,13 +93,17 @@ class AutomationStreakSupportSmokeTests {
         Map facts = AutomationStreakSupport.notificationFacts(ec, KREWE, crossing)
         assertEquals(daysSince(fires[0]), facts.streakDays, "no 20 cap: the stored streak counts every day")
         assertTrue((facts.streakDays as int) >= 31)
-        assertTrue((facts.badgeLine as String).contains("Month Doze"), facts.badgeLine as String)
+        assertTrue((facts.badgeLine as String).contains("Lunar Lap"), facts.badgeLine as String)
+        assertTrue((facts.factLine as String).startsWith("Space fact: "), facts.factLine as String)
+        assertEquals(facts.factLine, AutomationStreakSupport.notificationFacts(ec, KREWE, crossing).factLine,
+                "building the same message again tells the same fact")
         Map celebration = AutomationStreakSupport.celebrationFor(ec, facts)
-        assertTrue((celebration.imageUrl as String).endsWith("/streaks/darpan-doze.gif"), celebration.imageUrl as String)
+        assertTrue((celebration.imageUrl as String).endsWith("/streaks/darpan-lunar-lap.gif"), celebration.imageUrl as String)
         assertEquals("badge", celebration.kind)
 
         Map next = AutomationStreakSupport.notificationFacts(ec, KREWE, after)
         assertNull(next.badgeLine, "the slot after the crossing earns nothing")
+        assertNull(next.factLine, "and spends no fact")
         assertNull(AutomationStreakSupport.celebrationFor(ec, next))
 
         // Folding again never counts a slot twice.
@@ -181,7 +187,8 @@ class AutomationStreakSupportSmokeTests {
         assertTrue((facts.questLine as String).contains("12,000"), facts.questLine as String)
         Map celebration = AutomationStreakSupport.celebrationFor(ec, facts)
         assertEquals("quest", celebration.kind)
-        assertTrue((celebration.imageUrl as String).endsWith("/streaks/darpan-haul.gif"))
+        assertTrue((celebration.imageUrl as String).endsWith("/streaks/darpan-meteor-shower.gif"))
+        assertTrue((facts.factLine as String).startsWith("Space fact: "), facts.factLine as String)
 
         // Once per tenant: a second haul by another automation finds nothing new.
         automation("STRK_HAUL_2", KREWE)
@@ -214,8 +221,9 @@ class AutomationStreakSupportSmokeTests {
         assertNull(quest.automationId)
         assertNotNull(quest.notifiedDate)
         assertEquals(1, posted.size())
-        assertTrue((posted[0].text as String).contains("Black Friday Survivor"))
-        assertTrue(((posted[0].cardsV2 as List)[0].card.sections[0].widgets[0].image.imageUrl as String).endsWith("/streaks/darpan-bfcm.gif"))
+        assertTrue((posted[0].text as String).contains("Black Hole Survivor"))
+        assertTrue((posted[0].text as String).contains("\nSpace fact: "), posted[0].text as String)
+        assertTrue(((posted[0].cardsV2 as List)[0].card.sections[0].widgets[0].image.imageUrl as String).endsWith("/streaks/darpan-black-hole.gif"))
 
         assertNull(row("darpan.reconciliation.TenantStreakQuest", [companyUserGroupId: "STRK_BF_BROKEN", questKey: "BLACK_FRIDAY_SURVIVOR"]))
     }
@@ -238,11 +246,33 @@ class AutomationStreakSupportSmokeTests {
 
         assertEquals(2, posted.size())
         assertTrue(posted[0].cardsV2 != null, "the first badge of the day carries its GIF")
-        assertTrue((posted[0].text as String).contains("Month Doze"), posted[0].text as String)
+        assertTrue((posted[0].text as String).contains("Lunar Lap"), posted[0].text as String)
         assertNull(posted[1].cardsV2, "a second badge GIF to the same space that day is dropped")
-        assertTrue((posted[1].text as String).contains("Month Doze"), "the line still goes out")
+        assertTrue((posted[1].text as String).contains("Lunar Lap"), "the line still goes out")
+        List<String> factLines = posted.collect { ((it.text as String).readLines().find { it.startsWith("Space fact: ") }) }
+        assertTrue(factLines.every { it }, "each badge message closes on its fact: ${posted*.text}".toString())
+        assertEquals(2, factLines.toSet().size(), "two messages to one tenant never tell the same fact")
         assertFalse(posted.any { it.containsKey("celebration") }, "the provider-neutral key is never posted")
         assertNotNull(row("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "STRK_CAP_SPACE"]).lastBadgeGifDate)
+    }
+
+    @Test
+    void aTenantHearsEveryFactOnceThenNoneAndAnotherTenantStartsFresh() {
+        Timestamp day = ts(Instant.parse("2026-01-01T02:00:00Z"))
+        String first = StreakFactSupport.factFor(ec, "STRK_FACT", "HIGH_FIVE", "STRK_FACT_A", day)
+        assertNotNull(first)
+        assertEquals(first, StreakFactSupport.factFor(ec, "STRK_FACT", "HIGH_FIVE", "STRK_FACT_A", day), "the same earn, the same fact")
+
+        Set<String> heard = [first] as Set<String>
+        (1..<AstronomyFacts.FACTS.size()).each { int i ->
+            String fact = StreakFactSupport.factFor(ec, "STRK_FACT", "MONTH_DOZE", "STRK_FACT_A", ts(day.toInstant().plus(Duration.ofDays(i))))
+            assertNotNull(fact, "fact ${i} of ${AstronomyFacts.FACTS.size()}".toString())
+            assertTrue(heard.add(fact), "a repeat on message ${i}: ${fact}".toString())
+        }
+        assertEquals(AstronomyFacts.FACTS.toSet(), heard)
+        assertNull(StreakFactSupport.factFor(ec, "STRK_FACT", "MONTH_DOZE", "STRK_FACT_A", ts(day.toInstant().plus(Duration.ofDays(400)))),
+                "every fact told: silence, not a repeat")
+        assertNotNull(StreakFactSupport.factFor(ec, "STRK_FACT_2", "HIGH_FIVE", "STRK_FACT_B", day), "another tenant has heard none")
     }
 
     // ---- the read --------------------------------------------------------------------------------

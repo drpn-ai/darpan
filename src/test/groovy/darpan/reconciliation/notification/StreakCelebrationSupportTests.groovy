@@ -35,8 +35,8 @@ class StreakCelebrationSupportTests {
     @Test
     void celebrationPointsAtTheAppsStreaksFolder() {
         Map c = StreakCelebrationSupport.celebration(BASE + "/", "MONTH_DOZE")
-        assertEquals("https://app.drpn.ai/streaks/darpan-doze.gif", c.imageUrl)
-        assertEquals("Month Doze", c.title)
+        assertEquals("https://app.drpn.ai/streaks/darpan-lunar-lap.gif", c.imageUrl)
+        assertEquals("Lunar Lap", c.title)
     }
 
     @Test
@@ -60,8 +60,8 @@ class StreakCelebrationSupportTests {
         assertEquals("gorjana · Returns · clean. 30 days in a row.", shaped.text)
         assertFalse(shaped.containsKey("celebration"), "Google Chat rejects unknown fields with HTTP 400")
         Map image = shaped.cardsV2[0].card.sections[0].widgets[0].image as Map
-        assertEquals("https://app.drpn.ai/streaks/darpan-doze.gif", image.imageUrl)
-        assertTrue((image.altText as String).contains("Month Doze"))
+        assertEquals("https://app.drpn.ai/streaks/darpan-lunar-lap.gif", image.imageUrl)
+        assertTrue((image.altText as String).contains("Lunar Lap"))
     }
 
     @Test
@@ -72,9 +72,9 @@ class StreakCelebrationSupportTests {
         List blocks = shaped.blocks as List
         assertEquals("section", blocks[0].type)
         assertEquals("image", blocks[1].type)
-        assertEquals("https://app.drpn.ai/streaks/darpan-haul.gif", blocks[1].image_url)
+        assertEquals("https://app.drpn.ai/streaks/darpan-meteor-shower.gif", blocks[1].image_url)
         assertTrue(blocks[1].alt_text as boolean, "Slack refuses an image block without alt_text")
-        assertEquals("Big Haul", blocks[1].title.text)
+        assertEquals("Meteor Shower", blocks[1].title.text)
     }
 
     @Test

@@ -353,6 +353,11 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.TenantStreakQuest"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-138 — the astronomy facts a tenant has been told. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_STREAK_FACT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.TenantStreakFact"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <!-- DAR-BE-135 — a tenant's own conclusion codes (DAR-UI-064 shipped the entity without one). The catalog still
          reads every tenant's rows on purpose, through findGlobalUnscoped, to hide other tenants' codes. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_CONCLUSION"

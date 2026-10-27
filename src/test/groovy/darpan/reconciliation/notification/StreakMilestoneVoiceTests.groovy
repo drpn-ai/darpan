@@ -22,8 +22,8 @@ class StreakMilestoneVoiceTests {
     @Test
     void theLadderIsTheSevenDecidedBadgesInOrder() {
         assertEquals([5, 15, 30, 60, 90, 180, 365], StreakMilestoneVoice.BADGE_LADDER*.days)
-        assertEquals(["High Five", "Fifteen Days of Fame", "Month Doze", "Double Doze", "Quarter Clean",
-                      "Half-Year Hibernation", "Gloriously Boring"], StreakMilestoneVoice.BADGE_LADDER*.title)
+        assertEquals(["First Light", "Full Moon", "Lunar Lap", "Twin Moons", "Solstice",
+                      "Far Side of the Sun", "Full Orbit"], StreakMilestoneVoice.BADGE_LADDER*.title)
         assertEquals([false, false, true, true, true, true, true], StreakMilestoneVoice.BADGE_LADDER*.reEarnable)
         // The badges with a GIF share their key with the celebration catalogue.
         StreakCelebrationSupport.CATALOG.keySet().findAll { !(it in ["BIG_HAUL", "BLACK_FRIDAY_SURVIVOR"]) }.each {
@@ -33,9 +33,9 @@ class StreakMilestoneVoiceTests {
 
     @Test
     void theNextBadgeIsTheFirstRungNotYetReached() {
-        assertEquals("Month Doze", StreakMilestoneVoice.nextBadge(21).title)
-        assertEquals("Double Doze", StreakMilestoneVoice.nextBadge(30).title)
-        assertEquals("Gloriously Boring", StreakMilestoneVoice.nextBadge(364).title)
+        assertEquals("Lunar Lap", StreakMilestoneVoice.nextBadge(21).title)
+        assertEquals("Twin Moons", StreakMilestoneVoice.nextBadge(30).title)
+        assertEquals("Full Orbit", StreakMilestoneVoice.nextBadge(364).title)
         assertNull(StreakMilestoneVoice.nextBadge(365))
         assertNull(StreakMilestoneVoice.nextBadge(1200))
     }
@@ -71,10 +71,10 @@ class StreakMilestoneVoiceTests {
             assertEquals(1, template.count("{ordinal}"), template)
             RunNotificationVoice.setLinePicker { List<String> p, String slot -> template }
             String line = StreakMilestoneVoice.badgeLine("QUARTER_CLEAN", 3)
-            assertTrue(line.contains("Quarter Clean") && line.contains("3rd"), line)
+            assertTrue(line.contains("Solstice") && line.contains("3rd"), line)
         }
         RunNotificationVoice.resetLinePicker()
-        assertNull(StreakMilestoneVoice.badgeLine("HIGH_FIVE", 2), "High Five is earned once per automation, ever")
+        assertNull(StreakMilestoneVoice.badgeLine("HIGH_FIVE", 2), "First Light is earned once per automation, ever")
         assertNull(StreakMilestoneVoice.badgeLine("FIFTEEN_DAYS_OF_FAME", 2))
         assertNull(StreakMilestoneVoice.badgeLine("NOT_A_BADGE", 1))
         assertNull(StreakMilestoneVoice.badgeLine("MONTH_DOZE", 0))
@@ -88,7 +88,7 @@ class StreakMilestoneVoiceTests {
                 String line = StreakMilestoneVoice.longStreakLine(days)
                 assertTrue(line.contains(Integer.toString(days)), line)
                 assertFalse(line.contains("{"), line)
-                if (days >= 365) assertFalse(line.contains("Gloriously Boring"), "past the top rung there is no next badge: ${line}".toString())
+                if (days >= 365) assertFalse(line.contains("Full Orbit"), "past the top rung there is no next badge: ${line}".toString())
             }
         }
     }
@@ -101,7 +101,7 @@ class StreakMilestoneVoiceTests {
             assertFalse(template.contains("{left} day"), "the distance carries its own unit: ${template}".toString())
             RunNotificationVoice.setLinePicker { List<String> p, String slot -> template }
             String line = StreakMilestoneVoice.longStreakLine(89)
-            assertTrue(line.contains("Quarter Clean") && line.contains("1 day") && !line.contains("1 days"), line)
+            assertTrue(line.contains("Solstice") && line.contains("1 day") && !line.contains("1 days"), line)
         }
     }
 
@@ -122,12 +122,16 @@ class StreakMilestoneVoiceTests {
     }
 
     @Test
-    void everyLineIsOneQuietSentenceInPlainText() {
-        List<String> all = StreakMilestoneVoice.FIRST_EARN_LINES.values().flatten() + StreakMilestoneVoice.RE_EARN_LINES +
+    void everyLineIsQuietPlainTextAndOnlyAFirstEarnGetsMoreThanOneSentence() {
+        List<String> firstEarn = StreakMilestoneVoice.FIRST_EARN_LINES.values().flatten() as List<String>
+        List<String> all = firstEarn + StreakMilestoneVoice.RE_EARN_LINES +
                 StreakMilestoneVoice.LONG_STREAK_LINES + StreakMilestoneVoice.NEXT_BADGE_LINES
         assertTrue(all.size() > 300, "corpus is ${all.size()} lines".toString())
         all.each { String line ->
-            assertEquals(1, line.count("."), "one sentence: ${line}".toString())
+            // DAR-BE-138: a first earn is rare enough for a joke, so up to three short sentences; the rest stay at one.
+            int sentences = line.count(".")
+            if (line in firstEarn) assertTrue(sentences >= 1 && sentences <= 3, "one to three sentences: ${line}".toString())
+            else assertEquals(1, sentences, "one sentence: ${line}".toString())
             assertTrue(line.endsWith("."), line)
             assertFalse(line.contains("!"), "copy shouts: ${line}".toString())
             String lower = line.toLowerCase()
@@ -146,5 +150,20 @@ class StreakMilestoneVoiceTests {
         StreakMilestoneVoice.FIRST_EARN_LINES.each { String key, List<String> pool ->
             assertEquals(pool.size(), pool.toSet().size(), "duplicate entry in ${key}".toString())
         }
+    }
+
+    @Test
+    void theFactLineLabelsTheFactAndSaysNothingWithoutOne() {
+        assertEquals("Space fact: Io is volcanic.", StreakMilestoneVoice.factLine(" Io is volcanic. "))
+        assertNull(StreakMilestoneVoice.factLine(null))
+        assertNull(StreakMilestoneVoice.factLine("  "))
+    }
+
+    @Test
+    void theQuestLinesUseTheAstronomyNames() {
+        RunNotificationVoice.setLinePicker { List<String> p, String slot -> p[0] }
+        assertTrue(StreakMilestoneVoice.questLine("BIG_HAUL", 12345L).contains("Meteor Shower"))
+        assertTrue(StreakMilestoneVoice.questLine("BIG_HAUL", 12345L).contains("12,345"))
+        assertTrue(StreakMilestoneVoice.questLine("BLACK_FRIDAY_SURVIVOR", 0L).contains("Black Hole Survivor"))
     }
 }

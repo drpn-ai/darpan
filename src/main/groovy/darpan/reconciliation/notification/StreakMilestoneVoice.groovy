@@ -8,133 +8,140 @@ package darpan.reconciliation.notification
  * AutomationStreakSupport.notificationFacts reads the stored streak and the badge or quest this run's slot earned, and a
  * badge's line rides on the run message that crossed the threshold (DAR-BE-108), in place of the streak line.
  *
- * Badges belong to an automation and count clean DAYS (DAR-UI-059). High Five and Fifteen Days of Fame are earned once
- * per automation, ever; from Month Doze up a later streak earns the badge again.
+ * Badges belong to an automation and count clean DAYS (DAR-UI-059). First Light and Full Moon are earned once per
+ * automation, ever; from Lunar Lap up a later streak earns the badge again. Every badge and side-quest message also
+ * carries one astronomy fact (DAR-BE-138, factLine), never the same one twice for a tenant.
  */
 class StreakMilestoneVoice {
 
-    /** The ladder, lowest first. Keys match StreakCelebrationSupport.CATALOG where a badge has a GIF. */
+    /**
+     * The ladder, lowest first. Keys match StreakCelebrationSupport.CATALOG where a badge has a GIF. The keys are stored
+     * on AutomationStreakBadge rows, so they keep their first names; DAR-BE-138 renamed the titles after the sky
+     * (Aditi 2026-10-27), each fitting its day count: a telescope's first look, new moon to full, one lap of the Moon's
+     * phases, two of them, a season, half an orbit, a whole one.
+     */
     static final List<Map<String, Object>> BADGE_LADDER = [
-            [key: "HIGH_FIVE", title: "High Five", days: 5, reEarnable: false],
-            [key: "FIFTEEN_DAYS_OF_FAME", title: "Fifteen Days of Fame", days: 15, reEarnable: false],
-            [key: "MONTH_DOZE", title: "Month Doze", days: 30, reEarnable: true],
-            [key: "DOUBLE_DOZE", title: "Double Doze", days: 60, reEarnable: true],
-            [key: "QUARTER_CLEAN", title: "Quarter Clean", days: 90, reEarnable: true],
-            [key: "HALF_YEAR_HIBERNATION", title: "Half-Year Hibernation", days: 180, reEarnable: true],
-            [key: "GLORIOUSLY_BORING", title: "Gloriously Boring", days: 365, reEarnable: true],
+            [key: "HIGH_FIVE", title: "First Light", days: 5, reEarnable: false],
+            [key: "FIFTEEN_DAYS_OF_FAME", title: "Full Moon", days: 15, reEarnable: false],
+            [key: "MONTH_DOZE", title: "Lunar Lap", days: 30, reEarnable: true],
+            [key: "DOUBLE_DOZE", title: "Twin Moons", days: 60, reEarnable: true],
+            [key: "QUARTER_CLEAN", title: "Solstice", days: 90, reEarnable: true],
+            [key: "HALF_YEAR_HIBERNATION", title: "Far Side of the Sun", days: 180, reEarnable: true],
+            [key: "GLORIOUSLY_BORING", title: "Full Orbit", days: 365, reEarnable: true],
     ].asImmutable()
 
     /** Up to here RunNotificationVoice's own streak lines speak; past it, the lines below. */
     static final int LONG_STREAK_FROM = 21
 
     /**
-     * The line on the run message whose run earned a badge, the first time this automation earns it. Each badge has its
-     * own pool so the line can play on the badge (the doze, the hibernation, the crown) and state what it took; {badge}
-     * is the title, filled in here so no line can misspell it. No line puts an article before {badge}: "a Fifteen Days
-     * of Fame" and "another Gloriously Boring" do not read.
+     * The line on the run message whose run earned a badge, the first time this automation earns it. Badges are rare,
+     * so these get room for a joke (DAR-BE-138, Aditi 2026-10-27: "this is a once in a while thing so we can have some
+     * more fun with the text"): up to three short sentences, each playing on the badge's bit of sky and saying what it
+     * took. {badge} is the title, filled in here so no line can misspell it. No line puts an article before {badge}:
+     * "a Full Orbit" and "another Solstice" do not read.
      */
     static final Map<String, List<String>> FIRST_EARN_LINES = [
             HIGH_FIVE: [
-                    "Five matched days in a row, and that earns this automation its {badge}.",
-                    "{badge} unlocked: five straight days with nothing out of line.",
-                    "That's five days running without a single difference, which is worth a {badge}.",
-                    "Five consecutive days of matched records puts {badge} on the board.",
-                    "The automation just picked up its {badge} for five days in a row with nothing to chase.",
-                    "Badge earned: {badge}, for five days where every run lined up.",
-                    "Five days, every run matched, and the first badge goes up \u2014 {badge}.",
-                    "Day five in a row lined up, so {badge} is now on this automation's record.",
-                    "A {badge} for the automation, five days into a streak with no exceptions.",
-                    "Five straight days and the records have not drifted once, so here is {badge}.",
-                    "{badge} is in, after five days of both sides saying the same thing.",
-                    "Five for five on matched days, which is exactly what {badge} asks for.",
+                    "{badge}. Five days in a row lined up, and the streak just opened its eyes to the sky.",
+                    "Every telescope has a first night, and this automation just had five matched days of it. {badge} unlocked.",
+                    "Five straight days without a single difference. The lens cap is off, and this is {badge}.",
+                    "{badge} is in. Five matched days, and the automation has officially started looking up.",
+                    "Five days, zero differences, and the first badge comes into focus — {badge}.",
+                    "The dome is open and the sky is quiet. Five days in a row matched, which is exactly what {badge} asks for.",
+                    "Five matched days on the trot. Astronomers call a new telescope's first look {badge}, and so do we.",
+                    "Day five lined up like the four before it. Point the telescope, focus, and collect {badge}.",
+                    "{badge}, after five straight days of both systems telling the same story.",
+                    "Five days without anything to chase. The streak has had its first good look at the stars, and that is {badge}.",
+                    "Nothing out of line for five days running. Small step, clear skies, {badge}.",
+                    "Five in a row. Somewhere an observatory is cheering quietly for {badge}.",
             ].asImmutable(),
             FIFTEEN_DAYS_OF_FAME: [
-                    "Fifteen days in a row without a difference, and the automation gets its {badge}.",
-                    "{badge} earned, and it took fifteen straight days of every run lining up.",
-                    "Fifteen consecutive matched days, and this automation's {badge} has officially begun.",
-                    "The automation is briefly famous: fifteen straight matched days and {badge} to show for it.",
-                    "Fifteen days without an exception puts {badge} on this automation's record.",
-                    "Badge earned for fifteen consecutive matched days \u2014 {badge}, and the records are not letting it go to their heads.",
-                    "Fifteen days of nothing to report, which is the only kind of fame that earns {badge}.",
-                    "Every run for fifteen days lined up, so {badge} is now official.",
-                    "The automation takes {badge} for fifteen days straight with nothing to chase.",
-                    "Fifteen in a row, no differences, and {badge} is the quiet reward.",
-                    "{badge} is in: fifteen days and the data has not missed a cue.",
-                    "Half a month of matched runs, fifteen days exactly, and that is {badge} earned.",
+                    "Fifteen days in a row matched, about as long as the Moon takes to go from new to full. {badge} unlocked.",
+                    "{badge}. Fifteen straight days without a difference, and the streak is lit all the way across.",
+                    "Half a lunar month of matched records. The Moon is round, the data is square, and this is {badge}.",
+                    "Fifteen days, zero differences. Werewolves are nervous, reconcilers are relaxed, and the badge is {badge}.",
+                    "The streak has waxed for fifteen days straight and is now at {badge}.",
+                    "Fifteen consecutive matched days. Bright, round, and impossible to miss — {badge}.",
+                    "{badge} is in. Fifteen days of nothing to chase, and the night has never looked brighter.",
+                    "Fifteen days lined up end to end. Howling is optional, {badge} is not.",
+                    "New to full in fifteen days, same as the Moon. {badge}.",
+                    "Fifteen days without an exception, and the automation is glowing a little. That is {badge}.",
+                    "Every run for fifteen days lined up, and the streak has reached peak brightness. {badge}.",
+                    "Fifteen matched days running, a whole face of good news. {badge} unlocked.",
             ].asImmutable(),
             MONTH_DOZE: [
-                    "Thirty days in a row matched, and the automation has earned its {badge}.",
-                    "{badge} arrives after thirty straight days with nothing to wake anyone for.",
-                    "Thirty consecutive matched days, which is long enough for the sleep mask to come out \u2014 {badge}.",
-                    "Thirty days of runs that all lined up adds up to a month, and a month adds up to {badge}.",
-                    "Thirty days without a single difference, so {badge} it is, and nobody needs to set an alarm.",
-                    "The records have lined up for thirty days running, and the automation can take its {badge} lying down.",
-                    "Badge earned for thirty matched days in a row \u2014 {badge}, best enjoyed with eyes closed.",
-                    "Thirty straight days of nothing to chase is exactly how a {badge} is earned.",
-                    "Thirty days, every run matched, and the streak is now restful enough to call {badge}.",
-                    "A full thirty days of matched runs puts {badge} on this automation's record, and it is safe to doze.",
-                    "{badge} is in after thirty days of data so steady it is practically a lullaby.",
-                    "The data has not stirred once in thirty days, so here is {badge}.",
+                    "Thirty days, zero differences, and the Moon ran a whole lap of its phases while this automation matched every day of it. {badge} unlocked.",
+                    "{badge}. The Moon went new, full, and new again, and the data did not miss a single night.",
+                    "Thirty straight days lined up. The Moon needs about 29 and a half days for a lap of its phases, so this automation finished half a day ahead. {badge}.",
+                    "One whole lunar cycle of matched records. The tides came and went, the data stayed put, and the badge is {badge}.",
+                    "Thirty days of data so steady you could set a lunar calendar by it. {badge} awarded.",
+                    "{badge} is in. Every phase of the Moon, every day matched, and not one difference worth a second look.",
+                    "The Moon has lapped the sky once, and so has this streak. {badge}.",
+                    "Thirty days in a row matched. Crescent, quarter, gibbous, full and back again, all without an exception. That is {badge}.",
+                    "A full month of nothing to chase. The Moon did all the changing, the data did none, and {badge} goes on the record.",
+                    "Thirty consecutive matched days, one complete round of the Moon's moods. {badge} unlocked.",
+                    "The streak just finished a lap of the Moon's calendar. Thirty days, every one lined up, {badge}.",
+                    "Thirty days without a single difference. The Moon is back where it started, and the automation is holding {badge}.",
             ].asImmutable(),
             DOUBLE_DOZE: [
-                    "Sixty days of matched runs back to back, and that is a {badge}.",
-                    "{badge} earned: sixty straight days and the data has not so much as rolled over.",
-                    "Sixty consecutive matched days means the first nap went so well it got a sequel \u2014 {badge}.",
-                    "Two months of runs that all lined up, sixty days straight, earns a {badge}.",
-                    "Sixty days without a single difference, so the sleep mask stays on for {badge}.",
-                    "The records have lined up for sixty days running, which calls for {badge} and a longer lie-in.",
-                    "Badge earned for sixty matched days in a row \u2014 {badge}, twice as restful as the last one.",
-                    "Sixty straight days of nothing to chase, and {badge} is what that looks like on the record.",
-                    "Every run for sixty days has matched, so the automation has dozed its way into {badge}.",
-                    "A second month of uninterrupted matching brings the streak to sixty days and the badge to {badge}.",
-                    "{badge} is in after sixty days of data quiet enough to sleep through.",
-                    "Sixty days and not one exception, so the automation turns over and collects {badge}.",
+                    "Sixty days matched, two whole lunar cycles back to back. {badge} unlocked.",
+                    "{badge}. The Moon has gone round its phases twice and this automation has not blinked once.",
+                    "Two lunar laps, sixty days, zero differences. Mars has two moons as well, and they have never had to reconcile anything. That is {badge}.",
+                    "Sixty straight days lined up. One moon was impressive, two is a habit, and the badge is {badge}.",
+                    "Sixty days of nothing to chase. Double the moonlight, double the quiet, {badge}.",
+                    "{badge} is in. Sixty consecutive matched days, and the night sky is getting crowded with good news.",
+                    "Two months of runs that all lined up. The Moon came round twice to check, and found {badge}.",
+                    "Sixty days without a single difference, which earns a second moon for the collection. {badge}.",
+                    "The first lunar lap went so well it got a sequel. Sixty matched days in a row, {badge}.",
+                    "Sixty days, two full moons, no exceptions. {badge} unlocked.",
+                    "Every day for sixty days has matched. Two moons up, nothing out of line, and the badge reads {badge}.",
+                    "Sixty consecutive days lined up. The streak now has more moons than Earth does, and they are called {badge}.",
             ].asImmutable(),
             QUARTER_CLEAN: [
-                    "Ninety days in a row matched, and the sunglasses come out for {badge}.",
-                    "{badge} goes to this automation for ninety straight days, a full quarter, without a single exception.",
-                    "A whole quarter of matched runs, ninety days without a break, earns this automation {badge}.",
-                    "Ninety consecutive days lined up, which is worth a little confetti and a {badge}.",
-                    "Ninety days of matched records end to end, so {badge} goes up with the confetti.",
-                    "Badge earned for ninety days in a row \u2014 {badge}, with nothing from the whole stretch needing a second look.",
-                    "Three months of runs without a single difference adds up to ninety days and one {badge}.",
-                    "Ninety straight days with nothing to chase is the kind of quarter that earns {badge}.",
-                    "Every run for ninety days has lined up, so put the sunglasses on for {badge}.",
-                    "The streak just crossed ninety matched days, and {badge} arrives with confetti.",
-                    "{badge} is in after ninety days of records that never once drifted apart.",
-                    "Ninety days, one quarter, zero exceptions, and a {badge} to show for it.",
+                    "Ninety days in a row matched, a whole season from one turning point of the year to the next. Sunglasses on for {badge}.",
+                    "{badge}. A full quarter without a single difference, and the sun is putting on a show about it.",
+                    "Ninety straight days lined up. Stonehenge lines up with the solstice sunrise, this automation lines up records, and both get {badge}.",
+                    "A whole season of matched records. The sun has reached the end of its swing, and the automation has reached {badge}.",
+                    "Ninety days, zero exceptions. Finance owes this automation a coffee and the sun owes it a pair of shades. {badge}.",
+                    "{badge} is in. Three months of nothing to chase, and the quarterly review just became one slide long.",
+                    "Ninety consecutive matched days. The brightest stretch this automation has had yet, and it is called {badge}.",
+                    "The season turned and the data did not. Ninety days in a row, {badge}.",
+                    "Ninety matched days end to end. Deal with it: this automation has {badge}.",
+                    "A quarter of a year, every day lined up. Solstice means the sun stands still, and so did the difference count, at zero. {badge}.",
+                    "Three months without a difference. Put on the shades, step into the sunlight, and collect {badge}.",
+                    "Ninety days of steady data, one full season. {badge} unlocked, and the sun is shining on it.",
             ].asImmutable(),
             HALF_YEAR_HIBERNATION: [
-                    "A hundred and eighty matched days in a row, and the automation settles in under the snow for {badge}.",
-                    "{badge} begins now, after a hundred and eighty straight days of nothing worth waking for.",
-                    "Half a year of matched runs, a hundred and eighty days without a break, earns {badge}.",
-                    "Six months, 180 days straight with every run lined up, so the snow can fall on {badge}.",
-                    "The streak reached 180 matched days, which is long enough to hibernate through and call it {badge}.",
-                    "Badge earned for 180 days in a row \u2014 {badge}, and the data stayed put through one season and the next.",
-                    "A hundred and eighty days without a single difference is the kind of quiet that earns {badge}.",
-                    "With 180 matched days behind it, the automation curls up for the long sleep that is {badge}.",
-                    "Six months of nothing to chase, 180 days end to end, and {badge} is now on the record.",
-                    "The records have lined up for 180 consecutive days, which is a whole winter's sleep and a {badge}.",
-                    "{badge} is in, and 180 days of steady data means nothing will wake it before spring.",
-                    "Half a year, 180 days, and not a single exception, so {badge} goes on the record and the automation does not stir.",
+                    "A hundred and eighty matched days. Earth has travelled halfway round the Sun since this streak began, and the automation earns {badge}.",
+                    "{badge}. Six months without a single difference, and the planet is on the other side of its orbit.",
+                    "Half a year of matched records. Where Earth was when this streak started is now roughly three hundred million kilometres away — {badge}.",
+                    "180 days in a row lined up. Half an orbit, zero exceptions, {badge}.",
+                    "Six months, every day matched. The streak has watched two seasons go by on the way to {badge}.",
+                    "{badge} is in. A hundred and eighty days of steady data, and Earth has swung all the way round to celebrate.",
+                    "180 straight matched days. Somewhere past the Sun, a planet full of good news is waving hello, and it says {badge}.",
+                    "Half a year without anything to chase. The Sun now sits between today and day one, and the badge is {badge}.",
+                    "Six months of matched days end to end. Halfway round the Sun and not a wobble in the orbit. {badge}.",
+                    "A hundred and eighty days lined up. Hi from the far side, and congratulations on {badge}.",
+                    "Two seasons, not one difference. {badge} unlocked, see you on the way back round.",
+                    "180 consecutive matched days. The view from over here is excellent, and it includes {badge}.",
             ].asImmutable(),
             GLORIOUSLY_BORING: [
-                    "The crown goes on for {badge}, three hundred and sixty-five matched days in a row.",
-                    "{badge} is official: a full year, 365 straight days, and not one thing out of line.",
-                    "It took 365 days without a break, every run lined up, to earn this automation {badge}.",
-                    "Runs have matched for 365 consecutive days, which is as boring as it gets and exactly why this is {badge}.",
-                    "One full year, 365 days without a single difference, so the confetti is out and the crown is on \u2014 {badge}.",
-                    "Badge earned for 365 days in a row \u2014 {badge}, the highest honour available to something that never makes the news.",
-                    "Every one of 365 days matched, which is the dullest possible achievement and the most valuable, so here is {badge}.",
-                    "The streak has reached 365 days, and {badge} is the crown for a year of nothing to chase.",
-                    "Twelve months of runs with zero exceptions, all 365 days of them, crowns this automation with {badge}.",
-                    "Three hundred and sixty-five days of data lining up without being asked twice has earned {badge}.",
-                    "{badge} is in: one year, all 365 days matched, and not one surprise in the whole stretch.",
-                    "Nothing has drifted in 365 days, which makes this automation the proud, unremarkable holder of {badge}.",
+                    "A full year. 365 days without a single difference, and Earth has gone all the way round the Sun to hand over {badge}.",
+                    "{badge}. One trip around the Sun, every day matched, and nothing worth telling anyone about, which is the whole point.",
+                    "365 days in a row lined up. Earth covered roughly 940 million kilometres to get here and the data did not drop a single record. That is {badge}.",
+                    "One year without a difference. Historians of this automation will find the period very dull, and that is exactly why it earns {badge}.",
+                    "Every single day for a whole orbit matched. Lap one of one, finish line crossed, {badge}.",
+                    "A year of nothing to chase. The planet went round the Sun at about thirty kilometres a second and the records still kept up. {badge}.",
+                    "365 straight days. No drama, no plot twists, one full orbit. {badge}.",
+                    "{badge} is official. Twelve months, all 365 days matched, and the most exciting thing that happened was this message.",
+                    "One full lap of the Sun, every record in its place. Happy orbit-versary, and here is {badge}.",
+                    "Three hundred and sixty-five days of the same good news. Earth is back where it started, and the automation is holding {badge}.",
+                    "A whole year without a single difference. Somebody write a very short book about it, titled {badge}.",
+                    "365 days matched. The seasons went round, the Sun came back to the same spot among the stars, and {badge} went on the record.",
             ].asImmutable(),
     ].asImmutable()
 
-    /** A badge from Month Doze up, earned again on a later streak; {ordinal} is "2nd", "3rd" and on. No day count: shared by every badge. */
+    /** A badge from Lunar Lap up, earned again on a later streak; {ordinal} is "2nd", "3rd" and on. No day count: shared by every badge. */
     static final List<String> RE_EARN_LINES = [
             "{badge} is back, earned for the {ordinal} time on this automation.",
             "That makes {badge} for the {ordinal} time, and the streak behind it was just as quiet as the first.",
@@ -380,26 +387,26 @@ class StreakMilestoneVoice {
     ].asImmutable()
 
     /**
-     * DAR-BE-108. The line for a side quest just found, once per tenant. Big Haul rides on the run that found it;
-     * Black Friday Survivor is its own post to the tenant's streaks space. {records} is the run's record count with
-     * thousands separators.
+     * DAR-BE-108. The line for a side quest just found, once per tenant. Meteor Shower rides on the run that found it;
+     * Black Hole Survivor is its own post to the tenant's streaks space. {records} is the run's record count with
+     * thousands separators. The keys predate the DAR-BE-138 names (Big Haul, Black Friday Survivor) and stay as stored.
      */
     static final Map<String, List<String>> QUEST_LINES = [
             BIG_HAUL: [
-                    "Side quest found: Big Haul. {records} records in one run, and every one of them lined up.",
-                    "That was {records} records without a single difference, which counts as a Big Haul. Side quest found.",
-                    "Big Haul: {records} records checked in one go and nothing to chase. Side quest found.",
-                    "Side quest found: Big Haul, for carrying {records} records through one run without dropping any.",
-                    "{records} records, one run, zero differences. That is the Big Haul side quest.",
-                    "One run moved {records} records and every one lined up, so Big Haul is found.",
+                    "Side quest found: Meteor Shower. {records} records came down in one run, and every one of them landed where it should.",
+                    "{records} records in a single run without a single difference. That is a Meteor Shower, and the side quest is found.",
+                    "Meteor Shower: {records} records streaked through one run and not one burned up. Side quest found.",
+                    "Side quest found: Meteor Shower, for {records} records in one run with nothing out of line.",
+                    "{records} records, one run, zero differences. Make a wish, it is the Meteor Shower side quest.",
+                    "One run brought down {records} records and all of them matched. Meteor Shower is found.",
             ].asImmutable(),
             BLACK_FRIDAY_SURVIVOR: [
-                    "Side quest found: Black Friday Survivor. Every automation lined up from Black Friday to Cyber Monday.",
-                    "Black Friday through Cyber Monday, and not one automation found a difference. Side quest found: Black Friday Survivor.",
-                    "The busiest weekend of the year came and went, and every automation stayed clean. Black Friday Survivor is found.",
-                    "Every automation made it through Black Friday to Cyber Monday without a difference, which earns Black Friday Survivor.",
-                    "Side quest found: Black Friday Survivor. Four of the loudest days of the year, and the records stayed quiet.",
-                    "Black Friday Survivor: every automation, every day from Friday to Cyber Monday, all lined up.",
+                    "Side quest found: Black Hole Survivor. Every automation lined up from Black Friday to Cyber Monday, and nothing got pulled in.",
+                    "Black Friday through Cyber Monday pulls like a black hole, and not one automation found a difference. Side quest found: Black Hole Survivor.",
+                    "The busiest weekend of the year came and went, and every automation held its orbit. Black Hole Survivor is found.",
+                    "Every automation made it through Black Friday to Cyber Monday without a difference, which earns Black Hole Survivor.",
+                    "Side quest found: Black Hole Survivor. Four of the heaviest days of the year, and every record escaped.",
+                    "Black Hole Survivor: every automation, every day from Black Friday to Cyber Monday, all lined up.",
             ].asImmutable(),
     ].asImmutable()
 
@@ -407,6 +414,12 @@ class StreakMilestoneVoice {
     static String questLine(String key, long records) {
         String template = key ? RunNotificationVoice.pickLine(QUEST_LINES.get(key), "quest|" + key) : null
         return template?.replace("{records}", String.format(Locale.US, "%,d", records))
+    }
+
+    /** DAR-BE-138. The line that carries a badge or side quest's astronomy fact; null for no fact. */
+    static String factLine(String fact) {
+        String text = fact?.trim()
+        return text ? "Space fact: ${text}".toString() : null
     }
 
     /** The plain pool and the next-badge pool dealt as one, so a long streak names its next badge about half the time. */

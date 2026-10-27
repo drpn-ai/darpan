@@ -862,6 +862,31 @@
         </relationship>
     </entity>
 
+    <entity entity-name="TenantStreakFact" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>DAR-BE-138. An astronomy fact (AstronomyFacts) a tenant has been told, on the message for one badge
+            or side quest. The primary key is what keeps a fact from ever reaching the same tenant twice: a second
+            reservation of the same fact for the tenant fails on insert.</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="factId" type="id" is-pk="true">
+            <description>AstronomyFacts.idOf the fact's text.</description>
+        </field>
+        <field name="awardKey" type="id">
+            <description>The badge (StreakMilestoneVoice.BADGE_LADDER key) or side quest the message celebrated.</description>
+        </field>
+        <field name="automationId" type="id">
+            <description>The automation whose message carried it; null for a quest every automation earned together.</description>
+        </field>
+        <field name="earnedSlotDate" type="date-time">
+            <description>scheduledDate of the slot whose message carried it, so building that message again tells the
+                same fact rather than spending a new one.</description>
+        </field>
+        <field name="usedDate" type="date-time"/>
+
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="TSTRKF_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+    </entity>
+
     <entity entity-name="RunDataDocument" package="darpan.reconciliation" use="configuration">
         <description>Associates DataDocuments with a reconciliation run.</description>
         <field name="reconciliationRunId" type="id" is-pk="true"/>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   DAR-BE-094 — gorjana month close, comparison 1 (returns against credit memos and RMAs): the checks that need no
-  answer from the team yet: R9, R8, R7, R16, and R4's "nothing left open". R4's amount and R6 wait on a Shopify read.
+  answer from the team yet: R9, R8, R7, R16, R21, and R4's "nothing left open". R4's amount and R6 wait on a Shopify read.
 
   R16 "A cancelled exchange leaves nothing open in NetSuite." NetSuite never cancels an exchange RMA (none of 30,123
      exchange RMAs since Sep 1): the OMS cancels the return. So FILE_1 is the returns the OMS cancelled (OMS_RETURNS_GQL
@@ -57,6 +57,16 @@
      and ~150 RMAs a month at first: 61% of return credits have none, on every channel. Every address that exists has
      text, and no customer on these records lacks a name, so the name rule guards against a regression.
 
+  R21 "No Happiness Guarantee credit memo is left open by tax counted twice on its POS Tax Variance line." Aditi, 2026-10-27
+     (DAR-BE-149): a Happiness Guarantee return split between store credit and an exchange had the store-credit items' tax
+     counted twice by the OMS; it went on the credit memo as a POS Tax Variance line (item 34838), and the invoices are right,
+     so that much stays open (CM7661593, HG-629155: $49.92 open, the tax on a $605 store-credit item). One single-sided run
+     over every HG-channel credit memo (NS_HG_TAX_VARIANCE_MEMO). The finding: Open, more than $5 unapplied (R4's floor), and
+     the line covers the open amount (lineAfterFix, the line less the open amount, is 0 or more). lineAfterFix is also the
+     fix: what the line should read. Probed 2026-10-27: 65 memos, $729.66 (the data-fix file had 64, $724.23). A memo open
+     beyond its line (CM7661887: $219.07 open, line $7) is not this cause; R4 still lists it. POS memos carry the item for
+     penny rounding too, so the channel is what scopes it. OMS PR #520 stops new cases.
+
   Every record is read, not only the bad ones, so a fixed one is examined and its finding closes (as for R2).
 
   automationId is blank on purpose: an automation is created per environment (prod-owed on DAR-BE-094). Like R2's, the
@@ -79,6 +89,27 @@
     <moqui.basic.Enumeration enumId="CONC_RETURN_NOT_IN_NETSUITE" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_NOT_IN_NETSUITE" description="Return not in NetSuite"/>
 
     <moqui.basic.Enumeration enumId="CONC_HG_NOT_ON_42065" enumTypeId="DarpanConclusion" enumCode="CONC_HG_NOT_ON_42065" description="Happiness Guarantee credit not on 42065"/>
+
+    <moqui.basic.Enumeration enumId="CONC_HG_TAX_COUNTED_TWICE" enumTypeId="DarpanConclusion" enumCode="CONC_HG_TAX_COUNTED_TWICE" description="Tax counted twice"/>
+
+    <!-- ================================================================ R21: HG credits left open by POS Tax Variance -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_HG_TAX_VARIANCE_RS" ruleSetName="Credit memos - Happiness Guarantee POS Tax Variance"
+            description="No Happiness Guarantee credit memo is left open by its POS Tax Variance line. Reads every Happiness Guarantee credit memo so a corrected one is seen and closes."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_HG_TAX_VARIANCE_SCOPE" ruleSetId="GORJANA_HG_TAX_VARIANCE_RS"
+            objectType="CREDIT_MEMO" scopeMode="EVALUATE" description="No Happiness Guarantee credit memo is left open by its POS Tax Variance line. Reads every Happiness Guarantee credit memo so a corrected one is seen and closes."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_HG_TAX_VARIANCE_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="tranId"
+            sourceConfigId="NS_HG_TAX_VARIANCE_MEMO" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_HG_TAX_VARIANCE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_HG_TAX_VARIANCE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_HG_TAX_COUNTED_TWICE" appliesToBucket="FINDING"
+            fixActionTemplate="Lower the POS Tax Variance line on credit memo {recordKey} by the {unapplied} open, to {lineAfterFix}. The invoices are right; the OMS counted the store credit's tax twice."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_TAX_VARIANCE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="status" operator="IN" conditionValues="Credit Memo : Open" checkLabel="The credit memo is open" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_TAX_VARIANCE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="unapplied" operator="GT" conditionValues="5" checkLabel="More than $5 unapplied" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_TAX_VARIANCE_SCOPE" sequenceNum="10" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="lineAfterFix" operator="GT" conditionValues="-0.01" checkLabel="The POS Tax Variance line covers the amount open" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ R7: Happiness Guarantee credits on 42065 -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_HG_ACCOUNT_RS" ruleSetName="Credit memos - Happiness Guarantee account"
@@ -247,6 +278,16 @@ end]]></ruleLogic>
             passesWhenTemplate="Credit memo {recordKey} posts to 42065 Happiness Guarantee."/>
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R7" checkId="GORJANA_CHK_HG_ACCOUNT" companyUserGroupId="GORJANA"
             sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_HG_NOT_ON_42065"/>
+
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_HG_TAX_VARIANCE" companyUserGroupId="GORJANA" checkCode="hg-credits-open-by-pos-tax-variance"
+            label="Happiness Guarantee credit memos left open by their POS Tax Variance line" savedRunId="GORJANA_HG_TAX_VARIANCE_RS"
+            file1RecordType="creditMemo" graceDays="1"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Credit memo {recordKey} is left open by tax counted twice"
+            fixActionTemplate="Lower the POS Tax Variance line on credit memo {recordKey} by the amount left open."
+            passesWhenTemplate="Credit memo {recordKey} is no longer left open by its POS Tax Variance line."/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R21" checkId="GORJANA_CHK_HG_TAX_VARIANCE" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_HG_TAX_COUNTED_TWICE"/>
 
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_CANCELLED_RETURN_OPEN" companyUserGroupId="GORJANA" checkCode="cancelled-returns-left-open"
             label="Returns the OMS cancelled whose NetSuite RMA is still open" savedRunId="GORJANA_CANCELLED_RETURN_RS"

@@ -58,8 +58,8 @@ class GorjanaMonthCloseChecksDataTests {
         [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM, PAYMENTS].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
-        assertEquals(["GORJANA_R4", "GORJANA_R7", "GORJANA_R8", "GORJANA_R9", "GORJANA_R16"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
-                "comparison 1 covers R7, R8, R9, R16 and R4's nothing-left-open so far")
+        assertEquals(["GORJANA_R4", "GORJANA_R7", "GORJANA_R8", "GORJANA_R9", "GORJANA_R16", "GORJANA_R21"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
+                "comparison 1 covers R7, R8, R9, R16, R21 and R4's nothing-left-open so far")
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R11", "GORJANA_R15"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
@@ -75,6 +75,26 @@ class GorjanaMonthCloseChecksDataTests {
         assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [isHg: "F"]), "not a Happiness Guarantee credit")
         // CM7665367 (2026-10-21): a $0 memo posts no accounting line at all, so it is on no account; nothing to book.
         assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [amount: "0"]), "a \$0 memo credits nothing")
+    }
+
+    // DAR-BE-149 R21, from gorjana prod 2026-10-27: CM7661593 (HG-629155) is open $49.92 beside a $49.95 POS Tax Variance line.
+    @Test
+    void anR21RowIsAnOpenHgMemoItsPosTaxVarianceLineCovers() {
+        String scope = "GORJANA_HG_TAX_VARIANCE_SCOPE"
+        Map memo = [tranId: "CM7661593", returnId: "HG-629155", status: "Credit Memo : Open", unapplied: "49.92",
+                    posTaxVariance: "49.95", lineAfterFix: "0.03"]
+        assertEquals("CONC_HG_TAX_COUNTED_TWICE", conclude(RETURNS, scope, memo))
+        assertEquals("CONC_HG_TAX_COUNTED_TWICE", conclude(RETURNS, scope, memo + [unapplied: "5.01", posTaxVariance: "5.01", lineAfterFix: "0"]),
+                "the line exactly the open amount")
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [status: "Credit Memo : Fully Applied", unapplied: "0", lineAfterFix: "0.03"]),
+                "corrected and applied")
+        // CM7661887: $219.07 open beside a $7 line; open for something else, which R4 lists.
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [unapplied: "219.07", posTaxVariance: "7", lineAfterFix: "-212.07"]))
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [unapplied: "4.65", lineAfterFix: "45.3"]), "\$5 or less is ignored, as in R4")
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [posTaxVariance: null, lineAfterFix: null]), "no POS Tax Variance line")
+        Node rule = rows(RETURNS, "darpan.rule.RuleSetConclusionRule").find { it.attribute("compareScopeId") == scope }
+        assertEquals("Lower the POS Tax Variance line on credit memo {recordKey} by the {unapplied} open, to {lineAfterFix}. " +
+                "The invoices are right; the OMS counted the store credit's tax twice.", rule.attribute("fixActionTemplate"))
     }
 
     @Test

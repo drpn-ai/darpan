@@ -87,4 +87,8 @@
     <darpan.audit.AuditStatement statementId="GORJANA_R20" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R20"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="20"
             statementText="Every order HotWax completed is fulfilled in Shopify."/>
+    <!-- DAR-BE-149: R21 is Aditi's (2026-10-27, the HG tax data fix for Nutan), not from #483, so derived until Gorjana Accounting confirms it. -->
+    <darpan.audit.AuditStatement statementId="GORJANA_R21" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R21"
+            categoryEnumId="AUDC_REFUNDS_CREDITS" weightEnumId="AUDSW_DERIVED" sequenceNum="21"
+            statementText="No Happiness Guarantee credit memo is left open by tax counted twice on its POS Tax Variance line."/>
 </entity-facade-xml>

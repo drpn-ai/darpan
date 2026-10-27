@@ -244,7 +244,7 @@ class TenantOwnedEntityFilterRuntimeTests {
                     .orderBy("sequenceNum").useCache(false).list()
         }
         // R18 (DAR-BE-111) and R19 (DAR-BE-113) follow the seventeen from #483.
-        assertEquals((1..20).collect { "R${it}".toString() }, gorjana*.get("statementCode"), "GORJANA sees R1-R20 in order")
+        assertEquals((1..21).collect { "R${it}".toString() }, gorjana*.get("statementCode"), "GORJANA sees R1-R21 in order")
         assertEquals([], gorjana.findAll { !categoryIds.contains(it.get("categoryEnumId")) }*.get("statementCode"),
                 "every statement carries an AuditCategory")
 

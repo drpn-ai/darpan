@@ -442,8 +442,8 @@ class ConfigTransferImporter {
                     .condition("checkId", row.checkId).useCache(false).list() : []
             target.links = ConfigTransferExporter.linkRecords(ec, row.checkId as String, links, statementOrder, targetNamer)
         }
-        Map source = canonical(spec, rec, sourceIdOf(ctx))
-        Map existing = canonical(spec, target, targetIdOf(ctx))
+        Map source = canonical(ec, spec, rec, sourceIdOf(ctx))
+        Map existing = canonical(ec, spec, target, targetIdOf(ctx))
         List<Map> changes = changesBetween(existing, source)
         if (changes) {
             ctx.actions[rec.ref] = "UPDATE"
@@ -451,11 +451,18 @@ class ConfigTransferImporter {
         }
     }
 
-    /** A record with every ref replaced by the identity it has on the target, blanks dropped, keys sorted. */
-    static Map canonical(Map spec, Map rec, Closure<String> idOf) {
+    /**
+     * A record with every ref replaced by the identity it has on the target, keys sorted. A blank or absent column reads
+     * as this instance's default for it: an older source row holds null where the entity now declares a default, the
+     * create fills the default, and both must still read the same or a re-preview never converges.
+     */
+    static Map canonical(def ec, Map spec, Map rec, Closure<String> idOf) {
         Map out = new TreeMap()
         Map fields = new TreeMap()
-        ((rec.fields ?: [:]) as Map).each { k, v ->
+        def ed = ec.entity.getEntityDefinition(spec.entityName as String)
+        Map recFields = (rec.fields ?: [:]) as Map
+        new LinkedHashSet<String>((valueFields(ec, spec) as List<String>) + recFields.keySet().collect { it as String }).each { String k ->
+            Object v = text(recFields[k]) ?: defaultOf(ed, k)
             if (v == null) return
             fields[k] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> idOf(item.sourceConfigId) } : text(v)
         }
@@ -466,12 +473,20 @@ class ConfigTransferImporter {
             Map children = new TreeMap()
             (spec.children as List<Map>).each { Map child ->
                 String name = shortName(child.entityName as String)
-                children[name] = ((rec.children?.get(name) ?: []) as List<Map>).collect { canonical(child, it, idOf) }
+                children[name] = ((rec.children?.get(name) ?: []) as List<Map>).collect { canonical(ec, child, it, idOf) }
             }
             out.children = children
         }
-        if (spec.links) out.links = ((rec.links ?: []) as List<Map>).collect { canonical(spec.links as Map, it, idOf) }
+        if (spec.links) out.links = ((rec.links ?: []) as List<Map>).collect { canonical(ec, spec.links as Map, it, idOf) }
         return out
+    }
+
+    /** A field's declared default as the text a create stores ('Y' -> Y, 30 -> 30); null when it has none. */
+    private static String defaultOf(def ed, String field) {
+        String raw = ed.isField(field) ? ed.getFieldInfo(field).defaultStr : null
+        if (!raw?.trim()) return null
+        raw = raw.trim()
+        return (raw ==~ /'.*'/ || raw ==~ /".*"/) ? raw.substring(1, raw.length() - 1) : raw
     }
 
     private static List<Map> changesBetween(Map existing, Map incoming) {

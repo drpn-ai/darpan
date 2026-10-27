@@ -366,6 +366,41 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
+    void nullSourceFieldMatchesTargetDefault() {
+        // Older prod rows hold null where the entity now declares a default (RuleSet.isActive 'Y', isArchived 'N',
+        // a condition's presence, keyScope, quantifier). The target's create fills the default; the re-preview must
+        // still read them as the same. Direct SQL, so the source keeps its nulls.
+        Closure insert = { String entityName, Map fields -> ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields) }
+        insert("darpan.rule.RuleSet", [ruleSetId: "XFER_RS_NULLS", ruleSetName: "Old prod run", version: "1.0",
+                companyUserGroupId: SRC, isActive: null, isArchived: null])
+        insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS_NULLS", ruleSetId: "XFER_RS_NULLS", objectType: "RETURN",
+                companyUserGroupId: SRC])
+        insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "XFER_CS_NULLS", sequenceNum: 10L, conclusionEnumId: "CONC_XFER_SEED",
+                companyUserGroupId: SRC])
+        insert("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "XFER_CS_NULLS", sequenceNum: 10L, conditionSeq: 1L,
+                subject: "FILE_1", checkLabel: "Present", presence: null, keyScope: null, quantifier: null, companyUserGroupId: SRC])
+        try {
+            Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC, savedRunIds: ["XFER_RS_NULLS"]])
+            assertNoErrors(out)
+            Map bundle = out.result.bundle as Map
+            assertNull((bundle.runs as List<Map>)[0].fields.isActive, "the source really holds null")
+            assertNoErrors(applyPlan(DST, bundle, [:]))
+            assertEquals("Y", ec.entity.find("darpan.rule.RuleSet").condition("companyUserGroupId", DST).disableAuthz().useCache(false)
+                    .one().isActive, "the target's create filled the default")
+
+            Map again = importInto(DST, bundle, [:]).result.plan as Map
+            assertEquals([], again.blocking)
+            (again.lines as List<Map>).each { assertEquals("UNCHANGED", it.action, "${it.ref}: ${it.changes}") }
+        } finally {
+            wipeTenant(DST)
+            ["darpan.rule.RuleSetConclusionCondition", "darpan.rule.RuleSetConclusionRule", "darpan.rule.RuleSetCompareScope"].each {
+                ec.entity.find(it).condition("compareScopeId", "XFER_CS_NULLS").disableAuthz().deleteAll()
+            }
+            ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "XFER_RS_NULLS").disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
     void staleHashRefusesAndWritesNothing() {
         Map before = rowCounts(DST)
         Map out = importInto(DST, exportSource(), [(AUTH_REF): "CREATE"], true, "0" * 64)

@@ -81,7 +81,14 @@
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <if condition="!darpan.admin.transfer.ConfigTransferExporter.requireTenant(ec, tenantUserGroupId)"><return error="true"/></if>
             <if condition="apply">
-                <return error="true" message="Applying a transfer is not available yet."/>
+                <set field="result" from="darpan.admin.transfer.ConfigTransferImporter.apply(ec, tenantUserGroupId, bundle, connectionMap,
+                        planHash, bundle?.source?.instanceLabel)"/>
+                <if condition="result == null"><return error="true"/></if>
+                <set field="plan" from="result.plan"/>
+                <set field="planHash" from="result.planHash"/>
+                <set field="idMap" from="result.idMap"/>
+                <set field="applied" from="true"/>
+                <return/>
             </if>
             <set field="plan" from="darpan.admin.transfer.ConfigTransferImporter.plan(ec, tenantUserGroupId, bundle, connectionMap)"/>
             <set field="planHash" from="darpan.admin.transfer.ConfigTransferImporter.planHash(tenantUserGroupId, bundle, connectionMap, plan)"/>

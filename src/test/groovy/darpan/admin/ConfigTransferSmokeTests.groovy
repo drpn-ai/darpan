@@ -319,6 +319,141 @@ class ConfigTransferSmokeTests {
         assertNotEquals(first, remapped, "the connection map is part of what was previewed")
     }
 
+    // ---------------------------------------------------------------- Task 3: apply, round trip, gates
+
+    @Test
+    void roundTripCarriesEveryField() {
+        Map sent = exportSource()
+        Map out = applyPlan(DST, sent, [(AUTH_REF): "CREATE"])
+        assertNoErrors(out)
+        assertEquals(true, out.result.applied)
+
+        Map back = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: DST, auditCodes: ["month-close"],
+                sourceInstanceLabel: "local"]).result.bundle as Map
+        assertEquals(naturalised(sent), naturalised(back), "every column the source carried arrives, refs by natural identity")
+
+        // The columns no facade service writes, spelled out so a regression names itself.
+        Map check = (back.checks as List<Map>).find { it.fields.checkCode == "returns-vs-memos" }
+        assertEquals("trandate", check.fields.otherSideDateField)
+        assertEquals('[{"when":"x"}]', (back.queries as List<Map>)[0].fields.waiveRules)
+        assertEquals("10.5", (back.queries as List<Map>)[0].fields.minAmount)
+        assertNotNull((back.runs as List<Map>)[0].children.RuleSetCompareScope[0].fields.conclusionLookupsJson)
+        assertEquals(["R4", "R8"], back.statements*.fields*.statementCode)
+        assertEquals("FIELD_MISMATCH", (check.links as List<Map>)[0].fields.diffTypes)
+    }
+
+    @Test
+    void secondImportIsAllUnchanged() {
+        Map bundle = exportSource()
+        Map first = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertNoErrors(first)
+        String authId = first.result.idMap[AUTH_REF]
+        assertNotNull(authId)
+        assertNotEquals("XFER_NS_AUTH", authId, "a target id is minted on the target")
+        Map before = rowCounts(DST)
+
+        Map again = importInto(DST, bundle, [(AUTH_REF): authId])
+        Map plan = again.result.plan as Map
+        assertEquals([], plan.blocking)
+        (plan.lines as List<Map>).each {
+            assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+        }
+        Map reapplied = importInto(DST, bundle, [(AUTH_REF): authId], true, again.result.planHash as String)
+        assertNoErrors(reapplied)
+        assertEquals(before, rowCounts(DST), "applying an all-unchanged plan writes no rows")
+        assertEquals(first.result.idMap, reapplied.result.idMap)
+    }
+
+    @Test
+    void staleHashRefusesAndWritesNothing() {
+        Map before = rowCounts(DST)
+        Map out = importInto(DST, exportSource(), [(AUTH_REF): "CREATE"], true, "0" * 64)
+        assertTrue(out.hasError as boolean)
+        assertTrue((out.errors as List<String>).contains("The target changed since the preview. Preview again."), "${out.errors}")
+        assertEquals(before, rowCounts(DST))
+        assertEquals(0, ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).count())
+    }
+
+    @Test
+    void failureRollsBackEverything() {
+        Map bundle = copy(exportSource())
+        // The last check names a rule its run does not carry: everything before it is written, then it fails.
+        Map lastCheck = (bundle.checks as List<Map>)[-1]
+        assertEquals("returns-vs-memos", lastCheck.fields.checkCode)
+        (lastCheck.links as List<Map>)[0].listRefs.ruleIds = ["RULE:NOPE"]
+        Map before = rowCounts(DST)
+
+        Map out = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertTrue(out.hasError as boolean, "the apply fails")
+        assertEquals(before, rowCounts(DST), "and leaves nothing behind")
+        assertEquals(0, ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).count())
+    }
+
+    @Test
+    void createdConnectionHasNoSecrets() {
+        Map out = applyPlan(DST, exportSource(), [(AUTH_REF): "CREATE"])
+        assertNoErrors(out)
+        def auth = ec.entity.find("darpan.reconciliation.NsAuthConfig").condition("nsAuthConfigId", out.result.idMap[AUTH_REF])
+                .disableAuthz().useCache(false).one()
+        assertEquals(DST, auth.companyUserGroupId)
+        assertEquals("svc-user", auth.username)
+        assertEquals("gorjana prod", auth.description)
+        assertNull(auth.password)
+        assertNull(auth.privateKeyPem)
+        assertNull(auth.apiToken)
+    }
+
+    @Test
+    void isolationOtherTenantsUntouched() {
+        // The DarpanConclusion enum count spans tenants (DST gains a code), so only tenant-owned rows are compared.
+        Closure<Map> owned = { String t -> rowCounts(t).findAll { !it.key.startsWith("moqui.") } }
+        Map otherBefore = owned(OTHER)
+        Map sourceBefore = owned(SRC)
+        String sourceBundleBefore = JsonOutput.toJson(exportSource())
+        assertNoErrors(applyPlan(DST, exportSource(), [(AUTH_REF): "CREATE"]))
+        assertEquals(otherBefore, owned(OTHER))
+        assertEquals(sourceBefore, owned(SRC))
+        assertEquals(sourceBundleBefore, JsonOutput.toJson(exportSource()), "the source reads exactly as before")
+    }
+
+    @Test
+    void unknownFieldBlocks() {
+        Map bundle = copy(exportSource())
+        (bundle.runs as List<Map>)[0].fields.fakeColumn = "from the future"
+        Map plan = importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan as Map
+        Map block = (plan.blocking as List<Map>).find { it.code == "UNKNOWN_FIELD" }
+        assertNotNull(block, "${plan.blocking}")
+        assertEquals("RUN:XFER_RS", block.ref)
+        assertTrue((block.message as String).contains("darpan.rule.RuleSet") && (block.message as String).contains("fakeColumn"), block.message)
+    }
+
+    @Test
+    void systemMessageRemoteBlocks() {
+        Map bundle = copy(exportSource())
+        Map run = (bundle.runs as List<Map>)[0]
+        (run.children.RuleSetCompareScope[0].children.RuleSetCompareSource[1] as Map).fields.systemMessageRemoteId = "XFER_REMOTE"
+        Map plan = importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan as Map
+        assertEquals(["SYSTEM_MESSAGE_REMOTE"], plan.blocking*.code)
+        assertEquals(["RUN:XFER_RS"], plan.blocking*.ref)
+        assertTrue((plan.blocking[0].message as String).contains("Returns vs memos"))
+        Map refused = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.planHash as String)
+        assertTrue(refused.hasError as boolean, "a blocked plan never applies, even with its own hash")
+    }
+
+    @Test
+    void applyWritesOneAuditLogRow() {
+        Map out = applyPlan(DST, exportSource(), [(AUTH_REF): "CREATE"])
+        assertNoErrors(out)
+        List rows = ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()
+        assertEquals(1, rows.size())
+        assertEquals("XFER_SUPER", rows[0].adminUserId)
+        assertEquals("admin.TransferAdminServices.import#ConfigBundle", rows[0].serviceName)
+        assertEquals("Tenant", rows[0].targetType)
+        assertEquals(DST, rows[0].targetId)
+        assertTrue((rows[0].detailText as String).startsWith("local/${SRC} bundle ${(out.result.planHash as String).take(12)}: "),
+                rows[0].detailText as String)
+    }
+
     // ---------------------------------------------------------------- fixtures
 
     private void seedSource() {
@@ -341,9 +476,9 @@ class ConfigTransferSmokeTests {
 
         create("darpan.rule.RuleSet", [ruleSetId: "XFER_RS", ruleSetName: "Returns vs memos", description: "OMS returns vs memos",
                 version: "1.0", companyUserGroupId: SRC, isActive: "Y", isArchived: "N"])
-        create("darpan.rule.Rule", [ruleId: "XFER_RULE_A", ruleSetId: "XFER_RS", sequenceNum: 10L, ruleText: "a = b",
+        create("darpan.rule.Rule", [ruleId: "XFER_RULE_A", ruleSetId: "XFER_RS", sequenceNum: 10L, ruleText: "status equals 'A'",
                 enabled: "Y", ruleType: "FIELD_COMPARISON", companyUserGroupId: SRC])
-        create("darpan.rule.Rule", [ruleId: "XFER_RULE_B", ruleSetId: "XFER_RS", sequenceNum: 20L, ruleText: "c = d",
+        create("darpan.rule.Rule", [ruleId: "XFER_RULE_B", ruleSetId: "XFER_RS", sequenceNum: 20L, ruleText: "amount greater than 0",
                 enabled: "Y", ruleType: "FIELD_COMPARISON", severity: "WARN", companyUserGroupId: SRC])
         create("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS", ruleSetId: "XFER_RS", objectType: "RETURN",
                 scopeMode: "COMPARE", description: "Returns", companyUserGroupId: SRC,
@@ -411,6 +546,44 @@ class ConfigTransferSmokeTests {
         Map params = [tenantUserGroupId: tenantId, bundle: bundle, connectionMap: connectionMap, apply: apply]
         if (planHash) params.planHash = planHash
         return callAs(SUPER_USERNAME, "${SERVICES}.import#ConfigBundle", params)
+    }
+
+    /** Preview, then apply with the preview's hash: what the admin app does. */
+    private Map applyPlan(String tenantId, Map bundle, Map connectionMap) {
+        Map preview = importInto(tenantId, bundle, connectionMap)
+        assertNoErrors(preview)
+        return importInto(tenantId, bundle, connectionMap, true, preview.result.planHash as String)
+    }
+
+    private static Map copy(Map bundle) {
+        return new JsonSlurper().parseText(JsonOutput.toJson(bundle)) as Map
+    }
+
+    /**
+     * A bundle with every ref replaced by what the record is called on any instance (a run by its name, a rule by its
+     * run and position, a code by its label), including refs inside JSON text; source and record refs dropped.
+     */
+    private static Object naturalised(Map bundle) {
+        Map<String, String> names = [:]
+        (bundle.connections as List<Map>).each { names[it.ref as String] = "CONN ${it.kind} ${it.description}".toString() }
+        (bundle.queries as List<Map>).each { names[it.ref as String] = "QUERY ${it.label}".toString() }
+        (bundle.conclusionCodes as List<Map>).each { names[it.ref as String] = "CONC ${it.label}".toString() }
+        (bundle.runs as List<Map>).each { Map run ->
+            names[run.ref as String] = "RUN ${run.label}".toString()
+            (run.children.Rule as List<Map>).eachWithIndex { Map rule, int i -> names[rule.ref as String] = "RULE ${run.label}#${i}".toString() }
+        }
+        (bundle.audits as List<Map>).each { names[it.ref as String] = "AUDIT ${it.fields.auditCode}".toString() }
+        (bundle.statements as List<Map>).each { names[it.ref as String] = "STATEMENT ${it.label}".toString() }
+        (bundle.checks as List<Map>).each { names[it.ref as String] = "CHECK ${it.fields.checkCode}".toString() }
+        Closure rename
+        rename = { Object node ->
+            if (node instanceof Map) return ((Map) node).findAll { k, v -> !(k in ["source", "ref"]) }.collectEntries { k, v -> [(k): rename(v)] }
+            if (node instanceof List) return ((List) node).collect { rename(it) }
+            if (node instanceof String && names.containsKey(node)) return names[node]
+            if (node instanceof String && ((String) node).startsWith("[{")) return JsonOutput.toJson(rename(new JsonSlurper().parseText((String) node)))
+            return node
+        }
+        return rename(bundle)
     }
 
     /** Row count per transfer entity for one tenant (children counted through their tenant stamp or parent). */

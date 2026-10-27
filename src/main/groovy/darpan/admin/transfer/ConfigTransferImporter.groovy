@@ -1,12 +1,17 @@
 package darpan.admin.transfer
 
+import darpan.admin.AdminAuditSupport
 import darpan.facade.common.SharedConfigAccessSupport
+import darpan.facade.common.TenantAccessSupport
+import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import groovy.json.JsonOutput
 import groovy.transform.CompileDynamic
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+
+import reconciliation.rule.RuleEngineSupport
 
 import static darpan.admin.transfer.TransferSpecs.*
 
@@ -25,6 +30,8 @@ class ConfigTransferImporter {
 
     static final List<String> ACTIONS = ["CREATE", "UPDATE", "UNCHANGED", "MAPPED", "NEEDS_CREDENTIALS"].asImmutable()
     static final String CREATE = "CREATE"
+    static final String STALE_PLAN_MESSAGE = "The target changed since the preview. Preview again."
+    static final String SERVICE_NAME = "admin.TransferAdminServices.import#ConfigBundle"
 
     /** The dry run: [lines, blocking, warnings, counts]. Writes nothing. */
     static Map<String, Object> plan(def ec, String targetTenantId, Map bundle, Map<String, String> connectionMap) {
@@ -35,6 +42,55 @@ class ConfigTransferImporter {
     static String planHash(String targetTenantId, Map bundle, Map connectionMap, Map plan) {
         String json = JsonOutput.toJson(sorted([tenant: targetTenantId, bundle: bundle, connectionMap: connectionMap ?: [:], plan: plan]))
         return MessageDigest.getInstance("SHA-256").digest(json.getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
+    }
+
+    /**
+     * Writes the plan, refusing unless it has no blocking item and hashes to what was previewed. One transaction (the
+     * service's): any failure, a run that does not compile included, throws and rolls every row back. Answers [plan,
+     * planHash, idMap: every bundle ref to its target id]; null, with an error and nothing written, when refused.
+     */
+    static Map<String, Object> apply(def ec, String targetTenantId, Map bundle, Map connectionMap, String expectedPlanHash,
+                                     String sourceInstanceLabel) {
+        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap)
+        Map plan = ctx.plan as Map
+        String hash = planHash(targetTenantId, bundle, connectionMap, plan)
+        if (plan.blocking) {
+            ec.message.addError("The plan has blocking items (${(plan.blocking as List<Map>)*.code.unique().join(', ')}); resolve them and preview again.")
+            return null
+        }
+        if (text(expectedPlanHash) != hash) {
+            ec.message.addError(STALE_PLAN_MESSAGE)
+            return null
+        }
+        ctx.idMap = new LinkedHashMap<String, String>(ctx.resolved as Map)
+        ctx.now = ec.user.nowTimestamp
+        ctx.userId = ec.user.userId
+
+        records(ctx, "connections").each { Map c ->
+            if (ctx.actions[c.ref] in [CREATE, "NEEDS_CREDENTIALS"]) {
+                Map kindSpec = TransferSpecs.spec(c.kind as String)
+                // Secret columns are not in the record, so a created connection has them empty.
+                createRow(ctx, kindSpec, c, TenantScopedFinder.mintId(ec, kindSpec.entityName as String, kindSpec.pkField as String))
+            }
+        }
+        records(ctx, "queries").each { Map q -> writeTree(ctx, spec(NETSUITE_SUITEQL), q, "") }
+        records(ctx, "conclusionCodes").each { Map c -> if (ctx.actions[c.ref] == CREATE) createConclusion(ctx, c) }
+        records(ctx, "runs").each { Map r ->
+            if (ctx.actions[r.ref] == "UNCHANGED") {
+                keepRuleIds(ctx, r)
+            } else {
+                writeTree(ctx, spec(RUN), r, "RS_")
+                compile(ctx, ctx.idMap[r.ref] as String, r.label as String)
+            }
+        }
+        records(ctx, "audits").each { Map a -> writeTree(ctx, spec(AUDIT), a, "") }
+        records(ctx, "statements").each { Map s -> writeStatement(ctx, s) }
+        records(ctx, "checks").each { Map c -> writeCheck(ctx, c) }
+
+        String counts = ACTIONS.collect { "${it} ${plan.counts[it]}" }.join(", ")
+        AdminAuditSupport.record(ec, SERVICE_NAME, "Tenant", targetTenantId,
+                "${sourceInstanceLabel ?: '?'}/${bundle.source?.tenantUserGroupId ?: '?'} bundle ${hash.take(12)}: ${counts}".toString())
+        return [plan: plan, planHash: hash, idMap: ctx.idMap] as Map<String, Object>
     }
 
     static Map<String, Object> analyse(def ec, String tenantId, Map bundle, Map connectionMap) {
@@ -366,6 +422,190 @@ class ConfigTransferImporter {
                         "findings already recorded keep the rule they were raised by.")
             }
         }
+    }
+
+    // ---------------------------------------------------------------- apply: writers
+
+    /** A top-level record and its children: created with a minted id, updated in place, or left alone when unchanged. */
+    private static void writeTree(Map ctx, Map spec, Map rec, String mintPrefix) {
+        String action = ctx.actions[rec.ref]
+        if (action == CREATE) {
+            def row = createRow(ctx, spec, rec, TenantScopedFinder.mintId(ctx.ec, spec.entityName as String, spec.pkField as String, mintPrefix))
+            writeChildren(ctx, spec, row, rec, true)
+        } else if (action == "UPDATE") {
+            def row = updateRow(ctx, spec, rec)
+            writeChildren(ctx, spec, row, rec, false)
+        }
+    }
+
+    private static def createRow(Map ctx, Map spec, Map rec, String id) {
+        def value = ctx.ec.entity.makeValue(spec.entityName as String)
+        value.setAll(columns(ctx, spec, rec))
+        value.set(spec.pkField as String, id)
+        stamp(ctx, spec.entityName as String, value, true)
+        value.create()
+        ctx.idMap[rec.ref] = id
+        return value
+    }
+
+    /** The matched target row, re-read and its owner checked in code (a tenant condition beside a full key is dropped). */
+    private static def updateRow(Map ctx, Map spec, Map rec) {
+        String id = ctx.idMap[rec.ref] as String
+        def value = finder(ctx.ec, spec.entityName as String).condition(spec.pkField as String, id).useCache(false).one()
+        if (value == null || value.companyUserGroupId != ctx.tenantId) throw new IllegalStateException("${rec.label} changed on this instance during the transfer.")
+        value.setAll(columns(ctx, spec, rec))
+        stamp(ctx, spec.entityName as String, value, false)
+        value.update()
+        return value
+    }
+
+    /**
+     * A record's children under one parent. A child with its own minted id (a rule, a compare scope) keeps its target id
+     * by position, so checks and findings that name a rule still find it; any other child is replaced.
+     */
+    private static void writeChildren(Map ctx, Map parentSpec, def parentRow, Map rec, boolean parentIsNew) {
+        def ec = ctx.ec
+        ((parentSpec.children ?: []) as List<Map>).each { Map child ->
+            List<Map> incoming = (rec.children?.get(shortName(child.entityName as String)) ?: []) as List<Map>
+            List existing = parentIsNew ? [] : ConfigTransferExporter.childRows(ec, child, parentRow)
+            boolean keepsIds = child.pkField != null
+            if (!keepsIds) existing.each { deleteTree(ctx, child, it) }
+            incoming.eachWithIndex { Map childRec, int i ->
+                boolean creating = !keepsIds || i >= existing.size()
+                def value = creating ? ec.entity.makeValue(child.entityName as String) : existing[i]
+                value.setAll(columns(ctx, child, childRec))
+                (child.parentFields as List<String>).each { String f -> value.set(f, parentRow.get(f)) }
+                if (creating && keepsIds) {
+                    value.set(child.pkField as String, TenantScopedFinder.mintId(ec, child.entityName as String, child.pkField as String,
+                            (child.mintPrefix ?: "") as String))
+                }
+                stamp(ctx, child.entityName as String, value, creating)
+                if (creating) value.create() else value.update()
+                if (childRec.ref) ctx.idMap[childRec.ref] = value.get(child.pkField as String) as String
+                writeChildren(ctx, child, value, childRec, creating)
+            }
+            if (keepsIds) existing.drop(incoming.size()).each { deleteTree(ctx, child, it) }
+        }
+    }
+
+    private static void deleteTree(Map ctx, Map spec, def row) {
+        ((spec.children ?: []) as List<Map>).each { Map child ->
+            ConfigTransferExporter.childRows(ctx.ec, child, row).each { deleteTree(ctx, child, it) }
+        }
+        row.delete()
+    }
+
+    /** An unchanged run's rules, by position, so the checks that name them resolve. */
+    private static void keepRuleIds(Map ctx, Map run) {
+        List<String> ruleIds = finder(ctx.ec, "darpan.rule.Rule").condition("ruleSetId", ctx.idMap[run.ref])
+                .orderBy(["sequenceNum", "ruleId"]).useCache(false).list()*.ruleId.collect { it as String }
+        ((run.children?.Rule ?: []) as List<Map>).eachWithIndex { Map rule, int i -> if (i < ruleIds.size()) ctx.idMap[rule.ref] = ruleIds[i] }
+    }
+
+    /** As ConclusionCatalogSupport.create does: a DarpanConclusion enum and the TenantConclusion row that makes it the tenant's. */
+    private static void createConclusion(Map ctx, Map c) {
+        def ec = ctx.ec
+        String enumId = "CONC_" + ec.entity.sequencedIdPrimary("darpan.rule.TenantConclusion", null, null)
+        ec.entity.makeValue("moqui.basic.Enumeration").setAll([enumId: enumId, enumTypeId: CONCLUSION_ENUM_TYPE, enumCode: enumId,
+                description: text(c.label)]).create()
+        ec.entity.makeValue("darpan.rule.TenantConclusion").setAll([enumId: enumId, companyUserGroupId: ctx.tenantId,
+                createdByUserId: ctx.userId, createdDate: ctx.now]).create()
+        ctx.idMap[c.ref] = enumId
+    }
+
+    /** A new statement's id extends its audit's with the kept code, as add#AuditStatement does. */
+    private static void writeStatement(Map ctx, Map s) {
+        String action = ctx.actions[s.ref]
+        if (action == "UPDATE") {
+            updateRow(ctx, spec(STATEMENT), s)
+        } else if (action == CREATE) {
+            String id = "${targetId(ctx, s.refs?.auditId)}_${s.fields?.statementCode}".toString()
+            if (finder(ctx.ec, "darpan.audit.AuditStatement").condition("statementId", id).useCache(false).one() != null) {
+                id = TenantScopedFinder.mintId(ctx.ec, "darpan.audit.AuditStatement", "statementId")
+            }
+            createRow(ctx, spec(STATEMENT), s, id)
+        }
+    }
+
+    /** A check, then its links to the bundle's statements; links to statements of other audits are left alone. */
+    private static void writeCheck(Map ctx, Map c) {
+        def ec = ctx.ec
+        Map checkSpec = spec(CHECK)
+        String action = ctx.actions[c.ref]
+        if (action == CREATE) {
+            // Sequenced, as save#AuditCheck does (AuditCheckAuthoringSupport).
+            createRow(ctx, checkSpec, c, ec.entity.sequencedIdPrimary(checkSpec.entityName as String, null, null))
+        } else if (action == "UPDATE") {
+            def existing = finder(ec, checkSpec.entityName as String).condition("checkId", ctx.idMap[c.ref]).useCache(false).one()
+            // A changed run makes the check's automation stale, as save#AuditCheck treats it.
+            if (existing != null && existing.savedRunId != (c.refs?.savedRunId ? targetId(ctx, c.refs.savedRunId) : null)) {
+                existing.set("automationId", null)
+                existing.update()
+            }
+            updateRow(ctx, checkSpec, c)
+        } else {
+            return
+        }
+        String checkId = ctx.idMap[c.ref] as String
+        List<String> statementIds = records(ctx, "statements").collect { ctx.idMap[it.ref] as String }.findAll { it }
+        if (statementIds) {
+            finder(ec, "darpan.audit.AuditStatementCheck").condition("checkId", checkId).condition("statementId", "in", statementIds)
+                    .useCache(false).list().each { it.delete() }
+        }
+        Map linkSpec = checkSpec.links as Map
+        ((c.links ?: []) as List<Map>).each { Map link ->
+            def value = ec.entity.makeValue(linkSpec.entityName as String)
+            value.setAll(columns(ctx, linkSpec, link))
+            value.set("checkId", checkId)
+            stamp(ctx, linkSpec.entityName as String, value, true)
+            value.create()
+        }
+    }
+
+    /** A run's rules must compile here too, against this instance's rule engine; the transfer fails if they do not. */
+    private static void compile(Map ctx, String ruleSetId, String label) {
+        def ec = ctx.ec
+        if (finder(ec, "darpan.rule.Rule").condition("ruleSetId", ruleSetId).condition("enabled", "Y").useCache(false).count() == 0) return
+        Map result
+        // The compile gate reads the ACTIVE tenant, and a signed-in user's own tenant always wins over a system tenant.
+        // So the compile runs as a scheduled run does: no user, the target tenant published for this thread only.
+        ec.user.pushUser(null)
+        try {
+            result = TenantAccessSupport.withSystemTenant(ctx.tenantId as String) {
+                RuleEngineSupport.compileRuleSet(ec, ruleSetId, false, true)
+            } as Map
+        } finally {
+            ec.user.popUser()
+        }
+        if (result?.error) throw new IllegalStateException("Run ${label} does not compile on this instance: ${result.error}")
+    }
+
+    /** The record's columns for the target: values as sent, refs as target ids (inside JSON lookups too), lists joined. */
+    private static Map<String, Object> columns(Map ctx, Map spec, Map rec) {
+        Map<String, Object> out = [:]
+        ((rec.fields ?: [:]) as Map).each { k, v ->
+            out[k as String] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> targetId(ctx, item.sourceConfigId) } : text(v)
+        }
+        ((rec.refs ?: [:]) as Map).each { k, v -> out[k as String] = targetId(ctx, v) }
+        ((rec.listRefs ?: [:]) as Map).each { k, v ->
+            out[k as String] = ((v ?: []) as List).collect { parseRef(it) ? targetId(ctx, it) : text(it) }.join(",") ?: null
+        }
+        return out
+    }
+
+    /** The target id a ref lands on; a ref the bundle does not resolve fails the transfer. */
+    private static String targetId(Map ctx, Object ref) {
+        String id = ctx.idMap[ref] as String
+        if (id == null) throw new IllegalStateException("${ref} is not in the bundle, so it has no record on this instance.")
+        return id
+    }
+
+    private static void stamp(Map ctx, String entityName, def value, boolean creating) {
+        def ed = ctx.ec.entity.getEntityDefinition(entityName)
+        if (ed.isField("companyUserGroupId")) value.set("companyUserGroupId", ctx.tenantId)
+        if (creating && ed.isField("createdDate")) value.set("createdDate", ctx.now)
+        if (creating && ed.isField("createdByUserId")) value.set("createdByUserId", ctx.userId)
+        if (ed.isField("lastUpdatedDate")) value.set("lastUpdatedDate", ctx.now)
     }
 
     // ---------------------------------------------------------------- helpers

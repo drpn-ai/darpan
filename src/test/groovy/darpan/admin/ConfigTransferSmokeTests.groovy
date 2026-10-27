@@ -169,6 +169,28 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
+    void headersJsonTravelsAsASecretName() {
+        // headersJson is plain text, not encrypt="true", but it can carry an auth header.
+        create("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "XFER_RESTLET", description: "returns restlet",
+                companyUserGroupId: SRC, endpointUrl: "https://ns.example/restlet", nsAuthConfigId: "XFER_NS_AUTH",
+                headersJson: '{"X-Api-Key":"restlet-key-xfer"}'])
+        try {
+            Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC,
+                    connectionRefs: ["NETSUITE_RESTLET:XFER_RESTLET"]])
+            assertNoErrors(out)
+            String json = JsonOutput.toJson(out.result.bundle)
+            assertFalse(json.contains("X-Api-Key"), "no header names from headersJson")
+            assertFalse(json.contains("restlet-key-xfer"), "no header values from headersJson")
+            Map restlet = (out.result.bundle.connections as List<Map>).find { it.ref == "NETSUITE_RESTLET:XFER_RESTLET" }
+            assertTrue("headersJson" in (restlet.secretFields as List), "${restlet.secretFields}")
+            assertFalse((restlet.fields as Map).containsKey("headersJson"))
+            assertEquals(AUTH_REF, restlet.refs.nsAuthConfigId)
+        } finally {
+            ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsRestletConfigId", "XFER_RESTLET").disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
     void bundleIsDeterministic() {
         assertEquals(JsonOutput.toJson(exportSource()), JsonOutput.toJson(exportSource()))
     }

@@ -13,7 +13,8 @@ import java.sql.Timestamp
  * <p>A kind's {@code refFields} are columns holding another record's id; they travel as refs ({@code KIND:sourceId}),
  * never as ids, and only the importer turns a ref back into a target id. {@code children} hang off their parent by
  * {@code parentFields} (same-named columns copied from the parent row); a child with its own minted {@code pkField} keeps
- * its target id by position on update, any other child is replaced. Secrets ({@code encrypt="true"}) never travel.</p>
+ * its target id by position on update, any other child is replaced. Secrets ({@code encrypt="true"}, and a kind's
+ * {@code extraSecretFields}) never travel.</p>
  */
 @CompileDynamic
 class TransferSpecs {
@@ -65,9 +66,10 @@ class TransferSpecs {
             [kind: SHOPIFY_AUTH, entityName: "darpan.shopify.ShopifyAuthConfig", pkField: "shopifyAuthConfigId", naturalKey: null,
              grantType: SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH],
             [kind: HOTWAX_OMS_REST, entityName: "darpan.hotwax.HotWaxOmsRestSourceConfig", pkField: "omsRestSourceConfigId",
-             naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS],
+             naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, extraSecretFields: ["headersJson"]],
             [kind: NETSUITE_RESTLET, entityName: "darpan.reconciliation.NsRestletConfig", pkField: "nsRestletConfigId",
-             naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, refFields: [nsAuthConfigId: NETSUITE_AUTH]],
+             naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, refFields: [nsAuthConfigId: NETSUITE_AUTH],
+             extraSecretFields: ["headersJson"]],
             [kind: NETSUITE_SUITEQL, entityName: "darpan.reconciliation.NsSuiteQlSourceQuery", pkField: "nsSuiteQlSourceQueryId",
              naturalKey: "description", refFields: [nsAuthConfigId: NETSUITE_AUTH, omsStatusConfigId: HOTWAX_OMS_REST], children: [
                     [entityName: "darpan.reconciliation.NsSuiteQlSourceQueryField", parentFields: ["nsSuiteQlSourceQueryId"],
@@ -131,18 +133,27 @@ class TransferSpecs {
         skip.addAll(((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>)
         if (spec.polymorphicRef) skip.add(spec.polymorphicRef as String)
         if (spec.pkField) skip.add(spec.pkField as String)
-        return (ed.getAllFieldNames() as List<String>).findAll { !(it in skip) && !ed.getFieldInfo(it).encrypt }
+        return (ed.getAllFieldNames() as List<String>).findAll { !(it in skip) && !isSecret(ed, it) }
     }
 
     /** Every column that is not encrypted: what a read may select. */
     static List<String> readableFields(def ec, String entityName) {
         def ed = ec.entity.getEntityDefinition(entityName)
-        return (ed.getAllFieldNames() as List<String>).findAll { !ed.getFieldInfo(it).encrypt }
+        return (ed.getAllFieldNames() as List<String>).findAll { !isSecret(ed, it) }
     }
 
     static List<String> secretFields(def ec, String entityName) {
         def ed = ec.entity.getEntityDefinition(entityName)
-        return (ed.getAllFieldNames() as List<String>).findAll { ed.getFieldInfo(it).encrypt }.sort()
+        return (ed.getAllFieldNames() as List<String>).findAll { isSecret(ed, it) }.sort()
+    }
+
+    /**
+     * An encrypted column, or one a kind names in extraSecretFields: headersJson is plain text but may carry an auth
+     * header (OmsRestSourceSupport only ever shows safeHeaderNames), so it is never read, sent, diffed or written.
+     */
+    static boolean isSecret(def ed, String fieldName) {
+        if (ed.getFieldInfo(fieldName).encrypt) return true
+        return fieldName in ((specForEntity(ed.getFullEntityName() as String)?.extraSecretFields ?: []) as List<String>)
     }
 
     /** A bundle carries every value as text, so the same value reads the same on any database. */

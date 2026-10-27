@@ -41,6 +41,7 @@ class ConfigTransferSmokeTests {
 
     /** Every entity a transfer writes, children first, so a wipe never trips a foreign key. */
     private static final List<String> TRANSFER_ENTITIES = [
+            "darpan.reconciliation.ReconciliationRunResult",
             "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
             "darpan.rule.RuleSetConclusionCondition", "darpan.rule.RuleSetConclusionRule",
             "darpan.rule.RuleSetCompareSourceFilter", "darpan.rule.RuleSetCompareSourceKeyField",
@@ -377,14 +378,14 @@ class ConfigTransferSmokeTests {
     @Test
     void failureRollsBackEverything() {
         Map bundle = copy(exportSource())
-        // The last check names a rule its run does not carry: everything before it is written, then it fails.
-        Map lastCheck = (bundle.checks as List<Map>)[-1]
-        assertEquals("returns-vs-memos", lastCheck.fields.checkCode)
-        (lastCheck.links as List<Map>)[0].listRefs.ruleIds = ["RULE:NOPE"]
+        // A rule this instance's engine cannot compile: the plan cannot see it, so the apply writes connections, query,
+        // codes and the run, then the compile fails and every row goes.
+        ((bundle.runs as List<Map>)[0].children.Rule[0] as Map).fields.ruleLogic = 'this["status"] ==== "A" ((('
         Map before = rowCounts(DST)
 
         Map out = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
         assertTrue(out.hasError as boolean, "the apply fails")
+        assertTrue((out.errors as List<String>).any { it.contains("does not compile") }, "${out.errors}")
         assertEquals(before, rowCounts(DST), "and leaves nothing behind")
         assertEquals(0, ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).count())
     }
@@ -452,6 +453,158 @@ class ConfigTransferSmokeTests {
         assertEquals(DST, rows[0].targetId)
         assertTrue((rows[0].detailText as String).startsWith("local/${SRC} bundle ${(out.result.planHash as String).take(12)}: "),
                 rows[0].detailText as String)
+    }
+
+    // ---------------------------------------------------------------- review fixes: the dry run predicts the apply
+
+    @Test
+    void handEditedBundleIsRefused() {
+        Map bundle = copy(exportSource())
+        Map run = (bundle.runs as List<Map>)[0]
+        run.fields.ruleSetId = "XFER_RS"
+        (bundle.checks as List<Map>)[0].fields.companyUserGroupId = OTHER
+        (sourcesOf(run)[1].fields as Map).sourceConfigId = "XFER_OTHER_NS"
+        (bundle.connections as List<Map>)[0].fields.password = "planted"
+        (bundle.audits as List<Map>)[0].refs.periodEnumId = "AUDIT:XFER_AUDIT"
+        Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"])
+        List<Map> refused = (preview.result.plan.blocking as List<Map>).findAll { it.code == "FIELD_NOT_ALLOWED" }
+        assertEquals(["RuleSet.ruleSetId", "AuditCheck.companyUserGroupId", "RuleSetCompareSource.sourceConfigId",
+                      "NsAuthConfig.password", "Audit.periodEnumId"].sort(),
+                refused.collect { (it.message as String).find(/[A-Za-z]+\.[A-Za-z]+(?= is not)/) }.sort(), "${refused}")
+
+        Map before = rowCounts(DST)
+        Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String)
+        assertTrue(applied.hasError as boolean)
+        assertEquals(before, rowCounts(DST))
+    }
+
+    @Test
+    void blankOrDuplicateNaturalKeysBlock() {
+        String queryRef = "NETSUITE_SUITEQL:XFER_Q1"
+        Map blank = copy(exportSource())
+        (blank.queries as List<Map>)[0].fields.description = null
+        assertEquals([queryRef], blocked(blank, "AMBIGUOUS_MATCH"), "a query with no description matches nothing safely")
+
+        Map twice = copy(exportSource())
+        Map second = copy((twice.queries as List<Map>)[0])
+        second.ref = "NETSUITE_SUITEQL:XFER_Q2"
+        (twice.queries as List<Map>) << second
+        assertEquals([queryRef, "NETSUITE_SUITEQL:XFER_Q2"], blocked(twice, "AMBIGUOUS_MATCH"), "two records, one key")
+
+        create("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "XFER_DST_NS", description: "dst", companyUserGroupId: DST])
+        ["XFER_DST_Q1", "XFER_DST_Q2"].each { String id ->
+            create("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: id, nsAuthConfigId: "XFER_DST_NS",
+                    companyUserGroupId: DST, description: "Credit memos", recordType: "creditmemo"])
+        }
+        assertEquals([queryRef], blocked(exportSource(), "AMBIGUOUS_MATCH"), "two target rows answer to one description")
+    }
+
+    @Test
+    void lifecycleOwnedTargetRunBlocks() {
+        create("darpan.rule.RuleSet", [ruleSetId: "XFER_DST_LIFE_RS", ruleSetName: "Returns vs memos", version: "1.0",
+                companyUserGroupId: DST, ownerReconciliationId: "XFER_LIFE"])
+        assertEquals(["RUN:XFER_RS"], blocked(exportSource(), "TARGET_RUN_OWNED"))
+    }
+
+    @Test
+    void unresolvedRefsBlock() {
+        Map bundle = copy(exportSource())
+        Map check = (bundle.checks as List<Map>).find { it.fields.checkCode == "returns-vs-memos" }
+        (check.links as List<Map>)[0].listRefs.ruleIds = ["RULE:NOPE"]
+        Map scope = (bundle.runs as List<Map>)[0].children.RuleSetCompareScope[0] as Map
+        (scope.children.RuleSetConclusionRule[0] as Map).refs.conclusionEnumId = "CONC:NOPE"
+        scope.fields.conclusionLookupsJson = "not a list of lookups"
+        List<Map> refused = (importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan.blocking as List<Map>)
+                .findAll { it.code == "REF_UNRESOLVED" }
+        assertEquals(["CHECK:XFER_CHK1", "RUN:XFER_RS", "RUN:XFER_RS"], refused*.ref.sort(), "${refused}")
+        assertTrue(refused.any { (it.message as String).contains("RULE:NOPE") })
+        assertTrue(refused.any { (it.message as String).contains("CONC:NOPE") })
+        assertTrue(refused.any { (it.message as String).contains("conclusionLookupsJson") })
+    }
+
+    @Test
+    void exportCarriesACodeThatIsNoConclusion() {
+        // AUDP_MONTH is an Enumeration, but not a DarpanConclusion: carried as missing, so the plan can refuse it.
+        create("darpan.rule.RuleSetConclusionRule", [compareScopeId: "XFER_CS", sequenceNum: 30L, conclusionEnumId: "AUDP_MONTH",
+                companyUserGroupId: SRC])
+        try {
+            Map bundle = exportSource()
+            Map code = (bundle.conclusionCodes as List<Map>).find { it.ref == "CONC:AUDP_MONTH" }
+            assertNotNull(code, "${bundle.conclusionCodes}")
+            assertEquals(true, code.missing)
+            assertEquals(["CONC:AUDP_MONTH"], blocked(bundle, "REF_UNRESOLVED"))
+        } finally {
+            ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "XFER_CS").condition("sequenceNum", 30L)
+                    .disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
+    void scopeInUseBlocks() {
+        Map bundle = exportSource()
+        Map first = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertNoErrors(first)
+        String runId = first.result.idMap["RUN:XFER_RS"]
+        String scopeId = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", runId).disableAuthz().useCache(false)
+                .one().compareScopeId
+        create("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "XFER_DST_RR", ruleSetId: runId,
+                compareScopeId: scopeId, companyUserGroupId: DST])
+        Map map = [(AUTH_REF): first.result.idMap[AUTH_REF]]
+
+        Map dropped = copy(bundle)
+        (dropped.runs as List<Map>)[0].children.RuleSetCompareScope = []
+        assertEquals(["RUN:XFER_RS"], blocked(dropped, "SCOPE_IN_USE", map), "a scope a run result names is not deleted")
+
+        Map repurposed = copy(bundle)
+        ((repurposed.runs as List<Map>)[0].children.RuleSetCompareScope[0] as Map).fields.objectType = "ORDER"
+        assertEquals(["RUN:XFER_RS"], blocked(repurposed, "SCOPE_IN_USE", map), "nor turned into another object's scope")
+    }
+
+    @Test
+    void missingReferenceDataBlocks() {
+        Map bundle = copy(exportSource())
+        (bundle.audits as List<Map>)[0].fields.periodEnumId = "AUDP_NOPE"
+        (bundle.checks as List<Map>).find { it.fields.checkCode == "memos-open" }.fields.amountCurrencyUomId = "XYZ"
+        List<Map> refused = (importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan.blocking as List<Map>)
+                .findAll { it.code == "MISSING_REFERENCE_DATA" }
+        assertEquals(["AUDIT:XFER_AUDIT", "CHECK:XFER_CHK2"], refused*.ref.sort(), "${refused}")
+        assertTrue(refused.any { (it.message as String).contains("AUDP_NOPE") })
+        assertTrue(refused.any { (it.message as String).contains("XYZ") })
+    }
+
+    @Test
+    void updateWithFewerRulesAndScopes() {
+        Map bundle = exportSource()
+        Map first = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertNoErrors(first)
+        Map map = [(AUTH_REF): first.result.idMap[AUTH_REF]]
+        String runId = first.result.idMap["RUN:XFER_RS"]
+        String firstRuleId = first.result.idMap["RULE:XFER_RULE_A"]
+
+        // Rule A goes; rule B moves to the first position and keeps that position's target id.
+        Map fewerRules = copy(bundle)
+        ((fewerRules.runs as List<Map>)[0].children.Rule as List).remove(0)
+        Map second = applyPlan(DST, fewerRules, map)
+        assertNoErrors(second)
+        assertEquals("UPDATE", (second.result.plan.lines as List<Map>).find { it.ref == "RUN:XFER_RS" }.action)
+        List rules = ec.entity.find("darpan.rule.Rule").condition("ruleSetId", runId).disableAuthz().useCache(false).list()
+        assertEquals([firstRuleId], rules*.ruleId)
+        assertEquals("amount greater than 0", rules[0].ruleText)
+        String checkId = second.result.idMap["CHECK:XFER_CHK1"]
+        assertEquals(firstRuleId, ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", checkId)
+                .disableAuthz().useCache(false).one().ruleIds, "the check follows its rule to its new id")
+
+        Map noScope = copy(fewerRules)
+        (noScope.runs as List<Map>)[0].children.RuleSetCompareScope = []
+        assertNoErrors(applyPlan(DST, noScope, map))
+        Map counts = rowCounts(DST)
+        ["darpan.rule.RuleSetCompareScope", "darpan.rule.RuleSetCompareSource", "darpan.rule.RuleSetCompareSourceKeyField",
+         "darpan.rule.RuleSetCompareSourceFilter", "darpan.rule.RuleSetConclusionRule", "darpan.rule.RuleSetConclusionCondition"].each {
+            assertEquals(0L, counts[it], it)
+        }
+        (importInto(DST, noScope, map).result.plan.lines as List<Map>).each {
+            assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+        }
     }
 
     // ---------------------------------------------------------------- fixtures
@@ -553,6 +706,17 @@ class ConfigTransferSmokeTests {
         Map preview = importInto(tenantId, bundle, connectionMap)
         assertNoErrors(preview)
         return importInto(tenantId, bundle, connectionMap, true, preview.result.planHash as String)
+    }
+
+    /** The refs a plan blocks with one code, sorted. */
+    private List<String> blocked(Map bundle, String code, Map connectionMap = [(AUTH_REF): "CREATE"]) {
+        Map out = importInto(DST, bundle, connectionMap)
+        assertNoErrors(out)
+        return (out.result.plan.blocking as List<Map>).findAll { it.code == code }*.ref.collect { it as String }.sort()
+    }
+
+    private static List<Map> sourcesOf(Map run) {
+        return ((run.children.RuleSetCompareScope as List<Map>)[0].children.RuleSetCompareSource) as List<Map>
     }
 
     private static Map copy(Map bundle) {

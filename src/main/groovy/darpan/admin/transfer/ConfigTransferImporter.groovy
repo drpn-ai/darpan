@@ -24,6 +24,11 @@ import static darpan.admin.transfer.TransferSpecs.*
  * their audit and code; checks by checkCode. A matched record is diffed by exporting the TARGET row with the same
  * exporter and comparing both after every ref is rewritten to the target id it lands on (a rule by its position in its
  * run), so a record that would come out the same is UNCHANGED.</p>
+ *
+ * <p>The dry run predicts the apply: anything the apply would refuse or fail on (a column a transfer does not write,
+ * a ref the bundle cannot resolve, a natural key that names no one record, reference data the target lacks, a compare
+ * scope that would be deleted from under a run result) is a blocking line, and the apply refuses any plan that has one.
+ * The one thing only the apply sees is the rule engine's compile, which fails the whole transaction.</p>
  */
 @CompileDynamic
 class ConfigTransferImporter {
@@ -32,6 +37,8 @@ class ConfigTransferImporter {
     static final String CREATE = "CREATE"
     static final String STALE_PLAN_MESSAGE = "The target changed since the preview. Preview again."
     static final String SERVICE_NAME = "admin.TransferAdminServices.import#ConfigBundle"
+    /** Length of a Moqui "id" column (MoquiDefaultConf: VARCHAR(40)). */
+    static final int ID_LENGTH = 40
 
     /** The dry run: [lines, blocking, warnings, counts]. Writes nothing. */
     static Map<String, Object> plan(def ec, String targetTenantId, Map bundle, Map<String, String> connectionMap) {
@@ -75,6 +82,11 @@ class ConfigTransferImporter {
         }
         records(ctx, "queries").each { Map q -> writeTree(ctx, spec(NETSUITE_SUITEQL), q, "") }
         records(ctx, "conclusionCodes").each { Map c -> if (ctx.actions[c.ref] == CREATE) createConclusion(ctx, c) }
+        records(ctx, "runs").findAll { ctx.actions[it.ref] != "UNCHANGED" }.collectMany { sources(it) }.each { Map source ->
+            // A virtual API-orders remote is seed-defined; create it here if this instance has not needed it yet.
+            Map f = (source.fields ?: [:]) as Map
+            if (text(f.systemMessageRemoteId)) ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, f.systemEnumId, f.systemMessageRemoteId, f.sourceConfigType)
+        }
         records(ctx, "runs").each { Map r ->
             if (ctx.actions[r.ref] == "UNCHANGED") {
                 keepRuleIds(ctx, r)
@@ -107,29 +119,35 @@ class ConfigTransferImporter {
             warn(ctx, "VERSION_DIFFERS", null, "The source runs Darpan ${sourceVersion}; this instance runs ${localVersion}.")
         }
         checkShape(ctx)
+        checkRefs(ctx)
 
         matchConnections(ctx)
-        records(ctx, "queries").each { Map q -> matchOne(ctx, q, queryMatch(ctx, q)) }
+        matchByKey(ctx, "queries", "description", { Map q -> text(q.fields?.description) }) { Map q ->
+            scoped(ctx, spec(NETSUITE_SUITEQL).entityName as String).condition("description", q.fields?.description).list()
+        }
         records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
-        records(ctx, "runs").each { Map r ->
-            matchOne(ctx, r, scoped(ctx, "darpan.rule.RuleSet").condition("ruleSetName", r.fields?.ruleSetName).list().find())
+        matchByKey(ctx, "runs", "ruleSetName", { Map r -> text(r.fields?.ruleSetName) }) { Map r ->
+            scoped(ctx, "darpan.rule.RuleSet").condition("ruleSetName", r.fields?.ruleSetName).list()
         }
-        records(ctx, "audits").each { Map a ->
-            matchOne(ctx, a, scoped(ctx, "darpan.audit.Audit").condition("auditCode", a.fields?.auditCode).list().find())
+        ownedRunGate(ctx)
+        matchByKey(ctx, "audits", "auditCode", { Map a -> text(a.fields?.auditCode) }) { Map a ->
+            scoped(ctx, "darpan.audit.Audit").condition("auditCode", a.fields?.auditCode).list()
         }
-        records(ctx, "statements").each { Map s ->
+        matchByKey(ctx, "statements", "statementCode",
+                { Map s -> text(s.fields?.statementCode) ? "${s.refs?.auditId} ${s.fields.statementCode}".toString() : null }) { Map s ->
             String auditId = ctx.resolved[s.refs?.auditId] as String
-            matchOne(ctx, s, auditId ? scoped(ctx, "darpan.audit.AuditStatement").condition("auditId", auditId)
-                    .condition("statementCode", s.fields?.statementCode).list().find() : null)
+            auditId ? scoped(ctx, "darpan.audit.AuditStatement").condition("auditId", auditId)
+                    .condition("statementCode", s.fields?.statementCode).list() : []
         }
-        records(ctx, "checks").each { Map c ->
-            matchOne(ctx, c, scoped(ctx, "darpan.audit.AuditCheck").condition("checkCode", c.fields?.checkCode).list().find())
+        matchByKey(ctx, "checks", "checkCode", { Map c -> text(c.fields?.checkCode) }) { Map c ->
+            scoped(ctx, "darpan.audit.AuditCheck").condition("checkCode", c.fields?.checkCode).list()
         }
 
         sourceRuleIdentities(ctx)
         ["queries": NETSUITE_SUITEQL, "runs": RUN, "audits": AUDIT, "statements": STATEMENT, "checks": CHECK].each { String list, String kind ->
             records(ctx, list).findAll { ctx.matches.containsKey(it.ref) }.each { Map rec -> diff(ctx, spec(kind), rec) }
         }
+        scopeGate(ctx)
         targetOnlyWarnings(ctx)
         rulesReplacedWarnings(ctx)
 
@@ -178,13 +196,40 @@ class ConfigTransferImporter {
         }
     }
 
+    /**
+     * A record's columns: each must exist here (UNKNOWN_FIELD), be one a transfer writes in that part of the record
+     * (FIELD_NOT_ALLOWED: never a key, the tenant, a stamp, a secret, or an id column sent as a plain value), name
+     * reference data this instance has (MISSING_REFERENCE_DATA), and a lookups column must read as lookups.
+     */
     private static void checkFields(Map ctx, Map spec, Map rec, String ownerRef) {
-        def ed = ctx.ec.entity.getEntityDefinition(spec.entityName as String)
-        List<String> names = []
-        ["fields", "refs", "listRefs"].each { String part -> names.addAll(((rec.get(part) ?: [:]) as Map).keySet().collect { it as String }) }
-        names.unique().findAll { !ed.isField(it) }.each { String name ->
-            block(ctx, "UNKNOWN_FIELD", ownerRef, "${spec.entityName} has no field ${name} on this instance; the source is ahead. " +
-                    "Deploy this instance first.")
+        def ec = ctx.ec
+        String entityName = spec.entityName as String
+        def ed = ec.entity.getEntityDefinition(entityName)
+        Map<String, Set<String>> allowed = [fields  : valueFields(ec, spec) as Set<String>, refs: refColumns(spec),
+                                            listRefs: ((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>]
+        allowed.each { String part, Set<String> columns ->
+            ((rec.get(part) ?: [:]) as Map).keySet().collect { it as String }.each { String name ->
+                if (!ed.isField(name)) {
+                    block(ctx, "UNKNOWN_FIELD", ownerRef, "${entityName} has no field ${name} on this instance; the source is ahead. " +
+                            "Deploy this instance first.")
+                } else if (!(name in columns)) {
+                    block(ctx, "FIELD_NOT_ALLOWED", ownerRef, "${shortName(entityName)}.${name} is not a column a transfer writes " +
+                            "as ${part}; the bundle was edited. Export it again.")
+                }
+            }
+        }
+        referenceColumns(ec, spec).each { List<String> column ->
+            String value = text(rec.fields?.get(column[0]))
+            if (value && !referenceExists(ctx, column[1], column[2], value)) {
+                block(ctx, "MISSING_REFERENCE_DATA", ownerRef, "${shortName(entityName)}.${column[0]} is ${value}, which this " +
+                        "instance has no ${shortName(column[1])} for. Load it here first.")
+            }
+        }
+        JSON_REF_FIELDS.findAll { text(rec.fields?.get(it))?.trim() }.each { String field ->
+            if (lookupsOf(rec.fields.get(field)) == null) {
+                block(ctx, "REF_UNRESOLVED", ownerRef, "${shortName(entityName)}.${field} is not a list of lookups naming their " +
+                        "connections by ref, so its connection ids cannot be moved. Fix it at the source.")
+            }
         }
         Map<String, Map> childSpecs = ((spec.children ?: []) as List<Map>).collectEntries { [(shortName(it.entityName as String)): it] }
         ((rec.children ?: [:]) as Map<String, List>).each { String name, List rows ->
@@ -198,7 +243,108 @@ class ConfigTransferImporter {
         if (spec.links) ((rec.links ?: []) as List<Map>).each { checkFields(ctx, spec.links as Map, it, ownerRef) }
     }
 
+    /**
+     * Every ref must name a record the bundle carries, and a check's rules must be rules of its own run. A code the
+     * source exported as no conclusion at all is refused by name.
+     */
+    private static void checkRefs(Map ctx) {
+        Set<String> carried = new HashSet<String>()
+        Map<String, String> runOfRule = [:]
+        new LinkedHashSet<String>(BUNDLE_LISTS.values()).each { String list -> records(ctx, list).each { if (it.ref) carried.add(it.ref as String) } }
+        records(ctx, "runs").each { Map run ->
+            ((run.children?.Rule ?: []) as List<Map>).each { Map rule ->
+                if (rule.ref) {
+                    carried.add(rule.ref as String)
+                    runOfRule[rule.ref as String] = run.ref as String
+                }
+            }
+        }
+        records(ctx, "conclusionCodes").findAll { it.missing }.each { Map c ->
+            block(ctx, "REF_UNRESOLVED", c.ref, "${c.label} is not a conclusion code on the source, so the runs that name it cannot move.")
+        }
+        new LinkedHashSet<String>(BUNDLE_LISTS.values()).each { String list ->
+            records(ctx, list).findAll { it.kind != CONC }.each { Map rec ->
+                allRefs(rec).findAll { it != null }.unique().each { String r ->
+                    List<String> parsed = parseRef(r)
+                    boolean knownKind = parsed && (parsed[0] == RULE || TransferSpecs.spec(parsed[0]) != null)
+                    if (knownKind && !(r in carried)) {
+                        block(ctx, "REF_UNRESOLVED", rec.ref, "${rec.label ?: rec.ref} names ${r}, which the bundle does not carry.")
+                    }
+                }
+            }
+        }
+        records(ctx, "checks").each { Map check ->
+            ((check.links ?: []) as List<Map>).each { Map link ->
+                ((link.listRefs?.ruleIds ?: []) as List).findAll { it in runOfRule && runOfRule[it] != check.refs?.savedRunId }.each {
+                    block(ctx, "REF_UNRESOLVED", check.ref, "${check.label} names rule ${it}, which is not in its run.")
+                }
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- matching
+
+    /**
+     * Matches by natural key, which must name one record on each side: a blank key, a key two bundle records share, or a
+     * key two target rows answer to blocks (AMBIGUOUS_MATCH) rather than guessing.
+     */
+    private static void matchByKey(Map ctx, String list, String keyName, Closure<String> keyOf, Closure<List> rowsFor) {
+        List<Map> recs = records(ctx, list)
+        Map<String, Integer> uses = [:]
+        recs.each { Map rec -> String key = keyOf(rec); if (key) uses[key] = (uses[key] ?: 0) + 1 }
+        recs.each { Map rec ->
+            String key = keyOf(rec)
+            if (!key?.trim()) {
+                block(ctx, "AMBIGUOUS_MATCH", rec.ref, "${rec.label ?: rec.ref} has no ${keyName}, so it cannot be matched here. Name it at the source.")
+            } else if (uses[key] > 1) {
+                block(ctx, "AMBIGUOUS_MATCH", rec.ref, "${rec.label ?: rec.ref} shares its ${keyName} with another record in the bundle.")
+            } else {
+                List rows = rowsFor(rec) ?: []
+                if (rows.size() > 1) {
+                    block(ctx, "AMBIGUOUS_MATCH", rec.ref, "${rows.size()} records here have the ${keyName} of ${rec.label ?: rec.ref}.")
+                } else {
+                    matchOne(ctx, rec, rows ? rows[0] : null)
+                }
+            }
+        }
+    }
+
+    /** A run a lifecycle owns here is the lifecycle's to change, never a transfer's. */
+    private static void ownedRunGate(Map ctx) {
+        records(ctx, "runs").each { Map run ->
+            def row = ctx.matches[run.ref]
+            if (row != null && text(row.ownerReconciliationId)) {
+                block(ctx, "TARGET_RUN_OWNED", run.ref, "Run ${run.label} here belongs to a lifecycle; rename one of them first.")
+                ctx.matches.remove(run.ref)
+                ctx.resolved.remove(run.ref)
+                ctx.actions.remove(run.ref)
+            }
+        }
+    }
+
+    /**
+     * An updated run keeps its compare scopes by position. A scope the update would delete, or turn into another object's
+     * scope, must have no run result or automation pointing at it (RECRES_SCOPE, RECAUT_SCOPE).
+     */
+    private static void scopeGate(Map ctx) {
+        Map scopeSpec = (spec(RUN).children as List<Map>).find { it.pkField == "compareScopeId" }
+        records(ctx, "runs").findAll { ctx.actions[it.ref] == "UPDATE" }.each { Map run ->
+            List<Map> incoming = (run.children?.RuleSetCompareScope ?: []) as List<Map>
+            List existing = ConfigTransferExporter.childRows(ctx.ec, scopeSpec, ctx.matches[run.ref])
+            existing.eachWithIndex { scope, int i ->
+                boolean deleted = i >= incoming.size()
+                boolean repurposed = !deleted && text(incoming[i].fields?.objectType) != text(scope.objectType)
+                if (!deleted && !repurposed) return
+                String scopeId = scope.compareScopeId as String
+                long dependents = finder(ctx.ec, "darpan.reconciliation.ReconciliationRunResult").condition("compareScopeId", scopeId).count() +
+                        finder(ctx.ec, "darpan.reconciliation.ReconciliationAutomation").condition("compareScopeId", scopeId).count()
+                if (dependents > 0) {
+                    block(ctx, "SCOPE_IN_USE", run.ref, "Run ${run.label} would ${deleted ? 'drop' : 'change the object of'} its " +
+                            "${scope.objectType ?: ''} compare scope here, which ${dependents} run results or automations still name.")
+                }
+            }
+        }
+    }
 
     private static void matchConnections(Map ctx) {
         records(ctx, "connections").each { Map c ->
@@ -235,13 +381,9 @@ class ConfigTransferImporter {
         return SharedConfigAccessSupport.isSharedWithTenant(ctx.ec, spec.grantType as String, id, ctx.tenantId as String) ? row : null
     }
 
-    private static def queryMatch(Map ctx, Map q) {
-        return scoped(ctx, spec(NETSUITE_SUITEQL).entityName as String).condition("description", q.fields?.description)
-                .orderBy("nsSuiteQlSourceQueryId").list().find()
-    }
-
     /** A shared code by its id when this instance has it; otherwise any code of the target's catalog with the same label. */
     private static void matchCode(Map ctx, Map c) {
+        if (c.missing) return
         def ec = ctx.ec
         if (ctx.catalog == null) {
             Map<String, String> owners = finder(ec, "darpan.rule.TenantConclusion").useCache(false).list()
@@ -338,12 +480,16 @@ class ConfigTransferImporter {
         Map fromChildren = (existing.children ?: [:]) as Map
         Map toChildren = (incoming.children ?: [:]) as Map
         (new TreeSet(fromChildren.keySet() + toChildren.keySet())).each { k ->
-            if (fromChildren[k] != toChildren[k]) changes << [field: k, from: "${((List) fromChildren[k] ?: []).size()} rows".toString(),
-                                                                to  : "${((List) toChildren[k] ?: []).size()} rows".toString()]
+            if (fromChildren[k] == toChildren[k]) return
+            int from = ((List) fromChildren[k] ?: []).size()
+            int to = ((List) toChildren[k] ?: []).size()
+            changes << [field: k, from: "${from} rows".toString(), to: (from == to ? "${to} rows changed" : "${to} rows").toString()]
         }
         if (existing.links != incoming.links) {
-            changes << [field: "AuditStatementCheck", from: "${((List) existing.links ?: []).size()} links".toString(),
-                        to   : "${((List) incoming.links ?: []).size()} links".toString()]
+            int from = ((List) existing.links ?: []).size()
+            int to = ((List) incoming.links ?: []).size()
+            changes << [field: "AuditStatementCheck", from: "${from} links".toString(),
+                        to   : (from == to ? "${to} links changed" : "${to} links").toString()]
         }
         return changes
     }
@@ -505,7 +651,12 @@ class ConfigTransferImporter {
     /** As ConclusionCatalogSupport.create does: a DarpanConclusion enum and the TenantConclusion row that makes it the tenant's. */
     private static void createConclusion(Map ctx, Map c) {
         def ec = ctx.ec
-        String enumId = "CONC_" + ec.entity.sequencedIdPrimary("darpan.rule.TenantConclusion", null, null)
+        // Sequenced as ConclusionCatalogSupport.create does, skipping any value an older hand-typed code already holds.
+        String enumId
+        while (true) {
+            enumId = "CONC_" + ec.entity.sequencedIdPrimary("darpan.rule.TenantConclusion", null, null)
+            if (ec.entity.find("moqui.basic.Enumeration").condition("enumId", enumId).useCache(false).one() == null) break
+        }
         ec.entity.makeValue("moqui.basic.Enumeration").setAll([enumId: enumId, enumTypeId: CONCLUSION_ENUM_TYPE, enumCode: enumId,
                 description: text(c.label)]).create()
         ec.entity.makeValue("darpan.rule.TenantConclusion").setAll([enumId: enumId, companyUserGroupId: ctx.tenantId,
@@ -520,7 +671,9 @@ class ConfigTransferImporter {
             updateRow(ctx, spec(STATEMENT), s)
         } else if (action == CREATE) {
             String id = "${targetId(ctx, s.refs?.auditId)}_${s.fields?.statementCode}".toString()
-            if (finder(ctx.ec, "darpan.audit.AuditStatement").condition("statementId", id).useCache(false).one() != null) {
+            // An id column holds 40 characters; a long code keeps its code and takes a minted id.
+            if (id.length() > ID_LENGTH ||
+                    finder(ctx.ec, "darpan.audit.AuditStatement").condition("statementId", id).useCache(false).one() != null) {
                 id = TenantScopedFinder.mintId(ctx.ec, "darpan.audit.AuditStatement", "statementId")
             }
             createRow(ctx, spec(STATEMENT), s, id)
@@ -533,8 +686,8 @@ class ConfigTransferImporter {
         Map checkSpec = spec(CHECK)
         String action = ctx.actions[c.ref]
         if (action == CREATE) {
-            // Sequenced, as save#AuditCheck does (AuditCheckAuthoringSupport).
-            createRow(ctx, checkSpec, c, ec.entity.sequencedIdPrimary(checkSpec.entityName as String, null, null))
+            // Sequenced as save#AuditCheck does, skipping any value a hand-typed check id already holds.
+            createRow(ctx, checkSpec, c, TenantScopedFinder.mintId(ec, checkSpec.entityName as String, "checkId"))
         } else if (action == "UPDATE") {
             def existing = finder(ec, checkSpec.entityName as String).condition("checkId", ctx.idMap[c.ref]).useCache(false).one()
             // A changed run makes the check's automation stale, as save#AuditCheck treats it.
@@ -569,25 +722,34 @@ class ConfigTransferImporter {
         Map result
         // The compile gate reads the ACTIVE tenant, and a signed-in user's own tenant always wins over a system tenant.
         // So the compile runs as a scheduled run does: no user, the target tenant published for this thread only.
-        ec.user.pushUser(null)
+        // Pushed only when there is a user to step aside from: with none, pushUser fills the empty slot in place and a
+        // pop would discard it.
+        boolean pushed = ec.user.userId != null
+        if (pushed) ec.user.pushUser(null)
         try {
             result = TenantAccessSupport.withSystemTenant(ctx.tenantId as String) {
                 RuleEngineSupport.compileRuleSet(ec, ruleSetId, false, true)
             } as Map
         } finally {
-            ec.user.popUser()
+            if (pushed) ec.user.popUser()
         }
         if (result?.error) throw new IllegalStateException("Run ${label} does not compile on this instance: ${result.error}")
     }
 
-    /** The record's columns for the target: values as sent, refs as target ids (inside JSON lookups too), lists joined. */
+    /**
+     * The record's columns for the target: values as sent, refs as target ids (inside JSON lookups too), lists joined.
+     * Only the columns a transfer writes are taken, whatever else the record carries (the plan has already refused it).
+     */
     private static Map<String, Object> columns(Map ctx, Map spec, Map rec) {
         Map<String, Object> out = [:]
-        ((rec.fields ?: [:]) as Map).each { k, v ->
+        Set<String> values = valueFields(ctx.ec, spec) as Set<String>
+        Set<String> refs = refColumns(spec)
+        Set<String> lists = ((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>
+        ((rec.fields ?: [:]) as Map).findAll { k, v -> k in values }.each { k, v ->
             out[k as String] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> targetId(ctx, item.sourceConfigId) } : text(v)
         }
-        ((rec.refs ?: [:]) as Map).each { k, v -> out[k as String] = targetId(ctx, v) }
-        ((rec.listRefs ?: [:]) as Map).each { k, v ->
+        ((rec.refs ?: [:]) as Map).findAll { k, v -> k in refs }.each { k, v -> out[k as String] = targetId(ctx, v) }
+        ((rec.listRefs ?: [:]) as Map).findAll { k, v -> k in lists }.each { k, v ->
             out[k as String] = ((v ?: []) as List).collect { parseRef(it) ? targetId(ctx, it) : text(it) }.join(",") ?: null
         }
         return out
@@ -609,6 +771,28 @@ class ConfigTransferImporter {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private static boolean referenceExists(Map ctx, String entityName, String keyField, String value) {
+        Map cache = (Map) (ctx.references ?: (ctx.references = [:]))
+        String key = "${entityName}|${value}".toString()
+        if (!cache.containsKey(key)) {
+            cache[key] = ctx.ec.entity.find(entityName).condition(keyField, value).useCache(true).one() != null
+        }
+        return cache[key] as boolean
+    }
+
+    /** A lookups column as its list of lookups, each sourceConfigId a ref; null when it is anything else. */
+    private static List<Map> lookupsOf(Object raw) {
+        Object parsed
+        try {
+            parsed = new groovy.json.JsonSlurper().parseText(text(raw))
+        } catch (Exception ignored) {
+            return null
+        }
+        if (!(parsed instanceof List) || ((List) parsed).any { !(it instanceof Map) }) return null
+        List<Map> items = (List<Map>) parsed
+        return items.every { !text(it.sourceConfigId) || parseRef(it.sourceConfigId) != null } ? items : null
+    }
 
     private static Map line(Map ctx, String kind, Map rec) {
         String action = ctx.actions[rec.ref] as String

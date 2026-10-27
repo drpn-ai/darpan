@@ -136,6 +136,36 @@ class TransferSpecs {
         return (ed.getAllFieldNames() as List<String>).findAll { !(it in skip) && !isSecret(ed, it) }
     }
 
+    /** Columns pointing at reference data that the entity declares no relationship for: field -> [entity, its key]. */
+    static final Map<String, Map<String, List<String>>> UNDECLARED_REFERENCES = [
+            "darpan.audit.AuditCheck": [amountCurrencyUomId: ["moqui.basic.Uom", "uomId"]]].asImmutable()
+
+    /** Reference data a source points at that the target must already have; an instance-local remote is gated apart. */
+    static final Set<String> REFERENCE_SKIP_ENTITIES = (["moqui.service.message.SystemMessageRemote"] as Set<String>).asImmutable()
+
+    /** Value columns that name a reference-data row (an Enumeration, a Uom): [field, entityName, relatedField]. */
+    static List<List<String>> referenceColumns(def ec, Map spec) {
+        String entityName = spec.entityName as String
+        Set<String> values = valueFields(ec, spec) as Set<String>
+        List<List<String>> out = []
+        ec.entity.getEntityDefinition(entityName).getRelationshipsInfo(false).each { rel ->
+            if (!rel.isTypeOne || rel.relatedEntityName in REFERENCE_SKIP_ENTITIES || rel.keyMap.size() != 1) return
+            String field = rel.keyMap.keySet().first() as String
+            if (field in values) out << [field, rel.relatedEntityName as String, rel.keyMap[field] as String]
+        }
+        (UNDECLARED_REFERENCES[entityName] ?: [:]).each { String field, List<String> target ->
+            if (field in values) out << [field, target[0], target[1]]
+        }
+        return out
+    }
+
+    /** The ref columns a record of this spec may carry. */
+    static Set<String> refColumns(Map spec) {
+        Set<String> out = new HashSet<String>(((spec.refFields ?: [:]) as Map).keySet() as Set<String>)
+        if (spec.polymorphicRef) out.add(spec.polymorphicRef as String)
+        return out
+    }
+
     /** Every column that is not encrypted: what a read may select. */
     static List<String> readableFields(def ec, String entityName) {
         def ed = ec.entity.getEntityDefinition(entityName)

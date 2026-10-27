@@ -139,7 +139,7 @@ class ConfigTransferExporter {
         }
 
         List<Map> codeRecords = (reached[CONC] as List<String>).collect { String enumId -> conclusionRecord(ec, tenantId, enumId) }
-                .findAll { it != null }.sort { a, b -> a.label <=> b.label ?: a.ref <=> b.ref }
+                .sort { a, b -> a.label <=> b.label ?: a.ref <=> b.ref }
 
         ((connectionRefs ?: []) as List).each { Object picked ->
             List<String> parsed = parseRef(picked)
@@ -282,7 +282,10 @@ class ConfigTransferExporter {
 
     private static Map conclusionRecord(def ec, String tenantId, String enumId) {
         def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", enumId).useCache(false).one()
-        if (e == null || e.enumTypeId != CONCLUSION_ENUM_TYPE) return null
+        // Carried, not dropped: the target's plan refuses it by name instead of a run arriving with a dangling code.
+        if (e == null || e.enumTypeId != CONCLUSION_ENUM_TYPE) {
+            return [ref: TransferSpecs.ref(CONC, enumId), kind: CONC, label: enumId, tenantOwned: false, enumId: enumId, missing: true]
+        }
         def owner = finder(ec, "darpan.rule.TenantConclusion").condition("enumId", enumId).useCache(false).list().find()
         boolean own = owner != null && owner.companyUserGroupId == tenantId
         Map rec = [ref: TransferSpecs.ref(CONC, enumId), kind: CONC, label: e.description ?: enumId, tenantOwned: own]

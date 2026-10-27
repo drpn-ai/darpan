@@ -535,10 +535,9 @@
     </service>
 
     <service verb="request" noun="PasswordReset" allow-remote="true" authenticate="anonymous-all">
-        <description>DAR-BE-028. Email a 6-digit password reset code to the account's email on file. The reply is
-            identical, in content and in time, whether a code was sent or not (no such account, disabled, no email
-            on file, over the hourly limit), so it reveals nothing about which accounts exist. The code expires in
-            15 minutes; requesting again replaces it.</description>
+        <description>DAR-BE-028. Email a 6-digit password reset code to the account's email on file, and say what
+            happened in outcome (DAR-UI-084). This reveals which usernames exist and have an email, by choice. The
+            code expires in 15 minutes; requesting again replaces it.</description>
         <in-parameters>
             <parameter name="usernameOrEmail" required="true">
                 <description>Username (matched exactly, then case-insensitively, as login does) or the account's email.</description>
@@ -553,8 +552,15 @@
                 <parameter name="message"/>
             </parameter>
             <parameter name="errors" type="List">
-                <description>Always empty: every outcome gets the same reply.</description>
+                <description>Always empty: what happened is in outcome.</description>
                 <parameter name="error"/>
+            </parameter>
+            <parameter name="outcome">
+                <description>sent, noAccount, locked (disabled or locked out), noEmail (no email on file), overLimit
+                    (3 codes this hour for the account, or 20 from the IP), or sendFailed (the mail server refused it).</description>
+            </parameter>
+            <parameter name="emailAddressMasked">
+                <description>The address the code went to, masked (a•••@example.com). Set only when outcome is sent.</description>
             </parameter>
         </out-parameters>
         <actions>
@@ -562,6 +568,8 @@
             <set field="ok" from="requestResult.ok"/>
             <set field="messages" from="requestResult.messages"/>
             <set field="errors" from="requestResult.errors"/>
+            <set field="outcome" from="requestResult.outcome"/>
+            <set field="emailAddressMasked" from="requestResult.emailAddressMasked"/>
         </actions>
     </service>
 

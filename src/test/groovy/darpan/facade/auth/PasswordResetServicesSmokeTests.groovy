@@ -24,6 +24,9 @@ import static org.junit.jupiter.api.Assertions.*
 class PasswordResetServicesSmokeTests {
     private ExecutionContext ec
     private Closure originalSendEmail
+    private Closure originalSendResetCode
+    /** What the stubbed mail server answers for a reset code; a test sets false to see sendFailed. */
+    private boolean resetCodeAccepted
     private List<Map> sent = []
 
     private static final String OK_ID = "PWR_OK"
@@ -61,6 +64,12 @@ class PasswordResetServicesSmokeTests {
         PasswordResetSupport.sendEmail = { def ecArg, String templateId, String to, Map params ->
             sent << [templateId: templateId, to: to, params: params]
         }
+        originalSendResetCode = PasswordResetSupport.sendResetCode
+        resetCodeAccepted = true
+        PasswordResetSupport.sendResetCode = { def ecArg, String to, Map params ->
+            sent << [templateId: PasswordResetSupport.TEMPLATE_RESET_CODE, to: to, params: params]
+            return resetCodeAccepted
+        }
         // The seed carries SYSTEM by id alone (EmailTemplate FKs it); a test that wants mail configured sets smtpHost.
         ec.entity.makeValue("moqui.basic.email.EmailServer").setAll([emailServerId: "SYSTEM", smtpHost: null]).createOrUpdate()
     }
@@ -76,6 +85,7 @@ class PasswordResetServicesSmokeTests {
     @AfterEach
     void restoreMail() {
         PasswordResetSupport.sendEmail = originalSendEmail
+        PasswordResetSupport.sendResetCode = originalSendResetCode
     }
 
     // ---- Task 1: email plumbing ----
@@ -121,13 +131,17 @@ class PasswordResetServicesSmokeTests {
     // ---- Task 2: request + verify ----
 
     @Test
-    void requestReplyIsUniform() {
-        List<List> replies = [OK_USERNAME, "pwr.noemail", "pwr.disabled", "no.such.user"].collect { String who ->
+    void requestSaysWhatHappened() {
+        Map<String, List> replies = [OK_USERNAME, "pwr.noemail", "pwr.disabled", "no.such.user"].collectEntries { String who ->
             Map call = anon("request#PasswordReset", [usernameOrEmail: who])
-            [call.out.ok, call.out.messages, call.out.errors, call.errors]
+            [(who): [call.out.outcome, call.out.emailAddressMasked, call.out.ok, call.errors]]
         }
-        assertEquals(1, replies.unique(false).size(), "replies differ: ${replies}")
-        assertEquals([true, [], [], []], replies[0])
+        assertEquals([
+                (OK_USERNAME)  : ["sent", PasswordResetSupport.maskEmail(OK_EMAIL), true, []],
+                "pwr.noemail"  : ["noEmail", null, true, []],
+                "pwr.disabled" : ["locked", null, true, []],
+                "no.such.user" : ["noAccount", null, true, []],
+        ], replies)
         assertEquals(1, sent.size(), "sends: ${sent}")
         assertEquals(PasswordResetSupport.TEMPLATE_RESET_CODE, sent[0].templateId)
         assertEquals(OK_EMAIL, sent[0].to)
@@ -136,13 +150,12 @@ class PasswordResetServicesSmokeTests {
     }
 
     @Test
-    void requestHeldToFloor() {
-        [OK_USERNAME, "pwr.noemail", "pwr.disabled", "no.such.user"].each { String who ->
-            long started = System.nanoTime()
-            anon("request#PasswordReset", [usernameOrEmail: who])
-            long elapsedMs = (System.nanoTime() - started).intdiv(1_000_000L)
-            assertTrue(elapsedMs >= 400, "${who} answered in ${elapsedMs}ms")
-        }
+    void refusedSendSaysSendFailed() {
+        resetCodeAccepted = false
+        Map call = anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        assertEquals("sendFailed", call.out.outcome)
+        assertEquals(null, call.out.emailAddressMasked)
+        assertEquals([], call.out.messages, "no SMTP detail in the reply")
     }
 
     @Test
@@ -182,7 +195,8 @@ class PasswordResetServicesSmokeTests {
 
     @Test
     void fourthRequestInHourSendsNothing() {
-        4.times { anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME]) }
+        List outcomes = (1..4).collect { anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME]).out.outcome }
+        assertEquals(["sent", "sent", "sent", "overLimit"], outcomes)
         assertEquals(3, sent.size())
     }
 

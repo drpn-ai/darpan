@@ -28,7 +28,7 @@ class PasswordResetSupport {
     static final int MAX_FAILED_ATTEMPTS = 5
     static final int MAX_CODES_PER_ACCOUNT_PER_HOUR = 3
     static final int MAX_CODES_PER_IP_PER_HOUR = 20
-    /** Above the login's 25ms: the sent branch writes rows and queues mail, so the floor must clear it. */
+    /** Above the login's 25ms: a code check writes a row, so the floor must clear it. */
     static final long REPLY_FLOOR_MILLIS = 400L
     static final String CODE_FAILURE_MESSAGE = "That code didn't work. Request a new one."
 
@@ -36,13 +36,22 @@ class PasswordResetSupport {
     private static final long HOUR_MILLIS = 3_600_000L
     private static final SecureRandom random = new SecureRandom()
 
-    /** Every mail this feature sends goes through here, so tests can record sends instead of making them.
-     *  Async, like the framework's own reset#Password: SMTP time never shows in the reply, and an SMTP
-     *  failure lands in the server log rather than in the caller's answer. */
+    /** The notices (password changed, recovery email set) go through here, so tests can record sends instead of
+     *  making them. Async: a notice that fails must not hold up or fail the change it reports. */
     static Closure sendEmail = { def ec, String emailTemplateId, String toAddress, Map bodyParameters ->
         ec.service.async().name("org.moqui.impl.EmailServices.send#EmailTemplate")
                 .parameters([emailTemplateId: emailTemplateId, toAddresses: toAddress, bodyParameters: bodyParameters])
                 .call()
+    }
+
+    /** The reset code alone is sent while the request waits (DAR-UI-084), so the page can say whether it went
+     *  out. True once the mail server accepted it: send#EmailTemplate only returns a messageId on success, and
+     *  logs any failure. Its own transaction, so SMTP time never sits inside the request's. */
+    static Closure<Boolean> sendResetCode = { def ec, String toAddress, Map bodyParameters ->
+        Map result = ec.service.sync().name("org.moqui.impl.EmailServices.send#EmailTemplate").requireNewTransaction(true)
+                .parameters([emailTemplateId: TEMPLATE_RESET_CODE, toAddresses: toAddress, bodyParameters: bodyParameters])
+                .call()
+        return result?.messageId as boolean
     }
 
     /** First letter of the local part and the whole domain: enough for a user to recognise their own
@@ -54,21 +63,22 @@ class PasswordResetSupport {
         return email.substring(0, 1) + "•••" + email.substring(at)
     }
 
-    /** Ask for a reset code. The reply is the same for every outcome (code sent, no such account, disabled,
-     *  no email on file, over a limit) in text AND in time, so it cannot be used to learn which accounts exist
-     *  or have an address; the real outcome goes to the server log only. darpan-ui shows one fixed note. */
+    /** Ask for a reset code, and say plainly what happened (Aditi, 2026-10-27, DAR-UI-084: "not leaving the user
+     *  guessing"). This tells anyone which usernames exist and which have an email; she chose that over the
+     *  uniform reply DAR-BE-028 shipped with. The per-account and per-IP hourly caps still apply.
+     *  outcome is one of OUTCOMES; emailAddressMasked is set when a code was sent. */
     static Map<String, Object> requestPasswordReset(def ec, Object usernameOrEmail) {
-        long started = System.nanoTime()
         String value = normalize(usernameOrEmail)
         String outcome
+        String emailAddressMasked = null
         def account = findAccountForReset(ec, value)
         if (account == null) {
-            outcome = "no such account"
+            outcome = "noAccount"
         } else if (lockedOut(ec, account)) {
             // A permanent disable, or the framework's temporary lockout while it lasts: the user waits it out.
-            outcome = "account disabled"
+            outcome = "locked"
         } else if (!normalize(account.emailAddress)) {
-            outcome = "no email on file"
+            outcome = "noEmail"
         } else {
             Timestamp now = ec.user.nowTimestamp
             Timestamp hourAgo = new Timestamp(now.time - HOUR_MILLIS)
@@ -80,19 +90,27 @@ class PasswordResetSupport {
             int ipCodes = ip ? (int) codes(ec, "rate limit: codes per client IP").condition("requestIp", ip)
                     .condition("fromDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, hourAgo).count() : 0
             if (overLimit(accountCodes, ipCodes)) {
-                outcome = "over the hourly limit (${accountCodes} for the account, ${ipCodes} from ${ip ?: 'unknown IP'})"
+                outcome = "overLimit"
+                logger.info("Password reset over the hourly limit: {} for the account, {} from {}", accountCodes, ipCodes, ip ?: 'unknown IP')
             } else {
                 String code = issueCode(ec, account, ip, now)
-                sendEmail(ec, TEMPLATE_RESET_CODE, (String) account.emailAddress,
+                boolean sent = sendResetCode(ec, (String) account.emailAddress,
                         [code: code, expiresMinutes: CODE_LIFETIME_MINUTES, firstName: firstName(account)])
-                outcome = "code sent"
+                outcome = sent ? "sent" : "sendFailed"
+                if (sent) emailAddressMasked = maskEmail((String) account.emailAddress)
             }
         }
         logger.info("Password reset requested for {}: {}", logSubject(account), outcome)
+        // A failed send leaves the mail error in the messages; the outcome already says it, without SMTP detail.
         ec.message.clearAll()
-        holdToFloor(started)
-        return FacadeSupport.envelope(ec)
+        Map<String, Object> reply = FacadeSupport.envelope(ec)
+        reply.outcome = outcome
+        reply.emailAddressMasked = emailAddressMasked
+        return reply
     }
+
+    /** Every value requestPasswordReset can answer with; darpan-ui has one line of copy for each. */
+    static final List<String> OUTCOMES = ["sent", "noAccount", "locked", "noEmail", "overLimit", "sendFailed"]
 
     /** Check a code without using it up. Every failure (no account, no live code, wrong, expired, burned)
      *  gives the one CODE_FAILURE_MESSAGE. A wrong guess counts against the code, never against the account's

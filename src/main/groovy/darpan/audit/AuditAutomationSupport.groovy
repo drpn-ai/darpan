@@ -72,7 +72,8 @@ class AuditAutomationSupport {
 
     /**
      * The windows of one morning, in the automation's zone, each end exclusive: [period start, the day after the
-     * run's last day). Each window carries its audit period and report day for the ledger.
+     * run's last day). Each window carries its audit period and report day for the ledger. DAR-BE-145: a window starts
+     * at the tenant's go-live at the earliest, and one that ends by then is not read at all.
      */
     static List<Map<String, Object>> resolveWindows(def ec, def automation, Map audit, Timestamp scheduledFireTime,
                                                    Map explicit = null) {
@@ -93,19 +94,23 @@ class AuditAutomationSupport {
             ec.message.clearErrors()
             throw new IllegalStateException("Audit ${audit.auditCode}: ${sanitizeText(errors)}")
         }
-        return ((out.runs ?: []) as List<Map>).withIndex().collect { Map run, int index ->
-            Timestamp start = Timestamp.from((run.windowFromDate as Date).toLocalDate().atStartOfDay(zone).toInstant())
+        Timestamp goLive = goLive(ec, audit.companyUserGroupId as String)
+        List<Map<String, Object>> windows = []
+        ((out.runs ?: []) as List<Map>).each { Map run ->
             Timestamp end = Timestamp.from((run.windowThruDate as Date).toLocalDate().plusDays(1).atStartOfDay(zone).toInstant())
-            [sequenceNum         : index + 1,
-             windowStartDate     : start,
-             windowEndDate       : end,
-             childWindowStartDate: start,
-             childWindowEndDate  : end,
-             auditId             : audit.auditId,
-             auditPeriod         : run.period,
-             auditReportDate     : Date.valueOf(reportDay),
-             auditRecentReadStartDate: readStart(ec, audit, checkIds, run.period as String, start, end, zone)] + verify as Map<String, Object>
+            Timestamp start = fromGoLive(Timestamp.from((run.windowFromDate as Date).toLocalDate().atStartOfDay(zone).toInstant()), end, goLive)
+            if (start == null) return
+            windows << ([sequenceNum         : windows.size() + 1,
+                         windowStartDate     : start,
+                         windowEndDate       : end,
+                         childWindowStartDate: start,
+                         childWindowEndDate  : end,
+                         auditId             : audit.auditId,
+                         auditPeriod         : run.period,
+                         auditReportDate     : Date.valueOf(reportDay),
+                         auditRecentReadStartDate: readStart(ec, audit, checkIds, run.period as String, start, end, zone)] + verify as Map<String, Object>)
         }
+        return windows
     }
 
     /**
@@ -122,8 +127,12 @@ class AuditAutomationSupport {
         if (from < (w.from as LocalDate)) {
             throw new IllegalStateException("${AuditReportAssembler.periodOf(from, periodCode)} has ended; pick days in ${w.period}.")
         }
-        Timestamp start = Timestamp.from(from.atStartOfDay(zone).toInstant())
         Timestamp end = Timestamp.from(thru.plusDays(1).atStartOfDay(zone).toInstant())
+        Timestamp goLive = goLive(ec, audit.companyUserGroupId as String)
+        Timestamp start = fromGoLive(Timestamp.from(from.atStartOfDay(zone).toInstant()), end, goLive)
+        if (start == null) {
+            throw new IllegalStateException("Nothing before go-live (${goLiveText(goLive, zone)}) is audited; pick days from ${goLiveDay(goLive, zone)}.")
+        }
         return [[sequenceNum         : 1,
                  windowStartDate     : start,
                  windowEndDate       : end,
@@ -135,6 +144,26 @@ class AuditAutomationSupport {
                  auditWindowFromDate : Date.valueOf(from),
                  auditWindowThruDate : Date.valueOf(thru),
                  auditRecentReadStartDate: readStart(ec, audit, checkIds, w.period as String, start, end, zone)] as Map<String, Object>]
+    }
+
+    /** DAR-BE-145. When the tenant went live (TenantSetting.goLiveDate); null when it has no go-live. */
+    static Timestamp goLive(def ec, String tenantId) {
+        return tenantRows(ec, "darpan.auth.TenantSetting", tenantId).list().find()?.goLiveDate as Timestamp
+    }
+
+    /** DAR-BE-145. A window's start moved up to go-live; null when the window ends by go-live, so nothing in it is read. */
+    static Timestamp fromGoLive(Timestamp start, Timestamp end, Timestamp goLive) {
+        if (goLive == null || !goLive.after(start)) return start
+        return goLive.before(end) ? goLive : null
+    }
+
+    /** DAR-BE-145. The calendar day of go-live in {@code zone}: the first day an audit can report on. */
+    static LocalDate goLiveDay(Timestamp goLive, ZoneId zone) {
+        return goLive.toInstant().atZone(zone).toLocalDate()
+    }
+
+    private static String goLiveText(Timestamp goLive, ZoneId zone) {
+        return goLive.toInstant().atZone(zone).toLocalDateTime().toString().replace('T', ' ')
     }
 
     /** DAR-BE-122. A window's read start from its checks' last complete runs in the period (null: read the whole window). */

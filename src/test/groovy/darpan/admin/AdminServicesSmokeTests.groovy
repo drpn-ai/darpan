@@ -199,7 +199,7 @@ class AdminServicesSmokeTests {
         assertEquals(false, alpha.result.tenantDetail.disabled)
 
         Map charlie = callAs(SUPER_USERNAME, "admin.TenantAdminServices.get#TenantDetail", [tenantUserGroupId: CHARLIE])
-        assertEquals([tenantUserGroupId: CHARLIE, label: CHARLIE, timeZone: null, disabled: false,
+        assertEquals([tenantUserGroupId: CHARLIE, label: CHARLIE, timeZone: null, goLiveDate: null, disabled: false,
                       createdDate: null, members: []], charlie.result.tenantDetail,
                 "no TenantSetting row: label falls back to the id, nothing else is invented")
     }
@@ -303,6 +303,33 @@ class AdminServicesSmokeTests {
         assertEquals(true, out.result.ok)
         assertEquals("Alpha Renamed", find("moqui.security.UserGroup", [userGroupId: ALPHA]).description)
         assertEquals("America/Chicago", find("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA]).timeZone)
+    }
+
+    // DAR-BE-145: Dolls Kill's go-live was handed over as "2026-10-20 21:05:23, PST time zone". A go-live with no offset
+    // is that wall-clock time in the tenant's zone (here the zone set in the same call), not the server's.
+    @Test
+    void updateTenantReadsAGoLiveWithoutAnOffsetInTheTenantsZone() {
+        Map out = callAs(SUPER_USERNAME, "admin.TenantAdminServices.update#Tenant",
+                [tenantUserGroupId: ALPHA, timeZone: "America/Los_Angeles", goLiveDate: "2026-10-20 21:05:23"])
+
+        assertNoErrors(out)
+        assertEquals(true, out.result.ok)
+        assertEquals(java.time.Instant.parse("2026-10-21T04:05:23Z"),
+                (find("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA]).goLiveDate as Timestamp).toInstant())
+        assertEquals(java.time.Instant.parse("2026-10-21T04:05:23Z"), (callAs(SUPER_USERNAME,
+                "admin.TenantAdminServices.get#TenantDetail", [tenantUserGroupId: ALPHA]).result.tenantDetail.goLiveDate as Timestamp).toInstant())
+    }
+
+    @Test
+    void updateTenantRejectsAnUnreadableGoLiveBeforeApplyingTheLabel() {
+        Map out = callAs(SUPER_USERNAME, "admin.TenantAdminServices.update#Tenant",
+                [tenantUserGroupId: ALPHA, label: "Alpha Renamed", goLiveDate: "20 Oct"])
+
+        assertEquals(1, out.errors.size())
+        assertTrue(out.errors[0].contains("20 Oct"), out.errors[0])
+        assertEquals("Alpha Co", find("moqui.security.UserGroup", [userGroupId: ALPHA]).description)
+        assertNull(find("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA]).goLiveDate)
+        assertNoAudit()
     }
 
     @Test

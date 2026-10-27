@@ -52,11 +52,9 @@ class AuditSettingsSupport {
         Map<String, String> runNames = runNames(ec, tenantId, checks*.savedRunId.findAll { it }.unique() as List<String>)
         List<String> times = automations.collect { timeOf(it.scheduleExpr as String) }.unique()
         List<String> zones = automations.collect { it.windowTimeZone as String }.unique()
-        LocalDate today = LocalDate.now(ZoneId.of(tenantZone(ec)))
-        // The earliest day play can record this morning: the current period's first day. The run page offers nothing before it.
-        LocalDate playableFrom = (LocalDate) AuditReportAssembler.auditRun(ec, audit, today)?.from
+        ZoneId zone = ZoneId.of(tenantZone(ec))
         return [audit     : [id: audit.auditCode, name: audit.auditName, period: periods[audit.periodEnumId as String]],
-                playableFrom: playableFrom?.toString(),
+                playableFrom: playableFrom(ec, tenantId, audit, LocalDate.now(zone), zone),
                 schedule  : [active          : automations.any { it.isActive == "Y" },
                              time            : times.size() == 1 && times[0] ? times[0] : DEFAULT_TIME,
                              timeZone        : zones.size() == 1 && zones[0] ? zones[0] : tenantZone(ec),
@@ -115,6 +113,17 @@ class AuditSettingsSupport {
                 automation.update()
             }
         }
+    }
+
+    /**
+     * The earliest day play can record this morning: the current period's first day, or (DAR-BE-145) the tenant's go-live
+     * day when that is later. The run page offers nothing before it.
+     */
+    static String playableFrom(def ec, String tenantId, Map audit, LocalDate today, ZoneId zone) {
+        LocalDate from = (LocalDate) AuditReportAssembler.auditRun(ec, audit, today)?.from
+        Timestamp goLive = AuditAutomationSupport.goLive(ec, tenantId)
+        LocalDate goLiveDay = goLive != null ? AuditAutomationSupport.goLiveDay(goLive, zone) : null
+        return (from != null && goLiveDay != null && goLiveDay > from ? goLiveDay : from)?.toString()
     }
 
     /**

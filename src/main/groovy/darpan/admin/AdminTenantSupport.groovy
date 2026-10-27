@@ -3,6 +3,12 @@ package darpan.admin
 import darpan.facade.common.TenantAccessSupport
 import groovy.transform.CompileDynamic
 
+import java.sql.Timestamp
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeParseException
+
 /** Tenant creation for the admin app. A Darpan tenant IS a moqui.security.UserGroup with
  *  groupTypeEnumId=UgtDarpanCompany plus its darpan.auth.TenantSetting row.
  *  Create stays Groovy for the id-pattern check; the rest of the tenant lifecycle (update,
@@ -37,5 +43,23 @@ class AdminTenantSupport {
         AdminAuditSupport.record(ec, "admin.TenantAdminServices.create#Tenant", "Tenant", tenantId,
                 "Created tenant ${tenantId} (${label.trim()}).")
         return [tenantUserGroupId: tenantId]
+    }
+
+    /**
+     * DAR-BE-145. A go-live as typed: with an offset ("2026-10-20T21:05:23-07:00") it is that instant; without one
+     * ("2026-10-20 21:05:23") it is that wall-clock time in the tenant's zone, as a go-live is handed over. Null when
+     * it is neither.
+     */
+    static Timestamp parseGoLive(String text, String zoneId) {
+        String value = text?.trim()?.replace(' ', 'T')
+        if (!value) return null
+        try {
+            return Timestamp.from(OffsetDateTime.parse(value).toInstant())
+        } catch (DateTimeParseException ignored) { }
+        try {
+            return Timestamp.from(LocalDateTime.parse(value).atZone(ZoneId.of(zoneId ?: "UTC")).toInstant())
+        } catch (DateTimeParseException ignored) {
+            return null
+        }
     }
 }

@@ -2932,6 +2932,17 @@
                             "timeZone": {
                                 "type": "string"
                             },
+                            "goLiveDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
                             "disabled": {
                                 "type": "boolean"
                             },
@@ -3238,12 +3249,16 @@
                     "timeZone": {
                         "type": "string",
                         "description": "New timezone; unchanged when omitted."
+                    },
+                    "goLiveDate": {
+                        "type": "string",
+                        "description": "DAR-BE-145. When the tenant went live; no audit reads data from\n                before it. YYYY-MM-DD HH:mm:ss in the tenant's timezone, or ISO with an offset. Unchanged when omitted."
                     }
                 },
                 "required": [
                     "tenantUserGroupId"
                 ],
-                "description": "Rename a tenant and/or change its timezone."
+                "description": "Rename a tenant and/or change its timezone and go-live."
             },
             "UpdateTenantResult": {
                 "type": "object",

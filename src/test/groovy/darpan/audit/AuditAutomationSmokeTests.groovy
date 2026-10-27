@@ -14,6 +14,7 @@ import java.sql.Connection
 import java.sql.Statement
 import java.sql.Date
 import java.sql.Timestamp
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -133,6 +134,36 @@ class AuditAutomationSmokeTests {
         assertThrows(IllegalArgumentException) {
             AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
                     [auditWindowFromDate: Date.valueOf("2026-10-14"), auditWindowThruDate: Date.valueOf("2026-10-23")])
+        }
+    }
+
+    // DAR-BE-145: Dolls Kill went live 2026-10-20 21:05:23 Pacific; its October audit must not read October 1-20.
+    @Test
+    void nothingBeforeTheTenantsGoLiveIsRead() {
+        Map audit = AuditAutomationSupport.auditFor(ec, TENANT, AuditAutomationSupport.checksFor(ec, automation))
+        Timestamp goLive = at("2026-10-20", "21:05:23")
+        insert("darpan.auth.TenantSetting", [companyUserGroupId: TENANT, timeZone: "America/Los_Angeles", goLiveDate: goLive])
+        try {
+            List<Map> morning = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "06:00:00"))
+            assertEquals([goLive, goLive, at("2026-10-23", "00:00:00")],
+                    [morning[0].windowStartDate, morning[0].childWindowStartDate, morning[0].childWindowEndDate],
+                    "the morning's window starts at go-live, not on the 1st")
+            assertEquals([], AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-14", "06:00:00")),
+                    "a morning before go-live reads nothing")
+
+            List<Map> played = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
+                    [auditWindowFromDate: Date.valueOf("2026-10-18"), auditWindowThruDate: Date.valueOf("2026-10-21")])
+            assertEquals([goLive, goLive, at("2026-10-22", "00:00:00")],
+                    [played[0].windowStartDate, played[0].childWindowStartDate, played[0].childWindowEndDate])
+            IllegalStateException before = assertThrows(IllegalStateException) {
+                AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
+                        [auditWindowFromDate: Date.valueOf("2026-10-10"), auditWindowThruDate: Date.valueOf("2026-10-14")])
+            }
+            assertTrue(before.message.contains("2026-10-20"), before.message)
+
+            assertEquals("2026-10-20", AuditSettingsSupport.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 10, 22), LA))
+        } finally {
+            ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", TENANT).deleteAll()
         }
     }
 

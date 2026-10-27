@@ -21,11 +21,13 @@
     </service>
 
     <service verb="update" noun="Tenant" allow-remote="true">
-        <description>Rename a tenant and/or change its timezone.</description>
+        <description>Rename a tenant and/or change its timezone and go-live.</description>
         <in-parameters>
             <parameter name="tenantUserGroupId" required="true"><description>Tenant to update.</description></parameter>
             <parameter name="label"><description>New display label; unchanged when omitted.</description></parameter>
             <parameter name="timeZone"><description>New timezone; unchanged when omitted.</description></parameter>
+            <parameter name="goLiveDate"><description>DAR-BE-145. When the tenant went live; no audit reads data from
+                before it. YYYY-MM-DD HH:mm:ss in the tenant's timezone, or ISO with an offset. Unchanged when omitted.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when updated.</description></parameter></out-parameters>
         <actions>
@@ -43,6 +45,13 @@
                 <set field="timeZoneError" from="darpan.facade.common.TenantAccessSupport.validateTimeZone(timeZone)"/>
                 <if condition="timeZoneError"><return error="true" message="${timeZoneError}"/></if>
             </if>
+            <if condition="goLiveDate?.trim()">
+                <entity-find-one entity-name="darpan.auth.TenantSetting" value-field="currentSetting">
+                    <field-map field-name="companyUserGroupId" from="tenantUserGroupId"/></entity-find-one>
+                <set field="goLiveStamp" from="darpan.admin.AdminTenantSupport.parseGoLive(goLiveDate, timeZone?.trim() ?: currentSetting?.timeZone)"/>
+                <if condition="goLiveStamp == null"><return error="true"
+                        message="Go-live ${goLiveDate.trim()} is not a date and time, e.g. 2026-10-20 21:05:23."/></if>
+            </if>
             <!-- ok turns true once validation passes, as it always has: a write that then fails
                  surfaces through ec.message (and rolls the call back), not through ok. -->
             <set field="ok" from="true"/>
@@ -53,6 +62,10 @@
             <if condition="timeZone?.trim()">
                 <service-call name="store#darpan.auth.TenantSetting" in-map="[companyUserGroupId: tenantUserGroupId,
                         timeZone: timeZone.trim(), lastUpdatedDate: ec.user.nowTimestamp]"/>
+            </if>
+            <if condition="goLiveStamp">
+                <service-call name="store#darpan.auth.TenantSetting" in-map="[companyUserGroupId: tenantUserGroupId,
+                        goLiveDate: goLiveStamp, lastUpdatedDate: ec.user.nowTimestamp]"/>
             </if>
             <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
                     serviceName: 'admin.TenantAdminServices.update#Tenant', targetType: 'Tenant', targetId: tenantUserGroupId,
@@ -139,6 +152,7 @@
         <out-parameters>
             <parameter name="tenantDetail" type="Map"><description>Tenant detail or null when not found.</description>
                 <parameter name="tenantUserGroupId"/><parameter name="label"/><parameter name="timeZone"/>
+                <parameter name="goLiveDate" type="Timestamp"/>
                 <parameter name="disabled" type="Boolean"/><parameter name="createdDate" type="Timestamp"/>
                 <parameter name="members" type="List"><parameter name="member" type="Map">
                     <parameter name="userId"/><parameter name="username"/>
@@ -168,7 +182,7 @@
                 </if>
             </iterate>
             <set field="tenantDetail" from="[tenantUserGroupId: tenantUserGroupId,
-                    label: tenantGroup.description ?: tenantUserGroupId, timeZone: tenantSetting?.timeZone,
+                    label: tenantGroup.description ?: tenantUserGroupId, timeZone: tenantSetting?.timeZone, goLiveDate: tenantSetting?.goLiveDate,
                     disabled: tenantSetting?.disabled == 'Y', createdDate: tenantSetting?.createdDate, members: memberList]"/>
         </actions>
     </service>

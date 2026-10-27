@@ -84,6 +84,10 @@
                 quests every automation has to earn together. Quests one automation earns post to that
                 automation's own space instead. Null = no tenant-wide streak messages.</description>
         </field>
+        <field name="goLiveDate" type="date-time">
+            <description>DAR-BE-145. When the tenant went live. No audit reads data from before it: every audit window
+                starts here at the earliest. Null = no floor.</description>
+        </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
 

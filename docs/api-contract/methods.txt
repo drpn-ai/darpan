@@ -16,6 +16,7 @@ admin.TenantAdminServices.get#TenantDetail
 admin.TenantAdminServices.get#TenantList
 admin.TenantAdminServices.reactivate#Tenant
 admin.TenantAdminServices.update#Tenant
+admin.TransferAdminServices.begin#SecretHandoff
 admin.TransferAdminServices.export#ConfigBundle
 admin.TransferAdminServices.get#TransferCatalog
 admin.TransferAdminServices.import#ConfigBundle

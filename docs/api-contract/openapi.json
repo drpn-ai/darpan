@@ -78,6 +78,9 @@
                                         "$ref": "#/components/schemas/UpdateTenantRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/BeginSecretHandoffRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ExportConfigBundleRequest"
                                     },
                                     {
@@ -555,6 +558,7 @@
                                         "admin.TenantAdminServices.get#TenantList": "#/components/schemas/GetTenantListRequest",
                                         "admin.TenantAdminServices.reactivate#Tenant": "#/components/schemas/ReactivateTenantRequest",
                                         "admin.TenantAdminServices.update#Tenant": "#/components/schemas/UpdateTenantRequest",
+                                        "admin.TransferAdminServices.begin#SecretHandoff": "#/components/schemas/BeginSecretHandoffRequest",
                                         "admin.TransferAdminServices.export#ConfigBundle": "#/components/schemas/ExportConfigBundleRequest",
                                         "admin.TransferAdminServices.get#TransferCatalog": "#/components/schemas/GetTransferCatalogRequest",
                                         "admin.TransferAdminServices.import#ConfigBundle": "#/components/schemas/ImportConfigBundleRequest",
@@ -776,6 +780,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateTenantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/BeginSecretHandoffResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ExportConfigBundleResponse"
@@ -3144,6 +3151,107 @@
                     "result"
                 ]
             },
+            "BeginSecretHandoffParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The target tenant."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId"
+                ],
+                "description": "DAR-ADMIN-007. Starts a credentials handoff on the TARGET: a one-time RSA-3072 key pair. The source seals\n            credentials to publicKey; handoffToken carries the private key sealed with this instance's own entity encryption,\n            for this tenant, for 30 minutes. Nothing is stored."
+            },
+            "BeginSecretHandoffResult": {
+                "type": "object",
+                "properties": {
+                    "publicKey": {
+                        "type": "string",
+                        "description": "Base64 SPKI, for export#ConfigBundle secretsPublicKey."
+                    },
+                    "handoffToken": {
+                        "type": "string",
+                        "description": "Opaque; only this instance can open it. For import#ConfigBundle\n                secretHandoffToken."
+                    },
+                    "keyFingerprint": {
+                        "type": "string",
+                        "description": "Hex SHA-256 of the SPKI bytes."
+                    },
+                    "expiresAt": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When the token stops opening."
+                    }
+                }
+            },
+            "BeginSecretHandoffRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TransferAdminServices.begin#SecretHandoff",
+                "x-darpan-method": "admin.TransferAdminServices.begin#SecretHandoff",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TransferAdminServices.begin#SecretHandoff"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/BeginSecretHandoffParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "BeginSecretHandoffResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TransferAdminServices.begin#SecretHandoff. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/BeginSecretHandoffResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ExportConfigBundleParams": {
                 "type": "object",
                 "properties": {
@@ -3175,6 +3283,10 @@
                     "sourceInstanceLabel": {
                         "type": "string",
                         "description": "This instance's name as the operator knows it, e.g. local."
+                    },
+                    "secretsPublicKey": {
+                        "type": "string",
+                        "description": "DAR-ADMIN-007. The target's publicKey from begin#SecretHandoff\n                (base64 SPKI). When given, each owned connection's non-empty credentials are sealed to it (sealedSecrets),\n                the bundle carries secrets {wrappedKey, keyFingerprint, alg}, and one AdminAuditLog row records what was\n                sealed to which key. Without it no credential is read."
                     }
                 },
                 "required": [
@@ -3372,6 +3484,10 @@
                     "planHash": {
                         "type": "string",
                         "description": "Required with apply: the planHash of the preview being applied."
+                    },
+                    "secretHandoffToken": {
+                        "type": "string",
+                        "description": "DAR-ADMIN-007. The handoffToken begin#SecretHandoff answered on this\n                instance for this tenant; required when the bundle carries sealed credentials."
                     }
                 },
                 "required": [
@@ -3385,7 +3501,7 @@
                 "properties": {
                     "plan": {
                         "type": "object",
-                        "description": "{lines: [{kind, ref, label, action (CREATE | UPDATE | UNCHANGED |\n                MAPPED | NEEDS_CREDENTIALS), targetId, changes: [{field, from, to}]}], blocking: [{code, ref, message}],\n                warnings: [{code, ref, message}], counts: {action: n}}."
+                        "description": "{lines: [{kind, ref, label, action (CREATE | UPDATE | UNCHANGED |\n                MAPPED | NEEDS_CREDENTIALS), targetId, changes: [{field, from, to}], and on connection lines of a bundle with\n                sealed credentials secretsFilled and secretsKept (field names)}], blocking: [{code, ref, message}],\n                warnings: [{code, ref, message}], counts: {action: n, CREDENTIALS_FILLED: connections}}."
                     },
                     "planHash": {
                         "type": "string",
@@ -24090,6 +24206,7 @@
         "admin.TenantAdminServices.get#TenantList": "GetTenantList",
         "admin.TenantAdminServices.reactivate#Tenant": "ReactivateTenant",
         "admin.TenantAdminServices.update#Tenant": "UpdateTenant",
+        "admin.TransferAdminServices.begin#SecretHandoff": "BeginSecretHandoff",
         "admin.TransferAdminServices.export#ConfigBundle": "ExportConfigBundle",
         "admin.TransferAdminServices.get#TransferCatalog": "GetTransferCatalog",
         "admin.TransferAdminServices.import#ConfigBundle": "ImportConfigBundle",

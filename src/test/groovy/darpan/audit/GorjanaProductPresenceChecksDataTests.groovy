@@ -46,12 +46,25 @@ class GorjanaProductPresenceChecksDataTests {
     private static final Map ABSENT = [presence: "ABSENT", record: null, firstFieldPresence: "ABSENT", firstFieldRecord: null]
 
     private static String conclude(String bucket, Map file1, Map file2) {
+        return concluded(bucket, file1, file2).code
+    }
+
+    /** The engine's conclusion, then its cause's fix as the audit report fills it (AuditReportAssembler.causeFix). */
+    private static String fixOf(String bucket, Map file1, Map file2) {
+        Map c = concluded(bucket, file1, file2)
+        Map rule = scoped("darpan.rule.RuleSetConclusionRule").find { it.conclusionEnumId == c.code }
+        List<Map> evidence = (c.checks as List<Map>).collect { [label: it.label, checkValue: it.value as String] }
+        return AuditReportAssembler.causeFix(rule.fixActionTemplate as String, scoped("darpan.rule.RuleSetConclusionCondition")
+                .findAll { it.sequenceNum == rule.sequenceNum }, evidence, [recordKey: (file1?.record?.id ?: file2?.record?.nsKey) as String])
+    }
+
+    private static Map concluded(String bucket, Map file1, Map file2) {
         Map<String, String> labels = rows(FILE, "moqui.basic.Enumeration")
                 .collectEntries { [(it.attribute("enumId") as String): it.attribute("description") as String] }
         ConclusionTreeEngine engine = ConclusionTreeEngine.compile(RunConclusionStep.buildRules(
                 scoped("darpan.rule.RuleSetConclusionRule"), scoped("darpan.rule.RuleSetConclusionCondition"), labels))
         try {
-            return engine.conclude([[bucket: bucket, sides: [FILE_1: file1, FILE_2: file2]]])[0].code
+            return engine.conclude([[bucket: bucket, sides: [FILE_1: file1, FILE_2: file2]]])[0] as Map
         } finally {
             engine.close()
         }
@@ -59,7 +72,7 @@ class GorjanaProductPresenceChecksDataTests {
 
     private static Map item(String id, String live) { [id: id, sku: "SKU-${id}".toString(), itemType: "InvtPart", live: live] }
     private static Map product(String nsKey, String state) {
-        [nsKey: nsKey, productId: "10056", internalName: "2210-013a-G-OLD", netsuiteIdState: state]
+        [nsKey: nsKey, productId: "10056", internalName: "2210-013a-G-OLD", netsuiteIdState: state, sellable: "Y"]
     }
 
     @Test
@@ -74,9 +87,9 @@ class GorjanaProductPresenceChecksDataTests {
         Map<String, String> keys = scoped("darpan.rule.RuleSetCompareSourceKeyField").collectEntries { [(it.fileSide): it.fieldExpression] }
         assertEquals([FILE_1: "id", FILE_2: "nsKey"], keys)
         List<Map> filters = scoped("darpan.rule.RuleSetCompareSourceFilter")
-        assertEquals(1, filters.size())
+        assertEquals(2, filters.size())
         assertEquals([fileSide: "FILE_1", fieldExpression: "live", operator: "EXCLUDE_IN", filterValues: "N"],
-                filters[0].subMap(["fileSide", "fieldExpression", "operator", "filterValues"]))
+                filters.find { it.fileSide == "FILE_1" }.subMap(["fileSide", "fieldExpression", "operator", "filterValues"]))
     }
 
     @Test
@@ -101,7 +114,9 @@ class GorjanaProductPresenceChecksDataTests {
         assertEquals("CONC_PRODUCT_QUIET_IN_NS", conclude("MISSING_FROM_FILE_1", excluded(item("30000", "N")), kept(product("30000", "OWN"))),
                 "HotWax carries a quiet NetSuite item")
         assertEquals("CONC_PRODUCT_NO_NS_ID", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("HOTWAX-ONLY:10056", "NONE"))))
-        assertEquals("CONC_PRODUCT_NS_ID_SHARED", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("DUPLICATE:43000:10200", "SHARED"))))
+        assertEquals("CONC_PRODUCT_NS_ID_SHARED", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("DUPLICATE:43000:10200", "SHARED"))),
+                "the cause holds even when a field its fix names is blank")
+        assertEquals("UNEXPLAINED", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("X", "NEW_STATE"))), "only an OWN key reads as gone")
         assertEquals("CONC_PRODUCT_NS_ITEM_GONE", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("99999", "OWN"))),
                 "its NetSuite id is not an active stock item or kit")
     }
@@ -116,11 +131,41 @@ class GorjanaProductPresenceChecksDataTests {
         assertEquals("GORJANA_R22", link.attribute("statementId"))
         assertEquals("MISSING_IN_FILE_1,MISSING_IN_FILE_2", link.attribute("diffTypes"))
         List<String> counted = (link.attribute("conclusionCodes") as String).split(",")*.trim()
-        assertEquals(["CONC_PRODUCT_NOT_IN_HOTWAX", "CONC_PRODUCT_NO_NS_ID", "CONC_PRODUCT_NS_ID_SHARED", "CONC_PRODUCT_NS_ITEM_GONE", "UNEXPLAINED"], counted)
+        assertEquals(["CONC_PRODUCT_NOT_IN_HOTWAX", "CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX", "CONC_PRODUCT_NO_NS_ID", "CONC_PRODUCT_NS_ID_SHARED", "CONC_PRODUCT_NS_ITEM_GONE", "UNEXPLAINED"], counted)
         Node check = rows(FILE, "darpan.audit.AuditCheck")[0]
         assertEquals("products-not-in-both", check.attribute("checkCode"))
         assertEquals("GORJANA_PRODUCT_PRESENCE_RS", check.attribute("savedRunId"))
         assertEquals(null, check.attribute("automationId"), "automations are made per environment")
         assertEquals("darpan-tenant-config", new XmlParser(false, false).parse(dataDir().resolve(FILE).toFile()).attribute("type"))
+    }
+
+    // Reviewer 2026-10-28: a NetSuite item HotWax has only as a discontinued, virtual or digital product read "Sync it to HotWax".
+    @Test
+    void aLiveItemHotWaxHasOnlyAsANonSellableProductIsNamed() {
+        Map hw = product("42808", "OWN") + [sellable: "N", notSellableReason: "discontinued"]
+        assertEquals("CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX", conclude("MISSING_FROM_FILE_2", kept(item("42808", "Y")), excluded(hw)))
+        Map filter = scoped("darpan.rule.RuleSetCompareSourceFilter").find { it.fileSide == "FILE_2" }
+        assertEquals([fieldExpression: "sellable", operator: "EXCLUDE_IN", filterValues: "N"], filter.subMap(["fieldExpression", "operator", "filterValues"]))
+    }
+
+    // Reviewer 2026-10-28: a fix may only name what its conditions read (causeFix); every placeholder must fill.
+    @Test
+    void everyCausesFixIsFilled() {
+        Map hw = product("HOTWAX-ONLY:10056", "NONE")
+        assertEquals("Give HotWax product 10056 (2210-013a-G-OLD) its NetSuite id, or retire it in HotWax.",
+                fixOf("MISSING_FROM_FILE_1", ABSENT, kept(hw)))
+        Map shared = product("DUPLICATE:43000:10200", "SHARED") + [productId: "10200", netsuiteProductId: "43000", sharedWith: "10100"]
+        assertEquals("NetSuite id 43000 is on HotWax products 10200 (2210-013a-G-OLD) and 10100: keep it on the product that is that NetSuite item and remove it from the others.",
+                fixOf("MISSING_FROM_FILE_1", ABSENT, kept(shared)))
+        assertEquals("Sync NetSuite item 42808 (SKU-42808) to HotWax, then re-import anything HotWax refused for it (transfer orders).",
+                fixOf("MISSING_FROM_FILE_2", kept(item("42808", "Y")), ABSENT))
+        Map nonSellable = product("42808", "OWN") + [sellable: "N", notSellableReason: "discontinued"]
+        String notSellable = fixOf("MISSING_FROM_FILE_2", kept(item("42808", "Y")), excluded(nonSellable))
+        assertEquals("NetSuite item 42808 (SKU-42808) has stock or moved in 90 days, but HotWax product 10056 is discontinued: make it sellable in HotWax, or inactive in NetSuite.", notSellable)
+        [fixOf("MISSING_FROM_FILE_1", excluded(item("30000", "N")), kept(product("30000", "OWN"))),
+         fixOf("MISSING_FROM_FILE_1", ABSENT, kept(product("99999", "OWN"))),
+         fixOf("MISSING_FROM_FILE_2", kept(item("34838", "Y") + [itemType: "NonInvtPart"]), ABSENT)].each {
+            assertTrue(!(it =~ /\{[A-Za-z]/).find(), "unfilled placeholder: ${it}")
+        }
     }
 }

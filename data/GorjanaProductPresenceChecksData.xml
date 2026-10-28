@@ -30,13 +30,14 @@
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NO_NS_ID" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NO_NS_ID" description="No NetSuite id in HotWax"/>
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ID_SHARED" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ID_SHARED" description="One NetSuite id on several HotWax products"/>
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ONLY_NON_INVENTORY" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ONLY_NON_INVENTORY" description="Non-inventory item, NetSuite only"/>
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX" description="In HotWax, not sellable"/>
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ITEM_GONE" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ITEM_GONE" description="NetSuite item inactive or gone"/>
 
     <darpan.rule.RuleSet ruleSetId="GORJANA_PRODUCT_PRESENCE_RS" ruleSetName="Products - NetSuite vs HotWax"
-            description="Every active NetSuite stock item and kit is a sellable HotWax product carrying its NetSuite id, and every sellable HotWax product's NetSuite id names one. Whole catalogue, no window."
+            description="Every active NetSuite item (stock, kit, non-inventory) is a sellable HotWax product carrying its NetSuite id, and every sellable HotWax product's NetSuite id names one. Whole catalogue, no window."
             version="1.0" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" ruleSetId="GORJANA_PRODUCT_PRESENCE_RS"
-            objectType="PRODUCT" scopeMode="COMPARE" description="Every active NetSuite stock item and kit is a sellable HotWax product carrying its NetSuite id, and every sellable HotWax product's NetSuite id names one. Whole catalogue, no window."
+            objectType="PRODUCT" scopeMode="COMPARE" description="Every active NetSuite item (stock, kit, non-inventory) is a sellable HotWax product carrying its NetSuite id, and every sellable HotWax product's NetSuite id names one. Whole catalogue, no window."
             companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_1"
             systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
@@ -49,28 +50,52 @@
             recordRootExpression="records" primaryIdExpression="nsKey"
             sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_GQL_PRODUCTS" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="nsKey" companyUserGroupId="GORJANA"/>
+    <!-- A discontinued, virtual or non-selling product is in the extract only when it carries a NetSuite id no sellable product
+         holds; excluded here, so a live NetSuite item HotWax has only that way concludes "In HotWax, not sellable". -->
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="sellable" operator="EXCLUDE_IN" filterValues="N" companyUserGroupId="GORJANA"/>
 
-    <!-- HotWax has it, NetSuite's read does not: quiet (expected), no id, a shared id, or an id naming no active item. -->
+    <!-- HotWax has it, NetSuite's read does not: quiet (expected), no id, a shared id, or an id naming no active item.
+         A fix names only what its own conditions read (AuditReportAssembler.causeFix fills a placeholder from the condition
+         that reads the field), so the NOT_IN "-" conditions below exist to carry the SKU and product into the fix: they always
+         hold (no field is "-") and read the value, so a blank SKU leaves a placeholder rather than losing the cause. -->
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="5" conclusionEnumId="CONC_PRODUCT_QUIET_IN_NS" appliesToBucket="MISSING_FROM_FILE_1"
-            fixActionTemplate="Nothing to fix: NetSuite item {recordKey} is active but has no stock and no movement in 90 days, so the check does not require it. Make it inactive in NetSuite if it is retired." companyUserGroupId="GORJANA"/>
+            fixActionTemplate="Nothing to fix: NetSuite item {recordKey} is active but has no stock and no movement in 90 days, so the check does not require HotWax product {internalName}. Make it inactive in NetSuite if it is retired." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="5" conditionSeq="1" subject="FILE_1" presence="EXCLUDED" keyScope="FULL" checkLabel="NetSuite has the item, quiet for 90 days" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="5" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="internalName" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product SKU" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_PRODUCT_NO_NS_ID" appliesToBucket="MISSING_FROM_FILE_1"
             fixActionTemplate="Give HotWax product {productId} ({internalName}) its NetSuite id, or retire it in HotWax." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="netsuiteIdState" operator="IN" conditionValues="NONE" checkLabel="The HotWax product has no NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="productId" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="10" conditionSeq="3" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="internalName" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product SKU" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conclusionEnumId="CONC_PRODUCT_NS_ID_SHARED" appliesToBucket="MISSING_FROM_FILE_1"
-            fixActionTemplate="Remove NetSuite id {netsuiteProductId} from HotWax product {productId} ({internalName}): another product carries it." companyUserGroupId="GORJANA"/>
+            fixActionTemplate="NetSuite id {netsuiteProductId} is on HotWax products {productId} ({internalName}) and {sharedWith}: keep it on the product that is that NetSuite item and remove it from the others." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conditionSeq="1" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="netsuiteIdState" operator="IN" conditionValues="SHARED" checkLabel="Another HotWax product has the same NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="netsuiteProductId" operator="NOT_IN" conditionValues="-" checkLabel="Its NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conditionSeq="3" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="productId" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conditionSeq="4" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="internalName" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product SKU" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conditionSeq="5" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="sharedWith" operator="NOT_IN" conditionValues="-" checkLabel="Also on HotWax products" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conclusionEnumId="CONC_PRODUCT_NS_ITEM_GONE" appliesToBucket="MISSING_FROM_FILE_1"
-            fixActionTemplate="NetSuite has no active stock item or kit {recordKey}: reactivate it in NetSuite, or retire HotWax product {productId} ({internalName})." companyUserGroupId="GORJANA"/>
+            fixActionTemplate="NetSuite has no active item {recordKey}: reactivate it in NetSuite, or retire HotWax product {productId} ({internalName})." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conditionSeq="1" subject="FILE_1" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite's active items do not include it" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conditionSeq="4" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="netsuiteIdState" operator="IN" conditionValues="OWN" checkLabel="Keyed on its own NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="productId" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conditionSeq="3" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="internalName" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product SKU" companyUserGroupId="GORJANA"/>
 
-    <!-- NetSuite has it live, HotWax does not: a non-inventory item is NetSuite's own (expected); anything else needs syncing. -->
+    <!-- NetSuite has it live, HotWax does not sell it: HotWax has it but not sellable; a non-inventory item is NetSuite's own
+         (expected); anything else needs syncing. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="17" conclusionEnumId="CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX" appliesToBucket="MISSING_FROM_FILE_2"
+            fixActionTemplate="NetSuite item {recordKey} ({sku}) has stock or moved in 90 days, but HotWax product {productId} is {notSellableReason}: make it sellable in HotWax, or inactive in NetSuite." companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="17" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="notSellableReason" operator="NOT_IN" conditionValues="-" checkLabel="HotWax has the product, not sellable" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="17" conditionSeq="2" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="productId" operator="NOT_IN" conditionValues="-" checkLabel="HotWax product" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="17" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="sku" operator="NOT_IN" conditionValues="-" checkLabel="NetSuite SKU" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="18" conclusionEnumId="CONC_PRODUCT_NS_ONLY_NON_INVENTORY" appliesToBucket="MISSING_FROM_FILE_2"
             fixActionTemplate="Nothing to fix: {sku} is a NetSuite non-inventory item (an accounting line or a charge) that HotWax does not sell. Sync it to HotWax only if stores sell it." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="18" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="itemType" operator="IN" conditionValues="NonInvtPart" checkLabel="A NetSuite non-inventory item" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="18" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="sku" operator="NOT_IN" conditionValues="-" checkLabel="NetSuite SKU" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conclusionEnumId="CONC_PRODUCT_NOT_IN_HOTWAX" appliesToBucket="MISSING_FROM_FILE_2"
             fixActionTemplate="Sync NetSuite item {recordKey} ({sku}) to HotWax, then re-import anything HotWax refused for it (transfer orders)." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no product with this NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="sku" operator="NOT_IN" conditionValues="-" checkLabel="NetSuite SKU" companyUserGroupId="GORJANA"/>
 
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_PRODUCT_PRESENCE" companyUserGroupId="GORJANA" checkCode="products-not-in-both"
             label="NetSuite active items against HotWax sellable products" savedRunId="GORJANA_PRODUCT_PRESENCE_RS"
@@ -84,6 +109,6 @@
     <!-- Quiet in NetSuite is expected: not counted, it closes with its reason. -->
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R22" checkId="GORJANA_CHK_PRODUCT_PRESENCE" companyUserGroupId="GORJANA"
             sequenceNum="1" diffTypes="MISSING_IN_FILE_1,MISSING_IN_FILE_2"
-            conclusionCodes="CONC_PRODUCT_NOT_IN_HOTWAX,CONC_PRODUCT_NO_NS_ID,CONC_PRODUCT_NS_ID_SHARED,CONC_PRODUCT_NS_ITEM_GONE,UNEXPLAINED"/>
+            conclusionCodes="CONC_PRODUCT_NOT_IN_HOTWAX,CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX,CONC_PRODUCT_NO_NS_ID,CONC_PRODUCT_NS_ID_SHARED,CONC_PRODUCT_NS_ITEM_GONE,UNEXPLAINED"/>
 
 </entity-facade-xml>

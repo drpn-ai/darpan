@@ -346,4 +346,13 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].netsuiteIdState"
             label="NetSuite ID state" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="8"
             description="OWN: keyed on its NetSuite id; NONE: it has none (nsKey HOTWAX-ONLY:productId); SHARED: another product holds the id first (nsKey DUPLICATE:id:productId)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].sharedWith"
+            label="Shares its NetSuite ID with" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="9"
+            description="The other sellable HotWax products carrying the same NetSuite id, comma-separated."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].sellable"
+            label="Sellable" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="10"
+            description="Y for a sellable product; N for a discontinued, virtual or non-selling product kept only because it carries a NetSuite id no sellable product holds."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].notSellableReason"
+            label="Not sellable because" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="11"
+            description="discontinued, virtual, or the product type (DIGITAL_GOOD, SERVICE ...) when sellable is N."/>
 </entity-facade-xml>

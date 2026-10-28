@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Upgrade data for Darpan 2.1.3 (from 2.1.2). Load with ./gradlew loadDarpanUpgradeData on each instance that takes 2.1.3
-(sm-darpan first). Generated from backend compare range v2.1.2..HEAD; the record also lives in
-data/SourceSystemConnectorFieldSeedData.xml. One record: the OMS_GQL salesChannelEnumId connector field (the
-"Sales channel" pill), so a GraphQL HotWax source can exclude POS orders (DAR-BE-153, Steve Madden). No migration.
+Upgrade data for Darpan 2.1.4 (from 2.1.3): none. Generated from backend compare range v2.1.3..HEAD; no darpan seed
+record changed. loadDarpanUpgradeData is a no-op for this release.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- Added records from data/SourceSystemConnectorFieldSeedData.xml -->
-    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].salesChannelEnumId" label="Sales channel" fieldType="string" sequenceNum="12" description="DAR-BE-153: NOT in keepFieldsBase; selected only when a filter or rule reads it. On the Order type since the 2026-10-28 moqui-gql upgrade; Steve Madden's daily order run excludes POS_SALES_CHANNEL on it."/>
+    <!-- No added or modified candidate records were detected between the compared refs. -->
 </entity-facade-xml>

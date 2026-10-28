@@ -909,6 +909,7 @@ try {
                                         onlyInFile1Count         : serviceResult.missingInFile2Count,
                                         onlyInFile2Count         : serviceResult.missingInFile1Count,
                                         ruleDifferenceCount      : serviceResult.ruleDifferenceCount,
+                                        ruleDifferenceFields     : serviceResult.ruleDifferenceFields,
                                         ruleSetId                : savedRun.ruleSetId,
                                         compareScopeId           : savedRun.compareScopeId,
                                         compareScopeDescription  : savedRun.compareScopeDescription,

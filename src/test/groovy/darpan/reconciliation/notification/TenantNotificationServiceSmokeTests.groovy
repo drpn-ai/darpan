@@ -74,6 +74,33 @@ class TenantNotificationServiceSmokeTests {
     }
 
     @Test
+    void buildRunCompletedPayloadNamesTheFieldThatDrifted() {
+        // DAR-BE-155: RAILS Daily Order Reconciliation USA, one mismatch on isCompleted = isFulfilled.
+        Map result = ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters([
+                        companyUserGroupId       : "TENANT_A",
+                        runName                  : "Daily Order Reconciliation USA",
+                        savedRunId               : "RS_ORDER",
+                        reconciliationRunResultId: "RUN_RESULT_1",
+                        file1SystemLabel         : "HotWax",
+                        file2SystemLabel         : "Shopify",
+                        differenceCount          : 0,
+                        onlyInFile1Count         : 0,
+                        onlyInFile2Count         : 0,
+                        ruleDifferenceCount      : 1,
+                        ruleDifferenceFields     : [[field: "isCompleted = isFulfilled", count: 1, file1Value: "Y", file2Value: "N", sameValues: true]],
+                ])
+                .disableAuthz()
+                .call()
+
+        String text = result.payload.text as String
+        assertTrue(text.contains("On isCompleted = isFulfilled, HotWax has Y and Shopify has N."), text)
+        assertTrue(text.contains("Mismatches: 1 (isCompleted = isFulfilled)"), text)
+        assertFalse(text.contains("amount"), text)
+    }
+
+    @Test
     void buildRunCompletedPayloadSurfacesRuleFailureAndWarnings() {
         // Audit 2026-06-11 #5: a silently broken ruleset must not produce a normal "completed" ping.
         Map result = ec.service.sync()

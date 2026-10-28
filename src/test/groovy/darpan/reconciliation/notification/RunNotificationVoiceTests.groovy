@@ -415,6 +415,68 @@ class RunNotificationVoiceTests {
         assertTrue(headline.contains("8 to look at, all value mismatches"), headline)
     }
 
+    // DAR-BE-155: RAILS Daily Order Reconciliation USA, one mismatch on isCompleted = isFulfilled, read
+    // "Partial refunds or adjustments ... amount drift". The lines now say what differs, and nothing else.
+    private static Map tally(String field, int count, String file1Value = null, String file2Value = null) {
+        return [field: field, count: count, file1Value: file1Value, file2Value: file2Value, sameValues: file1Value != null || file2Value != null]
+    }
+
+    @Test
+    void valueDriftSaysWhatDiffersWhenEveryMismatchAgrees() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
+                [mismatchFields: [tally("isCompleted = isFulfilled", 1, "Y", "N")]])
+        assertEquals("On isCompleted = isFulfilled, HotWax has Y and Shopify has N.", lines[1], lines.join("\n"))
+        assertTrue(lines.contains("Mismatches: 1 (isCompleted = isFulfilled)"), lines.join("\n"))
+    }
+
+    @Test
+    void valueDriftSaysEveryTimeWhenManyMismatchesAgree() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 4) +
+                [mismatchFields: [tally("isCompleted = isFulfilled", 4, "Y", "N")]])
+        assertEquals("On isCompleted = isFulfilled, HotWax has Y and Shopify has N every time.", lines[1], lines.join("\n"))
+    }
+
+    @Test
+    void valueDriftSaysValuesVaryRatherThanGuessingACause() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 6) +
+                [mismatchFields: [tally("grand_total = total_amount", 6)]])
+        assertEquals("On grand_total = total_amount, the values differ from record to record.", lines[1], lines.join("\n"))
+    }
+
+    @Test
+    void valueDriftLeadsWithTheBusiestFieldWhenThereAreSeveral() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 12) +
+                [mismatchFields: [tally("grand_total = total_amount", 7), tally("isCompleted = isFulfilled", 3, "Y", "N"),
+                                  tally("c = d", 1), tally("a = b", 1)]])
+        assertEquals("Most are on grand_total = total_amount, where the values differ from record to record.", lines[1], lines.join("\n"))
+        assertTrue(lines.contains("Mismatches: 12 (grand_total = total_amount: 7, isCompleted = isFulfilled: 3, c = d: 1, +1 more)"),
+                lines.join("\n"))
+    }
+
+    @Test
+    void valueDriftNamesABlankValueInWords() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 2) +
+                [mismatchFields: [tally("shopifyOrderName = name", 5, "", "#1001"), tally("isCompleted = isFulfilled", 3, "Y", "N")]])
+        assertEquals("Most are on shopifyOrderName = name: HotWax has nothing and Shopify has #1001.", lines[1], lines.join("\n"))
+    }
+
+    @Test
+    void mismatchLineIsBareWhenTheRunDidNotSayWhichField() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 8))
+        assertTrue(lines.contains("Mismatches: 8"), lines.join("\n"))
+        assertTrue(RunNotificationVoice.VALUE_DRIFT_DIAGNOSES.contains(lines[1]), lines.join("\n"))
+    }
+
+    @Test
+    void valueDriftDiagnosesNameNoCause() {
+        List<String> causeWords = ["refund", "tax", "currency", "timezone", "rounding", "discount", "unit", "shipping",
+                                   "price", "amount", "quantit", "address", "status", "decimal", "true or false"]
+        RunNotificationVoice.VALUE_DRIFT_DIAGNOSES.each { String line ->
+            String lower = line.toLowerCase()
+            assertFalse(causeWords.any { lower.contains(it) }, "names a cause the run never saw: ${line}".toString())
+        }
+    }
+
     @Test
     void mixedHeadlineDistinguishesMissingOnlyFromMissingPlusMismatched() {
         RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
@@ -550,10 +612,14 @@ class RunNotificationVoiceTests {
         }
         allDiagnosisLines() // touched so an empty diagnosis pool fails loudly below
         [RunNotificationVoice.ONE_SIDED_DIAGNOSES, RunNotificationVoice.EVEN_SPLIT_DIAGNOSES,
-         RunNotificationVoice.VALUE_DRIFT_DIAGNOSES, RunNotificationVoice.MIXED_MISMATCH_DIAGNOSES,
+         RunNotificationVoice.MIXED_MISMATCH_DIAGNOSES,
          RunNotificationVoice.MIXED_MISSING_DIAGNOSES].each { List<String> pool ->
             assertTrue(pool.size() >= 40, "diagnosis pool is only ${pool.size()} deep: ${pool}".toString())
         }
+        // DAR-BE-155: value drift keeps only lines true of any field (the count line names the field), so a
+        // shallower pool, not 40 deep with guesses.
+        assertTrue(RunNotificationVoice.VALUE_DRIFT_DIAGNOSES.size() >= 15,
+                "value-drift pool is only ${RunNotificationVoice.VALUE_DRIFT_DIAGNOSES.size()} deep".toString())
     }
 
     @Test

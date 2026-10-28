@@ -29,6 +29,8 @@
                  this parameter a run with zero missing records and N value mismatches reported
                  "Differences: 0" and read as a clean sync. -->
             <parameter name="ruleDifferenceCount"/>
+            <!-- DAR-BE-155: rule differences per field label (RuleDiffSupport.fieldTally); the voice says what differs. -->
+            <parameter name="ruleDifferenceFields" type="List"/>
             <!-- Audit 2026-06-11 #5: surface rule failures / processing warnings so a silently broken
                  ruleset does not produce a normal "completed" alert. -->
             <parameter name="statusEnumId"/>
@@ -80,7 +82,7 @@
                 <set field="voiceModel" from="darpan.reconciliation.notification.RunNotificationVoice.classify(voiceCounts) + [
                         runName: runNameValue, file1SystemLabel: file1SystemLabelValue, file2SystemLabel: file2SystemLabelValue,
                         storedStreakDays: streakFacts.streakDays, badgeLine: streakFacts.badgeLine, questLine: streakFacts.questLine,
-                        factLine: streakFacts.factLine,
+                        factLine: streakFacts.factLine, mismatchFields: ruleDifferenceFields,
                         completedMoment: darpan.reconciliation.notification.TenantNotificationSupport.resolveCompletedMoment(ec, companyUserGroupId, resultIdValue)]"/>
                 <set field="lines" from="darpan.reconciliation.notification.RunNotificationVoice.renderLines(voiceModel)"/>
                 <!-- The GIF only ever rides on good news. -->

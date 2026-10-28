@@ -10,6 +10,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class RuleDiffSupportTests {
 
     @Test
+    void fieldTallyKeepsValuesOnlyWhenEveryDifferenceAgrees() {
+        // DAR-BE-155: a status mismatch names its pair; amounts that vary per record name none.
+        List<Map> tally = RuleDiffSupport.fieldTally([
+                [field: "grand_total = total_amount", file1Value: "89.89", file2Value: "90.32"],
+                [field: "isCompleted = isFulfilled", file1Value: "Y", file2Value: "N"],
+                [field: "grand_total = total_amount", file1Value: "10.00", file2Value: "10.01"],
+                [field: "isCompleted = isFulfilled", file1Value: "Y", file2Value: "N"],
+                [field: "grand_total = total_amount", file1Value: "5", file2Value: "6"],
+                [diffType: "BUSINESS_RULE_DIFF", message: "no field"],
+        ])
+        assertEquals([
+                [field: "grand_total = total_amount", count: 3, file1Value: null, file2Value: null, sameValues: false],
+                [field: "isCompleted = isFulfilled", count: 2, file1Value: "Y", file2Value: "N", sameValues: true],
+        ], tally)
+    }
+
+    @Test
     void applyPreActionsConvertsStringValuesBeforeOperatorComparison() {
         List<String> preActions = ["STRING_TO_INT"]
 

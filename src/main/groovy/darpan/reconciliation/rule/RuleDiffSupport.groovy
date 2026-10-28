@@ -234,6 +234,20 @@ class RuleDiffSupport {
         return new ArrayList<>(ensureGeneratedDiffList(fact))
     }
 
+    /**
+     * DAR-BE-155: rule differences per field label, busiest first, for the run notification:
+     * [field, count, file1Value, file2Value, sameValues]. The values are kept only when every difference on that
+     * field holds the same pair (a status Y against N), so the message can say what differs without guessing.
+     */
+    static List<Map> fieldTally(List<Map> diffRows) {
+        Map<String, List<Map>> byField = (diffRows ?: []).findAll { normalize(it?.field) }.groupBy { normalize(it.field) }
+        return byField.collect { String field, List<Map> rows ->
+            Set pairs = rows.collect { [stringify(it.file1Value), stringify(it.file2Value)] } as Set
+            List pair = pairs.size() == 1 ? (List) pairs.first() : [null, null]
+            [field: field, count: rows.size(), file1Value: pair[0], file2Value: pair[1], sameValues: pairs.size() == 1]
+        }.sort { -((int) it.count) }
+    }
+
     static List<Map> ensureGeneratedDiffList(Map fact) {
         Object existing = fact.get("_generatedDiffs")
         if (existing instanceof List) {

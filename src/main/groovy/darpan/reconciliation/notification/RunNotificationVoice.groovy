@@ -817,6 +817,7 @@ class RunNotificationVoice {
         int missingFromFile2 = toCount(safeModel.get("missingFromFile2Count"))
         int mismatches = toCount(safeModel.get("mismatchCount"))
         int total = toCount(safeModel.get("totalCount"))
+        List<Map> mismatchFields = mismatchTallies(safeModel.get("mismatchFields"))
 
         List<String> lines = []
 
@@ -834,15 +835,16 @@ class RunNotificationVoice {
             // (the all-zeros clean-looking run this whole change exists to fix) for another.
             // A failure that produced no output at all never reaches here: the service's
             // noOutput branch renders it without counts, because zeros there mean "never computed".
-            lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label))
+            lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields))
             return lines
         }
 
         if (bucket == BUCKET_CLEAN) return renderClean(runName, safeModel)
 
         lines << headlineFor(bucket, runName, total, missingFromFile2, mismatches, file1Label, file2Label)
-        lines << diagnosisFor(bucket, mismatches)
-        lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label))
+        lines << ((bucket == BUCKET_VALUE_DRIFT && mismatchFields) ?
+                valueDriftFact(mismatchFields, file1Label, file2Label) : diagnosisFor(bucket, mismatches))
+        lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields))
         return lines
     }
 
@@ -885,9 +887,13 @@ class RunNotificationVoice {
      * that side came back complete. The mismatch line prints only when there are mismatches
      * (DAR-BE-121) — at zero it names nothing and is just noise under a missing-records headline.
      * Single-asterisk bold — Google Chat renders `*Details*`; `**Details**` shows the asterisks.
+     *
+     * DAR-BE-155: the mismatch line names the fields that drifted (busiest three, then "+N more"), so the
+     * reader is not left to guess from a diagnosis line that cannot know which field moved.
      */
     private static List<String> detailsBlock(int missingFromFile1, int missingFromFile2,
-                                             int mismatches, String file1Label, String file2Label) {
+                                             int mismatches, String file1Label, String file2Label,
+                                             List<Map> mismatchFields) {
         List<String> lines = [
                 "",
                 "*Details*",
@@ -895,8 +901,48 @@ class RunNotificationVoice {
                 "Missing from ${file2Label}: ${missingFromFile2}".toString(),
                 "Missing from ${file1Label}: ${missingFromFile1}".toString(),
         ]
-        if (mismatches > 0) lines.add("Mismatches: ${mismatches}".toString())
+        if (mismatches > 0) lines.add("Mismatches: ${mismatches}${mismatchFieldsSuffix(mismatchFields)}".toString())
         return lines
+    }
+
+    private static String mismatchFieldsSuffix(List<Map> fields) {
+        if (!fields) return ""
+        if (fields.size() == 1) return " (${fields.first().field})".toString()
+        List<String> named = fields.take(3).collect { "${it.field}: ${it.count}".toString() }
+        if (fields.size() > 3) named.add("+${fields.size() - 3} more".toString())
+        return " (${named.join(', ')})".toString()
+    }
+
+    /** RuleDiffSupport.fieldTally rows the run sent, busiest first; empty when the run did not say. */
+    private static List<Map> mismatchTallies(Object raw) {
+        if (!(raw instanceof List)) return []
+        return ((List) raw).findAll { it instanceof Map && ((Map) it).field?.toString()?.trim() && toCount(((Map) it).count) > 0 }
+                .collect { Map it -> [field: it.field.toString().trim(), count: toCount(it.count), file1Value: it.file1Value,
+                                      file2Value: it.file2Value, sameValues: it.sameValues == true] }
+                .sort { -((int) it.count) }
+    }
+
+    /**
+     * DAR-BE-155: when the run says which fields drifted, the diagnosis is that fact, not a pooled reading.
+     * RAILS read "Partial refunds ... amount drift" over a status mismatch (isCompleted = isFulfilled, Y against N)
+     * because the pool could not know the field. The values are named only when every mismatch on the field agrees.
+     */
+    private static String valueDriftFact(List<Map> fields, String file1Label, String file2Label) {
+        Map top = fields.first()
+        String values = top.sameValues ?
+                "${file1Label} has ${spoken(top.file1Value)} and ${file2Label} has ${spoken(top.file2Value)}".toString() : null
+        if (fields.size() == 1) {
+            if (!values) return "On ${top.field}, the values differ from record to record.".toString()
+            return "On ${top.field}, ${values}${((int) top.count) > 1 ? ' every time' : ''}.".toString()
+        }
+        int total = (int) fields.sum { it.count }
+        String lead = ((int) top.count) * 2 > total ? "Most are on ${top.field}" : "The largest share is on ${top.field}"
+        return values ? "${lead}: ${values}.".toString() : "${lead}, where the values differ from record to record.".toString()
+    }
+
+    private static String spoken(Object value) {
+        String text = value?.toString()?.trim()
+        return text ?: "nothing"
     }
 
     /**
@@ -1166,38 +1212,14 @@ class RunNotificationVoice {
             "Presence is fine everywhere; it is the contents that have moved apart.",
             "Look at the comparison rules and the field mapping, not at the extracts.",
             "Delivery worked perfectly; the fields are what parted company.",
-            "Rounding, formatting and timezone are the usual three suspects here.",
             "The pairing is correct, so the question is which field moved.",
             "Nothing needs re-fetching; something needs re-checking.",
-            "A status that one system names differently from the other needs a value mapping, not a fix to the data.",
-            "Prices stored with tax on one side and without it on the other will differ on every affected record.",
-            "A currency or exchange-rate difference shows up as small, consistent gaps in the amount fields.",
-            "Dates that differ by a few hours usually mean one side stores local time and the other stores UTC.",
             "If the mismatches all sit on one field, the mapping for that field is the place to start.",
-            "Trailing spaces or letter case can be enough to fail a strict text comparison.",
-            "A tolerance on numeric fields would absorb differences that come from rounding rather than real changes.",
             "Edits made after the last sync read as mismatches until the next sync carries them over.",
-            "Some systems treat empty and null differently, which can make identical records look different.",
-            "A discount applied at the order level on one side and the line level on the other will shift line amounts.",
-            "Units of measure, such as each versus case, make quantities differ even when the stock is identical.",
             "Check whether a field was recently renamed or remapped, since the comparison may now be reading a different column.",
-            "If every mismatch is off by the same small amount, look for a shipping or handling charge counted on only one side.",
-            "Fields that one system recalculates after the fact, like totals or balances, often drift without anything being wrong.",
-            "A rule comparing text that one side formats with punctuation and the other without will flag every record.",
-            "Partial refunds or adjustments posted on one side only show up as amount drift on the same records.",
             "If the mismatches started on a specific date, a configuration change around then is the likeliest cause.",
-            "Ordering differences in a list field, such as tags or line references, can fail a comparison that expects an exact match.",
             "Look at a few mismatches side by side; drift from formatting looks very different from drift from real changes.",
-            "Rounding at the line level on one side and the total level on the other leaves small but persistent differences.",
-            "A default value filled in by one system where the other leaves the field empty will flag on every new record.",
-            "Timestamps rounded to the minute on one side and kept to the second on the other will rarely match exactly.",
-            "A rule that compares a field one system does not populate will flag records that are otherwise identical.",
-            "Fast-moving quantities will drift between two snapshots taken minutes apart.",
-            "Address and name fields are often normalised differently, so a looser rule may serve better than an exact one.",
             "If the mismatched values look newer on one side, that side is ahead and the other usually catches up.",
-            "Gross versus net reporting, before or after discounts, is a common reason for amount fields to drift.",
-            "A flag stored as true or false on one side and as Y or N on the other needs a mapping in the rule.",
-            "Precision differences, with one side keeping more decimal places, can make values that look equal fail an exact comparison.",
             "A field that one side overwrites on every sync and the other keeps as entered will drift whenever it is edited.",
     ].asImmutable()
 

@@ -528,6 +528,11 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals(1L, result.missingInFile2Count)
         assertEquals(2L, result.missingObjectDifferenceCount)
         assertEquals(2L, result.ruleDifferenceCount)
+        // DAR-BE-155: per field, so the run notification can name what drifted.
+        List<Map> fields = (List<Map>) result.ruleDifferenceFields
+        assertEquals([sku: 1, price: 1], fields.collectEntries { [(it.field): it.count] })
+        Map skuTally = fields.find { it.field == "sku" }
+        assertEquals([field: "sku", count: 1, file1Value: "SKU-B", file2Value: "SKU-B-ALT", sameValues: true], skuTally)
         assertEquals(4L, result.differenceCount)
         assertEquals(3L, result.matchedPairCount)
         assertEquals(2, result.ruleCount)

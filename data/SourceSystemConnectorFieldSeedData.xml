@@ -320,4 +320,27 @@
             label="Facility" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="11"/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].omsOrderStatusId"
             label="Order status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="12"/>
+
+    <!-- OMS_PRODUCTS_GQL (DAR-BE-157): HotWax products keyed by their NetSuite item id. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].nsKey"
+            label="NetSuite item ID (key)" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="The compare key: the product's NETSUITE_PRODUCT_ID (the NetSuite item internal id); HOTWAX-ONLY:productId when it has none, DUPLICATE:id:productId for every product after the first sharing one."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].netsuiteProductId"
+            label="NetSuite item ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="2"
+            description="The NETSUITE_PRODUCT_ID identification, blank when the product has none."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].productId"
+            label="HotWax product ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="3"
+            description="HotWax's own product id."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].internalName"
+            label="SKU" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="4"
+            description="The product's internal name (its SKU)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].productTypeId"
+            label="Product type" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="5"
+            description="FINISHED_GOOD or MARKETING_PKG_PICK."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].createdDate"
+            label="Created" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="6"
+            description="When HotWax created the product."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].duplicateNetsuiteId"
+            label="Shares its NetSuite ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="7"
+            description="true when another sellable product carries the same NetSuite id."/>
 </entity-facade-xml>

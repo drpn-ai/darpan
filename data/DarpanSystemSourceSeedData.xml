@@ -123,6 +123,16 @@
             sequenceNum="15"
             parentEnumId="OMS"/>
 
+    <!-- DAR-BE-157: HotWax products over GraphQL (connector OMS_PRODUCTS_GQL), the whole sellable catalogue keyed by its
+         NetSuite id, for the NetSuite <-> HotWax product reconciliation. -->
+    <moqui.basic.Enumeration
+            enumId="OMS_PRODUCTS_GQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_GQL_PRODUCTS"
+            description="HotWax products"
+            sequenceNum="16"
+            parentEnumId="OMS"/>
+
     <moqui.basic.Enumeration
             enumId="OMS_ORDER_ITEMS"
             enumTypeId="DarpanSystemSource"

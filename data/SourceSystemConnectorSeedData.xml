@@ -60,6 +60,28 @@
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
 
+    <!-- OMS_PRODUCTS_GQL (DAR-BE-157): every sellable HotWax product keyed by NETSUITE_PRODUCT_ID, for the two-way
+         NetSuite <-> HotWax product reconciliation. windowed N: presence is a whole-catalogue question, so the extract
+         ignores the window and an audit must never read it as "recent only" (AuditRecentReadSupport). Its own service and
+         expectedSourceConfigType, or it would shadow OMS_GQL in the resolvers. Same config row and credential as OMS_GQL. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_PRODUCTS_GQL"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlProducts"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_GQL_PRODUCTS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Products"
+            sendUrlTemplate="{baseUrl}/rest/s1/graphql"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlProducts"
+            systemAliases="OMS_PRODUCTS_GQL,HOTWAX_PRODUCTS"
+            preserveWindowInstants="N"
+            windowed="N"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="SHOPIFY"
             extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"

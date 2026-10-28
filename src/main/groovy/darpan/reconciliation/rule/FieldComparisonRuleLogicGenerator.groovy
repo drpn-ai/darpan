@@ -19,8 +19,9 @@ import groovy.json.JsonSlurper
 class FieldComparisonRuleLogicGenerator {
 
     static final String FIELD_COMPARISON_TYPE = "FIELD_COMPARISON"
-    // Operators whose meaning lives in RuleDiffSupport.matchesOperator (DAR-BE-126 adds the one-way presence pair).
-    private static final Set<String> RULE_DIFF_OPERATORS = [">", "<", ">=", "<=", "requires", "required by"] as Set
+    // Operators whose meaning lives in RuleDiffSupport.matchesOperator (DAR-BE-126 adds the one-way presence pair,
+    // DAR-BE-153 the list pair).
+    private static final Set<String> RULE_DIFF_OPERATORS = [">", "<", ">=", "<=", "requires", "required by", "all in", "contains all"] as Set
     private static final Set<String> VALID_OPERATORS = ["=", "==", "!="] as Set + RULE_DIFF_OPERATORS
     private static final Set<String> VALID_PRE_ACTIONS = ["STRING_TO_INT", "STRING_TO_NUMBER"] as Set
     private static final JsonSlurper JSON = new JsonSlurper()

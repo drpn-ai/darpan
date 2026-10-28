@@ -66,4 +66,27 @@ class RuleDiffSupportTests {
             assertEquals(fires, RuleDiffSupport.violatesOperator(pair[1], pair[0], "required by"), "required by ${pair.reverse()}")
         }
     }
+
+    // DAR-BE-153: every Shopify payment transaction id is on a HotWax OPP. "all in" breaks when one comma-joined value
+    // on the left is not among the right's; "contains all" is the mirror. A right side that was not read (null) claims
+    // nothing, while an empty one ("") has no values at all.
+    @Test
+    void allInBreaksOnlyWhenALeftValueIsMissingFromTheRight() {
+        Map<List, Boolean> allIn = [
+                ["20851263242371", "20851263242371"]                    : false,
+                ["20766330257539,20853219360899", "20766330257539,20853219360899,EPRA-20853219360899"]: false,
+                ["20766330257539,20853219360899", "20766330257539"]     : true,
+                ["20851263242371", ""]                                  : true,
+                ["20851263242371", null]                                : false,
+                ["", "20851263242371"]                                  : false,
+                [null, ""]                                              : false,
+                [" 1 , 2 ", "2,1"]                                      : false,
+                [["1", "2"], "1,2"]                                     : false,
+                ["1,2", ["1"]]                                          : true,
+        ]
+        allIn.each { List pair, Boolean fires ->
+            assertEquals(fires, RuleDiffSupport.violatesOperator(pair[0], pair[1], "all in"), "all in ${pair}")
+            assertEquals(fires, RuleDiffSupport.violatesOperator(pair[1], pair[0], "contains all"), "contains all ${pair.reverse()}")
+        }
+    }
 }

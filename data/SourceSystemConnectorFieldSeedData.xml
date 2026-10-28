@@ -75,6 +75,9 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentMethodTypeIds"
             label="Payment methods" fieldType="string" sequenceNum="9"
             description="Comma-joined OPP paymentMethodTypeIds from the first two OPPs (detail, not a key)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentRefNums"
+            label="Payment transaction ids" fieldType="string" sequenceNum="11"
+            description="DAR-BE-153: comma-joined OPP manualRefNums (the Shopify transaction id each OPP names), read from up to six OPPs; null when all six slots came back full, so a longer list is never claimed short. Compared against Shopify paymentTransactionIds (paymentTransactionIds all in paymentRefNums)."/>
 
     <!-- OMS reconciliationOrders. A strict SUBSET of OMS: the endpoint projects SERVER-side to a
          fixed set, so salesChannelEnumId and productStoreId never arrive and a rule drawn on either
@@ -202,6 +205,8 @@
             label="Has payment" fieldType="String" sequenceNum="8" description="DAR-BE-064: Y when any SUCCESS SALE, CAPTURE or AUTHORIZATION transaction exists, else N."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].isFulfilled"
             label="Fulfilled" fieldType="String" sequenceNum="9" description="DAR-BE-125: Y when displayFulfillmentStatus is FULFILLED, else N (partial is N)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].paymentTransactionIds"
+            label="Payment transaction ids" fieldType="String" sequenceNum="10" description="DAR-BE-153: comma-joined ids of the SUCCESS SALE and CAPTURE transactions, and of a SUCCESS AUTHORIZATION nothing captured; the ids HotWax keeps on its OPPs as manualRefNum."/>
 
     <!-- Shopify return references (DAR-BE-018 task 9; 2026-08-17 returns-refund-grain-alignment plan,
          Task 2, REVISION 2026-08-18). Derived from the EMITTED record shape pinned at

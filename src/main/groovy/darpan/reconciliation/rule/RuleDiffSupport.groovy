@@ -89,9 +89,22 @@ class RuleDiffSupport {
                 return !isTrue(file1Value) || isTrue(file2Value)
             case "required by":
                 return !isTrue(file2Value) || isTrue(file1Value)
+            // DAR-BE-153: every value on the left is among the right's (Shopify payment ids on HotWax OPPs); "contains
+            // all" is the mirror. A side that was not read (null) claims nothing.
+            case "all in":
+                return file2Value == null || valueList(file2Value).containsAll(valueList(file1Value))
+            case "contains all":
+                return file1Value == null || valueList(file1Value).containsAll(valueList(file2Value))
             default:
                 return equalValues(file1Value, file2Value)
         }
+    }
+
+    /** A list, or comma-joined text, as its trimmed non-blank values. */
+    static Set<String> valueList(Object value) {
+        if (value == null) return [] as Set
+        Collection parts = value instanceof Collection ? (Collection) value : value.toString().split(",") as List
+        return parts.collect { normalize(it) }.findAll { it } as Set
     }
 
     /** Y or true, any case. N, blank, null and anything else are not. */

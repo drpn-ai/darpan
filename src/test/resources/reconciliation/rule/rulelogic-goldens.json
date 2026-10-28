@@ -196,5 +196,27 @@
     "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].isFulfilled\",\"file2FieldPath\":\"$[*].isCompleted\",\"operator\":\"required by\"}",
     "ruleText": "isFulfilled required by isCompleted",
     "ruleLogic": "rule \"MY_RULE\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"isFulfilled\"), ((Map) $m.get(\"file2\")).get(\"isCompleted\"), \"required by\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"isFulfilled\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"isCompleted\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"isFulfilled required by isCompleted\",\n        _file1Value,\n        _file2Value,\n        \"ERROR\",\n        \"Field comparison failed: isFulfilled required by isCompleted\"\n    );\nend"
+  },
+  {
+    "name": "all_in",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].paymentTransactionIds\",\"file2FieldPath\":\"$[*].paymentRefNums\",\"operator\":\"all in\"}",
+    "ruleText": "paymentTransactionIds all in paymentRefNums",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"paymentTransactionIds\"), ((Map) $m.get(\"file2\")).get(\"paymentRefNums\"), \"all in\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"paymentTransactionIds\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"paymentRefNums\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"paymentTransactionIds all in paymentRefNums\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: paymentTransactionIds all in paymentRefNums\"\n    );\nend"
+  },
+  {
+    "name": "contains_all",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": "MY_RULE",
+    "severity": "ERROR",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].paymentRefNums\",\"file2FieldPath\":\"$[*].paymentTransactionIds\",\"operator\":\"contains all\"}",
+    "ruleText": "paymentRefNums contains all paymentTransactionIds",
+    "ruleLogic": "rule \"MY_RULE\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"paymentRefNums\"), ((Map) $m.get(\"file2\")).get(\"paymentTransactionIds\"), \"contains all\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"paymentRefNums\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"paymentTransactionIds\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"paymentRefNums contains all paymentTransactionIds\",\n        _file1Value,\n        _file2Value,\n        \"ERROR\",\n        \"Field comparison failed: paymentRefNums contains all paymentTransactionIds\"\n    );\nend"
   }
 ]

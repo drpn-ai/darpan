@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Upgrade data for Darpan 2.1.2 (from 2.1.1). Load on EVERY instance with ./gradlew loadDarpanUpgradeData, then run
+run#PendingMigrations. Generated from backend compare range v2.1.1..HEAD, darpan-seed files only; every record also
+lives in its generic seed file under runtime/component/darpan/data/. Three records: the AUTOMATION_STREAKS migration
+(DAR-BE-144, migrate#AutomationStreaks) and two connector fields for the payment transaction id check (DAR-BE-153:
+SHOPIFY paymentTransactionIds, OMS_GQL paymentRefNums). Tenant config (GORJANA: GorjanaMonthCloseCatalogData.xml and
+GorjanaMonthCloseReturnsChecksData.xml, R21; RAILS: RailsAuditData.xml, R7; type darpan-tenant-config) is NOT here; it is
+loaded per tenant.
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Added records from data/MigrationRegistrySeedData.xml -->
+    <darpan.migration.DarpanMigration migrationId="AUTOMATION_STREAKS" componentName="darpan" serviceName="reconciliation.ReconciliationNotificationServices.migrate#AutomationStreaks" sequenceNum="70" supportsDryRun="N" enabled="Y" description="Fold every automation's run history into its stored clean-day streak, so the                 clean-run Chat line reads the day count from the first message (DAR-BE-144).                 Idempotent — a fold reads only slots past the stored cursor."/>
+    <!-- Added records from data/SourceSystemConnectorFieldSeedData.xml -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentRefNums" label="Payment transaction ids" fieldType="string" sequenceNum="11" description="DAR-BE-153: comma-joined OPP manualRefNums (the Shopify transaction id each OPP names), read from up to six OPPs; null when all six slots came back full, so a longer list is never claimed short. Compared against Shopify paymentTransactionIds (paymentTransactionIds all in paymentRefNums)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].paymentTransactionIds" label="Payment transaction ids" fieldType="String" sequenceNum="10" description="DAR-BE-153: comma-joined ids of the SUCCESS SALE and CAPTURE transactions, and of a SUCCESS AUTHORIZATION nothing captured; the ids HotWax keeps on its OPPs as manualRefNum."/>
+</entity-facade-xml>

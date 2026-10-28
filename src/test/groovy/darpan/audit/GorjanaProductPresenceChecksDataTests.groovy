@@ -144,6 +144,9 @@ class GorjanaProductPresenceChecksDataTests {
     void aLiveItemHotWaxHasOnlyAsANonSellableProductIsNamed() {
         Map hw = product("42808", "OWN") + [sellable: "N", notSellableReason: "discontinued"]
         assertEquals("CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX", conclude("MISSING_FROM_FILE_2", kept(item("42808", "Y")), excluded(hw)))
+        assertEquals("CONC_PRODUCT_NS_ONLY_NON_INVENTORY", conclude("MISSING_FROM_FILE_2",
+                kept(item("22571", "Y") + [itemType: "NonInvtPart"]), excluded(hw + [notSellableReason: "DIGITAL_GOOD"])),
+                "a NetSuite accounting item HotWax holds as a digital good stays NetSuite's own")
         Map filter = scoped("darpan.rule.RuleSetCompareSourceFilter").find { it.fileSide == "FILE_2" }
         assertEquals([fieldExpression: "sellable", operator: "EXCLUDE_IN", filterValues: "N"], filter.subMap(["fieldExpression", "operator", "filterValues"]))
     }

@@ -79,6 +79,7 @@
             systemAliases="OMS_PRODUCTS_GQL,HOTWAX_PRODUCTS"
             preserveWindowInstants="N"
             windowed="N"
+            filterParameterName="sourceFilters"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
 

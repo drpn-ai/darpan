@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-157 - gorjana R22, "Every active product is in both NetSuite and HotWax.", measured against gorjana production on
+  2026-10-28 (tools/live-probes/run-active-products-probe.sh, run-transfer-products-probe.sh).
+
+  Why: 294 transfer orders were refused by HotWax on 16 and 22 Oct because their products were not in HotWax yet (the
+  NetSuite -> HotWax product sync was behind). A whole-catalogue, two-way presence check names such a product before
+  anything is refused for it.
+
+  FILE_1 = NetSuite ACTIVE_ITEMS (tools/netsuite-chain-config/gorjana-product-queries.xml): every non-inactive InvtPart
+  and Kit, live = stock on hand, any transaction line in 90 days, or created in them. Quiet items (live N) are EXCLUDED, so
+  they never become "not in HotWax", and a HotWax product whose NetSuite item is quiet concludes "Quiet in NetSuite"
+  (expected, not counted) instead of missing in NetSuite: 1,078 such on 2026-10-28.
+  FILE_2 = HotWax OMS_PRODUCTS_GQL: every sellable product (not virtual, FINISHED_GOOD or MARKETING_PKG_PICK, not
+  discontinued), nsKey = its NETSUITE_PRODUCT_ID (the NetSuite item internal id), HOTWAX-ONLY:productId when it has none,
+  DUPLICATE:id:productId for every product after the first sharing one (netsuiteIdState NONE / SHARED).
+  Neither side is windowed: presence is a whole-catalogue question.
+
+  NOT seed data - tenant configuration. Load per install, AFTER AuditSeedData.xml, GorjanaMonthCloseCatalogData.xml and
+  tools/netsuite-chain-config/gorjana-product-queries.xml. The HotWax side names the tenant's HotWax config
+  (gorjana_prod locally; gorjana_oms on prod - remap with /transfer). automationId is blank: an automation is created per
+  environment.
+-->
+<entity-facade-xml type="darpan-tenant-config">
+
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_NOT_IN_HOTWAX" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NOT_IN_HOTWAX" description="Not synced to HotWax"/>
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_QUIET_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_QUIET_IN_NS" description="Quiet in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_NO_NS_ID" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NO_NS_ID" description="No NetSuite id in HotWax"/>
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ID_SHARED" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ID_SHARED" description="One NetSuite id on several HotWax products"/>
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ITEM_GONE" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ITEM_GONE" description="NetSuite item inactive or gone"/>
+
+    <darpan.rule.RuleSet ruleSetId="GORJANA_PRODUCT_PRESENCE_RS" ruleSetName="Products - NetSuite vs HotWax"
+            description="Every active NetSuite stock item and kit is a sellable HotWax product carrying its NetSuite id, and every sellable HotWax product's NetSuite id names one. Whole catalogue, no window."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" ruleSetId="GORJANA_PRODUCT_PRESENCE_RS"
+            objectType="PRODUCT" scopeMode="COMPARE" description="Every active NetSuite stock item and kit is a sellable HotWax product carrying its NetSuite id, and every sellable HotWax product's NetSuite id names one. Whole catalogue, no window."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="id"
+            sourceConfigId="NS_ACTIVE_ITEMS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="live" operator="EXCLUDE_IN" filterValues="N" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_PRODUCTS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="nsKey"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_GQL_PRODUCTS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="nsKey" companyUserGroupId="GORJANA"/>
+
+    <!-- HotWax has it, NetSuite's read does not: quiet (expected), no id, a shared id, or an id naming no active item. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="5" conclusionEnumId="CONC_PRODUCT_QUIET_IN_NS" appliesToBucket="MISSING_FROM_FILE_1"
+            fixActionTemplate="Nothing to fix: NetSuite item {recordKey} is active but has no stock and no movement in 90 days, so the check does not require it. Make it inactive in NetSuite if it is retired." companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="5" conditionSeq="1" subject="FILE_1" presence="EXCLUDED" keyScope="FULL" checkLabel="NetSuite has the item, quiet for 90 days" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_PRODUCT_NO_NS_ID" appliesToBucket="MISSING_FROM_FILE_1"
+            fixActionTemplate="Give HotWax product {productId} ({internalName}) its NetSuite id, or retire it in HotWax." companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="netsuiteIdState" operator="IN" conditionValues="NONE" checkLabel="The HotWax product has no NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conclusionEnumId="CONC_PRODUCT_NS_ID_SHARED" appliesToBucket="MISSING_FROM_FILE_1"
+            fixActionTemplate="Remove NetSuite id {netsuiteProductId} from HotWax product {productId} ({internalName}): another product carries it." companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="12" conditionSeq="1" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="netsuiteIdState" operator="IN" conditionValues="SHARED" checkLabel="Another HotWax product has the same NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conclusionEnumId="CONC_PRODUCT_NS_ITEM_GONE" appliesToBucket="MISSING_FROM_FILE_1"
+            fixActionTemplate="NetSuite has no active stock item or kit {recordKey}: reactivate it in NetSuite, or retire HotWax product {productId} ({internalName})." companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conditionSeq="1" subject="FILE_1" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite's active items do not include it" companyUserGroupId="GORJANA"/>
+
+    <!-- NetSuite has it live, HotWax does not. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conclusionEnumId="CONC_PRODUCT_NOT_IN_HOTWAX" appliesToBucket="MISSING_FROM_FILE_2"
+            fixActionTemplate="Sync NetSuite item {recordKey} ({sku}) to HotWax, then re-import anything HotWax refused for it (transfer orders)." companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no product with this NetSuite id" companyUserGroupId="GORJANA"/>
+
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_PRODUCT_PRESENCE" companyUserGroupId="GORJANA" checkCode="products-not-in-both"
+            label="NetSuite active items against HotWax sellable products" savedRunId="GORJANA_PRODUCT_PRESENCE_RS"
+            file1RecordType="item" file2RecordType="product" graceDays="0"
+            matchedBy="NetSuite item internal id = HotWax NETSUITE_PRODUCT_ID"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Product {recordKey} is not in both NetSuite and HotWax"
+            fixActionTemplate="Sync NetSuite item {recordKey} to HotWax, or give the HotWax product its NetSuite id."
+            passesWhenTemplate="NetSuite item {recordKey} and its HotWax product both exist."/>
+
+    <!-- Quiet in NetSuite is expected: not counted, it closes with its reason. -->
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R22" checkId="GORJANA_CHK_PRODUCT_PRESENCE" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="MISSING_IN_FILE_1,MISSING_IN_FILE_2"
+            conclusionCodes="CONC_PRODUCT_NOT_IN_HOTWAX,CONC_PRODUCT_NO_NS_ID,CONC_PRODUCT_NS_ID_SHARED,CONC_PRODUCT_NS_ITEM_GONE,UNEXPLAINED"/>
+
+</entity-facade-xml>

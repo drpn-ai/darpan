@@ -60,14 +60,19 @@ then
     insertLogical( new OrderNotInNetsuite( $o ) );
 end
 
+// Per amount, not per row: two gift cards swiped (100 + 81) are given back only by 181 back to that tender. A row of the
+// tender with no amount proves nothing.
 rule "A tender taken was given back in full"
     @reads("Order, Payment") @produces("TenderGivenBack")
 when
     $o : Order( paymentsComplete == true )
-    Payment( order == $o, state == "SETTLED", $t : tender, $a : amount, amount != null )
-    Payment( order == $o, state == "REFUNDED", tender == $t, amount == $a )
+    Payment( order == $o, state == "SETTLED", $t : tender )
+    not Payment( order == $o, tender == $t, amount == null )
+    $taken : List() from collect( Payment( order == $o, tender == $t, state == "SETTLED" ) )
+    $back : List() from collect( Payment( order == $o, tender == $t, state == "REFUNDED" ) )
 then
-    insertLogical( new TenderGivenBack( $o, $t, $a ) );
+    BigDecimal taken = Payment.sum( $taken );
+    if (taken.compareTo( Payment.sum( $back ) ) == 0) { insertLogical( new TenderGivenBack( $o, $t, taken ) ); }
 end
 
 // ---- questions: asked only when an answer can still change a cause; the ask planner batches them across findings
@@ -91,11 +96,10 @@ when
     forall( $p : Payment( order == $o, state == "SETTLED" || state == "REFUNDED" )
             TenderGivenBack( order == $o, tender == $p.tender ) )
     not Payment( order == $o, state != "SETTLED", state != "REFUNDED", state != "CANCELLED" )
+    not Payment( order == $o, state == "SETTLED", amount == null )
     $amounts : List() from collect( Payment( order == $o, state == "SETTLED" ) )
 then
-    BigDecimal taken = BigDecimal.ZERO;
-    for (Object p : $amounts) { taken = taken.add( ((Payment) p).getAmount() ); }
-    insertLogical( new PaymentsGivenBack( $o, taken ) );
+    insertLogical( new PaymentsGivenBack( $o, Payment.sum( $amounts ) ) );
 end
 
 rule "Less than the order total was taken"
@@ -134,7 +138,7 @@ end
 rule "R1 · the order's cause, when NetSuite has no line for it"
     @reads("Finding, OrderNotInNetsuite, BestCause") @states("R1")
 when
-    $f : Finding( kind == "orderLine", $o : order, order != null )
+    $f : Finding( kind == "orderLine", bucket == "MISSING_FROM_FILE_2", $o : order, order != null )
     OrderNotInNetsuite( order == $o )
     BestCause( subject == $o, $c : cause )
 then
@@ -144,7 +148,7 @@ end
 rule "R2 · its order's cause"
     @reads("Finding, Return, BestCause") @states("R2")
 when
-    $f : Finding( kind == "return", $r : ret, ret != null )
+    $f : Finding( kind == "return", bucket == "MISSING_FROM_FILE_2", $r : ret, ret != null )
     Return( this == $r, $o : order )
     BestCause( subject == $o, $c : cause )
 then

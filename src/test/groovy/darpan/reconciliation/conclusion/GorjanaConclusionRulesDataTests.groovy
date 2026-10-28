@@ -236,8 +236,10 @@ class GorjanaConclusionRulesDataTests {
             assertTrue(row != null, "${scopeId} has no fix row for ${PILOT_CODE}".toString())
             assertEquals("BRAIN", row.@engine.toString())
             assertTrue(row.@fixActionTemplate.toString().startsWith("Nothing to fix in NetSuite"))
-            assertFalse(doc.'**'.any { it.name() == 'darpan.rule.RuleSetConclusionCondition' && it.@compareScopeId == scopeId &&
-                    it.@sequenceNum == row.@sequenceNum }, "a BRAIN row has no conditions")
+            def guards = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionCondition' && it.@compareScopeId == scopeId &&
+                    it.@sequenceNum == row.@sequenceNum }
+            assertEquals(1, guards.size(), "a BRAIN row carries one guard that never holds")
+            assertBrainRowIsInertInATree(row, guards[0])
             assertTrue(RunConclusionStep.buildRules([[sequenceNum: row.@sequenceNum.toString() as int, conclusionEnumId: PILOT_CODE,
                     engine: row.@engine.toString()]], [], [:]).isEmpty())
         }
@@ -249,6 +251,46 @@ class GorjanaConclusionRulesDataTests {
             load(file).'**'.findAll { it.name() == 'darpan.audit.AuditStatementCheck' }.each { link ->
                 assertFalse(link.@conclusionCodes.toString().contains(PILOT_CODE), "${link.@statementId} counts ${PILOT_CODE}".toString())
             }
+        }
+    }
+
+
+    /**
+     * Final review C1: code that does not know `engine` (a load before the deploy, a rules-board save, a config transfer to
+     * an older instance) compiles a BRAIN row into the tree. Its guard must then match nothing, not every missing finding.
+     */
+    private static void assertBrainRowIsInertInATree(def row, def guard) {
+        List rules = RunConclusionStep.buildRules(
+                [[sequenceNum: row.@sequenceNum.toString() as int, conclusionEnumId: row.@conclusionEnumId.toString(),
+                  appliesToBucket: row.@appliesToBucket.toString()]],
+                [[sequenceNum: guard.@sequenceNum.toString() as int, conditionSeq: guard.@conditionSeq.toString() as int,
+                  subject: guard.@subject.toString(), presence: guard.@presence.toString(), keyScope: guard.@keyScope.toString(),
+                  fieldExpression: guard.@fieldExpression.toString(), operator: guard.@operator.toString(),
+                  checkLabel: guard.@checkLabel.toString()]], [:])
+        ConclusionTreeEngine engine = ConclusionTreeEngine.compile(rules)
+        try {
+            Map sides = [FILE_1: [presence: "KEPT", record: [omsOrderId: "M1", returnId: "R1", statusId: "RETURN_COMPLETED"],
+                                  records: [[omsOrderId: "M1"]], firstFieldPresence: "KEPT"],
+                         FILE_2: [presence: "ABSENT", firstFieldPresence: "ABSENT"]]
+            assertEquals(ConclusionTreeSupport.UNEXPLAINED, engine.conclude([[bucket: "MISSING_FROM_FILE_2", sides: sides]])[0].code)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    void theProdPilotFileGuardsItsBrainRowsToo() {
+        java.nio.file.Path p = componentRoot()
+        while (p != null && !Files.exists(p.resolve("tools/netsuite-chain-config/gorjana-prod-brain-pilot.xml"))) p = p.parent
+        org.junit.jupiter.api.Assumptions.assumeTrue(p != null, "the wrapper's tools are not checked out here")
+        def doc = new XmlSlurper().parse(p.resolve("tools/netsuite-chain-config/gorjana-prod-brain-pilot.xml").toFile())
+        def rows = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionRule' }
+        assertEquals(2, rows.size())
+        rows.each { row ->
+            def guards = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionCondition' && it.@compareScopeId == row.@compareScopeId &&
+                    it.@sequenceNum == row.@sequenceNum }
+            assertEquals(1, guards.size(), "${row.@compareScopeId} BRAIN row has no guard".toString())
+            assertBrainRowIsInertInATree(row, guards[0])
         }
     }
 

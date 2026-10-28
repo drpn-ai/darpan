@@ -11,4 +11,11 @@ class Payment {
     String tender
     String state
     BigDecimal amount
+
+    /** The sum of payment rows' amounts (a rule only calls it on rows it has checked carry one). */
+    static BigDecimal sum(Collection rows) {
+        BigDecimal total = BigDecimal.ZERO
+        (rows ?: []).each { Object p -> total = total.add(((Payment) p).amount) }
+        return total
+    }
 }

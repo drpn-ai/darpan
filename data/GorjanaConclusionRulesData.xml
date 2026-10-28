@@ -49,6 +49,8 @@
 
     <!-- DAR-BE-151: the brain's cause (oms-netsuite pack); this row only carries its fix text for the audit. -->
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="2" engine="BRAIN" conclusionEnumId="CONC_PARTIAL_PAYMENT_GIVEN_BACK" appliesToBucket="MISSING_FROM_FILE_2" fixActionTemplate="Nothing to fix in NetSuite: part of the order was paid and given back by its return, so the sale never stood. HotWax does not send an unpaid order." companyUserGroupId="GORJANA"/>
+    <!-- Final review C1: inert wherever `engine` is unknown (a load before the deploy, a rules-board save, a transfer): no record carries this field. -->
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="2" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="concludedByTheBrainOnly" operator="NOT_BLANK" checkLabel="Concluded by the conclusion brain only" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="5" fixActionTemplate="NetSuite closed the line HotWax completed: reopen and bill it in NetSuite, or cancel item {recordKey} in HotWax if it never shipped." conclusionEnumId="CONC_COMPLETED_CLOSED_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="5" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="CLOSED" checkLabel="NetSuite closed the line" companyUserGroupId="GORJANA"/>
 

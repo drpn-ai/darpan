@@ -117,4 +117,42 @@ class OmsNetsuitePackTests {
         assertEquals([], codes(fired))
         assertEquals([], fired.asks)
     }
+
+    /** Final review I1: "given back in full" is per amount, not per tender: two gift cards, one given back, is a kept payment. */
+    @Test
+    void twoGiftCardsWithOnlyOneGivenBackDoNotConclude() {
+        assertEquals([], codes(fire([facts("orderLine", r1("M1", 371.54), [M1: answer([
+                paid("EXT_SHOP_GFT_CARD", "SETTLED", 100), paid("EXT_SHOP_GFT_CARD", "SETTLED", 81),
+                paid("EXT_SHOP_GFT_CARD", "REFUNDED", 100)])])])))
+        assertEquals([CODE], codes(fire([facts("orderLine", r1("M1", 371.54), [M1: answer([
+                paid("EXT_SHOP_GFT_CARD", "SETTLED", 100), paid("EXT_SHOP_GFT_CARD", "SETTLED", 81),
+                paid("EXT_SHOP_GFT_CARD", "REFUNDED", 181)])])])), "two swipes given back in one refund is still all given back")
+    }
+
+    /** Final review I1: a taken row with no amount proves nothing, and must never fail the conclude pass. */
+    @Test
+    void aTakenRowWithNoAmountNeverConcludesAndNeverThrows() {
+        assertEquals([], codes(fire([facts("orderLine", r1("M1", 371.54), [M1: answer([
+                paid("EXT_SHOP_GFT_CARD", "SETTLED", 181), paid("EXT_SHOP_GFT_CARD", "REFUNDED", 181),
+                paid("EXT_SHOP_GFT_CARD", "SETTLED", null)])])])))
+    }
+
+    /** Final review (re-graded Important): only a finding MISSING from NetSuite takes its order's cause; a duplicate is its own defect. */
+    @Test
+    void aDuplicateRowOfAPartlyPaidOrderKeepsItsOwnConclusion() {
+        Map answers = [M1088731: answer(M1088731)]
+        Map world = [:]
+        Map dup = r1("M1088731", 371.54, "02") + [bucket: "DUPLICATE_IN_FILE_2"]
+        Map fired = fire([BrainFactAdapter.facts("orderLine", r1("M1088731", 371.54), answers, world),
+                          BrainFactAdapter.facts("orderLine", dup, answers, world)])
+        assertEquals(["M1088731/01"], ((List<Conclusion>) fired.conclusions)*.finding*.key)
+    }
+
+    /** Review Focus 5, with the fallback ruled on: a total the record lacks is taken from the OMS answer for the same order. */
+    @Test
+    void aTotalOnlyTheOmsAnswerCarriesIsUsed() {
+        Map a = answer(M1088731) + [grandTotal: 371.54]
+        assertEquals([CODE], codes(fire([facts("orderLine", r1("M1088731", null), [M1088731: a])])))
+    }
+
 }

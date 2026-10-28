@@ -214,6 +214,8 @@ class RunExtractSupport {
         List<String> keepFields = null
         if (normalize(connector.keepFieldsParameterName)) {
             keepFields = ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, source, connector.keepFieldsBase)
+            // DAR-BE-151: a scope in the conclusion brain keeps the fields the brain's facts read (null stays null: full records).
+            if (keepFields != null) keepFields = (keepFields + brainRecordFields(ec, source)).unique()
         }
         List<Map<String, Object>> excludeFilters = null
         if (normalize(connector.filterParameterName)) {
@@ -243,4 +245,13 @@ class RunExtractSupport {
         return sourceResultForLocation(ec, source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
                 extractedLocation, normalizeInt(extraction.recordCount, null))
     }
+
+    /** DAR-BE-151: the record fields the conclusion brain reads on this source's side of its scope; none when the scope is not in it. */
+    private static List<String> brainRecordFields(def ec, Object source) {
+        String compareScopeId = normalize(source?.compareScopeId)
+        if (!compareScopeId) return []
+        def scope = darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, "darpan.rule.RuleSetCompareScope", "compareScopeId", compareScopeId)
+        return darpan.conclusion.brain.BrainFactAdapter.recordFieldsFor(scope?.conclusionBrain, normalize(source?.fileSide))
+    }
+
 }

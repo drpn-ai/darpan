@@ -19,6 +19,19 @@ class BrainFactAdapter {
 
     static final String ORDER_PAYMENTS = "orderPayments"
 
+    /**
+     * The record fields facts() reads, per RuleSetCompareScope.conclusionBrain and side. The extract must keep them, or a
+     * projection strips them (an R2 return's orderId) and the brain asks and concludes nothing.
+     */
+    static List<String> recordFieldsFor(Object conclusionBrain, String fileSide) {
+        if (fileSide != "FILE_1") return []
+        switch (conclusionBrain?.toString()?.trim()) {
+            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal"]
+            case "RETURN": return ["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"]
+            default: return []
+        }
+    }
+
     static List<Object> facts(String kind, Map finding, Map<String, Map> answersByOrderId, Map<String, Order> world = null) {
         Map sides = (Map) (finding?.sides ?: [:])
         Map record = (Map) (((Map) (sides.FILE_1 ?: [:])).record ?: [:])

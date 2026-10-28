@@ -110,4 +110,14 @@ class BrainFactAdapterTests {
         assertNull(of(BrainFactAdapter.facts("orderLine", r1("M1", "n/a"), [:]), Order)[0].total)
         assertNull(of(BrainFactAdapter.facts("orderLine", r1("M1", null), [:]), Order)[0].total)
     }
+
+    /** Final review I2: the extract keeps what the adapter reads, or an R2 return's order id is projected away and nothing is asked. */
+    @Test
+    void theRecordFieldsTheBrainReadsAreNamedPerKindAndSide() {
+        assertEquals(["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"], BrainFactAdapter.recordFieldsFor("RETURN", "FILE_1"))
+        assertEquals(["omsOrderId", "orderGrandTotal"], BrainFactAdapter.recordFieldsFor("ORDER_LINE", "FILE_1"))
+        assertEquals([], BrainFactAdapter.recordFieldsFor("RETURN", "FILE_2"))
+        assertEquals([], BrainFactAdapter.recordFieldsFor(null, "FILE_1"))
+    }
+
 }

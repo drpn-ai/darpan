@@ -7,8 +7,10 @@
   NetSuite -> HotWax product sync was behind). A whole-catalogue, two-way presence check names such a product before
   anything is refused for it.
 
-  FILE_1 = NetSuite ACTIVE_ITEMS (tools/netsuite-chain-config/gorjana-product-queries.xml): every non-inactive InvtPart
-  and Kit, live = stock on hand, any transaction line in 90 days, or created in them. Quiet items (live N) are EXCLUDED, so
+  FILE_1 = NetSuite ACTIVE_ITEMS (tools/netsuite-chain-config/gorjana-product-queries.xml): every non-inactive InvtPart,
+  Kit and NonInvtPart, live = stock on hand, any transaction line in 90 days, or created in them. HotWax sells 110
+  non-inventory items (packaging, glue dots); a non-inventory item HotWax lacks is NetSuite's own (POS Tax Variance,
+  Warranties Variance, donations) and concludes as expected. Quiet items (live N) are EXCLUDED, so
   they never become "not in HotWax", and a HotWax product whose NetSuite item is quiet concludes "Quiet in NetSuite"
   (expected, not counted) instead of missing in NetSuite: 1,078 such on 2026-10-28.
   FILE_2 = HotWax OMS_PRODUCTS_GQL: every sellable product (not virtual, FINISHED_GOOD or MARKETING_PKG_PICK, not
@@ -27,6 +29,7 @@
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_QUIET_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_QUIET_IN_NS" description="Quiet in NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NO_NS_ID" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NO_NS_ID" description="No NetSuite id in HotWax"/>
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ID_SHARED" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ID_SHARED" description="One NetSuite id on several HotWax products"/>
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ONLY_NON_INVENTORY" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ONLY_NON_INVENTORY" description="Non-inventory item, NetSuite only"/>
     <moqui.basic.Enumeration enumId="CONC_PRODUCT_NS_ITEM_GONE" enumTypeId="DarpanConclusion" enumCode="CONC_PRODUCT_NS_ITEM_GONE" description="NetSuite item inactive or gone"/>
 
     <darpan.rule.RuleSet ruleSetId="GORJANA_PRODUCT_PRESENCE_RS" ruleSetName="Products - NetSuite vs HotWax"
@@ -61,7 +64,10 @@
             fixActionTemplate="NetSuite has no active stock item or kit {recordKey}: reactivate it in NetSuite, or retire HotWax product {productId} ({internalName})." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="15" conditionSeq="1" subject="FILE_1" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite's active items do not include it" companyUserGroupId="GORJANA"/>
 
-    <!-- NetSuite has it live, HotWax does not. -->
+    <!-- NetSuite has it live, HotWax does not: a non-inventory item is NetSuite's own (expected); anything else needs syncing. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="18" conclusionEnumId="CONC_PRODUCT_NS_ONLY_NON_INVENTORY" appliesToBucket="MISSING_FROM_FILE_2"
+            fixActionTemplate="Nothing to fix: {sku} is a NetSuite non-inventory item (an accounting line or a charge) that HotWax does not sell. Sync it to HotWax only if stores sell it." companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="18" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="itemType" operator="IN" conditionValues="NonInvtPart" checkLabel="A NetSuite non-inventory item" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conclusionEnumId="CONC_PRODUCT_NOT_IN_HOTWAX" appliesToBucket="MISSING_FROM_FILE_2"
             fixActionTemplate="Sync NetSuite item {recordKey} ({sku}) to HotWax, then re-import anything HotWax refused for it (transfer orders)." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no product with this NetSuite id" companyUserGroupId="GORJANA"/>

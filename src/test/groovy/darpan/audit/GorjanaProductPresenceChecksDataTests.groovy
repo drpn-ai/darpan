@@ -96,6 +96,8 @@ class GorjanaProductPresenceChecksDataTests {
     @Test
     void eachGapTakesItsCause() {
         assertEquals("CONC_PRODUCT_NOT_IN_HOTWAX", conclude("MISSING_FROM_FILE_2", kept(item("42808", "Y")), ABSENT), "live, not in HotWax")
+        // A non-inventory item HotWax lacks is NetSuite's own (POS Tax Variance, Warranties Variance, donations): expected.
+        assertEquals("CONC_PRODUCT_NS_ONLY_NON_INVENTORY", conclude("MISSING_FROM_FILE_2", kept(item("34838", "Y") + [itemType: "NonInvtPart"]), ABSENT))
         assertEquals("CONC_PRODUCT_QUIET_IN_NS", conclude("MISSING_FROM_FILE_1", excluded(item("30000", "N")), kept(product("30000", "OWN"))),
                 "HotWax carries a quiet NetSuite item")
         assertEquals("CONC_PRODUCT_NO_NS_ID", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("HOTWAX-ONLY:10056", "NONE"))))

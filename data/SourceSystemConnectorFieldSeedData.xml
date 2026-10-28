@@ -42,9 +42,8 @@
             description="NOT in keepFieldsBase. Same reason as salesChannelEnumId."/>
 
     <!-- OMS_GQL (DAR-BE-064): the order-grain presence extract over GraphQL. A SUBSET of OMS: only fields
-         the GraphQL order document can carry (OmsGqlQueries.HEADER_FIELDS / DERIVED_FIELDS). There is NO
-         salesChannelEnumId pill: the deployed Order type does not expose it, and a filter on it is refused
-         at extract start rather than silently excluding nothing. -->
+         the GraphQL order document can carry (OmsGqlQueries.HEADER_FIELDS / DERIVED_FIELDS); a filter on any
+         other field is refused at extract start rather than silently excluding nothing. -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderId"
             label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="OMS order identity. In keepFieldsBase."/>
@@ -66,6 +65,9 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].productStoreId"
             label="Store" fieldType="string" sequenceNum="7"
             description="NOT in keepFieldsBase; selected in the GraphQL document only when a filter or rule reads it."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].salesChannelEnumId"
+            label="Sales channel" fieldType="string" sequenceNum="12"
+            description="DAR-BE-153: NOT in keepFieldsBase; selected only when a filter or rule reads it. On the Order type since the 2026-10-28 moqui-gql upgrade; Steve Madden's daily order run excludes POS_SALES_CHANNEL on it."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
             label="Has payment" fieldType="string" sequenceNum="8"
             description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (hasPaymentTransaction requires hasPaymentPreference, DAR-BE-126)."/>

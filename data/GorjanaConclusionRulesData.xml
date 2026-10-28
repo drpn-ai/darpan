@@ -41,10 +41,14 @@
     <!-- DAR-UI-075. Held by another line's backorder: relatedEnumId names that cause, so the audit's order finding names the line. -->
     <moqui.basic.Enumeration enumId="CONC_ORDER_BACKORDER_HOLDS_BILLING" enumTypeId="DarpanConclusion" enumCode="CONC_ORDER_BACKORDER_HOLDS_BILLING" description="Held by a backordered line" relatedEnumId="CONC_NS_BACKORDERED"/>
     <moqui.basic.Enumeration enumId="CONC_PARTIAL_PAYMENT_NO_NS" enumTypeId="DarpanConclusion" enumCode="CONC_PARTIAL_PAYMENT_NO_NS" description="Partial payment"/>
+    <!-- DAR-BE-151 / DAR-BE-150 (Aditi 2026-10-28): part of the order paid (gift card, cash, any tender) and given back by its return. -->
+    <moqui.basic.Enumeration enumId="CONC_PARTIAL_PAYMENT_GIVEN_BACK" enumTypeId="DarpanConclusion" enumCode="CONC_PARTIAL_PAYMENT_GIVEN_BACK" description="Partial payment given back"/>
     <moqui.basic.Enumeration enumId="CONC_DUPLICATE_ORDER_NO_NS" enumTypeId="DarpanConclusion" enumCode="CONC_DUPLICATE_ORDER_NO_NS" description="Duplicate order"/>
     <moqui.basic.Enumeration enumId="CONC_FULFILLED_WITHIN_DAY" enumTypeId="DarpanConclusion" enumCode="CONC_FULFILLED_WITHIN_DAY" description="Billing within 24 hours"/>
     <moqui.basic.Enumeration enumId="CONC_NOT_SHIPPED_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_NOT_SHIPPED_IN_NS" description="Not shipped after 24 hours"/>
 
+    <!-- DAR-BE-151: the brain's cause (oms-netsuite pack); this row only carries its fix text for the audit. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="2" engine="BRAIN" conclusionEnumId="CONC_PARTIAL_PAYMENT_GIVEN_BACK" appliesToBucket="MISSING_FROM_FILE_2" fixActionTemplate="Nothing to fix in NetSuite: part of the order was paid and given back by its return, so the sale never stood. HotWax does not send an unpaid order." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="5" fixActionTemplate="NetSuite closed the line HotWax completed: reopen and bill it in NetSuite, or cancel item {recordKey} in HotWax if it never shipped." conclusionEnumId="CONC_COMPLETED_CLOSED_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="5" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="CLOSED" checkLabel="NetSuite closed the line" companyUserGroupId="GORJANA"/>
 

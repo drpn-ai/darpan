@@ -26,5 +26,15 @@ class BrainQuestions {
 
     static String lookupNameFor(String question) { return question }
 
+    /**
+     * The read a question takes when its scope names no lookup for it: orderPayments reads the order's raw OPP rows from
+     * the scope's own HotWax config (the FILE_1 source's), by OMS order id. Null for a question with no default.
+     */
+    static Map defaultLookup(String question, String hotwaxSourceConfigId) {
+        if (question != ORDER_PAYMENTS || !hotwaxSourceConfigId) return null
+        return [name: ORDER_PAYMENTS, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_GQL", sourceConfigId: hotwaxSourceConfigId,
+                keyField: "orderId", parameters: [keepRecordFields: ["orderId", "grandTotal", "paymentPreferences"]]]
+    }
+
     private static String text(Object value) { value?.toString()?.replaceAll(/^"|"$/, "")?.trim() }
 }

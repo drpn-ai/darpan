@@ -105,8 +105,9 @@
     <darpan.rule.RuleSet ruleSetId="GORJANA_OMS_NS_LINE_RS" ruleSetName="Completed - HotWax vs NetSuite"
             description="Every item HotWax completed must be billed on its NetSuite sales order line, and every billed NetSuite line must be completed in HotWax. Keyed (OMS order id, OMS order item seq id)."
             version="1.0" companyUserGroupId="GORJANA"/>
+    <!-- DAR-BE-151: concluded by the brain first (conclusionBrain), the tree below for the rest. -->
     <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" ruleSetId="GORJANA_OMS_NS_LINE_RS"
-            objectType="ORDER_LINE_UNIT" scopeMode="COMPARE" description="Every item HotWax completed must be billed on its NetSuite sales order line, and every billed NetSuite line must be completed in HotWax. Keyed (OMS order id, OMS order item seq id)."
+            objectType="ORDER_LINE_UNIT" scopeMode="COMPARE" conclusionBrain="ORDER_LINE" description="Every item HotWax completed must be billed on its NetSuite sales order line, and every billed NetSuite line must be completed in HotWax. Keyed (OMS order id, OMS order item seq id)."
             conclusionLookupsJson='[{"name":"orderInNetsuite","subject":"FILE_2","idField":"internalId","systemEnumId":"NETSUITE_SUITEQL","sourceConfigId":"NS_SO_BACKORDER","keyField":"internalId"},{"name":"omsOrder","subject":"FILE_1","idField":"omsOrderId","systemEnumId":"OMS_GQL","sourceConfigId":"gorjana_prod","keyField":"orderId","parameters":{"keepRecordFields":["orderId","notes","statuses"]}}]'
             companyUserGroupId="GORJANA"/>
     <!-- DAR-BE-116: OMS order items over GraphQL; no rule here reads salesChannelEnumId. -->

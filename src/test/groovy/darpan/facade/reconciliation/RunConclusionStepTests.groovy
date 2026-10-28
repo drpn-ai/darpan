@@ -109,4 +109,21 @@ class RunConclusionStepTests {
         org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.brainKind("SOMETHING_ELSE"))
     }
 
+
+    /**
+     * DAR-BE-151: the order-payments question needs no lookup config. It reads the scope's own HotWax source (its FILE_1
+     * source config), so no prod lookup JSON is rewritten to add it; a lookup the scope names "orderPayments" still wins.
+     */
+    @Test
+    void theOrderPaymentsQuestionReadsTheScopesOwnHotwaxSource() {
+        Map lookup = RunConclusionStep.questionLookup("orderPayments", [], "gorjana_oms")
+        org.junit.jupiter.api.Assertions.assertEquals("OMS_GQL", lookup.systemEnumId)
+        org.junit.jupiter.api.Assertions.assertEquals("gorjana_oms", lookup.sourceConfigId)
+        org.junit.jupiter.api.Assertions.assertEquals("orderId", lookup.keyField)
+        org.junit.jupiter.api.Assertions.assertEquals(["orderId", "grandTotal", "paymentPreferences"], lookup.parameters.keepRecordFields)
+        Map named = [name: "orderPayments", systemEnumId: "OMS_GQL", sourceConfigId: "other"]
+        org.junit.jupiter.api.Assertions.assertSame(named, RunConclusionStep.questionLookup("orderPayments", [named], "gorjana_oms"))
+        org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.questionLookup("orderPayments", [], null))
+    }
+
 }

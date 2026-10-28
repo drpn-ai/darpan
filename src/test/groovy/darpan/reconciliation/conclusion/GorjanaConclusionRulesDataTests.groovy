@@ -43,7 +43,8 @@ class GorjanaConclusionRulesDataTests {
     @Test
     void everyRuleIsWellFormed() {
         def doc = load("data/GorjanaConclusionRulesData.xml")
-        def rules = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionRule' }
+        // DAR-BE-151: a BRAIN row only carries a brain cause's fix text; it has no conditions by design.
+        def rules = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionRule' && it.@engine.toString() != 'BRAIN' }
         def conditions = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionCondition' }
         Set<String> declaredEnums = doc.'**'.findAll { it.name() == 'moqui.basic.Enumeration' && it.@enumTypeId == 'DarpanConclusion' }
                 .collect { it.@enumId.toString() } as Set
@@ -209,4 +210,46 @@ class GorjanaConclusionRulesDataTests {
             engine.close()
         }
     }
+
+    // DAR-BE-151 / DAR-BE-150: the brain pilot. Both scopes opt in, each carries the brain cause's fix text on a BRAIN row
+    // the tree never compiles, and neither statement counts the cause, so its findings close with their reason.
+    private static final String PILOT_CODE = "CONC_PARTIAL_PAYMENT_GIVEN_BACK"
+
+    private static def scope(String file, String id) {
+        return load(file).'**'.find { it.name() == 'darpan.rule.RuleSetCompareScope' && it.@compareScopeId == id }
+    }
+
+    @Test
+    void bothPilotScopesOptIntoTheBrain() {
+        assertEquals("ORDER_LINE", scope("data/TriSystemOrderRunsRuleSetData.xml", "GORJANA_OMS_NS_LINE_SCOPE").@conclusionBrain.toString())
+        assertEquals("RETURN", scope("data/GorjanaMonthCloseReturnsChecksData.xml", "GORJANA_RETURN_IN_NETSUITE_SCOPE").@conclusionBrain.toString())
+    }
+
+    @Test
+    void eachPilotScopeCarriesTheBrainCausesFixTextOnABrainRow() {
+        assertTrue(load("data/GorjanaConclusionRulesData.xml").'**'.any {
+            it.name() == 'moqui.basic.Enumeration' && it.@enumId == PILOT_CODE && it.@description == 'Partial payment given back' })
+        [["data/GorjanaConclusionRulesData.xml", "GORJANA_OMS_NS_LINE_SCOPE"],
+         ["data/GorjanaMonthCloseReturnsChecksData.xml", "GORJANA_RETURN_IN_NETSUITE_SCOPE"]].each { String file, String scopeId ->
+            def doc = load(file)
+            def row = doc.'**'.find { it.name() == 'darpan.rule.RuleSetConclusionRule' && it.@compareScopeId == scopeId && it.@conclusionEnumId == PILOT_CODE }
+            assertTrue(row != null, "${scopeId} has no fix row for ${PILOT_CODE}".toString())
+            assertEquals("BRAIN", row.@engine.toString())
+            assertTrue(row.@fixActionTemplate.toString().startsWith("Nothing to fix in NetSuite"))
+            assertFalse(doc.'**'.any { it.name() == 'darpan.rule.RuleSetConclusionCondition' && it.@compareScopeId == scopeId &&
+                    it.@sequenceNum == row.@sequenceNum }, "a BRAIN row has no conditions")
+            assertTrue(RunConclusionStep.buildRules([[sequenceNum: row.@sequenceNum.toString() as int, conclusionEnumId: PILOT_CODE,
+                    engine: row.@engine.toString()]], [], [:]).isEmpty())
+        }
+    }
+
+    @Test
+    void neitherStatementCountsThePilotCode() {
+        ["data/GorjanaMonthCloseChecksData.xml", "data/GorjanaMonthCloseReturnsChecksData.xml"].each { String file ->
+            load(file).'**'.findAll { it.name() == 'darpan.audit.AuditStatementCheck' }.each { link ->
+                assertFalse(link.@conclusionCodes.toString().contains(PILOT_CODE), "${link.@statementId} counts ${PILOT_CODE}".toString())
+            }
+        }
+    }
+
 }

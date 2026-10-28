@@ -77,8 +77,9 @@ class RunConclusionStep {
             Map brain = kind ? [kind: kind, tenantId: tenantId,
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
                     fetchQuestion: { String question, List<String> ids ->
-                        Map lookup = lookups.find { it.name == darpan.conclusion.brain.BrainQuestions.lookupNameFor(question) }
-                        if (lookup == null) throw new IllegalStateException("the scope has no lookup named ${question}")
+                        Map lookup = questionLookup(question, lookups,
+                                darpan.common.ValueSupport.readOptionalString(args.get("file1Source"), "sourceConfigId"))
+                        if (lookup == null) throw new IllegalStateException("the scope has no HotWax source to ask ${question} of")
                         int before = lookupWarnings.size()
                         Map found = fetchLookup(ec, lookup, ids, tenantId, lookupWarnings)
                         // A failed lookup must not be remembered as "nothing found".
@@ -153,6 +154,12 @@ class RunConclusionStep {
             warnings.add("Lookup ${lookup.name} not answered: ${normalize(t.message) ?: t.class.simpleName}".toString())
             return [:]
         }
+    }
+
+    /** DAR-BE-151: the lookup a brain question is answered through: the scope's own of that name, else its default. */
+    static Map questionLookup(String question, List<Map> lookups, String hotwaxSourceConfigId) {
+        return (lookups ?: []).find { it.name == darpan.conclusion.brain.BrainQuestions.lookupNameFor(question) } ?:
+                darpan.conclusion.brain.BrainQuestions.defaultLookup(question, hotwaxSourceConfigId)
     }
 
     /** DAR-BE-151: RuleSetCompareScope.conclusionBrain to the brain's finding kind; anything else is no brain. */

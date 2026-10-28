@@ -173,7 +173,7 @@ end]]></ruleLogic>
             description="Every completed or received OMS return has its RMA in NetSuite, by return id."
             version="1.0" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" ruleSetId="GORJANA_RETURN_IN_NETSUITE_RS"
-            objectType="RETURN" scopeMode="COMPARE" description="Every completed or received OMS return has its RMA in NetSuite, by return id."
+            objectType="RETURN" scopeMode="COMPARE" conclusionBrain="RETURN" description="Every completed or received OMS return has its RMA in NetSuite, by return id."
             companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" fileSide="FILE_1"
             systemEnumId="OMS_RETURNS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
@@ -185,6 +185,8 @@ end]]></ruleLogic>
             recordRootExpression="records" primaryIdExpression="returnId"
             sourceConfigId="NS_RETURN_RMA" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="GORJANA"/>
+    <!-- DAR-BE-151 / DAR-BE-150: the brain's cause (oms-netsuite pack); this row only carries its fix text for the audit. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="5" engine="BRAIN" conclusionEnumId="CONC_PARTIAL_PAYMENT_GIVEN_BACK" appliesToBucket="MISSING_FROM_FILE_2" fixActionTemplate="Nothing to fix in NetSuite: part of the order was paid and given back by its return, so the sale never stood. HotWax does not send an unpaid order." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_RETURN_NO_ORDER_NOT_SYNCED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="statusId" operator="IN" conditionValues="RETURN_COMPLETED,RETURN_RECEIVED" checkLabel="The return is completed or received in the OMS" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="orderExternalId" operator="BLANK" checkLabel="The return names no order" companyUserGroupId="GORJANA"/>

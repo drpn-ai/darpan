@@ -84,6 +84,18 @@ class BrainFactAdapterTests {
         assertEquals([], of(none, Payment))
     }
 
+    /** Design D3: within one world each real thing is one fact; a second finding about the order adds what it knows. */
+    @Test
+    void twoFindingsOfOneOrderShareOneOrderFactInAWorld() {
+        Map world = [:]
+        List first = BrainFactAdapter.facts("orderLine", r1("M1088731", 371.54), [M1088731: answer(GIFT_CARD_GIVEN_BACK)], world)
+        List second = BrainFactAdapter.facts("return", r2("M248496", "M1088731", 371.54, "NS1"), [M1088731: answer(GIFT_CARD_GIVEN_BACK)], world)
+        assertSame(of(first, Order)[0], of(second, Return)[0].order)
+        assertEquals([], of(second, Order), "the order is already in the world: not inserted twice")
+        assertEquals([], of(second, Payment), "nor its payments")
+        assertEquals("NS1", of(first, Order)[0].netsuiteOrderId)
+    }
+
     /** Review Focus 3. */
     @Test
     void aRecordWithNoOrderIdGivesOnlyTheFinding() {

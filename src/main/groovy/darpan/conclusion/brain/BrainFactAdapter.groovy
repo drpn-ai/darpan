@@ -10,22 +10,27 @@ import static darpan.common.ValueSupport.normalize
 
 /**
  * DAR-BE-151. A finding as RunConclusionSupport builds it ([key, bucket, sides]) to the brain's typed facts, plus the
- * answers already known for its order. One Order instance per order id within a call; an order is never invented for
- * a record that names none. Pure: no Moqui, no Drools.
+ * answers already known for its order. One Order per order id within a WORLD (design D3): a second finding about an order
+ * reuses it, adding only what it knows (its NetSuite id, its total), and neither it nor its payments are returned again,
+ * since they are already in the session. Without a world, the call is its own. An order is never invented for a record
+ * that names none. Pure: no Moqui, no Drools.
  */
 class BrainFactAdapter {
 
     static final String ORDER_PAYMENTS = "orderPayments"
 
-    static List<Object> facts(String kind, Map finding, Map<String, Map> answersByOrderId) {
+    static List<Object> facts(String kind, Map finding, Map<String, Map> answersByOrderId, Map<String, Order> world = null) {
         Map sides = (Map) (finding?.sides ?: [:])
         Map record = (Map) (((Map) (sides.FILE_1 ?: [:])).record ?: [:])
         List<Object> facts = []
-        Map<String, Order> orders = [:]
+        Map<String, Order> orders = world != null ? world : [:]
         Closure<Order> orderFor = { String orderId, Object total, String netsuiteOrderId ->
             if (!orderId) return null
             Order order = orders.get(orderId)
-            if (order == null) {
+            if (order != null) {
+                if (order.netsuiteOrderId == null) order.netsuiteOrderId = netsuiteOrderId
+                if (order.total == null) order.total = number(total)
+            } else {
                 order = new Order(orderId: orderId, total: number(total), netsuiteOrderId: netsuiteOrderId)
                 orders.put(orderId, order)
                 facts.add(order)
@@ -50,6 +55,7 @@ class BrainFactAdapter {
         return facts
     }
 
+    /** Amounts lose trailing zeros so "181" and "181.00" are the same amount to a rule. */
     /** An answer whose read filled its slots may have cut a row off: it marks the order answered and adds no payments. */
     private static void addAnswer(List<Object> facts, Order order, Map<String, Map> answersByOrderId) {
         if (answersByOrderId == null || !answersByOrderId.containsKey(order.orderId)) return
@@ -63,7 +69,7 @@ class BrainFactAdapter {
             Map r = (Map) row
             String state = normalize(r?.statusId)
             facts.add(new Payment(order: order, tender: normalize(r?.paymentMethodTypeId),
-                    state: state?.startsWith("PAYMENT_") ? state.substring(8) : state, amount: number(r?.maxAmount)))
+                    state: state?.startsWith("PAYMENT_") ? state.substring(8) : state, amount: number(r?.maxAmount)?.stripTrailingZeros()))
         }
     }
 

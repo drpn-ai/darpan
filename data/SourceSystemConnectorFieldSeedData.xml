@@ -343,4 +343,7 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].duplicateNetsuiteId"
             label="Shares its NetSuite ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="7"
             description="true when another sellable product carries the same NetSuite id."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].netsuiteIdState"
+            label="NetSuite ID state" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="8"
+            description="OWN: keyed on its NetSuite id; NONE: it has none (nsKey HOTWAX-ONLY:productId); SHARED: another product holds the id first (nsKey DUPLICATE:id:productId)."/>
 </entity-facade-xml>

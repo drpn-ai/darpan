@@ -78,4 +78,28 @@ class BrainConcludeTests {
         assertEquals(1, out.reused)
         assertEquals(CODE, ((Map) out.byKey.M248496).code)
     }
+
+    /** Security review 2026-10-28: a question's ids go out in bounded batches, and one failed batch fails alone. */
+    @Test
+    void aQuestionIsAskedInBoundedBatchesAndAFailedBatchFailsAlone() {
+        int saved = BrainConclude.fetchBatch
+        BrainConclude.fetchBatch = 2
+        try {
+            List<Map> findings = ["M1", "M2", "M3"].collect { String o ->
+                [key: "${o}\u001F01".toString(), bucket: "MISSING_FROM_FILE_2", sides: [
+                        FILE_1: [presence: "KEPT", record: [omsOrderId: o, orderItemSeqId: "01", orderGrandTotal: 50]],
+                        FILE_2: [presence: "ABSENT", firstFieldPresence: "ABSENT"]]]
+            }
+            List calls = []
+            Map out = BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", findings: findings,
+                    fetchQuestion: { String q, List ids -> calls << ids; if (ids.contains("M3")) throw new IllegalStateException("504"); [:] }])
+            assertEquals([["M1", "M2"], ["M3"]], calls)
+            assertEquals(1, ((List) out.warnings).size())
+            assertTrue(BrainAnswerStore.has("GORJANA", "orderPayments", "M1"))
+            assertFalse(BrainAnswerStore.has("GORJANA", "orderPayments", "M3"))
+        } finally {
+            BrainConclude.fetchBatch = saved
+        }
+    }
+
 }

@@ -15,6 +15,8 @@ class BrainConclude {
 
     static final List<String> PILOT_PACKS = ["oms-netsuite"]
     static final int BATCH_FINDINGS = 500
+    /** Ids per question call, like the tree's lookups (RunConclusionSupport.LOOKUP_BATCH); tunable for tests. */
+    static int fetchBatch = 500
 
     /** args: kind, tenantId, findings ([key, bucket, sides] each), fetchQuestion(question, ids) -> id -> record, labelFor(code). */
     static Map run(Map args) {
@@ -34,17 +36,20 @@ class BrainConclude {
         Map plan = BrainAskPlanner.plan(asks, best, tenantId, BrainQuestions.mayEnableRanks(engine))
         ((Map<String, Map>) plan.answered).each { String q, Map byId -> if (q == BrainQuestions.ORDER_PAYMENTS) answers.putAll(byId) }
         int asked = 0
-        ((Map<String, List<String>>) plan.toFetch).each { String question, List<String> ids ->
-            try {
-                Map found = (Map) (fetchQuestion.call(question, ids) ?: [:])
-                ids.each { String id ->
-                    Map answer = (Map) found.get(id)
-                    BrainAnswerStore.put(tenantId, question, id, answer)
-                    if (question == BrainQuestions.ORDER_PAYMENTS) answers.put(id, answer)
+        ((Map<String, List<String>>) plan.toFetch).each { String question, List<String> allIds ->
+            // Bounded calls; a failed batch fails alone and is not remembered.
+            allIds.collate(fetchBatch).each { List<String> ids ->
+                try {
+                    Map found = (Map) (fetchQuestion.call(question, ids) ?: [:])
+                    ids.each { String id ->
+                        Map answer = (Map) found.get(id)
+                        BrainAnswerStore.put(tenantId, question, id, answer)
+                        if (question == BrainQuestions.ORDER_PAYMENTS) answers.put(id, answer)
+                    }
+                    asked += ids.size()
+                } catch (Throwable t) {
+                    warnings.add("Question ${question} not answered for ${ids.size()} subject(s): ${t.message ?: t.class.simpleName}".toString())
                 }
-                asked += ids.size()
-            } catch (Throwable t) {
-                warnings.add("Question ${question} not answered for ${ids.size()} subject(s): ${t.message ?: t.class.simpleName}".toString())
             }
         }
         if (answers) {

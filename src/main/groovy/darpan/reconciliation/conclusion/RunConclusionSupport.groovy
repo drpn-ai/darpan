@@ -29,6 +29,11 @@ class RunConclusionSupport {
     static final String TMP_SUFFIX = "conclude-tmp"
     /** Records kept per key: enough to judge "every record under this key", bounded for a hot key. */
     static final int MAX_RECORDS_PER_KEY = 1000
+    /**
+     * DAR-BE-151: findings the brain takes per run; past it the tree concludes the rest, with a warning. Each is kept slim
+     * (the present record and the other side's first-field presence only), so the pass stays bounded. Tunable for tests.
+     */
+    static int maxBrainFindings = 20_000
     /** DAR-BE-118: ids per lookup call. */
     static final int LOOKUP_BATCH = 500
     static Map concludeRun(Map args) {
@@ -112,8 +117,15 @@ class RunConclusionSupport {
         Map brain = null
         if (args.brain instanceof Map) {
             List<Map> findings = []
-            DiffDocumentStreamSupport.forEachRow(diffFile) { Map row -> findings.add(finding(row) + [key: row.get("primaryId")?.toString()]) }
+            int total = 0
+            DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+                if (++total > maxBrainFindings) return
+                findings.add(slimFinding(finding(row), row.get("primaryId")?.toString()))
+            }
             brain = BrainConclude.run((Map) args.brain + [findings: findings])
+            if (total > maxBrainFindings) {
+                ((List) brain.warnings).add("The brain concluded ${maxBrainFindings} of ${total} findings; the tree concluded the rest".toString())
+            }
         }
 
         DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
@@ -152,6 +164,14 @@ class RunConclusionSupport {
         })
         return [ran: true, counts: counts, unknownSides: unknownSides] +
                 (brain ? [brain: [asked: brain.asked, reused: brain.reused, dropped: brain.dropped, warnings: brain.warnings]] : [:])
+    }
+
+    /** DAR-BE-151: what BrainFactAdapter reads of a finding, and nothing else. */
+    private static Map slimFinding(Map f, String key) {
+        Map sides = (Map) (f.sides ?: [:])
+        Map file1 = (Map) (sides.FILE_1 ?: [:])
+        Map file2 = (Map) (sides.FILE_2 ?: [:])
+        return [key: key, bucket: f.bucket, sides: [FILE_1: [record: file1.record], FILE_2: [firstFieldPresence: file2.firstFieldPresence]]]
     }
 
     /**

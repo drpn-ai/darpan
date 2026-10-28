@@ -993,4 +993,16 @@ class SourceSystemConnectorSupportSmokeTests {
         assertNotNull(shopify, "SHOPIFY connector row should resolve")
         assertNull(shopify.lookupMaxIds, "the orders lookup must keep the shared conservative cap")
     }
+
+    // DAR-BE-157: windowed is a real Boolean, Y unless a row says N ("N" is a non-empty, truthy String).
+    @Test
+    void windowedDefaultsToY() {
+        assertEquals(true, SourceSystemConnectorSupport.resolve(ec, "OMS_GQL").windowed)
+        assertEquals(true, SourceSystemConnectorSupport.resolve(ec, "NETSUITE_SUITEQL").windowed)
+        ec.entity.makeValue(SourceSystemConnectorSupport.ENTITY_NAME)
+                .setAll([systemEnumId: "UNWINDOWED_PHASE1", extractServiceName: "reconciliation.FakeExtractionServices.extract#FakeAll",
+                         expectedSourceConfigType: "FAKE_ALL", windowed: "N", enabled: "Y"])
+                .create()
+        assertEquals(false, SourceSystemConnectorSupport.resolve(ec, "UNWINDOWED_PHASE1").windowed)
+    }
 }

@@ -194,6 +194,8 @@ class SourceSystemConnectorSupport {
                 // therefore truthy in Groovy, so a raw read would turn every connector into a
                 // date-only one.
                 windowDateOnly             : normalizeBool(readField(record, "windowDateOnly"), false),
+                // DAR-BE-157: false for a whole-population read; a Boolean for the same reason as windowDateOnly.
+                windowed                   : normalizeBool(readField(record, "windowed"), true),
                 keepFieldsParameterName    : readString(record, "keepFieldsParameterName"),
                 keepFieldsBase             : readString(record, "keepFieldsBase"),
                 windowFieldName            : readString(record, "windowFieldName"),

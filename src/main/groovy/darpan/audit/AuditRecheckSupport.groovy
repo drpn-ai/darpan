@@ -30,7 +30,7 @@ class AuditRecheckSupport {
     static void appendOpenFindings(def ec, def automation, List<Map> checks, Map window, List<Map> sides, Closure readByKey) {
         if (!checks || window?.auditRecentReadStartDate == null || !window?.auditPeriod) return
         List<Map> live = sides.findAll { it.source != null }
-        if (!live || live.any { !it.result?.fileLocation } || !live.any { AuditRecentReadSupport.readsRecentOnly(normalize(readField(it.source, "systemEnumId"))) }) return
+        if (!live || live.any { !it.result?.fileLocation } || !live.any { AuditRecentReadSupport.sourceReadsRecentOnly(ec, it.source) }) return
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
         Set<String> open = firstKeys(openRecordKeys(ec, tenantId, checks*.checkId, window.auditPeriod as String))
         if (!open) return

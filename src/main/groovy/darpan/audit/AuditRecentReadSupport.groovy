@@ -46,9 +46,20 @@ class AuditRecentReadSupport {
         return start.after(windowStart) ? start : null
     }
 
-    /** True for a HotWax OMS endpoint, the system read from the last complete read. */
-    static boolean readsRecentOnly(String systemEnumId) {
+    /**
+     * True for a HotWax OMS endpoint, the system read from the last complete read, unless its connector reads the whole
+     * population whatever the window (DAR-BE-157: windowed N, the product catalogue).
+     */
+    static boolean readsRecentOnly(String systemEnumId, Map connector) {
+        if (connector?.windowed == false) return false
         return AuditAutomationSupport.rootSystem(systemEnumId) == "OMS"
+    }
+
+    /** readsRecentOnly for a run or automation source, through its endpoint's connector row. */
+    static boolean sourceReadsRecentOnly(def ec, def source) {
+        String systemEnumId = darpan.common.ValueSupport.normalize(darpan.common.ValueSupport.readField(source, "systemEnumId"))
+        Map connector = ec != null && systemEnumId ? darpan.reconciliation.automation.SourceSystemConnectorSupport.resolveBySystemEnumId(ec, systemEnumId) : null
+        return readsRecentOnly(systemEnumId, connector)
     }
 
     /** The calendar day a record's date names, in `zone`: YYYY-MM-DD, NetSuite M/d/yyyy or an ISO instant. */

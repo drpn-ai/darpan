@@ -72,4 +72,17 @@ class AuditRecentReadSupportTests {
                 "its OMS twin may be dated just before the OMS read")
         assertTrue(AuditRecentReadSupport.judged([tranDate: "2026-10-19"], "tranDate", AuditRecentReadSupport.judgedFrom(recent), LA))
     }
+
+    /**
+     * DAR-BE-157: a connector that reads its whole population whatever the window (windowed N) is never "recent only", even
+     * under OMS. Otherwise an audit narrows the HotWax product sweep's start and drops every NetSuite-only item as
+     * unjudged, so "missing in HotWax" could never be raised or closed.
+     */
+    @Test
+    void anUnwindowedOmsEndpointIsNotRecentOnly() {
+        assertFalse(AuditRecentReadSupport.readsRecentOnly("OMS_PRODUCTS_GQL", [windowed: false]))
+        assertTrue(AuditRecentReadSupport.readsRecentOnly("OMS_GQL", [windowed: true]))
+        assertTrue(AuditRecentReadSupport.readsRecentOnly("OMS_GQL", null), "no connector row: today's rule")
+        assertFalse(AuditRecentReadSupport.readsRecentOnly("NETSUITE_SUITEQL", [windowed: true]))
+    }
 }

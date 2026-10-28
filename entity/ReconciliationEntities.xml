@@ -1270,6 +1270,13 @@
         <field name="remoteSendServiceName" type="text-medium"/>
         <field name="systemAliases" type="text-medium"/>
         <field name="preserveWindowInstants" type="text-indicator" default="'N'"/>
+        <field name="windowed" type="text-indicator" default="'Y'">
+            <description>DAR-BE-157. N when the extractor reads its whole population whatever the window (a product
+                catalogue: a product missing since August never falls inside a day's window). An audit then never treats the
+                endpoint as read from its checks' last complete read (AuditRecentReadSupport), even under OMS, so its
+                records are all judged and every finding can be raised and closed. The extractor still receives the window
+                and records requestMetadata.windowIgnored.</description>
+        </field>
         <field name="windowDateOnly" type="text-indicator" default="'N'">
             <description>Y when this source filters on a DATE column rather than an instant (SuiteQL's
                 TO_DATE, for example). Dispatch then sends the window bounds as yyyy-MM-dd, resolved in

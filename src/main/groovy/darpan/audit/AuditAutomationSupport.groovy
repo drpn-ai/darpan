@@ -244,8 +244,8 @@ class AuditAutomationSupport {
     static Set<String> unjudgedKeys(def ec, def automation, Map check, Map window, File diff, def file1Source, def file2Source) {
         Timestamp recent = window?.auditRecentReadStartDate as Timestamp
         if (recent == null || diff == null) return [] as Set
-        boolean oms1 = AuditRecentReadSupport.readsRecentOnly(normalize(readField(file1Source, "systemEnumId")))
-        boolean oms2 = AuditRecentReadSupport.readsRecentOnly(normalize(readField(file2Source, "systemEnumId")))
+        boolean oms1 = AuditRecentReadSupport.sourceReadsRecentOnly(ec, file1Source)
+        boolean oms2 = AuditRecentReadSupport.sourceReadsRecentOnly(ec, file2Source)
         if (oms1 == oms2) return [] as Set
         // Only the other side holds it: OMS is FILE_1, so the row is missing in FILE_1, and the reverse.
         String otherSideOnly = oms1 ? "MISSING_IN_FILE_1" : "MISSING_IN_FILE_2"

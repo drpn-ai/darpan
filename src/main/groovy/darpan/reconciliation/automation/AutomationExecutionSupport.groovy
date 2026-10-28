@@ -518,8 +518,8 @@ class AutomationExecutionSupport {
                 // reads from the OMS read's start too, with slack; checks between other systems keep the window.
                 Object recentRead = window?.auditRecentReadStartDate
                 if (recentRead != null && file2Source != null) {
-                    boolean oms1 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(normalize(readField(file1Source, "systemEnumId")))
-                    boolean oms2 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(normalize(readField(file2Source, "systemEnumId")))
+                    boolean oms1 = darpan.audit.AuditRecentReadSupport.sourceReadsRecentOnly(ec, file1Source)
+                    boolean oms2 = darpan.audit.AuditRecentReadSupport.sourceReadsRecentOnly(ec, file2Source)
                     if (oms1 != oms2) window.auditOtherSideStartDate = darpan.audit.AuditRecentReadSupport.otherSideStart(
                             (java.sql.Timestamp) recentRead, (java.sql.Timestamp) window.childWindowStartDate)
                 }
@@ -1997,7 +1997,7 @@ class AutomationExecutionSupport {
         // DAR-BE-116 / DAR-BE-122: an audit reads HotWax OMS (rate-limited) from its checks' last complete read
         // (AuditRecentReadSupport).
         Object recentStart = window?.auditRecentReadStartDate
-        if (recentStart != null && darpan.audit.AuditRecentReadSupport.readsRecentOnly(normalize(readField(source, "systemEnumId")))) {
+        if (recentStart != null && darpan.audit.AuditRecentReadSupport.sourceReadsRecentOnly(ec, source)) {
             window = new LinkedHashMap<String, Object>(window) + [childWindowStartDate: recentStart] as Map<String, Object>
         } else if (window?.auditOtherSideStartDate != null) {
             // The other side of an OMS-paired check: a little earlier than OMS, so a twin dated just before is read.

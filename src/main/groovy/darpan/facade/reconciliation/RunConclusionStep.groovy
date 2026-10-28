@@ -40,7 +40,7 @@ class RunConclusionStep {
         } catch (Throwable t) {
             return [ran: false, warning: "Conclusion rules could not be read: ${t.message}".toString()]
         }
-        if (!ruleRows) return [ran: false]
+        if (!ruleRows) return [ran: false]   // a brain scope carries at least its BRAIN fix rows
 
         String runResultId = normalize(args.get("runResultId"))
         Map stepCtx = (args.get("stepCtx") ?: [:]) as Map
@@ -72,7 +72,21 @@ class RunConclusionStep {
             } catch (Exception e) {
                 lookupWarnings.add("Lookups not read: ${e.message}".toString())
             }
+            String tenantId = normalize(scope?.companyUserGroupId)
+            String kind = brainKind(scope?.conclusionBrain)
+            Map brain = kind ? [kind: kind, tenantId: tenantId,
+                    labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
+                    fetchQuestion: { String question, List<String> ids ->
+                        Map lookup = lookups.find { it.name == darpan.conclusion.brain.BrainQuestions.lookupNameFor(question) }
+                        if (lookup == null) throw new IllegalStateException("the scope has no lookup named ${question}")
+                        int before = lookupWarnings.size()
+                        Map found = fetchLookup(ec, lookup, ids, tenantId, lookupWarnings)
+                        // A failed lookup must not be remembered as "nothing found".
+                        if (lookupWarnings.size() > before) throw new IllegalStateException(lookupWarnings.last())
+                        return found
+                    }] : null
             Map result = RunConclusionSupport.concludeRun([
+                    brain      : brain,
                     lookups    : lookups,
                     fetchLookup: { Map lookup, List<String> ids ->
                         fetchLookup(ec, lookup, ids, normalize(scope?.companyUserGroupId), lookupWarnings)
@@ -89,7 +103,7 @@ class RunConclusionStep {
             RunObservability.endStep(ec, step, RunObservability.STATUS_SUCCESS,
                     [recordCount: concluded,
                      metricsJson: JsonOutput.toJson([counts: result.counts, unknownSides: result.unknownSides,
-                                                     lookupWarnings: lookupWarnings ?: null])])
+                                                     lookupWarnings: lookupWarnings ?: null, brain: result.brain])])
             return result + (lookupWarnings ? [warning: lookupWarnings.join("; ")] : [:])
         } catch (Throwable t) {
             if (ec?.message?.hasError()) ec.message.clearErrors()
@@ -141,6 +155,15 @@ class RunConclusionStep {
         }
     }
 
+    /** DAR-BE-151: RuleSetCompareScope.conclusionBrain to the brain's finding kind; anything else is no brain. */
+    static String brainKind(Object conclusionBrain) {
+        switch (normalize(conclusionBrain)) {
+            case "ORDER_LINE": return "orderLine"
+            case "RETURN": return "return"
+            default: return null
+        }
+    }
+
     /** Entity rows to the ConclusionTreeEngine node shape, in sequence order. Pure, so it is tested alone. */
     static List<Map> buildRules(List<Map> ruleRows, List<Map> conditionRows, Map<String, String> labelsByEnum) {
         Map<Object, List<Map>> conditionsBySeq = [:]
@@ -157,7 +180,8 @@ class RunConclusionStep {
                     checkLabel     : normalize(row.checkLabel),
             ])
         }
-        return (ruleRows ?: []).sort { ((it.sequenceNum ?: 0) as int) }.collect { Map row ->
+        // DAR-BE-151: a BRAIN row carries a brain cause's fix text for the audit only; the tree never compiles it.
+        return (ruleRows ?: []).findAll { normalize(it.engine) != "BRAIN" }.sort { ((it.sequenceNum ?: 0) as int) }.collect { Map row ->
             String code = normalize(row.conclusionEnumId)
             return [sequenceNum      : row.sequenceNum as int,
                     parentSequenceNum: normalize(row.parentSequenceNum) ? (row.parentSequenceNum as int) : null,

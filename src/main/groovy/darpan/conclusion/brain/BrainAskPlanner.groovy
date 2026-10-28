@@ -31,7 +31,8 @@ class BrainAskPlanner {
             }
             toFetch.computeIfAbsent(ask.question, { new LinkedHashSet<String>() }).add(id)
         }
-        return [toFetch : toFetch.collectEntries { String q, Set ids -> [(q): ids as List<String>] },
+        // Sorted: a session hands its facts back in no fixed order, and a run must ask the same way every time.
+        return [toFetch : toFetch.collectEntries { String q, Set ids -> [(q): (ids as List<String>).sort()] },
                 answered: answered, dropped: dropped, reused: reused]
     }
 }

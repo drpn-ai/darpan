@@ -15,22 +15,27 @@ import darpan.conclusion.brain.fact.Conclusion
 import java.math.BigDecimal
 import java.util.List
 
+// @label / @value: how a fact reads in a finding's "how Darpan concluded" ({path} is a field path on the fact).
 declare OrderNotInNetsuite
+    @label("The order is not in NetSuite") @value("{order.orderId}")
     order : Order @key
 end
 
 declare TenderGivenBack
+    @label("A tender was given back in full") @value("{tender} {amount}")
     order : Order @key
     tender : String @key
     amount : BigDecimal
 end
 
 declare PaymentsGivenBack
+    @label("Every tender taken was given back") @value("{taken}")
     order : Order @key
     taken : BigDecimal
 end
 
 declare PartialPaymentGivenBack
+    @label("Part of the order was paid and given back") @value("{taken} of {order.total}")
     order : Order @key
     taken : BigDecimal
 end

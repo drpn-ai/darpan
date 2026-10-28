@@ -2,6 +2,7 @@ package darpan.reconciliation.conclusion
 
 import darpan.facade.reconciliation.DiffDetailClassifier
 import darpan.facade.reconciliation.DiffDocumentStreamSupport
+import darpan.conclusion.brain.BrainConclude
 import groovy.json.JsonSlurper
 
 /**
@@ -32,14 +33,15 @@ class RunConclusionSupport {
     static final int LOOKUP_BATCH = 500
     static Map concludeRun(Map args) {
         List<Map> rules = (List<Map>) (args.rules ?: [])
-        if (!rules) return [ran: false]
+        if (!rules && !args.brain) return [ran: false]
         // Compiled BEFORE the document is touched: a tree that does not compile throws here, and
         // RunConclusionStep ends the step FAILED with the document exactly as the compare wrote it.
-        ConclusionTreeEngine engine = ConclusionTreeEngine.compile(rules)
+        // DAR-BE-151: a brain scope whose only rows are brain fix text has no tree.
+        ConclusionTreeEngine engine = rules ? ConclusionTreeEngine.compile(rules) : null
         try {
             return concludeWith(engine, rules, args)
         } finally {
-            engine.close()
+            engine?.close()
         }
     }
 
@@ -105,7 +107,14 @@ class RunConclusionSupport {
             }
             return [bucket: bucket, sides: sides]
         }
-        Map<String, Map<String, Map>> answers = lookUp(engine, rules, args, diffFile, finding)
+        Map<String, Map<String, Map>> answers = engine ? lookUp(engine, rules, args, diffFile, finding) : [:]
+        // DAR-BE-151: a scope in the brain is concluded by it first; the tree concludes what the brain leaves unexplained.
+        Map brain = null
+        if (args.brain instanceof Map) {
+            List<Map> findings = []
+            DiffDocumentStreamSupport.forEachRow(diffFile) { Map row -> findings.add(finding(row) + [key: row.get("primaryId")?.toString()]) }
+            brain = BrainConclude.run((Map) args.brain + [findings: findings])
+        }
 
         DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
             Map f = finding(row)
@@ -114,7 +123,8 @@ class RunConclusionSupport {
                 Map found = answers.get(l.name)
                 if (found && sides.get(l.subject) != null) sides.put(l.subject, ConclusionLookupSupport.attach((Map) sides.get(l.subject), l, found))
             }
-            Map conclusion = engine.conclude([f])[0]
+            Map conclusion = (Map) ((Map) (brain?.byKey ?: [:])).get(row.get("primaryId")?.toString()) ?:
+                    (engine ? engine.conclude([f])[0] : ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, sides)))
             String code = conclusion.code?.toString()
             if (!counts.containsKey(code)) {
                 counts.put(code, 0)
@@ -140,7 +150,8 @@ class RunConclusionSupport {
                                                 [code: code, label: labels.get(code), count: count]
                                             }]]
         })
-        return [ran: true, counts: counts, unknownSides: unknownSides]
+        return [ran: true, counts: counts, unknownSides: unknownSides] +
+                (brain ? [brain: [asked: brain.asked, reused: brain.reused, dropped: brain.dropped, warnings: brain.warnings]] : [:])
     }
 
     /**

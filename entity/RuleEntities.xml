@@ -103,6 +103,12 @@
                 the column needs NO upgrade data and cannot reclassify a live reconciliation. A stored
                 value that is neither mode throws rather than falling back.</description>
         </field>
+        <field name="conclusionBrain" type="text-short">
+            <description>DAR-BE-151. Blank: the scope is concluded by its conclusion tree only (every scope before the brain).
+                ORDER_LINE or RETURN: the conclusion brain (checked-in DRL, darpan/conclusion/brain) concludes its findings
+                first, as findings of that kind, and the tree concludes the ones the brain leaves unexplained. Nullable with
+                no default, so adding the column changes no live scope.</description>
+        </field>
         <field name="conclusionLookupsJson" type="text-long">
             <description>DAR-BE-118. Records in another system a conclusion rule may read, looked up only for the
                 findings that reach such a rule: a JSON list of {name, subject (FILE_1|FILE_2), idField, systemEnumId,
@@ -340,6 +346,11 @@
         </field>
         <field name="suggestedFilterJson" type="text-long">
             <description>With questionText: {fileSide, fieldExpression, operator, values} the rules board opens pre-filled.</description>
+        </field>
+        <field name="engine" type="text-short">
+            <description>DAR-BE-151. Blank: a conclusion-tree rule. BRAIN: a row that only carries a conclusion-brain cause's fix
+                text (fixActionTemplate) for the audit, which reads a cause's fix by its conclusionEnumId; the tree never compiles
+                it. Nullable with no default.</description>
         </field>
         <field name="companyUserGroupId" type="id"/>
         <field name="createdDate" type="date-time"/>

@@ -92,4 +92,21 @@ class RunConclusionStepTests {
                 [[sequenceNum: 10, conditionSeq: 1, subject: "FILE_1", checkLabel: "x"]], [:])
         assertEquals("ALL", rules[0].conditions[0].quantifier)
     }
+
+    /** DAR-BE-151: a BRAIN row only carries a brain cause's fix text for the audit; the tree never compiles it. */
+    @Test
+    void brainRowsAreNotCompiledIntoTheTree() {
+        List rules = RunConclusionStep.buildRules([[sequenceNum: 5, conclusionEnumId: "CONC_PARTIAL_PAYMENT_GIVEN_BACK", engine: "BRAIN"],
+                                                   [sequenceNum: 10, conclusionEnumId: "CONC_NEVER_REACHED_NS"]], [], [:])
+        org.junit.jupiter.api.Assertions.assertEquals(["CONC_NEVER_REACHED_NS"], rules*.conclusionEnumId)
+    }
+
+    @Test
+    void aBrainScopesKindIsReadFromItsConclusionBrainValue() {
+        org.junit.jupiter.api.Assertions.assertEquals("orderLine", RunConclusionStep.brainKind("ORDER_LINE"))
+        org.junit.jupiter.api.Assertions.assertEquals("return", RunConclusionStep.brainKind("RETURN"))
+        org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.brainKind(null))
+        org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.brainKind("SOMETHING_ELSE"))
+    }
+
 }

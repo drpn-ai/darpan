@@ -88,6 +88,21 @@ class BrainEngine {
         }
     }
 
+    /** A declared fact's @label and @value template (by its simple class name), or null for a type the packs did not declare. */
+    Map<String, String> factMetadata(Object fact) {
+        if (fact == null) return null
+        for (def pkg : container.kieBase.kiePackages) {
+            def type = container.kieBase.getFactType(pkg.name, fact.getClass().simpleName)
+            if (type != null && type.factClass == fact.getClass()) {
+                Map meta = type.metaData ?: [:]
+                return [label: text(meta.label), value: text(meta.value)]
+            }
+        }
+        return null
+    }
+
+    private static String text(Object v) { v?.toString()?.replaceAll(/^"|"$/, "")?.trim() }
+
     /** Rule name -> its metadata (@reads, @produces, ...), for the guard and web tests. */
     Map<String, Map<String, Object>> ruleMetadata() {
         Map<String, Map<String, Object>> out = [:]

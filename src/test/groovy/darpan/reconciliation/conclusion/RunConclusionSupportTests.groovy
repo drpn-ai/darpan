@@ -94,6 +94,30 @@ class RunConclusionSupportTests {
         return (Map) new JsonSlurper().parseText(f.getText("UTF-8"))
     }
 
+    /** DAR-BE-151: a scope in the brain takes the brain's conclusion where it has one and the tree's for the rest. */
+    @Test
+    void aBrainScopeWritesTheBrainsConclusionAndTheTreesForTheRest() {
+        darpan.conclusion.brain.BrainAnswerStore.clear()
+        File doc = writeDiffDocument([
+                missingRow("M1088731${SEP}01", FILE1, FILE2, [omsOrderId: "M1088731", orderItemSeqId: "01", orderGrandTotal: 371.54]),
+                missingRow("M2${SEP}01", FILE1, FILE2, [omsOrderId: "M2", orderItemSeqId: "01", orderGrandTotal: 50])])
+        List asked = []
+        Map a = args(doc, NEVER_REACHED_RULES) + [brain: [kind: "orderLine", tenantId: "T_BRAIN", labelFor: { String c -> c },
+                fetchQuestion: { String q, List ids -> asked << ids; [M1088731: [orderId: "M1088731", paymentPreferenceSlotsFull: false,
+                        paymentPreferences: [[paymentMethodTypeId: "EXT_SHOP_CASH", statusId: "PAYMENT_SETTLED", maxAmount: "10"],
+                                             [paymentMethodTypeId: "EXT_SHOP_CASH", statusId: "PAYMENT_REFUNDED", maxAmount: "10"]]]] }]]
+
+        Map result = RunConclusionSupport.concludeRun(a)
+
+        assertEquals([["M1088731", "M2"]], asked, "both orders are asked once, together")
+        Map byId = ((List<Map>) parse(doc).differences).collectEntries { [(it.primaryId): it.conclusion] }
+        assertEquals("CONC_PARTIAL_PAYMENT_GIVEN_BACK", byId["M1088731${SEP}01".toString()].code)
+        assertEquals("CONC_NEVER_REACHED_NS", byId["M2${SEP}01".toString()].code, "nothing found for M2: the tree concludes it")
+        assertEquals(1, result.counts.CONC_PARTIAL_PAYMENT_GIVEN_BACK)
+        assertEquals(1, result.counts.CONC_NEVER_REACHED_NS)
+        assertEquals(2, result.brain.asked, "two orders asked in one call")
+    }
+
     /**
      * DAR-BE-118 (gorjana R8, F-104609): a return whose order is backordered in NetSuite. Only the findings that reach the
      * rule reading the lookup are asked about, each id once, in one call; a found record names the cause, a miss falls through.

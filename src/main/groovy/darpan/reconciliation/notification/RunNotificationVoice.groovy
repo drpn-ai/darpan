@@ -917,7 +917,8 @@ class RunNotificationVoice {
     private static List<Map> mismatchTallies(Object raw) {
         if (!(raw instanceof List)) return []
         return ((List) raw).findAll { it instanceof Map && ((Map) it).field?.toString()?.trim() && toCount(((Map) it).count) > 0 }
-                .collect { Map it -> [field: it.field.toString().trim(), count: toCount(it.count), file1Value: it.file1Value,
+                // Chat link and format syntax is stripped from the rule's label (security review on bb64b03).
+                .collect { Map it -> [field: it.field.toString().replaceAll(/[<>|*~`]/, "").trim(), count: toCount(it.count), file1Value: it.file1Value,
                                       file2Value: it.file2Value, sameValues: it.sameValues == true] }
                 .sort { -((int) it.count) }
     }
@@ -925,24 +926,35 @@ class RunNotificationVoice {
     /**
      * DAR-BE-155: when the run says which fields drifted, the diagnosis is that fact, not a pooled reading.
      * RAILS read "Partial refunds ... amount drift" over a status mismatch (isCompleted = isFulfilled, Y against N)
-     * because the pool could not know the field. The values are named only when every mismatch on the field agrees.
+     * because the pool could not know the field. The values are named only when every mismatch on the field agrees,
+     * and only when both are flags, codes or numbers: a record value goes to a chat space, so an email, a name or
+     * chat markup is never spoken (security review on bb64b03); the line then says the two sides differ.
      */
     private static String valueDriftFact(List<Map> fields, String file1Label, String file2Label) {
         Map top = fields.first()
-        String values = top.sameValues ?
-                "${file1Label} has ${spoken(top.file1Value)} and ${file2Label} has ${spoken(top.file2Value)}".toString() : null
+        String value1 = spoken(top.file1Value)
+        String value2 = spoken(top.file2Value)
+        String values = top.sameValues && value1 && value2 ?
+                "${file1Label} has ${value1} and ${file2Label} has ${value2}".toString() : null
+        String unnamed = top.sameValues ? "${file1Label} and ${file2Label} hold different values".toString() :
+                "the values differ from record to record"
         if (fields.size() == 1) {
-            if (!values) return "On ${top.field}, the values differ from record to record.".toString()
+            if (!values) return "On ${top.field}, ${unnamed}.".toString()
             return "On ${top.field}, ${values}${((int) top.count) > 1 ? ' every time' : ''}.".toString()
         }
         int total = (int) fields.sum { it.count }
         String lead = ((int) top.count) * 2 > total ? "Most are on ${top.field}" : "The largest share is on ${top.field}"
-        return values ? "${lead}: ${values}.".toString() : "${lead}, where the values differ from record to record.".toString()
+        return values ? "${lead}: ${values}.".toString() : "${lead}, where ${unnamed}.".toString()
     }
 
+    private static final java.util.regex.Pattern SPEAKABLE_VALUE =
+            ~/^(?:[A-Z0-9_]{1,32}|[YyNn]|true|false|-?\d{1,15}(?:\.\d{1,6})?)$/
+
+    /** A blank reads "nothing"; a flag, code or number reads as itself; anything else is not spoken (null). */
     private static String spoken(Object value) {
         String text = value?.toString()?.trim()
-        return text ?: "nothing"
+        if (!text) return "nothing"
+        return SPEAKABLE_VALUE.matcher(text).matches() ? text : null
     }
 
     /**

@@ -455,9 +455,35 @@ class RunNotificationVoiceTests {
 
     @Test
     void valueDriftNamesABlankValueInWords() {
-        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 2) +
-                [mismatchFields: [tally("shopifyOrderName = name", 5, "", "#1001"), tally("isCompleted = isFulfilled", 3, "Y", "N")]])
-        assertEquals("Most are on shopifyOrderName = name: HotWax has nothing and Shopify has #1001.", lines[1], lines.join("\n"))
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 8) +
+                [mismatchFields: [tally("statusId = status", 5, "", "ORDER_COMPLETED"), tally("isCompleted = isFulfilled", 3, "Y", "N")]])
+        assertEquals("Most are on statusId = status: HotWax has nothing and Shopify has ORDER_COMPLETED.", lines[1], lines.join("\n"))
+    }
+
+    // Security review on bb64b03: a record value goes to a chat space. Only flag, code and number values are
+    // spoken; an email, a name or chat markup never is.
+    @Test
+    void valueDriftNeverSpeaksAFreeTextOrMarkupValue() {
+        ["jane@example.com", "Jane Smith", "<https://evil.example|click>", "*bold*", "A" * 33].each { String risky ->
+            List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
+                    [mismatchFields: [tally("email = email", 1, risky, "ORDER_COMPLETED")]])
+            assertEquals("On email = email, HotWax and Shopify hold different values.", lines[1], lines.join("\n"))
+            assertFalse(lines.join("\n").contains(risky), lines.join("\n"))
+        }
+    }
+
+    @Test
+    void valueDriftStripsChatSyntaxFromTheRuleLabel() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
+                [mismatchFields: [tally("<https://evil.example|*status*> = status", 1, "Y", "N")]])
+        assertEquals("On https://evil.examplestatus = status, HotWax has Y and Shopify has N.", lines[1], lines.join("\n"))
+    }
+
+    @Test
+    void valueDriftSpeaksNumbersAndFlags() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
+                [mismatchFields: [tally("grand_total = total_amount", 1, "89.89", "-90.32")]])
+        assertEquals("On grand_total = total_amount, HotWax has 89.89 and Shopify has -90.32.", lines[1], lines.join("\n"))
     }
 
     @Test

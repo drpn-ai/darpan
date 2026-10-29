@@ -91,9 +91,4 @@
     <darpan.audit.AuditStatement statementId="GORJANA_R21" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R21"
             categoryEnumId="AUDC_REFUNDS_CREDITS" weightEnumId="AUDSW_DERIVED" sequenceNum="21"
             statementText="No Happiness Guarantee credit memo is left open by tax counted twice on its POS Tax Variance line."/>
-    <!-- DAR-BE-157: R22 is Aditi's (2026-10-28, after 294 transfer orders were refused for products HotWax did not have yet),
-         not from #483, so derived. Under orders: a product missing from HotWax stops its orders and transfer orders. -->
-    <darpan.audit.AuditStatement statementId="GORJANA_R22" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R22"
-            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="22"
-            statementText="Every active product is in both NetSuite and HotWax."/>
 </entity-facade-xml>

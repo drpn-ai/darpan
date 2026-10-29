@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  DAR-BE-157 - gorjana R22, "Every active product is in both NetSuite and HotWax.", measured against gorjana production on
-  2026-10-28 (tools/live-probes/run-active-products-probe.sh, run-transfer-products-probe.sh).
+  DAR-BE-157 - gorjana's NetSuite <-> HotWax product run: every active product is in both, a plain two-way saved run, not
+  part of the audit (Aditi 2026-10-29). Measured against gorjana production on 2026-10-28
+  (tools/live-probes/run-active-products-probe.sh, run-transfer-products-probe.sh).
 
   Why: 294 transfer orders were refused by HotWax on 16 and 22 Oct because their products were not in HotWax yet (the
   NetSuite -> HotWax product sync was behind). A whole-catalogue, two-way presence check names such a product before
@@ -18,10 +19,8 @@
   DUPLICATE:id:productId for every product after the first sharing one (netsuiteIdState NONE / SHARED).
   Neither side is windowed: presence is a whole-catalogue question.
 
-  NOT seed data - tenant configuration. Load per install, AFTER AuditSeedData.xml, GorjanaMonthCloseCatalogData.xml and
-  tools/netsuite-chain-config/gorjana-product-queries.xml. The HotWax side names the tenant's HotWax config
-  (gorjana_prod locally; gorjana_oms on prod - remap with /transfer). automationId is blank: an automation is created per
-  environment.
+  NOT seed data - tenant configuration. Load per install, AFTER tools/netsuite-chain-config/gorjana-product-queries.xml.
+  The HotWax side names the tenant's HotWax config (gorjana_prod locally; gorjana_oms on prod - remap with /transfer).
 -->
 <entity-facade-xml type="darpan-tenant-config">
 
@@ -96,19 +95,5 @@
             fixActionTemplate="Sync NetSuite item {recordKey} ({sku}) to HotWax, then re-import anything HotWax refused for it (transfer orders)." companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no product with this NetSuite id" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_PRODUCT_PRESENCE_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="sku" operator="NOT_IN" conditionValues="-" checkLabel="NetSuite SKU" companyUserGroupId="GORJANA"/>
-
-    <darpan.audit.AuditCheck checkId="GORJANA_CHK_PRODUCT_PRESENCE" companyUserGroupId="GORJANA" checkCode="products-not-in-both"
-            label="NetSuite active items against HotWax sellable products" savedRunId="GORJANA_PRODUCT_PRESENCE_RS"
-            file1RecordType="item" file2RecordType="product" graceDays="0"
-            matchedBy="NetSuite item internal id = HotWax NETSUITE_PRODUCT_ID"
-            fixOwner="HotWax Support" fixWhereEnumId="OMS"
-            headlineTemplate="Product {recordKey} is not in both NetSuite and HotWax"
-            fixActionTemplate="Sync NetSuite item {recordKey} to HotWax, or give the HotWax product its NetSuite id."
-            passesWhenTemplate="NetSuite item {recordKey} and its HotWax product both exist."/>
-
-    <!-- Quiet in NetSuite is expected: not counted, it closes with its reason. -->
-    <darpan.audit.AuditStatementCheck statementId="GORJANA_R22" checkId="GORJANA_CHK_PRODUCT_PRESENCE" companyUserGroupId="GORJANA"
-            sequenceNum="1" diffTypes="MISSING_IN_FILE_1,MISSING_IN_FILE_2"
-            conclusionCodes="CONC_PRODUCT_NOT_IN_HOTWAX,CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX,CONC_PRODUCT_NO_NS_ID,CONC_PRODUCT_NS_ID_SHARED,CONC_PRODUCT_NS_ITEM_GONE,UNEXPLAINED"/>
 
 </entity-facade-xml>

@@ -78,6 +78,15 @@ class RunConclusionSupport {
         boolean singleSided = args.singleSided == true
         Map sideSpecs = [FILE_1: (Map) args.file1, FILE_2: singleSided ? null : (Map) args.file2]
 
+        // DAR-BE-157: a side's evidence may name the field holding the OTHER side's key (a HotWax product's NetSuite id), so
+        // a row keyed apart from it (DUPLICATE:22139:M100880) still shows the record the other side has. Evidence only.
+        Map<String, String> otherSideKeyFields = [:]
+        sideSpecs.each { String side, Map spec ->
+            String field = ((Map) (spec?.evidence ?: [:])).get("otherSideKeyField")?.toString()
+            if (field) otherSideKeyFields.put(side, field)
+        }
+        JsonSlurper keySlurper = new JsonSlurper()
+
         // Pass 1: which keys do the findings need?
         Set<String> neededKeys = new HashSet<>()
         Set<String> neededFirstFields = new HashSet<>()
@@ -86,6 +95,10 @@ class RunConclusionSupport {
             if (key) {
                 neededKeys.add(key)
                 neededFirstFields.add(ConclusionKeySupport.firstField(key))
+            }
+            if (otherSideKeyFields) {
+                Map data = parseData(keySlurper, row.get("data"))
+                otherSideKeyFields.values().each { String field -> if (data.get(field) != null) neededKeys.add(data.get(field).toString()) }
             }
         }
 
@@ -179,7 +192,7 @@ class RunConclusionSupport {
             List systems = []
             sideSpecs.each { String side, Map spec ->
                 if (spec == null) return
-                systems.add(evidenceFor(side, (Map) sides.get(side), (Map) (spec.evidence ?: [:]),
+                systems.add(evidenceFor(side, evidenceSide(side, sides, index, otherSideKeyFields), (Map) (spec.evidence ?: [:]),
                         side == "FILE_1" ? file1Label : file2Label))
             }
             return row + otherSideIds(slurper, row, sides) + [conclusion: [code    : code,
@@ -354,6 +367,17 @@ class RunConclusionSupport {
         else if (((Map) sideIndex.excludedFirst).containsKey(firstField)) result.putAll([firstFieldPresence: "EXCLUDED", firstFieldRecord: ((Map) sideIndex.excludedFirst).get(firstField)])
         else result.putAll([firstFieldPresence: absent, firstFieldRecord: null])
         return result
+    }
+
+    /** A side absent under the row's key, looked up again by the key the other side's record names (otherSideKeyField). */
+    private static Map evidenceSide(String side, Map sides, Map<String, Map> index, Map<String, String> otherSideKeyFields) {
+        Map state = (Map) sides.get(side)
+        String field = otherSideKeyFields.get(side == "FILE_1" ? "FILE_2" : "FILE_1")
+        if (state?.get("presence") != "ABSENT" || !field) return state
+        Object otherKey = ((Map) ((Map) sides.get(side == "FILE_1" ? "FILE_2" : "FILE_1"))?.get("record"))?.get(field)
+        if (otherKey == null) return state
+        Map found = lookup(index.get(side), otherKey.toString())
+        return found.presence in ["KEPT", "EXCLUDED"] ? found : state
     }
 
     private static Map evidenceFor(String side, Map sideState, Map evidence, String label) {

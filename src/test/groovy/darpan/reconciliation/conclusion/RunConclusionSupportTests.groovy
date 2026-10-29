@@ -405,6 +405,33 @@ class RunConclusionSupportTests {
         assertEquals([MISSING_FROM_FILE_2: 1], out.hiddenByBucket)
     }
 
+    // DAR-BE-157: a HotWax product sharing a NetSuite id is keyed DUPLICATE:22139:M100880, which NetSuite never has; its
+    // evidence names the field holding NetSuite's key, so the NetSuite panel shows item 22139 instead of "Not found".
+    @Test
+    void theEvidenceFindsTheOtherSidesRecordByTheIdItNames() {
+        Map nsEvidence = [system: "NetSuite", facts: ["sku"]]
+        Map hwEvidence = [system: "HotWax", facts: ["internalName", "productId"], otherSideKeyField: "netsuiteProductId"]
+        Closure<Map> row = { String key, String nsId ->
+            [diffType: "missing_in_netsuite", compareScopeId: "SCOPE_1", objectType: "PRODUCT", primaryId: key,
+             presentIn: "HotWax products", missingIn: "NetSuite",
+             data: JsonOutput.toJson([nsKey: key, netsuiteProductId: nsId, productId: key.tokenize(":").last(), internalName: "GORSDED-23-2100"]),
+             message: "Present in HotWax products, missing in NetSuite"]
+        }
+        File doc = writeDiffDocument([row("DUPLICATE:22139:M100880", "22139"), row("DUPLICATE:99999:M1", "99999")])
+        List rules = [[conclusionEnumId: "CONC_PRODUCT_NS_ID_SHARED", label: "One NetSuite id on several HotWax products",
+                       appliesToBucket: "MISSING_FROM_FILE_1", conditions: [cond(subject: "FILE_2", checkLabel: "A HotWax product")]]]
+        RunConclusionSupport.concludeRun([diffFile: doc, file1Label: "NetSuite", file2Label: "HotWax products", singleSided: false, rules: rules,
+                file1: [extractFile: extract("ns-items.json", [[id: "22139", sku: "GORSDED-23-2100"]]), keyFields: ["id"], idNormalizer: null, evidence: nsEvidence],
+                file2: [extractFile: extract("hw-products.json", []), keyFields: ["nsKey"], idNormalizer: null, evidence: hwEvidence]])
+        List<Map> rows = (List<Map>) parse(doc).differences
+        Map<String, Map> shared = ((List<Map>) rows[0].conclusion.systems).collectEntries { [(it.side): it] }
+        assertEquals([side: "FILE_1", system: "NetSuite", presence: "KEPT", state: null, facts: ["GORSDED-23-2100"]], shared.FILE_1)
+        assertEquals(["GORSDED-23-2100", "M100880"], shared.FILE_2.facts)
+        assertEquals("CONC_PRODUCT_NS_ID_SHARED", rows[0].conclusion.code, "the rules still read the row's own key")
+        Map gone = ((List<Map>) rows[1].conclusion.systems).find { it.side == "FILE_1" }
+        assertEquals("ABSENT", gone.presence, "an id NetSuite does not have stays Not found")
+    }
+
     @Test
     void hiddenRowsComeOffTheRunsStoredCounts() {
         Map counts = [differenceCount: 10, onlyInFile1Count: 6, onlyInFile2Count: 4, missingInFile2Count: 6, missingInFile1Count: 4,

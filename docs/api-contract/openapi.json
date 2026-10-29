@@ -10935,6 +10935,10 @@
                     "lineKeyColumn": {
                         "type": "string"
                     },
+                    "usedTransactionTypes": {
+                        "type": "string",
+                        "description": "DAR-BE-157. ACTIVE_ITEMS only: the order types whose lines make an\n                item used (SalesOrd, TrnfrOrd, PurchOrd; blank = all)."
+                    },
                     "matchRules": {
                         "type": "string",
                         "description": "Moqui type Object. DAR-UI-064. RECORDS_MATCHING conditions: a list (or its\n                JSON) of {fieldId, op IN/GT/NOT_EMPTY/STARTS_WITH, values}. Validated by normalizeSpec like every other field."

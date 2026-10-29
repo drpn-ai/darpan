@@ -24,8 +24,10 @@
 
   FILE_1 = NetSuite ACTIVE_ITEMS (tools/netsuite-chain-config/gorjana-product-queries.xml): every non-inactive InvtPart,
   Kit and NonInvtPart, live = new (created in the last 90 days: a new item must reach HotWax before its first PO or
-  transfer order) or used for HotWax in the last year (a line on a HotWax sales order, a transfer order or a purchase
-  order). Quiet items (live N) are EXCLUDED, so they never become "not in HotWax".
+  transfer order) or used for HotWax in the last year: weekly (NS_ACTIVE_ITEMS) a line on a HotWax sales order, a transfer
+  order or a purchase order; daily (NS_ACTIVE_ITEMS_DAILY) transfer and purchase orders only, since a year of HotWax
+  sales-order lines took 447 s of a 13-minute run and an item on a HotWax order was in HotWax (Aditi 2026-10-29: the
+  daily run must not take long). Quiet items (live N) are EXCLUDED, so they never become "not in HotWax".
   FILE_2 = HotWax OMS_PRODUCTS_GQL: every sellable product (not virtual, FINISHED_GOOD or MARKETING_PKG_PICK, not
   discontinued), nsKey = its NETSUITE_PRODUCT_ID (the NetSuite item internal id), HOTWAX-ONLY:productId when it has none,
   DUPLICATE:id:productId for every product after the first sharing one (netsuiteIdState NONE / SHARED).
@@ -52,10 +54,11 @@
     <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_PRODUCT_NOT_IN_HOTWAX_SCOPE" ruleSetId="GORJANA_PRODUCT_NOT_IN_HOTWAX_RS"
             objectType="PRODUCT" scopeMode="COMPARE" description="Every sellable NetSuite item that is new or used for HotWax this year is a sellable HotWax product. Whole catalogue, no window. Run daily."
             companyUserGroupId="GORJANA"/>
+    <!-- NS_ACTIVE_ITEMS_DAILY: use = transfer and purchase orders only (19 s, not 447 s; see gorjana-product-queries.xml). -->
     <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_PRODUCT_NOT_IN_HOTWAX_SCOPE" fileSide="FILE_1"
             systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
             recordRootExpression="records" primaryIdExpression="id"
-            sourceConfigId="NS_ACTIVE_ITEMS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+            sourceConfigId="NS_ACTIVE_ITEMS_DAILY" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_PRODUCT_NOT_IN_HOTWAX_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="id" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_PRODUCT_NOT_IN_HOTWAX_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="live" operator="EXCLUDE_IN" filterValues="N" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_PRODUCT_NOT_IN_HOTWAX_SCOPE" fileSide="FILE_2"

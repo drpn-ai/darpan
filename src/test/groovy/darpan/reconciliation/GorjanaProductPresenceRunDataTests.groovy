@@ -87,7 +87,7 @@ class GorjanaProductPresenceRunDataTests {
             assertEquals("COMPARE", scoped(scope, "darpan.rule.RuleSetCompareScope")[0].scopeMode, scope)
             Map<String, Map> sources = scoped(scope, "darpan.rule.RuleSetCompareSource").collectEntries { [(it.fileSide): it] }
             assertEquals("NETSUITE_SUITEQL", sources.FILE_1.systemEnumId)
-            assertEquals("NS_ACTIVE_ITEMS", sources.FILE_1.sourceConfigId)
+            assertEquals(scope == DAILY ? "NS_ACTIVE_ITEMS_DAILY" : "NS_ACTIVE_ITEMS", sources.FILE_1.sourceConfigId, scope)
             assertEquals("OMS_PRODUCTS_GQL", sources.FILE_2.systemEnumId)
             assertEquals("HOTWAX_OMS_GQL_PRODUCTS", sources.FILE_2.sourceConfigType)
             Map<String, String> keys = scoped(scope, "darpan.rule.RuleSetCompareSourceKeyField").collectEntries { [(it.fileSide): it.fieldExpression] }
@@ -98,20 +98,30 @@ class GorjanaProductPresenceRunDataTests {
         }
     }
 
+    // Aditi 2026-10-29: the daily run must not take long. The two queries differ only in what counts as use: the daily one
+    // leaves out a year of HotWax sales-order lines (447 s of a 13-minute run; transfer and purchase orders are 19 s).
     @Test
-    void theNetsuiteQueryIsTheActiveItemsTemplateWithTheSubgroup() {
+    void theNetsuiteQueriesAreTheActiveItemsTemplateDifferingOnlyInUse() {
         // Client config lives in the wrapper checkout, beside the other gorjana queries; a component-only checkout skips.
         String queries = "../../../../../tools/netsuite-chain-config/gorjana-product-queries.xml"
         assumeTrue(dataDir().resolve(queries).toFile().exists(), "no wrapper checkout")
-        Node q = rows(queries, "NsSuiteQlSourceQuery")
-                .find { it.attribute("nsSuiteQlSourceQueryId") == "NS_ACTIVE_ITEMS" }
-        assertTrue(q != null, "no NS_ACTIVE_ITEMS query")
-        assertEquals("ACTIVE_ITEMS", q.attribute("queryTemplate"))
-        assertEquals("item", q.attribute("fromTable"))
-        assertEquals("id", q.attribute("joinKeyFieldName"))
-        assertEquals("GORJANA", q.attribute("companyUserGroupId"))
-        Node subgroup = rows(queries, "NsSuiteQlSourceQueryField").find { it.attribute("recordFieldName") == "subgroup" }
-        assertEquals("BUILTIN.DF(custitemsubgroup) AS subgroup", subgroup?.attribute("sourceColumn"))
+        Map<String, Node> q = rows(queries, "NsSuiteQlSourceQuery").collectEntries { [(it.attribute("nsSuiteQlSourceQueryId")): it] }
+        ["NS_ACTIVE_ITEMS", "NS_ACTIVE_ITEMS_DAILY"].each { String id ->
+            assertTrue(q[id] != null, "no ${id} query")
+            assertEquals("ACTIVE_ITEMS", q[id].attribute("queryTemplate"))
+            assertEquals("item", q[id].attribute("fromTable"))
+            assertEquals("id", q[id].attribute("joinKeyFieldName"))
+            assertEquals("GORJANA", q[id].attribute("companyUserGroupId"))
+        }
+        assertEquals(null, q.NS_ACTIVE_ITEMS.attribute("usedTransactionTypes"), "weekly: all three")
+        assertEquals("TrnfrOrd,PurchOrd", q.NS_ACTIVE_ITEMS_DAILY.attribute("usedTransactionTypes"))
+        Closure<Map> fields = { String id ->
+            rows(queries, "NsSuiteQlSourceQueryField").findAll { it.attribute("nsSuiteQlSourceQueryId") == id }
+                    .collectEntries { [(it.attribute("recordFieldName")): it.attribute("sourceColumn")] }
+        }
+        assertEquals(fields("NS_ACTIVE_ITEMS"), fields("NS_ACTIVE_ITEMS_DAILY"))
+        assertEquals("BUILTIN.DF(custitemsubgroup) AS subgroup", fields("NS_ACTIVE_ITEMS").subgroup)
+        assertTrue(!fields("NS_ACTIVE_ITEMS").containsKey("stock"), "the template no longer reads stock")
     }
 
     // Aditi 2026-10-29: "for the daily report, focus on the products that are sellable".

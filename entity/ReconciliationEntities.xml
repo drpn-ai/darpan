@@ -1036,6 +1036,13 @@
                 as TEXT and ORDER BY id is what makes offset paging safe, so a free-form SELECT would put
                 both in operator hands. An unrecognized value throws rather than defaulting.</description>
         </field>
+        <field name="usedTransactionTypes" type="text-short">
+            <description>DAR-BE-157. ACTIVE_ITEMS only (refused by every other template): the order types whose lines in
+                the last year make an item used, comma separated, some of SalesOrd (a sales order HotWax sent), TrnfrOrd,
+                PurchOrd. Blank = all three. Measured on gorjana 2026-10-29: a year of HotWax sales-order lines is 447 s,
+                transfer and purchase orders 19 s, so a daily run reads TrnfrOrd,PurchOrd (an item on a HotWax sales order
+                was in HotWax) and a weekly one all three.</description>
+        </field>
         <field name="absentChildRecordType" type="text-short">
             <description>Record type whose ABSENCE is the finding. Required by both linked-child
                 templates, refused by RECORDS. Validated as a plain identifier.</description>

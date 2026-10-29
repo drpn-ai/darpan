@@ -3,7 +3,6 @@ package darpan.reconciliation
 import darpan.audit.AuditReportAssembler
 
 import darpan.facade.reconciliation.RunConclusionStep
-import darpan.reconciliation.conclusion.ConclusionLookupSupport
 import darpan.reconciliation.conclusion.ConclusionTreeEngine
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.xml.XmlParser
@@ -94,9 +93,6 @@ class GorjanaProductPresenceRunDataTests {
         assertEquals(2, filters.size())
         assertEquals([fileSide: "FILE_1", fieldExpression: "live", operator: "EXCLUDE_IN", filterValues: "N"],
                 filters.find { it.fileSide == "FILE_1" }.subMap(["fileSide", "fieldExpression", "operator", "filterValues"]))
-        // A HotWax SKU is looked up among the NetSuite items the run read, kept or quiet: no second NetSuite call.
-        assertEquals([[name: "nsItemBySku", subject: "FILE_2", idField: "internalName", fromSide: "FILE_1", keyField: "sku"]],
-                ConclusionLookupSupport.parse(scope.conclusionLookupsJson))
     }
 
     @Test
@@ -127,15 +123,6 @@ class GorjanaProductPresenceRunDataTests {
         assertEquals("CONC_PRODUCT_QUIET_IN_NS", conclude("MISSING_FROM_FILE_1", excluded(item("30000", "N")), kept(product("30000", "OWN"))),
                 "HotWax carries a quiet NetSuite item")
         assertEquals("CONC_PRODUCT_NO_NS_ID", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("HOTWAX-ONLY:10056", "NONE"))))
-        // Aditi 2026-10-29: a product whose SKU NetSuite does not have is not expected to carry a NetSuite id (2210-013a-G-OLD:
-        // NetSuite has 2210-013a-G, on its own HotWax product). Only an answered miss says so; no answer keeps the finding.
-        assertEquals("CONC_PRODUCT_NOT_IN_NS", conclude("MISSING_FROM_FILE_1", ABSENT,
-                kept(product("HOTWAX-ONLY:10056", "NONE") + [nsItemBySku: [found: "N"]])))
-        assertEquals("CONC_PRODUCT_NO_NS_ID", conclude("MISSING_FROM_FILE_1", ABSENT,
-                kept(product("HOTWAX-ONLY:10056", "NONE") + [nsItemBySku: [id: "25086", sku: "2210-013a-G-OLD", found: "Y"]])))
-        assertEquals("25086", (concluded("MISSING_FROM_FILE_1", ABSENT,
-                kept(product("HOTWAX-ONLY:10056", "NONE") + [nsItemBySku: [id: "25086", found: "Y"]])).checks as List<Map>)
-                .find { it.label == "NetSuite item with this SKU" }.value)
         assertEquals("CONC_PRODUCT_NS_ID_SHARED", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("DUPLICATE:43000:10200", "SHARED"))),
                 "the cause holds even when a field its fix names is blank")
         assertEquals("UNEXPLAINED", conclude("MISSING_FROM_FILE_1", ABSENT, kept(product("X", "NEW_STATE"))), "only an OWN key reads as gone")
@@ -180,7 +167,6 @@ class GorjanaProductPresenceRunDataTests {
         String notSellable = fixOf("MISSING_FROM_FILE_2", kept(item("42808", "Y")), excluded(nonSellable))
         assertEquals("NetSuite item 42808 (SKU-42808) is new or was used for HotWax this year, but HotWax product 10056 is discontinued: make it sellable in HotWax, or inactive in NetSuite.", notSellable)
         [fixOf("MISSING_FROM_FILE_1", excluded(item("30000", "N")), kept(product("30000", "OWN"))),
-         fixOf("MISSING_FROM_FILE_1", ABSENT, kept(hw + [nsItemBySku: [found: "N"]])),
          fixOf("MISSING_FROM_FILE_1", ABSENT, kept(product("99999", "OWN"))),
          fixOf("MISSING_FROM_FILE_2", kept(item("34838", "Y") + [itemType: "NonInvtPart"]), ABSENT)].each {
             assertTrue(!(it =~ /\{[A-Za-z]/).find(), "unfilled placeholder: ${it}")
@@ -194,7 +180,6 @@ class GorjanaProductPresenceRunDataTests {
         assertEquals("HIDE", outcome.CONC_PRODUCT_QUIET_IN_NS)
         assertEquals("HIDE", outcome.CONC_PRODUCT_DISCONTINUED_IN_NS)
         assertEquals("HIDE", outcome.CONC_PRODUCT_NS_ONLY_NON_INVENTORY)
-        assertEquals("HIDE", outcome.CONC_PRODUCT_NOT_IN_NS)
         ["CONC_PRODUCT_NOT_IN_HOTWAX", "CONC_PRODUCT_NO_NS_ID", "CONC_PRODUCT_NS_ID_SHARED", "CONC_PRODUCT_NS_ITEM_GONE",
          "CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX"].each { assertEquals(null, outcome[it], "${it} needs fixing, so it shows") }
     }

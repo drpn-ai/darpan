@@ -219,7 +219,7 @@ class RunConclusionSupport {
                                                         Closure<Map> finding) {
         List<Map> lookups = (List<Map>) (args.lookups ?: [])
         Closure fetch = (Closure) args.fetchLookup
-        if (!lookups || (fetch == null && !lookups.any { it.fromSide })) return [:]
+        if (!lookups || fetch == null) return [:]
         Map plan = ConclusionLookupSupport.plan(ConclusionRuleLogicGenerator.assignNodes(rules), lookups)
         Map<String, Set<String>> wanted = lookups.collectEntries { [(it.name): new LinkedHashSet<String>()] }
         DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
@@ -232,9 +232,8 @@ class RunConclusionSupport {
             }
         }
         return lookups.collectEntries { Map l ->
-            if (l.fromSide) return [(l.name): sideAnswers((Map) args.get(l.fromSide == "FILE_1" ? "file1" : "file2"), l, wanted.get(l.name))]
             Map<String, Map> found = [:]
-            if (fetch != null) wanted.get(l.name).toList().collate(LOOKUP_BATCH).each { List<String> ids -> found.putAll((Map) fetch.call(l, ids) ?: [:]) }
+            wanted.get(l.name).toList().collate(LOOKUP_BATCH).each { List<String> ids -> found.putAll((Map) fetch.call(l, ids) ?: [:]) }
             [(l.name): found]
         }
     }
@@ -282,47 +281,28 @@ class RunConclusionSupport {
 
     /** KEPT and EXCLUDED records of one side, by full key and by first key field, for needed keys only. */
     private static Map indexSide(Map spec, Set<String> neededKeys, Set<String> neededFirstFields) {
+        File extractFile = (File) spec.extractFile
         List<String> keyFields = (List<String>) (spec.keyFields ?: [])
         String normalizer = (String) spec.idNormalizer
         Map keptFull = [:], keptFirst = [:], excludedFull = [:], excludedFirst = [:]
-        boolean unknown = streamSide(spec,
-                { Map record -> add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields) },
-                { Map record -> add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields) })
-        return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
-                excludedFirst: excludedFirst, unknownWhenAbsent: unknown]
-    }
-
-    /**
-     * One side's read, streamed: its kept records, then the ones its filters excluded (the sidecar).
-     * @return true when absence on that side is unknown
-     */
-    private static boolean streamSide(Map spec, Closure kept, Closure excluded) {
-        File extractFile = (File) spec?.extractFile
-        // No extract, or a key this pass cannot rebuild: nothing can be claimed absent.
-        if (!(extractFile?.exists() && spec.keyReliable != false)) return true
-        Map head = JsonRecordStream.forEachRecord(extractFile, "records", kept)
-        List exclusions = configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
-        Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile, excluded)
-        // Extractors write no sidecar when nothing was excluded, so a missing one is only unknown
-        // when the side's own metadata does not prove that every rule dropped nothing.
-        return exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
-    }
-
-    /**
-     * DAR-BE-157. A lookup from the run's other side: the records of that side's read, kept or excluded, whose keyField holds
-     * one of the ids, ignoring case, each with found Y. An id no record holds gets [found: N], but only when absence on
-     * that side is known; otherwise it gets nothing, and a rule reading found N cannot match.
-     */
-    static Map<String, Map> sideAnswers(Map spec, Map lookup, Collection<String> ids) {
-        Map<String, List<String>> idsByValue = ids.groupBy { String id -> id.toUpperCase() }
-        Map<String, Map> found = [:]
-        Closure match = { Map record ->
-            String value = record?.get(lookup.keyField)?.toString()?.trim()?.toUpperCase()
-            idsByValue.get(value)?.each { String id -> if (!found.containsKey(id)) found.put(id, record + [found: "Y"]) }
+        boolean readable = extractFile?.exists() && spec.keyReliable != false
+        if (readable) {
+            Map head = JsonRecordStream.forEachRecord(extractFile, "records") { Map record ->
+                add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
+            }
+            List exclusions = configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
+            Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
+                add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
+            }
+            // Extractors write no sidecar when nothing was excluded, so a missing one is only unknown
+            // when the side's own metadata does not prove that every rule dropped nothing.
+            boolean unknown = exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
+            return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
+                    excludedFirst: excludedFirst, unknownWhenAbsent: unknown]
         }
-        boolean unknown = spec == null || streamSide(spec, match, match)
-        if (!unknown) ids.each { String id -> if (!found.containsKey(id)) found.put(id, [found: "N"]) }
-        return found
+        // No extract, or a key this pass cannot rebuild: nothing can be claimed absent.
+        return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
+                excludedFirst: excludedFirst, unknownWhenAbsent: true]
     }
 
     private static List configuredExclusions(Map metadata) {

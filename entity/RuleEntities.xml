@@ -112,7 +112,7 @@
         <field name="conclusionLookupsJson" type="text-long">
             <description>DAR-BE-118. Records in another system a conclusion rule may read, looked up only for the
                 findings that reach such a rule: a JSON list of {name, subject (FILE_1|FILE_2), idField, systemEnumId,
-                sourceConfigId, keyField}, or {name, subject, idField, fromSide (FILE_1|FILE_2), keyField} (DAR-BE-157) to answer from the run's own read of that side. A finding's subject record names the other record by idField; the connector
+                sourceConfigId, keyField}. A finding's subject record names the other record by idField; the connector
                 of systemEnumId reads sourceConfigId by those ids; the answer whose keyField matches is attached under
                 name (rules read name.field). Blank: no lookups.</description>
         </field>

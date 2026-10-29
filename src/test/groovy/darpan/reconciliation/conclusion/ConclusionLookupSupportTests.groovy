@@ -63,15 +63,6 @@ class ConclusionLookupSupportTests {
         assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([LOOKUP + [parameters: "x"]])) }
     }
 
-    /** DAR-BE-157: a lookup answered from the run's other side names that side instead of a connection. */
-    @Test
-    void aSideLookupNeedsNoConnectionButAKnownSide() {
-        Map side = [name: "nsItemBySku", subject: "FILE_2", idField: "internalName", fromSide: "FILE_1", keyField: "sku"]
-        assertEquals([side], ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([side])))
-        assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([side + [fromSide: "FILE_3"]])) }
-        assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([side - [fromSide: "FILE_1"]])) }
-    }
-
     @Test
     void theAnswerIsAttachedToEveryRecordOfTheSubjectSideByItsId() {
         Map side = [presence: "KEPT", record: [orderNetsuiteId: "81"], records: [[orderNetsuiteId: "81"], [orderNetsuiteId: "82"]]]

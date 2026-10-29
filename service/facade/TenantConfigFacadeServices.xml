@@ -63,4 +63,62 @@
             <if condition="version == null"><return error="true"/></if>
         </actions>
     </service>
+
+    <service verb="preview" noun="TenantConfigRestore" allow-remote="true" authenticate="true" authz-action="view">
+        <description>What restoring one of the active tenant's config versions would do, writing nothing. What the version
+            holds is put back; a statement added since is switched off and a check link added since removed; runs and
+            queries added since are kept. Pass planHash to restore#TenantConfigVersion to apply exactly this.</description>
+        <in-parameters>
+            <parameter name="id" required="true"><description>configVersionId to restore.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="version" type="Map"><description>The version, as get#TenantConfigVersions lists it.</description></parameter>
+            <parameter name="plan" type="Map"><description>{lines: [{kind, ref, label, action (CREATE | UPDATE | UNCHANGED |
+                MAPPED), targetId, changes: [{field, from, to}]}], blocking: [{code, ref, message}], warnings: [{code, ref,
+                message}], counts, switchOff: [{statementId, audit, statement}], unlink: [{statementId, checkId, audit,
+                statement, check}], kept: [{kind, label}]}</description></parameter>
+            <parameter name="planHash"><description>SHA-256 of the version, the importer's plan and the switch-offs and unlinks.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><return error="true" message="Choose a tenant first."/></if>
+            <set field="preview" from="darpan.config.TenantConfigRestoreSupport.preview(ec, tenantId, id)"/>
+            <if condition="preview == null"><return error="true"/></if>
+            <set field="version" from="preview.version"/>
+            <set field="plan" from="preview.plan"/>
+            <set field="planHash" from="preview.planHash"/>
+        </actions>
+    </service>
+
+    <service verb="restore" noun="TenantConfigVersion" allow-remote="true" authenticate="true" transaction-timeout="600">
+        <description>Restores one of the active tenant's config versions by applying exactly the plan preview#TenantConfigRestore
+            showed: the current config is kept as a version first ("Before restoring version N"), then the restore is
+            written and kept as a version ("Restored version N"). One transaction: all of it or none of it. Needs edit
+            access to the tenant.</description>
+        <in-parameters>
+            <parameter name="id" required="true"><description>configVersionId to restore.</description></parameter>
+            <parameter name="planHash" required="true"><description>The planHash of the preview being applied.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="restored" type="Boolean"/>
+            <parameter name="before" type="Map"><description>The version kept before the restore (the version itself when nothing
+                changed since it).</description></parameter>
+            <parameter name="after" type="Map"><description>The version the restore left (the same as before when the restore
+                changed nothing).</description></parameter>
+            <parameter name="plan" type="Map"><description>The plan applied, as preview#TenantConfigRestore answered it.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="restored" from="false"/>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec,
+                    'Your active tenant only has view access, so it cannot restore a config version.')"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="result" from="darpan.config.TenantConfigRestoreSupport.restore(ec, tenantId, id, planHash)"/>
+            <if condition="result == null"><return error="true"/></if>
+            <set field="restored" from="true"/>
+            <set field="before" from="result.before"/>
+            <set field="after" from="result.after"/>
+            <set field="plan" from="result.plan"/>
+        </actions>
+    </service>
 </services>

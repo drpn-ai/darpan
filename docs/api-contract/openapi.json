@@ -561,6 +561,12 @@
                                         "$ref": "#/components/schemas/GetTenantConfigVersionsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/PreviewTenantConfigRestoreRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RestoreTenantConfigVersionRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SnapshotTenantConfigRequest"
                                     }
                                 ],
@@ -746,6 +752,8 @@
                                         "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "#/components/schemas/StoreSourceConfigEndpointAccessRequest",
                                         "facade.TenantConfigFacadeServices.get#TenantConfigVersion": "#/components/schemas/GetTenantConfigVersionRequest",
                                         "facade.TenantConfigFacadeServices.get#TenantConfigVersions": "#/components/schemas/GetTenantConfigVersionsRequest",
+                                        "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "#/components/schemas/PreviewTenantConfigRestoreRequest",
+                                        "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "#/components/schemas/RestoreTenantConfigVersionRequest",
                                         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "#/components/schemas/SnapshotTenantConfigRequest"
                                     }
                                 }
@@ -1299,6 +1307,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetTenantConfigVersionsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PreviewTenantConfigRestoreResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RestoreTenantConfigVersionResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SnapshotTenantConfigResponse"
@@ -25082,6 +25096,194 @@
                     "result"
                 ]
             },
+            "PreviewTenantConfigRestoreParams": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "configVersionId to restore."
+                    }
+                },
+                "required": [
+                    "id"
+                ],
+                "description": "What restoring one of the active tenant's config versions would do, writing nothing. What the version\n            holds is put back; a statement added since is switched off and a check link added since removed; runs and\n            queries added since are kept. Pass planHash to restore#TenantConfigVersion to apply exactly this."
+            },
+            "PreviewTenantConfigRestoreResult": {
+                "type": "object",
+                "properties": {
+                    "version": {
+                        "type": "object",
+                        "description": "The version, as get#TenantConfigVersions lists it."
+                    },
+                    "plan": {
+                        "type": "object",
+                        "description": "{lines: [{kind, ref, label, action (CREATE | UPDATE | UNCHANGED |\n                MAPPED), targetId, changes: [{field, from, to}]}], blocking: [{code, ref, message}], warnings: [{code, ref,\n                message}], counts, switchOff: [{statementId, audit, statement}], unlink: [{statementId, checkId, audit,\n                statement, check}], kept: [{kind, label}]}"
+                    },
+                    "planHash": {
+                        "type": "string",
+                        "description": "SHA-256 of the version, the importer's plan and the switch-offs and unlinks."
+                    }
+                }
+            },
+            "PreviewTenantConfigRestoreRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantConfigFacadeServices.preview#TenantConfigRestore",
+                "x-darpan-method": "facade.TenantConfigFacadeServices.preview#TenantConfigRestore",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantConfigFacadeServices.preview#TenantConfigRestore"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PreviewTenantConfigRestoreParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PreviewTenantConfigRestoreResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantConfigFacadeServices.preview#TenantConfigRestore. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PreviewTenantConfigRestoreResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RestoreTenantConfigVersionParams": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "configVersionId to restore."
+                    },
+                    "planHash": {
+                        "type": "string",
+                        "description": "The planHash of the preview being applied."
+                    }
+                },
+                "required": [
+                    "id",
+                    "planHash"
+                ],
+                "description": "Restores one of the active tenant's config versions by applying exactly the plan preview#TenantConfigRestore\n            showed: the current config is kept as a version first (\"Before restoring version N\"), then the restore is\n            written and kept as a version (\"Restored version N\"). One transaction: all of it or none of it. Needs edit\n            access to the tenant."
+            },
+            "RestoreTenantConfigVersionResult": {
+                "type": "object",
+                "properties": {
+                    "restored": {
+                        "type": "boolean"
+                    },
+                    "before": {
+                        "type": "object",
+                        "description": "The version kept before the restore (the version itself when nothing\n                changed since it)."
+                    },
+                    "after": {
+                        "type": "object",
+                        "description": "The version the restore left (the same as before when the restore\n                changed nothing)."
+                    },
+                    "plan": {
+                        "type": "object",
+                        "description": "The plan applied, as preview#TenantConfigRestore answered it."
+                    }
+                }
+            },
+            "RestoreTenantConfigVersionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
+                "x-darpan-method": "facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantConfigFacadeServices.restore#TenantConfigVersion"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RestoreTenantConfigVersionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RestoreTenantConfigVersionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantConfigFacadeServices.restore#TenantConfigVersion. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RestoreTenantConfigVersionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SnapshotTenantConfigParams": {
                 "type": "object",
                 "properties": {
@@ -25347,6 +25549,8 @@
         "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "StoreSourceConfigEndpointAccess",
         "facade.TenantConfigFacadeServices.get#TenantConfigVersion": "GetTenantConfigVersion",
         "facade.TenantConfigFacadeServices.get#TenantConfigVersions": "GetTenantConfigVersions",
+        "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "PreviewTenantConfigRestore",
+        "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "RestoreTenantConfigVersion",
         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "SnapshotTenantConfig"
     }
 }

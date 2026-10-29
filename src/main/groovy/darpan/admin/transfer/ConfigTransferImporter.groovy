@@ -74,7 +74,8 @@ class ConfigTransferImporter {
      * planHash, idMap: every bundle ref to its target id]; null, with an error and nothing written, when refused.
      */
     static Map<String, Object> apply(def ec, String targetTenantId, Map bundle, Map connectionMap, String expectedPlanHash,
-                                     String sourceInstanceLabel, String secretHandoffToken = null) {
+                                     String sourceInstanceLabel, String secretHandoffToken = null,
+                                     String logServiceName = SERVICE_NAME) {
         Map ctx = analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken)
         Map plan = ctx.plan as Map
         String hash = planHash(targetTenantId, bundle, connectionMap, plan, ctx.handoffFingerprint as String)
@@ -126,7 +127,8 @@ class ConfigTransferImporter {
         records(ctx, "checks").each { Map c -> writeCheck(ctx, c) }
 
         String counts = ACTIONS.collect { "${it} ${plan.counts[it]}" }.join(", ")
-        AdminAuditSupport.record(ec, SERVICE_NAME, "Tenant", targetTenantId,
+        // DAR-BE-160: a tenant's config restore applies through here too, and logs under its own service name.
+        AdminAuditSupport.record(ec, logServiceName ?: SERVICE_NAME, "Tenant", targetTenantId,
                 ("${sourceInstanceLabel ?: '?'}/${bundle.source?.tenantUserGroupId ?: '?'} bundle ${hash.take(12)}: ${counts}" +
                         (ctx.carriesSecrets ? "; credentials filled: ${ctx.filledCount ?: 0}" : "")).toString())
         return [plan: plan, planHash: hash, idMap: ctx.idMap] as Map<String, Object>

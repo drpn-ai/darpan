@@ -177,4 +177,6 @@ facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints
 facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess
 facade.TenantConfigFacadeServices.get#TenantConfigVersion
 facade.TenantConfigFacadeServices.get#TenantConfigVersions
+facade.TenantConfigFacadeServices.preview#TenantConfigRestore
+facade.TenantConfigFacadeServices.restore#TenantConfigVersion
 facade.TenantConfigFacadeServices.snapshot#TenantConfig

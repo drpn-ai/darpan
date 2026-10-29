@@ -29,10 +29,12 @@ class AuditRecheckSupport {
     static final int MAX_KEYS = 1000
 
     /**
-     * sides: [[source, result]] for FILE_1 and FILE_2. readByKey(source, keys) runs the side's extractor by key. Answers what
-     * it read ([keys: side -> count, records: side -> count]), or null when there was nothing to re-check.
+     * sides: [[source, result]] for FILE_1 and FILE_2. readByKey(source, keys) runs the side's extractor by key. onStart is
+     * called once, before anything is read, when there are older findings to re-check (the run's RECHECK step opens there).
+     * Answers what it read ([keys: side -> count, records: side -> count, failure]), or null when there was nothing to re-check.
      */
-    static Map appendOpenFindings(def ec, def automation, List<Map> checks, Map window, List<Map> sides, Closure readByKey) {
+    static Map appendOpenFindings(def ec, def automation, List<Map> checks, Map window, List<Map> sides, Closure readByKey,
+                                  Closure onStart = null) {
         if (!checks || window?.auditRecentReadStartDate == null || !window?.auditPeriod) return null
         List<Map> live = sides.findAll { it.source != null }
         if (!live || live.any { !it.result?.fileLocation } || !live.any { AuditRecentReadSupport.sourceReadsRecentOnly(ec, it.source) }) return null
@@ -40,6 +42,7 @@ class AuditRecheckSupport {
         List<String> ordered = oldestFirstKeys(openFindings(ec, tenantId, checks*.checkId, window.auditPeriod as String))
         Set<String> open = ordered as Set<String>
         if (!open) return null
+        onStart?.call()
         String scopeId = normalize(readField(automation, "compareScopeId"))
         List<Map> plan
         try {
@@ -101,6 +104,20 @@ class AuditRecheckSupport {
             ((Map) ((Map) failing.side).result).recheckFailure = reason
             return [keys: keysRead, records: recordsAdded, millis: System.currentTimeMillis() - started, failure: reason]
         }
+    }
+
+    /**
+     * DAR-BE-156. The RECHECK step's metrics: the systems read again (root codes, as the run page names them), the keys
+     * asked of each side and the records each added; recordCount is the records added in all.
+     */
+    static Map stepMetrics(Map outcome, Map<String, String> systemBySide) {
+        Map<String, Integer> keys = (Map<String, Integer>) (outcome?.keys ?: [:])
+        Map<String, Integer> records = (Map<String, Integer>) (outcome?.records ?: [:])
+        List<String> systems = keys.findAll { side, n -> n > 0 }.collect { side, n -> systemBySide[side] }.findAll { it }.unique()
+        Map metrics = [recordCount: (records.values().sum() ?: 0) as Integer,
+                       metricsJson: JsonOutput.toJson([recheckedSystems: systems, keys: keys, records: records, millis: outcome?.millis])]
+        if (outcome?.failure) metrics.errorMessage = outcome.failure
+        return metrics
     }
 
     /** DAR-BE-156. The findings' first keys, oldest firstFoundDate first (then by key), each once. */

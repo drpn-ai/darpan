@@ -36,6 +36,9 @@ class RunObservability {
     static final String STAGE_RESOLVE       = "RESOLVE"
     static final String STAGE_EXTRACT_FILE1 = "EXTRACT_FILE1"
     static final String STAGE_EXTRACT_FILE2 = "EXTRACT_FILE2"
+    /** DAR-BE-156: an audit run reads its older open findings again by key on each side, after the extracts and before
+     *  the compare that judges them. Only a window with older findings opens it. */
+    static final String STAGE_RECHECK       = "RECHECK"
     static final String STAGE_COMPARE       = "COMPARE"
     /** Finalizes the run: the verified artifact plus the persisted ReconciliationRunResult row.
      *  Sits AFTER verification -- COMPARE materializes the Spark output it needs (the diffs stream
@@ -64,14 +67,16 @@ class RunObservability {
             (STAGE_RESOLVE)         : 1,
             (STAGE_EXTRACT_FILE1)   : 2,
             (STAGE_EXTRACT_FILE2)   : 3,
-            (STAGE_COMPARE)         : 4,
-            (STAGE_VERIFY)          : 5,
-            (STAGE_VERIFY_MISSING)  : 5,
-            (STAGE_VERIFY_EXCHANGE) : 6,
-            (STAGE_VERIFY_RETURNS)  : 7,
-            (STAGE_CONCLUDE)        : 8,
-            (STAGE_WRITE_OUTPUT)    : 9,
-            (STAGE_NOTIFY)          : 10,
+            // DAR-BE-156. darpan-ui's RUN_STAGE_SEQUENCE holds the same order by POSITION: change both together.
+            (STAGE_RECHECK)         : 4,
+            (STAGE_COMPARE)         : 5,
+            (STAGE_VERIFY)          : 6,
+            (STAGE_VERIFY_MISSING)  : 6,
+            (STAGE_VERIFY_EXCHANGE) : 7,
+            (STAGE_VERIFY_RETURNS)  : 8,
+            (STAGE_CONCLUDE)        : 9,
+            (STAGE_WRITE_OUTPUT)    : 10,
+            (STAGE_NOTIFY)          : 11,
     ]
 
     static boolean isTerminalStatus(String status) { TERMINAL_STATUSES.contains(status) }

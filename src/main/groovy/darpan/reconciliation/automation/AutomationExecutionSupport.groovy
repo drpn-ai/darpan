@@ -560,12 +560,20 @@ class AutomationExecutionSupport {
                 // recent start nor the other side's), which is what a full read would hold, restricted to the keys.
                 Map<String, Object> recheckWindow = new LinkedHashMap<String, Object>(window) +
                         [auditRecentReadStartDate: null, auditOtherSideStartDate: null] as Map<String, Object>
-                AuditRecheckSupport.appendOpenFindings(ec, automation, auditChecks, window,
-                        [[source: file1Source, result: file1Result], [source: file2Source, result: file2Result]]) { def source, List<String> keys ->
+                Map recheck = AuditRecheckSupport.appendOpenFindings(ec, automation, auditChecks, window,
+                        [[source: file1Source, result: file1Result], [source: file2Source, result: file2Result]], { def source, List<String> keys ->
                     Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys, lookupWithinWindow: true,
                             sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
                                     DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-recheck")]
                     return normalizeSourceResult(extract.call(ec, automation, source, recheckWindow, byKey), source)
+                }, { -> openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_RECHECK) })
+                if (openStep != null) {
+                    // DAR-BE-156: the run page's own row for the re-check. A failed re-check fails its step, not the run: the
+                    // recent read is still compared, and the check's reason says the older findings were not re-checked.
+                    RunObservability.endStep(ec, openStep, recheck?.failure ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                            AuditRecheckSupport.stepMetrics(recheck, [FILE_1: AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId"))),
+                                                                      FILE_2: AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId")))]))
+                    openStep = null
                 }
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
                 // ever reaching the reconcile heartbeat, so this is the last one it gets before its own

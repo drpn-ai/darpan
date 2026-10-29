@@ -118,6 +118,23 @@ class AuditRecheckSupportTests {
     }
 
     @Test
+    void theRunsReCheckStepNamesTheSystemsReadAgainAndWhatTheyAdded() {
+        // DAR-BE-156: the run page's RECHECK row. NetSuite already held every key here, so only HotWax is named.
+        Map ok = AuditRecheckSupport.stepMetrics([keys: [FILE_1: 1294, FILE_2: 0], records: [FILE_1: 2241, FILE_2: 0], millis: 24774],
+                [FILE_1: "OMS", FILE_2: "NETSUITE"])
+        assertEquals(2241, ok.recordCount)
+        assertEquals(null, ok.errorMessage)
+        Map json = (Map) new groovy.json.JsonSlurper().parseText(ok.metricsJson as String)
+        assertEquals(["OMS"], json.recheckedSystems)
+        assertEquals([FILE_1: 1294, FILE_2: 0], json.keys)
+
+        Map failed = AuditRecheckSupport.stepMetrics([keys: [FILE_1: 1000], records: [:], failure: "Older findings were not re-checked: timed out"],
+                [FILE_1: "OMS", FILE_2: "NETSUITE"])
+        assertEquals("Older findings were not re-checked: timed out", failed.errorMessage)
+        assertEquals(0, failed.recordCount, "nothing is appended when a read fails")
+    }
+
+    @Test
     void aSideWhoseKeyCannotBeReadIsAFailureNotASkip() {
         File oms = extract("oms.json", [])
         List<Map> plan = [[side: [result: [:]], fileSide: "FILE_1", keyField: null, file: oms]]

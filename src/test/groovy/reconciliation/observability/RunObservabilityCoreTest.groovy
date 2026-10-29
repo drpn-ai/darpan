@@ -25,24 +25,27 @@ class RunObservabilityCoreTest {
     @Test
     void stageSequenceIsOrdered() {
         assertEquals(1, RunObservability.stageSequenceOf(RunObservability.STAGE_RESOLVE))
-        assertEquals(4, RunObservability.stageSequenceOf(RunObservability.STAGE_COMPARE))
+        // DAR-BE-156: an audit's re-check of its older findings reads both sides again by key, so it follows the
+        // extracts and precedes the compare that judges what it appended.
+        assertEquals(4, RunObservability.stageSequenceOf(RunObservability.STAGE_RECHECK))
+        assertEquals(5, RunObservability.stageSequenceOf(RunObservability.STAGE_COMPARE))
         // VERIFY sits BEFORE WRITE_OUTPUT: the compare stage materializes its own Spark output and
         // the verification passes recheck it, so the artifact WRITE_OUTPUT finalizes -- and the run
         // row it persists -- is the verified one. A timeline that wrote before verifying read as if
         // the results were settled while they were still being corrected.
         // One code per verification pass, in the order they execute. They shared a single VERIFY
         // code until a run that performed two of them showed two byte-identical timeline rows.
-        assertEquals(5, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_MISSING))
-        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_EXCHANGE))
-        assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_RETURNS))
+        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_MISSING))
+        assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_EXCHANGE))
+        assertEquals(8, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_RETURNS))
         // DAR-UI-044: CONCLUDE reads the VERIFIED findings, so it follows the last verification pass,
         // and precedes WRITE_OUTPUT so the persisted artifact is the concluded one.
-        assertEquals(8, RunObservability.stageSequenceOf(RunObservability.STAGE_CONCLUDE))
-        assertEquals(9, RunObservability.stageSequenceOf(RunObservability.STAGE_WRITE_OUTPUT))
-        assertEquals(10, RunObservability.stageSequenceOf(RunObservability.STAGE_NOTIFY))
+        assertEquals(9, RunObservability.stageSequenceOf(RunObservability.STAGE_CONCLUDE))
+        assertEquals(10, RunObservability.stageSequenceOf(RunObservability.STAGE_WRITE_OUTPUT))
+        assertEquals(11, RunObservability.stageSequenceOf(RunObservability.STAGE_NOTIFY))
         // Runs recorded before the split stored the retired code; it keeps a sequence so their
         // stored rows still sort into the same slot rather than collapsing to 0.
-        assertEquals(5, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY))
+        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY))
         assertEquals(0, RunObservability.stageSequenceOf("UNKNOWN_STAGE"))
     }
 }

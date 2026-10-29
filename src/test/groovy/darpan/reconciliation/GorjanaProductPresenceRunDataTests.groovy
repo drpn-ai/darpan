@@ -165,7 +165,7 @@ class GorjanaProductPresenceRunDataTests {
                 fixOf("MISSING_FROM_FILE_2", kept(item("42808", "Y")), ABSENT))
         Map nonSellable = product("42808", "OWN") + [sellable: "N", notSellableReason: "discontinued"]
         String notSellable = fixOf("MISSING_FROM_FILE_2", kept(item("42808", "Y")), excluded(nonSellable))
-        assertEquals("NetSuite item 42808 (SKU-42808) was used in NetSuite this year, but HotWax product 10056 is discontinued: make it sellable in HotWax, or inactive in NetSuite.", notSellable)
+        assertEquals("NetSuite item 42808 (SKU-42808) is new or was used for HotWax this year, but HotWax product 10056 is discontinued: make it sellable in HotWax, or inactive in NetSuite.", notSellable)
         [fixOf("MISSING_FROM_FILE_1", excluded(item("30000", "N")), kept(product("30000", "OWN"))),
          fixOf("MISSING_FROM_FILE_1", ABSENT, kept(product("99999", "OWN"))),
          fixOf("MISSING_FROM_FILE_2", kept(item("34838", "Y") + [itemType: "NonInvtPart"]), ABSENT)].each {

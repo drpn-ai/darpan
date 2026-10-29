@@ -112,6 +112,12 @@ class GorjanaProductPresenceRunDataTests {
     @Test
     void eachGapTakesItsCause() {
         assertEquals("CONC_PRODUCT_NOT_IN_HOTWAX", conclude("MISSING_FROM_FILE_2", kept(item("42808", "Y")), ABSENT), "live, not in HotWax")
+        // Aditi 2026-10-29: "Active Status: Discontinued for SKU 193-102-G in NS ... not expected" in HotWax (16 of the 53).
+        assertEquals("CONC_PRODUCT_DISCONTINUED_IN_NS", conclude("MISSING_FROM_FILE_2", kept(item("12777", "Y") + [activeStatus: "Discontinued"]), ABSENT))
+        assertEquals("CONC_PRODUCT_DISCONTINUED_IN_NS", conclude("MISSING_FROM_FILE_2", kept(item("856", "Y") + [activeStatus: "Discontinued"]),
+                excluded(product("856", "OWN") + [sellable: "N", notSellableReason: "DIGITAL_GOOD"])), "discontinued in NetSuite wins over not sellable in HotWax")
+        assertEquals("CONC_PRODUCT_NOT_IN_HOTWAX", conclude("MISSING_FROM_FILE_2", kept(item("43649", "Y") + [activeStatus: "Active: Sell-Down"]), ABSENT),
+                "a sell-down item is still sold")
         // A non-inventory item HotWax lacks is NetSuite's own (POS Tax Variance, Warranties Variance, donations): expected.
         assertEquals("CONC_PRODUCT_NS_ONLY_NON_INVENTORY", conclude("MISSING_FROM_FILE_2", kept(item("34838", "Y") + [itemType: "NonInvtPart"]), ABSENT))
         assertEquals("CONC_PRODUCT_QUIET_IN_NS", conclude("MISSING_FROM_FILE_1", excluded(item("30000", "N")), kept(product("30000", "OWN"))),

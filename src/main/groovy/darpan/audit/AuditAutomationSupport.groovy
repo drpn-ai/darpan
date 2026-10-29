@@ -315,8 +315,12 @@ class AuditAutomationSupport {
             return [systemEnumId: systemEnumId, statusEnumId: "AUDSR_FAILED", recordCount: null, readStamp: null,
                     reason: failureReason ?: "The read did not finish."]
         }
-        return [systemEnumId: systemEnumId, statusEnumId: "AUDSR_COMPLETE",
-                recordCount: result.recordCount != null ? (result.recordCount as Long) : null, readStamp: now, reason: null]
+        // DAR-BE-156: a read whose older findings could not be read again by key is partial: the check closes nothing
+        // and the board says why, where a log line used to be all there was.
+        String recheckFailure = normalize(result.recheckFailure)
+        return [systemEnumId: systemEnumId, statusEnumId: recheckFailure ? "AUDSR_PARTIAL" : "AUDSR_COMPLETE",
+                recordCount: result.recordCount != null ? (result.recordCount as Long) : null, readStamp: now,
+                reason: recheckFailure ? truncate(recheckFailure, REASON_MAX) : null]
     }
 
     /**

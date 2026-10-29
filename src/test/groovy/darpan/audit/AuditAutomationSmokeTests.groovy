@@ -289,6 +289,19 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aReCheckThatCouldNotFinishMakesTheCheckPartialAndSaysWhy() {
+        // DAR-BE-156: gorjana prod 2026-10-29. R1's re-check of 1,294 older orders timed out on NetSuite and only a log line
+        // said so; the check read "ran" and 2,193 findings sat unexamined. Now the read is partial and the board says why.
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-14", [], []), omsSource, nsSource,
+                [recordCount: 4], [recordCount: 9, recheckFailure: "Older findings were not re-checked: NetSuite SuiteQL page at offset 0 failed"],
+                [diffLocation: diff("d14", [])], null)
+        Map run = checkRun("2026-10-14")
+        assertEquals("AUDCS_PARTIAL", run.statusEnumId)
+        assertEquals("The NetSuite read was partial: Older findings were not re-checked: NetSuite SuiteQL page at offset 0 failed.", run.reason)
+        assertEquals(["AUDSR_COMPLETE", "AUDSR_PARTIAL"], reads(run.checkRunId as String)*.statusEnumId)
+    }
+
+    @Test
     void aCompositeKeyReadsAsOrderSlashItemButStaysRawForClosing() {
         Map check = [checkId: "X", headlineTemplate: "Item {recordKey} is not billed", file1RecordType: "orderItem"]
         Map row = [type: "MISSING_IN_FILE_2", id: "M1137118\u001F01", note: "missing"]

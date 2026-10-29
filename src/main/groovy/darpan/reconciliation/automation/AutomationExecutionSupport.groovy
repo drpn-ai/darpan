@@ -555,14 +555,17 @@ class AutomationExecutionSupport {
                     openStep = null
                     stampExtract(ec, execution, "file2", file2Result)
                 }
-                // DAR-BE-119: the audit's open findings the recent read did not reach, read again by key on both sides and
-                // appended, so they close or are concluded again from today's facts.
+                // DAR-BE-119: the audit's open findings the recent read did not reach, read again by key and appended, so they
+                // close or are concluded again from today's facts. DAR-BE-156: within the check's whole window (neither the
+                // recent start nor the other side's), which is what a full read would hold, restricted to the keys.
+                Map<String, Object> recheckWindow = new LinkedHashMap<String, Object>(window) +
+                        [auditRecentReadStartDate: null, auditOtherSideStartDate: null] as Map<String, Object>
                 AuditRecheckSupport.appendOpenFindings(ec, automation, auditChecks, window,
                         [[source: file1Source, result: file1Result], [source: file2Source, result: file2Result]]) { def source, List<String> keys ->
-                    Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys,
+                    Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys, lookupWithinWindow: true,
                             sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
                                     DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-recheck")]
-                    return normalizeSourceResult(extract.call(ec, automation, source, window, byKey), source)
+                    return normalizeSourceResult(extract.call(ec, automation, source, recheckWindow, byKey), source)
                 }
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
                 // ever reaching the reconcile heartbeat, so this is the last one it gets before its own
@@ -2042,6 +2045,11 @@ class AutomationExecutionSupport {
             serviceParams.lookupKeyField = AuditRecheckSupport.firstKeyField(ec,
                     normalize(readField(automation, "compareScopeId")), normalize(readField(source, "fileSide")))
             if (!serviceParams.lookupKeyField) throw new IllegalStateException("${readField(source, 'fileSide')} has no key to read by")
+            // DAR-BE-156: a re-check keeps the window too, where the extractor can (NetSuite); one reading by primary key
+            // (the OMS orderId) needs none.
+            if (params?.lookupWithinWindow && ec.service.getServiceDefinition(serviceName)?.inParameterNameList?.contains("lookupWithinWindow")) {
+                serviceParams.lookupWithinWindow = true
+            }
         }
 
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)

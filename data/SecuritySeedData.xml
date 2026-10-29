@@ -364,6 +364,12 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.rule.TenantConclusion"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-160 — a tenant's config versions. The services also name the tenant explicitly (the filter is skipped
+         when authz is disabled). -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_CONFIG_VERSION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.config.TenantConfigVersion"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER"

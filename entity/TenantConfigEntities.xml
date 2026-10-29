@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-160 phase A. A tenant's audit config (audits, statements, checks, runs, queries, conclusion codes, connections)
+  kept as versions in the database: the source of truth that replaces tenant data files in the product repo. The pack is
+  the DAR-ADMIN-006 transfer bundle of the whole tenant, so a version can later be compared, restored or moved with the
+  same code /transfer uses. Secrets never enter a pack.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="TenantConfigVersion" package="darpan.config" cache="never">
+        <description>One immutable version of a tenant's audit config. Written only when the config changed since the
+            tenant's latest version (contentHash), and chained to it (parentVersionId).</description>
+        <field name="configVersionId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="versionSeq" type="number-integer" not-null="true">
+            <description>1, 2, 3... per tenant; unique with the tenant.</description></field>
+        <field name="parentVersionId" type="id"><description>The tenant's version this one follows; empty for the first.</description></field>
+        <field name="contentHash" type="text-medium" not-null="true">
+            <description>Hex SHA-256 of the pack with map keys sorted and the source block left out.</description></field>
+        <field name="bundleVersion" type="number-integer" not-null="true">
+            <description>TransferSpecs.BUNDLE_VERSION the pack was written in, for migrations when the format changes.</description></field>
+        <field name="packJson" type="text-very-long" not-null="true">
+            <description>The whole-tenant transfer bundle as JSON: refs instead of ids, no secrets.</description></field>
+        <field name="countsJson" type="text-medium">
+            <description>{audits, statements, checks, runs, queries, conclusionCodes, connections}: what the pack holds.</description></field>
+        <field name="changeSource" type="text-short" not-null="true">
+            <description>What wrote it: MANUAL (a person asked), later SETTINGS_SAVE, AGENT_APPLY, IMPORT, RESTORE.</description></field>
+        <field name="reasonText" type="text-medium"><description>Why, in the person's words.</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time" not-null="true"/>
+
+        <relationship type="one" title="Tenant" related="moqui.security.UserGroup" short-alias="tenant">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one-nofk" title="Parent" related="darpan.config.TenantConfigVersion" short-alias="parent">
+            <key-map field-name="parentVersionId" related-field-name="configVersionId"/>
+        </relationship>
+        <relationship type="one-nofk" title="CreatedBy" related="moqui.security.UserAccount" short-alias="createdBy">
+            <key-map field-name="createdByUserId" related-field-name="userId"/>
+        </relationship>
+
+        <index name="TENANT_CONFIG_VERSION_SEQ" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="versionSeq"/>
+        </index>
+    </entity>
+</entities>

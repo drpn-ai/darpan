@@ -553,6 +553,15 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetTenantConfigVersionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetTenantConfigVersionsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SnapshotTenantConfigRequest"
                                     }
                                 ],
                                 "discriminator": {
@@ -734,7 +743,10 @@
                                         "facade.SlackFacadeServices.list#SlackChannels": "#/components/schemas/ListSlackChannelsRequest",
                                         "facade.SlackFacadeServices.save#SlackBotToken": "#/components/schemas/SaveSlackBotTokenRequest",
                                         "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "#/components/schemas/ListSourceConfigEndpointsRequest",
-                                        "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "#/components/schemas/StoreSourceConfigEndpointAccessRequest"
+                                        "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "#/components/schemas/StoreSourceConfigEndpointAccessRequest",
+                                        "facade.TenantConfigFacadeServices.get#TenantConfigVersion": "#/components/schemas/GetTenantConfigVersionRequest",
+                                        "facade.TenantConfigFacadeServices.get#TenantConfigVersions": "#/components/schemas/GetTenantConfigVersionsRequest",
+                                        "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "#/components/schemas/SnapshotTenantConfigRequest"
                                     }
                                 }
                             }
@@ -1281,6 +1293,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetTenantConfigVersionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetTenantConfigVersionsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SnapshotTenantConfigResponse"
                                         }
                                     ]
                                 }
@@ -24896,6 +24917,253 @@
                     "jsonrpc",
                     "result"
                 ]
+            },
+            "GetTenantConfigVersionParams": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "configVersionId."
+                    }
+                },
+                "required": [
+                    "id"
+                ],
+                "description": "One of the active tenant's config versions, with its pack (the whole-tenant transfer bundle)."
+            },
+            "GetTenantConfigVersionResult": {
+                "type": "object",
+                "properties": {
+                    "version": {
+                        "type": "object",
+                        "description": "The list's fields plus pack."
+                    }
+                }
+            },
+            "GetTenantConfigVersionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantConfigFacadeServices.get#TenantConfigVersion",
+                "x-darpan-method": "facade.TenantConfigFacadeServices.get#TenantConfigVersion",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantConfigFacadeServices.get#TenantConfigVersion"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTenantConfigVersionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTenantConfigVersionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantConfigFacadeServices.get#TenantConfigVersion. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTenantConfigVersionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetTenantConfigVersionsParams": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "At most 500."
+                    }
+                },
+                "description": "The active tenant's config versions, newest first, without their packs."
+            },
+            "GetTenantConfigVersionsResult": {
+                "type": "object",
+                "properties": {
+                    "versions": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{id, seq, parentId, hash, bundleVersion, counts, changeSource,\n                reason, createdBy, createdDate}]"
+                    }
+                }
+            },
+            "GetTenantConfigVersionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantConfigFacadeServices.get#TenantConfigVersions",
+                "x-darpan-method": "facade.TenantConfigFacadeServices.get#TenantConfigVersions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantConfigFacadeServices.get#TenantConfigVersions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTenantConfigVersionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTenantConfigVersionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantConfigFacadeServices.get#TenantConfigVersions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTenantConfigVersionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SnapshotTenantConfigParams": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Why, in the person's words."
+                    }
+                },
+                "description": "Keeps the active tenant's audit config as a new version when it changed since the latest one. Needs\n            edit access to the tenant."
+            },
+            "SnapshotTenantConfigResult": {
+                "type": "object",
+                "properties": {
+                    "created": {
+                        "type": "boolean",
+                        "description": "False when nothing changed; version is then the latest."
+                    },
+                    "version": {
+                        "type": "object",
+                        "description": "{id, seq, parentId, hash, bundleVersion, counts: {audits, statements,\n                checks, runs, queries, conclusionCodes, connections}, changeSource, reason, createdBy, createdDate}"
+                    }
+                }
+            },
+            "SnapshotTenantConfigRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantConfigFacadeServices.snapshot#TenantConfig",
+                "x-darpan-method": "facade.TenantConfigFacadeServices.snapshot#TenantConfig",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantConfigFacadeServices.snapshot#TenantConfig"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SnapshotTenantConfigParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SnapshotTenantConfigResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantConfigFacadeServices.snapshot#TenantConfig. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SnapshotTenantConfigResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
             }
         }
     },
@@ -25076,6 +25344,9 @@
         "facade.SlackFacadeServices.list#SlackChannels": "ListSlackChannels",
         "facade.SlackFacadeServices.save#SlackBotToken": "SaveSlackBotToken",
         "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "ListSourceConfigEndpoints",
-        "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "StoreSourceConfigEndpointAccess"
+        "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "StoreSourceConfigEndpointAccess",
+        "facade.TenantConfigFacadeServices.get#TenantConfigVersion": "GetTenantConfigVersion",
+        "facade.TenantConfigFacadeServices.get#TenantConfigVersions": "GetTenantConfigVersions",
+        "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "SnapshotTenantConfig"
     }
 }

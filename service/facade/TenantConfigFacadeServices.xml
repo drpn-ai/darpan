@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-160 phase A. The ACTIVE tenant's audit config kept as versions (darpan.config.TenantConfigVersion): keep one now,
+  list them, read one. Every read and write names the session's active tenant; another tenant's version reads as not
+  found. The work is darpan.config.TenantConfigVersionSupport.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="snapshot" noun="TenantConfig" allow-remote="true" authenticate="true">
+        <description>Keeps the active tenant's audit config as a new version when it changed since the latest one. Needs
+            edit access to the tenant.</description>
+        <in-parameters>
+            <parameter name="reason"><description>Why, in the person's words.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="created" type="Boolean"><description>False when nothing changed; version is then the latest.</description></parameter>
+            <parameter name="version" type="Map"><description>{id, seq, parentId, hash, bundleVersion, counts: {audits, statements,
+                checks, runs, queries, conclusionCodes, connections}, changeSource, reason, createdBy, createdDate}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="created" from="false"/>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec,
+                    'Your active tenant only has view access, so it cannot keep a config version.')"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="result" from="darpan.config.TenantConfigVersionSupport.snapshot(ec, tenantId, reason)"/>
+            <if condition="result == null"><return error="true"/></if>
+            <set field="created" from="result.created"/>
+            <set field="version" from="result.version"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="TenantConfigVersions" allow-remote="true" authenticate="true" authz-action="view">
+        <description>The active tenant's config versions, newest first, without their packs.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer" default-value="50"><description>At most 500.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="versions" type="List"><description>[{id, seq, parentId, hash, bundleVersion, counts, changeSource,
+                reason, createdBy, createdDate}]</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="versions" from="[]"/>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><return error="true" message="Choose a tenant first."/></if>
+            <set field="versions" from="darpan.config.TenantConfigVersionSupport.versions(ec, tenantId, limit)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="TenantConfigVersion" allow-remote="true" authenticate="true" authz-action="view">
+        <description>One of the active tenant's config versions, with its pack (the whole-tenant transfer bundle).</description>
+        <in-parameters>
+            <parameter name="id" required="true"><description>configVersionId.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="version" type="Map"><description>The list's fields plus pack.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><return error="true" message="Choose a tenant first."/></if>
+            <set field="version" from="darpan.config.TenantConfigVersionSupport.version(ec, tenantId, id)"/>
+            <if condition="version == null"><return error="true"/></if>
+        </actions>
+    </service>
+</services>

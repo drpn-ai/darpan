@@ -175,3 +175,6 @@ facade.SlackFacadeServices.list#SlackChannels
 facade.SlackFacadeServices.save#SlackBotToken
 facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints
 facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess
+facade.TenantConfigFacadeServices.get#TenantConfigVersion
+facade.TenantConfigFacadeServices.get#TenantConfigVersions
+facade.TenantConfigFacadeServices.snapshot#TenantConfig

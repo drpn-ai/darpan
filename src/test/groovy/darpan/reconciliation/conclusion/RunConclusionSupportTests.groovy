@@ -407,9 +407,11 @@ class RunConclusionSupportTests {
 
     @Test
     void hiddenRowsComeOffTheRunsStoredCounts() {
-        Map counts = [differenceCount: 10, onlyInFile1Count: 6, onlyInFile2Count: 4, missingInFile2Count: 6, missingInFile1Count: 4]
+        Map counts = [differenceCount: 10, onlyInFile1Count: 6, onlyInFile2Count: 4, missingInFile2Count: 6, missingInFile1Count: 4,
+                      missingObjectDifferenceCount: 10]
         RunConclusionSupport.applyHidden(counts, [MISSING_FROM_FILE_2: 5, MISSING_FROM_FILE_1: 1])
-        assertEquals([differenceCount: 4, onlyInFile1Count: 1, onlyInFile2Count: 3, missingInFile2Count: 1, missingInFile1Count: 3], counts)
+        assertEquals([differenceCount: 4, onlyInFile1Count: 1, onlyInFile2Count: 3, missingInFile2Count: 1, missingInFile1Count: 3,
+                      missingObjectDifferenceCount: 4], counts, "the run result page reads missingObjectDifferenceCount")
         Map untouched = [differenceCount: 3]
         RunConclusionSupport.applyHidden(untouched, null)
         assertEquals([differenceCount: 3], untouched)

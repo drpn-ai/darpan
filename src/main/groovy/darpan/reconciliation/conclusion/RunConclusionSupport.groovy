@@ -67,6 +67,8 @@ class RunConclusionSupport {
         minus("missingInFile2Count", onlyIn1)
         minus("onlyInFile2Count", onlyIn2)
         minus("missingInFile1Count", onlyIn2)
+        // The run result page shows this one (a hidden row is a missing-object row by construction).
+        minus("missingObjectDifferenceCount", onlyIn1 + onlyIn2)
     }
 
     private static Map concludeWith(ConclusionTreeEngine engine, List<Map> rules, Map args) {

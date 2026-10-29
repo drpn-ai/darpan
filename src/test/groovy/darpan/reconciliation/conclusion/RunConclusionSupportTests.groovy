@@ -176,6 +176,46 @@ class RunConclusionSupportTests {
         assertEquals(2, result.counts.C_BACKORDER)
     }
 
+    /**
+     * DAR-BE-157 (Aditi on the gorjana product run's "No NS id": a product whose SKU NetSuite does not have is not expected to
+     * carry a NetSuite id). A lookup from the run's other side answers from that side's own read, kept and excluded records
+     * alike, by a field instead of the compare key, ignoring case. A miss reads found N; a side whose excluded records are
+     * not all known answers nothing, so no rule can claim the SKU is absent.
+     */
+    @Test
+    void aSideLookupAnswersFromTheOtherSidesReadByAField() {
+        List rules = [
+                [conclusionEnumId: "C_NOT_IN_NS", label: "Not a NetSuite item", appliesToBucket: "MISSING_FROM_FILE_2",
+                 conditions: [cond(subject: "FILE_1", fieldExpression: "nsItemBySku.found", operator: "IN", conditionValues: ["N"],
+                                   checkLabel: "NetSuite has no item with the SKU")]],
+                [conclusionEnumId: "C_NO_NS_ID", label: "No NetSuite id", appliesToBucket: "MISSING_FROM_FILE_2",
+                 conditions: [cond(subject: "FILE_1", fieldExpression: "nsItemBySku.id", operator: "NOT_IN", conditionValues: ["-"],
+                                   checkLabel: "NetSuite item with the SKU")]]]
+        Closure row = { String key, String sku -> [diffType: "missing_in_${FILE2}".toString(), primaryId: key, presentIn: FILE1,
+                missingIn: FILE2, data: JsonOutput.toJson([nsKey: key, internalName: sku])] }
+        Closure conclude = { File ns ->
+            File doc = writeDiffDocument([row("P1", "hg-neck"), row("P2", "2210-013a-G-OLD"), row("P3", "052-0161-G"), row("P4", null)])
+            Map a = args(doc, rules, ns)
+            a.file1 = [extractFile: extract("oms-p-${System.nanoTime()}.json", []), keyFields: ["nsKey"], idNormalizer: null, evidence: HOTWAX_EVIDENCE]
+            a.file2 = [extractFile: ns, keyFields: ["id"], idNormalizer: null, evidence: NETSUITE_EVIDENCE]
+            a.lookups = [[name: "nsItemBySku", subject: "FILE_1", idField: "internalName", fromSide: "FILE_2", keyField: "sku"]]
+            a.fetchLookup = { Map l, List<String> ids -> throw new AssertionError("a side lookup never calls a connection") }
+            RunConclusionSupport.concludeRun(a)
+            return ((List<Map>) parse(doc).differences).collectEntries { [(it.primaryId): it.conclusion] }
+        }
+
+        File ns = extract("ns-items.json", [[id: "30345", sku: "HG-NECK"]], [configuredExclusions: [[sequenceNum: 1]]])
+        sidecar(ns, [[id: "18", sku: "052-0161-G"]])
+        Map byKey = conclude(ns)
+        assertEquals(["C_NO_NS_ID", "C_NOT_IN_NS", "C_NO_NS_ID", "C_NO_NS_ID"], ["P1", "P2", "P3", "P4"].collect { byKey[it].code },
+                "in NetSuite (any case), absent, screened out by a filter yet read, no SKU at all")
+        assertEquals("30345", ((List<Map>) byKey.P1.checks)[0].value)
+        assertEquals("18", ((List<Map>) byKey.P3.checks)[0].value)
+
+        File unknown = extract("ns-items-unknown.json", [[id: "30345", sku: "HG-NECK"]], [configuredExclusions: [[sequenceNum: 1]]])
+        assertEquals("C_NO_NS_ID", conclude(unknown).P2.code, "no sidecar: the filtered-out items are unknown, so absence is not claimed")
+    }
+
     /** Aditi on R1 F-100781: the NetSuite line the run screened out is the finding's NetSuite record; its ids ride on the row. */
     @Test
     void aFoundOtherSideRecordsIdsRideOnTheRow() {

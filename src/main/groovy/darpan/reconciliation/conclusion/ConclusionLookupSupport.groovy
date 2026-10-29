@@ -13,10 +13,16 @@ import groovy.json.JsonSlurper
  * name, each id once. Siblings are tried in sequence and the first match wins, so a finding reached rule L when L's
  * parent is on its path (or L is a root) and it matched no sibling of L before L. A finding that matched L itself is
  * asked too: it matched on a blank read, and the answer may change it. Pure: no Moqui.
+ *
+ * DAR-BE-157: a lookup may name fromSide (FILE_1|FILE_2) instead of a connection: it is answered from the run's own read of
+ * that side, kept and excluded records alike, by keyField ignoring case (is this HotWax SKU a NetSuite item?), and every id
+ * it answers carries found Y or N (RunConclusionSupport.sideAnswers).
  */
 class ConclusionLookupSupport {
 
-    static final List<String> REQUIRED = ["name", "subject", "idField", "systemEnumId", "sourceConfigId", "keyField"].asImmutable()
+    static final List<String> REQUIRED = ["name", "subject", "idField", "keyField"].asImmutable()
+    static final List<String> CONNECTION = ["systemEnumId", "sourceConfigId"].asImmutable()
+    static final List<String> SIDES = ["FILE_1", "FILE_2"].asImmutable()
 
     static List<Map> parse(Object raw) {
         String text = raw?.toString()?.trim()
@@ -26,9 +32,12 @@ class ConclusionLookupSupport {
         return ((List) parsed).collect { Object o ->
             if (!(o instanceof Map)) throw new IllegalArgumentException("A conclusion lookup must be an object, got: ${o}")
             Map lookup = (Map) o
-            List<String> missing = REQUIRED.findAll { !lookup.get(it)?.toString()?.trim() }
+            List<String> missing = (REQUIRED + (lookup.fromSide != null ? [] : CONNECTION)).findAll { !lookup.get(it)?.toString()?.trim() }
             if (missing) throw new IllegalArgumentException("Conclusion lookup ${lookup.name ?: ''} needs ${missing.join(', ')}")
-            if (!(lookup.subject in ["FILE_1", "FILE_2"])) throw new IllegalArgumentException("A lookup's subject is FILE_1 or FILE_2, got: ${lookup.subject}")
+            if (!(lookup.subject in SIDES)) throw new IllegalArgumentException("A lookup's subject is FILE_1 or FILE_2, got: ${lookup.subject}")
+            if (lookup.fromSide != null && !(lookup.fromSide in SIDES)) {
+                throw new IllegalArgumentException("A lookup's fromSide is FILE_1 or FILE_2, got: ${lookup.fromSide}")
+            }
             if (!(lookup.name ==~ /[A-Za-z][A-Za-z0-9_]{0,59}/)) throw new IllegalArgumentException("A lookup's name is one word, got: ${lookup.name}")
             if (lookup.parameters != null && !(lookup.parameters instanceof Map)) {
                 throw new IllegalArgumentException("A lookup's parameters are an object of extract options, got: ${lookup.parameters}")

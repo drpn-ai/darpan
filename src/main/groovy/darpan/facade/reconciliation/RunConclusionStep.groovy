@@ -197,6 +197,8 @@ class RunConclusionStep {
                     appliesToBucket  : normalize(row.appliesToBucket),
                     questionText     : normalize(row.questionText),
                     suggestedFilter  : parseJson(row.suggestedFilterJson),
+                    // DAR-BE-157: HIDE drops the rows this rule concludes from the result.
+                    outcome          : row.containsKey("outcome") ? normalize(row.outcome) : null,
                     conditions       : conditionsBySeq.get(row.sequenceNum as int) ?: []]
         }
     }

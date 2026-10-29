@@ -386,4 +386,32 @@ class RunConclusionSupportTests {
         Map concluded = (Map) ((Map) ((List) parse(doc).differences)[0]).conclusion
         assertEquals("DUP", concluded.code)
     }
+
+    // DAR-BE-157 (Aditi 2026-10-29: expected rows should not show in the product run): a rule whose outcome is HIDE drops
+    // the rows it concludes from the result, takes them off the summary's totals, and says what it hid.
+    @Test
+    void aHideRuleDropsItsRowsAndSaysWhatItHid() {
+        List rules = [BACKORDER_RULES[0], NEVER_REACHED_RULES[0] + [outcome: "HIDE"]]
+        File nsExtract = extract("ns-hide.json", [])
+        sidecar(nsExtract, [[orderId: "O1", orderLineId: "1", quantityBackordered: "2"]])
+        File doc = writeDiffDocument([missingRow("O1${SEP}1", FILE1, FILE2), missingRow("O2${SEP}1", FILE1, FILE2)],
+                [totalDifferences: 2, onlyInFile1Count: 2, onlyInFile2Count: 0])
+        Map out = RunConclusionSupport.concludeRun(args(doc, rules, nsExtract))
+        Map d = (Map) new JsonSlurper().parse(doc)
+        assertEquals(["O1${SEP}1".toString()], d.differences*.primaryId)
+        assertEquals([totalDifferences: 1, onlyInFile1Count: 1, onlyInFile2Count: 0], d.summary.subMap(["totalDifferences", "onlyInFile1Count", "onlyInFile2Count"]))
+        assertEquals([[code: "CONC_NEVER_REACHED_NS", label: "Never reached NetSuite", count: 1]], d.summary.conclusions.hidden)
+        assertFalse(d.summary.conclusions.counts*.code.contains("CONC_NEVER_REACHED_NS"), "a hidden cause is not among the shown ones")
+        assertEquals([MISSING_FROM_FILE_2: 1], out.hiddenByBucket)
+    }
+
+    @Test
+    void hiddenRowsComeOffTheRunsStoredCounts() {
+        Map counts = [differenceCount: 10, onlyInFile1Count: 6, onlyInFile2Count: 4, missingInFile2Count: 6, missingInFile1Count: 4]
+        RunConclusionSupport.applyHidden(counts, [MISSING_FROM_FILE_2: 5, MISSING_FROM_FILE_1: 1])
+        assertEquals([differenceCount: 4, onlyInFile1Count: 1, onlyInFile2Count: 3, missingInFile2Count: 1, missingInFile1Count: 3], counts)
+        Map untouched = [differenceCount: 3]
+        RunConclusionSupport.applyHidden(untouched, null)
+        assertEquals([differenceCount: 3], untouched)
+    }
 }

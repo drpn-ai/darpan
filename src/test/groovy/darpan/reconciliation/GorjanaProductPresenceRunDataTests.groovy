@@ -172,4 +172,15 @@ class GorjanaProductPresenceRunDataTests {
             assertTrue(!(it =~ /\{[A-Za-z]/).find(), "unfilled placeholder: ${it}")
         }
     }
+
+    // Aditi 2026-10-29: expected rows do not show ("Hide them"): the three not-needed causes drop out of the result.
+    @Test
+    void theNotNeededCausesAreHidden() {
+        Map<String, String> outcome = scoped("darpan.rule.RuleSetConclusionRule").collectEntries { [(it.conclusionEnumId): it.outcome] }
+        assertEquals("HIDE", outcome.CONC_PRODUCT_QUIET_IN_NS)
+        assertEquals("HIDE", outcome.CONC_PRODUCT_DISCONTINUED_IN_NS)
+        assertEquals("HIDE", outcome.CONC_PRODUCT_NS_ONLY_NON_INVENTORY)
+        ["CONC_PRODUCT_NOT_IN_HOTWAX", "CONC_PRODUCT_NO_NS_ID", "CONC_PRODUCT_NS_ID_SHARED", "CONC_PRODUCT_NS_ITEM_GONE",
+         "CONC_PRODUCT_NOT_SELLABLE_IN_HOTWAX"].each { assertEquals(null, outcome[it], "${it} needs fixing, so it shows") }
+    }
 }

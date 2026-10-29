@@ -1527,10 +1527,12 @@ class AutomationExecutionSupport {
                                                Map file1Result, Map file2Result, Map<String, Object> reconcileResult,
                                                String runResultId, Map stepCtx) {
         try {
-            RunConclusionStep.runIfConfigured([ec: ec,
+            Map concluded = RunConclusionStep.runIfConfigured([ec: ec,
                     compareScopeId: normalize(reconcileResult?.compareScopeId) ?: normalize(readField(automation, "compareScopeId")),
                     diffFile: resolveDiffFile(ec, reconcileResult), file1Source: file1Source, file2Source: file2Source,
                     file1Result: file1Result, file2Result: file2Result, runResultId: runResultId, stepCtx: stepCtx])
+            // DAR-BE-157: rows a HIDE rule dropped are not differences this run reports.
+            darpan.reconciliation.conclusion.RunConclusionSupport.applyHidden(reconcileResult, (Map) concluded?.hiddenByBucket)
         } catch (Throwable ignored) {
             if (ec?.message?.hasError()) ec.message.clearErrors()
         }

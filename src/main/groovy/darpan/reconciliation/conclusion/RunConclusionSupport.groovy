@@ -50,6 +50,25 @@ class RunConclusionSupport {
         }
     }
 
+    static final String OUTCOME_HIDE = "HIDE"
+
+    /**
+     * DAR-BE-157. Takes hidden rows off a run's counts, wherever they are kept: a row missing from FILE_2 is one only in
+     * FILE_1, and the reverse. Only the keys present are changed; no hidden rows, no change.
+     */
+    static void applyHidden(Map counts, Map hiddenByBucket, String totalKey = "differenceCount") {
+        if (!counts || !hiddenByBucket) return
+        int onlyIn1 = (hiddenByBucket.get("MISSING_FROM_FILE_2") ?: 0) as int
+        int onlyIn2 = (hiddenByBucket.get("MISSING_FROM_FILE_1") ?: 0) as int
+        int all = ((hiddenByBucket.values().sum(0)) ?: 0) as int
+        Closure minus = { String key, int n -> if (n && counts.get(key) != null) counts.put(key, Math.max(0, (counts.get(key) as int) - n)) }
+        minus(totalKey, all)
+        minus("onlyInFile1Count", onlyIn1)
+        minus("missingInFile2Count", onlyIn1)
+        minus("onlyInFile2Count", onlyIn2)
+        minus("missingInFile1Count", onlyIn2)
+    }
+
     private static Map concludeWith(ConclusionTreeEngine engine, List<Map> rules, Map args) {
         File diffFile = (File) args.diffFile
         String file1Label = (String) args.file1Label
@@ -88,6 +107,12 @@ class RunConclusionSupport {
         }
         counts.put(ConclusionTreeSupport.UNEXPLAINED, 0)
         labels.put(ConclusionTreeSupport.UNEXPLAINED, ConclusionTreeSupport.UNEXPLAINED_LABEL)
+        // DAR-BE-157: a rule whose outcome is HIDE concludes rows that are not differences anyone needs to see (an item NetSuite
+        // no longer uses); they leave the result, and the summary says how many and why.
+        Set<String> hiddenCodes = rules.findAll { it.get("outcome")?.toString() == OUTCOME_HIDE }
+                .collect { it.get("conclusionEnumId")?.toString() }.findAll { it } as Set<String>
+        Map<String, Integer> hidden = new LinkedHashMap<>()
+        Map<String, Integer> hiddenByBucket = new LinkedHashMap<>()
 
         JsonSlurper slurper = new JsonSlurper()
         Closure<Map> finding = { Map row ->
@@ -138,6 +163,11 @@ class RunConclusionSupport {
             Map conclusion = (Map) ((Map) (brain?.byKey ?: [:])).get(row.get("primaryId")?.toString()) ?:
                     (engine ? engine.conclude([f])[0] : ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, sides)))
             String code = conclusion.code?.toString()
+            if (hiddenCodes.contains(code)) {
+                hidden.put(code, (hidden.get(code) ?: 0) + 1)
+                hiddenByBucket.put((String) f.bucket, (hiddenByBucket.get((String) f.bucket) ?: 0) + 1)
+                return null
+            }
             if (!counts.containsKey(code)) {
                 counts.put(code, 0)
                 labels.put(code, conclusion.label?.toString() ?: code)
@@ -157,12 +187,17 @@ class RunConclusionSupport {
                                        question: conclusion.question,
                                        path    : conclusion.path]]
         }, { Map summary ->
-            return summary + [conclusions: [enabled: true,
-                                            counts : counts.collect { String code, Integer count ->
+            Map shownSummary = new LinkedHashMap(summary)
+            applyHidden(shownSummary, hiddenByBucket, "totalDifferences")
+            return shownSummary + [conclusions: [enabled: true,
+                                            counts : counts.findAll { !hiddenCodes.contains(it.key) }.collect { String code, Integer count ->
                                                 [code: code, label: labels.get(code), count: count]
-                                            }]]
+                                            }] + (hidden ? [hidden: hidden.collect { String code, Integer count ->
+                                                [code: code, label: labels.get(code), count: count]
+                                            }] : [:])]
         })
-        return [ran: true, counts: counts, unknownSides: unknownSides] +
+        return [ran: true, counts: counts.findAll { !hiddenCodes.contains(it.key) }, unknownSides: unknownSides,
+                hidden: hidden, hiddenByBucket: hiddenByBucket] +
                 (brain ? [brain: [asked: brain.asked, reused: brain.reused, dropped: brain.dropped, warnings: brain.warnings]] : [:])
     }
 

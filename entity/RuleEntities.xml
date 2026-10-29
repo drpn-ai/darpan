@@ -339,6 +339,11 @@
         <field name="questionText" type="text-medium">
             <description>Optional open question shown under "Needs a decision". Terse page copy.</description>
         </field>
+        <field name="outcome" type="text-short">
+            <description>DAR-BE-157. Blank: the rows this rule concludes are shown with its cause. HIDE: they are not differences
+                anyone needs to see (e.g. an item NetSuite no longer uses); they leave the result, and the result's summary
+                (conclusions.hidden) and counts say how many were hidden and why.</description>
+        </field>
         <field name="fixActionTemplate" type="text-intermediate">
             <description>DAR-BE-120. What to do when this is the cause, shown as the finding's fix in place of the check's.
                 {name} takes the check's template values (recordKey, the record ids by type, amounts) and any field one of

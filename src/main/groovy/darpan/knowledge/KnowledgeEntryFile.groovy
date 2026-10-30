@@ -66,7 +66,7 @@ class KnowledgeEntryFile {
 
         return [key       : id, tier: tier, systems: csv(header.get('system')), kind: header.get('kind') ?: '',
                 tags      : csv(header.get('tags')), source: source, owner: header.get('owner') ?: DEFAULT_OWNER,
-                reviewBy  : reviewBy, supersedes: header.get('supersedes') ?: '', title: title, body: body] as Map
+                reviewBy  : reviewBy, supersedes: header.get('supersedes') ?: '', promotedTo: header.get('promotedTo') ?: null, title: title, body: body] as Map
     }
 
     private static List<String> csv(String value) {

@@ -189,7 +189,7 @@ class KnowledgeSupport {
         Map fields = [companyUserGroupId: tenant, entryKey: key, title: parsed.title, body: parsed.body,
                       systems: (parsed.systems as List).join(','), entryKind: parsed.kind ?: null, tags: (parsed.tags as List).join(','),
                       sourceText: parsed.source, ownerName: parsed.owner, reviewByDate: Date.valueOf((LocalDate) parsed.reviewBy),
-                      supersedesKey: parsed.supersedes ?: null, statusId: ACTIVE]
+                      supersedesKey: parsed.supersedes ?: null, promotedToKey: parsed.promotedTo ?: null, statusId: ACTIVE]
         def existing = firstRow(tenantRows(ec, tenant).condition('entryKey', key))
         boolean created = existing == null
         if (created) {
@@ -390,14 +390,14 @@ class KnowledgeSupport {
     private static Map rowToEntry(def row) {
         return [key       : row.entryKey, tier: 'tenant', systems: csv(row.systems as String), kind: row.entryKind ?: '',
                 tags      : csv(row.tags as String), source: row.sourceText, owner: row.ownerName ?: KnowledgeEntryFile.DEFAULT_OWNER,
-                reviewBy  : ((Date) row.reviewByDate).toLocalDate(), supersedes: row.supersedesKey ?: '', title: row.title,
+                reviewBy  : ((Date) row.reviewByDate).toLocalDate(), supersedes: row.supersedesKey ?: '', promotedTo: row.promotedToKey ?: null, title: row.title,
                 body      : row.body ?: ''] as Map
     }
 
     /** The entry as services answer it: reviewBy as yyyy-MM-dd. */
     private static Map publicEntry(Map entry) {
         return [key: entry.key, tier: entry.tier, systems: entry.systems, kind: entry.kind, tags: entry.tags, source: entry.source,
-                owner: entry.owner, reviewBy: entry.reviewBy?.toString(), supersedes: entry.supersedes, title: entry.title, body: entry.body]
+                owner: entry.owner, reviewBy: entry.reviewBy?.toString(), supersedes: entry.supersedes, promotedTo: entry.promotedTo, title: entry.title, body: entry.body]
     }
 
     private static List<String> csv(String value) {

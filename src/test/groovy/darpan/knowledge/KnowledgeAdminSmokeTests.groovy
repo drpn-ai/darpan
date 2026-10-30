@@ -257,6 +257,14 @@ class KnowledgeAdminSmokeTests {
     }
 
     @Test
+    void storeMapsPromotedToToPromotedToKey() {
+        String md = tenantFile("promo-key", "Promoted lesson", "Rewritten as a product entry.").replace("source: synthetic test\n", "source: synthetic test\npromotedTo: some-product-key\n")
+        assertNoErrors(store(ACME, md))
+        def row = ec.entity.find(ENTRY).condition("companyUserGroupId", ACME).condition("entryKey", "promo-key").disableAuthz().useCache(false).list()[0]
+        assertEquals("some-product-key", row.promotedToKey)
+    }
+
+    @Test
     void searchSeesWritesAtOnce() {
         Map first = store(ACME, tenantFile("quick-write", "Quokka timing rule", "The quokka rule changes at noon."))
         assertNoErrors(first)

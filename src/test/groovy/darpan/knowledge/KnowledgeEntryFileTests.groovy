@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test
 import java.time.LocalDate
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -27,6 +28,11 @@ class KnowledgeEntryFileTests {
     }
 
     @Test
+    void parsesPromotedTo() {
+        assertEquals('some-product-key', KnowledgeEntryFile.parse(entry([promotedTo: 'some-product-key']), ORIGIN).get('promotedTo'))
+    }
+
+    @Test
     void parsesAFullEntry() {
         Map m = KnowledgeEntryFile.parse(entry(), ORIGIN)
         assertEquals('oms-gql-cost-cap', m.get('key'))
@@ -38,6 +44,7 @@ class KnowledgeEntryFileTests {
         assertEquals('Jo Doe', m.get('owner'))
         assertEquals(LocalDate.of(2027, 1, 31), m.get('reviewBy'))
         assertEquals('old-key', m.get('supersedes'))
+        assertNull(m.get('promotedTo'))
         assertEquals('OMS GraphQL caps one query at 1000 cost', m.get('title'))
         assertEquals('A short body.', m.get('body'))
     }

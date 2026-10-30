@@ -128,6 +128,7 @@ class ConfigTransferImporter {
         records(ctx, "statements").each { Map s -> writeStatement(ctx, s) }
         records(ctx, "checks").each { Map c -> writeCheck(ctx, c) }
         records(ctx, "automations").each { Map a -> writeAutomation(ctx, a) }
+        records(ctx, "knowledge").each { Map k -> writeTree(ctx, spec(KNOWLEDGE), k, "KE_") }
 
         String counts = ACTIONS.collect { "${it} ${plan.counts[it]}" }.join(", ")
         // DAR-BE-160: a tenant's config restore applies through here too, and logs under its own service name.
@@ -184,10 +185,15 @@ class ConfigTransferImporter {
             sameTenant ? scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationId", parseRef(a.ref)?.get(1)).list()
                     : scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationName", a.fields?.automationName).list()
         }
+        matchByKey(ctx, "knowledge", sameTenant ? "id" : "entryKey",
+                { Map k -> sameTenant ? parseRef(k.ref)?.get(1) : text(k.fields?.entryKey) }) { Map k ->
+            sameTenant ? scoped(ctx, spec(KNOWLEDGE).entityName as String).condition("knowledgeEntryId", parseRef(k.ref)?.get(1)).list()
+                    : scoped(ctx, spec(KNOWLEDGE).entityName as String).condition("entryKey", k.fields?.entryKey).list()
+        }
 
         sourceRuleIdentities(ctx)
         ["queries": NETSUITE_SUITEQL, "runs": RUN, "audits": AUDIT, "statements": STATEMENT, "checks": CHECK,
-         "automations": AUTOMATION].each { String list, String kind ->
+         "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
             records(ctx, list).findAll { ctx.matches.containsKey(it.ref) }.each { Map rec -> diff(ctx, spec(kind), rec) }
         }
         scopeGate(ctx)
@@ -199,7 +205,7 @@ class ConfigTransferImporter {
             if (ctx.actions[c.ref]) lines << line(ctx, c.kind as String, c)
         }
         [queries: NETSUITE_SUITEQL, conclusionCodes: CONC, runs: RUN, audits: AUDIT, statements: STATEMENT, checks: CHECK,
-         automations: AUTOMATION].each { String list, String kind ->
+         automations: AUTOMATION, knowledge: KNOWLEDGE].each { String list, String kind ->
             records(ctx, list).each { Map rec -> if (ctx.actions[rec.ref]) lines << line(ctx, kind, rec) }
         }
         return finish(ctx, lines)

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-161. The knowledge base's tenant tier: what one tenant has taught Darpan about its own data (join keys, statuses,
+  quirks). Tenant-scoped like every tenant entity (DARPAN_SCOPE_KNOWLEDGE_ENTRY), versioned with the tenant's config
+  (entity/TenantConfig.eecas.xml) and carried by a transfer (TransferSpecs KNOWLEDGE). The product tier lives in files.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="KnowledgeEntry" package="darpan.knowledge" cache="never">
+        <description>One thing a tenant has taught Darpan, found by search. Keyed by the tenant and entryKey; a retired entry
+            is kept for history and never searched.</description>
+        <field name="knowledgeEntryId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="entryKey" type="text-short" not-null="true"><description>The entry's name, unique within the tenant.</description></field>
+        <field name="title" type="text-medium" not-null="true"/>
+        <field name="body" type="text-long" not-null="true"><description>The entry's text.</description></field>
+        <field name="systems" type="text-medium"><description>Comma list of the systems it concerns.</description></field>
+        <field name="entryKind" type="text-short"/>
+        <field name="tags" type="text-medium"><description>Comma list.</description></field>
+        <field name="sourceText" type="text-medium" not-null="true"><description>Where the entry came from.</description></field>
+        <field name="ownerName" type="text-medium"/>
+        <field name="reviewByDate" type="date" not-null="true"><description>When someone should re-read it.</description></field>
+        <field name="supersedesKey" type="text-short"><description>The entryKey this entry replaces.</description></field>
+        <field name="statusId" type="text-short"><description>ACTIVE or RETIRED.</description></field>
+        <field name="promotedToKey" type="text-short"><description>The product entry this one was promoted to, if any.</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+
+        <relationship type="one" title="Tenant" related="moqui.security.UserGroup" short-alias="tenant">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+
+        <index name="KNOWLEDGE_ENTRY_TENANT_KEY" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="entryKey"/>
+        </index>
+    </entity>
+</entities>

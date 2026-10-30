@@ -25,7 +25,7 @@ class TenantConfigVersionSupport {
     static final String MANUAL = "MANUAL"
     static final List<String> CHANGE_SOURCES = [MANUAL, "SETTINGS_SAVE", "AGENT_APPLY", "IMPORT", "RESTORE"].asImmutable()
     static final List<String> COUNTED_LISTS = ["audits", "statements", "checks", "runs", "queries", "conclusionCodes",
-                                               "connections", "automations"].asImmutable()
+                                               "connections", "automations", "knowledge"].asImmutable()
     static final int DEFAULT_LIST_LIMIT = 50
 
     /** The tenant's whole config as a transfer bundle; null (with errors) when the exporter refuses. */

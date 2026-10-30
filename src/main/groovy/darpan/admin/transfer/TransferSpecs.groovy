@@ -34,6 +34,8 @@ class TransferSpecs {
     static final String CHECK = "CHECK"
     /** DAR-BE-160. Carried only by a tenant config version (bundle withAutomations), never by an admin transfer. */
     static final String AUTOMATION = "AUTOMATION"
+    /** DAR-BE-161. A tenant's knowledge entries (darpan.knowledge.KnowledgeEntry); only the ACTIVE ones travel. */
+    static final String KNOWLEDGE = "KNOWLEDGE"
 
     static final List<String> CONNECTION_KINDS = [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_RESTLET].asImmutable()
 
@@ -106,6 +108,9 @@ class TransferSpecs {
                      orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
                             [entityName: "darpan.reconciliation.ReconciliationAutomationSourceFilter",
                              parentFields: ["automationId", "fileSide"], orderBy: ["sequenceNum"]]]]]],
+            // DAR-BE-161. Matched by the tenant's entryKey; the importer stamps the tenant, creator and date.
+            [kind: KNOWLEDGE, entityName: "darpan.knowledge.KnowledgeEntry", pkField: "knowledgeEntryId", mintPrefix: "KE_",
+             naturalKey: "entryKey"],
     ].asImmutable()
 
     /** Every kind's name, for telling a ref inside JSON from a plain value. */
@@ -115,7 +120,7 @@ class TransferSpecs {
     static final Map<String, String> BUNDLE_LISTS = [(NETSUITE_AUTH): "connections", (SHOPIFY_AUTH): "connections",
             (HOTWAX_OMS_REST): "connections", (NETSUITE_RESTLET): "connections", (NETSUITE_SUITEQL): "queries",
             (CONC): "conclusionCodes", (RUN): "runs", (AUDIT): "audits", (STATEMENT): "statements", (CHECK): "checks",
-            (AUTOMATION): "automations"].asImmutable()
+            (AUTOMATION): "automations", (KNOWLEDGE): "knowledge"].asImmutable()
 
     static Map spec(String kind) {
         return KINDS.find { it.kind == kind }

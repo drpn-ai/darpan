@@ -152,6 +152,12 @@ class ConfigTransferExporter {
                     .collect { labelled(record(ec, spec(AUTOMATION), it, namer), it.automationName ?: it.automationId) }
         }
 
+        // DAR-BE-161: the tenant's ACTIVE knowledge entries, by entryKey. Absent when it has none, so a tenant without any
+        // keeps the pack (and its hash) it had before.
+        List<Map> knowledgeRecords = finder(ec, spec(KNOWLEDGE).entityName as String).condition("companyUserGroupId", tenantId)
+                .condition("statusId", "ACTIVE").orderBy(["entryKey", "knowledgeEntryId"]).useCache(false).list()
+                .collect { labelled(record(ec, spec(KNOWLEDGE), it, namer), it.title ?: it.entryKey) }
+
         List<Map> queryRecords = []
         Set<String> queryIds = reached[NETSUITE_SUITEQL]
         if (queryIds) {
@@ -194,6 +200,7 @@ class ConfigTransferExporter {
                 statements     : statementRecords,
                 checks         : checkRecords] as Map<String, Object>
         if (withAutomations) out.automations = automationRecords
+        if (knowledgeRecords) out.knowledge = knowledgeRecords
         if (secrets != null) out.secrets = secrets
         return out
     }

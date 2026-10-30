@@ -172,10 +172,10 @@ class ConfigTransferExporter {
                     .collect { labelled(record(ec, spec(AUTOMATION), it, namer), it.automationName ?: it.automationId) }
         }
 
-        // DAR-BE-161: the tenant's ACTIVE knowledge entries, by entryKey. Absent when it has none, so a tenant without any
-        // keeps the pack (and its hash) it had before.
+        // DAR-BE-161: the tenant's knowledge entries, ACTIVE and RETIRED (statusId travels, so a retire reaches the
+        // target), by entryKey. Absent when it has none, so a tenant without any keeps the pack (and its hash) it had before.
         List<Map> knowledgeRecords = finder(ec, spec(KNOWLEDGE).entityName as String).condition("companyUserGroupId", tenantId)
-                .condition("statusId", "ACTIVE").orderBy(["entryKey", "knowledgeEntryId"]).useCache(false).list()
+                .orderBy(["entryKey", "knowledgeEntryId"]).useCache(false).list()
                 .collect { labelled(record(ec, spec(KNOWLEDGE), it, namer), it.title ?: it.entryKey) }
 
         List<Map> queryRecords = []

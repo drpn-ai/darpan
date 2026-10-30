@@ -37,7 +37,10 @@ class TransferSpecs {
     /** DAR-BE-160. A lifecycle (darpan.reconciliation.Reconciliation) and its questions; version-only, like AUTOMATION. */
     static final String LIFECYCLE = "LIFECYCLE"
     static final String QUESTION = "QUESTION"
-    /** DAR-BE-161. A tenant's knowledge entries (darpan.knowledge.KnowledgeEntry); only the ACTIVE ones travel. */
+    /**
+     * DAR-BE-161. A tenant's knowledge entries (darpan.knowledge.KnowledgeEntry), ACTIVE and RETIRED (statusId travels, so a
+     * retire reaches the target). Imported only into the tenant they came from (ConfigTransferImporter.knowledgeGate).
+     */
     static final String KNOWLEDGE = "KNOWLEDGE"
     /** Kinds that live only as children of another kind's record (refs to them resolve inside their parent). */
     static final List<String> CHILD_KINDS = [RULE, QUESTION].asImmutable()
@@ -124,7 +127,8 @@ class TransferSpecs {
                      orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
                             [entityName: "darpan.reconciliation.ReconciliationAutomationSourceFilter",
                              parentFields: ["automationId", "fileSide"], orderBy: ["sequenceNum"]]]]]],
-            // DAR-BE-161. Matched by the tenant's entryKey; the importer stamps the tenant, creator and date.
+            // DAR-BE-161. Matched by id in its own version restore, else by entryKey within the target tenant; the importer
+            // stamps the tenant, creator and date.
             [kind: KNOWLEDGE, entityName: "darpan.knowledge.KnowledgeEntry", pkField: "knowledgeEntryId", mintPrefix: "KE_",
              naturalKey: "entryKey"],
     ].asImmutable()

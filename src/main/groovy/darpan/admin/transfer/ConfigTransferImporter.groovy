@@ -4,6 +4,7 @@ import darpan.admin.AdminAuditSupport
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.knowledge.KnowledgeSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import groovy.json.JsonOutput
@@ -142,6 +143,8 @@ class ConfigTransferImporter {
         records(ctx, "checks").each { Map c -> writeCheck(ctx, c) }
         records(ctx, "automations").each { Map a -> writeAutomation(ctx, a) }
         records(ctx, "knowledge").each { Map k -> writeTree(ctx, spec(KNOWLEDGE), k, "KE_") }
+        // DAR-BE-161: the tenant's cached knowledge index is dropped now and again once this transaction completes.
+        if (records(ctx, "knowledge")) KnowledgeSupport.invalidateAfterWrite(ec, targetTenantId)
 
         String counts = ACTIONS.collect { "${it} ${plan.counts[it]}" }.join(", ")
         // DAR-BE-160: a tenant's config restore applies through here too, and logs under its own service name.
@@ -170,14 +173,16 @@ class ConfigTransferImporter {
         if (sourceVersion != localVersion) {
             warn(ctx, "VERSION_DIFFERS", null, "The source runs Darpan ${sourceVersion}; this instance runs ${localVersion}.")
         }
-        checkShape(ctx)
-        checkRefs(ctx)
-        openSecrets(ctx, secretHandoffToken)
-
-        matchConnections(ctx)
         // DAR-BE-160. A config version restores into the tenant it came from: every id in it is that tenant's own, so
         // records match by id (a renamed run is renamed back, not copied) and one deleted since comes back under its id.
         ctx.sameTenant = ownVersion && text(bundle.source?.tenantUserGroupId) == tenantId
+        knowledgeGate(ctx)
+        checkShape(ctx)
+        checkRefs(ctx)
+        knowledgeWriteCheck(ctx)
+        openSecrets(ctx, secretHandoffToken)
+
+        matchConnections(ctx)
         if (ctx.sameTenant) {
             records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
             ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
@@ -223,6 +228,10 @@ class ConfigTransferImporter {
         scopeGate(ctx)
         targetOnlyWarnings(ctx)
         rulesReplacedWarnings(ctx)
+        int knowledgeWrites = records(ctx, "knowledge").count { ctx.actions[it.ref] in [CREATE, "UPDATE"] } as int
+        if (knowledgeWrites) {
+            warn(ctx, "KNOWLEDGE_WRITTEN", null, "${knowledgeWrites} knowledge entries will be written to tenant ${tenantId}.".toString())
+        }
 
         List<Map> lines = []
         records(ctx, "connections").each { Map c ->
@@ -233,6 +242,40 @@ class ConfigTransferImporter {
             records(ctx, list).each { Map rec -> if (ctx.actions[rec.ref]) lines << line(ctx, kind, rec) }
         }
         return finish(ctx, lines)
+    }
+
+    // ---------------------------------------------------------------- knowledge gates (DAR-BE-161)
+
+    /**
+     * A tenant's knowledge stays in that tenant. It is imported only by its own version restore (ownVersion, matched by
+     * id) or into the tenant id the bundle names as its source (the same tenant on another instance, matched by entryKey
+     * within the target). bundle.source is caller-supplied, so this guards against an accidental cross-tenant copy, not a
+     * forged one; knowledgeWriteCheck is what stops a forged one. For any other target no knowledge is written.
+     */
+    private static void knowledgeGate(Map ctx) {
+        List<Map> carried = records(ctx, "knowledge")
+        String source = text(ctx.bundle.source?.tenantUserGroupId)
+        if (!carried || ctx.sameTenant || source == ctx.tenantId) return
+        ctx.bundle = new LinkedHashMap((Map) ctx.bundle)
+        ((Map) ctx.bundle).remove("knowledge")
+        warn(ctx, "KNOWLEDGE_NOT_COPIED", null,
+                "${carried.size()} knowledge entries not copied: they belong to tenant ${source ?: '?'}.".toString())
+    }
+
+    /**
+     * Every knowledge entry imported passes the write check store uses (customer personal data, another tenant's
+     * identifier on this instance); a hit blocks, naming the entry key and the reason kinds only.
+     */
+    private static void knowledgeWriteCheck(Map ctx) {
+        records(ctx, "knowledge").each { Map rec ->
+            Map fields = (rec.fields ?: [:]) as Map
+            String content = ([rec.label] + fields.values()).findAll { it != null }.collect { it.toString() }.join("\n")
+            List<String> reasons = KnowledgeSupport.writeCheckReasons(ctx.ec, ctx.tenantId as String, content)
+            if (reasons) {
+                block(ctx, "KNOWLEDGE_REFUSED", rec.ref,
+                        "Knowledge entry ${text(fields.entryKey) ?: rec.ref} was not imported: it holds ${reasons.join(', ')}.".toString())
+            }
+        }
     }
 
     // ---------------------------------------------------------------- shape gates
@@ -947,11 +990,15 @@ class ConfigTransferImporter {
         return TenantScopedFinder.mintId(ctx.ec, entityName, pkField, prefix ?: "")
     }
 
-    /** A record matched by its own id in its own tenant, or created. */
+    /**
+     * A record matched by its own id in its own tenant, or created. The owner is compared in code as well, so an id the
+     * bundle names never lands on a row the target tenant does not own.
+     */
     private static void matchById(Map ctx, String list, Map kindSpec) {
         records(ctx, list).each { Map rec ->
             String id = parseRef(rec.ref)?.get(1)
-            def row = id ? scoped(ctx, kindSpec.entityName as String).condition(kindSpec.pkField as String, id).list().find() : null
+            def row = id ? scoped(ctx, kindSpec.entityName as String).condition(kindSpec.pkField as String, id).list()
+                    .find { it.companyUserGroupId == ctx.tenantId } : null
             matchOne(ctx, rec, row)
         }
     }

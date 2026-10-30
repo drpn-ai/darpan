@@ -89,7 +89,7 @@ class TenantConfigVersionSmokeTests {
         assertNull(version.parentId)
         assertEquals("before the R2 change", version.reason)
         assertEquals("MANUAL", version.changeSource)
-        assertEquals([audits: 1, statements: 1, checks: 1, runs: 0, queries: 0, conclusionCodes: 0, connections: 1, automations: 0, knowledge: 0], version.counts)
+        assertEquals([audits: 1, statements: 1, checks: 1, runs: 0, queries: 0, conclusionCodes: 0, connections: 1, automations: 0, lifecycles: 0, knowledge: 0], version.counts)
 
         Map got = call("get#TenantConfigVersion", [id: version.id])
         assertFalse(got.hadError as boolean, got.errorText as String)

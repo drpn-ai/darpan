@@ -114,6 +114,22 @@ class JsonRecordLinesTests {
     }
 
     @Test
+    void rowsGoToTheDriverInBoundedPartitionsHoweverTheShuffleCoalesced() {
+        // On SM's October run adaptive execution left all 125,602 matched pairs in one partition, and toLocalIterator
+        // brought it to the driver whole. Here: 5,000 rows forced into one partition come back as 3 of at most 2,000.
+        Dataset one = spark.range(5000).toDF("n").coalesce(1)
+        assertEquals(1, one.rdd().getNumPartitions())
+        Dataset bounded = ReconciliationServices.boundedPartitions(one, 2000)
+        assertEquals(3, bounded.rdd().getNumPartitions())
+        assertTrue(bounded.rdd().glom().toJavaRDD().collect().every { Object part -> ((Object[]) part).length <= 2000 })
+        Iterator<String> rows = bounded.toJSON().toLocalIterator()
+        int seen = 0
+        while (rows.hasNext()) { rows.next(); seen++ }
+        assertEquals(5000, seen, "every row still arrives")
+        assertEquals(1, ReconciliationServices.boundedPartitions(spark.range(0).toDF("n"), 2000).rdd().getNumPartitions())
+    }
+
+    @Test
     void aSavedDocumentSchemaGivesItsRecordSchema() {
         def schema = new org.apache.spark.sql.types.StructType()
                 .add("metadata", new org.apache.spark.sql.types.StructType().add("sourceType", "string"))

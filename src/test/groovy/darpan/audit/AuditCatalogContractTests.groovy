@@ -11,13 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-088 — the audit-run vocabulary and gorjana's statement catalog, at parse level (no Moqui boot).
+ * DAR-BE-088 — the audit-run vocabulary, at parse level (no Moqui boot).
  *
  * <p>The enum codes are the values the audit-run JSON emits, so they are pinned here exactly as the v1
  * contract lists them (docs/superpowers/specs/2026-10-21-audit-run-json-contract.md, "Enums", in the
  * wrapper repo). Within v1 a code may be added, never renamed or removed: a rename fails this test on
- * purpose. That the catalog's rows are hidden from another tenant is proven at runtime by
- * {@link darpan.security.TenantOwnedEntityFilterRuntimeTests}.</p>
+ * purpose. A tenant's statement catalog is tenant config (DAR-BE-160): it lives in that tenant's config pack, and
+ * {@link darpan.security.TenantOwnedEntityFilterRuntimeTests} proves its rows are hidden from another tenant.</p>
  */
 class AuditCatalogContractTests {
 
@@ -35,16 +35,7 @@ class AuditCatalogContractTests {
             AuditDigestKind     : ["daily", "weekly"],
     ].asImmutable()
 
-    /** #483 open point 6: every statement not listed there as derived is firm. */
-    static final List<String> GORJANA_FIRM = ["R1", "R2", "R5", "R7", "R9"].asImmutable()
 
-    /** #483 "What Gorjana Accounting needs": statement numbers under each heading. */
-    static final Map<String, List<Integer>> GORJANA_CATEGORIES = [
-            AUDC_ORDERS            : [1, 2, 3, 18, 19, 20],
-            AUDC_REFUNDS_CREDITS   : [4, 5, 6, 7, 21],
-            AUDC_RETURNS           : [8, 9, 10, 11],
-            AUDC_EXCHANGES_WARRANTY: [12, 13, 14, 15, 16, 17],
-    ].asImmutable()
 
     private static Path dataDir() {
         return ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/data")
@@ -117,41 +108,8 @@ class AuditCatalogContractTests {
     }
 
     @Test
-    void gorjanasCatalogIsTwentyOneStatementsInFourCategories() {
-        List<Map> audits = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.Audit")*.attributes()
-        assertEquals([[auditId: "GORJANA_MONTH_CLOSE", companyUserGroupId: "GORJANA", auditCode: "month-close",
-                       auditName: "Month close", periodEnumId: "AUDP_MONTH"]], audits, "gorjana's month close is one audit")
-        List<Node> statements = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.AuditStatement")
-        // R18 (DAR-BE-111), R19 (DAR-BE-113), R20 (DAR-BE-125) and R21 (DAR-BE-149) are Aditi's, after the seventeen from #483.
-        assertEquals((1..21).collect { "R${it}".toString() }, statements*.attribute("statementCode"), "R1-R21 in file order")
-        statements.each { Node row ->
-            String code = row.attribute("statementCode")
-            int n = code.substring(1).toInteger()
-            assertEquals("GORJANA", row.attribute("companyUserGroupId"), "${code} tenant")
-            assertEquals("GORJANA_MONTH_CLOSE", row.attribute("auditId"), "${code} audit")
-            assertEquals("GORJANA_${code}".toString(), row.attribute("statementId"), "${code} id")
-            assertEquals(n, (row.attribute("sequenceNum") as String).toInteger(), "${code} sequence")
-            String category = GORJANA_CATEGORIES.find { it.value.contains(n) }?.key
-            assertEquals(category, row.attribute("categoryEnumId"), "${code} category")
-            assertEquals(GORJANA_FIRM.contains(code) ? "AUDSW_FIRM" : "AUDSW_DERIVED", row.attribute("weightEnumId"), "${code} weight")
-            assertTrue((row.attribute("statementText") as String)?.trim()?.length() > 20, "${code} needs its text")
-        }
-    }
-
-    /** DAR-BE-125 (Aditi, 2026-10-24): "keep R1 R8 R12 R19", plus her R20 and R21 (DAR-BE-149); every other statement is off. */
-    @Test
-    void gorjanasAuditReportsOnlyTheStatementsAditiVerified() {
-        List<Node> statements = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.AuditStatement")
-        List<String> on = statements.findAll { (it.attribute("isActive") ?: "Y") != "N" }*.attribute("statementCode")
-        assertEquals(["R1", "R8", "R12", "R19", "R20", "R21"], on)
-        assertEquals(["N"] as Set, statements.findAll { !on.contains(it.attribute("statementCode")) }*.attribute("isActive") as Set)
-    }
-
-    @Test
-    void theCatalogIsTenantConfigNotSeed() {
-        // An upgrade pack loads on every instance, sm-darpan included; gorjana's statements must not.
-        String text = dataDir().resolve("GorjanaMonthCloseCatalogData.xml").toFile().text
-        assertTrue(text.contains('<entity-facade-xml type="darpan-tenant-config">'), "catalog file type")
+    void noTenantsCatalogShipsInTheUpgradePack() {
+        // An upgrade pack loads on every instance; a tenant's audits live in its config pack (DAR-BE-160), never here.
         assertEquals([], rows("upgrade-data.xml", "darpan.audit.AuditStatement"), "no catalog rows in upgrade-data.xml")
         assertEquals([], rows("upgrade-data.xml", "darpan.audit.Audit"), "no audit rows in upgrade-data.xml")
     }

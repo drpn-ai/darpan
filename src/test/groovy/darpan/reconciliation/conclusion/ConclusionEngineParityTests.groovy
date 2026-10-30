@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-063. The committed gorjana catalogue (DAR-UI-044, flat) must conclude IDENTICALLY under the
- * Drools engine: same code, label, checks and question for every finding shape the catalogue can see.
- * The matrix is every presence x every value any condition names (plus values no condition names, plus
- * null), for both sides, in every bucket — all concluded in ONE session per scope, which is also the
+ * DAR-BE-063. A real conclusion catalogue (DAR-UI-044, flat; the fixture data/test/ConclusionParityCatalogueData.xml,
+ * cut from a tenant config pack, DAR-BE-160) must conclude IDENTICALLY under the Drools engine: same code, label,
+ * checks and question for every finding shape the catalogue can see. The matrix is every presence x every value any
+ * condition names (plus values no condition names, plus null), for both sides, in every bucket — all concluded in ONE session per scope, which is also the
  * many-facts isolation proof at scale.
  */
 class ConclusionEngineParityTests {
@@ -39,8 +39,8 @@ class ConclusionEngineParityTests {
     }
 
     @Test
-    void gorjanaCatalogueConcludesIdentically() {
-        def doc = new XmlSlurper().parse(componentRoot().resolve("data/GorjanaConclusionRulesData.xml").toFile())
+    void aRealCatalogueConcludesIdentically() {
+        def doc = new XmlSlurper().parse(componentRoot().resolve("data/test/ConclusionParityCatalogueData.xml").toFile())
         List<Map> ruleRows = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionRule' }.collect { attrs(it) }
         List<Map> condRows = doc.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionCondition' }.collect { attrs(it) }
         Map<String, String> labels = doc.'**'.findAll { it.name() == 'moqui.basic.Enumeration' }
@@ -49,7 +49,7 @@ class ConclusionEngineParityTests {
         ruleRows*.compareScopeId.unique().each { String scope ->
             // The oracle is DAR-UI-044's frozen evaluator: parity is over what it has. Later operators (GT, WITHIN_HOURS)
             // and dotted paths (a looked-up record, DAR-BE-118) are proven by ConclusionConditionSupportTests and
-            // GorjanaConclusionRulesDataTests; their rules are left out of the comparison.
+            // ConclusionLookupSupportTests; their rules are left out of the comparison.
             List<Map> rules = RunConclusionStep.buildRules(ruleRows.findAll { it.compareScopeId == scope },
                     condRows.findAll { it.compareScopeId == scope }, labels)
                     .findAll { Map r -> ((List<Map>) r.conditions).every {

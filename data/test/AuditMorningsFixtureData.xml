@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test fixture for AuditMorningsSmokeTests (DAR-BE-160): one audit, the five statements and six checks its mornings
+     run, their saved runs and conclusion codes. Cut from a tenant config pack and renamed; never loaded by an install
+     (data/test is not scanned, and the type matches no load). -->
+<entity-facade-xml type="darpan-test-fixture">
+    <darpan.audit.Audit auditId="MORNINGS_MONTH_CLOSE" companyUserGroupId="MORNINGS" auditCode="month-close" auditName="Month close" periodEnumId="AUDP_MONTH" />
+    <darpan.audit.AuditStatement statementId="MORNINGS_R2" auditId="MORNINGS_MONTH_CLOSE" companyUserGroupId="MORNINGS" statementCode="R2" isActive="N" categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="2" statementText="Every invoice and credit memo carries the Shopify order id (the Etail id)." />
+    <darpan.audit.AuditStatement statementId="MORNINGS_R12" auditId="MORNINGS_MONTH_CLOSE" companyUserGroupId="MORNINGS" statementCode="R12" categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="12" statementText="A warranty replacement is paid by that claim's own credit, at the claim's value. The credit and the replacement invoice close each other out." />
+    <darpan.audit.AuditStatement statementId="MORNINGS_R13" auditId="MORNINGS_MONTH_CLOSE" companyUserGroupId="MORNINGS" statementCode="R13" isActive="N" categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="13" statementText="A return is never treated as replaced by the order it came from." />
+    <darpan.audit.AuditStatement statementId="MORNINGS_R14" auditId="MORNINGS_MONTH_CLOSE" companyUserGroupId="MORNINGS" statementCode="R14" isActive="N" categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="14" statementText="Every exchange credit belongs to a customer. When the shopper gave none, it belongs to the store's own customer." />
+    <darpan.audit.AuditStatement statementId="MORNINGS_R16" auditId="MORNINGS_MONTH_CLOSE" companyUserGroupId="MORNINGS" statementCode="R16" isActive="N" categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="16" statementText="A cancelled exchange leaves nothing open in NetSuite." />
+    <moqui.basic.Enumeration enumId="CONC_NO_ETAIL_ID" enumTypeId="DarpanConclusion" enumCode="CONC_NO_ETAIL_ID" description="No Shopify order id (Etail id)" />
+    <darpan.rule.RuleSet ruleSetId="MORNINGS_INVOICE_ETAIL_RS" ruleSetName="Invoices - Etail id" description="Every NetSuite invoice carries the Shopify order id (custbody_celigo_etail_order_id). Reads every invoice so a fixed one is seen and closes." version="1.0" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareScope compareScopeId="MORNINGS_INVOICE_ETAIL_SCOPE" ruleSetId="MORNINGS_INVOICE_ETAIL_RS" objectType="INVOICE" scopeMode="EVALUATE" description="Every NetSuite invoice carries the Shopify order id (custbody_celigo_etail_order_id). Reads every invoice so a fixed one is seen and closes." companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSource compareScopeId="MORNINGS_INVOICE_ETAIL_SCOPE" fileSide="FILE_1" systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="tranId" sourceConfigId="NS_INVOICE_ETAIL" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="MORNINGS_INVOICE_ETAIL_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetConclusionRule compareScopeId="MORNINGS_INVOICE_ETAIL_SCOPE" sequenceNum="10" conclusionEnumId="CONC_NO_ETAIL_ID" appliesToBucket="FINDING" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="MORNINGS_INVOICE_ETAIL_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="etailOrderId" operator="BLANK" checkLabel="The invoice has no Etail id" companyUserGroupId="MORNINGS" />
+    <darpan.audit.AuditCheck checkId="MORNINGS_CHK_INVOICE_ETAIL" companyUserGroupId="MORNINGS" checkCode="invoices-without-etail-id" label="NetSuite invoices with no Etail id" savedRunId="MORNINGS_INVOICE_ETAIL_RS" file1RecordType="invoice" graceDays="1" fixOwner="Mornings Accounting" fixWhereEnumId="NETSUITE" headlineTemplate="Invoice {recordKey} has no Etail id" fixActionTemplate="Enter the Shopify order id in the Etail Order Id field of invoice {recordKey}." passesWhenTemplate="Invoice {recordKey} carries an Etail id." />
+    <darpan.audit.AuditStatementCheck statementId="MORNINGS_R2" checkId="MORNINGS_CHK_INVOICE_ETAIL" companyUserGroupId="MORNINGS" sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_NO_ETAIL_ID" />
+    <darpan.rule.RuleSet ruleSetId="MORNINGS_MEMO_REPLACEMENT_RS" ruleSetName="Exchange credit memos - replacement orders" description="Every exchange or warranty credit memo against the replacement order that names it: one customer, and not the return's own original order." version="1.0" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareScope compareScopeId="MORNINGS_MEMO_REPLACEMENT_SCOPE" ruleSetId="MORNINGS_MEMO_REPLACEMENT_RS" objectType="CREDIT_MEMO" scopeMode="COMPARE" description="Every exchange or warranty credit memo against the replacement order that names it: one customer, and not the return's own original order." companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSource compareScopeId="MORNINGS_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_1" systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="memoId" sourceConfigId="NS_EXCHANGE_MEMO" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="MORNINGS_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="memoId" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSource compareScopeId="MORNINGS_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_2" systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="memoId" sourceConfigId="NS_REPLACEMENT_ORDER" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="MORNINGS_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="memoId" companyUserGroupId="MORNINGS" />
+    <darpan.rule.Rule ruleId="MORNINGS_MR_SAME_CUSTOMER" ruleSetId="MORNINGS_MEMO_REPLACEMENT_RS" sequenceNum="10" ruleText="customerId = customerId" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="MORNINGS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"customerId","file2FieldPath":"customerId","operator":"="}</expression>
+        <ruleLogic>rule "MORNINGS_MR_SAME_CUSTOMER"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(!java.util.Objects.equals(((Map) $m.get("file1")).get("customerId"), ((Map) $m.get("file2")).get("customerId")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("customerId");
+    Object _file2Value = ((Map) $m.get("file2")).get("customerId");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "customerId = customerId",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: customerId = customerId"
+    );
+end</ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="MORNINGS_MR_NOT_OWN_ORIGINAL" ruleSetId="MORNINGS_MEMO_REPLACEMENT_RS" sequenceNum="20" ruleText="orderId != orderId" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="MORNINGS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"orderId","file2FieldPath":"orderId","operator":"!="}</expression>
+        <ruleLogic>rule "MORNINGS_MR_NOT_OWN_ORIGINAL"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(java.util.Objects.equals(((Map) $m.get("file1")).get("orderId"), ((Map) $m.get("file2")).get("orderId")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("orderId");
+    Object _file2Value = ((Map) $m.get("file2")).get("orderId");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "orderId != orderId",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: orderId != orderId"
+    );
+end</ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="MORNINGS_MR_NOT_YEAR_OLDER" ruleSetId="MORNINGS_MEMO_REPLACEMENT_RS" sequenceNum="30" ruleText="yearBeforeDay &lt;= dayNumber" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="MORNINGS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"yearBeforeDay","file2FieldPath":"dayNumber","operator":"&lt;=","preActions":[{"fieldSide":"file1","action":"STRING_TO_INT"},{"fieldSide":"file2","action":"STRING_TO_INT"}]}</expression>
+        <ruleLogic>rule "MORNINGS_MR_NOT_YEAR_OLDER"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("yearBeforeDay"), java.util.Arrays.asList("STRING_TO_INT")), reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("dayNumber"), java.util.Arrays.asList("STRING_TO_INT")), "&lt;="))
+then
+    Object _file1Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("yearBeforeDay"), java.util.Arrays.asList("STRING_TO_INT"));
+    Object _file2Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("dayNumber"), java.util.Arrays.asList("STRING_TO_INT"));
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "yearBeforeDay &lt;= dayNumber",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: yearBeforeDay &lt;= dayNumber"
+    );
+end</ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.audit.AuditCheck checkId="MORNINGS_CHK_REPLACEMENT_CUSTOMER" companyUserGroupId="MORNINGS" checkCode="exchange-credits-on-another-customer" label="Exchange credit memos whose replacement order is under another customer" savedRunId="MORNINGS_MEMO_REPLACEMENT_RS" file1RecordType="creditMemo" file2RecordType="replacementOrder" graceDays="1" matchedBy="credit memo id (custbody_hc_exchange_credit_memo_id on the replacement order)" fixOwner="HotWax Support" fixWhereEnumId="NETSUITE" headlineTemplate="Credit memo id {creditMemo} and its replacement order are under different customers" fixActionTemplate="Move the credit memo with internal id {creditMemo} to its replacement order's customer (the store's own customer when the shopper gave none)." passesWhenTemplate="The credit memo with internal id {creditMemo} and its replacement order have the same customer." />
+    <darpan.audit.AuditCheck checkId="MORNINGS_CHK_REPLACEMENT_NOT_ORIGINAL" companyUserGroupId="MORNINGS" checkCode="returns-replaced-by-their-own-order" label="Exchange credit memos whose replacement is an existing order (its own original, or a year older)" savedRunId="MORNINGS_MEMO_REPLACEMENT_RS" file1RecordType="creditMemo" file2RecordType="replacementOrder" graceDays="1" matchedBy="credit memo id (custbody_hc_exchange_credit_memo_id on the replacement order)" fixOwner="HotWax Support" fixWhereEnumId="NETSUITE" headlineTemplate="Credit memo id {creditMemo} names an existing order as its replacement" fixActionTemplate="Unlink the credit memo with internal id {creditMemo} from the original order and apply it to the return's own replacement order." passesWhenTemplate="The replacement of the credit memo with internal id {creditMemo} is a new order, not the one the return came from." />
+    <darpan.audit.AuditStatementCheck statementId="MORNINGS_R14" checkId="MORNINGS_CHK_REPLACEMENT_CUSTOMER" companyUserGroupId="MORNINGS" sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="MORNINGS_MR_SAME_CUSTOMER" />
+    <darpan.audit.AuditStatementCheck statementId="MORNINGS_R13" checkId="MORNINGS_CHK_REPLACEMENT_NOT_ORIGINAL" companyUserGroupId="MORNINGS" sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="MORNINGS_MR_NOT_OWN_ORIGINAL,MORNINGS_MR_NOT_YEAR_OLDER" />
+    <darpan.rule.RuleSet ruleSetId="MORNINGS_WARRANTY_CLAIM_RS" ruleSetName="Warranty claims - credit memos" description="Every warranty claim against the credit memo that carries its return id: there is one, for the amount claimed." version="1.0" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareScope compareScopeId="MORNINGS_WARRANTY_CLAIM_SCOPE" ruleSetId="MORNINGS_WARRANTY_CLAIM_RS" objectType="RETURN" scopeMode="COMPARE" description="Every warranty claim against the credit memo that carries its return id: there is one, for the amount claimed." companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSource compareScopeId="MORNINGS_WARRANTY_CLAIM_SCOPE" fileSide="FILE_1" systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="returnId" sourceConfigId="NS_WARRANTY_CLAIM" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="MORNINGS_WARRANTY_CLAIM_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSource compareScopeId="MORNINGS_WARRANTY_CLAIM_SCOPE" fileSide="FILE_2" systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="returnId" sourceConfigId="NS_RETURN_MEMO" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="MORNINGS_WARRANTY_CLAIM_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="MORNINGS" />
+    <darpan.rule.Rule ruleId="MORNINGS_WC_MEMO_AT_CLAIM" ruleSetId="MORNINGS_WARRANTY_CLAIM_RS" sequenceNum="10" ruleText="amount = amount" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="MORNINGS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"amount","file2FieldPath":"amount","operator":"=","preActions":[{"fieldSide":"file1","action":"STRING_TO_NUMBER"},{"fieldSide":"file2","action":"STRING_TO_NUMBER"}]}</expression>
+        <ruleLogic>rule "MORNINGS_WC_MEMO_AT_CLAIM"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER")), reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER")), "="))
+then
+    Object _file1Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER"));
+    Object _file2Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER"));
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "amount = amount",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: amount = amount"
+    );
+end</ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.audit.AuditCheck checkId="MORNINGS_CHK_WARRANTY_NO_MEMO" companyUserGroupId="MORNINGS" checkCode="warranty-claims-without-a-credit-memo" label="Warranty claims with no credit memo" savedRunId="MORNINGS_WARRANTY_CLAIM_RS" file1RecordType="warrantyClaim" graceDays="2" matchedBy="return id (custbody_hc_return_id on the RMA and the credit memo)" fixOwner="HotWax Support" fixWhereEnumId="NETSUITE" headlineTemplate="Warranty claim {warrantyClaim} has no credit memo" fixActionTemplate="Create the credit memo for warranty claim {warrantyClaim}, for the amount claimed, with return id {recordKey}." passesWhenTemplate="A credit memo with return id {recordKey} exists for warranty claim {warrantyClaim}." />
+    <darpan.audit.AuditCheck checkId="MORNINGS_CHK_WARRANTY_MEMO_AMOUNT" companyUserGroupId="MORNINGS" checkCode="warranty-memos-not-at-the-claimed-amount" label="Warranty credit memos not at the amount claimed" savedRunId="MORNINGS_WARRANTY_CLAIM_RS" file1RecordType="warrantyClaim" graceDays="1" matchedBy="return id (custbody_hc_return_id on the RMA and the credit memo)" amountCurrencyUomId="USD" expectedSource="Warranty claim (RMA total)" actualSource="NetSuite credit memo total" fixOwner="HotWax Support" fixWhereEnumId="NETSUITE" headlineTemplate="Credit memo for return {recordKey} is {file2Value}; the claim is {file1Value}" fixActionTemplate="Correct the credit memo for return {recordKey} to the amount claimed, {expectedAmount}." passesWhenTemplate="The credit memo for return {recordKey} totals {expectedAmount}." />
+    <darpan.audit.AuditStatementCheck statementId="MORNINGS_R12" checkId="MORNINGS_CHK_WARRANTY_NO_MEMO" companyUserGroupId="MORNINGS" sequenceNum="1" diffTypes="MISSING_IN_FILE_2" />
+    <darpan.audit.AuditStatementCheck statementId="MORNINGS_R12" checkId="MORNINGS_CHK_WARRANTY_MEMO_AMOUNT" companyUserGroupId="MORNINGS" sequenceNum="2" diffTypes="FIELD_MISMATCH" ruleIds="MORNINGS_WC_MEMO_AT_CLAIM" />
+    <darpan.rule.RuleSet ruleSetId="MORNINGS_CANCELLED_RETURN_RS" ruleSetName="Cancelled OMS returns - open NetSuite RMAs" description="A return the OMS cancelled has no RMA left open in NetSuite." version="1.0" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareScope compareScopeId="MORNINGS_CANCELLED_RETURN_SCOPE" ruleSetId="MORNINGS_CANCELLED_RETURN_RS" objectType="RETURN" scopeMode="COMPARE" description="A return the OMS cancelled has no RMA left open in NetSuite." companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSource compareScopeId="MORNINGS_CANCELLED_RETURN_SCOPE" fileSide="FILE_1" systemEnumId="OMS_RETURNS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="returnId" sourceConfigId="mornings_prod" sourceConfigType="HOTWAX_OMS_GQL_RETURNS" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="MORNINGS_CANCELLED_RETURN_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSource compareScopeId="MORNINGS_CANCELLED_RETURN_SCOPE" fileSide="FILE_2" systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="returnId" sourceConfigId="NS_OPEN_RMA" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="MORNINGS" />
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="MORNINGS_CANCELLED_RETURN_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="MORNINGS" />
+    <darpan.rule.Rule ruleId="MORNINGS_R16_STATUS" ruleSetId="MORNINGS_CANCELLED_RETURN_RS" sequenceNum="10" ruleText="statusId = status" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="MORNINGS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"statusId","file2FieldPath":"status","operator":"="}</expression>
+        <ruleLogic>rule "MORNINGS_R16_STATUS"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(!java.util.Objects.equals(((Map) $m.get("file1")).get("statusId"), ((Map) $m.get("file2")).get("status")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("statusId");
+    Object _file2Value = ((Map) $m.get("file2")).get("status");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "statusId = status",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: statusId = status"
+    );
+end</ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.audit.AuditCheck checkId="MORNINGS_CHK_CANCELLED_RETURN_OPEN" companyUserGroupId="MORNINGS" checkCode="cancelled-returns-left-open" label="Returns the OMS cancelled whose NetSuite RMA is still open" savedRunId="MORNINGS_CANCELLED_RETURN_RS" file1RecordType="return" graceDays="1" matchedBy="return id (custbody_hc_return_id on the RMA, without its HG- prefix)" fixOwner="HotWax Support" fixWhereEnumId="NETSUITE" headlineTemplate="Return {recordKey} is cancelled in the OMS; its RMA is {file2Value}" fixActionTemplate="Close the RMA of return {recordKey} in NetSuite, with anything open behind it: the OMS cancelled the return." passesWhenTemplate="The RMA of return {recordKey} is no longer open." />
+    <darpan.audit.AuditStatementCheck statementId="MORNINGS_R16" checkId="MORNINGS_CHK_CANCELLED_RETURN_OPEN" companyUserGroupId="MORNINGS" sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="MORNINGS_R16_STATUS" />
+</entity-facade-xml>

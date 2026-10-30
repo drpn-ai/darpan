@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-UI-044. The conclusion vocabulary's type and its one universal member. Tenant-specific
-     conclusions live in tenant config files beside the rules that reach them. -->
+<!-- DAR-UI-044. The conclusion vocabulary's type, its one universal member, and every code core rule code concludes
+     (DAR-BE-160: core owns the words). Tenant-specific conclusions live in each tenant's config pack. -->
 <entity-facade-xml type="seed">
     <moqui.basic.EnumerationType enumTypeId="DarpanConclusion" description="Run result conclusion"/>
     <moqui.basic.Enumeration enumId="UNEXPLAINED" enumTypeId="DarpanConclusion" enumCode="UNEXPLAINED"
             description="Unexplained" sequenceNum="999"/>
+    <!-- DAR-BE-151: concluded by brain/oms-netsuite.drl (Cause.expected), so every install needs its label. -->
+    <moqui.basic.Enumeration enumId="CONC_PARTIAL_PAYMENT_GIVEN_BACK" enumTypeId="DarpanConclusion"
+            enumCode="CONC_PARTIAL_PAYMENT_GIVEN_BACK" description="Partial payment given back"/>
 </entity-facade-xml>

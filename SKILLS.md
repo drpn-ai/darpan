@@ -25,7 +25,8 @@ description: Guide coding and verifying changes inside the Darpan Moqui componen
    `docs/api-contract/` with `generateApiContract`.
 5. **Data.** Run artifacts live under `runtime://datamanager/reconciliation-runs/**`; schemas are
    stored in the `JsonSchema` entity. Seed changes also go into the release's upgrade data;
-   client configuration (`darpan-tenant-config`) does not.
+   client configuration never lives here: it is the tenant's config pack (`drpn-ai/darpan-config-<client>`,
+   DAR-BE-160), moved by the admin app's `/transfer`.
 6. **Verify.** Focused tests only (`scripts/focused-test.sh` or `test --tests <FQCN>`), on JDK 21.
    Note that Gradle does not rerun tests for a data-XML-only change; use `--rerun` after the task.
 7. **Docs.** Update `docs/**` when behaviour changes.

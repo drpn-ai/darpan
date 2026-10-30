@@ -228,34 +228,6 @@ class TenantOwnedEntityFilterRuntimeTests {
         assertEquals([], visible, "a caller with no active tenant must see no tenant-owned row")
     }
 
-    @Test
-    void gorjanasAuditCatalogIsSeenByGorjanaOnly() {
-        // DAR-BE-088: the real catalog file, loaded as an install loads it, read the way a facade service reads it.
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
-                "component://darpan/data/GorjanaMonthCloseCatalogData.xml")
-        Set<String> categoryIds = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditCategory")
-                .disableAuthz().useCache(false).list()*.get("enumId") as Set<String>
-        assertEquals(4, categoryIds.size(), "test precondition: the four categories are seeded")
-
-        actAs(EDITOR_USERNAME, GORJANA)
-        List gorjana = []
-        underFacadeGrant {
-            gorjana = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "like", "GORJANA_R%")
-                    .orderBy("sequenceNum").useCache(false).list()
-        }
-        // R18 (DAR-BE-111) and R19 (DAR-BE-113) follow the seventeen from #483.
-        assertEquals((1..21).collect { "R${it}".toString() }, gorjana*.get("statementCode"), "GORJANA sees R1-R21 in order")
-        assertEquals([], gorjana.findAll { !categoryIds.contains(it.get("categoryEnumId")) }*.get("statementCode"),
-                "every statement carries an AuditCategory")
-
-        actAs(EDITOR_USERNAME, KREWE)
-        long krewe = -1L
-        underFacadeGrant {
-            krewe = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "like", "GORJANA_R%").count()
-        }
-        assertEquals(0L, krewe, "another tenant must see none of gorjana's catalog")
-    }
-
     // -----------------------------------------------------------------------------------------
     // Layer 2 — real facade services, authz ON
     // -----------------------------------------------------------------------------------------

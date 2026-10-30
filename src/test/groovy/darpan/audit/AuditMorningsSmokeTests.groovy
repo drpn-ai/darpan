@@ -21,9 +21,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-093 end to end: gorjana's R2 check ("every invoice carries the Etail id") as shipped configuration, run by a
- * real audit automation through the real executor, Spark evaluate, conclusion step and ledger, on two mornings.
- * Only the NetSuite read is stubbed, with a fixture per morning.
+ * DAR-BE-093 end to end: an R2 check ("every invoice carries the Etail id") from a tenant config pack (the fixture
+ * data/test/AuditMorningsFixtureData.xml, DAR-BE-160), run by a real audit automation through the real executor, Spark
+ * evaluate, conclusion step and ledger, on two mornings. Only the NetSuite read is stubbed, with a fixture per morning.
  *
  *   14 Oct  INV9000002 (no Etail id) and INV9000003 (blank Etail id) are found; pending (grace 1 day)
  *   15 Oct  INV9000002 now carries its Etail id: fixed. INV9000003 still has none: open
@@ -31,11 +31,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * R2's check reads ONE system, so this is also the scheduled path's single-sided (EVALUATE) run.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class GorjanaMonthCloseMorningsSmokeTests {
+class AuditMorningsSmokeTests {
 
-    private static final String TENANT = "GORJANA"
-    private static final String AUTOMATION = "GORJANA_AUTO_INVOICE_ETAIL"
-    private static final String CHECK = "GORJANA_CHK_INVOICE_ETAIL"
+    private static final String TENANT = "MORNINGS"
+    private static final String AUTOMATION = "MORNINGS_AUTO_INVOICE_ETAIL"
+    private static final String CHECK = "MORNINGS_CHK_INVOICE_ETAIL"
     private static final ZoneId LA = ZoneId.of("America/Los_Angeles")
 
     private ExecutionContext ec
@@ -43,8 +43,8 @@ class GorjanaMonthCloseMorningsSmokeTests {
     @BeforeAll
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
-        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "gorjana-month-close-mornings")
-        upsert("moqui.security.UserGroup", [userGroupId: TENANT], [userGroupId: TENANT, description: "gorjana"])
+        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "mornings-month-close-mornings")
+        upsert("moqui.security.UserGroup", [userGroupId: TENANT], [userGroupId: TENANT, description: "mornings"])
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/MappingSeedData.xml",
                 "component://darpan/data/AutomationSeedData.xml",
@@ -52,21 +52,14 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 "component://darpan/data/SourceSystemConnectorSeedData.xml",
                 "component://darpan/data/ConclusionCatalogSeedData.xml",
                 "component://darpan/data/AuditSeedData.xml",
-                "component://darpan/data/TriSystemOrderRunsRuleSetData.xml",
-                "component://darpan/data/GorjanaConclusionRulesData.xml",
-                "component://darpan/data/GorjanaMonthCloseCatalogData.xml",
-                "component://darpan/data/GorjanaMonthCloseChecksData.xml",
-                "component://darpan/data/GorjanaMonthCloseReplacementChecksData.xml",
-                "component://darpan/data/GorjanaMonthCloseWarrantyClaimChecksData.xml",
-                "component://darpan/data/GorjanaMonthCloseReturnsChecksData.xml")
-        // DAR-BE-125 turned gorjana's statements off but R1 R8 R12 R19 R20; these mornings prove each check's mechanics, so
-        // every statement is on here.
-        ec.entity.find("darpan.audit.AuditStatement").condition("auditId", "GORJANA_MONTH_CLOSE").disableAuthz().useCache(false)
+                "component://darpan/data/test/AuditMorningsFixtureData.xml")
+        // These mornings prove each check's mechanics, so every statement is on here whatever the fixture says.
+        ec.entity.find("darpan.audit.AuditStatement").condition("auditId", "MORNINGS_MONTH_CLOSE").disableAuthz().useCache(false)
                 .list().each { it.set("isActive", "Y"); it.update() }
         // The loader rolls a file back on a referential failure and still reports a count: prove the rows.
-        assertEquals("GORJANA_INVOICE_ETAIL_RS", find("darpan.audit.AuditCheck", [checkId: CHECK])?.savedRunId)
+        assertEquals("MORNINGS_INVOICE_ETAIL_RS", find("darpan.audit.AuditCheck", [checkId: CHECK])?.savedRunId)
         assertEquals(TENANT, find("darpan.rule.RuleSetConclusionRule",
-                [compareScopeId: "GORJANA_INVOICE_ETAIL_SCOPE", sequenceNum: 10L])?.companyUserGroupId)
+                [compareScopeId: "MORNINGS_INVOICE_ETAIL_SCOPE", sequenceNum: 10L])?.companyUserGroupId)
 
         // An audit automation is created per environment (DAR-BE-093 prod-owed); this is its shape: one NetSuite
         // source, the R2 rule set, the tenant's zone.
@@ -74,8 +67,8 @@ class GorjanaMonthCloseMorningsSmokeTests {
         upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTOMATION], [automationId: AUTOMATION,
                 automationName: "Month close: invoices without an Etail id", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
-                savedRunId: "GORJANA_INVOICE_ETAIL_RS", savedRunType: "ruleset", ruleSetId: "GORJANA_INVOICE_ETAIL_RS",
-                compareScopeId: "GORJANA_INVOICE_ETAIL_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                savedRunId: "MORNINGS_INVOICE_ETAIL_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_INVOICE_ETAIL_RS",
+                compareScopeId: "MORNINGS_INVOICE_ETAIL_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTOMATION, fileSide: "FILE_1"], [
                 automationId: AUTOMATION, fileSide: "FILE_1", companyUserGroupId: TENANT,
@@ -94,12 +87,12 @@ class GorjanaMonthCloseMorningsSmokeTests {
 
     @Test
     void anInvoiceIsFoundOneMorningAndFixedTheNext() {
-        morning("2026-10-14", "component://darpan/data/test/gorjana-invoices-morning-1.json")
+        morning("2026-10-14", "component://darpan/data/test/mornings-invoices-morning-1.json")
 
         Map<String, Map> first = findingsByRecord()
         assertEquals(["INV9000002", "INV9000003"] as Set, first.keySet(), "the two invoices with no Etail id")
         first.values().each { Map f ->
-            assertEquals(["GORJANA_R2", "AUDFS_PENDING", Date.valueOf("2026-10-14")], [f.statementId, f.stateEnumId, f.firstFoundDate],
+            assertEquals(["MORNINGS_R2", "AUDFS_PENDING", Date.valueOf("2026-10-14")], [f.statementId, f.stateEnumId, f.firstFoundDate],
                     "${f.recordKey}: inside the one-day grace")
         }
         assertEquals("Invoice INV9000002 has no Etail id", first.INV9000002.headline)
@@ -111,7 +104,7 @@ class GorjanaMonthCloseMorningsSmokeTests {
         assertEquals(["AUDCS_RAN", "2026-10"], [run1.statusEnumId, run1.period])
         assertEquals([["NETSUITE", "AUDSR_COMPLETE", 3L]], reads(run1.checkRunId), "one system read, all three invoices")
 
-        morning("2026-10-15", "component://darpan/data/test/gorjana-invoices-morning-2.json")
+        morning("2026-10-15", "component://darpan/data/test/mornings-invoices-morning-2.json")
 
         Map<String, Map> second = findingsByRecord()
         assertEquals(["INV9000002", "INV9000003"] as Set, second.keySet(), "a fixed finding stays on the ledger")
@@ -122,7 +115,7 @@ class GorjanaMonthCloseMorningsSmokeTests {
         assertEquals(["AUDFE_FOUND", "AUDFE_STILL_OPEN"], events(second.INV9000003.findingId))
 
         Map report = (Map) ec.service.sync().name("audit.AuditReportServices.assemble#AuditReport").parameters([
-                companyUserGroupId: TENANT, auditId: "GORJANA_MONTH_CLOSE", reportDate: Date.valueOf("2026-10-15")])
+                companyUserGroupId: TENANT, auditId: "MORNINGS_MONTH_CLOSE", reportDate: Date.valueOf("2026-10-15")])
                 .disableAuthz().call()?.document
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         Map r2 = (Map) ((Map) ((Map) ((Map) report.categories).orders).statements).R2
@@ -135,7 +128,7 @@ class GorjanaMonthCloseMorningsSmokeTests {
 
     @Test
     void aSingleSidedAutomationWithASecondSourceIsRefused() {
-        String twoSided = "GORJANA_AUTO_INVOICE_ETAIL_2"
+        String twoSided = "MORNINGS_AUTO_INVOICE_ETAIL_2"
         Timestamp now = ec.user.nowTimestamp
         Map automation = find("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTOMATION]).getMap()
         upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: twoSided],
@@ -163,13 +156,13 @@ class GorjanaMonthCloseMorningsSmokeTests {
      */
     @Test
     void oneCompareServesR14AndR13ThroughTheirOwnRules() {
-        String auto = "GORJANA_AUTO_MEMO_REPLACEMENT"
+        String auto = "MORNINGS_AUTO_MEMO_REPLACEMENT"
         Timestamp now = ec.user.nowTimestamp
         upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: auto], [automationId: auto,
                 automationName: "Month close: exchange credits against replacements", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
-                savedRunId: "GORJANA_MEMO_REPLACEMENT_RS", savedRunType: "ruleset", ruleSetId: "GORJANA_MEMO_REPLACEMENT_RS",
-                compareScopeId: "GORJANA_MEMO_REPLACEMENT_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                savedRunId: "MORNINGS_MEMO_REPLACEMENT_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_MEMO_REPLACEMENT_RS",
+                compareScopeId: "MORNINGS_MEMO_REPLACEMENT_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         ["FILE_1", "FILE_2"].each { String side ->
             upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: side], [
@@ -177,7 +170,7 @@ class GorjanaMonthCloseMorningsSmokeTests {
                     sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "NETSUITE_SUITEQL",
                     fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
         }
-        ["GORJANA_CHK_REPLACEMENT_CUSTOMER", "GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL"].each { String id ->
+        ["MORNINGS_CHK_REPLACEMENT_CUSTOMER", "MORNINGS_CHK_REPLACEMENT_NOT_ORIGINAL"].each { String id ->
             def c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", id).disableAuthz().useCache(false).one()
             c.set("automationId", auto); c.update()
         }
@@ -186,25 +179,25 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
             boolean memos = source.get("fileSide") == "FILE_1"
             return [dataAvailable: true, fileTypeEnumId: "DftJson", recordCount: 4,
-                    fileLocation: "component://darpan/data/test/gorjana-${memos ? 'exchange-memos' : 'replacement-orders'}.json".toString(),
+                    fileLocation: "component://darpan/data/test/mornings-${memos ? 'exchange-memos' : 'replacement-orders'}.json".toString(),
                     fileName: "${memos ? 'memos' : 'orders'}.json".toString()]
         }
         Timestamp fire = Timestamp.from(LocalDateTime.parse("2026-10-14T06:00:00").atZone(LA).toInstant())
         Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: auto, scheduledFireTime: fire,
-                sparkMaster: "local[1]", sparkAppName: "GorjanaMonthCloseMorningsSmokeTests"])
+                sparkMaster: "local[1]", sparkAppName: "AuditMorningsSmokeTests"])
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals(1, result.executedCount, "${result}")
 
         Closure<List<Map>> findingsOf = { String checkId ->
             ec.entity.find("darpan.audit.AuditFinding").condition("checkId", checkId).disableAuthz().useCache(false).list()*.getMap()
         }
-        List<Map> r14 = findingsOf("GORJANA_CHK_REPLACEMENT_CUSTOMER")
-        List<Map> r13 = findingsOf("GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL")
+        List<Map> r14 = findingsOf("MORNINGS_CHK_REPLACEMENT_CUSTOMER")
+        List<Map> r13 = findingsOf("MORNINGS_CHK_REPLACEMENT_NOT_ORIGINAL")
         // DAR-UI-081: the headline names the memo by the number a person searches NetSuite by, not its internal id.
-        assertEquals([["GORJANA_R14", "81000101", "Credit memo id CM9000101 and its replacement order are under different customers"]],
+        assertEquals([["MORNINGS_R14", "81000101", "Credit memo id CM9000101 and its replacement order are under different customers"]],
                 r14.collect { [it.statementId, it.recordKey, it.headline] })
-        assertEquals([["GORJANA_R13", "81000102", "Credit memo id CM9000102 names an existing order as its replacement"],
-                      ["GORJANA_R13", "81000104", "Credit memo id CM9000104 names an existing order as its replacement"]],
+        assertEquals([["MORNINGS_R13", "81000102", "Credit memo id CM9000102 names an existing order as its replacement"],
+                      ["MORNINGS_R13", "81000104", "Credit memo id CM9000104 names an existing order as its replacement"]],
                 r13.sort { it.recordKey }.collect { [it.statementId, it.recordKey, it.headline] })
         // DAR-UI-080: a FIELD_MISMATCH row carries both sides' records (sideRecords), so the memo is named by its own number
         // with its internal id beside it, and the replacement chain it points at is listed with it. With no conclusion
@@ -222,13 +215,13 @@ class GorjanaMonthCloseMorningsSmokeTests {
      */
     @Test
     void r12FindsAClaimWithNoMemoAndMemosNotAtTheClaimedAmount() {
-        String auto = "GORJANA_AUTO_WARRANTY_CLAIM"
+        String auto = "MORNINGS_AUTO_WARRANTY_CLAIM"
         Timestamp now = ec.user.nowTimestamp
         upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: auto], [automationId: auto,
                 automationName: "Month close: warranty claims against credit memos", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
-                savedRunId: "GORJANA_WARRANTY_CLAIM_RS", savedRunType: "ruleset", ruleSetId: "GORJANA_WARRANTY_CLAIM_RS",
-                compareScopeId: "GORJANA_WARRANTY_CLAIM_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                savedRunId: "MORNINGS_WARRANTY_CLAIM_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_WARRANTY_CLAIM_RS",
+                compareScopeId: "MORNINGS_WARRANTY_CLAIM_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         ["FILE_1", "FILE_2"].each { String side ->
             upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: side], [
@@ -236,7 +229,7 @@ class GorjanaMonthCloseMorningsSmokeTests {
                     sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "NETSUITE_SUITEQL",
                     fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
         }
-        ["GORJANA_CHK_WARRANTY_NO_MEMO", "GORJANA_CHK_WARRANTY_MEMO_AMOUNT"].each { String id ->
+        ["MORNINGS_CHK_WARRANTY_NO_MEMO", "MORNINGS_CHK_WARRANTY_MEMO_AMOUNT"].each { String id ->
             def c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", id).disableAuthz().useCache(false).one()
             c.set("automationId", auto); c.update()
         }
@@ -245,12 +238,12 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
             boolean claims = source.get("fileSide") == "FILE_1"
             return [dataAvailable: true, fileTypeEnumId: "DftJson", recordCount: 4,
-                    fileLocation: "component://darpan/data/test/gorjana-warranty-${claims ? 'claims' : 'claim-memos'}.json".toString(),
+                    fileLocation: "component://darpan/data/test/mornings-warranty-${claims ? 'claims' : 'claim-memos'}.json".toString(),
                     fileName: "${claims ? 'claims' : 'memos'}.json".toString()]
         }
         Timestamp fire = Timestamp.from(LocalDateTime.parse("2026-10-14T06:00:00").atZone(LA).toInstant())
         Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: auto, scheduledFireTime: fire,
-                sparkMaster: "local[1]", sparkAppName: "GorjanaMonthCloseMorningsSmokeTests"])
+                sparkMaster: "local[1]", sparkAppName: "AuditMorningsSmokeTests"])
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals(1, result.executedCount, "${result}")
 
@@ -258,14 +251,14 @@ class GorjanaMonthCloseMorningsSmokeTests {
             ec.entity.find("darpan.audit.AuditFinding").condition("checkId", checkId).disableAuthz().useCache(false).list()
                     *.getMap().sort { it.recordKey }
         }
-        List<Map> noMemo = findingsOf("GORJANA_CHK_WARRANTY_NO_MEMO")
-        assertEquals([["GORJANA_R12", "M400103", "Warranty claim RMA900103 has no credit memo"]],
+        List<Map> noMemo = findingsOf("MORNINGS_CHK_WARRANTY_NO_MEMO")
+        assertEquals([["MORNINGS_R12", "M400103", "Warranty claim RMA900103 has no credit memo"]],
                 noMemo.collect { [it.statementId, it.recordKey, it.headline] }, "only the claim with no memo; not the stray memo")
         // DAR-UI-080: the claim's HotWax return is kept beside it.
         assertEquals([["NETSUITE", "warrantyClaim", "RMA900103", "82000103", null], ["OMS", "return", "M400103", null, null]],
                 records(noMemo[0].findingId as String))
 
-        List<Map> amount = findingsOf("GORJANA_CHK_WARRANTY_MEMO_AMOUNT")
+        List<Map> amount = findingsOf("MORNINGS_CHK_WARRANTY_MEMO_AMOUNT")
         assertEquals(["M400102", "M400104"], amount*.recordKey, "65 and 65.00 are one amount; above and a cent below are not")
         assertEquals("Credit memo for return M400102 is 70.77; the claim is 65.00", amount[0].headline, "money to the cent")
         assertEquals([65.00, 70.77, 5.77, "USD"], [amount[0].expectedAmount, amount[0].actualAmount, amount[0].differenceAmount,
@@ -282,13 +275,13 @@ class GorjanaMonthCloseMorningsSmokeTests {
      */
     @Test
     void r16FindsACancelledReturnWhoseRmaIsStillOpen() {
-        String auto = "GORJANA_AUTO_CANCELLED_RETURN"
+        String auto = "MORNINGS_AUTO_CANCELLED_RETURN"
         Timestamp now = ec.user.nowTimestamp
         upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: auto], [automationId: auto,
                 automationName: "Month close: cancelled returns left open", companyUserGroupId: TENANT,
                 inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
-                savedRunId: "GORJANA_CANCELLED_RETURN_RS", savedRunType: "ruleset", ruleSetId: "GORJANA_CANCELLED_RETURN_RS",
-                compareScopeId: "GORJANA_CANCELLED_RETURN_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                savedRunId: "MORNINGS_CANCELLED_RETURN_RS", savedRunType: "ruleset", ruleSetId: "MORNINGS_CANCELLED_RETURN_RS",
+                compareScopeId: "MORNINGS_CANCELLED_RETURN_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
                 relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
         upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: "FILE_1"], [
                 automationId: auto, fileSide: "FILE_1", companyUserGroupId: TENANT,
@@ -298,25 +291,25 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 automationId: auto, fileSide: "FILE_2", companyUserGroupId: TENANT,
                 sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "NETSUITE_SUITEQL",
                 fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
-        def c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "GORJANA_CHK_CANCELLED_RETURN_OPEN").disableAuthz().useCache(false).one()
+        def c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "MORNINGS_CHK_CANCELLED_RETURN_OPEN").disableAuthz().useCache(false).one()
         c.set("automationId", auto); c.update()
         AutomationExecutionSupport.resetExecutionHooks()
         AutomationExecutionSupport.setSourceExtractor { def ignoredEc, def ignoredAutomation, def source,
                 Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
             boolean oms = source.get("fileSide") == "FILE_1"
             return [dataAvailable: true, fileTypeEnumId: "DftJson", recordCount: 3,
-                    fileLocation: "component://darpan/data/test/gorjana-${oms ? 'cancelled-returns' : 'open-rmas'}.json".toString(),
+                    fileLocation: "component://darpan/data/test/mornings-${oms ? 'cancelled-returns' : 'open-rmas'}.json".toString(),
                     fileName: "${oms ? 'returns' : 'rmas'}.json".toString()]
         }
         Timestamp fire = Timestamp.from(LocalDateTime.parse("2026-10-14T06:00:00").atZone(LA).toInstant())
         Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: auto, scheduledFireTime: fire,
-                sparkMaster: "local[1]", sparkAppName: "GorjanaMonthCloseMorningsSmokeTests"])
+                sparkMaster: "local[1]", sparkAppName: "AuditMorningsSmokeTests"])
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals(1, result.executedCount, "${result}")
-        List<Map> found = ec.entity.find("darpan.audit.AuditFinding").condition("checkId", "GORJANA_CHK_CANCELLED_RETURN_OPEN")
+        List<Map> found = ec.entity.find("darpan.audit.AuditFinding").condition("checkId", "MORNINGS_CHK_CANCELLED_RETURN_OPEN")
                 .disableAuthz().useCache(false).list()*.getMap().sort { it.recordKey }
-        assertEquals([["GORJANA_R16", "628301", "Return 628301 is cancelled in the OMS; its RMA is Return Authorization : Pending Refund"],
-                      ["GORJANA_R16", "M500101", "Return M500101 is cancelled in the OMS; its RMA is Return Authorization : Pending Receipt"]],
+        assertEquals([["MORNINGS_R16", "628301", "Return 628301 is cancelled in the OMS; its RMA is Return Authorization : Pending Refund"],
+                      ["MORNINGS_R16", "M500101", "Return M500101 is cancelled in the OMS; its RMA is Return Authorization : Pending Receipt"]],
                 found.collect { [it.statementId, it.recordKey, it.headline] }, "the cancelled one with no RMA and the uncancelled RMA are not findings")
     }
 
@@ -331,7 +324,7 @@ class GorjanaMonthCloseMorningsSmokeTests {
         }
         Timestamp fire = Timestamp.from(LocalDateTime.parse("${day}T06:00:00").atZone(LA).toInstant())
         Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: AUTOMATION, scheduledFireTime: fire,
-                sparkMaster: "local[1]", sparkAppName: "GorjanaMonthCloseMorningsSmokeTests"])
+                sparkMaster: "local[1]", sparkAppName: "AuditMorningsSmokeTests"])
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals(1, result.executedCount, "${day}: ${result}")
         def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")

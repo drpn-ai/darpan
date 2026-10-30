@@ -20,6 +20,19 @@ class TenantScriptSupport {
         return INPUT_SOURCES.contains(value) ? value : null
     }
 
+    /**
+     * One difference as a script reads it. The result file keeps each record's fields as JSON text (record.data);
+     * a script has no JSON parser, so the fields arrive parsed: d.record.data.itemsBackordered, not a string.
+     */
+    static Object scriptRow(Object row) {
+        if (!(row instanceof Map) || !(((Map) row).get('record') instanceof Map)) return row
+        Map record = new LinkedHashMap((Map) ((Map) row).get('record'))
+        record.put('data', darpan.facade.reconciliation.DiffDetailClassifier.parseDiffData(record.get('data')))
+        Map out = new LinkedHashMap((Map) row)
+        out.put('record', record)
+        return out
+    }
+
     static Map<String, Object> toScriptMap(def row) {
         if (row == null) return null
         return [
@@ -60,7 +73,7 @@ class TenantScriptSupport {
                 if (ec.message.hasError()) return null
                 if (first == null) first = page
                 List rows = (page.differences instanceof List) ? (List) page.differences : []
-                differences.addAll(rows.take(MAX_RUN_RESULT_DIFFERENCES - differences.size()))
+                differences.addAll(rows.take(MAX_RUN_RESULT_DIFFERENCES - differences.size()).collect { scriptRow(it) })
                 pageIndex++
                 if (rows.size() < pageSize || pageIndex >= ((page.pageCount ?: 0) as int)) break
             }

@@ -44,6 +44,7 @@ class ScriptLibrary {
             [name: 'sum(list) / sum(list, field)', help: 'the total of the numbers, or of field across maps'],
             [name: 'groupCount(list, field)', help: 'a map of each value of field to how many maps have it'],
             [name: 'sorted(list) / distinct(list)', help: 'the list sorted / with repeats removed'],
+            [name: "sortBy(list, field) / sortBy(list, field, 'desc')", help: 'the maps in the list ordered by field (numbers as numbers)'],
             [name: 'day(x)', help: 'a date or timestamp as yyyy-MM-dd (UTC)'],
             [name: 'daysBetween(a, b) / hoursBetween(a, b)', help: 'whole days / hours from a to b (dates, timestamps or epoch ms)'],
             [name: 'log(x)', help: 'adds x to the run log and returns it'],
@@ -219,6 +220,26 @@ class ScriptLibrary {
         ScriptBudget.charge(items.size() * 4L)
         items.sort { Object a, Object b ->
             (a instanceof Number && b instanceof Number) ? dec(a) <=> dec(b) : String.valueOf(a) <=> String.valueOf(b)
+        }
+        return items
+    }
+
+    static List sortBy(Object list, Object field) { sortBy(list, field, 'asc') }
+
+    /** The maps in the list ordered by one field: numbers by value, the rest as text; ties keep their order. */
+    static List sortBy(Object list, Object field, Object direction) {
+        List items = new ArrayList(asList(list, 'sortBy'))
+        if (items.any { !(it instanceof Map) }) throw new IllegalArgumentException('sortBy takes a list of maps.')
+        String dir = str(direction)?.trim()?.toLowerCase(Locale.ROOT) ?: 'asc'
+        if (!(dir in ['asc', 'desc'])) throw new IllegalArgumentException("sortBy's direction is 'asc' or 'desc'.")
+        ScriptBudget.charge(items.size() * 4L)
+        int sign = dir == 'desc' ? -1 : 1
+        items.sort { Object a, Object b ->
+            Object x = ((Map) a).get(field), y = ((Map) b).get(field)
+            if (!ScriptBudget.isScalar(x) || !ScriptBudget.isScalar(y)) throw new IllegalArgumentException('sortBy sorts on text or numbers.')
+            int c = (x instanceof Number && y instanceof Number) ? dec(x) <=> dec(y)
+                    : (x == null ? (y == null ? 0 : -1) : (y == null ? 1 : String.valueOf(x) <=> String.valueOf(y)))
+            sign * c
         }
         return items
     }

@@ -322,6 +322,49 @@ class ScriptSupervisorTests {
         assertTrue((out.logs as List)[0].toString().startsWith('[{tender: CARD, amount: 40.00}'), "${out.logs}")
     }
 
+    // -- a tenant's question over a run result: units backordered per SKU (NetSuite sales orders)
+
+    static final String BACKORDERS_BY_SKU = '''
+        var bySku = {:};
+        for (var d : input.differences) {
+            for (var line : d.record.data.itemsBackordered ?? []) {
+                var row = bySku[line.sku] ?? {'sku': line.sku, 'units': 0, 'lines': 0};
+                row.units = row.units + d:dec(line.quantity);
+                row.lines = row.lines + 1;
+                bySku[line.sku] = row;
+            }
+        }
+        { 'skus': d:len(bySku), 'units': d:sum(d:vals(bySku), 'units'), 'bySku': d:sortBy(d:vals(bySku), 'units', 'desc') }
+    '''
+
+    @Test
+    void backordersPerSkuFromNetSuiteSalesOrderDifferences() {
+        // Rows as the result file holds them: the order's fields are JSON text in record.data.
+        List raw = [
+                [record: [id: '1', data: '{"order":"SO1","itemsBackordered":[{"quantity":"1","sku":"A:S"}]}']],
+                [record: [id: '2', data: '{"order":"SO2","itemsBackordered":[{"quantity":"2","sku":"A:S"},{"quantity":"1","sku":"B:M"}]}']],
+                [record: [id: '3', data: '{"order":"SO3","itemsBackordered":[]}']],
+                [record: [id: '4', data: '{"order":"SO4"}']],
+        ]
+        List differences = raw.collect { TenantScriptSupport.scriptRow(it) }
+        assertTrue(((differences[0] as Map).record as Map).data instanceof Map, 'record.data reaches the script parsed')
+
+        Map out = run('SCRIPT', BACKORDERS_BY_SKU, [differences: differences])
+        assertTrue(out.ok as boolean, "${out}")
+        Map result = out.result as Map
+        assertEquals(2, result.skus)
+        assertEquals(new BigDecimal('4'), result.units)
+        assertEquals([[sku: 'A:S', units: new BigDecimal('3'), lines: 2], [sku: 'B:M', units: new BigDecimal('1'), lines: 1]], result.bySku)
+    }
+
+    @Test
+    void sortByOrdersMapsByAFieldEitherWay() {
+        Map out = run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'b', 'n': 2}, {'k': 'a', 'n': 10}, {'k': 'c', 'n': 1}], 'n', 'desc'), 'k')")
+        assertEquals(['a', 'b', 'c'], out.result)
+        assertEquals(['a', 'b', 'c'], run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'c'}, {'k': 'a'}, {'k': 'b'}], 'k'), 'k')").result)
+        assertFalse(run('EXPRESSION', "d:sortBy([1, 2], 'k')").ok as boolean, 'sortBy takes maps')
+    }
+
     // -- the choke point
 
     @Test

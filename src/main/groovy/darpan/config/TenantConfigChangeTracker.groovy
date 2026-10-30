@@ -41,6 +41,7 @@ class TenantConfigChangeTracker {
             "darpan.audit.AuditStatementCheck"               : ["darpan.audit.AuditStatement", "statementId"],
             "darpan.reconciliation.ReconciliationAutomationSource"      : ["darpan.reconciliation.ReconciliationAutomation", "automationId"],
             "darpan.reconciliation.ReconciliationAutomationSourceFilter": ["darpan.reconciliation.ReconciliationAutomation", "automationId"],
+            "darpan.reconciliation.ReconciliationRun"                   : ["darpan.reconciliation.Reconciliation", "reconciliationId"],
     ].asImmutable()
 
     /**

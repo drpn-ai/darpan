@@ -96,6 +96,14 @@
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.ReconciliationAutomationSourceFilter', entityValue, eecaOperation)</script></actions>
     </eeca>
+    <eeca id="TenantConfigChange_Reconciliation" entity="darpan.reconciliation.Reconciliation" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.Reconciliation', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_ReconciliationRun" entity="darpan.reconciliation.ReconciliationRun" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.ReconciliationRun', entityValue, eecaOperation)</script></actions>
+    </eeca>
     <eeca id="TenantConfigChange_KnowledgeEntry" entity="darpan.knowledge.KnowledgeEntry" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.knowledge.KnowledgeEntry', entityValue, eecaOperation)</script></actions>

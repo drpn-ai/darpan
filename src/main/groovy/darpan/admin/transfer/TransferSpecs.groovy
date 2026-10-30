@@ -34,8 +34,13 @@ class TransferSpecs {
     static final String CHECK = "CHECK"
     /** DAR-BE-160. Carried only by a tenant config version (bundle withAutomations), never by an admin transfer. */
     static final String AUTOMATION = "AUTOMATION"
+    /** DAR-BE-160. A lifecycle (darpan.reconciliation.Reconciliation) and its questions; version-only, like AUTOMATION. */
+    static final String LIFECYCLE = "LIFECYCLE"
+    static final String QUESTION = "QUESTION"
     /** DAR-BE-161. A tenant's knowledge entries (darpan.knowledge.KnowledgeEntry); only the ACTIVE ones travel. */
     static final String KNOWLEDGE = "KNOWLEDGE"
+    /** Kinds that live only as children of another kind's record (refs to them resolve inside their parent). */
+    static final List<String> CHILD_KINDS = [RULE, QUESTION].asImmutable()
 
     static final List<String> CONNECTION_KINDS = [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_RESTLET].asImmutable()
 
@@ -51,6 +56,9 @@ class TransferSpecs {
      * connection or query id in safeMetadataJson.parameters, under its connector's configParameterName.
      */
     static final List<String> JSON_PARAM_REF_FIELDS = ["safeMetadataJson"].asImmutable()
+
+    /** DAR-BE-160. Text columns holding a JSON list whose items name a conclusion code by conclusionEnumId (a lifecycle's rules). */
+    static final List<String> JSON_CONC_REF_FIELDS = ["conclusionRules"].asImmutable()
 
     static final String CONCLUSION_ENUM_TYPE = "DarpanConclusion"
 
@@ -101,8 +109,16 @@ class TransferSpecs {
             // target's, and changing them is no config change. A source's config id travels as a ref inside
             // safeMetadataJson (JSON_PARAM_REF_FIELDS); its other id columns stay plain, as a version restores into the
             // tenant it came from.
+            // DAR-BE-160. A lifecycle's questions: only those switched on (a rebuild switches the old ones off and keeps
+            // them for history), parent before child. Its runs travel as RUN records marked ownedBy.
+            [kind: LIFECYCLE, entityName: "darpan.reconciliation.Reconciliation", pkField: "reconciliationId",
+             naturalKey: "reconciliationName", children: [
+                    [kind: QUESTION, entityName: "darpan.reconciliation.ReconciliationRun", pkField: "reconciliationRunId",
+                     parentFields: ["reconciliationId"], orderBy: ["runSequence", "reconciliationRunId"], activeOnly: "isActive",
+                     selfRef: "parentReconciliationRunId", refFields: [ruleSetId: RUN, parentReconciliationRunId: QUESTION]]]],
+            // savedRunId names a run, or a lifecycle when savedRunType is "reconciliation" (polymorphicKind).
             [kind: AUTOMATION, entityName: "darpan.reconciliation.ReconciliationAutomation", pkField: "automationId",
-             naturalKey: "automationName", refFields: [savedRunId: RUN],
+             naturalKey: "automationName", polymorphicRef: "savedRunId",
              dropFields: ["isActive", "nextScheduledFireTime", "lastScheduledFireTime"], children: [
                     [entityName: "darpan.reconciliation.ReconciliationAutomationSource", parentFields: ["automationId"],
                      orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
@@ -114,13 +130,13 @@ class TransferSpecs {
     ].asImmutable()
 
     /** Every kind's name, for telling a ref inside JSON from a plain value. */
-    static final Set<String> KIND_NAMES = ((KINDS*.kind as List<String>) + [RULE] as Set<String>).asImmutable()
+    static final Set<String> KIND_NAMES = ((KINDS*.kind as List<String>) + CHILD_KINDS as Set<String>).asImmutable()
 
     /** The bundle list each top-level kind travels in. */
     static final Map<String, String> BUNDLE_LISTS = [(NETSUITE_AUTH): "connections", (SHOPIFY_AUTH): "connections",
             (HOTWAX_OMS_REST): "connections", (NETSUITE_RESTLET): "connections", (NETSUITE_SUITEQL): "queries",
             (CONC): "conclusionCodes", (RUN): "runs", (AUDIT): "audits", (STATEMENT): "statements", (CHECK): "checks",
-            (AUTOMATION): "automations", (KNOWLEDGE): "knowledge"].asImmutable()
+            (AUTOMATION): "automations", (LIFECYCLE): "lifecycles", (KNOWLEDGE): "knowledge"].asImmutable()
 
     static Map spec(String kind) {
         return KINDS.find { it.kind == kind }

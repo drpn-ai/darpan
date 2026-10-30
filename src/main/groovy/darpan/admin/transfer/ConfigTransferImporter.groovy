@@ -116,6 +116,8 @@ class ConfigTransferImporter {
                         sendUrl: found.sendUrlTemplate, sendServiceName: found.remoteSendServiceName]).create()
             }
         }
+        Map<String, List> lifecycleRows = [:]
+        records(ctx, "lifecycles").each { Map l -> writeLifecycleRow(ctx, l, lifecycleRows) }
         records(ctx, "runs").each { Map r ->
             if (ctx.actions[r.ref] == "UNCHANGED") {
                 keepRuleIds(ctx, r)
@@ -123,6 +125,17 @@ class ConfigTransferImporter {
                 writeTree(ctx, spec(RUN), r, "RS_")
                 compile(ctx, ctx.idMap[r.ref] as String, r.label as String)
             }
+            // DAR-BE-160: a run a lifecycle owns is that lifecycle's again.
+            if (r.ownedBy && ctx.actions[r.ref] != "UNCHANGED") {
+                def run = finder(ctx.ec, "darpan.rule.RuleSet").condition("ruleSetId", ctx.idMap[r.ref]).useCache(false).one()
+                run.set("ownerReconciliationId", targetId(ctx, r.ownedBy))
+                run.update()
+            }
+        }
+        // Questions after runs: each names the run it asks.
+        records(ctx, "lifecycles").each { Map l ->
+            List written = lifecycleRows[l.ref as String]
+            if (written) writeChildren(ctx, spec(LIFECYCLE), written[0], l, written[1] as boolean)
         }
         records(ctx, "audits").each { Map a -> writeTree(ctx, spec(AUDIT), a, "") }
         records(ctx, "statements").each { Map s -> writeStatement(ctx, s) }
@@ -157,43 +170,49 @@ class ConfigTransferImporter {
         openSecrets(ctx, secretHandoffToken)
 
         matchConnections(ctx)
-        matchByKey(ctx, "queries", "description", { Map q -> text(q.fields?.description) }) { Map q ->
-            scoped(ctx, spec(NETSUITE_SUITEQL).entityName as String).condition("description", q.fields?.description).list()
-        }
-        records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
-        matchByKey(ctx, "runs", "ruleSetName", { Map r -> text(r.fields?.ruleSetName) }) { Map r ->
-            scoped(ctx, "darpan.rule.RuleSet").condition("ruleSetName", r.fields?.ruleSetName).list()
-        }
-        ownedRunGate(ctx)
-        matchByKey(ctx, "audits", "auditCode", { Map a -> text(a.fields?.auditCode) }) { Map a ->
-            scoped(ctx, "darpan.audit.Audit").condition("auditCode", a.fields?.auditCode).list()
-        }
-        matchByKey(ctx, "statements", "statementCode",
-                { Map s -> text(s.fields?.statementCode) ? "${s.refs?.auditId} ${s.fields.statementCode}".toString() : null }) { Map s ->
-            String auditId = ctx.resolved[s.refs?.auditId] as String
-            auditId ? scoped(ctx, "darpan.audit.AuditStatement").condition("auditId", auditId)
-                    .condition("statementCode", s.fields?.statementCode).list() : []
-        }
-        matchByKey(ctx, "checks", "checkCode", { Map c -> text(c.fields?.checkCode) }) { Map c ->
-            scoped(ctx, "darpan.audit.AuditCheck").condition("checkCode", c.fields?.checkCode).list()
-        }
-        // DAR-BE-160. Only a config version carries automations, and a version restores into its own tenant, where an
-        // automation is matched by its own id (names need not be unique); from another tenant, by its name.
-        boolean sameTenant = text(bundle.source?.tenantUserGroupId) == tenantId
-        matchByKey(ctx, "automations", sameTenant ? "id" : "automationName",
-                { Map a -> sameTenant ? parseRef(a.ref)?.get(1) : text(a.fields?.automationName) }) { Map a ->
-            sameTenant ? scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationId", parseRef(a.ref)?.get(1)).list()
-                    : scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationName", a.fields?.automationName).list()
-        }
-        matchByKey(ctx, "knowledge", sameTenant ? "id" : "entryKey",
-                { Map k -> sameTenant ? parseRef(k.ref)?.get(1) : text(k.fields?.entryKey) }) { Map k ->
-            sameTenant ? scoped(ctx, spec(KNOWLEDGE).entityName as String).condition("knowledgeEntryId", parseRef(k.ref)?.get(1)).list()
-                    : scoped(ctx, spec(KNOWLEDGE).entityName as String).condition("entryKey", k.fields?.entryKey).list()
+        // DAR-BE-160. A config version restores into the tenant it came from: every id in it is that tenant's own, so
+        // records match by id (a renamed run is renamed back, not copied) and one deleted since comes back under its id.
+        ctx.sameTenant = text(bundle.source?.tenantUserGroupId) == tenantId
+        if (ctx.sameTenant) {
+            records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
+            ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
+             "checks": CHECK, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind -> matchById(ctx, list, spec(kind)) }
+        } else {
+            matchByKey(ctx, "queries", "description", { Map q -> text(q.fields?.description) }) { Map q ->
+                scoped(ctx, spec(NETSUITE_SUITEQL).entityName as String).condition("description", q.fields?.description).list()
+            }
+            records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
+            matchByKey(ctx, "runs", "ruleSetName", { Map r -> text(r.fields?.ruleSetName) }) { Map r ->
+                scoped(ctx, "darpan.rule.RuleSet").condition("ruleSetName", r.fields?.ruleSetName).list()
+            }
+            ownedRunGate(ctx)   // across tenants only: in its own tenant a version puts its lifecycles' runs back
+            matchByKey(ctx, "audits", "auditCode", { Map a -> text(a.fields?.auditCode) }) { Map a ->
+                scoped(ctx, "darpan.audit.Audit").condition("auditCode", a.fields?.auditCode).list()
+            }
+            matchByKey(ctx, "statements", "statementCode",
+                    { Map s -> text(s.fields?.statementCode) ? "${s.refs?.auditId} ${s.fields.statementCode}".toString() : null }) { Map s ->
+                String auditId = ctx.resolved[s.refs?.auditId] as String
+                auditId ? scoped(ctx, "darpan.audit.AuditStatement").condition("auditId", auditId)
+                        .condition("statementCode", s.fields?.statementCode).list() : []
+            }
+            matchByKey(ctx, "checks", "checkCode", { Map c -> text(c.fields?.checkCode) }) { Map c ->
+                scoped(ctx, "darpan.audit.AuditCheck").condition("checkCode", c.fields?.checkCode).list()
+            }
+            // Only a config version carries automations and lifecycles; from another tenant they match by name.
+            matchByKey(ctx, "automations", "automationName", { Map a -> text(a.fields?.automationName) }) { Map a ->
+                scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationName", a.fields?.automationName).list()
+            }
+            matchByKey(ctx, "knowledge", "entryKey", { Map k -> text(k.fields?.entryKey) }) { Map k ->
+                scoped(ctx, spec(KNOWLEDGE).entityName as String).condition("entryKey", k.fields?.entryKey).list()
+            }
+            matchByKey(ctx, "lifecycles", "reconciliationName", { Map l -> text(l.fields?.reconciliationName) }) { Map l ->
+                scoped(ctx, spec(LIFECYCLE).entityName as String).condition("reconciliationName", l.fields?.reconciliationName).list()
+            }
         }
 
         sourceRuleIdentities(ctx)
-        ["queries": NETSUITE_SUITEQL, "runs": RUN, "audits": AUDIT, "statements": STATEMENT, "checks": CHECK,
-         "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
+        ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
+         "checks": CHECK, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
             records(ctx, list).findAll { ctx.matches.containsKey(it.ref) }.each { Map rec -> diff(ctx, spec(kind), rec) }
         }
         scopeGate(ctx)
@@ -204,8 +223,8 @@ class ConfigTransferImporter {
         records(ctx, "connections").each { Map c ->
             if (ctx.actions[c.ref]) lines << line(ctx, c.kind as String, c)
         }
-        [queries: NETSUITE_SUITEQL, conclusionCodes: CONC, runs: RUN, audits: AUDIT, statements: STATEMENT, checks: CHECK,
-         automations: AUTOMATION, knowledge: KNOWLEDGE].each { String list, String kind ->
+        [queries: NETSUITE_SUITEQL, conclusionCodes: CONC, runs: RUN, lifecycles: LIFECYCLE, audits: AUDIT, statements: STATEMENT,
+         checks: CHECK, automations: AUTOMATION, knowledge: KNOWLEDGE].each { String list, String kind ->
             records(ctx, list).each { Map rec -> if (ctx.actions[rec.ref]) lines << line(ctx, kind, rec) }
         }
         return finish(ctx, lines)
@@ -228,7 +247,7 @@ class ConfigTransferImporter {
                 checkFields(ctx, kindSpec, rec, rec.ref as String)
                 allRefs(rec).each { String r ->
                     String refKind = parseRef(r)?.get(0)
-                    if (refKind && TransferSpecs.spec(refKind) == null && refKind != RULE) {
+                    if (refKind && TransferSpecs.spec(refKind) == null && !(refKind in CHILD_KINDS)) {
                         block(ctx, "KIND_UNAVAILABLE", rec.ref, "${rec.label ?: rec.ref} names ${r}, a kind of record a transfer does not carry.")
                     }
                 }
@@ -639,7 +658,8 @@ class ConfigTransferImporter {
             Object v = text(recFields[k]) ?: defaultOf(ed, k)
             if (v == null) return
             fields[k] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> idOf(item.sourceConfigId) }
-                    : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> idOf(ref) } : text(v)
+                    : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> idOf(ref) }
+                    : k in JSON_CONC_REF_FIELDS ? ConfigTransferExporter.rewriteConclusionRules(v) { Object ref -> idOf(ref) } : text(v)
         }
         out.fields = fields
         out.refs = new TreeMap(((rec.refs ?: [:]) as Map).collectEntries { k, v -> [(k): idOf(v)] })
@@ -698,6 +718,7 @@ class ConfigTransferImporter {
             List<String> parsed = parseRef(value)
             if (parsed == null) return text(value)
             if (parsed[0] == RULE) return (ctx.ruleIdentity[value] ?: "NEW:${value}") as String
+            if (ctx.sameTenant) return parsed[1]
             return (ctx.resolved[value] ?: "NEW:${value}") as String
         }
     }
@@ -774,7 +795,7 @@ class ConfigTransferImporter {
     private static void writeTree(Map ctx, Map spec, Map rec, String mintPrefix) {
         String action = ctx.actions[rec.ref]
         if (action == CREATE) {
-            def row = createRow(ctx, spec, rec, TenantScopedFinder.mintId(ctx.ec, spec.entityName as String, spec.pkField as String, mintPrefix))
+            def row = createRow(ctx, spec, rec, newId(ctx, spec.entityName as String, spec.pkField as String, rec.ref, mintPrefix))
             writeChildren(ctx, spec, row, rec, true)
         } else if (action == "UPDATE") {
             def row = updateRow(ctx, spec, rec)
@@ -816,6 +837,10 @@ class ConfigTransferImporter {
             List<Map> incoming = (rec.children?.get(shortName(child.entityName as String)) ?: []) as List<Map>
             List existing = parentIsNew ? [] : ConfigTransferExporter.childRows(ec, child, parentRow)
             boolean keepsIds = child.pkField != null
+            if (ctx.sameTenant && keepsIds) {
+                writeChildrenById(ctx, child, parentRow, incoming, existing)
+                return
+            }
             if (!keepsIds) existing.each { deleteTree(ctx, child, it) }
             incoming.eachWithIndex { Map childRec, int i ->
                 boolean creating = !keepsIds || i >= existing.size()
@@ -832,6 +857,93 @@ class ConfigTransferImporter {
                 writeChildren(ctx, child, value, childRec, creating)
             }
             if (keepsIds) existing.drop(incoming.size()).each { deleteTree(ctx, child, it) }
+        }
+    }
+
+    /**
+     * DAR-BE-160. In its own tenant a child with an id is written back under that id (a lifecycle's questions are not in
+     * position order after a rebuild). One the version does not hold is switched off when the child keeps history
+     * (activeOnly), deleted otherwise. A child that names a sibling (selfRef) is written after it.
+     */
+    private static void writeChildrenById(Map ctx, Map child, def parentRow, List<Map> incoming, List existing) {
+        def ec = ctx.ec
+        String pk = child.pkField as String
+        List<String> parentFields = child.parentFields as List<String>
+        Map remaining = new LinkedHashMap(existing.collectEntries { [(it.get(pk) as String): it] })
+        (child.selfRef ? parentFirst(incoming, child.selfRef as String) : incoming).each { Map childRec ->
+            String sourceId = parseRef(childRec.ref)?.get(1)
+            def value = sourceId ? remaining.remove(sourceId) : null
+            if (value == null && sourceId) {
+                value = finder(ec, child.entityName as String).condition(pk, sourceId).useCache(false).one()
+                // Only this parent's own row (one it switched off) comes back; never another parent's.
+                if (value != null && !parentFields.every { String f -> value.get(f) == parentRow.get(f) }) value = null
+            }
+            boolean creating = value == null
+            if (creating) value = ec.entity.makeValue(child.entityName as String)
+            value.setAll(columns(ctx, child, childRec))
+            parentFields.each { String f -> value.set(f, parentRow.get(f)) }
+            if (creating) value.set(pk, newId(ctx, child.entityName as String, pk, childRec.ref, (child.mintPrefix ?: "") as String))
+            stamp(ctx, child.entityName as String, value, creating)
+            if (creating) value.create() else value.update()
+            if (childRec.ref) ctx.idMap[childRec.ref] = value.get(pk) as String
+            writeChildren(ctx, child, value, childRec, creating)
+        }
+        remaining.values().each { row ->
+            if (child.activeOnly) {
+                row.set(child.activeOnly as String, "N")
+                stamp(ctx, child.entityName as String, row, false)
+                row.update()
+            } else {
+                deleteTree(ctx, child, row)
+            }
+        }
+    }
+
+    /** Records that name a sibling through selfRef, each after the sibling it names. */
+    private static List<Map> parentFirst(List<Map> records, String selfRef) {
+        Map<String, Map> byRef = records.collectEntries { [(it.ref as String): it] }
+        List<Map> out = []
+        Set<String> placed = new HashSet<String>()
+        Set<String> visiting = new HashSet<String>()
+        Closure visit
+        visit = { Map r ->
+            String ref = r.ref as String
+            if (ref in placed || !visiting.add(ref)) return
+            String parent = r.refs?.get(selfRef) as String
+            if (parent && byRef[parent]) visit(byRef[parent])
+            placed.add(ref)
+            out << r
+        }
+        records.each { visit(it) }
+        return out
+    }
+
+    /** DAR-BE-160. In its own tenant a record comes back under its own id when that id is free; otherwise a new one. */
+    private static String newId(Map ctx, String entityName, String pkField, Object ref, String prefix) {
+        String sourceId = ctx.sameTenant ? parseRef(ref)?.get(1) : null
+        if (sourceId && sourceId.length() <= ID_LENGTH &&
+                finder(ctx.ec, entityName).condition(pkField, sourceId).useCache(false).one() == null) return sourceId
+        return TenantScopedFinder.mintId(ctx.ec, entityName, pkField, prefix ?: "")
+    }
+
+    /** A record matched by its own id in its own tenant, or created. */
+    private static void matchById(Map ctx, String list, Map kindSpec) {
+        records(ctx, list).each { Map rec ->
+            String id = parseRef(rec.ref)?.get(1)
+            def row = id ? scoped(ctx, kindSpec.entityName as String).condition(kindSpec.pkField as String, id).list().find() : null
+            matchOne(ctx, rec, row)
+        }
+    }
+
+    /** A lifecycle's own row, before the runs it owns; its questions follow the runs (writeChildren). */
+    private static void writeLifecycleRow(Map ctx, Map l, Map<String, List> written) {
+        Map lifecycleSpec = spec(LIFECYCLE)
+        String action = ctx.actions[l.ref]
+        if (action == CREATE) {
+            written[l.ref as String] = [createRow(ctx, lifecycleSpec, l, newId(ctx, lifecycleSpec.entityName as String,
+                    lifecycleSpec.pkField as String, l.ref, "")), true]
+        } else if (action == "UPDATE") {
+            written[l.ref as String] = [updateRow(ctx, lifecycleSpec, l), false]
         }
     }
 
@@ -871,7 +983,8 @@ class ConfigTransferImporter {
         if (action == "UPDATE") {
             updateRow(ctx, spec(STATEMENT), s)
         } else if (action == CREATE) {
-            String id = "${targetId(ctx, s.refs?.auditId)}_${s.fields?.statementCode}".toString()
+            String id = ctx.sameTenant ? newId(ctx, "darpan.audit.AuditStatement", "statementId", s.ref, "")
+                    : "${targetId(ctx, s.refs?.auditId)}_${s.fields?.statementCode}".toString()
             // An id column holds 40 characters; a long code keeps its code and takes a minted id.
             if (id.length() > ID_LENGTH ||
                     finder(ctx.ec, "darpan.audit.AuditStatement").condition("statementId", id).useCache(false).one() != null) {
@@ -888,7 +1001,7 @@ class ConfigTransferImporter {
         String action = ctx.actions[c.ref]
         if (action == CREATE) {
             // Sequenced as save#AuditCheck does, skipping any value a hand-typed check id already holds.
-            createRow(ctx, checkSpec, c, TenantScopedFinder.mintId(ec, checkSpec.entityName as String, "checkId"))
+            createRow(ctx, checkSpec, c, newId(ctx, checkSpec.entityName as String, "checkId", c.ref, ""))
         } else if (action == "UPDATE") {
             def existing = finder(ec, checkSpec.entityName as String).condition("checkId", ctx.idMap[c.ref]).useCache(false).one()
             // A changed run makes the check's automation stale, as save#AuditCheck treats it.
@@ -963,7 +1076,8 @@ class ConfigTransferImporter {
         Set<String> lists = ((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>
         ((rec.fields ?: [:]) as Map).findAll { k, v -> k in values }.each { k, v ->
             out[k as String] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> targetId(ctx, item.sourceConfigId) }
-                    : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> targetId(ctx, ref) } : text(v)
+                    : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> targetId(ctx, ref) }
+                    : k in JSON_CONC_REF_FIELDS ? ConfigTransferExporter.rewriteConclusionRules(v) { Object ref -> targetId(ctx, ref) } : text(v)
         }
         ((rec.refs ?: [:]) as Map).findAll { k, v -> k in refs }.each { k, v -> out[k as String] = targetId(ctx, v) }
         ((rec.listRefs ?: [:]) as Map).findAll { k, v -> k in lists }.each { k, v ->
@@ -975,6 +1089,8 @@ class ConfigTransferImporter {
     /** The target id a ref lands on; a ref the bundle does not resolve fails the transfer. */
     private static String targetId(Map ctx, Object ref) {
         String id = ctx.idMap[ref] as String
+        // In its own tenant a ref not written by this restore names the record by its own id.
+        if (id == null && ctx.sameTenant) id = parseRef(ref)?.get(1)
         if (id == null) throw new IllegalStateException("${ref} is not in the bundle, so it has no record on this instance.")
         return id
     }
@@ -1075,6 +1191,7 @@ class ConfigTransferImporter {
         ((rec.fields ?: [:]) as Map).each { k, v ->
             if (k in JSON_REF_FIELDS) ConfigTransferExporter.rewriteLookups(v) { Map item -> out << (item.sourceConfigId as String); item.sourceConfigId }
             if (k in JSON_PARAM_REF_FIELDS) ConfigTransferExporter.mapParamRefs(v) { String ref -> out << ref; ref }
+            if (k in JSON_CONC_REF_FIELDS) ConfigTransferExporter.rewriteConclusionRules(v) { Object ref -> out << (ref as String); ref }
         }
         ((rec.children ?: [:]) as Map).values().each { ((List) it).each { out.addAll(allRefs((Map) it)) } }
         ((rec.links ?: []) as List).each { out.addAll(allRefs((Map) it)) }

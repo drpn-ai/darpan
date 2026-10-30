@@ -82,7 +82,7 @@ class ConfigTransferExporter {
      * which key, never a value. Without it nothing secret is read, exactly as before.</p>
      */
     static Map<String, Object> bundle(def ec, String tenantId, List auditCodes, List savedRunIds, List connectionRefs,
-                                      String sourceInstanceLabel, String secretsPublicKey = null, boolean withAutomations = false) {
+                                      String sourceInstanceLabel, String secretsPublicKey = null, boolean forVersion = false) {
         if (!requireTenant(ec, tenantId)) return null
         Map<String, Object> bundleKey = null
         if (text(secretsPublicKey)) {
@@ -125,6 +125,14 @@ class ConfigTransferExporter {
         Set<String> runIds = new LinkedHashSet<String>(checks*.savedRunId.findAll { it }.collect { it as String })
         Set<String> pickedRunIds = ((savedRunIds ?: []) as List).collect { text(it) }.findAll { it } as Set<String>
         runIds.addAll(pickedRunIds)
+        // DAR-BE-160: a version holds every lifecycle, and the runs its switched-on questions ask.
+        List lifecycles = forVersion ? finder(ec, spec(LIFECYCLE).entityName as String).condition("companyUserGroupId", tenantId)
+                .orderBy(["reconciliationName", "reconciliationId"]).useCache(false).list() : []
+        if (lifecycles) {
+            finder(ec, "darpan.reconciliation.ReconciliationRun").condition("companyUserGroupId", tenantId)
+                    .condition("reconciliationId", "in", lifecycles*.reconciliationId).useCache(false).list()
+                    .findAll { it.isActive != "N" && it.ruleSetId }.each { runIds.add(it.ruleSetId as String) }
+        }
         List runs = runIds ? finder(ec, "darpan.rule.RuleSet").condition("companyUserGroupId", tenantId)
                 .condition("ruleSetId", "in", runIds).orderBy(["ruleSetName", "ruleSetId"]).useCache(false).list() : []
         (runIds - (runs*.ruleSetId.collect { it as String } as Set)).each { String id ->
@@ -141,14 +149,26 @@ class ConfigTransferExporter {
             rec.links = linkRecords(ec, check.checkId as String, links.findAll { it.checkId == check.checkId }, statementIds, namer)
             return rec
         }
-        List<Map> runRecords = runs.collect { labelled(record(ec, spec(RUN), it, namer), it.ruleSetName ?: it.ruleSetId) }
+        List<Map> runRecords = runs.collect { run ->
+            Map rec = labelled(record(ec, spec(RUN), run, namer), run.ruleSetName ?: run.ruleSetId)
+            // A run a lifecycle owns says so: a version restores it as the lifecycle's again (an admin transfer never
+            // carries one; the catalog does not offer them).
+            if (forVersion && text(run.ownerReconciliationId)) rec.ownedBy = namer(LIFECYCLE, run.ownerReconciliationId)
+            return rec
+        }
+        List<Map> lifecycleRecords = lifecycles.collect {
+            labelled(record(ec, spec(LIFECYCLE), it, namer), it.reconciliationName ?: it.reconciliationId)
+        }
 
         // DAR-BE-160: a version also holds the automations of the runs it holds (read before the queries: a source can
         // name a query no run uses). A lifecycle's or a mapping's automation has no saved run here and waits.
         List<Map> automationRecords = []
-        if (withAutomations && runIds) {
+        if (forVersion) {
+            Set<String> heldRuns = runs*.ruleSetId.collect { it as String } as Set<String>
+            Set<String> heldLifecycles = lifecycles*.reconciliationId.collect { it as String } as Set<String>
             automationRecords = finder(ec, spec(AUTOMATION).entityName as String).condition("companyUserGroupId", tenantId)
-                    .condition("savedRunId", "in", runs*.ruleSetId).orderBy(["automationName", "automationId"]).useCache(false).list()
+                    .orderBy(["automationName", "automationId"]).useCache(false).list()
+                    .findAll { (it.savedRunId as String) in (polymorphicKind(ec, spec(AUTOMATION), it) == LIFECYCLE ? heldLifecycles : heldRuns) }
                     .collect { labelled(record(ec, spec(AUTOMATION), it, namer), it.automationName ?: it.automationId) }
         }
 
@@ -199,7 +219,10 @@ class ConfigTransferExporter {
                 audits         : auditRecords,
                 statements     : statementRecords,
                 checks         : checkRecords] as Map<String, Object>
-        if (withAutomations) out.automations = automationRecords
+        if (forVersion) {
+            out.lifecycles = lifecycleRecords
+            out.automations = automationRecords
+        }
         if (knowledgeRecords) out.knowledge = knowledgeRecords
         if (secrets != null) out.secrets = secrets
         return out
@@ -251,6 +274,8 @@ class ConfigTransferExporter {
             Object value = row.get(f)
             if (f in JSON_REF_FIELDS) {
                 fields[f] = rewriteLookups(value) { Map item -> namer(lookupKind(ec, item.systemEnumId) ?: "UNKNOWN", item.sourceConfigId) }
+            } else if (f in JSON_CONC_REF_FIELDS) {
+                fields[f] = rewriteConclusionRules(value) { Object id -> namer(CONC, id) }
             } else if (f in JSON_PARAM_REF_FIELDS) {
                 // The row's connector says which parameter holds its config id, and of what kind.
                 Map connector = text(row.get("systemEnumId")) ? SourceSystemConnectorSupport.resolve(ec, text(row.get("systemEnumId"))) : null
@@ -268,7 +293,7 @@ class ConfigTransferExporter {
             if (text(value)) refs[f] = namer(kind, value)
         }
         if (spec.polymorphicRef && text(row.get(spec.polymorphicRef as String))) {
-            refs[spec.polymorphicRef as String] = namer(sourceKind(ec, row), row.get(spec.polymorphicRef as String))
+            refs[spec.polymorphicRef as String] = namer(polymorphicKind(ec, spec, row), row.get(spec.polymorphicRef as String))
         }
         out.refs = refs
         if (spec.children) {
@@ -285,7 +310,9 @@ class ConfigTransferExporter {
     static List childRows(def ec, Map child, def parentRow) {
         def query = finder(ec, child.entityName as String).selectFields(readableFields(ec, child.entityName as String))
         (child.parentFields as List<String>).each { String f -> query.condition(f, parentRow.get(f)) }
-        return query.orderBy(child.orderBy as List<String>).useCache(false).list()
+        List rows = query.orderBy(child.orderBy as List<String>).useCache(false).list()
+        // DAR-BE-160: a child switched off (a lifecycle's old question) is history, not config.
+        return child.activeOnly ? rows.findAll { it.get(child.activeOnly as String) != "N" } : rows
     }
 
     /** A check's links to the given statements, in statement order: refs for the statement, the rules and the codes. */
@@ -308,6 +335,12 @@ class ConfigTransferExporter {
     }
 
     /** The kind of a compare source's sourceConfigId: its type when that is a kind, else its connector's config entity. */
+    /** The kind a polymorphic ref column names: an automation's saved run is a lifecycle or a run; a compare source's, its connector's. */
+    static String polymorphicKind(def ec, Map spec, def row) {
+        if (spec.kind == AUTOMATION) return text(row.get("savedRunType")) == "reconciliation" ? LIFECYCLE : RUN
+        return sourceKind(ec, row)
+    }
+
     static String sourceKind(def ec, def source) {
         String type = text(source.get("sourceConfigType"))
         if (type in [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_SUITEQL]) return type
@@ -355,6 +388,25 @@ class ConfigTransferExporter {
         Map copy = new LinkedHashMap((Map) parsed)
         copy.parameters = ((Map) copy.parameters).collectEntries { k, v -> [(k): mapValue(k as String, v)] }
         return JsonOutput.toJson(copy)
+    }
+
+    /** DAR-BE-160. A JSON list whose items name a conclusion code by conclusionEnumId, each mapped; other text is kept. */
+    static String rewriteConclusionRules(Object raw, Closure<Object> mapId) {
+        String json = text(raw)
+        if (!json?.trim()) return json
+        Object parsed
+        try {
+            parsed = new JsonSlurper().parseText(json)
+        } catch (Exception ignored) {
+            return json
+        }
+        if (!(parsed instanceof List)) return json
+        return JsonOutput.toJson(((List) parsed).collect { Object item ->
+            if (!(item instanceof Map) || !text(((Map) item).conclusionEnumId)) return item
+            Map copy = new LinkedHashMap((Map) item)
+            copy.conclusionEnumId = mapId(copy.conclusionEnumId)
+            return copy
+        })
     }
 
     /** The import side of rewriteParams: a parameter value that is a ref of a transfer kind maps through mapRef. */

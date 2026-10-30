@@ -146,6 +146,10 @@ class TenantConfigRestoreSupport {
         rows(ec, tenantId, "darpan.reconciliation.ReconciliationAutomation")
                 .findAll { it.savedRunId && !((it.automationId as String) in versionAutomations) }
                 .each { kept << ([kind: "AUTOMATION", label: it.automationName ?: it.automationId] as Map) }
+        Set<String> versionLifecycles = ((pack.lifecycles ?: []) as List<Map>)
+                .collect { TransferSpecs.parseRef(it.ref)?.get(1) }.findAll { it } as Set<String>
+        rows(ec, tenantId, "darpan.reconciliation.Reconciliation").findAll { !((it.reconciliationId as String) in versionLifecycles) }
+                .each { kept << ([kind: "LIFECYCLE", label: it.reconciliationName ?: it.reconciliationId] as Map) }
         return [switchOff: switchOff, unlink: unlink, kept: kept.sort { a, b -> a.kind <=> b.kind ?: a.label <=> b.label }]
     }
 

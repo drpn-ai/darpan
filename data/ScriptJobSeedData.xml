@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-167. Runs every script deployment that is due. -->
+<entity-facade-xml type="darpan-seed">
+    <moqui.service.job.ServiceJob
+            jobName="scan_TenantScriptDeployments_5m"
+            description="Run tenant script deployments that are due and deliver their text."
+            serviceName="script.TenantScriptServices.scan#DueScriptDeployments"
+            cronExpression="0 0/5 * * * ?"
+            paused="N"/>
+</entity-facade-xml>

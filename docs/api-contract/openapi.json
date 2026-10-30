@@ -591,13 +591,25 @@
                                         "$ref": "#/components/schemas/DeleteTenantScriptRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeleteTenantScriptDeploymentRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListTenantScriptDeploymentsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListTenantScriptsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/RunTenantScriptRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/RunTenantScriptDeploymentRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SaveTenantScriptRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveTenantScriptDeploymentRequest"
                                     }
                                 ],
                                 "discriminator": {
@@ -792,9 +804,13 @@
                                         "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "#/components/schemas/RestoreTenantConfigVersionRequest",
                                         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "#/components/schemas/SnapshotTenantConfigRequest",
                                         "facade.TenantScriptFacadeServices.delete#TenantScript": "#/components/schemas/DeleteTenantScriptRequest",
+                                        "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment": "#/components/schemas/DeleteTenantScriptDeploymentRequest",
+                                        "facade.TenantScriptFacadeServices.list#TenantScriptDeployments": "#/components/schemas/ListTenantScriptDeploymentsRequest",
                                         "facade.TenantScriptFacadeServices.list#TenantScripts": "#/components/schemas/ListTenantScriptsRequest",
                                         "facade.TenantScriptFacadeServices.run#TenantScript": "#/components/schemas/RunTenantScriptRequest",
-                                        "facade.TenantScriptFacadeServices.save#TenantScript": "#/components/schemas/SaveTenantScriptRequest"
+                                        "facade.TenantScriptFacadeServices.run#TenantScriptDeployment": "#/components/schemas/RunTenantScriptDeploymentRequest",
+                                        "facade.TenantScriptFacadeServices.save#TenantScript": "#/components/schemas/SaveTenantScriptRequest",
+                                        "facade.TenantScriptFacadeServices.save#TenantScriptDeployment": "#/components/schemas/SaveTenantScriptDeploymentRequest"
                                     }
                                 }
                             }
@@ -1379,13 +1395,25 @@
                                             "$ref": "#/components/schemas/DeleteTenantScriptResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/DeleteTenantScriptDeploymentResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListTenantScriptDeploymentsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ListTenantScriptsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/RunTenantScriptResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/RunTenantScriptDeploymentResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/SaveTenantScriptResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveTenantScriptDeploymentResponse"
                                         }
                                     ]
                                 }
@@ -26071,6 +26099,198 @@
                     "result"
                 ]
             },
+            "DeleteTenantScriptDeploymentParams": {
+                "type": "object",
+                "properties": {
+                    "tenantScriptDeploymentId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "tenantScriptDeploymentId"
+                ],
+                "description": "Delete one of the active tenant's script deployments. Needs edit access to the tenant."
+            },
+            "DeleteTenantScriptDeploymentResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DeleteTenantScriptDeploymentRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.delete#TenantScriptDeployment",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteTenantScriptDeploymentParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteTenantScriptDeploymentResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.delete#TenantScriptDeployment. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteTenantScriptDeploymentResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListTenantScriptDeploymentsParams": {
+                "type": "object",
+                "properties": {
+                    "tenantScriptId": {
+                        "type": "string"
+                    }
+                },
+                "description": "The active tenant's script deployments, optionally for one script."
+            },
+            "ListTenantScriptDeploymentsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "deployments": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{tenantScriptDeploymentId, tenantScriptId, scheduleExpr,\n                inputSavedRunId, chatSpaceId, isActive, nextRunDate, lastRunDate, lastRunStatus, lastRunMessage, lastRunUnits}]"
+                    },
+                    "timeZone": {
+                        "type": "string",
+                        "description": "The tenant's zone, which every schedule is read in."
+                    }
+                }
+            },
+            "ListTenantScriptDeploymentsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.list#TenantScriptDeployments",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.list#TenantScriptDeployments",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.list#TenantScriptDeployments"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListTenantScriptDeploymentsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListTenantScriptDeploymentsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.list#TenantScriptDeployments. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListTenantScriptDeploymentsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListTenantScriptsParams": {
                 "type": "object",
                 "properties": {
@@ -26291,6 +26511,108 @@
                     "result"
                 ]
             },
+            "RunTenantScriptDeploymentParams": {
+                "type": "object",
+                "properties": {
+                    "tenantScriptDeploymentId": {
+                        "type": "string"
+                    },
+                    "send": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "tenantScriptDeploymentId"
+                ],
+                "description": "Runs a saved deployment now, exactly as the schedule would (the script's newest input, its chat\n            space). send=false (the default) is a preview: the text comes back and nothing is posted or recorded.\n            send=true posts it and stamps the outcome on the deployment. Needs edit access to the tenant."
+            },
+            "RunTenantScriptDeploymentResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "outcome": {
+                        "type": "object",
+                        "description": "{status (PREVIEW, SENT, NOTHING_TO_SEND, SCRIPT_ERROR, NO_INPUT,\n                NOT_DELIVERED, SCRIPT_MISSING), message, text, run, inputSummary, fileName}"
+                    },
+                    "deployment": {
+                        "type": "object"
+                    }
+                }
+            },
+            "RunTenantScriptDeploymentRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.run#TenantScriptDeployment"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunTenantScriptDeploymentParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunTenantScriptDeploymentResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.run#TenantScriptDeployment. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunTenantScriptDeploymentResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveTenantScriptParams": {
                 "type": "object",
                 "properties": {
@@ -26408,6 +26730,119 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveTenantScriptResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveTenantScriptDeploymentParams": {
+                "type": "object",
+                "properties": {
+                    "tenantScriptDeploymentId": {
+                        "type": "string"
+                    },
+                    "tenantScriptId": {
+                        "type": "string"
+                    },
+                    "scheduleExpr": {
+                        "type": "string",
+                        "description": "Quartz cron, e.g. 0 0 9 * * ? for 09:00 daily."
+                    },
+                    "inputSavedRunId": {
+                        "type": "string"
+                    },
+                    "chatSpaceId": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "tenantScriptId",
+                    "scheduleExpr",
+                    "chatSpaceId"
+                ],
+                "description": "Create or update a deployment of one of the active tenant's scripts. The schedule must be a cron the\n            scheduler understands; the chat space must be the tenant's and switched on; a script that reads a run result\n            needs the saved run. A deployment that is on gets its next run date. Needs edit access to the tenant."
+            },
+            "SaveTenantScriptDeploymentResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "deployment": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveTenantScriptDeploymentRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.save#TenantScriptDeployment",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.save#TenantScriptDeployment",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.save#TenantScriptDeployment"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveTenantScriptDeploymentParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveTenantScriptDeploymentResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.save#TenantScriptDeployment. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveTenantScriptDeploymentResult"
                     }
                 },
                 "required": [
@@ -26607,8 +27042,12 @@
         "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "RestoreTenantConfigVersion",
         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "SnapshotTenantConfig",
         "facade.TenantScriptFacadeServices.delete#TenantScript": "DeleteTenantScript",
+        "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment": "DeleteTenantScriptDeployment",
+        "facade.TenantScriptFacadeServices.list#TenantScriptDeployments": "ListTenantScriptDeployments",
         "facade.TenantScriptFacadeServices.list#TenantScripts": "ListTenantScripts",
         "facade.TenantScriptFacadeServices.run#TenantScript": "RunTenantScript",
-        "facade.TenantScriptFacadeServices.save#TenantScript": "SaveTenantScript"
+        "facade.TenantScriptFacadeServices.run#TenantScriptDeployment": "RunTenantScriptDeployment",
+        "facade.TenantScriptFacadeServices.save#TenantScript": "SaveTenantScript",
+        "facade.TenantScriptFacadeServices.save#TenantScriptDeployment": "SaveTenantScriptDeployment"
     }
 }

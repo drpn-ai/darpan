@@ -33,4 +33,42 @@
             <index-field name="scriptName"/>
         </index>
     </entity>
+
+    <!-- DAR-BE-167. A script put to work: run on a schedule, its text posted to a chat space. -->
+    <entity entity-name="TenantScriptDeployment" package="darpan.script" cache="never">
+        <description>One deployment of a tenant script: when it runs (cron in the tenant's zone), what it reads (the
+            newest result of a saved run, or the script's own sample), and where its text goes (a chat space). The
+            script never sends anything itself: it returns text and Darpan delivers it.</description>
+        <field name="tenantScriptDeploymentId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="tenantScriptId" type="id" not-null="true"/>
+        <field name="scheduleExpr" type="text-short" not-null="true">
+            <description>Quartz cron, e.g. 0 0 9 * * ? (09:00 daily), read in the tenant's time zone.</description></field>
+        <field name="inputSavedRunId" type="id">
+            <description>RUN_RESULT scripts: the saved run whose newest finished result the script reads.</description></field>
+        <field name="chatSpaceId" type="id" not-null="true"><description>Where the script's text is posted.</description></field>
+        <field name="isActive" type="text-indicator"/>
+        <field name="nextRunDate" type="date-time"/>
+        <field name="lastRunDate" type="date-time"/>
+        <field name="lastRunStatus" type="text-short">
+            <description>SENT, NOTHING_TO_SEND, SCRIPT_ERROR, NO_INPUT, NOT_DELIVERED, SCRIPT_MISSING.</description></field>
+        <field name="lastRunMessage" type="text-medium"/>
+        <field name="lastRunUnits" type="number-integer"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedByUserId" type="id"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" title="Tenant" related="moqui.security.UserGroup" short-alias="tenant">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.script.TenantScript" short-alias="script">
+            <key-map field-name="tenantScriptId"/>
+        </relationship>
+
+        <index name="TSCRIPT_DEPLOY_DUE">
+            <index-field name="isActive"/>
+            <index-field name="nextRunDate"/>
+        </index>
+    </entity>
 </entities>

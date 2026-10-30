@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-167. Server-side script work with no user session: the scheduled pass over script deployments. Not remote;
+  each deployment runs as its own tenant (darpan.script.ScriptDeploymentSupport).
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="scan" noun="DueScriptDeployments" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
+        <description>Runs every active script deployment whose nextRunDate has come (ServiceJob
+            scan_TenantScriptDeployments_5m). Each is claimed by moving its nextRunDate forward before it runs, then its
+            outcome is stamped on it (lastRunStatus SENT, NOTHING_TO_SEND, SCRIPT_ERROR, NO_INPUT, NOT_DELIVERED,
+            SCRIPT_MISSING). One deployment failing never stops the others.</description>
+        <in-parameters>
+            <parameter name="nowTimestamp" type="Timestamp"/>
+            <parameter name="limit" type="Integer" default-value="50"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ran" type="Integer"/>
+            <parameter name="results" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="scan" from="darpan.script.ScriptDeploymentSupport.scanDue(ec, nowTimestamp, limit)"/>
+            <set field="ran" from="scan.ran"/>
+            <set field="results" from="scan.results"/>
+        </actions>
+    </service>
+</services>

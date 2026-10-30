@@ -12,7 +12,8 @@ class KnowledgeLeakCheckTests {
     private static final List<Map> IDENTIFIERS = [
         [value: 'KB_ACME', kind: 'tenantId', caseSensitive: true],
         [value: 'Acme Goods', kind: 'label', caseSensitive: false],
-        [value: 'acme.myshopify.com', kind: 'host', caseSensitive: false]
+        [value: 'acme.myshopify.com', kind: 'host', caseSensitive: false],
+        [value: 'acme-shop', kind: 'store', caseSensitive: false]
     ] as List<Map>
 
     @Test
@@ -20,6 +21,9 @@ class KnowledgeLeakCheckTests {
         Map<String, String> cases = [
             'contact ops@acme.example now'        : 'email',
             'call +1 415 555 0100 today'          : 'phone',
+            'call (415)555-0100 today'            : 'phone',
+            'call (415) 555-0100 today'           : 'phone',
+            'call 415-555-0100 today'             : 'phone',
             'gid://shopify/Order/5123456789'      : 'shopifyGid',
             'account 1234567_SB1'                 : 'netsuiteAccount',
             'order #AC123456'                     : 'orderName',
@@ -33,6 +37,7 @@ class KnowledgeLeakCheckTests {
         }
         assertEquals(['email'], KnowledgeLeakCheck.shapeHits('ops@acme.example'))
         assertEquals(['phone'], KnowledgeLeakCheck.shapeHits('+1 415 555 0100'))
+        assertEquals(['phone'], KnowledgeLeakCheck.shapeHits('(415)555-0100'))
         assertEquals(['shopifyGid'], KnowledgeLeakCheck.shapeHits('gid://shopify/Order/5123456789'))
         assertEquals(['netsuiteAccount'], KnowledgeLeakCheck.shapeHits('account 1234567_SB1'))
         assertEquals(['omsOrderId'], KnowledgeLeakCheck.shapeHits('M1088731'))
@@ -46,7 +51,8 @@ class KnowledgeLeakCheckTests {
             'QUERY_COST_BUDGET is 950 per query.',
             'Shopify bulk operations poll every 5 s.',
             'api.shopify.com',
-            'suitetalk.api.netsuite.com'
+            'suitetalk.api.netsuite.com',
+            'reviewed 2026-10-30, version 1.415.555'
         ].each { String text ->
             assertEquals([], KnowledgeLeakCheck.shapeHits(text), text)
         }
@@ -59,13 +65,17 @@ class KnowledgeLeakCheckTests {
         assertEquals(['label'], KnowledgeLeakCheck.identifierHits('for acme goods the store...', IDENTIFIERS, none))
         assertEquals(['host'], KnowledgeLeakCheck.identifierHits('https://ACME.myshopify.com/admin', IDENTIFIERS, none))
         assertEquals([], KnowledgeLeakCheck.identifierHits('kb_acme', IDENTIFIERS, none))
+        assertEquals(['store'], KnowledgeLeakCheck.identifierHits('the ACME-SHOP admin', IDENTIFIERS, none))
+        assertEquals([], KnowledgeLeakCheck.identifierHits('the acme-shopper admin', IDENTIFIERS, none), 'store is a whole word')
     }
 
     @Test
     void allowPhraseSuppressesAFalsePositive() {
-        List<Map> ids = [[value: 'Rails', kind: 'label', caseSensitive: false]] as List<Map>
-        assertEquals([], KnowledgeLeakCheck.identifierHits('guard rails on page size', ids, ['guard rails'] as Set<String>))
-        assertEquals(['label'], KnowledgeLeakCheck.identifierHits('guard rails on page size', ids, [] as Set<String>))
+        List<Map> ids = [[value: 'Fencepost', kind: 'label', caseSensitive: false]] as List<Map>
+        assertEquals([], KnowledgeLeakCheck.identifierHits('watch for fencepost errors in paging', ids, ['fencepost errors'] as Set<String>))
+        assertEquals(['label'], KnowledgeLeakCheck.identifierHits('watch for fencepost errors in paging', ids, [] as Set<String>))
+        assertEquals(['label'], KnowledgeLeakCheck.identifierHits('Fencepost runs a second store', ids, ['fencepost errors'] as Set<String>),
+                'the phrase is removed, the bare label still matches')
     }
 
     @Test

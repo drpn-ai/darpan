@@ -14,6 +14,19 @@ import java.time.format.DateTimeParseException
 class KnowledgeEntryFile {
 
     static final int MAX_BODY_CHARS = 1500
+    /** KnowledgeEntry text-short columns (VARCHAR(63) in MoquiDefaultConf for h2, mysql8 and postgres). */
+    static final int MAX_SHORT_CHARS = 63
+    /** KnowledgeEntry text-medium columns (VARCHAR(255)). */
+    static final int MAX_MEDIUM_CHARS = 255
+    /**
+     * Each value's column limit, checked at parse so a long value is a clean error, not a database one: these hold for
+     * every tier (the knowledge repo's check script mirrors them), TENANT_MAX_CHARS for the tier stored as rows.
+     */
+    static final Map<String, Integer> MAX_CHARS = [id: MAX_SHORT_CHARS, supersedes: MAX_SHORT_CHARS, promotedTo: MAX_SHORT_CHARS,
+                                                   title: MAX_MEDIUM_CHARS].asImmutable()
+    /** The other KnowledgeEntry columns a tenant entry fills; a product file never becomes a row, so it may run longer. */
+    static final Map<String, Integer> TENANT_MAX_CHARS = [kind: MAX_SHORT_CHARS, source: MAX_MEDIUM_CHARS, owner: MAX_MEDIUM_CHARS,
+                                                          system: MAX_MEDIUM_CHARS, tags: MAX_MEDIUM_CHARS].asImmutable()
     static final String DEFAULT_OWNER = 'Aditi Patel'
     private static final Set<String> TIERS = ['product', 'tenant', 'staff'] as Set<String>
 
@@ -60,6 +73,14 @@ class KnowledgeEntryFile {
         }
         String title = lines.get(i).substring(2).trim()
         String body = lines.subList(i + 1, lines.size()).join('\n').trim()
+        Map<String, Integer> caps = new LinkedHashMap<String, Integer>(MAX_CHARS)
+        if (tier == 'tenant') caps.putAll(TENANT_MAX_CHARS)
+        for (Map.Entry<String, Integer> cap : caps.entrySet()) {
+            String value = cap.key == 'title' ? title : header.get(cap.key)
+            if (value != null && value.length() > cap.value) {
+                throw bad(origin, "${cap.key} is ${value.length()} characters, limit ${cap.value}")
+            }
+        }
         if (body.length() > MAX_BODY_CHARS) {
             throw bad(origin, "body is ${body.length()} characters, limit ${MAX_BODY_CHARS}")
         }

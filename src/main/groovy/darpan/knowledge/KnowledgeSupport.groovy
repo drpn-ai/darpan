@@ -8,6 +8,7 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -30,6 +31,8 @@ import java.util.stream.Stream
 class KnowledgeSupport {
 
     static final String PRODUCT_PATH_PROPERTY = 'darpan.knowledge.productPath'
+    /** The product repo's allow phrases (one per line, # comments): generic words a tenant label also uses. */
+    static final String ALLOW_PHRASES_FILE = 'allow-phrases.txt'
     static final String ALLOW_DIRECT_WRITES_PROPERTY = 'darpan.knowledge.allowDirectWrites'
     static final String ENTRY_ENTITY = 'darpan.knowledge.KnowledgeEntry'
     static final String ACTIVE = 'ACTIVE'
@@ -123,15 +126,15 @@ class KnowledgeSupport {
 
     /**
      * Every tenant's identifiers, for the leak check: [value, kind, caseSensitive, tenantId]. Company groups give
-     * tenantId (case-sensitive) and label; connection URLs give host and, for NetSuite, account. Cross-tenant on
-     * purpose, so only the encrypted-free URL fields are selected.
+     * tenantId (case-sensitive) and label; connection URLs give host, the shop handle of a .myshopify.com host as
+     * store and, for NetSuite, account. Cross-tenant on purpose, so only the encrypted-free URL fields are selected.
      */
     static List<Map> tenantIdentifiers(def ec) {
         Set<String> seen = new HashSet<String>()
         List<Map> out = []
         Closure addId = { String value, String kind, boolean caseSensitive, String tenantId ->
             String v = value?.trim()
-            if (!v || !seen.add("${kind}|${tenantId}|${caseSensitive ? v : v.toLowerCase()}".toString())) return
+            if (!v || !seen.add("${kind}|${tenantId}|${caseSensitive ? v : v.toLowerCase(Locale.ROOT)}".toString())) return
             out.add([value: v, kind: kind, caseSensitive: caseSensitive, tenantId: tenantId])
         }
         TenantScopedFinder.findGlobalUnscoped(ec, 'moqui.security.UserGroup', 'knowledge leak check: every tenant id and label')
@@ -149,6 +152,7 @@ class KnowledgeSupport {
                 String host = hostOf(row.get(field) as String)
                 if (!host) return
                 addId(host, 'host', false, tenant)
+                addId(shopHandle(host), 'store', false, tenant)
                 netsuiteAccounts(host).each { String account -> addId(account, 'account', false, tenant) }
             }
         }
@@ -176,10 +180,7 @@ class KnowledgeSupport {
             ec.message.addError("Entry ${key} has tier ${parsed.tier}; only tier tenant entries are stored here.".toString())
             return null
         }
-        List<String> reasons = []
-        KnowledgeLeakCheck.shapeHits(markdown).findAll { CUSTOMER_DATA_SHAPES.contains(it) }.each { reasons.add("customer data (${it})".toString()) }
-        List<Map> others = tenantIdentifiers(ec).findAll { Map id -> id.tenantId != tenant }
-        KnowledgeLeakCheck.identifierHits(markdown, others, null).each { reasons.add("another tenant's ${it}".toString()) }
+        List<String> reasons = writeCheckReasons(ec, tenant, markdown)
         if (reasons) {
             logger.warn("knowledge entry tenant:{}/{} refused: {}", tenant, key, reasons.join(', '))
             ec.message.addError("Entry ${key} was not stored: it holds ${reasons.join(', ')}.".toString())
@@ -204,6 +205,19 @@ class KnowledgeSupport {
         }
         invalidateAfterWrite(ec, tenant)
         return [entry: publicEntry(parsed + [tier: 'tenant']), created: created]
+    }
+
+    /**
+     * The tenant-tier write check, shared by store and the config transfer import: the reason kinds the text cannot be
+     * written to this tenant for (customer personal data, another tenant's identifier on this instance), never the
+     * matched values. Empty when it may be written. No allow phrases: they apply to the product tier only.
+     */
+    static List<String> writeCheckReasons(def ec, String tenantId, String text) {
+        List<String> reasons = []
+        KnowledgeLeakCheck.shapeHits(text).findAll { CUSTOMER_DATA_SHAPES.contains(it) }.each { reasons.add("customer data (${it})".toString()) }
+        List<Map> others = tenantIdentifiers(ec).findAll { Map id -> id.tenantId != tenantId }
+        KnowledgeLeakCheck.identifierHits(text, others, null).each { reasons.add("another tenant's ${it}".toString()) }
+        return reasons
     }
 
     /** Retires the tenant's entry with this key (kept for history, never searched). Same write gate as store. */
@@ -271,8 +285,11 @@ class KnowledgeSupport {
         }
 
         List<Map> identifiers = tenantIdentifiers(ec)
+        Set<String> allowPhrases = allowPhrases(root)
         Set<String> keys = new HashSet<String>()
+        int position = 0
         for (Path file in files) {
+            position++
             String origin = root.relativize(file).toString()
             List<String> reasons = []
             Map parsed = null
@@ -288,15 +305,16 @@ class KnowledgeSupport {
                 } catch (IllegalArgumentException ignored) {
                     reasons.add('unparseable')   // the parse message can quote the file, so only its kind is logged
                 }
-            }
-            if (parsed != null) {
-                if (parsed.tier != 'product') reasons.add("tier ${parsed.tier}".toString())
+                if (parsed != null && parsed.tier != 'product') reasons.add("tier ${parsed.tier}".toString())
                 KnowledgeLeakCheck.shapeHits(text).each { reasons.add("shape ${it}".toString()) }
-                KnowledgeLeakCheck.identifierHits(text, identifiers, null).each { reasons.add("tenant ${it}".toString()) }
-                if (!reasons && !keys.add(parsed.key as String)) reasons.add('duplicate key')
+                KnowledgeLeakCheck.identifierHits(text, identifiers, allowPhrases).each { reasons.add("tenant ${it}".toString()) }
+                if (parsed != null && !reasons && !keys.add(parsed.key as String)) reasons.add('duplicate key')
             }
             if (reasons) {
-                logger.warn("knowledge entry {} dropped: {}", origin, reasons.join(', '))
+                // A hit in the text or in the path itself: the log line must not carry the path.
+                boolean leak = reasons.any { it.startsWith('shape ') || it.startsWith('tenant ') } ||
+                        KnowledgeLeakCheck.shapeHits(origin) || KnowledgeLeakCheck.identifierHits(origin, identifiers, null)
+                logger.warn(dropLogLine(position, origin, reasons, leak))
                 continue
             }
             tier.entries.add(parsed)
@@ -308,6 +326,33 @@ class KnowledgeSupport {
         tier.index = KnowledgeIndex.build(tier.entries)
         logger.info("knowledge product tier loaded: {} entries, {} dropped", tier.entries.size(), files.size() - tier.entries.size())
         return tier
+    }
+
+    /**
+     * The log line for a dropped product file. A shape or identifier hit could sit in the file's path or key itself, so
+     * such a drop names the file by its position in the sorted walk and the first 8 hex of the SHA-1 of its relative
+     * path, never the path; a parse, tier or duplicate drop names the path.
+     */
+    static String dropLogLine(int position, String origin, List<String> reasons, boolean leak) {
+        if (!leak) return "knowledge entry ${origin} dropped: ${reasons.join(', ')}".toString()
+        String sha = MessageDigest.getInstance('SHA-1').digest(origin.getBytes(StandardCharsets.UTF_8)).encodeHex().toString().take(8)
+        return "knowledge entry #${position} (sha1 ${sha}) dropped: ${reasons.join(', ')}".toString()
+    }
+
+    /** The product repo's allow phrases: one per line, blank lines and # comments skipped. Absent or unreadable is none. */
+    static Set<String> allowPhrases(Path root) {
+        Path file = root.resolve(ALLOW_PHRASES_FILE)
+        Set<String> out = new LinkedHashSet<String>()
+        if (!Files.isRegularFile(file)) return out
+        try {
+            Files.readAllLines(file, StandardCharsets.UTF_8).each { String line ->
+                String phrase = line.trim()
+                if (phrase && !phrase.startsWith('#')) out.add(phrase)
+            }
+        } catch (IOException ignored) {
+            logger.warn("knowledge allow phrases unreadable under the product path; none applied")
+        }
+        return out
     }
 
     // ---------------------------------------------------------------- tenant indexes
@@ -351,8 +396,11 @@ class KnowledgeSupport {
         }
     }
 
-    /** Invalidates now and again once the write's transaction completes, so no search caches the pre-commit rows. */
-    private static void invalidateAfterWrite(def ec, String tenant) {
+    /**
+     * Invalidates now and again once the write's transaction completes, so no search caches the pre-commit rows. Store,
+     * retire and the config transfer / version restore apply all call it.
+     */
+    static void invalidateAfterWrite(def ec, String tenant) {
         invalidate(tenant)
         if (ec.transaction.isTransactionInPlace()) {
             ec.transaction.registerSynchronization(new Synchronization() {
@@ -416,6 +464,13 @@ class KnowledgeSupport {
         }
         host = host?.toLowerCase(Locale.ROOT)
         return host && host.contains('.') ? host : null
+    }
+
+    /** The shop handle of a Shopify host (kb-shop.myshopify.com -> kb-shop); null for any other host. */
+    static String shopHandle(String host) {
+        if (!host?.endsWith('.myshopify.com')) return null
+        String label = host.substring(0, host.indexOf('.'))
+        return label ?: null
     }
 
     /**

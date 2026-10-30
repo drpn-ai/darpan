@@ -98,4 +98,20 @@ class KnowledgeIndexTests {
         assertNotNull(index.get('ns-status-codes'))
         assertEquals(6, index.size())
     }
+
+    /** A default locale whose lower-casing differs (Turkish dotless i) changes no filter or code match. */
+    @Test
+    void lowerCasingIgnoresTheDefaultLocale() {
+        Locale before = Locale.getDefault()
+        Locale.setDefault(Locale.forLanguageTag('tr-TR'))
+        KnowledgeIndex turkish = null
+        try {
+            turkish = KnowledgeIndex.build([entry('imap-limit', 'IMAP pages stop at fifty', ['IMAP'], 'LIMIT', ['IMAP_PAGE'], 'Paging stops.')])
+            assertEquals(['imap-limit'], turkish.search('pages', 'imap', 'limit', 5, TODAY)*.key)
+            assertEquals(['imap-limit'], turkish.search('IMAP_PAGE', null, null, 5, TODAY)*.key)
+        } finally {
+            turkish?.close()
+            Locale.setDefault(before)
+        }
+    }
 }

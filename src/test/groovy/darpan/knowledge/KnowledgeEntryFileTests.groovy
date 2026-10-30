@@ -76,4 +76,28 @@ class KnowledgeEntryFileTests {
         // exactly at the limit passes
         KnowledgeEntryFile.parse(entry([:], 'x' * KnowledgeEntryFile.MAX_BODY_CHARS), ORIGIN)
     }
+
+    @Test
+    void rejectsValuesLongerThanTheirColumn() {
+        Map<String, String> tooLong = [id: 'k' * (KnowledgeEntryFile.MAX_SHORT_CHARS + 1),
+                                       supersedes: 's' * (KnowledgeEntryFile.MAX_SHORT_CHARS + 1),
+                                       promotedTo: 'p' * (KnowledgeEntryFile.MAX_SHORT_CHARS + 1)]
+        tooLong.each { String field, String value ->
+            IllegalArgumentException e = assertThrows(IllegalArgumentException) { KnowledgeEntryFile.parse(entry([(field): value]), ORIGIN) }
+            assertTrue(e.message.startsWith(ORIGIN + ': ' + field + ' is '), e.message)
+        }
+        String longTitle = entry([:]).replace('# OMS GraphQL caps one query at 1000 cost', '# ' + 't' * (KnowledgeEntryFile.MAX_MEDIUM_CHARS + 1))
+        IllegalArgumentException e = assertThrows(IllegalArgumentException) { KnowledgeEntryFile.parse(longTitle, ORIGIN) }
+        assertTrue(e.message.startsWith(ORIGIN + ': title is 256 characters, limit 255'), e.message)
+        // a tenant entry is a row, so its source column caps it too; a product file never is
+        String longSource = 'x' * (KnowledgeEntryFile.MAX_MEDIUM_CHARS + 1)
+        IllegalArgumentException tenant = assertThrows(IllegalArgumentException) {
+            KnowledgeEntryFile.parse(entry([tier: 'tenant', source: longSource]), ORIGIN)
+        }
+        assertTrue(tenant.message.startsWith(ORIGIN + ': source is 256 characters, limit 255'), tenant.message)
+        KnowledgeEntryFile.parse(entry([source: longSource]), ORIGIN)
+        // exactly at the limits passes
+        KnowledgeEntryFile.parse(entry([id: 'k' * KnowledgeEntryFile.MAX_SHORT_CHARS]).replace('# OMS GraphQL caps one query at 1000 cost',
+                '# ' + 't' * KnowledgeEntryFile.MAX_MEDIUM_CHARS), ORIGIN)
+    }
 }

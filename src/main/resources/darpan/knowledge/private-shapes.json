@@ -1,6 +1,6 @@
 [
   {"name": "email", "regex": "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}"},
-  {"name": "phone", "regex": "(?<![\\w.])(?:\\+\\d[\\d\\s().-]{7,}\\d|\\(?\\d{3}\\)?[\\s.-]\\d{3}[\\s.-]\\d{4})(?!\\w)"},
+  {"name": "phone", "regex": "(?<![\\w.])(?:\\+\\d[\\d\\s().-]{7,}\\d|(?:\\(\\d{3}\\)[\\s.-]?|\\d{3}[\\s.-])\\d{3}[\\s.-]\\d{4})(?!\\w)"},
   {"name": "shopifyGid", "regex": "gid://shopify/\\w+/\\d+"},
   {"name": "netsuiteAccount", "regex": "\\b\\d{5,9}_(?:SB|RP)\\d*\\b"},
   {"name": "orderName", "regex": "#[A-Za-z]{0,6}\\d{4,}\\b"},

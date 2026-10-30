@@ -35,6 +35,8 @@ class KnowledgeAdminSmokeTests {
     private static final String ENTRY = "darpan.knowledge.KnowledgeEntry"
     private static final String ACME = "KB_ACME"
     private static final String BETA = "KB_BETA"
+    /** A synthetic tenant whose label is a common word, for the product tier's allow phrases. */
+    private static final String GAMMA = "KB_GAMMA"
     private static final String SUPER_ID = "KB_SUPER"
     private static final String SUPER_USERNAME = "kb.super"
     private static final String EDITOR_ID = "KB_EDITOR"
@@ -60,7 +62,7 @@ class KnowledgeAdminSmokeTests {
                 emailAddress: "kb.editor@example.com", disabled: "N", requirePasswordChange: "N"])
         upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID, fromDate: T0])
         upsert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: T0])
-        [(ACME): "Acme Synthetic", (BETA): "Beta Synthetic"].each { String tenant, String label ->
+        [(ACME): "Acme Synthetic", (BETA): "Beta Synthetic", (GAMMA): "Fencepost"].each { String tenant, String label ->
             upsert("moqui.security.UserGroup", [userGroupId: tenant, description: label,
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
         }
@@ -92,6 +94,12 @@ class KnowledgeAdminSmokeTests {
                 "Write to ops@acme.example about the walrus."))
         Files.writeString(oms.resolve("walrus-bad-tenant.md"), productFile("walrus-bad-tenant", "Walrus owner",
                 "The walrus field is set by KB_BETA only."))
+        // Allow phrases live beside product/ in the product repo; they lift a generic phrase, never the bare label.
+        Files.writeString(productRoot.resolve("allow-phrases.txt"), "# generic words only\n\nfencepost errors\n")
+        Files.writeString(oms.resolve("narwhal-allowed.md"), productFile("narwhal-allowed", "Narwhal paging",
+                "Narwhal paging has fencepost errors at the last page.", "narwhal"))
+        Files.writeString(oms.resolve("narwhal-bare-label.md"), productFile("narwhal-bare-label", "Narwhal owner",
+                "Narwhal reads are run by Fencepost.", "narwhal"))
         ec.message.clearErrors()
     }
 
@@ -176,6 +184,10 @@ class KnowledgeAdminSmokeTests {
         assertTrue(label.hasError as boolean, "another tenant's label is refused too")
         Map host = store(BETA, tenantFile("names-acme-host", "Names the other host", "Reads come from ${SHOPIFY_HOST} too."))
         assertTrue(host.hasError as boolean, "another tenant's connection host is refused")
+        Map handle = store(BETA, tenantFile("names-acme-shop", "Names the other shop", "The KB-ACME-TEST admin shows it."))
+        assertTrue(handle.hasError as boolean, "another tenant's shop handle is refused")
+        assertTrue(handle.errors.any { it.contains("another tenant's store") }, "${handle.errors}")
+        assertFalse(handle.errors.any { it.toLowerCase().contains("kb-acme-test") }, "${handle.errors}")
         assertEquals(0L, entryCount(BETA))
 
         Map own = store(ACME, tenantFile("names-acme", "Names itself", "Rows here come from KB_ACME via ${SHOPIFY_HOST}."))
@@ -215,6 +227,30 @@ class KnowledgeAdminSmokeTests {
         Map good = kb("get#KnowledgeEntry", [tenantUserGroupId: ACME, key: "walrus-good-two"]).result.entry as Map
         assertEquals("product", good.tier)
         assertEquals("2099-01-01", good.reviewBy)
+    }
+
+    @Test
+    void productAllowPhrasesLiftOnlyThePhrase() {
+        Map out = kb("search#Knowledge", [words: "narwhal", limit: 20])
+        assertNoErrors(out)
+        assertEquals(["narwhal-allowed"], (out.result.hits as List<Map>)*.key, "the allow phrase lifts the generic use only")
+        assertNull(kb("get#KnowledgeEntry", [key: "narwhal-bare-label"]).result.entry, "the bare label is still a tenant identifier")
+    }
+
+    @Test
+    void tenantWritesIgnoreTheAllowPhrases() {
+        Map refused = store(ACME, tenantFile("acme-fence", "Acme fence", "Paging has fencepost errors."))
+        assertTrue(refused.hasError as boolean, "allow phrases are product-only: ${refused.errors}")
+        assertTrue(refused.errors.any { it.contains("another tenant's label") }, "${refused.errors}")
+    }
+
+    @Test
+    void dropLogLineHidesThePathOnALeak() {
+        String origin = "product/oms/kb-acme-test.md"
+        String leak = KnowledgeSupport.dropLogLine(7, origin, ["tenant store"], true)
+        assertTrue(leak ==~ /knowledge entry #7 \(sha1 [0-9a-f]{8}\) dropped: tenant store/, leak)
+        assertFalse(leak.contains("kb-acme"), leak)
+        assertEquals("knowledge entry ${origin} dropped: unparseable".toString(), KnowledgeSupport.dropLogLine(7, origin, ["unparseable"], false))
     }
 
     @Test
@@ -337,6 +373,9 @@ class KnowledgeAdminSmokeTests {
         assertNotNull(ids.find { it.value == ACME && it.kind == "tenantId" && it.tenantId == ACME && it.caseSensitive == true })
         assertNotNull(ids.find { it.value == "Acme Synthetic" && it.kind == "label" && it.tenantId == ACME })
         assertNotNull(ids.find { it.value == SHOPIFY_HOST && it.kind == "host" && it.tenantId == ACME })
+        assertNotNull(ids.find { it.value == "kb-acme-test" && it.kind == "store" && it.tenantId == ACME && it.caseSensitive == false },
+                "a .myshopify.com host gives its shop handle")
+        assertNull(ids.find { it.kind == "store" && it.tenantId == BETA }, "a NetSuite host gives no shop handle")
         assertNotNull(ids.find { it.value == "${NS_ACCOUNT}.restlets.api.netsuite.com" && it.kind == "host" && it.tenantId == BETA })
         assertNotNull(ids.find { it.value == NS_ACCOUNT && it.kind == "account" && it.tenantId == BETA })
         assertTrue(ids.every { it.tenantId != "DARPAN_USER" }, "only company groups are tenants")
@@ -344,8 +383,8 @@ class KnowledgeAdminSmokeTests {
 
     // ---------------------------------------------------------------- helpers
 
-    private static String productFile(String key, String title, String body) {
-        return "---\nid: ${key}\ntier: product\nsystem: oms\nkind: api-limit\ntags: walrus\nsource: synthetic test\n" +
+    private static String productFile(String key, String title, String body, String tags = "walrus") {
+        return "---\nid: ${key}\ntier: product\nsystem: oms\nkind: api-limit\ntags: ${tags}\nsource: synthetic test\n" +
                 "reviewBy: 2099-01-01\n---\n# ${title}\n\n${body}\n"
     }
 

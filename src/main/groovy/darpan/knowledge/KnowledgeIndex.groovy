@@ -98,8 +98,8 @@ class KnowledgeIndex implements Closeable {
 
         BooleanQuery.Builder query = new BooleanQuery.Builder()
         query.add(terms.build(), BooleanClause.Occur.MUST)
-        if (system) query.add(new TermQuery(new Term('system', system.toLowerCase())), BooleanClause.Occur.FILTER)
-        if (kind) query.add(new TermQuery(new Term('kind', kind.toLowerCase())), BooleanClause.Occur.FILTER)
+        if (system) query.add(new TermQuery(new Term('system', system.toLowerCase(Locale.ROOT))), BooleanClause.Occur.FILTER)
+        if (kind) query.add(new TermQuery(new Term('kind', kind.toLowerCase(Locale.ROOT))), BooleanClause.Occur.FILTER)
         LocalDate asOf = today ?: LocalDate.now()
         query.add(LongPoint.newRangeQuery('reviewBy', asOf.toEpochDay(), Long.MAX_VALUE), BooleanClause.Occur.FILTER)
 
@@ -142,7 +142,7 @@ class KnowledgeIndex implements Closeable {
         Matcher m = RAW_TOKEN.matcher(text)
         while (m.find()) {
             String token = m.group()
-            if (token.find('[0-9_]') || TWO_CAPITALS.matcher(token).find()) out.add(token.toLowerCase())
+            if (token.find('[0-9_]') || TWO_CAPITALS.matcher(token).find()) out.add(token.toLowerCase(Locale.ROOT))
         }
         return out
     }
@@ -158,8 +158,8 @@ class KnowledgeIndex implements Closeable {
         doc.add(new TextField('tags', tagText, Field.Store.NO))
         doc.add(new TextField('body', body, Field.Store.NO))
         for (String code in codeTokens(title + ' ' + tagText + ' ' + body)) doc.add(new StringField('codes', code, Field.Store.NO))
-        for (Object s in (entry.get('systems') ?: new ArrayList()) as List) doc.add(new StringField('system', (s as String).toLowerCase(), Field.Store.NO))
-        if (entry.get('kind')) doc.add(new StringField('kind', (entry.get('kind') as String).toLowerCase(), Field.Store.NO))
+        for (Object s in (entry.get('systems') ?: new ArrayList()) as List) doc.add(new StringField('system', (s as String).toLowerCase(Locale.ROOT), Field.Store.NO))
+        if (entry.get('kind')) doc.add(new StringField('kind', (entry.get('kind') as String).toLowerCase(Locale.ROOT), Field.Store.NO))
         doc.add(new LongPoint('reviewBy', (entry.get('reviewBy') as LocalDate).toEpochDay()))
         return doc
     }

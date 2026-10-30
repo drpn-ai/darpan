@@ -82,4 +82,24 @@ class KnowledgeLeakCheckTests {
             assertFalse(h.contains('@'), h)
         }
     }
+
+    @Test
+    void nonWordEdgeIdentifiersStillMatch() {
+        List<Map> ids = [[value: 'Acme & Co.', kind: 'label', caseSensitive: false]] as List<Map>
+        Set<String> none = [] as Set<String>
+        assertEquals(['label'], KnowledgeLeakCheck.identifierHits('sold by acme & co. in the US', ids, none))
+        // "co." is followed by a word character, so it is a different token and does not match.
+        assertEquals([], KnowledgeLeakCheck.identifierHits('acme & co.uk', ids, none))
+    }
+
+    @Test
+    void blankOrNullIdentifiersAreSkipped() {
+        List<Map> ids = [
+            [value: null, kind: 'label', caseSensitive: false],
+            [value: '  ', kind: 'label', caseSensitive: false],
+            [value: 'x', kind: null, caseSensitive: false],
+            [value: 'KB_ACME', kind: 'tenantId', caseSensitive: true]
+        ] as List<Map>
+        assertEquals(['tenantId'], KnowledgeLeakCheck.identifierHits('KB_ACME x', ids, [] as Set<String>))
+    }
 }

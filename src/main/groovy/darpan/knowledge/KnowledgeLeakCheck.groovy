@@ -3,6 +3,7 @@ package darpan.knowledge
 import groovy.json.JsonSlurper
 import groovy.transform.CompileStatic
 
+import java.util.Locale
 import java.util.regex.Matcher
 import java.util.regex.Pattern
 
@@ -42,7 +43,7 @@ class KnowledgeLeakCheck {
             s.name = (String) m.get('name')
             s.pattern = Pattern.compile((String) m.get('regex'))
             List allow = (List) m.get('allow')
-            if (allow != null) for (Object a : allow) s.allow.add(((String) a).toLowerCase())
+            if (allow != null) for (Object a : allow) s.allow.add(((String) a).toLowerCase(Locale.ROOT))
             shapes.add(s)
         }
         return shapes
@@ -55,7 +56,7 @@ class KnowledgeLeakCheck {
         for (Shape s : SHAPES) {
             Matcher m = s.pattern.matcher(text)
             while (m.find()) {
-                if (s.allow.contains(m.group().toLowerCase())) continue
+                if (s.allow.contains(m.group().toLowerCase(Locale.ROOT))) continue
                 hits.add(s.name)
                 break
             }
@@ -80,11 +81,11 @@ class KnowledgeLeakCheck {
         for (Map id : identifiers) {
             String value = (String) id.get('value')
             String kind = (String) id.get('kind')
-            if (!value) continue
+            if (!value?.trim() || !kind?.trim()) continue
             boolean caseSensitive = Boolean.TRUE == id.get('caseSensitive')
             int flags = caseSensitive ? 0 : Pattern.CASE_INSENSITIVE
             String quoted = Pattern.quote(value)
-            String regex = kind == 'host' ? quoted : '\\b' + quoted + '\\b'
+            String regex = kind == 'host' ? quoted : '(?<!\\w)' + quoted + '(?!\\w)'
             if (kind == 'host') flags |= Pattern.CASE_INSENSITIVE
             if (Pattern.compile(regex, flags).matcher(cleaned).find()) hits.add(kind)
         }

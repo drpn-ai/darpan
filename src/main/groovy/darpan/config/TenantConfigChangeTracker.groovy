@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.facade.common.TenantScopedFinder
 import groovy.transform.CompileDynamic
 import jakarta.transaction.Status
 import jakarta.transaction.Synchronization
@@ -85,7 +86,9 @@ class TenantConfigChangeTracker {
         if (parent == null) return null
         Object parentId = valueOf(fields, parent[1])
         if (!parentId) return null
-        def parentRow = ec.entity.find(parent[0]).condition(parent[1], parentId).disableAuthz().useCache(false).one()
+        def parentRow = TenantScopedFinder.findGlobalUnscoped(ec, parent[0],
+                "DAR-BE-160 config change tracking: a child row names its parent; the tenant is read from that parent")
+                .condition(parent[1], parentId).useCache(false).one()
         return parentRow == null ? null : tenantOf(ec, parent[0], parentRow)
     }
 

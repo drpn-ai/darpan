@@ -112,8 +112,9 @@ class TenantConfigVersionSupport {
     static Map<String, String> userNames(def ec, Collection userIds) {
         List<String> ids = (userIds ?: []).findAll { it }.collect { it as String }.unique()
         if (!ids) return [:]
-        return ec.entity.find("moqui.security.UserAccount").condition("userId", "in", ids)
-                .selectFields(["userId", "userFullName", "username"]).disableAuthz().useCache(false).list()
+        return TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                "DAR-BE-160 config versions: the name of whoever kept each version (no tenant column on UserAccount)")
+                .condition("userId", "in", ids).selectFields(["userId", "userFullName", "username"]).useCache(false).list()
                 .collectEntries { [(it.userId as String): (it.userFullName ?: it.username) as String] } as Map<String, String>
     }
 

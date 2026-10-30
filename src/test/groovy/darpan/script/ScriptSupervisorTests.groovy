@@ -230,6 +230,63 @@ class ScriptSupervisorTests {
         assertRefused(out, 'MEMORY')
     }
 
+    // -- hostile suite: caps hold at the peak allocation (security review of 52334af)
+
+    @Test
+    void replaceIsRefusedBeforeItBuildsAnOversizedText() {
+        Map input = [t: 'a' * 1000, big: 'x' * 1000]
+        assertRefused(run('SCRIPT', "d:replace(input.t, 'a', input.big)", input), 'MEMORY')
+    }
+
+    @Test
+    void joinIsRefusedBeforeItBuildsAnOversizedText() {
+        Map input = [parts: (1..100).collect { 'y' * 1000 }]
+        assertRefused(run('SCRIPT', "d:join(input.parts, '')", input), 'MEMORY')
+        assertFalse(run('SCRIPT', "d:join([input.parts], ',')", input).ok as boolean, 'join refuses a list of lists')
+    }
+
+    @Test
+    void selfAddDoublingHitsTheTextCap() {
+        assertRefused(run('SCRIPT', "var s = 'x'; while (true) { s += s }"), 'MEMORY')
+    }
+
+    @Test
+    void textCannotBeJoinedWithACollection() {
+        assertRefused(run('SCRIPT', "'paid: ' + input.payments"), 'ACCESS')
+        Map ok = run('SCRIPT', "'paid: ' + d:str(input.payments[0])")
+        assertTrue(ok.ok as boolean, "${ok}")
+        assertTrue(ok.result.toString().startsWith('paid: {tender: CARD'), "${ok.result}")
+    }
+
+    @Test
+    void aHugeRangeIsNeverCopiedIntoMemory() {
+        assertRefused(run('SCRIPT', 'd:sum(1..100000000)'), 'MEMORY')
+        assertRefused(run('SCRIPT', 'd:len(d:distinct(1..100000000))'), 'MEMORY')
+    }
+
+    @Test
+    void aHugeRangeReturnedAsTheResultIsRefusedInsideTheBudget() {
+        assertRefused(run('SCRIPT', '1..100000000'), 'MEMORY')
+        assertRefused(run('EXPRESSION', '1..100000000'), 'MEMORY')
+    }
+
+    @Test
+    void templateTextIsRefusedWithItsLine() {
+        Map out = run('SCRIPT', 'var s = \'x\';\nvar t = `${s}${s}`;\nt')
+        assertRefused(out, 'NOT_ALLOWED')
+        assertEquals(2, (out.error as Map).line)
+        Map quoted = run('SCRIPT', "// a ` in a comment\n'a ` in text'")
+        assertTrue(quoted.ok as boolean, "a backtick inside quotes or a comment is fine: ${quoted}")
+        assertEquals('a ` in text', quoted.result)
+    }
+
+    @Test
+    void logRendersAMapWithoutItsToString() {
+        Map out = run('SCRIPT', 'd:log(input.payments); 1')
+        assertTrue(out.ok as boolean, "${out}")
+        assertTrue((out.logs as List)[0].toString().startsWith('[{tender: CARD, amount: 40.00}'), "${out.logs}")
+    }
+
     // -- the choke point
 
     @Test

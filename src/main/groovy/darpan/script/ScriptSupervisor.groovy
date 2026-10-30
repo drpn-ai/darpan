@@ -57,6 +57,7 @@ class ScriptSupervisor {
     static final int MAX_COLLECTION_SIZE = 10_000
     static final int MAX_INPUT_JSON_CHARS = 2_000_000
     static final int MAX_OUTPUT_JSON_CHARS = 65_536
+    static final int MAX_OUTPUT_NODES = 20_000
 
     private static final JexlFeatures SCRIPT_FEATURES = JexlFeatures.createScript()
             .methodCall(false).newInstance(false).annotation(false)
@@ -120,6 +121,12 @@ class ScriptSupervisor {
         if (source.length() > maxChars) {
             return failure(p, 'INVALID', "The script is ${source.length()} characters; the ${p.toLowerCase(Locale.ROOT)} limit is ${maxChars}.".toString())
         }
+        int templateLine = templateLiteralLine(source)
+        if (templateLine > 0) {
+            Map<String, Object> refused = failure(p, 'NOT_ALLOWED', 'Template text (`...`) is not available; join text with +.')
+            (refused.error as Map).line = templateLine
+            return refused
+        }
         JexlScript script
         try {
             script = ENGINES[p].createScript(new JexlInfo('script', 1, 1), source)
@@ -162,7 +169,14 @@ class ScriptSupervisor {
                 try {
                     MapContext context = new MapContext()
                     context.set(INPUT_NAME, plainInput)
-                    return script.execute(context)
+                    Object raw = script.execute(context)
+                    // Shaped here, inside the budget and the timeout: a result can be a huge range or a deep graph.
+                    Object plain = toPlain(raw, 0, [0] as int[])
+                    String json = JsonOutput.toJson(plain)
+                    if (json.length() > MAX_OUTPUT_JSON_CHARS) {
+                        throw new ScriptLimitException('MEMORY', "The result is ${json.length()} characters of JSON; the limit is ${MAX_OUTPUT_JSON_CHARS}.".toString())
+                    }
+                    return plain
                 } finally {
                     ScriptBudget.close()
                 }
@@ -173,26 +187,64 @@ class ScriptSupervisor {
 
         Map<String, Object> out
         try {
-            Object result = future.get(limits.timeoutMs as long, TimeUnit.MILLISECONDS)
-            Object plain = toPlain(result, 0)
-            String json = JsonOutput.toJson(plain)
-            if (json.length() > MAX_OUTPUT_JSON_CHARS) {
-                out = failure(p, 'MEMORY', "The result is ${json.length()} characters of JSON; the limit is ${MAX_OUTPUT_JSON_CHARS}.".toString())
-            } else {
-                out = [ok: true, profile: p, result: plain, error: null] as Map<String, Object>
-            }
+            Object plain = future.get(limits.timeoutMs as long, TimeUnit.MILLISECONDS)
+            out = [ok: true, profile: p, result: plain, error: null] as Map<String, Object>
         } catch (TimeoutException ignored) {
             future.cancel(true)
             out = failure(p, 'TIME', "The script ran past ${limits.timeoutMs} ms and was stopped.".toString())
         } catch (ExecutionException e) {
             out = failureFrom(p, e.cause ?: e)
-        } catch (IllegalArgumentException e) {
-            out = failure(p, 'OUTPUT', e.message)
         }
         out.units = budget.units
         out.elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
         out.logs = new ArrayList<String>(budget.logs)
         return out
+    }
+
+    /**
+     * The line of the first template literal (a backtick outside quotes and comments), or 0. JEXL builds `${a}${b}`
+     * through its template engine, not the arithmetic, so it would skip the text caps; JexlFeatures has no switch
+     * for it, hence the scan.
+     */
+    static int templateLiteralLine(String source) {
+        int line = 1
+        int i = 0
+        int n = source.length()
+        while (i < n) {
+            char c = source.charAt(i)
+            if (c == '\n' as char) { line++; i++; continue }
+            if ((c == '\'' as char) || (c == '"' as char)) {
+                char quote = c
+                i++
+                while (i < n && source.charAt(i) != quote) {
+                    if (source.charAt(i) == '\\' as char) i++
+                    else if (source.charAt(i) == '\n' as char) line++
+                    i++
+                }
+                i++
+                continue
+            }
+            if (c == '/' as char && i + 1 < n && source.charAt(i + 1) == '/' as char) {
+                while (i < n && source.charAt(i) != '\n' as char) i++
+                continue
+            }
+            if (c == '#' as char && i + 1 < n && source.charAt(i + 1) == '#' as char) {
+                while (i < n && source.charAt(i) != '\n' as char) i++
+                continue
+            }
+            if (c == '/' as char && i + 1 < n && source.charAt(i + 1) == '*' as char) {
+                i += 2
+                while (i + 1 < n && !(source.charAt(i) == '*' as char && source.charAt(i + 1) == '/' as char)) {
+                    if (source.charAt(i) == '\n' as char) line++
+                    i++
+                }
+                i += 2
+                continue
+            }
+            if (c == '`' as char) return line
+            i++
+        }
+        return 0
     }
 
     /** Parses JSON text for an input; blank is an empty map. */
@@ -233,9 +285,15 @@ class ScriptSupervisor {
         throw new IllegalArgumentException("The input holds a ${value.getClass().simpleName}, which is not a JSON value.".toString())
     }
 
-    /** What the script returned, as JSON values; anything else (a function, a host object) is refused. */
-    private static Object toPlain(Object value, int depth) {
-        if (depth > 32) throw new IllegalArgumentException('The result is nested more than 32 levels deep.')
+    /**
+     * What the script returned, as JSON values; anything else (a function, a host object) is refused. Runs on the
+     * pool thread with the budget open: every node is charged, at most MAX_OUTPUT_NODES are shaped, and a non-list
+     * collection (a range) is size-checked before it is walked.
+     */
+    private static Object toPlain(Object value, int depth, int[] nodes) {
+        ScriptBudget.charge()
+        if (++nodes[0] > MAX_OUTPUT_NODES) throw new ScriptLimitException('MEMORY', "The result holds more than ${MAX_OUTPUT_NODES} values.".toString())
+        if (depth > 32) throw new ScriptLimitException('OUTPUT', 'The result is nested more than 32 levels deep.')
         if (value == null || value instanceof Boolean || value instanceof String) return value
         if (value instanceof BigDecimal) return value
         if (value instanceof Number) {
@@ -248,12 +306,15 @@ class ScriptSupervisor {
         if (value instanceof Character) return value.toString()
         if (value instanceof Map) {
             Map<String, Object> out = new LinkedHashMap<>()
-            ((Map) value).each { Object k, Object v -> out.put(String.valueOf(k), toPlain(v, depth + 1)) }
+            ((Map) value).each { Object k, Object v -> out.put(ScriptBudget.render(k, 200), toPlain(v, depth + 1, nodes)) }
             return out
         }
-        if (value instanceof Collection) return ((Collection) value).collect { toPlain(it, depth + 1) }
-        if (value.getClass().isArray()) return ScriptArithmetic.arrayItems(value).collect { toPlain(it, depth + 1) }
-        throw new IllegalArgumentException('The script returned something that is not data (a function?); return a value, list or map.')
+        if (value instanceof Collection) {
+            ScriptBudget.checkSize(((Collection) value).size())
+            return ((Collection) value).collect { toPlain(it, depth + 1, nodes) }
+        }
+        if (value.getClass().isArray()) return ScriptArithmetic.arrayItems(value).collect { toPlain(it, depth + 1, nodes) }
+        throw new ScriptLimitException('OUTPUT', 'The script returned something that is not data (a function?); return a value, list or map.')
     }
 
     // -- errors

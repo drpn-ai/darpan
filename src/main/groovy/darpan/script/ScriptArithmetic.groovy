@@ -35,7 +35,29 @@ class ScriptArithmetic extends JexlArithmetic {
         return new ScriptArithmetic(strict, context, scale)
     }
 
-    @Override Object add(Object l, Object r) { ScriptBudget.charge(); return guard(super.add(l, r)) }
+    /**
+     * Text joined with + is length-checked before it is built. Joining text with a list or map is refused: its
+     * toString would build the whole collection first, outside every cap.
+     */
+    @Override
+    Object add(Object l, Object r) {
+        ScriptBudget.charge()
+        if (l instanceof CharSequence || r instanceof CharSequence) {
+            if (!ScriptBudget.isScalar(l) || !ScriptBudget.isScalar(r)) {
+                throw new ScriptLimitException("ACCESS", "Text can only be joined with text or numbers; use d:join for a list.")
+            }
+            ScriptBudget.checkLength(scalarLength(l) + scalarLength(r))
+        }
+        return guard(super.add(l, r))
+    }
+
+    private static long scalarLength(Object x) {
+        if (x == null) return 4L
+        if (x instanceof CharSequence) return ((CharSequence) x).length()
+        if (x instanceof BigDecimal) return ((BigDecimal) x).toPlainString().length()
+        if (x instanceof BigInteger) return ((BigInteger) x).bitLength().intdiv(3) + 2L
+        return 40L
+    }
     @Override Object subtract(Object l, Object r) { ScriptBudget.charge(); return guard(super.subtract(l, r)) }
     @Override
     Object multiply(Object l, Object r) {
@@ -58,7 +80,18 @@ class ScriptArithmetic extends JexlArithmetic {
     @Override boolean greaterThan(Object l, Object r) { ScriptBudget.charge(); return super.greaterThan(l, r) }
     @Override boolean lessThanOrEqual(Object l, Object r) { ScriptBudget.charge(); return super.lessThanOrEqual(l, r) }
     @Override boolean greaterThanOrEqual(Object l, Object r) { ScriptBudget.charge(); return super.greaterThanOrEqual(l, r) }
-    @Override boolean equals(Object l, Object r) { ScriptBudget.charge(); return super.equals(l, r) }
+    /** A list or map compared with == costs its size: the comparison walks it. */
+    @Override
+    boolean equals(Object l, Object r) {
+        ScriptBudget.charge(1L + sizeOf(l) + sizeOf(r))
+        return super.equals(l, r)
+    }
+
+    private static long sizeOf(Object x) {
+        if (x instanceof Collection) return ((Collection) x).size()
+        if (x instanceof Map) return ((Map) x).size()
+        return 0L
+    }
 
     @Override
     Iterable<?> createRange(Object from, Object to) {

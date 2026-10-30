@@ -83,10 +83,16 @@ class ScriptLibrary {
 
     // -- text
 
+    /** Text of a value. A list or map renders node by node up to the text cap, never through its own toString. */
     static String str(Object x) {
         ScriptBudget.charge()
         if (x == null) return null
-        return ScriptBudget.checkString(x instanceof BigDecimal ? ((BigDecimal) x).toPlainString() : x.toString())
+        if (x instanceof CharSequence) return x.toString()
+        if (x instanceof BigDecimal) return ((BigDecimal) x).toPlainString()
+        if (ScriptBudget.isScalar(x)) return x.toString()
+        ScriptBudget budget = ScriptBudget.current()
+        String text = ScriptBudget.render(x, budget != null ? budget.maxStringChars : 65_536)
+        return ScriptBudget.checkString(text)
     }
 
     static String lower(Object s) { str(s)?.toLowerCase(Locale.ROOT) }
@@ -108,8 +114,17 @@ class ScriptLibrary {
     static String replace(Object s, Object from, Object to) {
         String text = str(s), f = str(from)
         if (text == null || !f) return text
-        ScriptBudget.charge(1 + text.length().intdiv(64))
-        return ScriptBudget.checkString(text.replace(f, str(to) ?: ''))
+        String t = str(to) ?: ''
+        // The result's length is known before it is built: count the matches first.
+        long matches = 0
+        int at = text.indexOf(f)
+        while (at >= 0) {
+            matches++
+            at = text.indexOf(f, at + f.length())
+        }
+        ScriptBudget.charge(1 + text.length().intdiv(64) + matches)
+        ScriptBudget.checkLength(text.length() + matches * (t.length() - f.length()))
+        return ScriptBudget.checkString(text.replace(f, t))
     }
 
     static List<String> split(Object s, Object sep) {
@@ -132,7 +147,15 @@ class ScriptLibrary {
     static String join(Object list, Object sep) {
         List items = asList(list, 'join')
         ScriptBudget.charge(items.size())
-        return ScriptBudget.checkString(items.collect { it instanceof BigDecimal ? ((BigDecimal) it).toPlainString() : String.valueOf(it) }.join(str(sep) ?: ''))
+        String separator = str(sep) ?: ''
+        List<String> parts = items.collect { Object item ->
+            if (!ScriptBudget.isScalar(item)) throw new IllegalArgumentException('join takes a list of text or numbers.')
+            item instanceof BigDecimal ? ((BigDecimal) item).toPlainString() : String.valueOf(item)
+        }
+        // Summed before joining, so the cap holds at the peak allocation.
+        long total = (parts.sum(0L) { String part -> (long) part.length() } as long) + Math.max(0, parts.size() - 1) * (long) separator.length()
+        ScriptBudget.checkLength(total)
+        return ScriptBudget.checkString(parts.join(separator))
     }
 
     // -- lists and maps
@@ -184,7 +207,7 @@ class ScriptLibrary {
         ScriptBudget.charge(items.size())
         Map<String, Integer> out = new LinkedHashMap<>()
         items.each { Object item ->
-            String key = String.valueOf(item instanceof Map ? ((Map) item).get(field) : null)
+            String key = ScriptBudget.render(item instanceof Map ? ((Map) item).get(field) : null, 200)
             out.put(key, (out.get(key) ?: 0) + 1)
         }
         return out
@@ -192,6 +215,7 @@ class ScriptLibrary {
 
     static List sorted(Object list) {
         List items = new ArrayList(asList(list, 'sorted'))
+        if (items.any { !ScriptBudget.isScalar(it) }) throw new IllegalArgumentException('sorted takes a list of text or numbers.')
         ScriptBudget.charge(items.size() * 4L)
         items.sort { Object a, Object b ->
             (a instanceof Number && b instanceof Number) ? dec(a) <=> dec(b) : String.valueOf(a) <=> String.valueOf(b)
@@ -201,6 +225,7 @@ class ScriptLibrary {
 
     static List distinct(Object list) {
         List items = asList(list, 'distinct')
+        if (items.any { !ScriptBudget.isScalar(it) }) throw new IllegalArgumentException('distinct takes a list of text or numbers.')
         ScriptBudget.charge(items.size())
         return new ArrayList(new LinkedHashSet(items))
     }
@@ -226,7 +251,7 @@ class ScriptLibrary {
 
     static Object log(Object x) {
         ScriptBudget.charge()
-        ScriptBudget.log(x instanceof BigDecimal ? ((BigDecimal) x).toPlainString() : String.valueOf(x))
+        ScriptBudget.log(ScriptBudget.render(x, 500))
         return x
     }
 
@@ -235,7 +260,12 @@ class ScriptLibrary {
     private static List asList(Object x, String fn) {
         if (x == null) return []
         if (x instanceof List) return (List) x
-        if (x instanceof Collection) return new ArrayList((Collection) x)
+        if (x instanceof Collection) {
+            // A range (1..100000000) is a lazy collection: size-check it before copying it into memory.
+            ScriptBudget.checkSize(((Collection) x).size())
+            ScriptBudget.charge(((Collection) x).size())
+            return new ArrayList((Collection) x)
+        }
         if (x.getClass().isArray()) return ScriptArithmetic.arrayItems(x)
         throw new IllegalArgumentException("${fn} takes a list.".toString())
     }
@@ -248,6 +278,7 @@ class ScriptLibrary {
 
     private static boolean same(Object a, Object b) {
         if (a instanceof Number && b instanceof Number) return dec(a).compareTo(dec(b)) == 0
+        if (!ScriptBudget.isScalar(a) || !ScriptBudget.isScalar(b)) return a.is(b)
         return a == b || (a != null && b != null && a.toString() == b.toString())
     }
 

@@ -57,6 +57,76 @@ class ScriptBudget {
         return value
     }
 
+    /**
+     * Refuses a text of this length BEFORE it is built, so the cap holds at the peak allocation, not after it.
+     * Counts toward the total made.
+     */
+    static void checkLength(long length) {
+        ScriptBudget budget = CURRENT.get()
+        if (budget == null) return
+        if (length > budget.maxStringChars) {
+            throw new ScriptLimitException("MEMORY", "A text value would grow past ${budget.maxStringChars} characters.".toString())
+        }
+        if (budget.charsMade + length > budget.maxStringChars * 64L) {
+            throw new ScriptLimitException("MEMORY", "The script built more than ${budget.maxStringChars * 64L} characters of text.".toString())
+        }
+    }
+
+    /** A value is scalar when its text form is its own size: text, numbers, true/false, null. */
+    static boolean isScalar(Object x) {
+        return x == null || x instanceof CharSequence || x instanceof Number || x instanceof Boolean || x instanceof Character
+    }
+
+    /**
+     * Text of any value, at most limit characters (then '…'), built node by node and charged, never through a
+     * collection's own toString (which would build the whole thing first).
+     */
+    static String render(Object x, int limit) {
+        StringBuilder out = new StringBuilder()
+        renderInto(x, out, limit)
+        return out.length() > limit ? out.substring(0, limit) + '…' : out.toString()
+    }
+
+    private static void renderInto(Object x, StringBuilder out, int limit) {
+        if (out.length() > limit) return
+        charge()
+        if (x instanceof BigDecimal) { out.append(((BigDecimal) x).toPlainString()); return }
+        if (isScalar(x)) {
+            String text = String.valueOf(x)
+            int room = Math.max(0, limit + 1 - out.length())
+            out.append(text, 0, Math.min(text.length(), room))
+            return
+        }
+        if (x instanceof Map) {
+            out.append('{')
+            boolean first = true
+            for (Map.Entry e : ((Map) x).entrySet()) {
+                if (out.length() > limit) return
+                if (!first) out.append(', ')
+                first = false
+                renderInto(e.key, out, limit)
+                out.append(': ')
+                renderInto(e.value, out, limit)
+            }
+            out.append('}')
+            return
+        }
+        if (x instanceof Iterable || (x != null && x.getClass().isArray())) {
+            Iterable items = x instanceof Iterable ? (Iterable) x : ScriptArithmetic.arrayItems(x)
+            out.append('[')
+            boolean first = true
+            for (Object item : items) {
+                if (out.length() > limit) return
+                if (!first) out.append(', ')
+                first = false
+                renderInto(item, out, limit)
+            }
+            out.append(']')
+            return
+        }
+        out.append('(not data)')
+    }
+
     static void checkSize(int size) {
         ScriptBudget budget = CURRENT.get()
         if (budget != null && size > budget.maxCollectionSize) {

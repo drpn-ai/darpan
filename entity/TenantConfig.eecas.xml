@@ -10,78 +10,90 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
     <eeca id="TenantConfigChange_NsAuthConfig" entity="darpan.reconciliation.NsAuthConfig" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsAuthConfig', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsAuthConfig', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_ShopifyAuthConfig" entity="darpan.shopify.ShopifyAuthConfig" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.shopify.ShopifyAuthConfig', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.shopify.ShopifyAuthConfig', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_HotWaxOmsRestSourceConfig" entity="darpan.hotwax.HotWaxOmsRestSourceConfig" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.hotwax.HotWaxOmsRestSourceConfig', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.hotwax.HotWaxOmsRestSourceConfig', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_NsRestletConfig" entity="darpan.reconciliation.NsRestletConfig" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsRestletConfig', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsRestletConfig', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_NsSuiteQlSourceQuery" entity="darpan.reconciliation.NsSuiteQlSourceQuery" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsSuiteQlSourceQuery', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsSuiteQlSourceQuery', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_NsSuiteQlSourceQueryField" entity="darpan.reconciliation.NsSuiteQlSourceQueryField" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsSuiteQlSourceQueryField', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.NsSuiteQlSourceQueryField', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_TenantConclusion" entity="darpan.rule.TenantConclusion" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.TenantConclusion', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.TenantConclusion', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_RuleSet" entity="darpan.rule.RuleSet" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSet', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSet', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_Rule" entity="darpan.rule.Rule" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.Rule', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.Rule', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_RuleSetCompareScope" entity="darpan.rule.RuleSetCompareScope" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareScope', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareScope', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_RuleSetCompareSource" entity="darpan.rule.RuleSetCompareSource" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareSource', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareSource', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_RuleSetCompareSourceKeyField" entity="darpan.rule.RuleSetCompareSourceKeyField" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareSourceKeyField', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareSourceKeyField', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_RuleSetCompareSourceFilter" entity="darpan.rule.RuleSetCompareSourceFilter" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareSourceFilter', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetCompareSourceFilter', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_RuleSetConclusionRule" entity="darpan.rule.RuleSetConclusionRule" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetConclusionRule', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetConclusionRule', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_RuleSetConclusionCondition" entity="darpan.rule.RuleSetConclusionCondition" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetConclusionCondition', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.rule.RuleSetConclusionCondition', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_Audit" entity="darpan.audit.Audit" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.Audit', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.Audit', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_AuditStatement" entity="darpan.audit.AuditStatement" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.AuditStatement', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.AuditStatement', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_AuditCheck" entity="darpan.audit.AuditCheck" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.AuditCheck', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.AuditCheck', entityValue, eecaOperation)</script></actions>
     </eeca>
     <eeca id="TenantConfigChange_AuditStatementCheck" entity="darpan.audit.AuditStatementCheck" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
-        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.AuditStatementCheck', entityValue)</script></actions>
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.AuditStatementCheck', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_ReconciliationAutomation" entity="darpan.reconciliation.ReconciliationAutomation" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.ReconciliationAutomation', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_ReconciliationAutomationSource" entity="darpan.reconciliation.ReconciliationAutomationSource" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.ReconciliationAutomationSource', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_ReconciliationAutomationSourceFilter" entity="darpan.reconciliation.ReconciliationAutomationSourceFilter" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.ReconciliationAutomationSourceFilter', entityValue, eecaOperation)</script></actions>
     </eeca>
 </eecas>

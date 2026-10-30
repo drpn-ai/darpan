@@ -4,6 +4,7 @@ import darpan.admin.AdminAuditSupport
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import groovy.json.JsonOutput
 import groovy.transform.CompileDynamic
@@ -12,6 +13,7 @@ import javax.crypto.SecretKey
 import java.nio.charset.StandardCharsets
 import java.security.GeneralSecurityException
 import java.security.MessageDigest
+import java.sql.Timestamp
 
 import reconciliation.rule.RuleEngineSupport
 
@@ -125,6 +127,7 @@ class ConfigTransferImporter {
         records(ctx, "audits").each { Map a -> writeTree(ctx, spec(AUDIT), a, "") }
         records(ctx, "statements").each { Map s -> writeStatement(ctx, s) }
         records(ctx, "checks").each { Map c -> writeCheck(ctx, c) }
+        records(ctx, "automations").each { Map a -> writeAutomation(ctx, a) }
 
         String counts = ACTIONS.collect { "${it} ${plan.counts[it]}" }.join(", ")
         // DAR-BE-160: a tenant's config restore applies through here too, and logs under its own service name.
@@ -173,9 +176,18 @@ class ConfigTransferImporter {
         matchByKey(ctx, "checks", "checkCode", { Map c -> text(c.fields?.checkCode) }) { Map c ->
             scoped(ctx, "darpan.audit.AuditCheck").condition("checkCode", c.fields?.checkCode).list()
         }
+        // DAR-BE-160. Only a config version carries automations, and a version restores into its own tenant, where an
+        // automation is matched by its own id (names need not be unique); from another tenant, by its name.
+        boolean sameTenant = text(bundle.source?.tenantUserGroupId) == tenantId
+        matchByKey(ctx, "automations", sameTenant ? "id" : "automationName",
+                { Map a -> sameTenant ? parseRef(a.ref)?.get(1) : text(a.fields?.automationName) }) { Map a ->
+            sameTenant ? scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationId", parseRef(a.ref)?.get(1)).list()
+                    : scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationName", a.fields?.automationName).list()
+        }
 
         sourceRuleIdentities(ctx)
-        ["queries": NETSUITE_SUITEQL, "runs": RUN, "audits": AUDIT, "statements": STATEMENT, "checks": CHECK].each { String list, String kind ->
+        ["queries": NETSUITE_SUITEQL, "runs": RUN, "audits": AUDIT, "statements": STATEMENT, "checks": CHECK,
+         "automations": AUTOMATION].each { String list, String kind ->
             records(ctx, list).findAll { ctx.matches.containsKey(it.ref) }.each { Map rec -> diff(ctx, spec(kind), rec) }
         }
         scopeGate(ctx)
@@ -186,7 +198,8 @@ class ConfigTransferImporter {
         records(ctx, "connections").each { Map c ->
             if (ctx.actions[c.ref]) lines << line(ctx, c.kind as String, c)
         }
-        [queries: NETSUITE_SUITEQL, conclusionCodes: CONC, runs: RUN, audits: AUDIT, statements: STATEMENT, checks: CHECK].each { String list, String kind ->
+        [queries: NETSUITE_SUITEQL, conclusionCodes: CONC, runs: RUN, audits: AUDIT, statements: STATEMENT, checks: CHECK,
+         automations: AUTOMATION].each { String list, String kind ->
             records(ctx, list).each { Map rec -> if (ctx.actions[rec.ref]) lines << line(ctx, kind, rec) }
         }
         return finish(ctx, lines)
@@ -619,7 +632,8 @@ class ConfigTransferImporter {
         new LinkedHashSet<String>((valueFields(ec, spec) as List<String>) + recFields.keySet().collect { it as String }).each { String k ->
             Object v = text(recFields[k]) ?: defaultOf(ed, k)
             if (v == null) return
-            fields[k] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> idOf(item.sourceConfigId) } : text(v)
+            fields[k] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> idOf(item.sourceConfigId) }
+                    : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> idOf(ref) } : text(v)
         }
         out.fields = fields
         out.refs = new TreeMap(((rec.refs ?: [:]) as Map).collectEntries { k, v -> [(k): idOf(v)] })
@@ -896,6 +910,21 @@ class ConfigTransferImporter {
         }
     }
 
+    /**
+     * DAR-BE-160. An automation, its sources and their filters. A new one starts paused, as every audit automation does;
+     * an existing one keeps being on or paused. Its next firing follows the schedule written.
+     */
+    private static void writeAutomation(Map ctx, Map a) {
+        String action = ctx.actions[a.ref]
+        if (!(action in [CREATE, "UPDATE"])) return
+        writeTree(ctx, spec(AUTOMATION), a, "")
+        def row = finder(ctx.ec, spec(AUTOMATION).entityName as String).condition("automationId", ctx.idMap[a.ref]).useCache(false).one()
+        if (row == null) return
+        if (action == CREATE) row.set("isActive", "N")
+        row.set("nextScheduledFireTime", AutomationExecutionSupport.resolveNextScheduledFireTime(row, ctx.now as Timestamp, ctx.now as Timestamp))
+        row.update()
+    }
+
     /** A run's rules must compile here too, against this instance's rule engine; the transfer fails if they do not. */
     private static void compile(Map ctx, String ruleSetId, String label) {
         def ec = ctx.ec
@@ -927,7 +956,8 @@ class ConfigTransferImporter {
         Set<String> refs = refColumns(spec)
         Set<String> lists = ((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>
         ((rec.fields ?: [:]) as Map).findAll { k, v -> k in values }.each { k, v ->
-            out[k as String] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> targetId(ctx, item.sourceConfigId) } : text(v)
+            out[k as String] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> targetId(ctx, item.sourceConfigId) }
+                    : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> targetId(ctx, ref) } : text(v)
         }
         ((rec.refs ?: [:]) as Map).findAll { k, v -> k in refs }.each { k, v -> out[k as String] = targetId(ctx, v) }
         ((rec.listRefs ?: [:]) as Map).findAll { k, v -> k in lists }.each { k, v ->
@@ -1038,6 +1068,7 @@ class ConfigTransferImporter {
         ((rec.listRefs ?: [:]) as Map).values().each { out.addAll(((List) it).collect { it as String }) }
         ((rec.fields ?: [:]) as Map).each { k, v ->
             if (k in JSON_REF_FIELDS) ConfigTransferExporter.rewriteLookups(v) { Map item -> out << (item.sourceConfigId as String); item.sourceConfigId }
+            if (k in JSON_PARAM_REF_FIELDS) ConfigTransferExporter.mapParamRefs(v) { String ref -> out << ref; ref }
         }
         ((rec.children ?: [:]) as Map).values().each { ((List) it).each { out.addAll(allRefs((Map) it)) } }
         ((rec.links ?: []) as List).each { out.addAll(allRefs((Map) it)) }

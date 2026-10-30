@@ -140,7 +140,13 @@ class TenantConfigRestoreSupport {
                 .condition("ownerReconciliationId", null).useCache(false).list()
                 .findAll { !((it.ruleSetName as String) in versionRuns) }
                 .collect { [kind: "RUN", label: it.ruleSetName] as Map }
-        return [switchOff: switchOff, unlink: unlink, kept: kept.sort { a, b -> a.label <=> b.label }]
+        // An automation of a saved run that the version does not hold was added since; it keeps running as it is.
+        Set<String> versionAutomations = ((pack.automations ?: []) as List<Map>)
+                .collect { TransferSpecs.parseRef(it.ref)?.get(1) }.findAll { it } as Set<String>
+        rows(ec, tenantId, "darpan.reconciliation.ReconciliationAutomation")
+                .findAll { it.savedRunId && !((it.automationId as String) in versionAutomations) }
+                .each { kept << ([kind: "AUTOMATION", label: it.automationName ?: it.automationId] as Map) }
+        return [switchOff: switchOff, unlink: unlink, kept: kept.sort { a, b -> a.kind <=> b.kind ?: a.label <=> b.label }]
     }
 
     /** SHA-256 over the version, the importer's plan hash and exactly which rows are switched off and unlinked. */

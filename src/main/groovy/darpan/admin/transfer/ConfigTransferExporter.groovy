@@ -82,7 +82,7 @@ class ConfigTransferExporter {
      * which key, never a value. Without it nothing secret is read, exactly as before.</p>
      */
     static Map<String, Object> bundle(def ec, String tenantId, List auditCodes, List savedRunIds, List connectionRefs,
-                                      String sourceInstanceLabel, String secretsPublicKey = null) {
+                                      String sourceInstanceLabel, String secretsPublicKey = null, boolean withAutomations = false) {
         if (!requireTenant(ec, tenantId)) return null
         Map<String, Object> bundleKey = null
         if (text(secretsPublicKey)) {
@@ -143,6 +143,15 @@ class ConfigTransferExporter {
         }
         List<Map> runRecords = runs.collect { labelled(record(ec, spec(RUN), it, namer), it.ruleSetName ?: it.ruleSetId) }
 
+        // DAR-BE-160: a version also holds the automations of the runs it holds (read before the queries: a source can
+        // name a query no run uses). A lifecycle's or a mapping's automation has no saved run here and waits.
+        List<Map> automationRecords = []
+        if (withAutomations && runIds) {
+            automationRecords = finder(ec, spec(AUTOMATION).entityName as String).condition("companyUserGroupId", tenantId)
+                    .condition("savedRunId", "in", runs*.ruleSetId).orderBy(["automationName", "automationId"]).useCache(false).list()
+                    .collect { labelled(record(ec, spec(AUTOMATION), it, namer), it.automationName ?: it.automationId) }
+        }
+
         List<Map> queryRecords = []
         Set<String> queryIds = reached[NETSUITE_SUITEQL]
         if (queryIds) {
@@ -184,6 +193,7 @@ class ConfigTransferExporter {
                 audits         : auditRecords,
                 statements     : statementRecords,
                 checks         : checkRecords] as Map<String, Object>
+        if (withAutomations) out.automations = automationRecords
         if (secrets != null) out.secrets = secrets
         return out
     }
@@ -232,8 +242,17 @@ class ConfigTransferExporter {
         Map<String, Object> fields = [:]
         valueFields(ec, spec).each { String f ->
             Object value = row.get(f)
-            fields[f] = f in JSON_REF_FIELDS ? rewriteLookups(value) { Map item -> namer(lookupKind(ec, item.systemEnumId) ?: "UNKNOWN", item.sourceConfigId) }
-                    : text(value)
+            if (f in JSON_REF_FIELDS) {
+                fields[f] = rewriteLookups(value) { Map item -> namer(lookupKind(ec, item.systemEnumId) ?: "UNKNOWN", item.sourceConfigId) }
+            } else if (f in JSON_PARAM_REF_FIELDS) {
+                // The row's connector says which parameter holds its config id, and of what kind.
+                Map connector = text(row.get("systemEnumId")) ? SourceSystemConnectorSupport.resolve(ec, text(row.get("systemEnumId"))) : null
+                String param = text(connector?.configParameterName)
+                String kind = lookupKind(ec, row.get("systemEnumId"))
+                fields[f] = param && kind ? rewriteParams(value) { String key, Object v -> key == param && text(v) ? namer(kind, v) : v } : text(value)
+            } else {
+                fields[f] = text(value)
+            }
         }
         out.fields = fields
         Map<String, String> refs = [:]
@@ -310,6 +329,33 @@ class ConfigTransferExporter {
             copy.sourceConfigId = mapId(copy)
             return copy
         })
+    }
+
+    /**
+     * DAR-BE-160. A JSON map whose "parameters" map passes each value through mapValue(key, value); text that is no such
+     * map is kept as it is.
+     */
+    static String rewriteParams(Object raw, Closure<Object> mapValue) {
+        String json = text(raw)
+        if (!json?.trim()) return json
+        Object parsed
+        try {
+            parsed = new JsonSlurper().parseText(json)
+        } catch (Exception ignored) {
+            return json
+        }
+        if (!(parsed instanceof Map) || !(((Map) parsed).parameters instanceof Map)) return json
+        Map copy = new LinkedHashMap((Map) parsed)
+        copy.parameters = ((Map) copy.parameters).collectEntries { k, v -> [(k): mapValue(k as String, v)] }
+        return JsonOutput.toJson(copy)
+    }
+
+    /** The import side of rewriteParams: a parameter value that is a ref of a transfer kind maps through mapRef. */
+    static String mapParamRefs(Object raw, Closure<String> mapRef) {
+        return rewriteParams(raw) { String key, Object v ->
+            List<String> parsed = parseRef(v)
+            parsed && parsed[0] in KIND_NAMES ? mapRef(v as String) : v
+        }
     }
 
     static List<String> splitList(Object raw) {

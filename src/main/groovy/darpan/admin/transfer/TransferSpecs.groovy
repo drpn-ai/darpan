@@ -32,6 +32,8 @@ class TransferSpecs {
     static final String AUDIT = "AUDIT"
     static final String STATEMENT = "STATEMENT"
     static final String CHECK = "CHECK"
+    /** DAR-BE-160. Carried only by a tenant config version (bundle withAutomations), never by an admin transfer. */
+    static final String AUTOMATION = "AUTOMATION"
 
     static final List<String> CONNECTION_KINDS = [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_RESTLET].asImmutable()
 
@@ -41,6 +43,12 @@ class TransferSpecs {
 
     /** Text columns holding a JSON list whose items name a connection by sourceConfigId (DAR-BE-118 lookups). */
     static final List<String> JSON_REF_FIELDS = ["conclusionLookupsJson"].asImmutable()
+
+    /**
+     * DAR-BE-160. Text columns holding a JSON map whose parameters name a config by id: an automation source keeps its
+     * connection or query id in safeMetadataJson.parameters, under its connector's configParameterName.
+     */
+    static final List<String> JSON_PARAM_REF_FIELDS = ["safeMetadataJson"].asImmutable()
 
     static final String CONCLUSION_ENUM_TYPE = "DarpanConclusion"
 
@@ -86,12 +94,28 @@ class TransferSpecs {
              // A check's links to statements: only those of the audits in the bundle travel; links to other audits stay.
              links: [entityName: "darpan.audit.AuditStatementCheck", parentFields: ["checkId"], refFields: [statementId: STATEMENT],
                      textListRefs: [ruleIds: RULE, conclusionCodes: CONC]]],
+            // DAR-BE-160. The morning audit runs an automation's own copy of its run's sources and exclusion filters, so a
+            // version holds them. When it last and next fires and whether it is on are operational: they stay the
+            // target's, and changing them is no config change. A source's config id travels as a ref inside
+            // safeMetadataJson (JSON_PARAM_REF_FIELDS); its other id columns stay plain, as a version restores into the
+            // tenant it came from.
+            [kind: AUTOMATION, entityName: "darpan.reconciliation.ReconciliationAutomation", pkField: "automationId",
+             naturalKey: "automationName", refFields: [savedRunId: RUN],
+             dropFields: ["isActive", "nextScheduledFireTime", "lastScheduledFireTime"], children: [
+                    [entityName: "darpan.reconciliation.ReconciliationAutomationSource", parentFields: ["automationId"],
+                     orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
+                            [entityName: "darpan.reconciliation.ReconciliationAutomationSourceFilter",
+                             parentFields: ["automationId", "fileSide"], orderBy: ["sequenceNum"]]]]]],
     ].asImmutable()
+
+    /** Every kind's name, for telling a ref inside JSON from a plain value. */
+    static final Set<String> KIND_NAMES = ((KINDS*.kind as List<String>) + [RULE] as Set<String>).asImmutable()
 
     /** The bundle list each top-level kind travels in. */
     static final Map<String, String> BUNDLE_LISTS = [(NETSUITE_AUTH): "connections", (SHOPIFY_AUTH): "connections",
             (HOTWAX_OMS_REST): "connections", (NETSUITE_RESTLET): "connections", (NETSUITE_SUITEQL): "queries",
-            (CONC): "conclusionCodes", (RUN): "runs", (AUDIT): "audits", (STATEMENT): "statements", (CHECK): "checks"].asImmutable()
+            (CONC): "conclusionCodes", (RUN): "runs", (AUDIT): "audits", (STATEMENT): "statements", (CHECK): "checks",
+            (AUTOMATION): "automations"].asImmutable()
 
     static Map spec(String kind) {
         return KINDS.find { it.kind == kind }

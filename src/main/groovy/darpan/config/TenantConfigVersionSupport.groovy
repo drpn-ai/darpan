@@ -25,7 +25,7 @@ class TenantConfigVersionSupport {
     static final String MANUAL = "MANUAL"
     static final List<String> CHANGE_SOURCES = [MANUAL, "SETTINGS_SAVE", "AGENT_APPLY", "IMPORT", "RESTORE"].asImmutable()
     static final List<String> COUNTED_LISTS = ["audits", "statements", "checks", "runs", "queries", "conclusionCodes",
-                                               "connections"].asImmutable()
+                                               "connections", "automations"].asImmutable()
     static final int DEFAULT_LIST_LIMIT = 50
 
     /** The tenant's whole config as a transfer bundle; null (with errors) when the exporter refuses. */
@@ -36,7 +36,8 @@ class TenantConfigVersionSupport {
         List runIds = (catalog.runs as List<Map>)*.savedRunId
         // Owned connections only; one shared to the tenant still travels when a run reaches it, as /transfer does.
         List connectionRefs = (catalog.connections as List<Map>).findAll { !it.granted }*.ref
-        return ConfigTransferExporter.bundle(ec, tenantId, auditCodes, runIds, connectionRefs, null)
+        // With automations: the morning audit runs an automation's own copy of its run's sources and filters.
+        return ConfigTransferExporter.bundle(ec, tenantId, auditCodes, runIds, connectionRefs, null, null, true)
     }
 
     /** Hex SHA-256 of the pack without its source block, map keys sorted; list order is kept (the exporter sorts lists). */

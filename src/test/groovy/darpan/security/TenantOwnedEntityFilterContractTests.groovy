@@ -96,7 +96,8 @@ class TenantOwnedEntityFilterContractTests {
      * Filter rows added since the last release cut. No pack carries them yet: the next cut generates its pack from
      * the previous tag, and data/upgrade-data.xml is not hand-edited between cuts. Remove an entry once a pack ships it.
      */
-    static final Map<String, String> PENDING_NEXT_PACK = ["DARPAN_SCOPE_KNOWLEDGE_ENTRY": "DAR-BE-161 knowledge entries; the next release cut generates its pack row"].asImmutable()
+    static final Map<String, String> PENDING_NEXT_PACK = ["DARPAN_SCOPE_KNOWLEDGE_ENTRY": "DAR-BE-161 knowledge entries; the next release cut generates its pack row",
+                                                          "DARPAN_SCOPE_TENANT_SCRIPT": "DAR-BE-164 tenant scripts; the next release cut generates its pack row"].asImmutable()
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS).asImmutable()

@@ -186,3 +186,7 @@ facade.TenantConfigFacadeServices.get#TenantConfigVersions
 facade.TenantConfigFacadeServices.preview#TenantConfigRestore
 facade.TenantConfigFacadeServices.restore#TenantConfigVersion
 facade.TenantConfigFacadeServices.snapshot#TenantConfig
+facade.TenantScriptFacadeServices.delete#TenantScript
+facade.TenantScriptFacadeServices.list#TenantScripts
+facade.TenantScriptFacadeServices.run#TenantScript
+facade.TenantScriptFacadeServices.save#TenantScript

@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-164. The ACTIVE tenant's scripts (darpan.script.TenantScript): JEXL a tenant writes and runs in Darpan as data,
+  with no code commit. Every read and write names the session's active tenant; another tenant's script reads as not
+  found. Only darpan.script.ScriptSupervisor evaluates a script.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="list" noun="TenantScripts" authz-action="view" allow-remote="true" authenticate="true">
+        <description>The active tenant's scripts by name, plus the d: library and the limits, for the editor.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="scripts" type="List"><description>[{tenantScriptId, scriptName, description, scriptProfile,
+                inputSource, scriptBody, sampleInputJson, isActive, createdByUserId, createdDate, lastUpdatedDate}]</description></parameter>
+            <parameter name="library" type="List"><description>[{name, help}]: the d: functions.</description></parameter>
+            <parameter name="limits" type="Map"><description>{EXPRESSION: {maxSourceChars, unitLimit, timeoutMs}, SCRIPT: {...}}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="scripts" from="[]"/>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="tenantId">
+                <set field="scriptRows" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScript', 'DAR-BE-164 tenant scripts list, pinned to the active tenant by condition').condition('companyUserGroupId', tenantId).orderBy('scriptName').useCache(false).list()"/>
+                <set field="scripts" from="scriptRows.collect { darpan.script.TenantScriptSupport.toScriptMap(it) }"/>
+            </if>
+            <set field="library" from="darpan.script.ScriptSupervisor.libraryCatalog()"/>
+            <set field="limits" from="darpan.script.ScriptSupervisor.LIMITS"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantScript" allow-remote="true" authenticate="true">
+        <description>Create or update one of the active tenant's scripts. The body must parse under its profile; a script
+            that does not is refused with the line, never saved half-checked. Needs edit access to the tenant.</description>
+        <in-parameters>
+            <parameter name="tenantScriptId"/>
+            <parameter name="scriptName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="scriptProfile" default-value="SCRIPT"><description>EXPRESSION or SCRIPT.</description></parameter>
+            <parameter name="inputSource" default-value="SAMPLE"><description>SAMPLE or RUN_RESULT.</description></parameter>
+            <parameter name="scriptBody" required="true" allow-html="true"><description>JEXL; holds &lt; and &gt;.</description></parameter>
+            <parameter name="sampleInputJson" allow-html="true"/>
+            <parameter name="isActive" type="Boolean" default-value="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="script" type="Map"/>
+            <parameter name="validation" type="Map"><description>{ok, profile, variables, error: {kind, message, line, column}}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change scripts.')"/>
+            </if>
+            <set field="scriptIdValue" from="tenantScriptId?.toString()?.trim()"/>
+            <set field="nameValue" from="scriptName?.toString()?.trim()"/>
+            <set field="profileValue" from="darpan.script.ScriptSupervisor.profileOf(scriptProfile)"/>
+            <set field="sourceValue" from="darpan.script.TenantScriptSupport.inputSourceOf(inputSource)"/>
+            <set field="existing" from="(!ec.message.hasError() &amp;&amp; scriptIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', scriptIdValue, tenantId, 'DAR-BE-164 script edit target verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; scriptIdValue &amp;&amp; existing == null">
+                <message error="true">Script '${scriptIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <if condition="!nameValue"><message error="true">A script needs a name.</message></if>
+                <if condition="profileValue == null"><message error="true">Profile must be EXPRESSION or SCRIPT.</message></if>
+                <if condition="sourceValue == null"><message error="true">Input must be SAMPLE or RUN_RESULT.</message></if>
+                <set field="nameClash" from="nameValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScript', 'DAR-BE-164 script name uniqueness within the active tenant').condition('companyUserGroupId', tenantId).useCache(false).list().find { it.tenantScriptId != scriptIdValue &amp;&amp; it.scriptName?.toString()?.trim()?.equalsIgnoreCase(nameValue) } : null"/>
+                <if condition="nameClash != null"><message error="true">A script named '${nameValue}' already exists.</message></if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="validation" from="darpan.script.ScriptSupervisor.validate(profileValue, scriptBody)"/>
+                <if condition="!validation.ok">
+                    <message error="true">${validation.error.line ? 'Line ' + validation.error.line + ': ' : ''}${validation.error.message}</message>
+                </if>
+                <script>
+                    if (sampleInputJson?.toString()?.trim()) {
+                        try { darpan.script.ScriptSupervisor.parseInputJson(sampleInputJson.toString()) }
+                        catch (IllegalArgumentException e) { ec.message.addError("Sample input: ${e.message}") }
+                    }
+                </script>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="userIdValue" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
+                <set field="scriptIdValue" from="scriptIdValue ?: darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.script.TenantScript', 'tenantScriptId')"/>
+                <set field="scriptMap" from="[tenantScriptId: scriptIdValue, companyUserGroupId: tenantId, scriptName: nameValue,
+                        description: description?.toString()?.trim() ?: null, scriptProfile: profileValue, inputSource: sourceValue,
+                        scriptBody: scriptBody, sampleInputJson: sampleInputJson?.toString()?.trim() ? sampleInputJson : null,
+                        isActive: (isActive == null || isActive) ? 'Y' : 'N',
+                        createdByUserId: existing?.createdByUserId ?: userIdValue, createdDate: existing?.createdDate ?: nowTs,
+                        lastUpdatedByUserId: userIdValue, lastUpdatedDate: nowTs]"/>
+                <service-call name="store#darpan.script.TenantScript" in-map="scriptMap"/>
+                <if condition="!ec.message.hasError()"><message>Saved script.</message></if>
+            </if>
+            <set field="savedRow" from="(!ec.message.hasError() &amp;&amp; scriptIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', scriptIdValue, tenantId, 'DAR-BE-164 saved script read back for the active tenant') : null"/>
+            <set field="script" from="darpan.script.TenantScriptSupport.toScriptMap(savedRow)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="TenantScript" allow-remote="true" authenticate="true">
+        <description>Delete one of the active tenant's scripts. Needs edit access to the tenant.</description>
+        <in-parameters><parameter name="tenantScriptId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change scripts.')"/>
+            </if>
+            <set field="scriptRow" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', tenantScriptId, tenantId, 'DAR-BE-164 script delete target verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; scriptRow == null">
+                <message error="true">Script '${tenantScriptId}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreDelete" from="scriptRow.delete()"/>
+                <message>Deleted script.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="TenantScript" transaction="ignore" allow-remote="true" authenticate="true">
+        <description>Runs a script and returns what it gave back; writes nothing. Either a saved script (tenantScriptId) or
+            an unsaved draft (scriptBody + scriptProfile; these also override a saved script's, so the editor can try an
+            edit before saving). The input is read first, then the script runs with no transaction open. A script error
+            is a result (run.ok false, run.error), not a service error. Needs edit access to the tenant.</description>
+        <in-parameters>
+            <parameter name="tenantScriptId"/>
+            <parameter name="scriptBody" allow-html="true"/>
+            <parameter name="scriptProfile"/>
+            <parameter name="inputSource"><description>SAMPLE or RUN_RESULT; defaults to the saved script's, else SAMPLE.</description></parameter>
+            <parameter name="inputJson" allow-html="true"><description>SAMPLE input; defaults to the saved sample.</description></parameter>
+            <parameter name="fileName"><description>RUN_RESULT: the run result file, as list#GeneratedOutputs names it.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="run" type="Map"><description>{ok, profile, result, units, elapsedMs, logs, error: {kind, message, line, column}}</description></parameter>
+            <parameter name="inputSummary" type="Map"><description>{source, characters} or {source, fileName, records, totalDifferences, truncated}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot run scripts.')"/>
+            </if>
+            <set field="scriptIdValue" from="tenantScriptId?.toString()?.trim()"/>
+            <set field="saved" from="(!ec.message.hasError() &amp;&amp; scriptIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', scriptIdValue, tenantId, 'DAR-BE-164 script run target verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; scriptIdValue &amp;&amp; saved == null">
+                <message error="true">Script '${scriptIdValue}' was not found.</message>
+            </if>
+            <set field="bodyValue" from="scriptBody != null ? scriptBody.toString() : saved?.scriptBody"/>
+            <set field="profileValue" from="scriptProfile ?: saved?.scriptProfile ?: 'SCRIPT'"/>
+            <set field="sourceValue" from="darpan.script.TenantScriptSupport.inputSourceOf(inputSource ?: saved?.inputSource)"/>
+            <if condition="!ec.message.hasError()">
+                <if condition="!bodyValue?.trim()"><message error="true">Write a script, or choose a saved one.</message></if>
+                <if condition="sourceValue == null"><message error="true">Input must be SAMPLE or RUN_RESULT.</message></if>
+            </if>
+            <set field="prepared" from="!ec.message.hasError() ? darpan.script.TenantScriptSupport.runInput(ec, sourceValue, inputJson?.toString(), saved?.sampleInputJson, fileName?.toString()) : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; prepared != null">
+                <set field="run" from="darpan.script.ScriptSupervisor.evaluate(profileValue, bodyValue, prepared.input)"/>
+                <set field="inputSummary" from="prepared.inputSummary"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

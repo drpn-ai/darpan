@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-164. Tenant scripts: JEXL a tenant writes and runs in Darpan as data, with no code commit. Tenant-scoped like
+  every tenant entity (DARPAN_SCOPE_TENANT_SCRIPT). Evaluated only by darpan.script.ScriptSupervisor.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="TenantScript" package="darpan.script" cache="never">
+        <description>One script a tenant wrote: its JEXL body, the profile it runs under and what it reads.</description>
+        <field name="tenantScriptId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="scriptName" type="text-medium" not-null="true"><description>Unique within the tenant.</description></field>
+        <field name="description" type="text-medium"/>
+        <field name="scriptProfile" type="text-short" not-null="true">
+            <description>EXPRESSION (one expression, no loops) or SCRIPT (statements, loops, lambdas).</description></field>
+        <field name="inputSource" type="text-short" not-null="true">
+            <description>What input holds: SAMPLE (sampleInputJson) or RUN_RESULT (a finished run's differences).</description></field>
+        <field name="scriptBody" type="text-long" not-null="true"><description>The JEXL source.</description></field>
+        <field name="sampleInputJson" type="text-long"><description>The input a SAMPLE script runs against.</description></field>
+        <field name="isActive" type="text-indicator"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedByUserId" type="id"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" title="Tenant" related="moqui.security.UserGroup" short-alias="tenant">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+
+        <index name="TENANT_SCRIPT_NAME" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="scriptName"/>
+        </index>
+    </entity>
+</entities>

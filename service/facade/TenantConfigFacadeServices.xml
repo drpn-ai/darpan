@@ -37,7 +37,7 @@
             <parameter name="limit" type="Integer" default-value="50"><description>At most 500.</description></parameter>
         </in-parameters>
         <out-parameters>
-            <parameter name="versions" type="List"><description>[{id, seq, parentId, hash, bundleVersion, counts, changeSource,
+            <parameter name="versions" type="List"><description>[{id, seq, parentId, hash, bundleVersion, counts, changeSource, createdByName,
                 reason, createdBy, createdDate}]</description></parameter>
         </out-parameters>
         <actions>

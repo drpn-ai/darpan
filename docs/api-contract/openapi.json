@@ -25032,7 +25032,7 @@
                         "items": {
                             
                         },
-                        "description": "[{id, seq, parentId, hash, bundleVersion, counts, changeSource,\n                reason, createdBy, createdDate}]"
+                        "description": "[{id, seq, parentId, hash, bundleVersion, counts, changeSource, createdByName,\n                reason, createdBy, createdDate}]"
                     }
                 }
             },

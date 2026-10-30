@@ -139,6 +139,7 @@ class TenantConfigVersionSmokeTests {
         List<Map> versions = (List<Map>) out.versions
         assertEquals([2L, 1L], versions*.seq.collect { it as Long })
         assertTrue(versions.every { !it.containsKey("pack") }, "the list stays small; get#TenantConfigVersion carries the pack")
+        assertEquals(["Smoke Test Customer", "Smoke Test Customer"], versions*.createdByName, "who, by name, not a user id")
     }
 
     @Test

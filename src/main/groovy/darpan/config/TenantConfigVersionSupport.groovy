@@ -100,8 +100,19 @@ class TenantConfigVersionSupport {
     /** The tenant's versions, newest first, without their packs. */
     static List<Map> versions(def ec, String tenantId, Integer limit = DEFAULT_LIST_LIMIT) {
         int max = (limit && limit > 0) ? Math.min(limit, 500) : DEFAULT_LIST_LIMIT
-        return ec.entity.find(ENTITY).condition("companyUserGroupId", tenantId).orderBy("-versionSeq").limit(max)
-                .selectFields(SUMMARY_FIELDS).useCache(false).list().collect { summary(it) }
+        List rows = ec.entity.find(ENTITY).condition("companyUserGroupId", tenantId).orderBy("-versionSeq").limit(max)
+                .selectFields(SUMMARY_FIELDS).useCache(false).list()
+        Map<String, String> names = userNames(ec, rows*.createdByUserId)
+        return rows.collect { summary(it) + [createdByName: names[it.createdByUserId as String]] }
+    }
+
+    /** Full name, else username, for each user id; one read for the whole list. */
+    static Map<String, String> userNames(def ec, Collection userIds) {
+        List<String> ids = (userIds ?: []).findAll { it }.collect { it as String }.unique()
+        if (!ids) return [:]
+        return ec.entity.find("moqui.security.UserAccount").condition("userId", "in", ids)
+                .selectFields(["userId", "userFullName", "username"]).disableAuthz().useCache(false).list()
+                .collectEntries { [(it.userId as String): (it.userFullName ?: it.username) as String] } as Map<String, String>
     }
 
     /** One of the tenant's versions with its pack; null (with an error) when it is not this tenant's. */
@@ -113,7 +124,8 @@ class TenantConfigVersionSupport {
             ec.message.addError("Config version ${configVersionId ?: '(missing)'} was not found.")
             return null
         }
-        return summary(row) + [pack: new JsonSlurper().parseText(row.packJson as String)]
+        return summary(row) + [createdByName: userNames(ec, [row.createdByUserId])[row.createdByUserId as String],
+                               pack: new JsonSlurper().parseText(row.packJson as String)]
     }
 
     private static final List<String> SUMMARY_FIELDS = ["configVersionId", "companyUserGroupId", "versionSeq", "parentVersionId",

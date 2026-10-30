@@ -76,6 +76,26 @@ class ExtractReplaySupport {
     }
 
     /**
+     * DAR-BE-163. The sides a failed interactive run finished reading: side -> [dataManagerPath, fileName, recordCount].
+     * Unlike replayResults, a side that was not read in full, or whose file is gone, is simply left out: the retry reads
+     * that side again. The stamped path is data-manager relative and resolved under its root only, so a run row can never
+     * point a retry at a file outside it.
+     */
+    static Map<String, Map<String, Object>> landedSides(def ec, String tenantId, String runResultId, def runRow) {
+        Map<String, Integer> counts = readCounts(ec, tenantId, runResultId)
+        Map<String, Map<String, Object>> landed = [:]
+        [(SIDE_1): "file1", (SIDE_2): "file2"].each { String side, String field ->
+            if (!counts.containsKey(side)) return
+            String path = normalize(readField(runRow, "${field}DataManagerPath"))
+            File onDisk = path ? DataManagerSupport.resolveDataManagerFile(ec, path) : null
+            if (onDisk == null || !onDisk.isFile() || onDisk.length() == 0) return
+            landed[side] = [dataManagerPath: path, fileName: normalize(readField(runRow, "${field}Name")) ?: onDisk.name,
+                            recordCount    : counts[side]] as Map<String, Object>
+        }
+        return landed
+    }
+
+    /**
      * Pure: each side's newest extract folder under one execution's run folder, and the one extract file in it.
      * Answers [files: [FILE_1: [fileLocation, fileName, exchangeManifestFileLocation?], FILE_2: ...]] or [error: words].
      */

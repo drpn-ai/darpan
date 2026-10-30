@@ -8,6 +8,7 @@ import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.facade.reconciliation.RunConclusionStep
 import darpan.facade.reconciliation.RunExtractSupport
+import darpan.facade.reconciliation.RunRetrySupport
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
@@ -123,6 +124,22 @@ boolean systemTenantRunValue = ec.context.get("systemTenantRun") == true &&
         !TenantAccessSupport.currentUserId(ec) && TenantAccessSupport.activeSystemTenantUserGroupId()
 if (!ec.message.hasError() && !systemTenantRunValue) {
     TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for reconciliation runs.")
+}
+
+// DAR-BE-163: a retry of a failed run reuses the sides it finished reading (extractApiSource below) and runs over that
+// run's own window, already normalized when it ran, so the requested window is not used. Refused before any run row.
+String retryFromRunResultIdValue = normalize(ec.context.get("retryFromRunResultId"))
+Map<String, Object> retryPlan = null
+if (retryFromRunResultIdValue && !ec.message.hasError()) {
+    retryPlan = RunRetrySupport.plan(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec), retryFromRunResultIdValue, savedRunIdValue)
+    if (retryPlan.error) {
+        ec.message.addError(retryPlan.error as String)
+    } else {
+        windowStartDateValue = (Timestamp) retryPlan.windowStartDate
+        windowEndDateValue = (Timestamp) retryPlan.windowEndDate
+        windowTimeZoneValue = retryPlan.windowTimeZone as String
+        parentRunResultIdValue = retryPlan.sourceRunResultId as String
+    }
 }
 
 // --- Observability (run status lifecycle): RunObservability owns statusEnumId from here on.
@@ -321,6 +338,9 @@ def resolveTenantApiWindow = {
 // the same resolver the automation path uses, so connector dispatch lives in one place and
 // onboarding a new source needs no edit here.
 def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null ->
+    // DAR-BE-163: a side the failed run already read comes back as it landed, with no call to the source system.
+    Map<String, Object> replayed = retryPlan ? RunRetrySupport.replayedSide(ec, retryPlan, source, fileSide) : null
+    if (replayed != null) return replayed
     RunExtractSupport.extractApiSource(ec, source, fileSide, sourceLabel(source, fileSide), artifactContext,
             (tenantApiWindow ?: resolveTenantApiWindow()), progressContext, runInternalService)
 }

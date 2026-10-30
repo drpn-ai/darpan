@@ -1996,6 +1996,7 @@ SERVICE run SavedRunDiff
     file2SystemEnumId : String
     file2Text : String
     hasHeader : Boolean
+    retryFromRunResultId : String
     savedRunId : String [required]
     sparkAppName : String
     sparkMaster : String

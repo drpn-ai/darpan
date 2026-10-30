@@ -57,6 +57,7 @@ dependencies {
     implementation 'javax.servlet:javax.servlet-api:4.0.1'
     implementation 'com.networknt:json-schema-validator:1.5.5' // bumped from 1.0.87: 4-major behind + transitive CVEs
     implementation 'com.jayway.jsonpath:json-path:2.9.0'       // bumped from 2.8.0 for CVE-2023-51074 (stack-overflow DoS in Criteria.parse)
+    implementation 'org.apache.lucene:lucene-core:9.12.3' // DAR-BE-161: knowledge base keyword search (Apache-2.0, no runtime deps)
     // json-path -> json-smart -> accessors-smart pins org.ow2.asm:asm:9.3, which cannot read Java 21
     // bytecode (max major 63). addRuntime merges component libs into the exec war's WEB-INF/lib, where
     // the stale ASM wins the flat classloader and Jetty ee11 annotation scanning fails on every

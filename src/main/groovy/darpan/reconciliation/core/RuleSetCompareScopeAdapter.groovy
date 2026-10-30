@@ -13,8 +13,6 @@ import org.slf4j.LoggerFactory
 class RuleSetCompareScopeAdapter {
     private static final Logger logger = LoggerFactory.getLogger(RuleSetCompareScopeAdapter.class)
     private static final List<String> FILE_SIDES = ["FILE_1", "FILE_2"].asImmutable()
-    /** DAR-BE-063: RuleSetCompareSource.duplicateKeyHandling value that reports repeated keys as findings. */
-    static final String DUPLICATE_KEY_FINDING = "FINDING"
     private static final Map<String, String> SIDE_PREFIX_BY_SIDE = [FILE_1: "file1", FILE_2: "file2"].asImmutable()
 
     /** A scope that diffs two sources. Every scope that existed before DAR-BE-049 is one of these. */
@@ -74,7 +72,6 @@ class RuleSetCompareScopeAdapter {
         String ruleSetId = ReconciliationServices.normalize(context.get("ruleSetId"))
         String compareScopeId = ReconciliationServices.normalize(context.get("compareScopeId"))
         Boolean hasHeader = (Boolean) context.get("hasHeader")
-        Boolean allowDuplicateCompareIds = (Boolean) context.get("allowDuplicateCompareIds")
         // Security (HIGH gaps 3,5, defense-in-depth 2026-06-30): IGNORE any caller-supplied sparkMaster.
         // Resolve server-side only (resource property, else local[*]) so a future allow-remote exposure
         // of this service cannot redirect the tenant's Spark job to an attacker-controlled cluster.
@@ -157,7 +154,6 @@ class RuleSetCompareScopeAdapter {
                     recordRootExpression: ReconciliationServices.normalize(source.recordRootExpression),
                     primaryIdExpression : ReconciliationServices.normalize(source.primaryIdExpression),
                     idValueNormalizer   : ReconciliationServices.normalize(source.idValueNormalizer),
-                    duplicateKeyHandling: ReconciliationServices.normalize(source.duplicateKeyHandling)?.toUpperCase(),
                     keyFields           : source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: []
             ]]
         }
@@ -252,38 +248,20 @@ class RuleSetCompareScopeAdapter {
         // record now exists only on FILE_2 was looked at, and may close.
         String file2KeysOutLocation = ReconciliationServices.normalize(context.get("file2KeysOutLocation"))
         if (file2KeysOutLocation && !singleSided) writeSideIds(ingestBySide, "FILE_2", file2KeysOutLocation)
-        // DAR-BE-063: a side that opts into duplicateKeyHandling=FINDING reports its repeated keys as
-        // findings; they leave the compare on BOTH sides before validate/collapse ever sees them.
+        // DAR-BE-165: every repeated key on either side is reported as findings (DAR-BE-063's FINDING, now the only
+        // behaviour) and leaves the compare on BOTH sides. It used to fail a ruled run outright, so a month-wide run
+        // with one order twice in HotWax showed nothing, and to collapse silently into a match on a base-diff run.
+        // An evaluate run never joins on compare_id, so its repeated ids are its findings and pass through untouched.
         Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :
-                splitDuplicateKeys(ingestBySide, activeSides.collectEntries { String fileSide ->
-                    [(fileSide): ((Map) ((Map) sidePlanBySide[fileSide]).config).duplicateKeyHandling]
-                })
+                splitDuplicateKeys(ingestBySide)
         ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
         ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
             if (count > 0) processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} " +
                     "(${((Map) sidePlanBySide[fileSide]).label}) has ${count} key(s) on more than one record; " +
                     "every record under them is reported as a duplicate finding and left out of the compare.".toString())
         }
-        Map<String, Object> preparedIngestBySide = activeSides.collectEntries { String fileSide ->
-            Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
-            Map<String, Object> ingest = (Map<String, Object>) ingestBySide[fileSide]
-            if (singleSided) {
-                // EVALUATE NEVER JOINS ON compare_id — there is no other side to join to, so the id is
-                // a row identifier and uniqueness is not a correctness property here. Both existing
-                // branches would be wrong: validate would throw on an exception report that
-                // legitimately has two failing rows for one order, and collapse would DROP one of them
-                // (the [[DAR-BE-046]] behaviour) and under-report the very findings this scope exists
-                // to surface. So duplicates pass through untouched.
-                [(fileSide): ingest]
-            } else if (allowDuplicateCompareIds == Boolean.TRUE) {
-                [(fileSide): collapseDuplicateCompareIdsForBaseDiffOnly(ingest, compareScopeLabel, fileSide, (String) plan.label, processingWarnings)]
-            } else {
-                ReconciliationServices.validateUniqueCompareIds((Dataset) ingest.dataDf, compareScopeLabel, fileSide, (String) plan.label)
-                [(fileSide): ingest]
-            }
-        }
-        Map<String, Object> ingest1 = (Map<String, Object>) preparedIngestBySide.FILE_1
-        Map<String, Object> ingest2 = (Map<String, Object>) preparedIngestBySide.FILE_2
+        Map<String, Object> ingest1 = (Map<String, Object>) ingestBySide.FILE_1
+        Map<String, Object> ingest2 = (Map<String, Object>) ingestBySide.FILE_2
 
         // Audit 2026-06-11 #16: the legacy reconcileUnifiedFiles path persists its id frames, but the
         // RuleSet path returned un-cached Datasets that the XML orchestration then re-reads and
@@ -382,18 +360,24 @@ class RuleSetCompareScopeAdapter {
     }
 
     /**
-     * DAR-BE-063. For every side whose handling is FINDING: its repeated keys are found, every record
-     * under them is kept aside as that side's duplicate frame, and the union of all such keys is removed
-     * from EVERY side's data and id frames — so the other side's record for a duplicated key is not
-     * reported missing. No side opting in returns the input map itself.
+     * DAR-BE-063 / DAR-BE-165. Each side's repeated keys: every record under them is kept aside as that side's
+     * duplicate frame, and the union of all such keys is removed from EVERY side's data and id frames, so the other
+     * side's record for a repeated key is not reported missing. With no key repeated anywhere, the input map itself.
      */
-    static Map<String, Object> splitDuplicateKeys(Map<String, Object> ingestBySide, Map<String, String> handlingBySide) {
+    static Map<String, Object> splitDuplicateKeys(Map<String, Object> ingestBySide) {
         Map<String, Dataset> duplicateIdsBySide = [:]
-        (handlingBySide ?: [:]).each { String fileSide, String handling ->
-            Map ingest = (Map) ingestBySide?.get(fileSide)
-            if (handling == DUPLICATE_KEY_FINDING && ingest?.dataDf != null) {
-                duplicateIdsBySide.put(fileSide, CompareDatasetSupport.duplicateCompareIds((Dataset) ingest.dataDf).persist(StorageLevel.MEMORY_AND_DISK()))
+        Map<String, Long> countBySide = [:]
+        (ingestBySide ?: [:]).each { String fileSide, Object raw ->
+            Dataset dataDf = (Dataset) ((Map) raw)?.dataDf
+            if (dataDf == null) return
+            Dataset ids = CompareDatasetSupport.duplicateCompareIds(dataDf).persist(StorageLevel.MEMORY_AND_DISK())
+            long count = ids.count()
+            if (count == 0L) {
+                ids.unpersist()
+                return
             }
+            duplicateIdsBySide.put(fileSide, ids)
+            countBySide.put(fileSide, count)
         }
         if (duplicateIdsBySide.isEmpty()) {
             return [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []]
@@ -402,11 +386,9 @@ class RuleSetCompareScopeAdapter {
             CompareDatasetSupport.unionDatasets(acc, ids)
         }.distinct()
         Map<String, Dataset> duplicateDataBySide = [:]
-        Map<String, Long> countBySide = [:]
         duplicateIdsBySide.each { String fileSide, Dataset ids ->
             Dataset dataDf = (Dataset) ((Map) ingestBySide.get(fileSide)).dataDf
             duplicateDataBySide.put(fileSide, dataDf.join(ids, "compare_id", "inner"))
-            countBySide.put(fileSide, ids.count())
         }
         Map<String, Object> filtered = ingestBySide.collectEntries { String fileSide, Object raw ->
             Map ingest = new LinkedHashMap((Map) raw)
@@ -418,29 +400,6 @@ class RuleSetCompareScopeAdapter {
         // owner unpersists — a frame nobody returns stays cached for the JVM's life.
         return [ingestBySide: filtered, duplicateDataBySide: duplicateDataBySide, duplicateKeyCountBySide: countBySide,
                 persistedFrames: new ArrayList<Dataset>(duplicateIdsBySide.values())]
-    }
-
-    private static Map<String, Object> collapseDuplicateCompareIdsForBaseDiffOnly(Map<String, Object> ingest,
-                                                                                  String compareScopeLabel,
-                                                                                  String fileSide,
-                                                                                  String fileLabel,
-                                                                                  List<String> processingWarnings) {
-        Dataset dataDf = (Dataset) ingest?.dataDf
-        List duplicateRows = ReconciliationServices.findDuplicateCompareIdRows(dataDf)
-        if (!duplicateRows) return ingest
-
-        String sideCode = ReconciliationServices.normalize(fileSide) ?: "FILE"
-        String label = ReconciliationServices.normalize(fileLabel) ?: sideCode
-        String examples = ReconciliationServices.buildDuplicateCompareIdExamples(duplicateRows)
-        processingWarnings.add(
-                "Compare scope '${ReconciliationServices.normalize(compareScopeLabel) ?: 'compare scope'}' ${sideCode} (${label}) collapsed duplicate primaryId values for base diff only because this RuleSet run has no active rules: ${examples}."
-        )
-
-        Dataset collapsedDataDf = ReconciliationServices.collapseDuplicateCompareIds(dataDf)
-        Map<String, Object> collapsedIngest = new LinkedHashMap<>((Map<String, Object>) ingest)
-        collapsedIngest.dataDf = collapsedDataDf
-        collapsedIngest.idDf = collapsedDataDf.select("compare_id").distinct()
-        return collapsedIngest
     }
 
     static List<Map<String, Object>> buildCompareSourceIdSpecsForTest(String compareScopeLabel, String fileSide, String fileType,

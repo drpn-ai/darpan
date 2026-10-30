@@ -15,8 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertSame
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-063 Task 12. A side that opts into duplicateKeyHandling=FINDING reports every key that repeats
- * as findings instead of throwing (ruled run) or silently collapsing it into a match (base-diff run).
+ * DAR-BE-063 Task 12, DAR-BE-165. Every key that repeats on a side is reported as findings, never thrown on
+ * (ruled run) or silently collapsed into a match (base-diff run).
  * The repeated key leaves the compare on BOTH sides: otherwise the other side's record for it would read
  * as a false "missing". Spark but no Moqui, so this lands in the fast unitTest pool.
  */
@@ -66,23 +66,23 @@ class DuplicateKeySplitTests {
     }
 
     @Test
-    void aFindingSideTakesTheRepeatedKeyOutOfBothSides() {
-        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys(
-                [FILE_1: ingest(alpha()), FILE_2: ingest(beta())], [FILE_1: null, FILE_2: "FINDING"])
+    void aRepeatedKeyLeavesBothSides() {
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(alpha()), FILE_2: ingest(beta())])
         Map sides = (Map) split.ingestBySide
         assertEquals(["K1", "K3"], ids((Dataset) sides.FILE_1.dataDf), "the other side must not report K2 missing")
         assertEquals(["K1", "K3"], ids((Dataset) sides.FILE_1.idDf))
         assertEquals(["K1", "K3"], ids((Dataset) sides.FILE_2.dataDf))
         assertEquals(["K1", "K3"], ids((Dataset) sides.FILE_2.idDf))
         assertEquals(["K2", "K2"], ids((Dataset) split.duplicateDataBySide.FILE_2), "every record under the key is kept")
-        assertNull(split.duplicateDataBySide.FILE_1)
+        assertNull(split.duplicateDataBySide.FILE_1, "a side with no repeated key has no duplicate frame")
         assertEquals(1L, split.duplicateKeyCountBySide.FILE_2)
+        assertNull(split.duplicateKeyCountBySide.FILE_1)
     }
 
     @Test
-    void withoutFindingNothingChanges() {
-        Map input = [FILE_1: ingest(alpha()), FILE_2: ingest(beta())]
-        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys(input, [FILE_1: null, FILE_2: null])
+    void noRepeatedKeyLeavesTheInputAlone() {
+        Map input = [FILE_1: ingest(alpha()), FILE_2: ingest(alpha())]
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys(input)
         assertSame(input, split.ingestBySide)
         assertEquals([:], split.duplicateDataBySide)
     }
@@ -106,8 +106,7 @@ class DuplicateKeySplitTests {
     @Test
     void everyFrameTheSplitPersistsIsHandedBackForRelease() {
         // Review I3: a persisted frame nobody returns stays in Spark's CacheManager for the JVM's life.
-        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys(
-                [FILE_1: ingest(alpha()), FILE_2: ingest(beta())], [FILE_1: null, FILE_2: "FINDING"])
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys([FILE_1: ingest(alpha()), FILE_2: ingest(beta())])
         List<Dataset> frames = (List<Dataset>) split.persistedFrames
         assertEquals(1, frames.size())
         frames.each { Dataset f -> assertTrue(f.storageLevel().useDisk() || f.storageLevel().useMemory(), "it is cached") }

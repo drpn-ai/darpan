@@ -14,8 +14,9 @@ import java.security.MessageDigest
  * <p>What the version holds is put back through the DAR-ADMIN-006 importer into the same tenant: records match by their
  * codes and names, so an untouched record is UNCHANGED and an edited one is updated back. What was added since is not
  * deleted, because findings, run results and automations point at it: a statement the version does not hold is switched
- * off, and a check link the version does not hold is removed (a link is config, not history). Runs and queries added
- * since are kept and listed; nothing in the restored audits uses them.</p>
+ * off, and a check link the version does not hold is removed (a link is config, not history). Runs added since are kept
+ * and listed; nothing in the restored audits uses them. (Queries are not listed: a version holds a query only as a run
+ * reaches it, so one no run uses is in no version.)</p>
  *
  * <p>The restore applies only the plan that was previewed (planHash), keeps the current config as a version first so the
  * restore can itself be undone, and runs in the caller's one transaction: all of it or none of it.</p>
@@ -132,15 +133,14 @@ class TenantConfigRestoreSupport {
              check: checkCodeById[link.checkId as String]] as Map
         }.sort { a, b -> a.statement <=> b.statement ?: a.check <=> b.check }
 
+        // Runs only: a version holds every run a lifecycle does not own, so one missing from it was added since. Queries
+        // are held only as a run reaches them, so a query no run uses is in no version and proves nothing.
         Set<String> versionRuns = ((pack.runs ?: []) as List<Map>).collect { it.fields?.ruleSetName as String } as Set<String>
-        Set<String> versionQueries = ((pack.queries ?: []) as List<Map>).collect { it.fields?.description as String } as Set<String>
-        List<Map> kept = []
-        ec.entity.find("darpan.rule.RuleSet").condition("companyUserGroupId", tenantId).condition("ownerReconciliationId", null)
-                .useCache(false).list().findAll { !((it.ruleSetName as String) in versionRuns) }
-                .each { kept << [kind: "RUN", label: it.ruleSetName] }
-        rows(ec, tenantId, "darpan.reconciliation.NsSuiteQlSourceQuery").findAll { !((it.description as String) in versionQueries) }
-                .each { kept << [kind: "NETSUITE_SUITEQL", label: it.description] }
-        return [switchOff: switchOff, unlink: unlink, kept: kept.sort { a, b -> a.kind <=> b.kind ?: a.label <=> b.label }]
+        List<Map> kept = ec.entity.find("darpan.rule.RuleSet").condition("companyUserGroupId", tenantId)
+                .condition("ownerReconciliationId", null).useCache(false).list()
+                .findAll { !((it.ruleSetName as String) in versionRuns) }
+                .collect { [kind: "RUN", label: it.ruleSetName] as Map }
+        return [switchOff: switchOff, unlink: unlink, kept: kept.sort { a, b -> a.label <=> b.label }]
     }
 
     /** SHA-256 over the version, the importer's plan hash and exactly which rows are switched off and unlinked. */

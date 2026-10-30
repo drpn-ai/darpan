@@ -66,8 +66,8 @@
 
     <service verb="preview" noun="TenantConfigRestore" allow-remote="true" authenticate="true" authz-action="view">
         <description>What restoring one of the active tenant's config versions would do, writing nothing. What the version
-            holds is put back; a statement added since is switched off and a check link added since removed; runs and
-            queries added since are kept. Pass planHash to restore#TenantConfigVersion to apply exactly this.</description>
+            holds is put back; a statement added since is switched off and a check link added since removed; runs added
+            since are kept. Pass planHash to restore#TenantConfigVersion to apply exactly this.</description>
         <in-parameters>
             <parameter name="id" required="true"><description>configVersionId to restore.</description></parameter>
         </in-parameters>

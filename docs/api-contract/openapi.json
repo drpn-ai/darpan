@@ -25107,7 +25107,7 @@
                 "required": [
                     "id"
                 ],
-                "description": "What restoring one of the active tenant's config versions would do, writing nothing. What the version\n            holds is put back; a statement added since is switched off and a check link added since removed; runs and\n            queries added since are kept. Pass planHash to restore#TenantConfigVersion to apply exactly this."
+                "description": "What restoring one of the active tenant's config versions would do, writing nothing. What the version\n            holds is put back; a statement added since is switched off and a check link added since removed; runs added\n            since are kept. Pass planHash to restore#TenantConfigVersion to apply exactly this."
             },
             "PreviewTenantConfigRestoreResult": {
                 "type": "object",

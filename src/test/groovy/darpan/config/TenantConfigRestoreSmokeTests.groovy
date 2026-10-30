@@ -49,6 +49,9 @@ class TenantConfigRestoreSmokeTests {
                     description: "Can view tenant-scoped Darpan data", groupTypeEnumId: "UgtDarpanPermission"])
             upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TCR_NS_AUTH", description: "krewe netsuite",
                     companyUserGroupId: MINE, authType: "BASIC", username: "svc-user", password: "S3cret-Tcr-Pass"])
+            // A query no run uses: a version never holds it, so it must not read as "added since" (browser pass 2026-10-30).
+            upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TCR_UNUSED_QUERY", companyUserGroupId: MINE,
+                    description: "Cash sales that never shipped", recordType: "cashsale"])
         }
     }
 
@@ -90,6 +93,7 @@ class TenantConfigRestoreSmokeTests {
         assertTrue((plan.lines as List<Map>).every { it.action in ["UNCHANGED", "MAPPED"] }, "nothing to write: ${plan.lines}")
         assertEquals([], plan.switchOff)
         assertEquals([], plan.unlink)
+        assertEquals([], plan.kept, "a query no run uses was there all along; nothing was added since")
         assertTrue((preview.planHash as String) ==~ /[0-9a-f]{64}/)
     }
 

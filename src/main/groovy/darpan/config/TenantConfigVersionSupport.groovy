@@ -65,7 +65,8 @@ class TenantConfigVersionSupport {
      * Keeps the tenant's config as a new version when it changed since the latest one. Answers [created, version]; when
      * nothing changed, created is false and version is the latest. Null (with errors) when the pack cannot be built.
      */
-    static Map<String, Object> snapshot(def ec, String tenantId, String reason, String changeSource = MANUAL) {
+    static Map<String, Object> snapshot(def ec, String tenantId, String reason, String changeSource = MANUAL,
+                                        String createdByUserId = null) {
         String source = changeSource ?: MANUAL
         if (!(source in CHANGE_SOURCES)) {
             ec.message.addError("Change source ${source} is not one of ${CHANGE_SOURCES.join(', ')}.")
@@ -88,7 +89,8 @@ class TenantConfigVersionSupport {
                     countsJson        : JsonOutput.toJson(counts(pack)),
                     changeSource      : source,
                     reasonText        : reason?.trim() ?: null,
-                    createdByUserId   : ec.user.userId,
+                    // A scheduled version has no user; it is credited to whoever saved last.
+                    createdByUserId   : createdByUserId ?: ec.user.userId,
                     createdDate       : ec.user.nowTimestamp])
         row.setSequencedIdPrimary()
         row.create()

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-160 phase A. Automatic tenant config versions: every minute, a version for each tenant whose config changed and
+     has been quiet for a minute. -->
+<entity-facade-xml type="darpan-seed">
+    <moqui.service.job.ServiceJob jobName="snapshot_PendingTenantConfigs_1m"
+            description="Keep a config version for each tenant whose audit config changed and has been quiet for a minute."
+            serviceName="config.TenantConfigServices.snapshot#PendingTenantConfigs"
+            cronExpression="0 * * * * ?" paused="N"/>
+</entity-facade-xml>

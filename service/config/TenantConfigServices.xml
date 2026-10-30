@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-160 phase A. Automatic tenant config versions: a committed save marks its tenant pending
+  (entity/TenantConfig.eecas.xml), and a minute job keeps a version once the tenant has been quiet. Internal only:
+  neither is remote, and the job runs without a user. The work is darpan.config.TenantConfigPendingSupport.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="note" noun="TenantConfigChange" authenticate="false" allow-remote="false">
+        <description>Marks a tenant's config pending after a save that changed it committed (called async by
+            TenantConfigChangeTracker, once per tenant per transaction).</description>
+        <in-parameters>
+            <parameter name="tenantId" required="true"/>
+            <parameter name="userId"><description>Who saved; the version is credited to whoever saved last.</description></parameter>
+        </in-parameters>
+        <actions>
+            <script>darpan.config.TenantConfigPendingSupport.markPending(ec, tenantId, userId)</script>
+        </actions>
+    </service>
+
+    <service verb="snapshot" noun="PendingTenantConfigs" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Keeps a config version for each pending tenant that has been quiet for quietSeconds, oldest first, up to
+            maxTenants per run; each tenant in its own transaction. A tenant whose version fails keeps its row, with the
+            reason, and is tried again after 15 minutes.</description>
+        <in-parameters>
+            <parameter name="nowStamp" type="Timestamp" default="ec.user.nowTimestamp">
+                <description>The moment to judge "quiet" at; pinned by tests, now otherwise.</description></parameter>
+            <parameter name="quietSeconds" type="Integer" default-value="60"/>
+            <parameter name="maxTenants" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcomes" type="List"><description>[{tenant, outcome: VERSIONED | UNCHANGED | NOT_QUIET |
+                BACKING_OFF | FAILED, versionId, error}]</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="outcomes" from="darpan.config.TenantConfigPendingSupport.snapshotDue(ec, nowStamp, quietSeconds, maxTenants)"/>
+        </actions>
+    </service>
+</services>

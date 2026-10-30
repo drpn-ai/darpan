@@ -45,4 +45,22 @@
             <index-field name="versionSeq"/>
         </index>
     </entity>
+
+    <entity entity-name="TenantConfigPending" package="darpan.config" cache="never">
+        <description>A tenant whose audit config changed since its latest version. Written after a save commits (one row per
+            tenant, once per transaction; entity/TenantConfig.eecas.xml); config.TenantConfigServices.snapshot#PendingTenantConfigs
+            keeps a version once the tenant has been quiet for a minute, then removes the row.</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"><description>The tenant.</description></field>
+        <field name="firstChangeDate" type="date-time"><description>The first save not yet in a version.</description></field>
+        <field name="lastChangeDate" type="date-time"><description>The latest save; the version waits until it is a minute old.</description></field>
+        <field name="lastChangedByUserId" type="id"><description>Who saved last; the version is credited to them.</description></field>
+        <field name="changeCount" type="number-integer"><description>Saves (transactions) since the latest version.</description></field>
+        <field name="lastAttemptDate" type="date-time"><description>When a version was last attempted and failed.</description></field>
+        <field name="lastErrorText" type="text-long"><description>Why that attempt failed; the job waits 15 minutes before trying again.</description></field>
+
+        <!-- No FK: a bookkeeping row never blocks removing a tenant; the job reports a tenant that is gone. -->
+        <relationship type="one-nofk" title="Tenant" related="moqui.security.UserGroup" short-alias="tenant">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+    </entity>
 </entities>

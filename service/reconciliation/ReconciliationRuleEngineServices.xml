@@ -78,7 +78,10 @@
         </actions>
     </service>
 
-    <service verb="execute" noun="RuleSetMatchedPairs">
+    <!-- DAR-BE-166: no-remember-parameters. Moqui keeps every service call's parameters on the request's
+         artifact-execution history until the request ends; called once per 500-pair batch, this kept every
+         batch's parsed pairs alive and a month-wide compare ran a 2 GB JVM out of heap. -->
+    <service verb="execute" noun="RuleSetMatchedPairs" no-remember-parameters="true">
         <description>Execute RuleSet DRL against matched compare-scope facts and return normalized rule-generated Diff maps.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>

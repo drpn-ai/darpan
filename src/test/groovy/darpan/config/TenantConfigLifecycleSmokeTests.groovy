@@ -181,6 +181,34 @@ class TenantConfigLifecycleSmokeTests {
         assertNotNull(asSystem { ec.entity.find(LIFECYCLE).condition("reconciliationId", "TCL_LATER").one() }, "kept, not deleted")
     }
 
+    /**
+     * Security review 2026-10-30: same-tenant restore (match by id, raw-id refs) must never be switched on by the bundle.
+     * An admin import of a bundle that CLAIMS to come from the target tenant still matches by name.
+     */
+    @Test
+    void aBundleCannotClaimSameTenantTrust() {
+        Map v1 = snapshot()
+        Map pack = (Map) call("get#TenantConfigVersion", [id: v1.id]).version.pack
+        asSystem { ec.entity.find(RULE_SET).condition("ruleSetId", "RS_TCL_PLAIN").one().set("ruleSetName", "Plain run, renamed").update() }
+        Map plan = asSystem { darpan.admin.transfer.ConfigTransferImporter.plan(ec, MINE, pack, sameConnections(pack)) }
+        Map plain = (plan.lines as List<Map>).find { it.ref == "RUN:RS_TCL_PLAIN" }
+        assertEquals("CREATE", plain?.action, "the admin path matches by name, whatever bundle.source says: ${plain}")
+    }
+
+    @Test
+    void aQuestionRefTheBundleDoesNotCarryIsRefused() {
+        Map v1 = snapshot()
+        Map pack = (Map) call("get#TenantConfigVersion", [id: v1.id]).version.pack
+        Map q2 = ((pack.lifecycles as List<Map>)[0].children.ReconciliationRun as List<Map>)[1]
+        q2.refs.parentReconciliationRunId = "QUESTION:SOMEONE_ELSES_QUESTION"
+        Map plan = asSystem { darpan.admin.transfer.ConfigTransferImporter.plan(ec, MINE, pack, sameConnections(pack)) }
+        assertTrue((plan.blocking as List<Map>).any { it.code == "REF_UNRESOLVED" }, "a question ref must be carried: ${plan.blocking}")
+    }
+
+    private static Map<String, String> sameConnections(Map pack) {
+        return TenantConfigRestoreSupport.sameConnections(pack)
+    }
+
     private Map snapshot() {
         Map out = call("snapshot#TenantConfig")
         assertFalse(out.hadError as boolean, out.errorText as String)

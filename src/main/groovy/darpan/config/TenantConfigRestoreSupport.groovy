@@ -37,7 +37,8 @@ class TenantConfigRestoreSupport {
         if (version == null) return null
         Map pack = (Map) version.remove("pack")
         Map<String, String> connectionMap = sameConnections(pack)
-        Map imported = ConfigTransferImporter.preview(ec, tenantId, pack, connectionMap)
+        // ownVersion: the pack is the tenant's own stored version, so it restores into its own tenant by id.
+        Map imported = ConfigTransferImporter.preview(ec, tenantId, pack, connectionMap, null, true)
         Map plan = new LinkedHashMap((Map) imported.plan)
         plan.blocking = ((plan.blocking ?: []) as List<Map>).collect { Map b -> restoreWording(b) }
         Map since = addedSince(ec, tenantId, pack)
@@ -68,7 +69,7 @@ class TenantConfigRestoreSupport {
         if (before == null) return null
 
         Map applied = ConfigTransferImporter.apply(ec, tenantId, (Map) p.pack, (Map) p.connectionMap, p.importerPlanHash as String,
-                "version ${seq}".toString(), null, SERVICE_NAME)
+                "version ${seq}".toString(), null, SERVICE_NAME, true)
         if (applied == null) return null
 
         (plan.switchOff as List<Map>).each { Map s ->

@@ -53,8 +53,8 @@ class ConfigTransferImporter {
 
     /** The dry run and its hash, which covers the handoff key the sealed credentials were opened with. */
     static Map<String, Object> preview(def ec, String targetTenantId, Map bundle, Map<String, String> connectionMap,
-                                       String secretHandoffToken = null) {
-        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken)
+                                       String secretHandoffToken = null, boolean ownVersion = false) {
+        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken, ownVersion)
         return [plan    : ctx.plan,
                 planHash: planHash(targetTenantId, bundle, connectionMap, ctx.plan as Map, ctx.handoffFingerprint as String)] as Map<String, Object>
     }
@@ -77,8 +77,8 @@ class ConfigTransferImporter {
      */
     static Map<String, Object> apply(def ec, String targetTenantId, Map bundle, Map connectionMap, String expectedPlanHash,
                                      String sourceInstanceLabel, String secretHandoffToken = null,
-                                     String logServiceName = SERVICE_NAME) {
-        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken)
+                                     String logServiceName = SERVICE_NAME, boolean ownVersion = false) {
+        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken, ownVersion)
         Map plan = ctx.plan as Map
         String hash = planHash(targetTenantId, bundle, connectionMap, plan, ctx.handoffFingerprint as String)
         if (plan.blocking) {
@@ -151,7 +151,12 @@ class ConfigTransferImporter {
         return [plan: plan, planHash: hash, idMap: ctx.idMap] as Map<String, Object>
     }
 
-    static Map<String, Object> analyse(def ec, String tenantId, Map bundle, Map connectionMap, String secretHandoffToken = null) {
+    /**
+     * ownVersion: DAR-BE-160 same-tenant restore (match by id, refs by their own ids). Only the config version restore
+     * passes it, for a pack it loaded from the tenant's own stored version; nothing in a bundle can switch it on.
+     */
+    static Map<String, Object> analyse(def ec, String tenantId, Map bundle, Map connectionMap, String secretHandoffToken = null,
+                                       boolean ownVersion = false) {
         Map ctx = [ec      : ec, tenantId: tenantId, bundle: bundle ?: [:], map: (connectionMap ?: [:]),
                    blocking: [], warnings: [], resolved: [:], matches: [:], actions: [:], changes: [:], ruleIdentity: [:],
                    secretValues: [:], fills: [:], kept: [:], unreadable: [:]]
@@ -172,7 +177,7 @@ class ConfigTransferImporter {
         matchConnections(ctx)
         // DAR-BE-160. A config version restores into the tenant it came from: every id in it is that tenant's own, so
         // records match by id (a renamed run is renamed back, not copied) and one deleted since comes back under its id.
-        ctx.sameTenant = text(bundle.source?.tenantUserGroupId) == tenantId
+        ctx.sameTenant = ownVersion && text(bundle.source?.tenantUserGroupId) == tenantId
         if (ctx.sameTenant) {
             records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
             ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
@@ -329,6 +334,9 @@ class ConfigTransferImporter {
                 }
             }
         }
+        records(ctx, "lifecycles").each { Map l ->
+            ((l.children?.ReconciliationRun ?: []) as List<Map>).each { Map q -> if (q.ref) carried.add(q.ref as String) }
+        }
         records(ctx, "conclusionCodes").findAll { it.missing }.each { Map c ->
             block(ctx, "REF_UNRESOLVED", c.ref, "${c.label} is not a conclusion code on the source, so the runs that name it cannot move.")
         }
@@ -336,7 +344,7 @@ class ConfigTransferImporter {
             records(ctx, list).findAll { it.kind != CONC }.each { Map rec ->
                 allRefs(rec).findAll { it != null }.unique().each { String r ->
                     List<String> parsed = parseRef(r)
-                    boolean knownKind = parsed && (parsed[0] == RULE || TransferSpecs.spec(parsed[0]) != null)
+                    boolean knownKind = parsed && (parsed[0] in CHILD_KINDS || TransferSpecs.spec(parsed[0]) != null)
                     if (knownKind && !(r in carried)) {
                         block(ctx, "REF_UNRESOLVED", rec.ref, "${rec.label ?: rec.ref} names ${r}, which the bundle does not carry.")
                     }
@@ -918,6 +926,19 @@ class ConfigTransferImporter {
         return out
     }
 
+    /** The entity and key behind a ref of each kind, children included, for checking who owns an id. */
+    private static final Map<String, List<String>> CHILD_ENTITIES = [(RULE): ["darpan.rule.Rule", "ruleId"],
+            (QUESTION): ["darpan.reconciliation.ReconciliationRun", "reconciliationRunId"]].asImmutable()
+
+    /** True when the id names a row of this kind that belongs to the importing tenant (read by key, owner compared in code). */
+    private static boolean ownedByTenant(Map ctx, String kind, String id) {
+        Map kindSpec = TransferSpecs.spec(kind)
+        List<String> entity = kindSpec ? [kindSpec.entityName as String, kindSpec.pkField as String] : CHILD_ENTITIES[kind]
+        if (!entity || !id || !ctx.ec.entity.getEntityDefinition(entity[0])?.isField("companyUserGroupId")) return false
+        def row = finder(ctx.ec, entity[0]).condition(entity[1], id).useCache(false).one()
+        return row != null && row.companyUserGroupId == ctx.tenantId
+    }
+
     /** DAR-BE-160. In its own tenant a record comes back under its own id when that id is free; otherwise a new one. */
     private static String newId(Map ctx, String entityName, String pkField, Object ref, String prefix) {
         String sourceId = ctx.sameTenant ? parseRef(ref)?.get(1) : null
@@ -1089,8 +1110,11 @@ class ConfigTransferImporter {
     /** The target id a ref lands on; a ref the bundle does not resolve fails the transfer. */
     private static String targetId(Map ctx, Object ref) {
         String id = ctx.idMap[ref] as String
-        // In its own tenant a ref not written by this restore names the record by its own id.
-        if (id == null && ctx.sameTenant) id = parseRef(ref)?.get(1)
+        // In its own tenant a ref not written by this restore names the record by its own id, if the tenant owns it.
+        if (id == null && ctx.sameTenant) {
+            List<String> parsed = parseRef(ref)
+            if (parsed && ownedByTenant(ctx, parsed[0], parsed[1])) id = parsed[1]
+        }
         if (id == null) throw new IllegalStateException("${ref} is not in the bundle, so it has no record on this instance.")
         return id
     }

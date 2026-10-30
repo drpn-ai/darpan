@@ -1,3 +1,9 @@
+admin.KnowledgeAdminServices.get#KnowledgeEntry
+admin.KnowledgeAdminServices.get#KnowledgeForReview
+admin.KnowledgeAdminServices.get#KnowledgeIdentifiers
+admin.KnowledgeAdminServices.retire#KnowledgeEntry
+admin.KnowledgeAdminServices.search#Knowledge
+admin.KnowledgeAdminServices.store#KnowledgeEntry
 admin.MembershipAdminServices.add#TenantMember
 admin.MembershipAdminServices.remove#TenantMember
 admin.MembershipAdminServices.update#TenantMemberRole

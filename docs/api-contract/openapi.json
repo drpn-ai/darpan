@@ -24,6 +24,24 @@
                             "schema": {
                                 "oneOf": [
                                     {
+                                        "$ref": "#/components/schemas/GetKnowledgeEntryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetKnowledgeForReviewRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetKnowledgeIdentifiersRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RetireKnowledgeEntryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SearchKnowledgeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/StoreKnowledgeEntryRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/AddTenantMemberRequest"
                                     },
                                     {
@@ -573,6 +591,12 @@
                                 "discriminator": {
                                     "propertyName": "method",
                                     "mapping": {
+                                        "admin.KnowledgeAdminServices.get#KnowledgeEntry": "#/components/schemas/GetKnowledgeEntryRequest",
+                                        "admin.KnowledgeAdminServices.get#KnowledgeForReview": "#/components/schemas/GetKnowledgeForReviewRequest",
+                                        "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "#/components/schemas/GetKnowledgeIdentifiersRequest",
+                                        "admin.KnowledgeAdminServices.retire#KnowledgeEntry": "#/components/schemas/RetireKnowledgeEntryRequest",
+                                        "admin.KnowledgeAdminServices.search#Knowledge": "#/components/schemas/SearchKnowledgeRequest",
+                                        "admin.KnowledgeAdminServices.store#KnowledgeEntry": "#/components/schemas/StoreKnowledgeEntryRequest",
                                         "admin.MembershipAdminServices.add#TenantMember": "#/components/schemas/AddTenantMemberRequest",
                                         "admin.MembershipAdminServices.remove#TenantMember": "#/components/schemas/RemoveTenantMemberRequest",
                                         "admin.MembershipAdminServices.update#TenantMemberRole": "#/components/schemas/UpdateTenantMemberRoleRequest",
@@ -770,6 +794,24 @@
                                     "oneOf": [
                                         {
                                             "$ref": "#/components/schemas/JsonRpcErrorResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetKnowledgeEntryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetKnowledgeForReviewResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetKnowledgeIdentifiersResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RetireKnowledgeEntryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SearchKnowledgeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/StoreKnowledgeEntryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/AddTenantMemberResponse"
@@ -1386,6 +1428,544 @@
                 "required": [
                     "jsonrpc",
                     "error"
+                ]
+            },
+            "GetKnowledgeEntryParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The one tenant whose entries are looked in; product only when omitted."
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "The entry's key (its id: header)."
+                    }
+                },
+                "required": [
+                    "key"
+                ],
+                "description": "One whole entry by key: the product tier first, then the named tenant's active entry."
+            },
+            "GetKnowledgeEntryResult": {
+                "type": "object",
+                "properties": {
+                    "entry": {
+                        "type": "object",
+                        "description": "{key, tier, systems, kind, tags, source, owner, reviewBy, supersedes,\n                title, body}, or null when neither tier holds the key."
+                    }
+                }
+            },
+            "GetKnowledgeEntryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.KnowledgeAdminServices.get#KnowledgeEntry",
+                "x-darpan-method": "admin.KnowledgeAdminServices.get#KnowledgeEntry",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.KnowledgeAdminServices.get#KnowledgeEntry"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetKnowledgeEntryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetKnowledgeEntryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.KnowledgeAdminServices.get#KnowledgeEntry. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetKnowledgeEntryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetKnowledgeForReviewParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The one tenant whose entries are included; product only when omitted."
+                    },
+                    "withinDays": {
+                        "type": "integer",
+                        "description": "Days ahead of today to include."
+                    }
+                },
+                "description": "Entries due for a re-read (reviewBy within withinDays, expired ones included): product, plus the named tenant's."
+            },
+            "GetKnowledgeForReviewResult": {
+                "type": "object",
+                "properties": {
+                    "entries": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{key, tier, title, source, owner, reviewBy}] soonest first."
+                    }
+                }
+            },
+            "GetKnowledgeForReviewRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.KnowledgeAdminServices.get#KnowledgeForReview",
+                "x-darpan-method": "admin.KnowledgeAdminServices.get#KnowledgeForReview",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.KnowledgeAdminServices.get#KnowledgeForReview"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetKnowledgeForReviewParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetKnowledgeForReviewResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.KnowledgeAdminServices.get#KnowledgeForReview. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetKnowledgeForReviewResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetKnowledgeIdentifiersParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Every tenant's identifiers the leak check matches (tenant ids, labels, connection hosts, NetSuite\n            accounts), for staff checking a product entry before commit. Names tenants: never ship the list."
+            },
+            "GetKnowledgeIdentifiersResult": {
+                "type": "object",
+                "properties": {
+                    "identifiers": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{value, kind (tenantId | label | host | account),\n                caseSensitive, tenantId}]."
+                    }
+                }
+            },
+            "GetKnowledgeIdentifiersRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.KnowledgeAdminServices.get#KnowledgeIdentifiers",
+                "x-darpan-method": "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetKnowledgeIdentifiersParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetKnowledgeIdentifiersResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.KnowledgeAdminServices.get#KnowledgeIdentifiers. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetKnowledgeIdentifiersResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RetireKnowledgeEntryParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The tenant the entry belongs to."
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "The entry's key."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId",
+                    "key"
+                ],
+                "description": "Retires one tenant entry: kept for history, never searched or answered again. Local instances only."
+            },
+            "RetireKnowledgeEntryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when retired."
+                    }
+                }
+            },
+            "RetireKnowledgeEntryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.KnowledgeAdminServices.retire#KnowledgeEntry",
+                "x-darpan-method": "admin.KnowledgeAdminServices.retire#KnowledgeEntry",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.KnowledgeAdminServices.retire#KnowledgeEntry"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RetireKnowledgeEntryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RetireKnowledgeEntryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.KnowledgeAdminServices.retire#KnowledgeEntry. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RetireKnowledgeEntryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SearchKnowledgeParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The one tenant whose entries join the search; product only when omitted."
+                    },
+                    "words": {
+                        "type": "string",
+                        "description": "Search words; codes such as R2 match whole."
+                    },
+                    "system": {
+                        "type": "string",
+                        "description": "Only entries about this system, e.g. oms."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Only entries of this kind."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Hits to answer; 5 by default, 20 at most."
+                    }
+                },
+                "required": [
+                    "words"
+                ],
+                "description": "Keyword search over the product tier and, when a tenant is named, that tenant's entries, merged by score."
+            },
+            "SearchKnowledgeResult": {
+                "type": "object",
+                "properties": {
+                    "hits": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{key, tier (product | tenant), title, snippet, source, reviewBy, score}]\n                best first."
+                    },
+                    "productTier": {
+                        "type": "string",
+                        "description": "loaded, or absent when no product entry is loaded on this instance."
+                    },
+                    "tenantTier": {
+                        "type": "string",
+                        "description": "loaded, none (no tenant named) or deactivated (no tenant hits)."
+                    }
+                }
+            },
+            "SearchKnowledgeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.KnowledgeAdminServices.search#Knowledge",
+                "x-darpan-method": "admin.KnowledgeAdminServices.search#Knowledge",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.KnowledgeAdminServices.search#Knowledge"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SearchKnowledgeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SearchKnowledgeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.KnowledgeAdminServices.search#Knowledge. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SearchKnowledgeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "StoreKnowledgeEntryParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The tenant the entry belongs to."
+                    },
+                    "markdown": {
+                        "type": "string",
+                        "description": "The entry file: header, # title, body; tier: tenant."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId",
+                    "markdown"
+                ],
+                "description": "Adds or replaces one tenant entry (by tenant and key) from its markdown file text. Refused, writing\n            nothing, off a local instance, or when the text names another tenant or holds customer personal data."
+            },
+            "StoreKnowledgeEntryResult": {
+                "type": "object",
+                "properties": {
+                    "entry": {
+                        "type": "object",
+                        "description": "The stored entry, as get#KnowledgeEntry answers it."
+                    },
+                    "created": {
+                        "type": "boolean",
+                        "description": "True when the key was new for the tenant."
+                    }
+                }
+            },
+            "StoreKnowledgeEntryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.KnowledgeAdminServices.store#KnowledgeEntry",
+                "x-darpan-method": "admin.KnowledgeAdminServices.store#KnowledgeEntry",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.KnowledgeAdminServices.store#KnowledgeEntry"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/StoreKnowledgeEntryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "StoreKnowledgeEntryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.KnowledgeAdminServices.store#KnowledgeEntry. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/StoreKnowledgeEntryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
                 ]
             },
             "AddTenantMemberParams": {
@@ -25370,6 +25950,12 @@
         }
     },
     "x-darpan-methods": {
+        "admin.KnowledgeAdminServices.get#KnowledgeEntry": "GetKnowledgeEntry",
+        "admin.KnowledgeAdminServices.get#KnowledgeForReview": "GetKnowledgeForReview",
+        "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "GetKnowledgeIdentifiers",
+        "admin.KnowledgeAdminServices.retire#KnowledgeEntry": "RetireKnowledgeEntry",
+        "admin.KnowledgeAdminServices.search#Knowledge": "SearchKnowledge",
+        "admin.KnowledgeAdminServices.store#KnowledgeEntry": "StoreKnowledgeEntry",
         "admin.MembershipAdminServices.add#TenantMember": "AddTenantMember",
         "admin.MembershipAdminServices.remove#TenantMember": "RemoveTenantMember",
         "admin.MembershipAdminServices.update#TenantMemberRole": "UpdateTenantMemberRole",

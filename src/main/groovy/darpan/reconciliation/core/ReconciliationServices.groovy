@@ -621,6 +621,15 @@ class ReconciliationServices {
         ]
     }
 
+    /** DAR-BE-166: matched pairs per partition when they are brought to the driver for the rule batches. */
+    static final int MATCHED_PAIRS_PER_PARTITION = 2000
+
+    /** DAR-BE-166: df in partitions of at most rowsPerPartition rows, whatever the shuffle that made it coalesced to. */
+    static Dataset boundedPartitions(Dataset df, int rowsPerPartition) {
+        long rows = df.count()
+        return df.repartition((int) Math.max(1L, (rows + rowsPerPartition - 1) / rowsPerPartition))
+    }
+
     static Map<String, Object> executeRuleSetMatchedPairBatches(ExecutionContext ec, Dataset matchedPairDf,
                                                                 String ruleSetId, String compareScopeId,
                                                                 String compareScopeDescription, int ruleBatchSize) {
@@ -645,7 +654,10 @@ class ReconciliationServices {
             ]
         }
 
-        Iterator<String> rowIterator = matchedPairDf.toJSON().toLocalIterator()
+        // DAR-BE-166: toLocalIterator brings one whole partition to the driver, and adaptive execution coalesces a shuffle's
+        // small partitions: on SM's October run all 125,602 matched pairs came back as ONE partition and the driver ran out of
+        // heap holding them as JSON. An explicit partition count is never coalesced, so each trip carries a bounded number.
+        Iterator<String> rowIterator = boundedPartitions(matchedPairDf, MATCHED_PAIRS_PER_PARTITION).toJSON().toLocalIterator()
         while (rowIterator.hasNext()) {
             List<Map<String, Object>> batch = nextMatchedPairBatch(rowIterator, safeRuleBatchSize)
             if (!batch) break

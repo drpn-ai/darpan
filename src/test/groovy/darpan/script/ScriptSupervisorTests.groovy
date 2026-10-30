@@ -271,13 +271,48 @@ class ScriptSupervisorTests {
     }
 
     @Test
-    void templateTextIsRefusedWithItsLine() {
+    void anyBacktickIsRefusedWithItsLine() {
         Map out = run('SCRIPT', 'var s = \'x\';\nvar t = `${s}${s}`;\nt')
         assertRefused(out, 'NOT_ALLOWED')
         assertEquals(2, (out.error as Map).line)
-        Map quoted = run('SCRIPT', "// a ` in a comment\n'a ` in text'")
-        assertTrue(quoted.ok as boolean, "a backtick inside quotes or a comment is fine: ${quoted}")
-        assertEquals('a ` in text', quoted.result)
+        // A regex literal holding a quote cannot hide a template from the check (second security review).
+        assertRefused(run('SCRIPT', 'var r = ~/\'/;\nvar s = \'x\';\n`${s}${s}`'), 'NOT_ALLOWED')
+        assertRefused(run('SCRIPT', "'a ` in text'"), 'NOT_ALLOWED')
+    }
+
+    // -- hostile suite: second security review of e5ad242
+
+    @Test
+    void deepEqualityIsChargedAtEveryDepth() {
+        List rows = (1..100).collect { int i -> (1..100).collectEntries { int j -> ["k${j}".toString(), i * j] } }
+        Map out = run('SCRIPT', 'input.a == input.b', [a: rows, b: rows.collect { new LinkedHashMap(it) }])
+        assertTrue(out.ok as boolean, "${out}")
+        assertEquals(true, out.result)
+        assertTrue((out.units as long) >= 10_000, "a 10,000-value comparison must cost at least 10,000 units, cost ${out.units}")
+        assertEquals(false, run('SCRIPT', 'input.a == input.b', [a: [[x: 1]], b: [[x: 2]]]).result)
+    }
+
+    @Test
+    void aHugeExponentDecimalNeverPrintsItsDigits() {
+        assertRefused(run('SCRIPT', 'd:str(input.x)', [x: new BigDecimal('1E999999999')]), 'INPUT')
+        assertRefused(run('SCRIPT', "d:str(d:dec('1E999999999'))"), 'NUMBER')
+        assertRefused(run('SCRIPT', "d:dec('1E900') * d:dec('1E900')"), 'NUMBER')
+        Map fine = run('SCRIPT', "d:str(d:dec('1E20'))")
+        assertTrue(fine.ok as boolean, "${fine}")
+        assertEquals('100000000000000000000', fine.result)
+    }
+
+    @Test
+    void oneSharedInputStringCannotInflateTheResult() {
+        Map out = run('SCRIPT', "{'a': input.big, 'b': input.big, 'c': input.big}", [big: 'z' * 30_000])
+        assertRefused(out, 'MEMORY')
+        assertTrue((out.error as Map).message.toString().contains('characters of JSON'), "${out.error}")
+    }
+
+    @Test
+    void aRangeWhoseSizeOverflowsIsStillCapped() {
+        assertRefused(run('SCRIPT', 'd:sum(1..3000000000)'), 'MEMORY')
+        assertRefused(run('SCRIPT', '1..3000000000'), 'MEMORY')
     }
 
     @Test

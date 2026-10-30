@@ -123,7 +123,7 @@ class ScriptSupervisor {
         }
         int templateLine = templateLiteralLine(source)
         if (templateLine > 0) {
-            Map<String, Object> refused = failure(p, 'NOT_ALLOWED', 'Template text (`...`) is not available; join text with +.')
+            Map<String, Object> refused = failure(p, 'NOT_ALLOWED', 'The ` character is not available (template text skips the limits); join text with +.')
             (refused.error as Map).line = templateLine
             return refused
         }
@@ -171,7 +171,7 @@ class ScriptSupervisor {
                     context.set(INPUT_NAME, plainInput)
                     Object raw = script.execute(context)
                     // Shaped here, inside the budget and the timeout: a result can be a huge range or a deep graph.
-                    Object plain = toPlain(raw, 0, [0] as int[])
+                    Object plain = toPlain(raw, 0, [0L, 0L] as long[])
                     String json = JsonOutput.toJson(plain)
                     if (json.length() > MAX_OUTPUT_JSON_CHARS) {
                         throw new ScriptLimitException('MEMORY', "The result is ${json.length()} characters of JSON; the limit is ${MAX_OUTPUT_JSON_CHARS}.".toString())
@@ -202,49 +202,17 @@ class ScriptSupervisor {
     }
 
     /**
-     * The line of the first template literal (a backtick outside quotes and comments), or 0. JEXL builds `${a}${b}`
-     * through its template engine, not the arithmetic, so it would skip the text caps; JexlFeatures has no switch
-     * for it, hence the scan.
+     * The line of the first backtick, or 0. JEXL builds `${a}${b}` template text through its template engine, not the
+     * arithmetic, so it would skip the text caps, and JexlFeatures has no switch for it. Any backtick is refused, even
+     * in a string or comment: a second lexer that skips quotes can be fooled (a ~/'/ regex literal), one that
+     * refuses the character cannot.
      */
     static int templateLiteralLine(String source) {
+        int at = source.indexOf('`')
+        if (at < 0) return 0
         int line = 1
-        int i = 0
-        int n = source.length()
-        while (i < n) {
-            char c = source.charAt(i)
-            if (c == '\n' as char) { line++; i++; continue }
-            if ((c == '\'' as char) || (c == '"' as char)) {
-                char quote = c
-                i++
-                while (i < n && source.charAt(i) != quote) {
-                    if (source.charAt(i) == '\\' as char) i++
-                    else if (source.charAt(i) == '\n' as char) line++
-                    i++
-                }
-                i++
-                continue
-            }
-            if (c == '/' as char && i + 1 < n && source.charAt(i + 1) == '/' as char) {
-                while (i < n && source.charAt(i) != '\n' as char) i++
-                continue
-            }
-            if (c == '#' as char && i + 1 < n && source.charAt(i + 1) == '#' as char) {
-                while (i < n && source.charAt(i) != '\n' as char) i++
-                continue
-            }
-            if (c == '/' as char && i + 1 < n && source.charAt(i + 1) == '*' as char) {
-                i += 2
-                while (i + 1 < n && !(source.charAt(i) == '*' as char && source.charAt(i + 1) == '/' as char)) {
-                    if (source.charAt(i) == '\n' as char) line++
-                    i++
-                }
-                i += 2
-                continue
-            }
-            if (c == '`' as char) return line
-            i++
-        }
-        return 0
+        for (int i = 0; i < at; i++) if (source.charAt(i) == ('\n' as char)) line++
+        return line
     }
 
     /** Parses JSON text for an input; blank is an empty map. */
@@ -273,8 +241,9 @@ class ScriptSupervisor {
         if (++nodes[0] > 500_000) throw new IllegalArgumentException('The input holds more than 500000 values.')
         if (depth > 32) throw new IllegalArgumentException('The input is nested more than 32 levels deep.')
         if (value == null || value instanceof Boolean || value instanceof String) return value
-        if (value instanceof BigDecimal || value instanceof BigInteger || value instanceof Long || value instanceof Integer) return value
-        if (value instanceof Number) return new BigDecimal(value.toString())
+        if (value instanceof BigDecimal) return checkInputDecimal((BigDecimal) value)
+        if (value instanceof BigInteger || value instanceof Long || value instanceof Integer) return value
+        if (value instanceof Number) return checkInputDecimal(new BigDecimal(value.toString()))
         if (value instanceof CharSequence || value instanceof Date || value instanceof java.time.temporal.Temporal) return value.toString()
         if (value instanceof Map) {
             Map<String, Object> out = new LinkedHashMap<>()
@@ -285,13 +254,27 @@ class ScriptSupervisor {
         throw new IllegalArgumentException("The input holds a ${value.getClass().simpleName}, which is not a JSON value.".toString())
     }
 
+    private static BigDecimal checkInputDecimal(BigDecimal d) {
+        if (ScriptBudget.plainLength(d) > ScriptBudget.MAX_DECIMAL_CHARS) {
+            throw new IllegalArgumentException("The input holds a number with more than ${ScriptBudget.MAX_DECIMAL_CHARS} digits.".toString())
+        }
+        return d
+    }
+
     /**
      * What the script returned, as JSON values; anything else (a function, a host object) is refused. Runs on the
      * pool thread with the budget open: every node is charged, at most MAX_OUTPUT_NODES are shaped, and a non-list
      * collection (a range) is size-checked before it is walked.
      */
-    private static Object toPlain(Object value, int depth, int[] nodes) {
+    private static Object toPlain(Object value, int depth, long[] nodes) {
         ScriptBudget.charge()
+        // nodes[1] is the JSON size so far, kept as it is built, so the JSON is never written past the limit.
+        nodes[1] += 4
+        if (value instanceof String) nodes[1] += ((String) value).length() + 2
+        else if (value instanceof BigDecimal) nodes[1] += ScriptBudget.plainLength(ScriptBudget.checkDecimal((BigDecimal) value))
+        if (nodes[1] > MAX_OUTPUT_JSON_CHARS) {
+            throw new ScriptLimitException('MEMORY', "The result is more than ${MAX_OUTPUT_JSON_CHARS} characters of JSON.".toString())
+        }
         if (++nodes[0] > MAX_OUTPUT_NODES) throw new ScriptLimitException('MEMORY', "The result holds more than ${MAX_OUTPUT_NODES} values.".toString())
         if (depth > 32) throw new ScriptLimitException('OUTPUT', 'The result is nested more than 32 levels deep.')
         if (value == null || value instanceof Boolean || value instanceof String) return value
@@ -306,12 +289,20 @@ class ScriptSupervisor {
         if (value instanceof Character) return value.toString()
         if (value instanceof Map) {
             Map<String, Object> out = new LinkedHashMap<>()
-            ((Map) value).each { Object k, Object v -> out.put(ScriptBudget.render(k, 200), toPlain(v, depth + 1, nodes)) }
+            ((Map) value).each { Object k, Object v ->
+                String key = ScriptBudget.render(k, 200)
+                nodes[1] += key.length() + 3
+                out.put(key, toPlain(v, depth + 1, nodes))
+            }
             return out
         }
         if (value instanceof Collection) {
-            ScriptBudget.checkSize(((Collection) value).size())
-            return ((Collection) value).collect { toPlain(it, depth + 1, nodes) }
+            List out = []
+            for (Object item : (Collection) value) {
+                out.add(toPlain(item, depth + 1, nodes))
+                ScriptBudget.checkSize(out.size())
+            }
+            return out
         }
         if (value.getClass().isArray()) return ScriptArithmetic.arrayItems(value).collect { toPlain(it, depth + 1, nodes) }
         throw new ScriptLimitException('OUTPUT', 'The script returned something that is not data (a function?); return a value, list or map.')

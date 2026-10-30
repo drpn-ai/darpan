@@ -54,13 +54,13 @@ class ScriptLibrary {
     static BigDecimal dec(Object x) {
         ScriptBudget.charge()
         if (x == null) return null
-        if (x instanceof BigDecimal) return (BigDecimal) x
-        if (x instanceof Number) return new BigDecimal(x.toString())
+        if (x instanceof BigDecimal) return ScriptBudget.checkDecimal((BigDecimal) x)
+        if (x instanceof Number) return ScriptBudget.checkDecimal(new BigDecimal(x.toString()))
         String text = x.toString().trim().replace(',', '')
         if (text.isEmpty()) return null
         if (text.length() > 64) throw new ScriptLimitException("NUMBER", "'${text.take(20)}…' is too long to be a number.".toString())
         try {
-            return new BigDecimal(text)
+            return ScriptBudget.checkDecimal(new BigDecimal(text))
         } catch (NumberFormatException ignored) {
             throw new IllegalArgumentException("'${text}' is not a number.".toString())
         }
@@ -88,7 +88,7 @@ class ScriptLibrary {
         ScriptBudget.charge()
         if (x == null) return null
         if (x instanceof CharSequence) return x.toString()
-        if (x instanceof BigDecimal) return ((BigDecimal) x).toPlainString()
+        if (x instanceof BigDecimal) return ScriptBudget.checkDecimal((BigDecimal) x).toPlainString()
         if (ScriptBudget.isScalar(x)) return x.toString()
         ScriptBudget budget = ScriptBudget.current()
         String text = ScriptBudget.render(x, budget != null ? budget.maxStringChars : 65_536)
@@ -150,7 +150,7 @@ class ScriptLibrary {
         String separator = str(sep) ?: ''
         List<String> parts = items.collect { Object item ->
             if (!ScriptBudget.isScalar(item)) throw new IllegalArgumentException('join takes a list of text or numbers.')
-            item instanceof BigDecimal ? ((BigDecimal) item).toPlainString() : String.valueOf(item)
+            item instanceof BigDecimal ? ScriptBudget.checkDecimal((BigDecimal) item).toPlainString() : String.valueOf(item)
         }
         // Summed before joining, so the cap holds at the peak allocation.
         long total = (parts.sum(0L) { String part -> (long) part.length() } as long) + Math.max(0, parts.size() - 1) * (long) separator.length()
@@ -260,12 +260,8 @@ class ScriptLibrary {
     private static List asList(Object x, String fn) {
         if (x == null) return []
         if (x instanceof List) return (List) x
-        if (x instanceof Collection) {
-            // A range (1..100000000) is a lazy collection: size-check it before copying it into memory.
-            ScriptBudget.checkSize(((Collection) x).size())
-            ScriptBudget.charge(((Collection) x).size())
-            return new ArrayList((Collection) x)
-        }
+        // A range (1..100000000) is a lazy collection whose size() can overflow: copy it counted, item by item.
+        if (x instanceof Collection) return ScriptBudget.copyCounted((Collection) x)
         if (x.getClass().isArray()) return ScriptArithmetic.arrayItems(x)
         throw new IllegalArgumentException("${fn} takes a list.".toString())
     }

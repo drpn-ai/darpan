@@ -54,7 +54,7 @@ class ScriptArithmetic extends JexlArithmetic {
     private static long scalarLength(Object x) {
         if (x == null) return 4L
         if (x instanceof CharSequence) return ((CharSequence) x).length()
-        if (x instanceof BigDecimal) return ((BigDecimal) x).toPlainString().length()
+        if (x instanceof BigDecimal) return ScriptBudget.plainLength((BigDecimal) x)
         if (x instanceof BigInteger) return ((BigInteger) x).bitLength().intdiv(3) + 2L
         return 40L
     }
@@ -80,17 +80,33 @@ class ScriptArithmetic extends JexlArithmetic {
     @Override boolean greaterThan(Object l, Object r) { ScriptBudget.charge(); return super.greaterThan(l, r) }
     @Override boolean lessThanOrEqual(Object l, Object r) { ScriptBudget.charge(); return super.lessThanOrEqual(l, r) }
     @Override boolean greaterThanOrEqual(Object l, Object r) { ScriptBudget.charge(); return super.greaterThanOrEqual(l, r) }
-    /** A list or map compared with == costs its size: the comparison walks it. */
+    /**
+     * == on lists and maps is walked here, one unit per node at every depth, so a nested comparison costs what it
+     * does (the default deep equals is one uncharged, uninterruptible call).
+     */
     @Override
     boolean equals(Object l, Object r) {
-        ScriptBudget.charge(1L + sizeOf(l) + sizeOf(r))
-        return super.equals(l, r)
-    }
-
-    private static long sizeOf(Object x) {
-        if (x instanceof Collection) return ((Collection) x).size()
-        if (x instanceof Map) return ((Map) x).size()
-        return 0L
+        ScriptBudget.charge()
+        boolean lData = l instanceof Map || l instanceof Collection
+        boolean rData = r instanceof Map || r instanceof Collection
+        if (!lData && !rData) return super.equals(l, r)
+        if (l.is(r)) return true
+        if (l instanceof Map && r instanceof Map) {
+            Map a = (Map) l, b = (Map) r
+            if (a.size() != b.size()) return false
+            for (Map.Entry e : (Set<Map.Entry>) a.entrySet()) {
+                if (!b.containsKey(e.key) || !equals(e.value, b.get(e.key))) return false
+            }
+            return true
+        }
+        if (l instanceof Collection && r instanceof Collection) {
+            Iterator i = ((Collection) l).iterator(), j = ((Collection) r).iterator()
+            while (i.hasNext() && j.hasNext()) {
+                if (!equals(i.next(), j.next())) return false
+            }
+            return !i.hasNext() && !j.hasNext()
+        }
+        return false
     }
 
     @Override
@@ -195,6 +211,7 @@ class ScriptArithmetic extends JexlArithmetic {
         if (value instanceof BigDecimal && ((BigDecimal) value).unscaledValue().bitLength() > MAX_NUMBER_BITS) {
             throw new ScriptLimitException("NUMBER", "A number grew too large.")
         }
+        if (value instanceof BigDecimal) ScriptBudget.checkDecimal((BigDecimal) value)
         return value
     }
 }

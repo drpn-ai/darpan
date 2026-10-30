@@ -385,18 +385,28 @@ class ReconciliationServices {
             List<String> fieldExpressions = idSpecs.collect { (String) it.idExpr }
             StructType readSchema = (schemaFile && SparkReadSchemaSupport.savedReadSchemaEnabled()) ?
                     SparkReadSchemaSupport.buildReadSchema(ec, schemaFile) : null
+            // DAR-BE-166: keys under one top-level array (every extract: {metadata, records:[...]}) are read from its
+            // records, one per line, in partitions. multiLine makes each FILE one row, so a month's extract was parsed
+            // whole in one task and ran a 2 GB JVM out of heap at the compare.
+            File recordLines = JsonRecordLines.forRecordArray(ec, path, pathInfos)
+            List<Map> readPathInfos = recordLines != null ? JsonRecordLines.recordRootPathInfos(pathInfos) : pathInfos
+            Closure<Dataset> readJson = { StructType schema ->
+                def reader = spark.read()
+                if (recordLines == null) reader = reader.option("multiLine", "true")
+                StructType effective = recordLines != null ? JsonRecordLines.recordSchema(schema, pathInfos) : schema
+                if (effective != null) reader = reader.schema(effective)
+                return reader.json(recordLines?.absolutePath ?: path)
+            }
             try {
-                df = readSchema != null ?
-                        spark.read().schema(readSchema).option("multiLine", "true").json(path) :
-                        spark.read().option("multiLine", "true").json(path)
-                idDf = CompareDatasetSupport.buildJsonIdDf(df, pathInfos, label, idNormalizers, fieldExpressions)
-                dataDf = CompareDatasetSupport.buildJsonDataDf(df, pathInfos, label, idNormalizers, fieldExpressions)
+                df = readJson(readSchema)
+                idDf = CompareDatasetSupport.buildJsonIdDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
+                dataDf = CompareDatasetSupport.buildJsonDataDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
             } catch (Exception readFailure) {
                 if (readSchema == null) throw readFailure
                 logger.warn("Saved read schema for '${label}' did not cover the data (${readFailure.message}); re-reading with inference.")
-                df = spark.read().option("multiLine", "true").json(path)
-                idDf = CompareDatasetSupport.buildJsonIdDf(df, pathInfos, label, idNormalizers, fieldExpressions)
-                dataDf = CompareDatasetSupport.buildJsonDataDf(df, pathInfos, label, idNormalizers, fieldExpressions)
+                df = readJson(null)
+                idDf = CompareDatasetSupport.buildJsonIdDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
+                dataDf = CompareDatasetSupport.buildJsonDataDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
             }
         } else {
              // CSV

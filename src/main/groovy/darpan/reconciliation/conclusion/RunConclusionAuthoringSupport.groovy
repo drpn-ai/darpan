@@ -61,7 +61,8 @@ class RunConclusionAuthoringSupport {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return null
         def scope = scopeFor(ec, savedRunId)
         if (scope == null) return null
-        boolean evaluate = (scope.scopeMode as String)?.equalsIgnoreCase("EVALUATE")
+        // DAR-BE-168: an older scope has no scopeMode (COMPARE); `?.` would hand conditionsOf a null boolean.
+        boolean evaluate = "EVALUATE".equalsIgnoreCase(scope.scopeMode as String)
         Map<String, Integer> seqByKey = [:], depthByKey = [:]
         List<Map<String, Object>> nodes = []
         ((submitted ?: []) as List).eachWithIndex { Object o, int i ->

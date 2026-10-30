@@ -50,6 +50,7 @@ class RunConclusionAuthoringSmokeTests {
             run("TCON_RS", MINE, "COMPARE")
             run("TCON_RS_EVAL", MINE, "EVALUATE")
             run("TCON_RS_OTHER", OTHER, "COMPARE")
+            run("TCON_RS_NOMODE", MINE, null)
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
@@ -126,6 +127,16 @@ class RunConclusionAuthoringSmokeTests {
                 conditions: [[subject: "FILE_2", field: "status", operator: "NOT_BLANK", checkLabel: "x"]]]]])
         assertTrue(out.hadError as boolean)
         assertTrue((out.errorText as String).contains("reads one system"), out.errorText as String)
+    }
+
+    @Test
+    @Order(3)
+    void aScopeWithNoModeIsATwoSystemRun() {
+        // DAR-BE-168: SM's RS_PROD_ORDERS scope has no scopeMode; saving its tree answered a 500.
+        Map out = facade("save#RunConclusions", [savedRunId: "TCON_RS_NOMODE", conclusions: [[key: "a", conclusion: "CONC_TCON_OPEN",
+                conditions: [[subject: "FILE_2", field: "status", operator: "NOT_BLANK", checkLabel: "x"]]]]])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals(1, ((Map) out.savedConclusions).conclusions.size())
     }
 
     @Test

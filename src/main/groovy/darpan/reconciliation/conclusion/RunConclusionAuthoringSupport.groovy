@@ -176,6 +176,7 @@ class RunConclusionAuthoringSupport {
         List<Map> parsed
         try {
             parsed = ConclusionLookupSupport.parse(JsonOutput.toJson(lookups))
+            parsed.each { ConclusionLookupSupport.requireSafeParameters(it) }
         } catch (IllegalArgumentException e) {
             ec.message.addError(e.message)
             return null

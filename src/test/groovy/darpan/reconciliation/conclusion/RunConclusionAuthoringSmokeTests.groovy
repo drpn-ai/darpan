@@ -198,7 +198,8 @@ class RunConclusionAuthoringSmokeTests {
         [[lookups: [items + [systemEnumId: "TCON_NO_SUCH_SYSTEM"]], says: "cannot be asked by id"],
          [lookups: [items - [keyField: "omsOrderId"]], says: "needs keyField"],
          [lookups: [items + [many: "yes"]], says: "many is true or false"],
-         [lookups: [items, items], says: "Two lookups are named items"]].each { Map c ->
+         [lookups: [items, items], says: "Two lookups are named items"],
+         [lookups: [items + [parameters: [outputLocation: "runtime://elsewhere"]]], says: "take only keepRecordFields"]].each { Map c ->
             Map out = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: [], lookups: c.lookups])
             assertTrue(out.hadError as boolean, "should refuse: ${c.says}")
             assertTrue((out.errorText as String).contains(c.says as String), out.errorText as String)

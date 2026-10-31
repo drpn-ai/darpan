@@ -127,7 +127,8 @@ class RunConclusionStep {
             if (!service || !configParameter || !ec.service.getServiceDefinition(service)?.inParameterNameList?.contains("lookupKeys")) {
                 throw new IllegalStateException("${lookup.systemEnumId} cannot be asked by id")
             }
-            Map options = lookup.parameters instanceof Map ? (Map) lookup.parameters : [:]
+            // DAR-BE-174 security review: only keepRecordFields reaches the extract; a tenant saves lookups now.
+            Map options = ConclusionLookupSupport.safeParameters(lookup)
             // A read by key has no window, but an extract's contract may still require one: send all time, under the
             // connector's own names; the keys bound the read (lookupKeys).
             Map window = [(normalize(connector.dateFromParameterName) ?: "windowStart"): new java.sql.Timestamp(0L),

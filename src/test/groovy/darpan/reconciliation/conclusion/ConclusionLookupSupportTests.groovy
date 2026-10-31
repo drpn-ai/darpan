@@ -84,6 +84,24 @@ class ConclusionLookupSupportTests {
         assertEquals("ITEM_CANCELLED", ((Map) one.M1).statusId, "a plain lookup keeps one record per key, as before")
     }
 
+    // DAR-BE-174 security review: a lookup's parameters reach the extract service's call, and a tenant now saves them.
+    // Only keepRecordFields (field names) may pass, on save and when a stored lookup is asked, so nothing can name an
+    // output location or a run's ids.
+    @Test
+    void onlyKeepRecordFieldsReachTheExtract() {
+        assertEquals([keepRecordFields: ["orderId", "notes"]],
+                ConclusionLookupSupport.safeParameters(LOOKUP + [parameters: [keepRecordFields: ["orderId", "notes"]]]))
+        assertEquals([:], ConclusionLookupSupport.safeParameters(LOOKUP))
+        assertEquals([keepRecordFields: ["orderId"]], ConclusionLookupSupport.safeParameters(LOOKUP + [parameters:
+                [keepRecordFields: ["orderId"], outputLocation: "runtime://../../etc", automationExecutionId: "X"]]),
+                "a stored lookup's other keys are dropped when it is asked")
+        [[outputLocation: "runtime://x"], [keepRecordFields: "orderId"], [keepRecordFields: ["a b"]]].each { Map p ->
+            assertThrows(IllegalArgumentException, { ConclusionLookupSupport.requireSafeParameters(LOOKUP + [parameters: p]) },
+                    "refused on save: ${p}")
+        }
+        ConclusionLookupSupport.requireSafeParameters(LOOKUP + [parameters: [keepRecordFields: ["orderId", "paymentPreferences"]]])
+    }
+
     @Test
     void itemsCompletedButOrderNotReadsEveryItem() {
         Map done = ConclusionLookupSupport.attach([presence: "KEPT", record: [orderId: "M1", statusId: "ORDER_APPROVED"]], ITEMS,

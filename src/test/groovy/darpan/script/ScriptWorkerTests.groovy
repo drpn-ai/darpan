@@ -102,4 +102,13 @@ class ScriptWorkerTests {
         HttpURLConnection health = (HttpURLConnection) new URL(base + '/health').openConnection()
         assertEquals(200, health.responseCode)
     }
+
+    // AWS UAT (0.25 vCPU): a fresh worker's first EXPRESSION ran past its 250 ms wall clock. main() warms both
+    // profiles before the port opens, so the health check (and with it Cloud Map) never shows a cold worker.
+    @Test
+    void warmUpRunsEveryProfileOnceAndReportsEach() {
+        Map<String, Map<String, Object>> warmed = ScriptWorker.warmUp()
+        assertEquals(ScriptSupervisor.LIMITS.keySet(), warmed.keySet())
+        warmed.each { String profile, Map<String, Object> out -> assertTrue(out.ok as boolean, "${profile}: ${out.error}") }
+    }
 }

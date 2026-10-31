@@ -100,8 +100,34 @@ class ScriptWorker {
 
     static void main(String[] args) {
         int port = (System.getenv('DARPAN_SCRIPT_WORKER_PORT') ?: DEFAULT_PORT.toString()) as int
+        Map<String, Map<String, Object>> warmed = warmUp()
+        println "Script worker warmed: ${warmed.collect { String p, Map<String, Object> o -> "${p} ${o.ok ? 'ok' : (o.error as Map)?.kind}" }.join(', ')}"
         HttpServer server = start(port)
         println "Script worker listening on :${server.address.port}"
+    }
+
+    /** A cold JVM's first evaluation (class loading, first JEXL compile) ran past EXPRESSION's 250 ms on 0.25 vCPU. */
+    static final int WARM_UP_ROUNDS = 3
+    private static final Map<String, String> WARM_UP_BODIES = [
+            (ScriptSupervisor.EXPRESSION): '1 + 1',
+            (ScriptSupervisor.SCRIPT)    : 'var t = 0; for (var x : input) { t = t + x }; t',
+    ] as Map<String, String>
+
+    /**
+     * Runs every profile in this JVM until it succeeds (at most WARM_UP_ROUNDS times) and returns the last outcome per
+     * profile. main() calls it before the port opens, so a health check, and with it service discovery, never shows
+     * Moqui a cold worker. A profile that still fails is reported, not fatal: the worker starts and the caps still hold.
+     */
+    static Map<String, Map<String, Object>> warmUp() {
+        Map<String, Map<String, Object>> out = [:]
+        for (String profile : ScriptSupervisor.LIMITS.keySet()) {
+            Map<String, Object> last = null
+            for (int i = 0; i < WARM_UP_ROUNDS && !(last?.ok as boolean); i++) {
+                last = ScriptSupervisor.evaluateHere(profile, WARM_UP_BODIES[profile], [1, 2, 3])
+            }
+            out[profile] = last
+        }
+        return out
     }
 
     static HttpServer start(int port) {

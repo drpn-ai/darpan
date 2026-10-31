@@ -6,6 +6,7 @@
         <subscreens-item name="SftpServers" menu-title="SFTP" location="component://darpan/screen/Settings/SftpServers.xml"/>
         <subscreens-item name="NetSuiteAuth" menu-title="NetSuite Auth" location="component://darpan/screen/Settings/NetSuiteAuth.xml"/>
         <subscreens-item name="NetSuiteRestlet" menu-title="NetSuite Endpoints" location="component://darpan/screen/Settings/NetSuiteRestlet.xml"/>
+        <subscreens-item name="ScriptWorker" menu-title="Script Worker" location="component://darpan/screen/Settings/ScriptWorker.xml"/>
     </subscreens>
     <pre-actions>
         <script><![CDATA[

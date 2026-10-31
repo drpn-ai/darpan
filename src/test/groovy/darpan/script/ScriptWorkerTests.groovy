@@ -118,6 +118,20 @@ class ScriptWorkerTests {
         warmed.each { String profile, Map<String, Object> out -> assertTrue(out.ok as boolean, "${profile}: ${out.error}") }
     }
 
+    // DAR-BE-169 operator screen: Moqui probes the worker's /health and says plainly when it is not there.
+    @Test
+    void healthProbeReportsALiveWorkerADeadOneAndNoWorkerConfigured() {
+        Map<String, Object> live = ScriptWorker.probeHealth(startWorker())
+        assertTrue(live.reachable as boolean, "${live}")
+        assertEquals(200, live.status)
+        Map<String, Object> dead = ScriptWorker.probeHealth(deadUrl())
+        assertFalse(dead.reachable as boolean)
+        assertTrue((dead.message as String).contains('did not answer'), "${dead}")
+        Map<String, Object> none = ScriptWorker.probeHealth(null)
+        assertFalse(none.reachable as boolean)
+        assertTrue((none.message as String).contains('No worker URL'), "${none}")
+    }
+
     // The worker holds only the token's SHA-256, so an escaped script reading its own environment learns nothing
     // it can call the worker with. Where NetworkPolicy is not enforced, this is the only wall.
     @Test

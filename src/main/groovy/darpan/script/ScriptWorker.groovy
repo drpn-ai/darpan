@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Duration
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * DAR-BE-169. The worker JVM (sandbox design §4, stage 2a): tenant scripts run in a separate process that holds no
@@ -118,6 +119,32 @@ class ScriptWorker {
             return workerFailure(p, 'WORKER', 'Interrupted while waiting for the script worker; the script was not run.')
         } catch (Exception e) {
             return workerFailure(p, 'WORKER', "The script worker did not answer (${e.getClass().simpleName}); the script was not run.".toString())
+        }
+    }
+
+    /** Moqui side, for the operator screen: GET /health on the worker. {reachable, status, ms, message}. Never throws. */
+    static Map<String, Object> probeHealth(String baseUrl) {
+        if (!baseUrl) {
+            return [reachable: false, status: 0, ms: 0L,
+                    message: 'No worker URL configured: scripts run inside Moqui.'] as Map<String, Object>
+        }
+        long started = System.nanoTime()
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl.replaceAll('/+$', '') + '/health'))
+                    .timeout(Duration.ofSeconds(3)).GET().build()
+            HttpResponse<InputStream> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream())
+            response.body().withCloseable { InputStream s -> readCapped(s, 1_000) }
+            long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            boolean ok = response.statusCode() == 200
+            return [reachable: ok, status: response.statusCode(), ms: ms,
+                    message: ok ? 'The worker answered.' : "The worker answered ${response.statusCode()}.".toString()] as Map<String, Object>
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt()
+            return [reachable: false, status: 0, ms: 0L, message: 'Interrupted while asking the worker.'] as Map<String, Object>
+        } catch (Exception e) {
+            long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            return [reachable: false, status: 0, ms: ms,
+                    message: "The worker did not answer (${e.getClass().simpleName}).".toString()] as Map<String, Object>
         }
     }
 

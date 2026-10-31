@@ -2,7 +2,7 @@
     "openapi": "3.1.0",
     "info": {
         "title": "Darpan Facade API",
-        "version": "2.1.10",
+        "version": "2.1.11",
         "x-darpan-contract-version": 3,
         "description": "GENERATED from the facade service XML \u2014 do not edit by hand. Regenerate with ./gradlew :runtime:component:darpan:generateApiContract.\n\nTransport: JSON-RPC 2.0 over POST /rpc/json. Auth channels: browser SPA uses the HttpOnly darpan_login_key cookie + CSRF token (canonical); integration callers and no-credentialed-CORS fallbacks use the login_key header (in-memory only, never query params). HTTP status is 200 for every dispatched call; distinguish outcomes by shape. JSON-RPC error object: protocol failures (-32700 parse, -32600 invalid request, -32601 method not found, -32602 invalid params), unhandled service errors (code 500), authorization denial (code 403). Facade business validation instead returns a success envelope with result.ok=false and result.errors[]."
     },
@@ -20922,6 +20922,13 @@
                         "items": {
                             
                         }
+                    },
+                    "lookups": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "DAR-BE-174. The run's lookups, replaced when given (an empty\n                list clears them, absent keeps them): [{name, subject FILE_1|FILE_2, idField, systemEnumId, sourceConfigId,\n                keyField, many (every record under the key, as a list), parameters}]. A condition reads one as\n                name.field. Refused in words for a part missing, two of one name, or a system that cannot be asked by\n                id."
                     }
                 },
                 "required": [

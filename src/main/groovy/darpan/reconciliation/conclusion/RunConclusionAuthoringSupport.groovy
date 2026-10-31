@@ -2,6 +2,8 @@ package darpan.reconciliation.conclusion
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import groovy.json.JsonOutput
 
 import static darpan.common.ValueSupport.normalize
 
@@ -47,7 +49,13 @@ class RunConclusionAuthoringSupport {
                   checkLabel: c.checkLabel] as Map<String, Object>
              }] as Map<String, Object>
         }
-        return [savedRunId: savedRunId, scopeMode: (scope.scopeMode ?: "COMPARE") as String, conclusions: nodes,
+        List<Map> lookups = []
+        try {
+            lookups = ConclusionLookupSupport.parse(scope.conclusionLookupsJson)
+        } catch (IllegalArgumentException e) {
+            ec.message.addMessage("This run's lookups cannot be read: ${e.message}".toString(), "warning")
+        }
+        return [savedRunId: savedRunId, scopeMode: (scope.scopeMode ?: "COMPARE") as String, conclusions: nodes, lookups: lookups,
                 catalog   : ConclusionCatalogSupport.catalog(ec),
                 buckets   : BUCKETS, operators: OPERATORS, presence: PRESENCE, keyScopes: KEY_SCOPES, quantifiers: QUANTIFIERS] as Map<String, Object>
     }
@@ -55,12 +63,16 @@ class RunConclusionAuthoringSupport {
     /**
      * Replaces the run's tree. conclusions: [{key, parent (an earlier node's key or blank), conclusion (a DarpanConclusion
      * id), bucket (roots), question, fix (DAR-BE-120: what to do when this is the cause), conditions: [{subject FILE_1|FILE_2, presence, keyScope, quantifier, field, operator,
-     * values, checkLabel}]}]. An empty list clears it.
+     * values, checkLabel}]}]. An empty list clears it. DAR-BE-174: lookups, when given, replace the run's
+     * ([{name, subject, idField, systemEnumId, sourceConfigId, keyField, many?, parameters?}], see ConclusionLookupSupport;
+     * an empty list clears them); absent keeps them.
      */
-    static Map<String, Object> save(def ec, String savedRunId, List submitted) {
+    static Map<String, Object> save(def ec, String savedRunId, List submitted, List lookups = null) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return null
         def scope = scopeFor(ec, savedRunId)
         if (scope == null) return null
+        String lookupsJson = lookups == null ? null : lookupsJsonOf(ec, lookups)
+        if (ec.message.hasError()) return null
         // DAR-BE-168: an older scope has no scopeMode (COMPARE); `?.` would hand conditionsOf a null boolean.
         boolean evaluate = "EVALUATE".equalsIgnoreCase(scope.scopeMode as String)
         Map<String, Integer> seqByKey = [:], depthByKey = [:]
@@ -99,6 +111,10 @@ class RunConclusionAuthoringSupport {
         String compareScopeId = scope.compareScopeId as String
         String tenantId = scope.companyUserGroupId as String
         def now = ec.user.nowTimestamp
+        if (lookups != null) {
+            scope.set("conclusionLookupsJson", lookupsJson)
+            scope.update()
+        }
         TenantScopedFinder.findTenantScoped(ec, CONDITION).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
         TenantScopedFinder.findTenantScoped(ec, RULE).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
         nodes.each { Map<String, Object> node ->
@@ -150,6 +166,29 @@ class RunConclusionAuthoringSupport {
         }
         if (!out) { ec.message.addError("'${label}' needs at least one condition."); return null }
         return out
+    }
+
+    /**
+     * DAR-BE-174. The lookups as the scope stores them (null for none), or an error in words: a part missing, two of one
+     * name, or a system whose connector cannot be asked by id (its extract takes no lookupKeys; it would read a window).
+     */
+    private static String lookupsJsonOf(def ec, List lookups) {
+        List<Map> parsed
+        try {
+            parsed = ConclusionLookupSupport.parse(JsonOutput.toJson(lookups))
+        } catch (IllegalArgumentException e) {
+            ec.message.addError(e.message)
+            return null
+        }
+        parsed*.name.countBy { it }.findAll { it.value > 1 }.each { ec.message.addError("Two lookups are named ${it.key}.") }
+        parsed.each { Map l ->
+            Map connector = SourceSystemConnectorSupport.resolveBySystemEnumId(ec, (String) l.systemEnumId)
+            String service = normalize(connector?.extractServiceName)
+            if (!service || !ec.service.getServiceDefinition(service)?.inParameterNameList?.contains("lookupKeys")) {
+                ec.message.addError("Lookup ${l.name}: ${l.systemEnumId} cannot be asked by id.")
+            }
+        }
+        return parsed ? JsonOutput.toJson(parsed) : null
     }
 
     private static def scopeFor(def ec, String savedRunId) {

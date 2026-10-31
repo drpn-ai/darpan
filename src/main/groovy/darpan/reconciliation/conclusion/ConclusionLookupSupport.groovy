@@ -6,8 +6,9 @@ import groovy.json.JsonSlurper
  * DAR-BE-118. A conclusion lookup: a finding's record names a record in another system (an OMS return names its order's
  * NetSuite id), and a rule reads that record, attached under the lookup's name (orderInNetsuite.backordered).
  * Configured on the compare scope (RuleSetCompareScope.conclusionLookupsJson) as
- * [{name, subject (FILE_1|FILE_2), idField, systemEnumId, sourceConfigId, keyField, parameters?}]; parameters are extract
- * options the connector reads, e.g. {keepRecordFields: [orderId, notes]} to ask OMS for an order's notes.
+ * [{name, subject (FILE_1|FILE_2), idField, systemEnumId, sourceConfigId, keyField, many?, parameters?}]; parameters are extract
+ * options the connector reads, e.g. {keepRecordFields: [orderId, notes]} to ask OMS for an order's notes. DAR-BE-174: many
+ * attaches every record under the key as a list (an order's items: items.statusId); set from the app by save#RunConclusions.
  *
  * Asked as little as possible (Aditi 2026-10-23): only for findings whose first evaluation REACHED a rule reading the
  * name, each id once. Siblings are tried in sequence and the first match wins, so a finding reached rule L when L's
@@ -33,8 +34,22 @@ class ConclusionLookupSupport {
             if (lookup.parameters != null && !(lookup.parameters instanceof Map)) {
                 throw new IllegalArgumentException("A lookup's parameters are an object of extract options, got: ${lookup.parameters}")
             }
+            if (lookup.many != null && !(lookup.many instanceof Boolean)) {
+                throw new IllegalArgumentException("A lookup's many is true or false, got: ${lookup.many}")
+            }
             return lookup
         }
+    }
+
+    /**
+     * DAR-BE-174. Files one answered record under its key: a `many` lookup (an order's items) keeps every record as a list,
+     * any other keeps one record per key, as before. A record without a key is dropped.
+     */
+    static void collect(Map<String, Object> found, Map lookup, Map record) {
+        String key = record?.get(lookup.keyField)?.toString()?.trim()
+        if (!key) return
+        if (lookup.many == true) ((List) found.computeIfAbsent(key, { [] })).add(record)
+        else found.put(key, record)
     }
 
     /** Per lookup name, the nodes whose conditions read it, and every node by id. */
@@ -72,11 +87,14 @@ class ConclusionLookupSupport {
         return field == name || field?.startsWith("${name}.")
     }
 
-    /** A copy of a side's state with each record carrying the looked-up record its idField names. */
-    static Map attach(Map sideState, Map lookup, Map<String, Map> found) {
+    /**
+     * A copy of a side's state with each record carrying the looked-up record its idField names (a `many` lookup: the
+     * list of them, which a dotted condition field fans out across).
+     */
+    static Map attach(Map sideState, Map lookup, Map<String, ?> found) {
         Closure<Map> withAnswer = { Map record ->
             String id = record?.get(lookup.idField)?.toString()?.trim()
-            Map answer = id ? found.get(id) : null
+            Object answer = id ? found.get(id) : null
             return answer == null ? record : (record + [(lookup.name): answer])
         }
         Map copy = new LinkedHashMap(sideState)

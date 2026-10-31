@@ -63,6 +63,47 @@ class ConclusionLookupSupportTests {
         assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([LOOKUP + [parameters: "x"]])) }
     }
 
+    // DAR-BE-174 (SM SMUS#11892322): an order's items are many records under one key. A `many` lookup keeps every one and
+    // attaches the list, so a condition reads all of them (ALL) or any of them (ANY) through the dotted field.
+    private static final Map ITEMS = [name: "items", subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_ORDER_ITEMS_GQL",
+                                      sourceConfigId: "steve_madden_prodhw", keyField: "omsOrderId", many: true]
+
+    @Test
+    void aManyLookupKeepsEveryRecordUnderItsKey() {
+        assertEquals([ITEMS], ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([ITEMS])))
+        assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([ITEMS + [many: "yes"]])) }
+
+        Map<String, Object> many = [:], one = [:]
+        [[omsOrderId: "M1", statusId: "ITEM_COMPLETED"], [omsOrderId: "M1", statusId: "ITEM_CANCELLED"],
+         [omsOrderId: "M2", statusId: "ITEM_APPROVED"], [omsOrderId: null, statusId: "ITEM_COMPLETED"]].each { Map r ->
+            ConclusionLookupSupport.collect(many, ITEMS, r)
+            ConclusionLookupSupport.collect(one, LOOKUP + [keyField: "omsOrderId"], r)
+        }
+        assertEquals(["M1", "M2"] as Set, many.keySet())
+        assertEquals(["ITEM_COMPLETED", "ITEM_CANCELLED"], ((List<Map>) many.M1)*.statusId)
+        assertEquals("ITEM_CANCELLED", ((Map) one.M1).statusId, "a plain lookup keeps one record per key, as before")
+    }
+
+    @Test
+    void itemsCompletedButOrderNotReadsEveryItem() {
+        Map done = ConclusionLookupSupport.attach([presence: "KEPT", record: [orderId: "M1", statusId: "ORDER_APPROVED"]], ITEMS,
+                [M1: [[statusId: "ITEM_COMPLETED", facilityId: "990"], [statusId: "ITEM_CANCELLED", facilityId: "990"]]])
+        Map open = ConclusionLookupSupport.attach([presence: "KEPT", record: [orderId: "M2", statusId: "ORDER_APPROVED"]], ITEMS,
+                [M2: [[statusId: "ITEM_COMPLETED", facilityId: "804"], [statusId: "ITEM_APPROVED", facilityId: "804"]]])
+        Map allDoneOrCancelled = [subject: "FILE_1", fieldExpression: "items.statusId", operator: "IN",
+                                  conditionValues: ["ITEM_COMPLETED", "ITEM_CANCELLED"], quantifier: "ALL"]
+        Map oneCompleted = [subject: "FILE_1", fieldExpression: "items.statusId", operator: "IN", conditionValues: ["ITEM_COMPLETED"],
+                            quantifier: "ANY"]
+        Map amazon = [subject: "FILE_1", fieldExpression: "items.facilityId", operator: "IN", conditionValues: ["990"], quantifier: "ANY"]
+
+        assertTrue(ConclusionConditionSupport.check(allDoneOrCancelled, done).passed as boolean)
+        assertTrue(ConclusionConditionSupport.check(oneCompleted, done).passed as boolean)
+        assertTrue(ConclusionConditionSupport.check(amazon, done).passed as boolean)
+        assertFalse(ConclusionConditionSupport.check(allDoneOrCancelled, open).passed as boolean, "an item still approved")
+        assertFalse(ConclusionConditionSupport.check(amazon, open).passed as boolean)
+        assertEquals("ITEM_COMPLETED, ITEM_CANCELLED", ConclusionConditionSupport.check(allDoneOrCancelled, done).value)
+    }
+
     @Test
     void theAnswerIsAttachedToEveryRecordOfTheSubjectSideByItsId() {
         Map side = [presence: "KEPT", record: [orderNetsuiteId: "81"], records: [[orderNetsuiteId: "81"], [orderNetsuiteId: "82"]]]

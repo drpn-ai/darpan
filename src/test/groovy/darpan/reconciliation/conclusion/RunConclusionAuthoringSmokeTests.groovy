@@ -175,6 +175,43 @@ class RunConclusionAuthoringSmokeTests {
         assertFalse(mine.hadError as boolean, mine.errorText as String)
     }
 
+    // DAR-BE-174: a run's lookups are set with its tree (SM RS_PROD_ORDERS: the order's items). Absent keeps them; a lookup
+    // through a connector that cannot be asked by id, or with a part missing, is refused and writes nothing.
+    @Test
+    @Order(6)
+    void aRunsLookupsAreSavedWithItsTree() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml",
+                "component://darpan/data/SourceSystemConnectorSeedData.xml")
+        Map items = [name: "items", subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_ORDER_ITEMS_GQL",
+                     sourceConfigId: "steve_madden_prodhw", keyField: "omsOrderId", many: true]
+        Map node = [key: "a", conclusion: "CONC_TCON_OPEN", bucket: "RULE", conditions: [[subject: "FILE_1", field: "items.statusId",
+                operator: "IN", values: ["ITEM_COMPLETED", "ITEM_CANCELLED"], quantifier: "ALL", checkLabel: "Every item completed or cancelled"]]]
+
+        Map saved = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: [node], lookups: [items]])
+        assertFalse(saved.hadError as boolean, saved.errorText as String)
+        assertEquals([items], ((Map) saved.savedConclusions).lookups)
+
+        Map kept = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: [node]])
+        assertFalse(kept.hadError as boolean, kept.errorText as String)
+        assertEquals([items], ((Map) facade("get#RunConclusions", [savedRunId: "TCON_RS"]).conclusions).lookups, "absent keeps them")
+
+        [[lookups: [items + [systemEnumId: "TCON_NO_SUCH_SYSTEM"]], says: "cannot be asked by id"],
+         [lookups: [items - [keyField: "omsOrderId"]], says: "needs keyField"],
+         [lookups: [items + [many: "yes"]], says: "many is true or false"],
+         [lookups: [items, items], says: "Two lookups are named items"]].each { Map c ->
+            Map out = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: [], lookups: c.lookups])
+            assertTrue(out.hadError as boolean, "should refuse: ${c.says}")
+            assertTrue((out.errorText as String).contains(c.says as String), out.errorText as String)
+        }
+        Map read = (Map) facade("get#RunConclusions", [savedRunId: "TCON_RS"]).conclusions
+        assertEquals([items], read.lookups, "a refused save writes nothing")
+        assertEquals(1, read.conclusions.size())
+
+        Map cleared = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: [node], lookups: []])
+        assertFalse(cleared.hadError as boolean, cleared.errorText as String)
+        assertEquals([], ((Map) cleared.savedConclusions).lookups, "an empty list clears them")
+    }
+
     private def row(String entity, String id) {
         return ec.entity.find(entity).condition("enumId", id).disableAuthz().useCache(false).one()
     }

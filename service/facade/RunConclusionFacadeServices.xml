@@ -29,6 +29,11 @@
         <in-parameters>
             <parameter name="savedRunId" required="true"/>
             <parameter name="conclusions" type="List"/>
+            <parameter name="lookups" type="List"><description>DAR-BE-174. The run's lookups, replaced when given (an empty
+                list clears them, absent keeps them): [{name, subject FILE_1|FILE_2, idField, systemEnumId, sourceConfigId,
+                keyField, many (every record under the key, as a list), parameters}]. A condition reads one as
+                name.field. Refused in words for a part missing, two of one name, or a system that cannot be asked by
+                id.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -37,7 +42,7 @@
             <parameter name="savedConclusions" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="savedConclusions" from="darpan.reconciliation.conclusion.RunConclusionAuthoringSupport.save(ec, savedRunId, conclusions)"/>
+            <set field="savedConclusions" from="darpan.reconciliation.conclusion.RunConclusionAuthoringSupport.save(ec, savedRunId, conclusions, lookups)"/>
             <if condition="ec.message.hasError()"><return error="true"/></if>
             <set field="ok" from="true"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

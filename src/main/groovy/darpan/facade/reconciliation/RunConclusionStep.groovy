@@ -142,11 +142,9 @@ class RunConclusionStep {
             if (!file?.isFile() && out?.dataAvailable != false) {
                 throw new IllegalStateException("${service} answered no file${ec.message.validationErrors ? ': ' + ec.message.validationErrors.join('; ') : ''}")
             }
-            Map<String, Map> found = [:]
-            if (file?.isFile()) JsonRecordStream.forEachRecord(file, "records") { Map r ->
-                String key = normalize(r.get(lookup.keyField))
-                if (key) found.put(key, r)
-            }
+            // DAR-BE-174: a `many` lookup keeps every record under a key (an order's items), others one.
+            Map<String, Object> found = [:]
+            if (file?.isFile()) JsonRecordStream.forEachRecord(file, "records") { Map r -> ConclusionLookupSupport.collect(found, lookup, r) }
             ec.logger.info("conclusion lookup ${lookup.name}: asked ${ids.size()} ids of ${lookup.systemEnumId}, found ${found.size()}")
             return found
         } catch (Throwable t) {

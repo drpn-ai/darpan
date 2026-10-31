@@ -11,6 +11,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.concurrent.Executors
 
@@ -52,6 +53,33 @@ class ScriptWorker {
         return url?.trim() ?: null
     }
 
+    // Caller authentication. Moqui sends the token; the worker holds only its SHA-256 (hex), so a script that escaped
+    // the sandbox and read the worker's own environment learns nothing it could call the worker with.
+    static final String TOKEN_PROPERTY = 'darpan.script.worker.token'
+    static final String TOKEN_ENV = 'DARPAN_SCRIPT_WORKER_TOKEN'
+    static final String TOKEN_SHA256_ENV = 'DARPAN_SCRIPT_WORKER_TOKEN_SHA256'
+    static final String TOKEN_HEADER = 'X-Darpan-Worker-Token'
+
+    static String configuredToken() {
+        String token = System.getProperty(TOKEN_PROPERTY) ?: System.getenv(TOKEN_ENV)
+        return token?.trim() ?: null
+    }
+
+    static String sha256Hex(String text) {
+        byte[] digest = MessageDigest.getInstance('SHA-256').digest(text.getBytes(StandardCharsets.UTF_8))
+        StringBuilder hex = new StringBuilder(64)
+        for (byte b : digest) hex.append(String.format('%02x', b & 0xff))
+        return hex.toString()
+    }
+
+    /** Constant time over the two digests, so the comparison leaks nothing about how much of a guess was right. */
+    static boolean tokenMatches(String presented, String expectedSha256Hex) {
+        if (!presented) return false
+        byte[] got = sha256Hex(presented).getBytes(StandardCharsets.US_ASCII)
+        byte[] want = expectedSha256Hex.trim().toLowerCase().getBytes(StandardCharsets.US_ASCII)
+        return MessageDigest.isEqual(got, want)
+    }
+
     // -- Moqui side
 
     /** Same contract as ScriptSupervisor.evaluate: {ok, profile, result, units, elapsedMs, logs, error}. Never throws. */
@@ -67,11 +95,13 @@ class ScriptWorker {
             return workerFailure(p, 'INPUT', "The input is too large for the script worker (${payload.length()} characters).".toString())
         }
         long timeoutMs = ((ScriptSupervisor.LIMITS[p] as Map)?.timeoutMs as Long ?: 2_000L) + NETWORK_MARGIN_MS
-        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl.replaceAll('/+$', '') + '/evaluate'))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(baseUrl.replaceAll('/+$', '') + '/evaluate'))
                 .timeout(Duration.ofMillis(timeoutMs))
                 .header('Content-Type', 'application/json')
                 .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
-                .build()
+        String token = configuredToken()
+        if (token) builder.header(TOKEN_HEADER, token)
+        HttpRequest request = builder.build()
         try {
             HttpResponse<InputStream> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream())
             String text = response.body().withCloseable { InputStream s -> readCapped(s, MAX_RESPONSE_CHARS) }
@@ -102,8 +132,12 @@ class ScriptWorker {
         int port = (System.getenv('DARPAN_SCRIPT_WORKER_PORT') ?: DEFAULT_PORT.toString()) as int
         Map<String, Map<String, Object>> warmed = warmUp()
         println "Script worker warmed: ${warmed.collect { String p, Map<String, Object> o -> "${p} ${o.ok ? 'ok' : (o.error as Map)?.kind}" }.join(', ')}"
-        HttpServer server = start(port)
-        println "Script worker listening on :${server.address.port}"
+        String expectedSha256 = System.getenv(TOKEN_SHA256_ENV)?.trim() ?: null
+        if (!expectedSha256) {
+            println "WARNING: ${TOKEN_SHA256_ENV} is not set; any caller that can reach this port can run scripts."
+        }
+        HttpServer server = start(port, expectedSha256)
+        println "Script worker listening on :${server.address.port} (caller token ${expectedSha256 ? 'required' : 'NOT required'})"
     }
 
     /** A cold JVM's first evaluation (class loading, first JEXL compile) ran past EXPRESSION's 250 ms on 0.25 vCPU. */
@@ -131,18 +165,27 @@ class ScriptWorker {
     }
 
     static HttpServer start(int port) {
+        return start(port, null)
+    }
+
+    /** expectedTokenSha256 null = no caller check (lab only; main() warns). /health never needs the token. */
+    static HttpServer start(int port, String expectedTokenSha256) {
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 32)
         server.createContext('/health', { HttpExchange ex -> reply(ex, 200, '{"ok":true}') } as HttpHandler)
-        server.createContext('/evaluate', { HttpExchange ex -> handle(ex) } as HttpHandler)
+        server.createContext('/evaluate', { HttpExchange ex -> handle(ex, expectedTokenSha256) } as HttpHandler)
         server.executor = Executors.newFixedThreadPool(4)
         server.start()
         return server
     }
 
-    private static void handle(HttpExchange ex) {
+    private static void handle(HttpExchange ex, String expectedTokenSha256) {
         try {
             if (ex.requestMethod != 'POST') {
                 reply(ex, 405, '{"ok":false,"error":{"kind":"WORKER","message":"POST only"}}')
+                return
+            }
+            if (expectedTokenSha256 && !tokenMatches(ex.requestHeaders.getFirst(TOKEN_HEADER), expectedTokenSha256)) {
+                reply(ex, 401, '{"ok":false,"error":{"kind":"WORKER","message":"Caller token missing or wrong"}}')
                 return
             }
             String text = readCapped(ex.requestBody, MAX_REQUEST_CHARS)

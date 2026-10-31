@@ -16,6 +16,12 @@ class ScriptWorkerTests {
     void stop() {
         server?.stop(0)
         System.clearProperty(ScriptWorker.URL_PROPERTY)
+        System.clearProperty(ScriptWorker.TOKEN_PROPERTY)
+    }
+
+    private String startWorkerExpecting(String token) {
+        server = ScriptWorker.start(0, ScriptWorker.sha256Hex(token))
+        return "http://127.0.0.1:${server.address.port}".toString()
     }
 
     private String startWorker() {
@@ -110,5 +116,31 @@ class ScriptWorkerTests {
         Map<String, Map<String, Object>> warmed = ScriptWorker.warmUp()
         assertEquals(ScriptSupervisor.LIMITS.keySet(), warmed.keySet())
         warmed.each { String profile, Map<String, Object> out -> assertTrue(out.ok as boolean, "${profile}: ${out.error}") }
+    }
+
+    // The worker holds only the token's SHA-256, so an escaped script reading its own environment learns nothing
+    // it can call the worker with. Where NetworkPolicy is not enforced, this is the only wall.
+    @Test
+    void aWorkerWithATokenHashRunsScriptsForTheRightToken() {
+        String base = startWorkerExpecting('right-token-0123456789')
+        System.setProperty(ScriptWorker.TOKEN_PROPERTY, 'right-token-0123456789')
+        Map<String, Object> out = ScriptWorker.call(base, 'EXPRESSION', '2 * 3', null)
+        assertTrue(out.ok as boolean, "${out.error}")
+        assertEquals(6, (out.result as Number).intValue())
+    }
+
+    @Test
+    void aWorkerWithATokenHashRefusesAMissingOrWrongToken() {
+        String base = startWorkerExpecting('right-token-0123456789')
+        Map<String, Object> none = ScriptWorker.call(base, 'EXPRESSION', '2 * 3', null)
+        assertFalse(none.ok as boolean)
+        assertEquals('WORKER', (none.error as Map).kind)
+        assertTrue(((none.error as Map).message as String).contains('401'), "${none.error}")
+        System.setProperty(ScriptWorker.TOKEN_PROPERTY, 'wrong-token')
+        Map<String, Object> wrong = ScriptWorker.call(base, 'EXPRESSION', '2 * 3', null)
+        assertFalse(wrong.ok as boolean)
+        assertTrue(((wrong.error as Map).message as String).contains('401'), "${wrong.error}")
+        HttpURLConnection health = (HttpURLConnection) new URL(base + '/health').openConnection()
+        assertEquals(200, health.responseCode)
     }
 }

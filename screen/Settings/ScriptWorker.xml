@@ -34,8 +34,10 @@
             <service-call name="facade.TenantScriptFacadeServices.run#TenantScript" out-map="runOut"
                     in-map="[tenantScriptId: tenantScriptId ?: null, scriptProfile: scriptProfile, scriptBody: scriptBody, inputSource: 'SAMPLE', inputJson: inputJson ?: '{}']"/>
             <set field="lastRun" from="[tenantScriptId: tenantScriptId, scriptProfile: scriptProfile, scriptBody: scriptBody, inputJson: inputJson,
-                    run: runOut?.run, ranAt: ec.user.nowTimestamp, workerUrl: darpan.script.ScriptWorker.configuredUrl()]"/>
-            <script>ec.web.sessionAttributes.put('darpanScriptWorkerLastRun', lastRun)</script>
+                    run: runOut?.run, ranAt: ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd HH:mm:ss'), workerUrl: darpan.script.ScriptWorker.configuredUrl()]"/>
+            <!-- As JSON text: Moqui refuses a non-serializable session attribute (WebUtilities warns and drops it), and
+                 the run map is not reliably serializable. A String always is. -->
+            <script>ec.web.sessionAttributes.put('darpanScriptWorkerLastRun', groovy.json.JsonOutput.toJson(lastRun))</script>
         </actions>
         <default-response url="."/>
     </transition>
@@ -73,7 +75,8 @@
                 scriptBody: savedPick.scriptBody, inputJson: savedPick.sampleInputJson ?: '{}'] : null"/>
 
         <!-- The last run (shown once), else a loaded saved script, else the chosen example, else 1 + 1. -->
-        <set field="lastRun" from="ec.web.sessionAttributes.remove('darpanScriptWorkerLastRun')"/>
+        <set field="lastRunJson" from="ec.web.sessionAttributes.remove('darpanScriptWorkerLastRun')"/>
+        <set field="lastRun" from="lastRunJson instanceof String ? new groovy.json.JsonSlurper().parseText(lastRunJson) : null"/>
         <set field="formValues" from="lastRun ?: (savedValues ?: (examples[example] ?: examples.one))"/>
         <if condition="lastRun">
             <set field="run" from="lastRun.run ?: [:]"/>
@@ -168,7 +171,7 @@
                 <widgets>
                     <label text="Result" type="h4"/>
                     <container-box>
-                        <box-header><label text="${runVerdict} · ran in the ${runWhere} · ${ec.l10n.format(lastRun.ranAt, 'yyyy-MM-dd HH:mm:ss')}"/></box-header>
+                        <box-header><label text="${runVerdict} · ran in the ${runWhere} · ${lastRun.ranAt}"/></box-header>
                         <box-body>
                             <label text="Result:" type="p" style="text-muted"/>
                             <label text="${runResultJson}" type="pre"/>

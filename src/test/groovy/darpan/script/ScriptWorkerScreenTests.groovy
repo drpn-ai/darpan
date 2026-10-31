@@ -22,6 +22,8 @@ class ScriptWorkerScreenTests {
     private static ExecutionContext ec
     private static final String SUPER_ADMIN_USER_ID = 'SW_SCREEN_SUPER_ADMIN'
     private static final String REGULAR_USER_ID = 'SW_SCREEN_REGULAR'
+    // Its own user: the active tenant is kept per user, and the no-tenant test needs none.
+    private static final String TENANT_SUPER_ADMIN_USER_ID = 'SW_SCREEN_TENANT_ADMIN'
 
     @BeforeAll
     static void setup() {
@@ -32,6 +34,7 @@ class ScriptWorkerScreenTests {
             ec.entity.makeDataLoader().dummyFks(true).dataTypes(['seed', 'seed-initial', 'darpan-seed'] as Set).load()
             createUserInGroup(SUPER_ADMIN_USER_ID, 'DARPAN_SUPER_ADMIN')
             createUserInGroup(REGULAR_USER_ID, 'DARPAN_USER')
+            createUserInGroup(TENANT_SUPER_ADMIN_USER_ID, 'DARPAN_SUPER_ADMIN')
         } finally {
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
         }
@@ -73,14 +76,42 @@ class ScriptWorkerScreenTests {
     }
 
     @Test
-    void runGoesThroughTheRealRunTenantScriptService() {
-        // With no active tenant, run#TenantScript itself refuses: the transition reached the real service.
-        // The POST carries the session token like a browser form does (WebFacadeStub's is "TestSessionToken");
-        // without it Moqui refuses before the transition runs, which is the CSRF wall working.
-        ScreenTest.ScreenTestRender str = renderAs(SUPER_ADMIN_USER_ID, 'ScriptWorker/runScript',
-                [scriptProfile: 'EXPRESSION', scriptBody: '1 + 1', inputJson: '{}', moquiSessionToken: 'TestSessionToken'], 'post')
+    void aRunPostWithoutTheSessionTokenIsRefused() {
+        // A browser form carries moquiSessionToken (the harness stub's is "TestSessionToken"); a forged cross-site
+        // POST does not, and Moqui refuses it before the transition runs.
+        ec.artifactExecution.disableAuthz()
+        try { ec.user.internalLoginUser(SUPER_ADMIN_USER_ID) } finally { ec.artifactExecution.enableAuthz() }
+        ScreenTest screenTest = ec.screen.makeTest().baseScreenPath('apps/darpan/Settings')
+        ScreenTest.ScreenTestRender str = screenTest.render('ScriptWorker/runScript',
+                [scriptProfile: 'EXPRESSION', scriptBody: '1 + 1', inputJson: '{}'], 'post')
         String errors = (str.errorMessages ?: []).join(' | ')
-        assertTrue(errors.contains('Choose a tenant first'), "errors: ${errors}")
+        assertTrue(errors.contains('Session token required'), "errors: ${errors}")
+        assertTrue(((org.moqui.impl.screen.ScreenTestImpl) screenTest).sessionAttributes.get('darpanScriptWorkerLastRun') == null,
+                'nothing ran, so nothing was stored')
+    }
+
+    @Test
+    void aRunIsKeptAsSerializableTextAndShownOnTheNextRender() {
+        ec.artifactExecution.disableAuthz()
+        try { ec.user.internalLoginUser(TENANT_SUPER_ADMIN_USER_ID) } finally { ec.artifactExecution.enableAuthz() }
+        ec.service.sync().name('admin.TenantAdminServices.create#Tenant')
+                .parameters([tenantUserGroupId: 'SW_SCREEN_TENANT', label: 'Screen test tenant']).call()
+        ec.service.sync().name('facade.AuthFacadeServices.save#ActiveTenant')
+                .parameters([activeTenantUserGroupId: 'SW_SCREEN_TENANT']).call()
+        assertFalse(ec.message.hasError(), "tenant setup: ${ec.message.errorsString}")
+
+        ScreenTest screenTest = ec.screen.makeTest().baseScreenPath('apps/darpan/Settings')
+        ScreenTest.ScreenTestRender post = screenTest.render('ScriptWorker/runScript',
+                [scriptProfile: 'EXPRESSION', scriptBody: '6 * 7', inputJson: '{}', moquiSessionToken: 'TestSessionToken'], 'post')
+        assertFalse(post.errorMessages as boolean, "errors: ${post.errorMessages}")
+        // A real servlet session drops a value that is not Serializable (WebUtilities warns and the result never
+        // shows, as on UAT 2026-10-31); the harness stub keeps anything, so check the stored type directly.
+        Object stored = ((org.moqui.impl.screen.ScreenTestImpl) screenTest).sessionAttributes.get('darpanScriptWorkerLastRun')
+        assertTrue(stored instanceof String, "the last run is stored as JSON text, got ${stored?.getClass()}")
+
+        String out = screenTest.render('ScriptWorker', [:], 'get').output ?: ''
+        assertTrue(out.contains('Result') && out.contains('42'), out.take(2000))
+        assertTrue(out.contains('ran in the inside Moqui'), 'no worker URL in the test JVM, and the screen says so')
     }
 
     private static void createUserInGroup(String userId, String userGroupId) {

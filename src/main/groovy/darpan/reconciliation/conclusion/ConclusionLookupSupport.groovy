@@ -41,6 +41,32 @@ class ConclusionLookupSupport {
         }
     }
 
+    /** DAR-BE-174 security review: the only extract options a lookup may carry, and the shape of a field name. */
+    static final List<String> PARAMETER_KEYS = ["keepRecordFields"].asImmutable()
+    private static final String FIELD_NAME = /[A-Za-z][A-Za-z0-9_]{0,59}/
+
+    /**
+     * The options a lookup hands its extract: keepRecordFields (field names) only. Applied every time a lookup is asked,
+     * so a stored lookup cannot name an output location, a run's ids or anything else the extract reads.
+     */
+    static Map safeParameters(Map lookup) {
+        Object fields = lookup?.parameters instanceof Map ? ((Map) lookup.parameters).get("keepRecordFields") : null
+        if (!(fields instanceof List)) return [:]
+        List<String> names = ((List) fields).collect { it?.toString()?.trim() }.findAll { it ==~ FIELD_NAME } as List<String>
+        return names ? [keepRecordFields: names] : [:]
+    }
+
+    /** On save: parameters are refused, in words, unless they are keepRecordFields as a list of field names. */
+    static void requireSafeParameters(Map lookup) {
+        if (lookup?.parameters == null) return
+        Map p = (Map) lookup.parameters
+        List<String> other = p.keySet().collect { it.toString() }.findAll { !(it in PARAMETER_KEYS) }
+        Object fields = p.get("keepRecordFields")
+        if (other || (fields != null && !(fields instanceof List && ((List) fields).every { it?.toString() ==~ FIELD_NAME }))) {
+            throw new IllegalArgumentException("Lookup ${lookup.name}'s parameters take only keepRecordFields, a list of field names.")
+        }
+    }
+
     /**
      * DAR-BE-174. Files one answered record under its key: a `many` lookup (an order's items) keeps every record as a list,
      * any other keeps one record per key, as before. A record without a key is dropped.

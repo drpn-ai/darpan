@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Upgrade data for Darpan 2.1.9 (from 2.1.8): none. Generated from backend compare range v2.1.8..HEAD; no darpan seed
+Upgrade data for Darpan 2.1.10 (from 2.1.9): none. Generated from backend compare range v2.1.9..HEAD; no darpan seed
 record changed. loadDarpanUpgradeData is a no-op for this release.
 -->
 <entity-facade-xml type="darpan-seed">

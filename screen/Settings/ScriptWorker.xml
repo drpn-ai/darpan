@@ -9,6 +9,7 @@
         default-menu-title="Script Worker" require-authentication="true">
 
     <parameter name="example"/>
+    <parameter name="savedId"/>
 
     <!-- Throw, not <return error>: Moqui still runs a transition's actions after an always-actions error message
          (ScreenDefinition: "run actions if any defined ... even if" errors), so only an exception stops both paths. -->
@@ -29,9 +30,10 @@
     <transition name="runScript">
         <actions>
             <if condition="!darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)"><return error="true" message="Super-admin only."/></if>
+            <!-- A loaded saved script runs by its id (the stored body and sample unless edited here). -->
             <service-call name="facade.TenantScriptFacadeServices.run#TenantScript" out-map="runOut"
-                    in-map="[scriptProfile: scriptProfile, scriptBody: scriptBody, inputSource: 'SAMPLE', inputJson: inputJson ?: '{}']"/>
-            <set field="lastRun" from="[scriptProfile: scriptProfile, scriptBody: scriptBody, inputJson: inputJson,
+                    in-map="[tenantScriptId: tenantScriptId ?: null, scriptProfile: scriptProfile, scriptBody: scriptBody, inputSource: 'SAMPLE', inputJson: inputJson ?: '{}']"/>
+            <set field="lastRun" from="[tenantScriptId: tenantScriptId, scriptProfile: scriptProfile, scriptBody: scriptBody, inputJson: inputJson,
                     run: runOut?.run, ranAt: ec.user.nowTimestamp, workerUrl: darpan.script.ScriptWorker.configuredUrl()]"/>
             <script>ec.web.sessionAttributes.put('darpanScriptWorkerLastRun', lastRun)</script>
         </actions>
@@ -60,9 +62,19 @@
                 escape: [scriptProfile: 'SCRIPT', scriptBody: '\'\'.class.forName(\'java.lang.Runtime\')', inputJson: '{}'],
                 loop  : [scriptProfile: 'SCRIPT', scriptBody: 'while (true) {}', inputJson: '{}']]"/>
 
-        <!-- The last run (shown once), else the chosen example, else 1 + 1. -->
+        <!-- The active tenant's saved scripts (the sample data), through the same facade the app's Scripts page uses. -->
+        <set field="savedScripts" from="[]"/>
+        <if condition="activeTenantUserGroupId">
+            <service-call name="facade.TenantScriptFacadeServices.list#TenantScripts" out-map="listOut"/>
+            <set field="savedScripts" from="listOut?.scripts ?: []"/>
+        </if>
+        <set field="savedPick" from="savedId ? savedScripts.find { it.tenantScriptId == savedId } : null"/>
+        <set field="savedValues" from="savedPick ? [tenantScriptId: savedPick.tenantScriptId, scriptProfile: savedPick.scriptProfile,
+                scriptBody: savedPick.scriptBody, inputJson: savedPick.sampleInputJson ?: '{}'] : null"/>
+
+        <!-- The last run (shown once), else a loaded saved script, else the chosen example, else 1 + 1. -->
         <set field="lastRun" from="ec.web.sessionAttributes.remove('darpanScriptWorkerLastRun')"/>
-        <set field="formValues" from="lastRun ?: (examples[example] ?: examples.one)"/>
+        <set field="formValues" from="lastRun ?: (savedValues ?: (examples[example] ?: examples.one))"/>
         <if condition="lastRun">
             <set field="run" from="lastRun.run ?: [:]"/>
             <set field="runVerdict" from="run.ok ? 'ok' : ('stopped: ' + (run.error?.kind ?: 'unknown'))"/>
@@ -109,9 +121,25 @@
                 </widgets>
             </section>
 
+            <section name="SavedScripts" condition="activeTenantUserGroupId">
+                <widgets>
+                    <label text="Saved scripts (${savedScripts.size()})" type="h4"/>
+                    <label text="None saved for this tenant yet." type="p" style="text-muted" condition="!savedScripts"/>
+                    <section-iterate name="SavedScriptRows" list="savedScripts" entry="saved">
+                        <widgets>
+                            <container>
+                                <link url="." text="Load" parameter-map="[savedId: saved.tenantScriptId]" link-type="anchor"/>
+                                <label text="  ${saved.scriptName} · ${saved.scriptProfile}${saved.description ? ' · ' + saved.description : ''}" type="span"/>
+                            </container>
+                        </widgets>
+                    </section-iterate>
+                </widgets>
+            </section>
+
             <section name="RunScript">
                 <widgets>
                     <label text="Run a script" type="h4"/>
+                    <label text="Loaded: saved script ${formValues.tenantScriptId}" type="p" style="text-info" condition="formValues?.tenantScriptId"/>
                     <container>
                         <label text="Examples:" type="span" style="text-muted"/>
                         <link url="." text="1 + 1" parameter-map="[example: 'one']" link-type="anchor"/>
@@ -120,6 +148,7 @@
                         <link url="." text="Endless loop" parameter-map="[example: 'loop']" link-type="anchor"/>
                     </container>
                     <form-single name="RunScriptForm" transition="runScript" map="formValues">
+                        <field name="tenantScriptId"><default-field><hidden/></default-field></field>
                         <field name="scriptProfile">
                             <default-field title="Profile">
                                 <drop-down allow-empty="false">

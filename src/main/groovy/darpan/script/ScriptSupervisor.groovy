@@ -34,10 +34,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * runs on a small dedicated pool, never on the caller's thread, under a unit budget (ScriptArithmetic), text and
  * collection caps, and a wall-clock stop.
  *
- * <p>MVP boundary: SCRIPT runs in Moqui's JVM. The caps bound what one evaluation can hold, but JEXL has no heap limit
- * of its own, so the design's worker JVM (§4, stage 2a) is still the gate before tenants outside Darpan author
- * SCRIPT-profile code. Evaluations never open a transaction or touch the database: the caller reads the input
- * first and writes nothing.</p>
+ * <p>Where it runs: in Moqui's JVM by default. The caps bound what one evaluation can hold, but JEXL has no heap limit
+ * of its own, so tenants outside Darpan authoring SCRIPT-profile code need the worker JVM (§4, stage 2a; ScriptWorker,
+ * DAR-BE-169), switched on by a worker URL. Evaluations never open a transaction or touch the database: the caller
+ * reads the input first and writes nothing.</p>
  */
 @CompileStatic
 class ScriptSupervisor {
@@ -145,8 +145,15 @@ class ScriptSupervisor {
     /**
      * Runs the script against input (any JSON-shaped value, copied before the script sees it).
      * {ok, profile, result, units, elapsedMs, logs, error: {kind, message, line, column}}. Never throws.
+     * With a worker URL configured the script runs in the worker JVM (ScriptWorker) and nowhere else.
      */
     static Map<String, Object> evaluate(Object profile, String body, Object input) {
+        String workerUrl = ScriptWorker.configuredUrl()
+        return workerUrl ? ScriptWorker.call(workerUrl, profile, body, input) : evaluateHere(profile, body, input)
+    }
+
+    /** evaluate in this JVM: Moqui's when no worker is configured, or the worker's own. */
+    static Map<String, Object> evaluateHere(Object profile, String body, Object input) {
         Map<String, Object> checked = validate(profile, body)
         if (!checked.ok) return notRun(checked)
         String p = checked.profile as String

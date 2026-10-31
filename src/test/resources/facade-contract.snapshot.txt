@@ -2525,6 +2525,7 @@ SERVICE save RunConclusions
   allow-remote: true
   IN:
     conclusions : List
+    lookups : List
     savedRunId : String [required]
   OUT:
     errors : List

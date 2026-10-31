@@ -21597,6 +21597,13 @@
                         "items": {
                             
                         }
+                    },
+                    "lookups": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "DAR-BE-174. The run's lookups, replaced when given (an empty\n                list clears them, absent keeps them): [{name, subject FILE_1|FILE_2, idField, systemEnumId, sourceConfigId,\n                keyField, many (every record under the key, as a list), parameters}]. A condition reads one as\n                name.field. Refused in words for a part missing, two of one name, or a system that cannot be asked by\n                id."
                     }
                 },
                 "required": [

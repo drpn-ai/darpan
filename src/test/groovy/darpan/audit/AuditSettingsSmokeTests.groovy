@@ -333,6 +333,62 @@ class AuditSettingsSmokeTests {
         }
     }
 
+    // DAR-BE-172 (sm-darpan 2026-10-31, audit order-sync-month): the first play of an audit makes its automations, and
+    // RunAdmission's pool starts the run at once on another thread. Made inside run#Audit's own transaction, the
+    // automation was not committed yet, so that thread read "Automation ... not found", the error went to the log only
+    // and the play did nothing. This executor starts each run on its own thread while run#Audit is still going.
+    @Test
+    @Order(13)
+    void anAuditsFirstPlayRunsTheAutomationItMakes() {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.Audit", [auditId: "${MINE}_FP".toString(), companyUserGroupId: MINE, auditCode: "first-play",
+                    auditName: "First play", periodEnumId: "AUDP_MONTH"])
+            insert("darpan.audit.AuditStatement", [statementId: "${MINE}_FP_R1".toString(), companyUserGroupId: MINE,
+                    auditId: "${MINE}_FP".toString(), statementCode: "R1", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM",
+                    sequenceNum: 1L, statementText: "Every Shopify order is in HotWax."])
+            insert("darpan.audit.AuditCheck", [checkId: "TSET_FIRST", companyUserGroupId: MINE, checkCode: "first-play-sync",
+                    label: "first-play-sync", savedRunId: "TSET_RS2", graceDays: 1L])
+            insert("darpan.audit.AuditStatementCheck", [checkId: "TSET_FIRST", statementId: "${MINE}_FP_R1".toString(),
+                    companyUserGroupId: MINE, sequenceNum: 1L])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        assertEquals(null, checkRow("TSET_FIRST").automationId, "a first play: no automation yet")
+
+        // The pool's thread starts at once and run#Audit waits (inside its transaction) until that run reaches its read,
+        // or 30s. It must not wait for the run to END: RunAdmission holds its lock while it starts a run, and the run
+        // takes that lock again to give its slot back.
+        List<Map> seen = Collections.synchronizedList([] as List<Map>)
+        java.util.concurrent.CountDownLatch reachedRead = new java.util.concurrent.CountDownLatch(1)
+        List<Thread> pool = Collections.synchronizedList([] as List<Thread>)
+        RunAdmission admission = new RunAdmission(8, 5, 85, { -> null }, { Runnable r ->
+            Thread thread = new Thread(r, "audit-first-play-run")
+            pool << thread
+            thread.start()
+            reachedRead.await(30L, java.util.concurrent.TimeUnit.SECONDS)
+        } as Executor)
+        AutomationExecutionSupport.setRunAdmission(admission)
+        AutomationExecutionSupport.setSourceExtractor({ runEc, automation, source, window, params ->
+            seen << [automationId: automation.automationId]
+            reachedRead.countDown()
+            throw new IllegalStateException("probe: stop before reading")
+        })
+        try {
+            String today = java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles")).toString()
+            Map played = facade("run#Audit", [audit: "first-play", fromDate: today, thruDate: today])
+            pool.each { Thread t -> t.join(120_000L); assertFalse(t.alive, "the run finished") }
+            assertFalse(played.hadError as boolean, played.errorText as String)
+            String made = checkRow("TSET_FIRST").automationId as String
+            assertNotNull(made, "the play made the check's automation")
+            assertEquals([made], played.runs*.automationId, "the play submits the automation it made")
+            assertTrue(seen*.automationId.contains(made), "the run reached its read instead of 'Automation ${made} not found': ${seen}")
+        } finally {
+            AutomationExecutionSupport.setRunAdmission(null)
+            AutomationExecutionSupport.resetExecutionHooks()
+        }
+    }
+
     private static void runOnItsOwnThread(Runnable work) {
         Thread thread = new Thread(work, "audit-settings-run")
         thread.start()

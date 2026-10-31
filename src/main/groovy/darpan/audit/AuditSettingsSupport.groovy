@@ -139,10 +139,19 @@ class AuditSettingsSupport {
             ec.message.addError(e.message)
             return []
         }
-        ensureAutomations(ec, tenantId, audit)
-        List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten() as List<Map>
+        // DAR-BE-172: the automations a first play makes commit in their OWN transaction before a run is handed to
+        // RunAdmission, whose pool starts it on another thread at once. Made in the request's transaction, that thread
+        // could not see its automation yet ("Automation ... not found", in the log only) and the play did nothing. The
+        // rows are read in that transaction too: on MySQL the request's own snapshot would still hide them.
+        List<Map> automations = (List<Map>) AutomationRuntimeSupport.runInNewTransaction(ec,
+                "Could not make audit ${audit.auditCode}'s automations".toString()) { ->
+            ensureAutomations(ec, tenantId, audit)
+            List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten() as List<Map>
+            return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>)
+                    .collect { [automationId: it.automationId, savedRunId: it.savedRunId] }
+        }
         Timestamp now = ec.user.nowTimestamp
-        return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>).collect { automation ->
+        return automations.collect { Map automation ->
             Map submitted = AutomationExecutionSupport.submitExecuteAutomationService(ec, [automationId: automation.automationId,
                     scheduledFireTime: now, auditWindowFromDate: Date.valueOf(from), auditWindowThruDate: Date.valueOf(thru),
                     auditFullRead: fullRead], tenantId)

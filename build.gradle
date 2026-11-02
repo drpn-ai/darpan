@@ -51,7 +51,7 @@ dependencies {
     // moqui-sftp is deliberately NOT a compile dependency (ADR 0001 rule 1: plugins depend on
     // core, never the reverse). SftpAutomationSupport resolves org.moqui.sftp.SftpClient at
     // runtime from the Moqui classloader; the component is a deploy-time plugin.
-    implementation 'org.apache.spark:spark-sql_2.12:3.5.1'
+    implementation 'org.apache.spark:spark-sql_2.13:4.2.1'
     // Spark 3.5.x is built against the legacy javax.servlet API (UI + MetricsServlet); Moqui 4 only ships
     // jakarta.servlet, so provide javax.servlet-api for Spark. Different namespace — coexists with jakarta.
     implementation 'javax.servlet:javax.servlet-api:4.0.1'

@@ -103,6 +103,18 @@ class DataSourceRunnerTests {
     }
 
     @Test
+    void childReadsInParallelGiveTheSameRecordsInTheSameOrder() {
+        Map d = AcmeLedgerFixture.definition()
+        d.steps = ((List<Map>) d.steps).collect { Map st ->
+            st.kind == "query" && st.id != "invoices" ? st + [bind: [ids: ((Map) ((Map) st.bind).ids) + [parallel: 3, chunk: 1]]] : st
+        }
+        Map serial = runIt([mode: "ids", keys: ["A1", "A2", "A3"], keyField: "invoiceNo"])
+        Map par = runIt([mode: "ids", keys: ["A1", "A2", "A3"], keyField: "invoiceNo"], new AcmeLedgerFixture.ScriptedTransport(), d)
+        assertEquals(serial.records, par.records)
+        assertEquals(serial.counts, par.counts)
+    }
+
+    @Test
     void aFailingPieceFailsTheWholeRun() {
         long from = java.time.Instant.parse("2026-10-01T00:00:00Z").toEpochMilli()
         long thru = java.time.Instant.parse("2026-10-04T00:00:00Z").toEpochMilli()

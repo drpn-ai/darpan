@@ -250,11 +250,35 @@ class DataSourceRunner {
         Map b = (Map) ((Map) step.bind).ids
         String[] from = ((String) b.from).split(/\./, 2)
         List<String> ids = cleanIds(((List<Map>) (ctx.get(from[0]) ?: [])).collectMany { JsonPathValues.values(it, from[1]) })
-        List<Map> found = []
-        ids.collate(((b.chunk ?: 100) as Number).intValue()).each { List<String> chunk ->
-            readPages(step, fill((Map) b.variables, [ids: chunk.join((b.separator ?: ",") as String), keyField: ""]), { List<Map> page -> found.addAll(page) })
+        List<List<String>> chunks = ids.collate(((b.chunk ?: 100) as Number).intValue())
+        List<List<Map>> byChunk = chunks.collect { new ArrayList<Map>() }
+        Closure readChunk = { int i ->
+            readPages(step, fill((Map) b.variables, [ids: chunks[i].join((b.separator ?: ",") as String), keyField: ""]),
+                    { List<Map> page -> byChunk[i].addAll(page) })
         }
-        return found
+        int parallel = Math.max(1, Math.min(((b.parallel ?: 1) as Number).intValue(), chunks.size()))
+        if (parallel == 1) {
+            chunks.indices.each { readChunk.call(it) }
+        } else {
+            // A step's chunks for one batch side by side (bind.ids.parallel), each into its own list, so the records keep
+            // chunk order whichever answers first; the first failure is thrown after the others stop.
+            java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger()
+            java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>()
+            List<Thread> threads = (1..parallel).collect { int n ->
+                Thread t = new Thread({ ->
+                    int i
+                    while (failure.get() == null && (i = next.getAndIncrement()) < chunks.size()) {
+                        try { readChunk.call(i) } catch (Throwable e) { failure.compareAndSet(null, e) }
+                    }
+                } as Runnable, "data-source-${step.id}-${n}")
+                t.daemon = true
+                t.start()
+                t
+            }
+            threads.each { it.join() }
+            if (failure.get() != null) throw failure.get()
+        }
+        return byChunk.flatten() as List<Map>
     }
 
     private static void unwrap(Map step, List<Map> input) {

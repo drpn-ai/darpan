@@ -12,6 +12,7 @@ import java.lang.management.ManagementFactory
  * Tenant scripts run last: a script starts only while Darpan's own work has room. Busy when reconciliation runs are
  * queued or at their cap, when heap after GC is at or above darpan.scripts.holdAtHeapPercent (70, below the 85 runs
  * hold at), or when process CPU is at or above darpan.scripts.holdAtCpuPercent (75). A value of 101 turns a signal off.
+ * When heap after GC is unknown, live heap is held at 85% instead, so the heap signal never fails open.
  *
  * NOTE: Java thread priority is not used, the JVM ignores it on Linux.
  */
@@ -25,8 +26,10 @@ class ScriptLoadGate {
     static final int DEFAULT_HOLD_AT_HEAP_PERCENT = 70
     static final int DEFAULT_HOLD_AT_CPU_PERCENT = 75
     static final int DEFAULT_SCHEDULED_MAX_WAIT_MINUTES = 60
+    // NOTE: live heap reads ~90% on a healthy JVM just before a young GC, so it only backs up the after-GC reading
+    static final int LIVE_HEAP_BACKSTOP_PERCENT = 85
 
-    /** {runsRunning, runsQueued, runsCap, heapPercent, cpuPercent}, a null value is unknown; replaced in tests */
+    /** {runsRunning, runsQueued, runsCap, heapPercent, liveHeapPercent, cpuPercent}, a null value is unknown; replaced in tests */
     static Closure<Map<String, Object>> probe = { -> defaultReadings() }
 
     static int holdAtHeapPercent() { intProperty(HEAP_PROPERTY, DEFAULT_HOLD_AT_HEAP_PERCENT) }
@@ -45,13 +48,16 @@ class ScriptLoadGate {
         }
         String reason = null
         Integer queued = r.runsQueued as Integer, running = r.runsRunning as Integer, cap = r.runsCap as Integer
-        Integer heap = r.heapPercent as Integer, cpu = r.cpuPercent as Integer
+        Integer heap = r.heapPercent as Integer, liveHeap = r.liveHeapPercent as Integer, cpu = r.cpuPercent as Integer
+        boolean heapOn = holdAtHeapPercent() <= 100
         if (queued != null && queued > 0) {
             reason = "${queued} reconciliation run${queued == 1 ? ' is' : 's are'} waiting to start".toString()
         } else if (running != null && cap != null && running >= cap) {
             reason = "reconciliation runs are at their limit (${running} of ${cap})".toString()
-        } else if (heap != null && heap >= holdAtHeapPercent()) {
+        } else if (heapOn && heap != null && heap >= holdAtHeapPercent()) {
             reason = "memory is ${heap}% used (scripts wait above ${holdAtHeapPercent()}%)".toString()
+        } else if (heapOn && heap == null && liveHeap != null && liveHeap >= LIVE_HEAP_BACKSTOP_PERCENT) {
+            reason = "memory is ${liveHeap}% used (scripts wait above ${LIVE_HEAP_BACKSTOP_PERCENT}%)".toString()
         } else if (cpu != null && cpu >= holdAtCpuPercent()) {
             reason = "CPU is at ${cpu}% (scripts wait above ${holdAtCpuPercent()}%)".toString()
         }
@@ -64,8 +70,10 @@ class ScriptLoadGate {
 
     private static Map<String, Object> defaultReadings() {
         Map<String, Object> runs = RunAdmission.SHARED.snapshot()
-        return [runsRunning: runs.running, runsQueued: runs.queued, runsCap: runs.cap,
-                heapPercent: SystemLoadReader.heapAfterGcPercent(), cpuPercent: processCpuPercent()] as Map<String, Object>
+        Runtime rt = Runtime.runtime
+        Integer liveHeap = rt.maxMemory() > 0 ? (int) Math.round(100d * (rt.totalMemory() - rt.freeMemory()) / rt.maxMemory()) : null
+        return [runsRunning: runs.running, runsQueued: runs.queued, runsCap: runs.cap, heapPercent: SystemLoadReader.heapAfterGcPercent(),
+                liveHeapPercent: liveHeap, cpuPercent: processCpuPercent()] as Map<String, Object>
     }
 
     private static Integer processCpuPercent() {

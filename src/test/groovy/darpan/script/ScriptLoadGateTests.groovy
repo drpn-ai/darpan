@@ -55,6 +55,20 @@ class ScriptLoadGateTests {
     }
 
     @Test
+    void liveHeapBacksUpAnUnknownHeapAfterGc() {
+        System.setProperty(ScriptLoadGate.HEAP_PROPERTY, '70')
+        Map calm = [runsQueued: 0, runsRunning: 1, runsCap: 8, heapPercent: null, cpuPercent: 30]
+        readings(calm + [liveHeapPercent: 84])
+        assertFalse((Boolean) ScriptLoadGate.check().busy)
+        readings(calm + [liveHeapPercent: 85])
+        assertTrue((Boolean) ScriptLoadGate.check().busy)
+        assertTrue(ScriptLoadGate.check().reason.toString().contains('85%'))
+        // a known after-GC reading wins: a young-GC spike in live heap does not hold scripts
+        readings(calm + [heapPercent: 40, liveHeapPercent: 92])
+        assertFalse((Boolean) ScriptLoadGate.check().busy)
+    }
+
+    @Test
     void aBrokenReadingDoesNotStopScripts() {
         ScriptLoadGate.probe = { -> throw new IllegalStateException('no MXBean') }
         assertFalse(ScriptLoadGate.check().busy as boolean)

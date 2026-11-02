@@ -158,7 +158,10 @@ class AutomationEntityContractTests {
     @Test
     void apiSourceEndpointsAreSeededForCreateRunSetup() {
         assertHotWaxOrdersRemote(parse("data/SystemMessageRemoteSeedData.xml"))
-        assertHotWaxOrdersRemote(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
+        // A shipped release's upgrade data is history: it still names the REST endpoint deleted by DAR-BE-052. It must
+        // carry the row; the current seed above carries its GraphQL values.
+        assertNotNull(nodes(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH), "moqui.service.message.SystemMessageRemote")
+                .find { attr(it, "systemMessageRemoteId") == "HOTWAX_ORDERS_API" }, "Missing HotWax orders SystemMessageRemote")
         assertShopifyGraphqlOrdersRemote(parse("data/SystemMessageRemoteSeedData.xml"))
         assertShopifyGraphqlOrdersRemote(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
     }
@@ -343,9 +346,9 @@ class AutomationEntityContractTests {
             attr(it, "systemMessageRemoteId") == "HOTWAX_ORDERS_API"
         }
         assertNotNull(remote, "Missing HotWax orders SystemMessageRemote")
-        assertEquals("Orders API", attr(remote, "description"))
-        assertEquals("{baseUrl}/rest/s1/oms/orders", attr(remote, "sendUrl"))
-        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders", attr(remote, "sendServiceName"))
+        assertEquals("Orders and payments", attr(remote, "description"))
+        assertEquals("{baseUrl}/rest/s1/graphql", attr(remote, "sendUrl"))
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders", attr(remote, "sendServiceName"))
     }
 
     private static void assertOmsSystemSourceLabel(def root) {

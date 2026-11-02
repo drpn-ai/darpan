@@ -87,7 +87,7 @@ class AutomationFacadeSmokeTests {
                 savedRun                : [
                         createMode        : "csv",
                         runName           : "Daily API Saved Run",
-                        file1SystemEnumId : "OMS",
+                        file1SystemEnumId : "OMS_GQL",
                         file2SystemEnumId : "SHOPIFY",
                         file1CompareColumn: "order_id",
                         file2CompareColumn: "order_id",
@@ -100,7 +100,7 @@ class AutomationFacadeSmokeTests {
                         [
                                 fileSide             : "FILE_1",
                                 sourceTypeEnumId     : "AUT_SRC_API",
-                                systemEnumId         : "OMS",
+                                systemEnumId         : "OMS_GQL",
                                 fileTypeEnumId       : "DftCsv",
                                 systemMessageRemoteId: "OMS_REMOTE",
                                 dateFromParameterName: "fromDate",
@@ -127,13 +127,13 @@ class AutomationFacadeSmokeTests {
         // which had a hard-coded special case. That made one system read as its proper name and every
         // other as its machine code — visible side by side in this very assertion. DarpanSystemSource
         // now prefers the description for all of them.
-        assertEquals("API: HotWax via OMS_REMOTE -> Shopify via SHOPIFY_REMOTE", automation.sourceSummary)
+        assertEquals("API: HotWax orders and payments via OMS_REMOTE -> Shopify via SHOPIFY_REMOTE", automation.sourceSummary)
         assertEquals("PT1H", automation.scheduleSummary)
         assertEquals(true, ((Map) automation.permissions).canRunNow)
         assertEquals(2, ((List) automation.sources).size())
         Map<String, Object> file1Source = ((List<Map<String, Object>>) automation.sources).find { it.fileSide == "FILE_1" }
         Map<String, Object> file1Metadata = (Map<String, Object>) new JsonSlurper().parseText(file1Source.safeMetadataJson as String)
-        assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE, file1Metadata.extractServiceName)
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders", file1Metadata.extractServiceName)
         assertEquals("KREWE_OMS", ((Map) file1Metadata.parameters).omsRestSourceConfigId)
         assertEquals("windowStart", file1Source.dateFromParameterName)
         assertEquals("windowEnd", file1Source.dateToParameterName)
@@ -364,21 +364,21 @@ class AutomationFacadeSmokeTests {
             Map<String, Object> optionsResult = callFacade("facade.ReconciliationFacadeServices.list#AutomationSourceOptions", [:])
             assertTrue((Boolean) optionsResult.ok, optionsResult.errors?.toString())
             assertTrue(((List<Map<String, Object>>) optionsResult.sourceConfigs).any {
-                it.sourceConfigId == "KREWE_OMS" && it.sourceConfigType == "HOTWAX_OMS_REST" && it.systemEnumId == "OMS"
+                it.sourceConfigId == "KREWE_OMS" && it.sourceConfigType == "HOTWAX_OMS_GQL" && it.systemEnumId == "OMS_GQL"
             })
 
             // Task 6 (Plan 2): one systemRemotes row per (config x enabled endpoint) now — KREWE_OMS
-            // carries OMS, OMS_RECON_ORDERS, OMS_RETURNS and OMS_TRANSFER_ORDERS rows, so optionKey
+            // carries one row per enabled HotWax GraphQL endpoint, so optionKey
             // alone is no longer unique; systemEnumId picks the canonical orders row specifically.
             Map<String, Object> omsSourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
-                it.optionKey == "KREWE_OMS" && it.systemEnumId == "OMS"
+                it.optionKey == "KREWE_OMS" && it.systemEnumId == "OMS_GQL"
             }
             assertNotNull(omsSourceOption)
             assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-            assertEquals("Orders (REST)", omsSourceOption.label)
+            assertEquals("Orders and payments", omsSourceOption.label)
             assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
-            assertEquals("HOTWAX_OMS_REST", omsSourceOption.sourceConfigType)
-            assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+            assertEquals("HOTWAX_OMS_GQL", omsSourceOption.sourceConfigType)
+            assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
                     ((Map) new JsonSlurper().parseText(omsSourceOption.safeMetadataJson as String)).extractServiceName)
         } finally {
             seedSystemRemotes()
@@ -441,9 +441,9 @@ class AutomationFacadeSmokeTests {
 
         // Endpoint-level rows: parentEnumId points at their owning system.
         [
-                OMS_TRANSFER_ORDERS: "OMS",
-                OMS_RECON_ORDERS   : "OMS",
-                OMS_RETURNS        : "OMS",
+                OMS_GQL            : "OMS",
+                OMS_ORDER_ITEMS_GQL: "OMS",
+                OMS_RETURNS_GQL    : "OMS",
                 SHOPIFY_RETURN_REFS: "SHOPIFY",
         ].each { String endpointEnumId, String expectedParent ->
             assertTrue(systemsById.containsKey(endpointEnumId), "expected ${endpointEnumId} in systems")
@@ -482,20 +482,20 @@ class AutomationFacadeSmokeTests {
         assertTrue(sftpServers.any { it.sftpServerId == "SHARED_TEST_SFTP" })
         assertFalse(sftpServers.any { it.sftpServerId == "ADMIN_TEST_SFTP" })
         List<Map<String, Object>> sourceConfigs = (List<Map<String, Object>>) optionsResult.sourceConfigs
-        assertTrue(sourceConfigs.any { it.sourceConfigId == "KREWE_OMS" && it.sourceConfigType == "HOTWAX_OMS_REST" && it.systemEnumId == "OMS" })
+        assertTrue(sourceConfigs.any { it.sourceConfigId == "KREWE_OMS" && it.sourceConfigType == "HOTWAX_OMS_GQL" && it.systemEnumId == "OMS_GQL" })
         assertTrue(sourceConfigs.any { it.sourceConfigId == "KREWE_SHOPIFY" && it.sourceConfigType == "SHOPIFY_AUTH" && it.systemEnumId == "SHOPIFY" })
         // Task 6 (Plan 2): one systemRemotes row per (config x enabled endpoint) now — optionKey
-        // alone is no longer unique for KREWE_OMS (also carries OMS_RECON_ORDERS/OMS_RETURNS/
-        // OMS_TRANSFER_ORDERS rows), so systemEnumId picks the canonical orders row specifically.
+        // alone is no longer unique for KREWE_OMS (one row per enabled HotWax GraphQL endpoint),
+        // so systemEnumId picks the orders row specifically.
         Map<String, Object> omsSourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
-            it.optionKey == "KREWE_OMS" && it.systemEnumId == "OMS"
+            it.optionKey == "KREWE_OMS" && it.systemEnumId == "OMS_GQL"
         }
         assertNotNull(omsSourceOption)
         assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-        assertEquals("Orders (REST)", omsSourceOption.label)
+        assertEquals("Orders and payments", omsSourceOption.label)
         assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
-        assertEquals("HOTWAX_OMS_REST", omsSourceOption.sourceConfigType)
-        assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+        assertEquals("HOTWAX_OMS_GQL", omsSourceOption.sourceConfigType)
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
                 ((Map) new JsonSlurper().parseText(omsSourceOption.safeMetadataJson as String)).extractServiceName)
         assertEquals("windowStart", omsSourceOption.dateFromParameterName)
         assertEquals("windowEnd", omsSourceOption.dateToParameterName)
@@ -627,11 +627,11 @@ class AutomationFacadeSmokeTests {
     void apiRuleSetRunRequiresAndPersistsSelectedPrimaryIdExpression() {
         Map<String, Object> createResult = callFacade("facade.ReconciliationFacadeServices.create#RuleSetRun", [
                 runName                   : "Automation API Primary ID",
-                file1SystemEnumId         : "OMS",
+                file1SystemEnumId         : "OMS_GQL",
                 file1SourceTypeEnumId     : "AUT_SRC_API",
                 file1SystemMessageRemoteId: "OMS_REMOTE",
                 file1SourceConfigId       : "KREWE_OMS",
-                file1SourceConfigType     : "HOTWAX_OMS_REST",
+                file1SourceConfigType     : "HOTWAX_OMS_GQL",
                 file1PrimaryIdExpression  : "\$.records[*].orderId",
                 file2SystemEnumId         : "SHOPIFY",
                 file2FileTypeEnumId       : "DftCsv",
@@ -646,7 +646,7 @@ class AutomationFacadeSmokeTests {
         assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
         assertEquals("OMS_REMOTE", file1Option.systemMessageRemoteId)
         assertEquals("KREWE_OMS", file1Option.sourceConfigId)
-        assertEquals("HOTWAX_OMS_REST", file1Option.sourceConfigType)
+        assertEquals("HOTWAX_OMS_GQL", file1Option.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Option.idFieldExpression)
 
         def file1Source = ec.entity.find("darpan.rule.RuleSetCompareSource")
@@ -658,13 +658,13 @@ class AutomationFacadeSmokeTests {
         assertEquals("AUT_SRC_API", file1Source.sourceTypeEnumId)
         assertEquals("OMS_REMOTE", file1Source.systemMessageRemoteId)
         assertEquals("KREWE_OMS", file1Source.sourceConfigId)
-        assertEquals("HOTWAX_OMS_REST", file1Source.sourceConfigType)
+        assertEquals("HOTWAX_OMS_GQL", file1Source.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Source.primaryIdExpression)
 
         ec.message.clearErrors()
         Map<String, Object> missingPrimaryIdResult = callFacade("facade.ReconciliationFacadeServices.create#RuleSetRun", [
                 runName                   : "Automation Missing API Primary ID",
-                file1SystemEnumId         : "OMS",
+                file1SystemEnumId         : "OMS_GQL",
                 file1SourceTypeEnumId     : "AUT_SRC_API",
                 file1SystemMessageRemoteId: "OMS_REMOTE",
                 file2SystemEnumId         : "SHOPIFY",
@@ -747,11 +747,11 @@ class AutomationFacadeSmokeTests {
     void connectorKeysAreFoldedOnCreateAndBareStoredKeysAreRepaired() {
         Map<String, Object> created = callFacade("facade.ReconciliationFacadeServices.create#RuleSetRun", [
                 runName                   : "Seed-shaped connector run",
-                file1SystemEnumId         : "OMS",
+                file1SystemEnumId         : "OMS_GQL",
                 file1SourceTypeEnumId     : "AUT_SRC_API",
                 file1SystemMessageRemoteId: "OMS_REMOTE",
                 file1SourceConfigId       : "KREWE_OMS",
-                file1SourceConfigType     : "HOTWAX_OMS_REST",
+                file1SourceConfigType     : "HOTWAX_OMS_GQL",
                 file1RecordRootExpression : "records",
                 file1PrimaryIdExpressions : ["omsOrderId", "orderItemSeqId"],
                 file2SystemEnumId         : "SHOPIFY",
@@ -787,15 +787,15 @@ class AutomationFacadeSmokeTests {
         Map<String, Object> saved = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
                 automationName          : "Replay API Orders",
                 inputModeEnumId         : "AUT_IN_API_RANGE",
-                savedRun                : [createMode: "csv", runName: "Replay API Saved Run", file1SystemEnumId: "OMS",
+                savedRun                : [createMode: "csv", runName: "Replay API Saved Run", file1SystemEnumId: "OMS_GQL",
                                            file2SystemEnumId: "SHOPIFY", file1CompareColumn: "order_id", file2CompareColumn: "order_id"],
                 scheduleExpr            : "PT1H",
                 relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
                 relativeWindowCount     : 1,
                 windowTimeZone          : "UTC",
-                sources                 : ["FILE_1": "OMS", "FILE_2": "SHOPIFY"].collect { String side, String system ->
-                    [fileSide: side, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: system, fileTypeEnumId: "DftCsv",
-                     systemMessageRemoteId: "${system}_REMOTE".toString(), dateFromParameterName: "fromDate", dateToParameterName: "toDate"]
+                sources                 : ["FILE_1": ["OMS_GQL", "OMS_REMOTE"], "FILE_2": ["SHOPIFY", "SHOPIFY_REMOTE"]].collect { String side, List system ->
+                    [fileSide: side, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: system[0], fileTypeEnumId: "DftCsv",
+                     systemMessageRemoteId: system[1], dateFromParameterName: "fromDate", dateToParameterName: "toDate"]
                 },
         ])
         assertTrue((Boolean) saved.ok, saved.errors?.toString())
@@ -827,14 +827,27 @@ class AutomationFacadeSmokeTests {
     // A state-based automation defines its population by status on BOTH sides; a side that still
     // needs a date window (i.e. its connector does not declare supportsStateExtract) makes the diff
     // compare two different populations. These exercise validateStateModeSources directly against the
-    // real SourceSystemConnector registry rows seeded in setup() (OMS_TRANSFER_ORDERS is the only
-    // enabled connector with supportsStateExtract="Y" — see data/SourceSystemConnectorSeedData.xml).
+    // SourceSystemConnector registry. No seeded connector declares supportsStateExtract since the HotWax REST
+    // transfer-order connector was deleted (DAR-BE-052), so a test-only row stands in for one.
+
+    private static final String STATE_CAPABLE = "STATE_CAPABLE_TEST"
+
+    private void seedStateCapableConnector() {
+        upsertEntity(darpan.reconciliation.automation.SourceSystemConnectorSupport.ENTITY_NAME, [systemEnumId: STATE_CAPABLE], [
+                systemEnumId        : STATE_CAPABLE,
+                extractServiceName  : "reconciliation.StateTestExtractionServices.extract#StateTestRecords",
+                supportsStateExtract: "Y",
+                statusParameterName : "statusIds",
+                enabled             : "Y",
+        ])
+    }
 
     @Test
     void stateModeAutomationRejectsASideThatCannotDoStateExtraction() {
+        seedStateCapableConnector()
         List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
                 [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
-                [[fileSide: "FILE_1", systemEnumId: "OMS_TRANSFER_ORDERS"],
+                [[fileSide: "FILE_1", systemEnumId: STATE_CAPABLE],
                  [fileSide: "FILE_2", systemEnumId: "SHOPIFY"]])
 
         assertEquals(1, errors.size())
@@ -844,10 +857,11 @@ class AutomationFacadeSmokeTests {
 
     @Test
     void stateModeAutomationAcceptsTwoStateCapableSides() {
+        seedStateCapableConnector()
         List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
                 [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
-                [[fileSide: "FILE_1", systemEnumId: "OMS_TRANSFER_ORDERS"],
-                 [fileSide: "FILE_2", systemEnumId: "OMS_TRANSFER_ORDERS"]])
+                [[fileSide: "FILE_1", systemEnumId: STATE_CAPABLE],
+                 [fileSide: "FILE_2", systemEnumId: STATE_CAPABLE]])
 
         assertEquals([], errors)
     }
@@ -866,9 +880,10 @@ class AutomationFacadeSmokeTests {
     void stateModeAutomationTreatsAnUnresolvableConnectorAsIncapableRatherThanThrowing() {
         // A systemEnumId with no SourceSystemConnector row (typo, retired system, or a disabled row)
         // must fail the same actionable way as a real-but-window-only connector, never throw.
+        seedStateCapableConnector()
         List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
                 [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
-                [[fileSide: "FILE_1", systemEnumId: "OMS_TRANSFER_ORDERS"],
+                [[fileSide: "FILE_1", systemEnumId: STATE_CAPABLE],
                  [fileSide: "FILE_2", systemEnumId: "NOT_A_REAL_SYSTEM"]])
 
         assertEquals(1, errors.size())
@@ -976,9 +991,9 @@ class AutomationFacadeSmokeTests {
         ])
         upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API"], [
                 systemMessageRemoteId: "HOTWAX_ORDERS_API",
-                description          : "Orders API",
-                sendUrl              : "{baseUrl}/rest/s1/oms/orders",
-                sendServiceName      : AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+                description          : "Orders and payments",
+                sendUrl              : "{baseUrl}/rest/s1/graphql",
+                sendServiceName      : "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
         ])
         upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "SHOPIFY_REMOTE"], [
                 systemMessageRemoteId: "SHOPIFY_REMOTE",
@@ -1143,7 +1158,7 @@ class AutomationFacadeSmokeTests {
                 inputModeEnumId         : "AUT_IN_API_RANGE",
                 savedRun                : [
                         runName            : "${automationName} Run".toString(),
-                        file1SystemEnumId       : "OMS",
+                        file1SystemEnumId       : "OMS_GQL",
                         file1SchemaFileName     : "run-schema-oms.json",
                         file1PrimaryIdExpression: "order_id",
                         file2SystemEnumId       : "SHOPIFY",
@@ -1155,7 +1170,7 @@ class AutomationFacadeSmokeTests {
                 relativeWindowCount     : 1,
                 windowTimeZone          : "UTC",
                 sources                 : [
-                        [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS",
+                        [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS_GQL",
                          fileTypeEnumId: "DftCsv", systemMessageRemoteId: "OMS_REMOTE"],
                         [fileSide: "FILE_2", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "SHOPIFY",
                          fileTypeEnumId: "DftCsv", systemMessageRemoteId: "SHOPIFY_REMOTE"],
@@ -1347,7 +1362,7 @@ class AutomationFacadeSmokeTests {
                     relativeWindowCount     : 1,
                     windowTimeZone          : "UTC",
                     sources                 : [
-                            [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS",
+                            [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS_GQL",
                              fileTypeEnumId: "DftCsv", systemMessageRemoteId: "OMS_REMOTE"],
                             [fileSide: "FILE_2", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "SHOPIFY",
                              fileTypeEnumId: "DftCsv", systemMessageRemoteId: "SHOPIFY_REMOTE"],

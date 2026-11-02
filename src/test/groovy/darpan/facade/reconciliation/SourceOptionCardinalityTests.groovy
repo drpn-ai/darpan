@@ -87,20 +87,20 @@ class SourceOptionCardinalityTests {
         List<Map<String, Object>> options = AutomationFacadeSupport.listSourceConfigOptions(ec)
                 .findAll { it.sourceConfigId == CONFIG_ID }
 
-        // DAR-BE-050 added OMS_ORDER_LINE_UNITS, DAR-BE-062 OMS_ORDER_ITEMS, DAR-BE-064 OMS_GQL, DAR-BE-040 OMS_RETURNS_GQL. The list is spelled out rather than counted on
+        // HotWax is read over GraphQL only (DAR-BE-052). The list is spelled out rather than counted on
         // purpose: this test exists to make a new endpoint VISIBLE, so one must be added here
         // deliberately rather than absorbed by a size() assertion that would never notice.
-        assertEquals(["OMS", "OMS_GQL", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_RETURNS_GQL", "OMS_TRANSFER_ORDERS"],
+        assertEquals(["OMS_GQL", "OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL", "OMS_RETURNS_GQL"],
                 options.collect { it.systemEnumId }.sort())
     }
 
     @Test
     void eachOptionCarriesItsOwnConnectorFields() {
         Map<String, Object> returnsOption = AutomationFacadeSupport.listSourceConfigOptions(ec)
-                .find { it.sourceConfigId == CONFIG_ID && it.systemEnumId == "OMS_RETURNS" }
+                .find { it.sourceConfigId == CONFIG_ID && it.systemEnumId == "OMS_RETURNS_GQL" }
 
         assertNotNull(returnsOption, "The returns endpoint must appear as its own option row")
-        assertEquals("HOTWAX_OMS_REST_RETURNS", returnsOption.sourceConfigType)
+        assertEquals("HOTWAX_OMS_GQL_RETURNS", returnsOption.sourceConfigType)
     }
 
     @Test
@@ -112,26 +112,27 @@ class SourceOptionCardinalityTests {
         try {
             ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
                     .setAll([configTypeEnumId  : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
-                             configId          : CONFIG_ID, systemEnumId: "OMS_TRANSFER_ORDERS",
+                             configId          : CONFIG_ID, systemEnumId: "OMS_RETURNS_GQL",
                              companyUserGroupId: TENANT, isEnabled: "N"]).createOrUpdate()
 
             assertTrue(AutomationFacadeSupport.listSourceConfigOptions(ec)
                     .findAll { it.sourceConfigId == CONFIG_ID }
-                    .every { it.systemEnumId != "OMS_TRANSFER_ORDERS" })
+                    .every { it.systemEnumId != "OMS_RETURNS_GQL" })
         } finally {
             ec.entity.find(SourceEndpointAccessSupport.ENTITY_NAME)
                     .condition([configTypeEnumId: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
-                                configId         : CONFIG_ID, systemEnumId: "OMS_TRANSFER_ORDERS"])
+                                configId         : CONFIG_ID, systemEnumId: "OMS_RETURNS_GQL"])
                     .useCache(false).deleteAll()
         }
     }
 
     @Test
-    void theOmsOrdersOptionIsUnchangedFromBefore() {
+    void theOmsOrdersOptionIsTheGraphQlEndpoint() {
         Map<String, Object> ordersOption = AutomationFacadeSupport.listSourceConfigOptions(ec)
-                .find { it.sourceConfigId == CONFIG_ID && it.systemEnumId == "OMS" }
+                .find { it.sourceConfigId == CONFIG_ID && it.systemEnumId == "OMS_GQL" }
 
-        assertEquals("HOTWAX_OMS_REST", ordersOption.sourceConfigType)
+        assertNotNull(ordersOption, "the HotWax orders option is OMS_GQL")
+        assertEquals("HOTWAX_OMS_GQL", ordersOption.sourceConfigType)
         assertEquals(CONFIG_ID, ordersOption.omsRestSourceConfigId)
     }
 }

@@ -630,7 +630,7 @@ class AutomationExecutionServiceSmokeTests {
     private void seedReturnsAutomation(String automationId, Map<String, String> configIdsBySide) {
         seedSourcePair(automationId,
                 [(AutomationExecutionSupport.FILE_SIDE_1): ["SHOPIFY_RETURN_REFS", "shopifyAuthConfigId"],
-                 (AutomationExecutionSupport.FILE_SIDE_2): ["OMS_RETURNS", "omsRestSourceConfigId"]],
+                 (AutomationExecutionSupport.FILE_SIDE_2): ["OMS_RETURNS_GQL", "omsRestSourceConfigId"]],
                 configIdsBySide)
     }
 
@@ -638,7 +638,7 @@ class AutomationExecutionServiceSmokeTests {
     private void seedExchangeAutomation(String automationId, Map<String, String> configIdsBySide) {
         seedSourcePair(automationId,
                 [(AutomationExecutionSupport.FILE_SIDE_1): ["SHOPIFY", "shopifyAuthConfigId"],
-                 (AutomationExecutionSupport.FILE_SIDE_2): ["OMS", "omsRestSourceConfigId"]],
+                 (AutomationExecutionSupport.FILE_SIDE_2): ["OMS_GQL", "omsRestSourceConfigId"]],
                 configIdsBySide)
     }
 
@@ -1573,8 +1573,8 @@ class AutomationExecutionServiceSmokeTests {
 
     /** A source row shaped like the automation's own, pointing at the seeded OMS_RETURNS connector. */
     private static Map<String, Object> omsReturnsSource() {
-        return [systemEnumId    : "OMS_RETURNS",
-                sourceConfigType: "HOTWAX_OMS_REST_RETURNS",
+        return [systemEnumId    : "OMS_RETURNS_GQL",
+                sourceConfigType: "HOTWAX_OMS_GQL_RETURNS",
                 sourceConfigId  : "SMOKE_OMS_RETURNS_CFG",
                 fileSide        : AutomationExecutionSupport.FILE_SIDE_2] as Map<String, Object>
     }

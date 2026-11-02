@@ -49,6 +49,9 @@ class SavedRunsFacadeSmokeTests {
         // only carries the canonical OMS/SHOPIFY/NETSUITE/SAPI rows.
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
+        // The API sources' SystemMessageRemote rows (HOTWAX_ORDERS_API, SHOPIFY_REMOTE): a deploy loads them with every
+        // darpan-seed file (loadDarpanUpgradeData); this harness loads seed files one by one.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SystemMessageRemoteSeedData.xml")
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
     }
 
@@ -92,9 +95,10 @@ class SavedRunsFacadeSmokeTests {
                 ])
                 .create()
         assertEquals("ACME_AUTH", ReconciliationSavedRunSupport.expectedSourceConfigType(ec, "ACME3"))
-        // canonical OMS/SHOPIFY/NETSUITE stay byte-identical (now sourced from the registry).
-        assertEquals(ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST,
-                ReconciliationSavedRunSupport.expectedSourceConfigType(ec, "OMS"))
+        // canonical SHOPIFY/NETSUITE stay byte-identical (now sourced from the registry). HotWax is read through its
+        // GraphQL endpoints only (DAR-BE-052): OMS is the family, with no connector of its own.
+        assertNull(ReconciliationSavedRunSupport.expectedSourceConfigType(ec, "OMS"))
+        assertEquals("HOTWAX_OMS_GQL", ReconciliationSavedRunSupport.expectedSourceConfigType(ec, "OMS_GQL"))
         assertEquals(ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_SHOPIFY_AUTH,
                 ReconciliationSavedRunSupport.expectedSourceConfigType(ec, "SHOPIFY"))
         assertEquals(ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_NETSUITE_AUTH,
@@ -425,7 +429,7 @@ class SavedRunsFacadeSmokeTests {
                     .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
                     .parameters([
                             runName                   : "Legacy Source Alias",
-                            file1SystemEnumId         : "OMS",
+                            file1SystemEnumId         : "OMS_GQL",
                             file1SourceTypeEnumId     : "AUT_SRC_API",
                             file1SystemMessageRemoteId: "HOTWAX_ORDERS_API",
                             file1SourceConfigId       : "KREWE_OMS_LEGACY",
@@ -452,7 +456,7 @@ class SavedRunsFacadeSmokeTests {
             Map<String, Object> file2Option = ((List<Map<String, Object>>) resolved.savedRun.systemOptions).find { it.fileSide == "FILE_2" }
             assertEquals("OMS", file1Option.enumId)
             assertEquals("SHOPIFY", file2Option.enumId)
-            assertEquals("HOTWAX_OMS_REST", file1Option.sourceConfigType)
+            assertEquals("HOTWAX_OMS_GQL", file1Option.sourceConfigType)
         } finally {
             if (savedRunId && compareScopeId) {
                 deleteRuleSetRunEntities(savedRunId, compareScopeId)
@@ -463,20 +467,21 @@ class SavedRunsFacadeSmokeTests {
 
     @Test
     void apiSourceConfigResolutionCanonicalizesLegacySystemAliases() {
-        seedOmsRestSourceConfig(KREWE, "KREWE_OMS_ALIAS")
+        // HotWax has no legacy alias left to resolve (its REST row is gone, DAR-BE-052), so Shopify carries the case.
+        seedShopifyAuthConfig(KREWE, "KREWE_SHOPIFY_ALIAS")
 
         Map<String, Object> resolution = ReconciliationSavedRunSupport.resolveApiSourceConfig(
                 ec,
                 "file1",
-                "DarSysOms",
-                "KREWE_OMS_ALIAS",
+                "DarSysShopify",
+                "KREWE_SHOPIFY_ALIAS",
                 null,
                 null
         )
 
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        assertEquals("KREWE_OMS_ALIAS", resolution.sourceConfigId)
-        assertEquals("HOTWAX_OMS_REST", resolution.sourceConfigType)
+        assertEquals("KREWE_SHOPIFY_ALIAS", resolution.sourceConfigId)
+        assertEquals("SHOPIFY_AUTH", resolution.sourceConfigType)
     }
 
     @Test
@@ -920,11 +925,6 @@ end'''
                 description: "API source",
                 sequenceNum: 1,
         ])
-        ec.entity.find("moqui.service.message.SystemMessageRemote")
-                .condition("systemMessageRemoteId", "HOTWAX_ORDERS_API")
-                .disableAuthz()
-                .useCache(false)
-                .deleteAll()
         seedOmsRestSourceConfig(KREWE, "KREWE_OMS")
 
         Map<String, Object> createResult = ec.service.sync()
@@ -932,11 +932,11 @@ end'''
                 .parameters([
                         runName                   : "Mixed API File Source",
                         description               : "OMS API against Shopify upload",
-                        file1SystemEnumId         : "OMS",
+                        file1SystemEnumId         : "OMS_GQL",
                         file1SourceTypeEnumId     : "AUT_SRC_API",
                         file1SystemMessageRemoteId: "HOTWAX_ORDERS_API",
                         file1SourceConfigId       : "KREWE_OMS",
-                        file1SourceConfigType     : "HOTWAX_OMS_REST",
+                        file1SourceConfigType     : "HOTWAX_OMS_GQL",
                         file1PrimaryIdExpression  : "\$.records[*].orderId",
                         file2SystemEnumId         : "SHOPIFY",
                         file2FileTypeEnumId       : "DftCsv",
@@ -959,9 +959,9 @@ end'''
         Map<String, Object> file2Option = systemOptions.find { it.fileSide == "FILE_2" }
         assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
         assertEquals("HOTWAX_ORDERS_API", file1Option.systemMessageRemoteId)
-        assertEquals("Orders (REST)", file1Option.systemMessageRemoteLabel)
+        assertEquals("Orders and payments", file1Option.systemMessageRemoteLabel)
         assertEquals("KREWE_OMS", file1Option.sourceConfigId)
-        assertEquals("HOTWAX_OMS_REST", file1Option.sourceConfigType)
+        assertEquals("HOTWAX_OMS_GQL", file1Option.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Option.idFieldExpression)
         assertEquals("DftCsv", file2Option.fileTypeEnumId)
         assertEquals("order_id", file2Option.idFieldExpression)
@@ -975,7 +975,7 @@ end'''
         assertEquals("AUT_SRC_API", file1Source.sourceTypeEnumId)
         assertEquals("HOTWAX_ORDERS_API", file1Source.systemMessageRemoteId)
         assertEquals("KREWE_OMS", file1Source.sourceConfigId)
-        assertEquals("HOTWAX_OMS_REST", file1Source.sourceConfigType)
+        assertEquals("HOTWAX_OMS_GQL", file1Source.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Source.primaryIdExpression)
         assertEquals("DftCsv", file2Source.fileTypeEnumId)
         assertEquals("order_id", file2Source.primaryIdExpression)
@@ -1389,9 +1389,9 @@ end'''
         ])
         upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API"], [
                 systemMessageRemoteId: "HOTWAX_ORDERS_API",
-                description          : "Orders API",
-                sendUrl              : "{baseUrl}/rest/s1/oms/orders",
-                sendServiceName      : "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders",
+                description          : "Orders and payments",
+                sendUrl              : "{baseUrl}/rest/s1/graphql",
+                sendServiceName      : "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
         ])
         seedShopifyAuthConfig(KREWE, "KREWE_SHOPIFY_RETURNS")
         seedOmsRestSourceConfig(KREWE, "KREWE_OMS_RETURNS")
@@ -1407,11 +1407,11 @@ end'''
                         file1SourceConfigId        : "KREWE_SHOPIFY_RETURNS",
                         file1SourceConfigType      : "SHOPIFY_RETURN_REFS_API",
                         file1PrimaryIdExpression   : "\$.refundOrReturnId",
-                        file2SystemEnumId          : "OMS_RETURNS",
+                        file2SystemEnumId          : "OMS_RETURNS_GQL",
                         file2SourceTypeEnumId      : "AUT_SRC_API",
                         file2SystemMessageRemoteId : "HOTWAX_ORDERS_API",
                         file2SourceConfigId        : "KREWE_OMS_RETURNS",
-                        file2SourceConfigType      : "HOTWAX_OMS_REST_RETURNS",
+                        file2SourceConfigType      : "HOTWAX_OMS_GQL_RETURNS",
                         file2PrimaryIdExpression   : "externalId",
                         rules                      : [],
                 ])
@@ -1427,9 +1427,9 @@ end'''
         Map<String, Object> file2Option = systemOptions.find { it.fileSide == "FILE_2" }
 
         // Each side's OWN connector label (SourceSystemConnectorSeedData.xml), not the shared remote's
-        // inherited parent description ("Admin GraphQL Orders" / "Orders API").
+        // inherited parent description ("Admin GraphQL Orders" / "Orders and payments").
         assertEquals("Returns", file1Option.systemMessageRemoteLabel)
-        assertEquals("Refunded returns (REST)", file2Option.systemMessageRemoteLabel)
+        assertEquals("Returns", file2Option.systemMessageRemoteLabel)
 
         // The SYSTEM the endpoint belongs to, read off the enum's parentEnumId. `label` names the
         // ENDPOINT for these two, so without this the manager page's System card has nothing to show

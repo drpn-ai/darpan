@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 class AutomationFacadeSupportExtractServiceAllowlistTests {
 
+    private static final String OMS_GQL_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+
     private static MessageStub callValidate(String extractServiceName, Map<String, Object> parameters = [:]) {
         MessageStub message = new MessageStub()
         def ec = new Expando(message: message, entity: connectorEntityStub())
@@ -29,31 +31,11 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
 
     @Test
     void allowsKnownExtractServices() {
-        assertFalse(callValidate(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+        assertFalse(callValidate(OMS_GQL_EXTRACT_SERVICE,
                 [omsRestSourceConfigId: "OMS_CFG"]).hasError())
         assertFalse(callValidate(AutomationFacadeSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE,
                 [shopifyAuthConfigId: "SHOP_CFG"]).hasError())
         assertFalse(callValidate(AutomationFacadeSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE).hasError())
-    }
-
-    /**
-     * DAR-BE-018. The required-parameter branch keys on the extract service NAME, so a second OMS
-     * connector with its own service name would skip the check entirely and persist a source with no
-     * omsRestSourceConfigId — which then fails at run time, inside a scheduled automation, rather
-     * than at save time in front of the operator.
-     */
-    @Test
-    void reconOrdersSourceStillRequiresItsOmsConfigId() {
-        MessageStub message = callValidate(AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE)
-        assertTrue(message.hasError())
-        assertTrue(message.errors.any { it.contains("omsRestSourceConfigId") },
-                "Unexpected errors: ${message.errors}")
-    }
-
-    @Test
-    void allowsReconOrdersSourceCarryingItsConfigId() {
-        assertFalse(callValidate(AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE,
-                [omsRestSourceConfigId: "OMS_CFG"]).hasError())
     }
 
     @Test
@@ -71,21 +53,17 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
     }
 
     // Minimal entity-facade stub so the save-side allow-list (now registry-derived via
-    // SourceSystemConnectorSupport.allowedServiceNames) resolves the known OMS/SHOPIFY services without a
+    // SourceSystemConnectorSupport.allowedServiceNames) resolves the known OMS_GQL/SHOPIFY services without a
     // Moqui bootstrap. Mirrors data/SourceSystemConnectorSeedData.xml (extract + remoteSend service names).
     private static Object connectorEntityStub() {
         List<Map<String, Object>> rows = [
-                [systemEnumId         : "OMS",
-                 extractServiceName   : AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
-                 remoteSendServiceName: AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+                [systemEnumId         : "OMS_GQL",
+                 extractServiceName   : OMS_GQL_EXTRACT_SERVICE,
+                 remoteSendServiceName: OMS_GQL_EXTRACT_SERVICE,
                  enabled              : "Y"],
                 [systemEnumId         : "SHOPIFY",
                  extractServiceName   : AutomationFacadeSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE,
                  remoteSendServiceName: AutomationFacadeSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE,
-                 enabled              : "Y"],
-                [systemEnumId         : AutomationFacadeSupport.OMS_RECON_SYSTEM_ENUM_ID,
-                 extractServiceName   : AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE,
-                 remoteSendServiceName: AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE,
                  enabled              : "Y"],
         ]
         Expando finder = new Expando()

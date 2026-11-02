@@ -125,14 +125,6 @@ class AutomationFacadeSupportTests {
     // SourceSystemConnectorField registry, which needs a real, seed-backed ExecutionContext that
     // this file's ec-free fixtures do not provide.
 
-    @Test
-    void reconciliationOrdersSystemLabelsItsOwnEndpoint() {
-        String label = AutomationFacadeSupport.endpointLabelForSystem(
-                "OMS_RECON_ORDERS", "HOTWAX_ORDERS_API", null)
-        assertEquals("Sales orders (REST)", label,
-                "the shared remoteId must not make this source display as the plain Orders endpoint")
-    }
-
     // returnsSystemOffersTheChannelPill and returnsPillsNameOnlyTopLevelRecordKeys (DAR-BE-018 Task 6,
     // design §5) moved to SourceSystemConnectorSupportSmokeTests.groovy (Task 5, Plan 2) for the same
     // reason as the reconciliationOrders pill tests above — fieldOptionsForSystem now reads the

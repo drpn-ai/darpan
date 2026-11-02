@@ -97,19 +97,18 @@ class SourceEndpointAccessMigrationTests {
         assertEquals(0L, accessRowCount("mig-open"),
                 "canReadOrders='Y' must write nothing — absent already means enabled")
         assertTrue(SourceEndpointAccessSupport.isEndpointEnabled(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, "mig-open", "OMS_RETURNS"))
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, "mig-open", "OMS_RETURNS_GQL"))
     }
 
     @Test
     void closedConfigIsDisabledOnEveryEndpoint() {
         runMigration()
-        // DAR-BE-050 added OMS_ORDER_LINE_UNITS, DAR-BE-062 OMS_ORDER_ITEMS, DAR-BE-064 OMS_GQL and DAR-BE-040
-        // OMS_RETURNS_GQL, so a closed config now needs EIGHT disable rows.
+        // One disable row per HotWax endpoint: the four GraphQL endpoints (the REST ones were deleted, DAR-BE-052).
         // The endpoint is added to the iterated list as well as the count: the count alone would
         // pass while leaving the new endpoint unverified, which is the half-fix this test exists
         // to prevent - a legacy-closed config silently open on the newest endpoint.
-        assertEquals(8L, accessRowCount("mig-closed"))
-        ["OMS", "OMS_GQL", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_RETURNS_GQL", "OMS_TRANSFER_ORDERS"].each { String systemEnumId ->
+        assertEquals(4L, accessRowCount("mig-closed"))
+        ["OMS_GQL", "OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL", "OMS_RETURNS_GQL"].each { String systemEnumId ->
             assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
                     SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, "mig-closed", systemEnumId),
                     "${systemEnumId} must be disabled for a canReadOrders='N' config")
@@ -120,7 +119,7 @@ class SourceEndpointAccessMigrationTests {
     void reRunningWritesNoDuplicates() {
         runMigration()
         runMigration()
-        assertEquals(8L, accessRowCount("mig-closed"))
+        assertEquals(4L, accessRowCount("mig-closed"))
     }
 
     @Test

@@ -28,13 +28,13 @@ class ExtractorInstalledCheckTests {
     @Test void otherMissingExtractorStillNamesTheService() {
         def e = assertThrows(IllegalStateException) {
             AutomationExecutionSupport.requireExtractorServiceInstalled(ecWith([] as Set),
-                    "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders")
+                    "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders")
         }
         assertTrue(e.message.contains("HotWaxOmsExtractionServices"))
     }
 
     @Test void installedServicePassesThrough() {
-        String name = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+        String name = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
         AutomationExecutionSupport.requireExtractorServiceInstalled(ecWith([name] as Set), name)
     }
 }

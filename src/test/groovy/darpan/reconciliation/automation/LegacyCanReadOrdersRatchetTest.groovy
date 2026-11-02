@@ -26,11 +26,11 @@ class LegacyCanReadOrdersRatchetTest {
     private static final List<String> ALLOWED = [
             // --- HotWax OMS write path: persists the legacy flag and echoes it back to callers ---
             // saveOmsRestSourceConfig.groovy normalizes the incoming value and writes it onto the
-            // entity; OmsRestSourceSupport.groovy both declares it in the save round-trip's
+            // entity; OmsExtractSupport.groovy both declares it in the save round-trip's
             // CONFIG_FIELD_NAMES list and reads it back in safeConfigMapFromPlain() so callers see
             // what was just persisted (same shape as every other config field there).
             "saveOmsRestSourceConfig.groovy",
-            "OmsRestSourceSupport.groovy",
+            "OmsExtractSupport.groovy",
 
             // --- Shopify write path: same pattern as the HotWax pair above ---
             // ShopifyAuthConfigSupport.groovy both writes canReadOrders on save (deriveCanReadOrders/

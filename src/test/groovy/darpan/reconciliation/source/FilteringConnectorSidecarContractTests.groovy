@@ -21,16 +21,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 class FilteringConnectorSidecarContractTests {
 
-    static final Set<String> WRITES_SIDECAR = ["OMS", "OMS_ORDER_LINE_UNITS", "OMS_ORDER_ITEMS",
+    // OMS_ORDER_ITEMS_GQL: the unit-grain shaper collects what it drops (darpan-hotwax
+    // DataDefinedOrderItemsServiceSmokeTests.byKeysWithFiltersAndTheSidecar); OMS_PRODUCTS_GQL: OmsGqlProductsConnectorWiringTests.
+    static final Set<String> WRITES_SIDECAR = ["OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL",
                                                "SHOPIFY_ORDER_LINE_UNITS", "NETSUITE_SUITEQL", "SHOPIFY"] as Set
     /** Filter without a verified sidecar today. Conclusions on these sides read UNKNOWN when they filter. */
     // OMS_GQL (DAR-BE-064): its script calls ExcludedRecordsSidecar.writeBeside, but at ORDER grain the shared
-    // OmsRestSourceSupport shaper never feeds the excluded collector (only the unit-grain branch collects), so
-    // the sidecar is always empty today. Same pipeline as REST OMS by construction.
-    // OMS_RETURNS_GQL (DAR-BE-040 fix 3): the REST returns pipeline with GraphQL pages, so the same NOT_YET as OMS_RETURNS —
-    // neither returns script writes a sidecar.
-    static final Set<String> NOT_YET = ["OMS_TRANSFER_ORDERS", "OMS_RECON_ORDERS", "OMS_RETURNS", "SHOPIFY_RETURN_REFS", "OMS_GQL",
-                                        "OMS_RETURNS_GQL"] as Set
+    // OmsExtractSupport shaper never feeds the excluded collector (only the unit-grain branch collects), so
+    // the sidecar is always empty today.
+    // OMS_RETURNS_GQL (DAR-BE-040 fix 3): the returns script writes no sidecar.
+    static final Set<String> NOT_YET = ["SHOPIFY_RETURN_REFS", "OMS_GQL", "OMS_RETURNS_GQL"] as Set
 
     private static Path componentRoot() {
         Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()

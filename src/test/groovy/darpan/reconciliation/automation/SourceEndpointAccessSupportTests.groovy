@@ -156,15 +156,15 @@ class SourceEndpointAccessSupportTests {
     @Test
     void absentRowMeansEnabled() {
         assertTrue(SourceEndpointAccessSupport.isEndpointEnabled(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS"),
-                "A config with no access row at all must be able to use OMS_RETURNS")
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS_GQL"),
+                "A config with no access row at all must be able to use OMS_RETURNS_GQL")
     }
 
     @Test
     void explicitNoDisables() {
-        writeAccessRow("OMS_TRANSFER_ORDERS", "N")
+        writeAccessRow("OMS_ORDER_ITEMS_GQL", "N")
         assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_TRANSFER_ORDERS"))
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_ORDER_ITEMS_GQL"))
     }
 
     @Test
@@ -180,11 +180,11 @@ class SourceEndpointAccessSupportTests {
     void catalogComesFromRegistryFilteredByConfigEntity() {
         List<Map<String, Object>> endpoints = SourceEndpointAccessSupport.listEndpointsForConfig(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID)
-        // DAR-BE-050 added OMS_ORDER_LINE_UNITS; the tri-system runs (DAR-BE-062) added OMS_ORDER_ITEMS; DAR-BE-064 added OMS_GQL; DAR-BE-040 added OMS_RETURNS_GQL.
-        assertEquals(["OMS", "OMS_GQL", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_RETURNS_GQL", "OMS_TRANSFER_ORDERS"],
+        // HotWax is read through its GraphQL endpoints only (DAR-BE-052).
+        assertEquals(["OMS_GQL", "OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL", "OMS_RETURNS_GQL"],
                 endpoints.collect { it.systemEnumId }.sort())
-        assertEquals("Refunded returns (REST)",
-                endpoints.find { it.systemEnumId == "OMS_RETURNS" }.endpointLabel)
+        assertEquals("Returns",
+                endpoints.find { it.systemEnumId == "OMS_RETURNS_GQL" }.endpointLabel)
     }
 
     @Test
@@ -236,13 +236,13 @@ class SourceEndpointAccessSupportTests {
         ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
                 .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                              configId            : CONFIG_ID,
-                             enabledSystemEnumIds: ["OMS", "OMS_RECON_ORDERS", "OMS_TRANSFER_ORDERS"]])
+                             enabledSystemEnumIds: ["OMS_GQL", "OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL"]])
                 .disableAuthz().call()
 
         assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS"))
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS_GQL"))
         assertTrue(SourceEndpointAccessSupport.isEndpointEnabled(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS"))
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_GQL"))
     }
 
     @Test
@@ -250,23 +250,23 @@ class SourceEndpointAccessSupportTests {
         ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
                 .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                              configId            : CONFIG_ID,
-                             enabledSystemEnumIds: ["OMS", "OMS_RECON_ORDERS", "OMS_TRANSFER_ORDERS"]])
+                             enabledSystemEnumIds: ["OMS_GQL", "OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL"]])
                 .disableAuthz().call()
         // Fix round 1 (finding 4): absent-means-enabled makes the final assertTrue below pass even if
         // the store service is a total no-op, so prove the FIRST call actually took effect before the
         // re-enabling call would otherwise paper over that.
         assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS"),
-                "The first store call must have actually disabled OMS_RETURNS before we can call re-enabling it meaningful")
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS_GQL"),
+                "The first store call must have actually disabled OMS_RETURNS_GQL before we can call re-enabling it meaningful")
         // Re-enable everything; the previously written 'N' row must flip back, not linger.
         ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
                 .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                              configId            : CONFIG_ID,
-                             enabledSystemEnumIds: ["OMS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"]])
+                             enabledSystemEnumIds: ["OMS_GQL", "OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL", "OMS_RETURNS_GQL"]])
                 .disableAuthz().call()
 
         assertTrue(SourceEndpointAccessSupport.isEndpointEnabled(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS"))
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS_GQL"))
     }
 
     @Test
@@ -301,7 +301,7 @@ class SourceEndpointAccessSupportTests {
             ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
                     .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                                  configId            : CONFIG_ID,
-                                 enabledSystemEnumIds: ["OMS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"]])
+                                 enabledSystemEnumIds: ["OMS_GQL", "OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL", "OMS_RETURNS_GQL"]])
                     .disableAuthz().call()
         } as Map<String, Object>
 

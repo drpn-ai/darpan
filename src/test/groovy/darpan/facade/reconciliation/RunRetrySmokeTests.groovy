@@ -39,6 +39,7 @@ class RunRetrySmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MappingSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SystemMessageRemoteSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         ReconciliationSmokeTestSupport.upsertEntity(ec, "moqui.security.UserGroup", [userGroupId: OTHER_TENANT], [
                 userGroupId: OTHER_TENANT, description: "Another tenant", groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
@@ -51,11 +52,11 @@ class RunRetrySmokeTests {
 
         Map created = ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun").parameters([
                 runName                   : "Retry ${UUID.randomUUID()}".toString(),
-                file1SystemEnumId         : "OMS",
+                file1SystemEnumId         : "OMS_GQL",
                 file1SourceTypeEnumId     : "AUT_SRC_API",
                 file1SystemMessageRemoteId: "HOTWAX_ORDERS_API",
                 file1SourceConfigId       : "RETRY_OMS",
-                file1SourceConfigType     : "HOTWAX_OMS_REST",
+                file1SourceConfigType     : "HOTWAX_OMS_GQL",
                 file1PrimaryIdExpression  : "\$.records[*].orderId",
                 file2SystemEnumId         : "SHOPIFY",
                 file2FileTypeEnumId       : "DftCsv",

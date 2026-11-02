@@ -1548,7 +1548,7 @@ class AutomationExecutionSupportTests {
             assertTrue(text.contains("Tenant: Tenant A"))
             assertFalse(text.contains("Result ID"), text)
             // URL from main: the deep link now names the tenant so the app can switch into it.
-            assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
+            assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS_GQL&tenantId=TENANT_A|Open run result>"))
             assertTrue(text.contains("Missing from "), text)
             // Original intent preserved: the system labels must RESOLVE, never fall back.
             assertFalse(text.contains("Missing from File 1"), text)
@@ -3427,14 +3427,14 @@ class AutomationExecutionSupportTests {
     private static void seedApiAutomation(FakeEc ec) {
         // Registry rows the dispatch path now reads (mirrors data/SourceSystemConnectorSeedData.xml).
         ec.entity.add(SourceSystemConnectorSupport.ENTITY_NAME, [
-                systemEnumId            : "OMS",
-                extractServiceName      : AutomationExecutionSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+                systemEnumId            : "OMS_GQL",
+                extractServiceName      : "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
                 dateFromParameterName   : "windowStart",
                 dateToParameterName     : "windowEnd",
-                expectedSourceConfigType: "HOTWAX_OMS_REST",
+                expectedSourceConfigType: "HOTWAX_OMS_GQL",
                 configParameterName     : "omsRestSourceConfigId",
                 configEntityName        : darpan.common.DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG,
-                remoteSendServiceName   : AutomationExecutionSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+                remoteSendServiceName   : "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
                 preserveWindowInstants  : "N",
                 enabled                 : "Y",
         ])
@@ -3471,7 +3471,7 @@ class AutomationExecutionSupportTests {
                     fileSide              : fileSide,
                     companyUserGroupId    : "TENANT_A",
                     sourceTypeEnumId      : AutomationExecutionSupport.AUTOMATION_SOURCE_API,
-                    systemEnumId          : fileSide == "FILE_1" ? "SHOPIFY" : "OMS",
+                    systemEnumId          : fileSide == "FILE_1" ? "SHOPIFY" : "OMS_GQL",
                     fileTypeEnumId        : "DftJson",
                     schemaFileName        : "${fileSide}.schema.json".toString(),
                     dateFromParameterName : "updatedFrom",

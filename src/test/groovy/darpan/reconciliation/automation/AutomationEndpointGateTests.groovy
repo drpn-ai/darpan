@@ -70,13 +70,13 @@ class AutomationEndpointGateTests {
                          companyUserGroupId   : TENANT, baseUrl: "https://auto-gate.example.invalid",
                          isActive             : "Y", canReadOrders: "Y"])
                 .createOrUpdate()
-        // Returns explicitly disabled for this config. Every other registered OMS endpoint (OMS,
-        // OMS_TRANSFER_ORDERS, OMS_RECON_ORDERS) stays absent from this table entirely — proving the
+        // Returns explicitly disabled for this config. Every other registered OMS endpoint (OMS_GQL,
+        // OMS_ORDER_ITEMS_GQL, OMS_PRODUCTS_GQL) stays absent from this table entirely — proving the
         // absent-means-enabled default rather than requiring an explicit 'Y' row for each.
         ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
                 .setAll([configTypeEnumId : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                          configId          : CONFIG_ID,
-                         systemEnumId      : "OMS_RETURNS",
+                         systemEnumId      : "OMS_RETURNS_GQL",
                          companyUserGroupId: TENANT,
                          isEnabled         : "N"])
                 .createOrUpdate()
@@ -90,14 +90,14 @@ class AutomationEndpointGateTests {
     @Test
     void resolvesForAnEnabledEndpoint() {
         assertEquals(CONFIG_ID, AutomationExecutionSupport.findSingleActiveConfigId(ec,
-                TENANT, "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId", "OMS"),
-                "OMS has no access row for this config, so absent-means-enabled must let auto-detect find it")
+                TENANT, "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId", "OMS_GQL"),
+                "OMS_GQL has no access row for this config, so absent-means-enabled must let auto-detect find it")
     }
 
     @Test
     void refusesToResolveForADisabledEndpoint() {
         assertNull(AutomationExecutionSupport.findSingleActiveConfigId(ec,
-                TENANT, "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId", "OMS_RETURNS"),
+                TENANT, "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId", "OMS_RETURNS_GQL"),
                 "A config with returns disabled must not be auto-selected for a returns run")
     }
 
@@ -108,12 +108,12 @@ class AutomationEndpointGateTests {
         def config = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
                 .condition("omsRestSourceConfigId", CONFIG_ID).useCache(false).one()
         ReconciliationSavedRunSupport.requireEndpointEnabledForSide(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS")
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS_GQL")
         assertTrue(ec.message.hasError())
         ec.message.clearErrors()
 
         ReconciliationSavedRunSupport.requireEndpointEnabledForSide(ec,
-                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS")
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_GQL")
         assertFalse(ec.message.hasError())
         ec.message.clearErrors()
     }
@@ -131,7 +131,7 @@ class AutomationEndpointGateTests {
     void resolveApiSourceConfigRefusesAReturnsRunWhoseReturnsEndpointIsDisabled() {
         ec.message.clearErrors()
         ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, "File 1",
-                ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS, CONFIG_ID, null)
+                ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS_GQL, CONFIG_ID, null)
         assertTrue(ec.message.hasError(),
                 "OMS_RETURNS is explicitly disabled for this config — a run naming OMS_RETURNS must be refused, " +
                 "not silently validated against the unrelated OMS endpoint")
@@ -155,23 +155,23 @@ class AutomationEndpointGateTests {
             ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
                     .setAll([configTypeEnumId : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                              configId          : CONFIG_ID_PARENT_DISABLED,
-                             systemEnumId      : "OMS",
+                             systemEnumId      : "OMS_GQL",
                              companyUserGroupId: TENANT,
                              isEnabled         : "N"])
                     .createOrUpdate()
             ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
                     .setAll([configTypeEnumId : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                              configId          : CONFIG_ID_PARENT_DISABLED,
-                             systemEnumId      : "OMS_RETURNS",
+                             systemEnumId      : "OMS_RETURNS_GQL",
                              companyUserGroupId: TENANT,
                              isEnabled         : "Y"])
                     .createOrUpdate()
 
             ec.message.clearErrors()
             ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, "File 1",
-                    ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS, CONFIG_ID_PARENT_DISABLED, null)
+                    ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS_GQL, CONFIG_ID_PARENT_DISABLED, null)
             assertFalse(ec.message.hasError(),
-                    "OMS_RETURNS is enabled for this config even though its parent OMS endpoint is disabled")
+                    "OMS_RETURNS_GQL is enabled for this config even though its sibling OMS_GQL endpoint is disabled")
             ec.message.clearErrors()
         } finally {
             ec.entity.find(SourceEndpointAccessSupport.ENTITY_NAME)
@@ -190,9 +190,9 @@ class AutomationEndpointGateTests {
         // Unchanged coverage: a run naming the base OMS system must keep working through the same
         // dispatch path post-fix. CONFIG_ID has no access row for OMS at all (absent means enabled).
         ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, "File 1",
-                ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS, CONFIG_ID, null)
+                "OMS_GQL", CONFIG_ID, null)
         assertFalse(ec.message.hasError(),
-                "a plain OMS run must behave exactly as it did before the registry-driven dispatch fix")
+                "a plain OMS_GQL run must behave exactly as it did before the registry-driven dispatch fix")
         ec.message.clearErrors()
     }
 }

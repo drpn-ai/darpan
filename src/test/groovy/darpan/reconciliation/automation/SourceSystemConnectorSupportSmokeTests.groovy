@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SourceSystemConnectorSupportSmokeTests {
+    private static final String OMS_GQL_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
     private ExecutionContext ec
 
     @BeforeAll
@@ -45,19 +46,27 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void resolvesOmsRowByteIdenticalToSwitch() {
-        Map<String, Object> c = SourceSystemConnectorSupport.resolve(ec, "OMS")
-        assertNotNull(c, "OMS connector row should resolve")
-        assertEquals("OMS", c.systemEnumId)
-        assertEquals(ReconciliationSavedRunSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE, c.extractServiceName)
-        // Date params must equal what the automation switch computes for this extract service.
+    void resolvesOmsGqlRow() {
+        Map<String, Object> c = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
+        assertNotNull(c, "OMS_GQL connector row should resolve")
+        assertEquals("OMS_GQL", c.systemEnumId)
+        assertEquals(OMS_GQL_EXTRACT_SERVICE, c.extractServiceName)
         assertEquals("windowStart", c.dateFromParameterName)
         assertEquals("windowEnd", c.dateToParameterName)
-        assertEquals(ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST, c.expectedSourceConfigType)
-        assertEquals(ReconciliationSavedRunSupport.HOTWAX_ORDERS_REMOTE_ID, c.remoteId)
-        assertEquals(ReconciliationSavedRunSupport.HOTWAX_ORDERS_ENDPOINT_LABEL, c.endpointLabel)
+        assertEquals("HOTWAX_OMS_GQL", c.expectedSourceConfigType)
+        assertEquals("HOTWAX_ORDERS_API", c.remoteId)
+        assertEquals("Orders and payments", c.endpointLabel)
         // OMS does NOT preserve window instants (only Shopify does — AutomationExecutionSupport:634).
         assertFalse((boolean) c.preserveWindowInstants)
+    }
+
+    @Test
+    void noHotWaxRestConnectorResolves() {
+        // DAR-BE-052: HotWax is read over GraphQL only; the REST rows are gone from the seed.
+        ["OMS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_TRANSFER_ORDERS"].each {
+            assertNull(SourceSystemConnectorSupport.resolveBySystemEnumId(ec, it), "${it} must not resolve")
+        }
+        assertNull(SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, "HOTWAX_OMS_REST"))
     }
 
     @Test
@@ -82,10 +91,9 @@ class SourceSystemConnectorSupportSmokeTests {
     @Test
     void resolvesByExpectedSourceConfigTypeForInteractiveDispatch() {
         // The saved-run path keys sources on sourceConfigType — the registry must resolve it.
-        Map<String, Object> oms = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
-                ec, ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST)
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, "HOTWAX_OMS_GQL")
         assertNotNull(oms)
-        assertEquals(ReconciliationSavedRunSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE, oms.extractServiceName)
+        assertEquals(OMS_GQL_EXTRACT_SERVICE, oms.extractServiceName)
 
         Map<String, Object> shopify = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
                 ec, ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_SHOPIFY_AUTH)
@@ -103,9 +111,9 @@ class SourceSystemConnectorSupportSmokeTests {
 
     @Test
     void resolvesByAliasAndNormalizesInput() {
-        Map<String, Object> viaAlias = SourceSystemConnectorSupport.resolve(ec, "HOTWAX")
-        assertNotNull(viaAlias, "alias HOTWAX should resolve to the OMS connector")
-        assertEquals("OMS", viaAlias.systemEnumId)
+        Map<String, Object> viaAlias = SourceSystemConnectorSupport.resolve(ec, "HOTWAX_GQL")
+        assertNotNull(viaAlias, "alias HOTWAX_GQL should resolve to the OMS_GQL connector")
+        assertEquals("OMS_GQL", viaAlias.systemEnumId)
         // Whitespace/case-insensitive input still resolves.
         assertEquals("SHOPIFY", SourceSystemConnectorSupport.resolve(ec, " shopify ")?.systemEnumId)
     }
@@ -158,8 +166,8 @@ class SourceSystemConnectorSupportSmokeTests {
                 "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState"))
 
         // OMS side: pairLookupServiceName returns full order groups keyed by the compare join key.
-        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
-        assertNotNull(oms, "OMS connector row should resolve")
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
+        assertNotNull(oms, "OMS_GQL connector row should resolve")
         assertEquals("reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId",
                 oms.pairLookupServiceName)
 
@@ -208,8 +216,8 @@ class SourceSystemConnectorSupportSmokeTests {
         assertEquals("facade.ShopifyFacadeServices.probe#ShopifyAuthConnection", shopify.healthCheckServiceName)
         assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape((String) shopify.healthCheckServiceName))
 
-        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
-        assertNotNull(oms, "OMS connector row should resolve")
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
+        assertNotNull(oms, "OMS_GQL connector row should resolve")
         assertEquals("facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection", oms.healthCheckServiceName)
         assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape((String) oms.healthCheckServiceName))
 
@@ -224,8 +232,8 @@ class SourceSystemConnectorSupportSmokeTests {
 
     @Test
     void omsConnectorDeclaresTheExclusionFilterParameter() {
-        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
-        assertNotNull(oms, "OMS connector row should resolve")
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
+        assertNotNull(oms, "OMS_GQL connector row should resolve")
         assertEquals("sourceFilters", oms.filterParameterName)
     }
 
@@ -302,101 +310,32 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void theBoardsOmsFieldPillsCoverEveryKeepFieldsBaseField() {
-        // FINAL-REVIEW CRITICAL 1b, updated for Task 5 (Plan 2): the OMS field pills used to be a
-        // hand-written AutomationFacadeSupport constant mirroring keepFieldsBase plus
-        // salesChannelEnumId; they are now SourceSystemConnectorField seed rows read through
-        // AutomationFacadeSupport.fieldOptionsForSystem. Pin the mirror: adding a field to
-        // keepFieldsBase without adding a pill row would silently make it unselectable on the rules
-        // board.
+    void theBoardOffersTheOmsFilterPillsThatAreNotKeepFields() {
+        // Exclusions run before projection, so a filter pill need not be a keep field: the store and channel
+        // filters SM's order runs use are offered on OMS_GQL though neither is compared. Primary-ID choice stays
+        // the three order identifiers.
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
-
-        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
-        assertNotNull(oms, "OMS connector row should resolve")
-
-        List<String> pillFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS")
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
+        assertNotNull(oms, "OMS_GQL connector row should resolve")
+        List<String> pillFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_GQL")
                 .collect { Map<String, Object> option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
         List<String> keepFields = ((String) oms.keepFieldsBase).split(",").collect { it.trim() }.findAll { it }
-
-        assertTrue(pillFields.containsAll(keepFields),
-                "keepFieldsBase ${keepFields} not all offered as pills ${pillFields}")
-        // The whole point of the widening: the shipping use case is selectable even though it is NOT
-        // a keep field (exclusions run before projection, so any raw field is testable).
-        assertTrue(pillFields.contains("salesChannelEnumId"))
-        assertFalse(keepFields.contains("salesChannelEnumId"))
-        // DAR-BE-017, same widening for the same reason. Verified against a real captured OMS extract
-        // (org.apache.ofbiz.order.order.OrderHeader): productStoreId is a top-level key on every order
-        // document, so a rule drawn on this pill matches the raw record before projection trims it.
         assertTrue(pillFields.contains("productStoreId"))
         assertFalse(keepFields.contains("productStoreId"))
-        // Primary-ID selection stays deliberately narrow — widening the pills must not widen it.
-        assertEquals(3, AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS").size())
-    }
-
-    @Test
-    void transferOrderConnectorResolvesDistinctlyFromSalesOrders() {
-        Map<String, Object> salesOrders = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
-                ec, "HOTWAX_OMS_REST")
-        Map<String, Object> transferOrders = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
-                ec, "HOTWAX_OMS_REST_TRANSFER")
-
-        assertEquals("OMS", salesOrders.systemEnumId)
-        assertEquals("OMS_TRANSFER_ORDERS", transferOrders.systemEnumId)
-        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders",
-                salesOrders.extractServiceName)
-        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders",
-                transferOrders.extractServiceName)
-        // Both reuse the same credential storage; only the routing label differs.
-        assertEquals(salesOrders.configEntityName, transferOrders.configEntityName)
-        assertEquals(salesOrders.configParameterName, transferOrders.configParameterName)
-    }
-
-    @Test
-    void reconciliationOrdersConnectorResolvesDistinctlyFromLegacyOmsOrders() {
-        Map<String, Object> legacy = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
-                ec, "HOTWAX_OMS_REST")
-        Map<String, Object> recon = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
-                ec, "HOTWAX_OMS_REST_RECON")
-
-        assertNotNull(recon, "reconciliationOrders connector row should resolve")
-        assertEquals("OMS", legacy.systemEnumId)
-        assertEquals("OMS_RECON_ORDERS", recon.systemEnumId)
-        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders",
-                recon.extractServiceName)
-        // Same credentials, same window parameters, same projection — only the endpoint differs, so
-        // an operator can move a rule set across without touching its source config or its rules.
-        assertEquals(legacy.configEntityName, recon.configEntityName)
-        assertEquals(legacy.configParameterName, recon.configParameterName)
-        assertEquals(legacy.dateFromParameterName, recon.dateFromParameterName)
-        assertEquals(legacy.dateToParameterName, recon.dateToParameterName)
-        assertEquals(legacy.keepFieldsBase, recon.keepFieldsBase)
-        // Configured exclusions still run client-side here: the endpoint knows nothing of tenant
-        // exclusion rules, so dropping filterParameterName would silently disable them.
-        assertEquals(legacy.filterParameterName, recon.filterParameterName)
-    }
-
-    @Test
-    void reconciliationOrdersExtractServiceIsDispatchable() {
-        Set<String> allowed = SourceSystemConnectorSupport.allowedServiceNames(ec)
-        String reconService = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
-
-        assertTrue(allowed.contains(reconService),
-                "the connector row must auto-permit its extract service: ${allowed}")
-        assertTrue(SourceSystemConnectorSupport.isAllowedExtractorServiceShape(reconService),
-                "the service name must also satisfy the defense-in-depth naming guard")
+        assertTrue(pillFields.containsAll(["orderId", "orderName", "externalId", "grandTotal", "orderDate", "statusId"]))
+        assertEquals(3, AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_GQL").size())
     }
 
     @Test
     void omsReturnsConnectorIsRegisteredAndCarriesExclusionSupport() {
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(
-                ec, ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS)
+                ec, ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS_GQL)
 
-        assertNotNull(connector, "OMS_RETURNS connector row must exist and be enabled")
-        assertEquals(ReconciliationSavedRunSupport.HOTWAX_OMS_RETURNS_EXTRACT_SERVICE,
+        assertNotNull(connector, "OMS_RETURNS_GQL connector row must exist and be enabled")
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns",
                 connector.extractServiceName)
-        assertEquals(ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RETURNS,
-                connector.expectedSourceConfigType)
+        assertEquals("HOTWAX_OMS_GQL_RETURNS", connector.expectedSourceConfigType)
         // Without filterParameterName the channel exclusion cannot dispatch at all, and the rules
         // board hides the control — a configured rule would validate, persist and never run (§5).
         assertEquals("sourceFilters", connector.filterParameterName)
@@ -430,27 +369,6 @@ class SourceSystemConnectorSupportSmokeTests {
                 "expectedSourceConfigType claimed by more than one enabled connector: ${duplicateConfigTypes}")
         assertTrue(duplicateExtractServices.isEmpty(),
                 "extractServiceName claimed by more than one enabled connector: ${duplicateExtractServices}")
-    }
-
-    /**
-     * Ratchet, not a spot check. HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS is currently derived in code by
-     * filtering HOTWAX_OMS_ORDER_FIELD_OPTIONS, so the two provably cannot diverge. Once both become
-     * SourceSystemConnectorField seed rows (Task 5), that guarantee is gone — this test replaces it.
-     * The recon endpoint (OMS_RECON_ORDERS) projects server-side to a subset of the OMS document; an
-     * extra pill there names a field that never arrives, so a rule on it validates, persists, and
-     * excludes nothing.
-     */
-    @Test
-    void reconOrderPillsAreASubsetOfOmsPills() {
-        ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
-
-        Set<String> omsPaths = pillPaths("OMS")
-        Set<String> reconPaths = pillPaths("OMS_RECON_ORDERS")
-
-        assertTrue(omsPaths.containsAll(reconPaths),
-                "The recon endpoint projects server-side to a subset of the OMS document. Extra pills " +
-                "here name fields that never arrive: ${(reconPaths - omsPaths).sort()}")
     }
 
     /**
@@ -503,67 +421,15 @@ class SourceSystemConnectorSupportSmokeTests {
                 "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
 
         // The endpoints that had NO case in the old switch must now return real options.
-        assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_RETURNS").isEmpty(),
-                "OMS_RETURNS fell through to default: return [] before this change")
+        assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_RETURNS_GQL").isEmpty(),
+                "OMS_RETURNS_GQL must return real options from the registry")
         assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "SHOPIFY_RETURN_REFS").isEmpty())
 
         assertEquals(["\$.records[*].orderId", "\$.records[*].orderName", "\$.records[*].externalId"],
-                AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS").collect { it.fieldPath })
+                AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_GQL").collect { it.fieldPath })
         assertEquals("Return channel",
-                AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS")
+                AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
                         .find { it.fieldPath == "\$.records[*].returnChannelEnumId" }.label)
-    }
-
-    /**
-     * Moved from AutomationFacadeSupportTests.groovy (Task 5, Plan 2): primaryIdOptionsForSystem /
-     * fieldOptionsForSystem gained an ec parameter and now read the SourceSystemConnectorField
-     * registry, so these assertions need a real, seed-backed ExecutionContext rather than the
-     * ec-free fixture that file otherwise sticks to.
-     *
-     * DAR-BE-018. The reconciliationOrders connector is a second OMS orders source with its own
-     * systemEnumId, and these lookups key on systemEnumId equality against the registry. Without a
-     * matching row they return empty, and the rules board silently offers no field pills and no
-     * primary-id choices for a source the operator can otherwise configure — a connector that
-     * validates and then cannot be given a join key.
-     *
-     * systemAliases does NOT cover this: aliases are read only by SourceSystemConnectorSupport.resolve
-     * to find a row FROM an id, and have no effect on these comparisons.
-     */
-    @Test
-    void reconciliationOrdersSystemOffersRulesBoardPillsAtAll() {
-        ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
-
-        assertFalse(AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RECON_ORDERS").isEmpty(),
-                "without pills the rules board cannot configure a source this connector can otherwise save")
-        assertEquals(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS"),
-                AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_RECON_ORDERS"),
-                "the join key must be selectable from the same choices — all three are projected fields")
-    }
-
-    /**
-     * Moved from AutomationFacadeSupportTests.groovy (Task 5, Plan 2) — see note above.
-     *
-     * The recon endpoint projects server-side to a fixed six-field set, so the two pills that exist
-     * only because the LEGACY endpoint ships whole order documents (salesChannelEnumId,
-     * productStoreId) must not be offered here. A rule drawn on a field the endpoint never returns
-     * would validate, persist, and then exclude nothing — silently.
-     */
-    @Test
-    void reconciliationOrdersPillsAreLimitedToProjectedFields() {
-        ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
-
-        List<String> reconFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RECON_ORDERS")
-                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
-        List<String> legacyFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS")
-                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
-
-        assertEquals(["orderId", "orderName", "externalId", "grandTotal", "orderDate", "statusId"], reconFields)
-        assertFalse(reconFields.contains("salesChannelEnumId"))
-        assertFalse(reconFields.contains("productStoreId"))
-        // Still a strict subset of the legacy list, so the two cannot drift into disagreeing labels.
-        assertTrue(legacyFields.containsAll(reconFields))
     }
 
     /**
@@ -578,9 +444,9 @@ class SourceSystemConnectorSupportSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS")
+        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
 
-        assertFalse(options.isEmpty(), "OMS_RETURNS must have a curated pill list — an empty list means the "
+        assertFalse(options.isEmpty(), "OMS_RETURNS_GQL must have a curated pill list — an empty list means the "
                 + "channel pill silently disappears (design §5)")
         List<String> paths = options.collect { it.fieldPath as String }
         assertTrue(paths.contains("\$.records[*].returnChannelEnumId"),
@@ -599,7 +465,7 @@ class SourceSystemConnectorSupportSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
 
-        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS")
+        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
         options.each { Map<String, Object> option ->
             String path = option.fieldPath as String
             String tail = path.substring(path.lastIndexOf('.') + 1)
@@ -718,10 +584,10 @@ class SourceSystemConnectorSupportSmokeTests {
 
     @Test
     void omsReturnsConnectorDeclaresTheOrderStateLookupService() {
-        // The cancellation-refund suppression dispatches through this slot. Seeded on OMS_RETURNS only:
+        // The cancellation-refund suppression dispatches through this slot. Seeded on the OMS returns endpoint:
         // it is the OMS API that gets called, even though the rows being suppressed are Shopify events.
-        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
-        assertNotNull(connector, "OMS_RETURNS connector row must be seeded")
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        assertNotNull(connector, "OMS_RETURNS_GQL connector row must be seeded")
         assertEquals("reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId",
                 connector.orderStateLookupServiceName)
         // Dispatch goes through the same lookup fence as every other verify-stage slot.
@@ -737,7 +603,7 @@ class SourceSystemConnectorSupportSmokeTests {
         List rows = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
                 .condition("orderStateLookupServiceName", org.moqui.entity.EntityCondition.IS_NOT_NULL, null)
                 .useCache(false).list()*.systemEnumId
-        assertEquals(["OMS_RETURNS", "OMS_RETURNS_GQL"], rows.sort())
+        assertEquals(["OMS_RETURNS_GQL"], rows.sort())
     }
 
     @Test
@@ -761,8 +627,8 @@ class SourceSystemConnectorSupportSmokeTests {
         // Same service today, but the two slots name DIFFERENT stages (exchange pair verify vs
         // cancellation-refund suppression). Re-pointing one must not silently move the other, so the
         // OMS_RETURNS row must not acquire a pairLookupServiceName by copy-paste.
-        Map<String, Object> omsReturns = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
-        assertNotNull(omsReturns, "OMS_RETURNS connector row should resolve")
+        Map<String, Object> omsReturns = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        assertNotNull(omsReturns, "OMS_RETURNS_GQL connector row should resolve")
         assertNull(omsReturns.pairLookupServiceName,
                 "OMS_RETURNS drives the returns suppression, not the exchange pair verify stage")
     }
@@ -781,8 +647,8 @@ class SourceSystemConnectorSupportSmokeTests {
      */
     @Test
     void theOrderStateLookupServiceDeclaresEveryParameterTheReturnsStageDispatches() {
-        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
-        assertNotNull(connector, "OMS_RETURNS connector row should resolve")
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        assertNotNull(connector, "OMS_RETURNS_GQL connector row should resolve")
         String serviceName = connector.orderStateLookupServiceName as String
 
         // "<package>.<ServicesFile>.<verb>#<noun>" -> the file that must define it.
@@ -819,7 +685,7 @@ class SourceSystemConnectorSupportSmokeTests {
         List rows = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
                 .condition("returnLinesLookupServiceName", org.moqui.entity.EntityCondition.IS_NOT_NULL, null)
                 .useCache(false).list()*.systemEnumId
-        assertEquals(["OMS_RETURNS", "OMS_RETURNS_GQL"], rows.sort())
+        assertEquals(["OMS_RETURNS_GQL"], rows.sort())
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
         assertEquals("reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnLinesByOrderExternalId",
                 connector.returnLinesLookupServiceName)
@@ -830,7 +696,7 @@ class SourceSystemConnectorSupportSmokeTests {
     void theReturnLinesLookupServiceDeclaresEveryParameterTheReturnsStageDispatches() {
         // Same reasoning as the order-state contract above: Moqui drops undeclared in-parameters silently,
         // so a renamed one would make pairing fail closed and look exactly like "nothing to pair".
-        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
         String serviceName = connector.returnLinesLookupServiceName as String
         String noun = serviceName.substring(serviceName.indexOf("#") + 1)
         String verb = serviceName.substring(serviceName.lastIndexOf(".") + 1, serviceName.indexOf("#"))

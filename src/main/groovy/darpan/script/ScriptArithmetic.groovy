@@ -70,7 +70,16 @@ class ScriptArithmetic extends JexlArithmetic {
     @Override Object subtract(Object left, Object right) { ScriptBudget.charge(); guard(super.subtract(left, right)) }
     @Override Object divide(Object left, Object right) { ScriptBudget.charge(); guard(super.divide(left, right)) }
     @Override Object mod(Object left, Object right) { ScriptBudget.charge(); guard(super.mod(left, right)) }
-    @Override Object shiftLeft(Object left, Object right) { ScriptBudget.charge(); guard(super.shiftLeft(left, right)) }
+    /** BigInteger.shiftLeft builds the whole result before guard sees it, so a shift past the number cap is refused first */
+    @Override
+    Object shiftLeft(Object left, Object right) {
+        ScriptBudget.charge()
+        if (right == null) return guard(super.shiftLeft(left, right))
+        // NOTE: converted once and exactly; JEXL's own toInteger keeps a big number's low 32 bits, so 2^32 + n shifts by n
+        BigInteger by = toBigInteger(right)
+        if (by.abs() > MAX_NUMBER_BITS) throw new LimitReached('NUMBER', 'A number grew too large.')
+        return guard(super.shiftLeft(left, by.intValue()))
+    }
     @Override boolean testPredicate(Object value) { ScriptBudget.charge(); super.testPredicate(value) }
     @Override boolean lessThan(Object left, Object right) { ScriptBudget.charge(); super.lessThan(left, right) }
     @Override boolean greaterThan(Object left, Object right) { ScriptBudget.charge(); super.greaterThan(left, right) }

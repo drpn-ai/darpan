@@ -1,5 +1,6 @@
 package darpan.script
 
+import darpan.script.ScriptBudget.LimitReached
 import groovy.transform.CompileStatic
 import org.apache.commons.jexl3.JexlArithmetic
 import org.apache.commons.jexl3.JexlEngine
@@ -37,11 +38,11 @@ class ScriptArithmetic extends JexlArithmetic {
         ScriptBudget.charge()
         // NOTE: without this JEXL joins lists as text, and list + list returns "[I@6eeb90e5[I@..."
         if (isListLike(left)) return appendAll(appendAll(new ScriptList(), left), right)
-        if (isListLike(right)) throw new ScriptLimitException('ACCESS', 'Put the list first: list + item, or list + list.')
-        if (left instanceof Map || right instanceof Map) throw new ScriptLimitException('ACCESS', '+ does not combine a map; set its keys one at a time: m[key] = value.')
+        if (isListLike(right)) throw new LimitReached('ACCESS', 'Put the list first: list + item, or list + list.')
+        if (left instanceof Map || right instanceof Map) throw new LimitReached('ACCESS', '+ does not combine a map; set its keys one at a time: m[key] = value.')
         if (left instanceof CharSequence || right instanceof CharSequence) {
             // a list or map's toString would build the whole thing first, outside every cap
-            if (!ScriptBudget.isScalar(left) || !ScriptBudget.isScalar(right)) throw new ScriptLimitException('ACCESS', 'Text can only be joined with text or numbers; use d:join for a list.')
+            if (!ScriptBudget.isScalar(left) || !ScriptBudget.isScalar(right)) throw new LimitReached('ACCESS', 'Text can only be joined with text or numbers; use d:join for a list.')
             ScriptBudget.checkLength(scalarLength(left) + scalarLength(right))
         }
         return guard(super.add(left, right))
@@ -61,7 +62,7 @@ class ScriptArithmetic extends JexlArithmetic {
             return guard(super.multiply(left, right))
         } catch (ArithmeticException e) {
             // NOTE: JEXL 3.7 has its own BigInteger precision cap; report it as the same limit
-            if (!(e instanceof ScriptLimitException) && e.message?.contains('precision')) throw new ScriptLimitException('NUMBER', 'A number grew too large.')
+            if (!(e instanceof LimitReached) && e.message?.contains('precision')) throw new LimitReached('NUMBER', 'A number grew too large.')
             throw e
         }
     }
@@ -105,7 +106,7 @@ class ScriptArithmetic extends JexlArithmetic {
     Boolean contains(Object container, Object value) {
         ScriptBudget.charge()
         if (container instanceof CharSequence || container instanceof java.util.regex.Pattern) {
-            throw new ScriptLimitException('ACCESS', 'Pattern matching (=~ on text) is not available; use d:has(text, part).')
+            throw new LimitReached('ACCESS', 'Pattern matching (=~ on text) is not available; use d:has(text, part).')
         }
         if (container instanceof Collection) ScriptBudget.charge(((Collection) container).size())
         return super.contains(container, value)
@@ -117,7 +118,7 @@ class ScriptArithmetic extends JexlArithmetic {
     Iterator<?> forEach(Object collection) {
         ScriptBudget.charge()
         if (collection == null) return Collections.emptyIterator()
-        if (!(collection instanceof Map || collection instanceof Iterable || isArray(collection))) throw new ScriptLimitException('ACCESS', 'A loop needs a list or a map.')
+        if (!(collection instanceof Map || collection instanceof Iterable || isArray(collection))) throw new LimitReached('ACCESS', 'A loop needs a list or a map.')
         Iterator<?> source = collection instanceof Map ? ((Map) collection).values().iterator()
                 : (collection instanceof Iterable ? ((Iterable) collection).iterator() : arrayItems(collection).iterator())
         return new Iterator<Object>() {
@@ -139,7 +140,7 @@ class ScriptArithmetic extends JexlArithmetic {
         }
         if (target instanceof List) return ((List) target).get(indexIn(key, ((List) target).size()))
         if (isArray(target)) return Array.get(target, indexIn(key, Array.getLength(target)))
-        throw new ScriptLimitException('ACCESS', "'${key}' can only be read from a map or a list.".toString())
+        throw new LimitReached('ACCESS', "'${key}' can only be read from a map or a list.".toString())
     }
 
     /** ARRAY_GET: x[key], same rule */
@@ -157,7 +158,7 @@ class ScriptArithmetic extends JexlArithmetic {
         } else if (isArray(target)) {
             Array.set(target, indexIn(key, Array.getLength(target)), value)
         } else {
-            throw new ScriptLimitException('ACCESS', 'Only a map or a list can be changed.')
+            throw new LimitReached('ACCESS', 'Only a map or a list can be changed.')
         }
         return value
     }
@@ -178,7 +179,7 @@ class ScriptArithmetic extends JexlArithmetic {
     static Object guard(Object value) {
         if (value instanceof String) return ScriptBudget.checkString((String) value)
         BigInteger digits = value instanceof BigInteger ? (BigInteger) value : (value instanceof BigDecimal ? ((BigDecimal) value).unscaledValue() : null)
-        if (digits != null && digits.bitLength() > MAX_NUMBER_BITS) throw new ScriptLimitException('NUMBER', 'A number grew too large.')
+        if (digits != null && digits.bitLength() > MAX_NUMBER_BITS) throw new LimitReached('NUMBER', 'A number grew too large.')
         if (value instanceof BigDecimal) ScriptBudget.checkDecimal((BigDecimal) value)
         return value
     }
@@ -202,8 +203,8 @@ class ScriptArithmetic extends JexlArithmetic {
     /** a list position from a number or numeric text, inside 0..size-1 */
     private static int indexIn(Object key, int size) {
         Integer index = key instanceof Number ? ((Number) key).intValue() : (key?.toString()?.isInteger() ? key.toString().toInteger() : null)
-        if (index == null) throw new ScriptLimitException('ACCESS', "A list has no field '${key}'; use a number, like items[0].".toString())
-        if (index < 0 || index >= size) throw new ScriptLimitException('ACCESS', "There is no item ${index} in a list of ${size}.".toString())
+        if (index == null) throw new LimitReached('ACCESS', "A list has no field '${key}'; use a number, like items[0].".toString())
+        if (index < 0 || index >= size) throw new LimitReached('ACCESS', "There is no item ${index} in a list of ${size}.".toString())
         return index
     }
 

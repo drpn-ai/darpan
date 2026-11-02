@@ -17,6 +17,16 @@ class ScriptBudget {
 
     private static final ThreadLocal<ScriptBudget> CURRENT = new ThreadLocal<>()
 
+    /** A script hit one of its limits; kind is UNITS, TIME, MEMORY, NUMBER, ACCESS or OUTPUT. */
+    static class LimitReached extends ArithmeticException {
+        final String kind
+
+        LimitReached(String kind, String message) {
+            super(message)
+            this.kind = kind
+        }
+    }
+
     final long unitLimit
     final int maxStringChars
     final int maxCollectionSize
@@ -47,18 +57,18 @@ class ScriptBudget {
         ScriptBudget budget = CURRENT.get()
         if (budget == null) return
         // NOTE: an overflowed Collection.size() is negative and would refund units
-        if (cost < 0) throw new ScriptLimitException('MEMORY', 'A list is too large to count.')
+        if (cost < 0) throw new LimitReached('MEMORY', 'A list is too large to count.')
         budget.units += cost
-        if (budget.units > budget.unitLimit) throw new ScriptLimitException('UNITS', "The script used more than ${budget.unitLimit} units of work.".toString())
-        if (Thread.currentThread().isInterrupted()) throw new ScriptLimitException('TIME', 'The script ran out of time.')
+        if (budget.units > budget.unitLimit) throw new LimitReached('UNITS', "The script used more than ${budget.unitLimit} units of work.".toString())
+        if (Thread.currentThread().isInterrupted()) throw new LimitReached('TIME', 'The script ran out of time.')
     }
 
     /** Refuses text of this length before it is built, so the cap holds at the peak allocation. */
     static void checkLength(long length) {
         ScriptBudget budget = CURRENT.get()
         if (budget == null) return
-        if (length > budget.maxStringChars) throw new ScriptLimitException('MEMORY', "A text value would grow past ${budget.maxStringChars} characters.".toString())
-        if (budget.charsMade + length > budget.maxTotalChars) throw new ScriptLimitException('MEMORY', "The script built more than ${budget.maxTotalChars} characters of text.".toString())
+        if (length > budget.maxStringChars) throw new LimitReached('MEMORY', "A text value would grow past ${budget.maxStringChars} characters.".toString())
+        if (budget.charsMade + length > budget.maxTotalChars) throw new LimitReached('MEMORY', "The script built more than ${budget.maxTotalChars} characters of text.".toString())
     }
 
     /** Text the script made: checked like checkLength, then counted toward all the text it made. */
@@ -71,14 +81,14 @@ class ScriptBudget {
     }
 
     static void checkSize(int size) {
-        if (size < 0) throw new ScriptLimitException('MEMORY', 'A list is too large to count.')
+        if (size < 0) throw new LimitReached('MEMORY', 'A list is too large to count.')
         ScriptBudget budget = CURRENT.get()
-        if (budget != null && size > budget.maxCollectionSize) throw new ScriptLimitException('MEMORY', "A list or map grew past ${budget.maxCollectionSize} entries.".toString())
+        if (budget != null && size > budget.maxCollectionSize) throw new LimitReached('MEMORY', "A list or map grew past ${budget.maxCollectionSize} entries.".toString())
     }
 
     /** Refuses a decimal whose plain text would be longer than MAX_DECIMAL_CHARS, wherever one enters. */
     static BigDecimal checkDecimal(BigDecimal number) {
-        if (number != null && plainLength(number) > MAX_DECIMAL_CHARS) throw new ScriptLimitException('NUMBER', "A number has more than ${MAX_DECIMAL_CHARS} digits.".toString())
+        if (number != null && plainLength(number) > MAX_DECIMAL_CHARS) throw new LimitReached('NUMBER', "A number has more than ${MAX_DECIMAL_CHARS} digits.".toString())
         return number
     }
 

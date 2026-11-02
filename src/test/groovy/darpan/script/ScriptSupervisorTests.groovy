@@ -363,6 +363,10 @@ class ScriptSupervisorTests {
         assertEquals(['a', 'b', 'c'], out.result)
         assertEquals(['a', 'b', 'c'], run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'c'}, {'k': 'a'}, {'k': 'b'}], 'k'), 'k')").result)
         assertFalse(run('EXPRESSION', "d:sortBy([1, 2], 'k')").ok as boolean, 'sortBy takes maps')
+        // Moqui's comparator is unmetered, so the order-by is bounded before it sorts
+        assertFalse(run('EXPRESSION', "d:sortBy([{'k': 1}], '" + (['k'] * 6).join(',') + "')").ok as boolean, 'at most 5 fields')
+        assertFalse(run('EXPRESSION', "d:sortBy([{'k': 1}], '-')").ok as boolean, 'a bare prefix is not a field')
+        assertEquals(['a', 'c', 'b'], run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'b', 'n': 1}, {'k': 'c', 'n': 2}, {'k': 'a', 'n': 2}], '-n,k'), 'k')").result)
     }
 
     // -- the choke point

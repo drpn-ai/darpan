@@ -2,6 +2,7 @@ package darpan.script
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
+import darpan.script.ScriptBudget.LimitReached
 import groovy.transform.CompileStatic
 import org.apache.commons.jexl3.JexlBuilder
 import org.apache.commons.jexl3.JexlEngine
@@ -23,20 +24,12 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * DAR-BE-164. The one place Darpan runs tenant-written JEXL (sandbox design §12: nothing else may reference jexl3;
- * ScriptSupervisorTests pins that). Two profiles on one engine family:
- * <ul>
- *   <li>EXPRESSION (tier T1): one expression, no loops, lambdas, local variables or side effects. Terminates by
- *   construction.</li>
- *   <li>SCRIPT (tier T2): statements, local variables, loops and lambdas. Still no method calls, no {@code new},
- *   no pragmas, no annotations, no assigning to {@code input}.</li>
- * </ul>
- * Both reach only {@code input} (plain JSON values) and the {@code d:} library (ScriptPermissions). Every evaluation
- * runs on a small dedicated pool, never on the caller's thread, under a unit budget (ScriptArithmetic), text and
- * collection caps, and a wall-clock stop.
+ * The one place Darpan runs tenant-written JEXL. EXPRESSION is one expression with no loops, locals or side effects;
+ * SCRIPT adds statements, locals, loops and lambdas. Both read only input (plain JSON) and the d: library, on a small
+ * pool of their own, under a work budget, text and list caps and a time limit.
  *
- * <p>Scripts run last (ScriptLoadGate), never open a transaction or touch the database: the caller reads the input
- * first and writes nothing.</p>
+ * NOTE: nothing else may reference jexl3, ScriptSupervisorTests pins that
+ * NOTE: scripts run last (ScriptLoadGate) and never touch the database; the caller reads the input first, writes nothing
  */
 @CompileStatic
 class ScriptSupervisor {
@@ -57,16 +50,21 @@ class ScriptSupervisor {
     static final int MAX_INPUT_JSON_CHARS = 2_000_000
     static final int MAX_OUTPUT_JSON_CHARS = 65_536
     static final int MAX_OUTPUT_NODES = 20_000
+    static final int MAX_INPUT_VALUES = 500_000
+    static final int MAX_DEPTH = 32
+
+    // NOTE: what usually lies behind each limit, so a refused save says what to change
+    private static final Map<String, String> LIMIT_HINTS = [
+            UNITS : 'A loop that never ends, or a loop inside a loop, is the usual cause.',
+            TIME  : 'A loop that never ends, or a loop inside a loop, is the usual cause.',
+            MEMORY: 'A list or text that keeps growing is the usual cause.',
+    ].asImmutable()
 
     private static final JexlFeatures SCRIPT_FEATURES = JexlFeatures.createScript()
             .methodCall(false).newInstance(false).annotation(false)
             .pragma(false).pragmaAnywhere(false).importPragma(false).namespacePragma(false).namespaceInstantiation(false)
             .sideEffectGlobal(false).register(false)
-
-    private static final JexlFeatures EXPRESSION_FEATURES = JexlFeatures.createScript()
-            .methodCall(false).newInstance(false).annotation(false)
-            .pragma(false).pragmaAnywhere(false).importPragma(false).namespacePragma(false).namespaceInstantiation(false)
-            .sideEffectGlobal(false).register(false)
+    private static final JexlFeatures EXPRESSION_FEATURES = new JexlFeatures(SCRIPT_FEATURES)
             .script(false).loops(false).lambda(false).thinArrow(false).fatArrow(false).localVar(false).sideEffect(false)
 
     private static final Map<String, JexlEngine> ENGINES = [
@@ -74,18 +72,10 @@ class ScriptSupervisor {
             (SCRIPT)    : engine(SCRIPT_FEATURES),
     ].asImmutable()
 
-    /** Two threads, sixteen waiting: a burst of runs queues briefly, then is refused, never piles onto Moqui. */
+    private static final AtomicInteger threadCount = new AtomicInteger()
+    /** two threads and sixteen waiting places: a burst queues briefly, then is refused, never piles onto Moqui */
     private static final ThreadPoolExecutor POOL = new ThreadPoolExecutor(2, 2, 60L, TimeUnit.SECONDS,
-            new ArrayBlockingQueue<Runnable>(16), new ThreadFactory() {
-        private final AtomicInteger seq = new AtomicInteger()
-        @Override
-        Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "darpan-script-${seq.incrementAndGet()}".toString())
-            t.daemon = true
-            t.priority = Thread.NORM_PRIORITY - 1
-            return t
-        }
-    })
+            new ArrayBlockingQueue<Runnable>(16), { Runnable task -> scriptThread(task) } as ThreadFactory)
 
     private static JexlEngine engine(JexlFeatures features) {
         return new JexlBuilder()
@@ -102,6 +92,15 @@ class ScriptSupervisor {
                 .create()
     }
 
+    private static Thread scriptThread(Runnable task) {
+        Thread thread = new Thread(task, "darpan-script-${threadCount.incrementAndGet()}".toString())
+        thread.daemon = true
+        thread.priority = Thread.NORM_PRIORITY - 1
+        return thread
+    }
+
+    private static Map limitsOf(String profileName) { (Map) LIMITS[profileName] }
+
     static String profileOf(Object profile) {
         String value = profile?.toString()?.trim()?.toUpperCase(Locale.ROOT) ?: SCRIPT
         return PROFILES.contains(value) ? value : null
@@ -112,33 +111,33 @@ class ScriptSupervisor {
      * profile leaves out, and any name other than {@code input} (locals declared with var are fine).
      */
     static Map<String, Object> validate(Object profile, String body) {
-        String p = profileOf(profile)
-        if (p == null) return failure(null, 'INVALID', "Profile must be one of ${PROFILES.join(', ')}.".toString())
+        String profileName = profileOf(profile)
+        if (profileName == null) return failure(null, 'INVALID', "Profile must be one of ${PROFILES.join(', ')}.".toString())
         String source = body ?: ''
-        if (!source.trim()) return failure(p, 'INVALID', 'The script is empty.')
-        int maxChars = (LIMITS[p] as Map).maxSourceChars as int
+        if (!source.trim()) return failure(profileName, 'INVALID', 'The script is empty.')
+        int maxChars = limitsOf(profileName).maxSourceChars as int
         if (source.length() > maxChars) {
-            return failure(p, 'INVALID', "The script is ${source.length()} characters; the ${p.toLowerCase(Locale.ROOT)} limit is ${maxChars}.".toString())
+            return failure(profileName, 'INVALID', "The script is ${source.length()} characters; the ${profileName.toLowerCase(Locale.ROOT)} limit is ${maxChars}.".toString())
         }
         int templateLine = templateLiteralLine(source)
         if (templateLine > 0) {
-            Map<String, Object> refused = failure(p, 'NOT_ALLOWED', 'The ` character is not available (template text skips the limits); join text with +.')
+            Map<String, Object> refused = failure(profileName, 'NOT_ALLOWED', 'The ` character is not available (template text skips the limits); join text with +.')
             (refused.error as Map).line = templateLine
             return refused
         }
         JexlScript script
         try {
-            script = ENGINES[p].createScript(new JexlInfo('script', 1, 1), source)
+            script = ENGINES[profileName].createScript(new JexlInfo('script', 1, 1), source)
         } catch (JexlException e) {
-            return failure(p, e instanceof JexlException.Feature ? 'NOT_ALLOWED' : 'SYNTAX', message(e), e)
+            return failure(profileName, e instanceof JexlException.Feature ? 'NOT_ALLOWED' : 'SYNTAX', message(e), e)
         }
         List<String> names = (script.variables ?: [] as Set<List<String>>).collect { List<String> path -> path ? path[0] : null }
                 .findAll { it }.unique() as List<String>
         List<String> unknown = names.findAll { it != INPUT_NAME }
         if (unknown) {
-            return failure(p, 'ACCESS', "Unknown name${unknown.size() > 1 ? 's' : ''} ${unknown.collect { "'${it}'" }.join(', ')}: a script reads only input (declare your own with var).".toString())
+            return failure(profileName, 'ACCESS', "Unknown name${unknown.size() > 1 ? 's' : ''} ${unknown.collect { "'${it}'" }.join(', ')}: a script reads only input (declare your own with var).".toString())
         }
-        return [ok: true, profile: p, variables: names, error: null] as Map<String, Object>
+        return [ok: true, profile: profileName, variables: names, error: null] as Map<String, Object>
     }
 
     /**
@@ -156,17 +155,18 @@ class ScriptSupervisor {
     static Map<String, Object> evaluateAdmitted(Object profile, String body, Object input) {
         Map<String, Object> checked = validate(profile, body)
         if (!checked.ok) return notRun(checked)
-        String p = checked.profile as String
-        Map limits = LIMITS[p] as Map
+        String profileName = checked.profile as String
+        Map limits = limitsOf(profileName)
 
         Object plainInput
         try {
-            plainInput = copyInput(input)
+            plainInput = copyNode(input, 0, new Tally())
         } catch (IllegalArgumentException e) {
-            return notRun(failure(p, 'INPUT', e.message))
+            return notRun(failure(profileName, 'INPUT', e.message))
         }
 
-        JexlScript script = ENGINES[p].createScript(new JexlInfo('script', 1, 1), body)
+        // NOTE: the engine caches the parse validate just did
+        JexlScript script = ENGINES[profileName].createScript(new JexlInfo('script', 1, 1), body)
         ScriptBudget budget = new ScriptBudget(limits.unitLimit as long, MAX_STRING_CHARS, MAX_COLLECTION_SIZE)
         long started = System.nanoTime()
         Future<Object> future
@@ -177,11 +177,11 @@ class ScriptSupervisor {
                     MapContext context = new MapContext()
                     context.set(INPUT_NAME, plainInput)
                     Object raw = script.execute(context)
-                    // Shaped here, inside the budget and the timeout: a result can be a huge range or a deep graph.
-                    Object plain = toPlain(raw, 0, [0L, 0L] as long[])
+                    // shaped here, inside the budget and the time limit: a result can be a huge range or a deep graph
+                    Object plain = toPlain(raw, 0, new Tally())
                     String json = JsonOutput.toJson(plain)
                     if (json.length() > MAX_OUTPUT_JSON_CHARS) {
-                        throw new ScriptLimitException('MEMORY', "The result is ${json.length()} characters of JSON; the limit is ${MAX_OUTPUT_JSON_CHARS}.".toString())
+                        throw new LimitReached('MEMORY', "The result is ${json.length()} characters of JSON; the limit is ${MAX_OUTPUT_JSON_CHARS}.".toString())
                     }
                     return plain
                 } finally {
@@ -189,31 +189,24 @@ class ScriptSupervisor {
                 }
             } as java.util.concurrent.Callable<Object>)
         } catch (RejectedExecutionException ignored) {
-            return notRun(failure(p, 'BUSY', 'Scripts are busy right now; try again in a moment.'))
+            return notRun(failure(profileName, 'BUSY', 'Scripts are busy right now; try again in a moment.'))
         }
 
         Map<String, Object> out
         try {
             Object plain = future.get(limits.timeoutMs as long, TimeUnit.MILLISECONDS)
-            out = [ok: true, profile: p, result: plain, error: null] as Map<String, Object>
+            out = [ok: true, profile: profileName, result: plain, error: null] as Map<String, Object>
         } catch (TimeoutException ignored) {
             future.cancel(true)
-            out = failure(p, 'TIME', "The script ran past ${limits.timeoutMs} ms and was stopped.".toString())
+            out = failure(profileName, 'TIME', "The script ran past ${limits.timeoutMs} ms and was stopped.".toString())
         } catch (ExecutionException e) {
-            out = failureFrom(p, e.cause ?: e, body, budget)
+            out = failureFrom(profileName, e.cause ?: e, body, budget)
         }
         out.units = budget.units
         out.elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
         out.logs = new ArrayList<String>(budget.logs)
         return out
     }
-
-    // NOTE: what usually lies behind each limit, so a refused save says what to change
-    private static final Map<String, String> LIMIT_HINTS = [
-            UNITS : 'A loop that never ends, or a loop inside a loop, is the usual cause.',
-            TIME  : 'A loop that never ends, or a loop inside a loop, is the usual cause.',
-            MEMORY: 'A list or text that keeps growing is the usual cause.',
-    ].asImmutable()
 
     /**
      * Runs a script on its own sample input before it is saved: {ok, problems: [{rule, line, message}], notes}.
@@ -236,7 +229,7 @@ class ScriptSupervisor {
             String hint = LIMIT_HINTS[error.kind as String]
             return refused('FAILS_ON_SAMPLE', error.line, "On its sample input the script stops: ${error.message}${hint ? ' ' + hint : ''}".toString())
         }
-        long unitLimit = (LIMITS[profileName] as Map).unitLimit as long
+        long unitLimit = limitsOf(profileName).unitLimit as long
         long units = run.units as long
         if (units * 2 > unitLimit) {
             return refused('TOO_HEAVY', null, ("On its sample input alone the script uses ${Math.round(100d * units / unitLimit)}% of its work budget, " +
@@ -252,17 +245,13 @@ class ScriptSupervisor {
     }
 
     /**
-     * The line of the first backtick, or 0. JEXL builds `${a}${b}` template text through its template engine, not the
-     * arithmetic, so it would skip the text caps, and JexlFeatures has no switch for it. Any backtick is refused, even
-     * in a string or comment: a second lexer that skips quotes can be fooled (a ~/'/ regex literal), one that
-     * refuses the character cannot.
+     * The line of the first backtick, or 0. JEXL builds `${a}` template text in its template engine, outside the
+     * arithmetic and its text caps, and JexlFeatures has no switch for it.
+     * NOTE: refused anywhere, even in a string or comment: a lexer that skips quotes can be fooled (a ~/'/ regex literal)
      */
     static int templateLiteralLine(String source) {
         int at = source.indexOf('`')
-        if (at < 0) return 0
-        int line = 1
-        for (int i = 0; i < at; i++) if (source.charAt(i) == ('\n' as char)) line++
-        return line
+        return at < 0 ? 0 : source.substring(0, at).count('\n') + 1
     }
 
     /** Parses JSON text for an input; blank is an empty map. */
@@ -281,15 +270,16 @@ class ScriptSupervisor {
 
     // -- input and output shaping
 
-    /** A deep copy holding only maps, lists, text, numbers, true/false and null. */
-    private static Object copyInput(Object input) {
-        int[] nodes = [0] as int[]
-        return copyNode(input, 0, nodes)
+    /** how much of an input or a result has been walked */
+    private static class Tally {
+        int values = 0
+        long jsonChars = 0L
     }
 
-    private static Object copyNode(Object value, int depth, int[] nodes) {
-        if (++nodes[0] > 500_000) throw new IllegalArgumentException('The input holds more than 500000 values.')
-        if (depth > 32) throw new IllegalArgumentException('The input is nested more than 32 levels deep.')
+    /** A deep copy of the input holding only maps, lists, text, numbers, true/false and null. */
+    private static Object copyNode(Object value, int depth, Tally tally) {
+        if (++tally.values > MAX_INPUT_VALUES) throw new IllegalArgumentException("The input holds more than ${MAX_INPUT_VALUES} values.".toString())
+        if (depth > MAX_DEPTH) throw new IllegalArgumentException("The input is nested more than ${MAX_DEPTH} levels deep.".toString())
         if (value == null || value instanceof Boolean || value instanceof String) return value
         if (value instanceof BigDecimal) return checkInputDecimal((BigDecimal) value)
         if (value instanceof BigInteger || value instanceof Long || value instanceof Integer) return value
@@ -297,18 +287,18 @@ class ScriptSupervisor {
         if (value instanceof CharSequence || value instanceof Date || value instanceof java.time.temporal.Temporal) return value.toString()
         if (value instanceof Map) {
             Map<String, Object> out = new LinkedHashMap<>()
-            ((Map) value).each { Object k, Object v -> out.put(String.valueOf(k), copyNode(v, depth + 1, nodes)) }
+            ((Map) value).each { Object key, Object item -> out.put(String.valueOf(key), copyNode(item, depth + 1, tally)) }
             return out
         }
-        if (value instanceof Collection) return ((Collection) value).collect { copyNode(it, depth + 1, nodes) }
+        if (value instanceof Collection) return ((Collection) value).collect { Object item -> copyNode(item, depth + 1, tally) }
         throw new IllegalArgumentException("The input holds a ${value.getClass().simpleName}, which is not a JSON value.".toString())
     }
 
-    private static BigDecimal checkInputDecimal(BigDecimal d) {
-        if (ScriptBudget.plainLength(d) > ScriptBudget.MAX_DECIMAL_CHARS) {
+    private static BigDecimal checkInputDecimal(BigDecimal number) {
+        if (ScriptBudget.plainLength(number) > ScriptBudget.MAX_DECIMAL_CHARS) {
             throw new IllegalArgumentException("The input holds a number with more than ${ScriptBudget.MAX_DECIMAL_CHARS} digits.".toString())
         }
-        return d
+        return number
     }
 
     /**
@@ -316,46 +306,46 @@ class ScriptSupervisor {
      * pool thread with the budget open: every node is charged, at most MAX_OUTPUT_NODES are shaped, and a non-list
      * collection (a range) is size-checked before it is walked.
      */
-    private static Object toPlain(Object value, int depth, long[] nodes) {
+    private static Object toPlain(Object value, int depth, Tally tally) {
         ScriptBudget.charge()
-        // nodes[1] is the JSON size so far, kept as it is built, so the JSON is never written past the limit.
-        nodes[1] += 4
-        if (value instanceof String) nodes[1] += ((String) value).length() + 2
-        else if (value instanceof BigDecimal) nodes[1] += ScriptBudget.plainLength(ScriptBudget.checkDecimal((BigDecimal) value))
-        if (nodes[1] > MAX_OUTPUT_JSON_CHARS) {
-            throw new ScriptLimitException('MEMORY', "The result is more than ${MAX_OUTPUT_JSON_CHARS} characters of JSON.".toString())
+        // NOTE: the JSON size is counted as it is built, so the JSON is never written past the limit
+        tally.jsonChars += 4
+        if (value instanceof String) tally.jsonChars += ((String) value).length() + 2
+        else if (value instanceof BigDecimal) tally.jsonChars += ScriptBudget.plainLength(ScriptBudget.checkDecimal((BigDecimal) value))
+        if (tally.jsonChars > MAX_OUTPUT_JSON_CHARS) {
+            throw new LimitReached('MEMORY', "The result is more than ${MAX_OUTPUT_JSON_CHARS} characters of JSON.".toString())
         }
-        if (++nodes[0] > MAX_OUTPUT_NODES) throw new ScriptLimitException('MEMORY', "The result holds more than ${MAX_OUTPUT_NODES} values.".toString())
-        if (depth > 32) throw new ScriptLimitException('OUTPUT', 'The result is nested more than 32 levels deep.')
+        if (++tally.values > MAX_OUTPUT_NODES) throw new LimitReached('MEMORY', "The result holds more than ${MAX_OUTPUT_NODES} values.".toString())
+        if (depth > MAX_DEPTH) throw new LimitReached('OUTPUT', "The result is nested more than ${MAX_DEPTH} levels deep.".toString())
         if (value == null || value instanceof Boolean || value instanceof String) return value
         if (value instanceof BigDecimal) return value
         if (value instanceof Number) {
             if (value instanceof Double || value instanceof Float) {
-                double d = ((Number) value).doubleValue()
-                if (d.isNaN() || d.isInfinite()) return null
+                double number = ((Number) value).doubleValue()
+                if (number.isNaN() || number.isInfinite()) return null
             }
             return value
         }
         if (value instanceof Character) return value.toString()
         if (value instanceof Map) {
             Map<String, Object> out = new LinkedHashMap<>()
-            ((Map) value).each { Object k, Object v ->
-                String key = ScriptBudget.render(k, 200)
-                nodes[1] += key.length() + 3
-                out.put(key, toPlain(v, depth + 1, nodes))
+            ((Map) value).each { Object rawKey, Object item ->
+                String key = ScriptBudget.render(rawKey, 200)
+                tally.jsonChars += key.length() + 3
+                out.put(key, toPlain(item, depth + 1, tally))
             }
             return out
         }
         if (value instanceof Collection) {
             List out = []
             for (Object item : (Collection) value) {
-                out.add(toPlain(item, depth + 1, nodes))
+                out.add(toPlain(item, depth + 1, tally))
                 ScriptBudget.checkSize(out.size())
             }
             return out
         }
-        if (value.getClass().isArray()) return ScriptArithmetic.arrayItems(value).collect { toPlain(it, depth + 1, nodes) }
-        throw new ScriptLimitException('OUTPUT', 'The script returned something that is not data (a function?); return a value, list or map.')
+        if (value.getClass().isArray()) return ScriptArithmetic.arrayItems(value).collect { Object item -> toPlain(item, depth + 1, tally) }
+        throw new LimitReached('OUTPUT', 'The script returned something that is not data (a function?); return a value, list or map.')
     }
 
     // -- errors
@@ -368,14 +358,13 @@ class ScriptSupervisor {
     }
 
     private static Map<String, Object> failureFrom(String profile, Throwable thrown, String body = null, ScriptBudget budget = null) {
-        Throwable t = thrown
-        int guard = 0
         boolean nullOperand = thrown instanceof JexlException.Variable && !((JexlException.Variable) thrown).isUndefined()
-        while (t != null && guard++ < 10) {
-            if (t instanceof ScriptLimitException) return failure(profile, ((ScriptLimitException) t).kind, t.message, thrown)
-            if (t instanceof JexlException.Cancel || t instanceof InterruptedException) return failure(profile, 'TIME', 'The script ran out of time and was stopped.', thrown)
-            if (t instanceof JexlArithmetic.NullOperand) nullOperand = true
-            t = t.cause == t ? null : t.cause
+        Throwable cause = thrown
+        for (int hops = 0; cause != null && hops < 10; hops++) {
+            if (cause instanceof LimitReached) return failure(profile, ((LimitReached) cause).kind, cause.message, thrown)
+            if (cause instanceof JexlException.Cancel || cause instanceof InterruptedException) return failure(profile, 'TIME', 'The script ran out of time and was stopped.', thrown)
+            if (cause instanceof JexlArithmetic.NullOperand) nullOperand = true
+            cause = cause.cause == cause ? null : cause.cause
         }
         if (nullOperand) return emptyValueFailure(profile, thrown, body, budget)
         if (thrown instanceof JexlException.Method) {

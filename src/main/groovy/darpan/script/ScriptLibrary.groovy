@@ -1,5 +1,6 @@
 package darpan.script
 
+import darpan.script.ScriptBudget.LimitReached
 import groovy.transform.CompileStatic
 import org.moqui.util.CollectionUtilities
 
@@ -54,7 +55,7 @@ class ScriptLibrary {
         if (value instanceof Number) return ScriptBudget.checkDecimal(new BigDecimal(value.toString()))
         String text = value.toString().trim().replace(',', '')
         if (text.isEmpty()) return null
-        if (text.length() > 64) throw new ScriptLimitException('NUMBER', "'${text.take(20)}…' is too long to be a number.".toString())
+        if (text.length() > 64) throw new LimitReached('NUMBER', "'${text.take(20)}…' is too long to be a number.".toString())
         try {
             return ScriptBudget.checkDecimal(new BigDecimal(text))
         } catch (NumberFormatException ignored) {
@@ -198,11 +199,14 @@ class ScriptLibrary {
     static List sortBy(Object list, Object orderBy) {
         List items = new ArrayList(asList(list, 'sortBy'))
         if (items.any { !(it instanceof Map) }) throw new IllegalArgumentException('sortBy takes a list of maps.')
-        String fields = str(orderBy)?.trim()
-        if (!fields) throw new IllegalArgumentException('sortBy needs a field to sort on.')
-        ScriptBudget.charge(items.size() * 4L)
+        List<String> fields = (str(orderBy) ?: '').split(',').collect { String field -> field.trim() } as List<String>
+        if (fields.size() > MAX_SORT_FIELDS || fields.any { String field -> !field.replaceFirst(/^[-+]?\^?/, '') }) {
+            throw new IllegalArgumentException("sortBy takes 1 to ${MAX_SORT_FIELDS} fields, like '-total,orderId'.".toString())
+        }
+        // NOTE: Moqui's comparator is not metered, so the whole sort is charged first: items x log2(items) x fields
+        ScriptBudget.charge((long) items.size() * (32 - Integer.numberOfLeadingZeros(items.size() + 1)) * fields.size())
         try {
-            return CollectionUtilities.orderMapList((List<Map<String, Object>>) items, [fields])
+            return CollectionUtilities.orderMapList((List<Map<String, Object>>) items, fields)
         } catch (ClassCastException ignored) {
             throw new IllegalArgumentException('sortBy sorts on text or numbers.')
         }
@@ -232,6 +236,8 @@ class ScriptLibrary {
     }
 
     // -- helpers, private so a script cannot call them
+
+    private static final int MAX_SORT_FIELDS = 5
 
     private static final List<Closure<Instant>> DATE_FORMATS = [
             { String text -> Instant.parse(text) },

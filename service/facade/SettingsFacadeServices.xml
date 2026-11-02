@@ -361,7 +361,8 @@
                 <set field="automationRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
                 <set field="subscriptionRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
                 <set field="streaksSpaceRef" from="darpan.facade.common.TenantAccessSupport.readStoredStreaksChatSpaceId(ec, tenantId) == chatSpaceIdValue"/>
-                <if condition="automationRefCount &gt; 0 || subscriptionRefCount &gt; 0 || streaksSpaceRef">
+                <set field="deploymentRefCount" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScriptDeployment', 'script deployments posting to a chat space being deleted, pinned to the active tenant by condition').condition('companyUserGroupId', tenantId).condition('chatSpaceId', chatSpaceIdValue).useCache(false).count()"/>
+                <if condition="automationRefCount &gt; 0 || subscriptionRefCount &gt; 0 || streaksSpaceRef || deploymentRefCount &gt; 0">
                     <message error="true">Chat space '${spaceRow.spaceName}' is in use; deactivate it instead of deleting.</message>
                 </if>
             </if>

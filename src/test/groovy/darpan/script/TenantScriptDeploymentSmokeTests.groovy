@@ -301,6 +301,16 @@ class TenantScriptDeploymentSmokeTests {
         assertNull(row(id))
     }
 
+    @Test
+    void aChatSpaceADeploymentPostsToCannotBeDeleted() {
+        String scriptId = saveScript("Space keeper", "'x'")
+        assertTrue(call("save#TenantScriptDeployment", [tenantScriptId: scriptId, scheduleExpr: "0 0 9 * * ?", chatSpaceId: "KREWE_SPACE"]).ok as Boolean)
+        Map out = withProductionAuthz { (Map) ec.service.sync().name("facade.SettingsFacadeServices.delete#TenantChatSpace").parameters([chatSpaceId: "KREWE_SPACE"]).call() }
+        assertFalse(out.ok as Boolean)
+        assertTrue((out.errors as List)[0].toString().contains("is in use"), "${out.errors}")
+        assertNotNull(ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "KREWE_SPACE").disableAuthz().useCache(false).one())
+    }
+
     private String saveScript(String name, String body) {
         Map out = call("save#TenantScript", [scriptName: name, scriptProfile: "SCRIPT", inputSource: "SAMPLE",
                                              scriptBody: body, sampleInputJson: SAMPLE])

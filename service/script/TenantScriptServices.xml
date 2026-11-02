@@ -1,17 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  DAR-BE-167. Server-side script work with no user session: the scheduled pass over script deployments. Not remote;
-  each deployment runs as its own tenant (darpan.script.ScriptDeploymentSupport).
--->
+<!-- Script work with no user session; each deployment runs as its own tenant (darpan.script.ScriptDeploymentSupport). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="scan" noun="DueScriptDeployments" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
-        <description>Runs every active script deployment whose nextRunDate has come (ServiceJob
-            scan_TenantScriptDeployments_5m). Each is claimed by moving its nextRunDate forward before it runs, then its
-            outcome is stamped on it (lastRunStatus SENT, NOTHING_TO_SEND, SCRIPT_ERROR, NO_INPUT, NOT_DELIVERED,
-            SCRIPT_MISSING). One deployment failing never stops the others. While Darpan's core is busy a due deployment
-            is not run: it is marked WAITING, then EXPIRED once its window passes, never forced.</description>
+        <description>Runs the script deployments that are due (job scan_TenantScriptDeployments_5m) and stamps each
+            outcome on it; one failing never stops the others. While Darpan is busy a due one waits, then expires.</description>
         <in-parameters>
             <parameter name="nowTimestamp" type="Timestamp"/>
             <parameter name="limit" type="Integer" default-value="50"/>

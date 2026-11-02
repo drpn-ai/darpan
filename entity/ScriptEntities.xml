@@ -65,6 +65,9 @@
         <relationship type="one" related="darpan.script.TenantScript" short-alias="script">
             <key-map field-name="tenantScriptId"/>
         </relationship>
+        <relationship type="one" related="darpan.reconciliation.TenantChatSpace" short-alias="chatSpace" fk-name="TSCRIPT_DEPLOY_SPACE">
+            <key-map field-name="chatSpaceId"/>
+        </relationship>
 
         <index name="TSCRIPT_DEPLOY_DUE">
             <index-field name="isActive"/>

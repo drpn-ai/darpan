@@ -5628,7 +5628,7 @@
                     "fromDate",
                     "thruDate"
                 ],
-                "description": "Play: runs every check of the audit now over the days picked, first to last inclusive (the tenant's zone),\n            recording findings as the morning run does. Submitted to the background, one automation per run; the audit page\n            shows the results as each finishes. Refused up front for days in the future or in a period that ended and was\n            not extended."
+                "description": "Play: runs every check of the audit now over the days picked, first to last inclusive (the tenant's zone),\n            recording findings as the morning run does. Submitted to the background, one automation per run; the audit page\n            shows the results as each finishes. Days in the period just ended record under that period (DAR-BE-178).\n            Refused up front for days in the future or in a period ended before that."
             },
             "RunAuditResult": {
                 "type": "object",

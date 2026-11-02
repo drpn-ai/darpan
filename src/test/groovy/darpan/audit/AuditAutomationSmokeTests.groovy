@@ -112,7 +112,8 @@ class AuditAutomationSmokeTests {
     }
 
     // DAR-UI-063: play runs the days a person picks, not the period to date. Each period's days are their own window,
-    // dated as picked, reported on the run's own morning; a period that has ended is refused up front.
+    // dated as picked, reported on the run's own morning. DAR-BE-178: the period just ended can still be played (SM on
+    // Nov 2 plays October); one before it is refused up front.
     @Test
     void picksDaysAreSplitByPeriodAndKeepTheirOwnDates() {
         List<Map> checks = AuditAutomationSupport.checksFor(ec, automation)
@@ -125,12 +126,24 @@ class AuditAutomationSmokeTests {
                 [windows[0].childWindowStartDate, windows[0].childWindowEndDate, windows[0].auditPeriod, windows[0].auditReportDate,
                  windows[0].auditWindowFromDate, windows[0].auditWindowThruDate])
 
+        List<Map> crossing = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
+                [auditWindowFromDate: Date.valueOf("2026-09-28"), auditWindowThruDate: Date.valueOf("2026-10-02")])
+        assertEquals([[1, "2026-09", at("2026-09-28", "00:00:00"), at("2026-10-01", "00:00:00"), Date.valueOf("2026-09-28"), Date.valueOf("2026-09-30")],
+                      [2, "2026-10", at("2026-10-01", "00:00:00"), at("2026-10-03", "00:00:00"), Date.valueOf("2026-10-01"), Date.valueOf("2026-10-02")]],
+                crossing.collect { [it.sequenceNum, it.auditPeriod, it.childWindowStartDate, it.childWindowEndDate, it.auditWindowFromDate, it.auditWindowThruDate] },
+                "days across two periods are one window per period, each recorded under its own")
+
+        List<Map> lastMonth = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-11-02", "01:00:00"),
+                [auditWindowFromDate: Date.valueOf("2026-10-01"), auditWindowThruDate: Date.valueOf("2026-10-31")])
+        assertEquals([["2026-10", at("2026-10-01", "00:00:00"), at("2026-11-01", "00:00:00"), Date.valueOf("2026-11-02")]],
+                lastMonth.collect { [it.auditPeriod, it.childWindowStartDate, it.childWindowEndDate, it.auditReportDate] },
+                "on Nov 2 the whole of October plays, reported on Nov 2")
 
         IllegalStateException ended = assertThrows(IllegalStateException) {
             AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
-                    [auditWindowFromDate: Date.valueOf("2026-09-28"), auditWindowThruDate: Date.valueOf("2026-10-02")])
+                    [auditWindowFromDate: Date.valueOf("2026-08-30"), auditWindowThruDate: Date.valueOf("2026-09-02")])
         }
-        assertTrue(ended.message.contains("2026-09"), ended.message)
+        assertTrue(ended.message.contains("2026-08") && ended.message.contains("2026-09-01"), ended.message)
         assertThrows(IllegalArgumentException) {
             AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
                     [auditWindowFromDate: Date.valueOf("2026-10-14"), auditWindowThruDate: Date.valueOf("2026-10-23")])
@@ -162,9 +175,13 @@ class AuditAutomationSmokeTests {
             assertTrue(before.message.contains("2026-10-20"), before.message)
 
             assertEquals("2026-10-20", AuditSettingsSupport.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 10, 22), LA))
+            assertEquals("2026-10-20", AuditSettingsSupport.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 11, 2), LA),
+                    "DAR-BE-178: the month just ended is playable, but never before go-live")
         } finally {
             ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", TENANT).deleteAll()
         }
+        assertEquals("2026-10-01", AuditSettingsSupport.playableFrom(ec, TENANT, audit, LocalDate.of(2026, 11, 2), LA),
+                "DAR-BE-178: on Nov 2 a monthly audit plays from October 1")
     }
 
     @Test

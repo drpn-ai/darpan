@@ -126,8 +126,21 @@ class DeriveRules {
         try { return Instant.parse(v.toString()).toEpochMilli() } catch (Exception ignored) { return v }
     }
 
+    /**
+     * Bounds on a number a value may parse to. new BigDecimal reads exponents ("1e999999999") for free, but adding it to 1
+     * or printing it plainly builds a billion digits: a value outside these bounds is not a number here, so arithmetic
+     * counts it as 0 and the conversions keep it as it came.
+     */
+    static final int MAX_DECIMAL_SCALE = 100
+    static final int MAX_DECIMAL_DIGITS = 100
+
     private static BigDecimal parseDecimal(Object v) {
-        try { return new BigDecimal(v.toString().trim()) } catch (Exception ignored) { return null }
+        try {
+            BigDecimal d = new BigDecimal(v.toString().trim())
+            return (Math.abs(d.scale()) > MAX_DECIMAL_SCALE || d.precision() > MAX_DECIMAL_DIGITS) ? null : d
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     /** Words for each problem in a derive step's rows. */

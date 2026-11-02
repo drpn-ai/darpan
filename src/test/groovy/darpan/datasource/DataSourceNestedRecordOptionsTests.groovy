@@ -52,6 +52,17 @@ class DataSourceNestedRecordOptionsTests {
         assertTrue(DeriveRules.check("t", [[set: "x", value: [fn: "firstWhere", list: "ids", field: "value"]]])[0].contains("firstWhere needs"))
     }
 
+    @Test
+    void aNumberWithAHugeExponentIsNotANumberSoNothingExpandsIt() {
+        // Security review: "1e999999999" parses for free, but 1e999999999 + 1, or its plain text, is a billion digits.
+        Map r = [a: "1e999999999", b: "1", c: "-1E-999999999"]
+        assertEquals(BigDecimal.ONE, DeriveRules.valueOf(r, [fn: "sum", args: [[copy: "a"], [copy: "b"], [copy: "c"]]]))
+        assertEquals(BigDecimal.ZERO, DeriveRules.valueOf(r, [fn: "multiply", args: [[copy: "a"], [copy: "b"]]]))
+        assertEquals("1e999999999", DeriveRules.valueOf(r, [fn: "decimalPlain", args: [[copy: "a"]]]), "kept as it came")
+        assertEquals("1e999999999", DeriveRules.valueOf(r, [fn: "decimal", args: [[copy: "a"]]]))
+        assertEquals(new BigDecimal("120.5"), DeriveRules.valueOf([x: "1.205E2"], [fn: "decimalPlain", args: [[copy: "x"]]]), "a small exponent still reads")
+    }
+
     // ---------------------------------------------------------------- a made-up helpdesk
 
     static final String TICKETS = '''query DeskTickets($q: String, $first: Int, $after: String) {

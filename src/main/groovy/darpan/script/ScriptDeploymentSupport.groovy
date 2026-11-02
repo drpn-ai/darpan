@@ -174,8 +174,7 @@ class ScriptDeploymentSupport {
     /**
      * The scheduled pass: every active deployment whose nextRunDate has come, each claimed (its next run date moved
      * forward) before it runs, so a slow run or an overlapping tick never sends twice. Returns one line per run.
-     * While ScriptLoadGate says the core is busy a due deployment is not claimed but marked WAITING, then EXPIRED once
-     * its window passes (see holdForLoad).
+     * While the core is busy a due deployment is held instead (holdForLoad).
      */
     static Map<String, Object> scanDue(def ec, Timestamp now, int limit) {
         Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())
@@ -187,9 +186,9 @@ class ScriptDeploymentSupport {
         List<Map<String, Object>> results = []
         due.each { def deployment ->
             String id = deployment.tenantScriptDeploymentId
-            Map<String, Object> gate = ScriptLoadGate.check()
-            if (gate.busy) {
-                Map<String, Object> held = holdForLoad(ec, deployment, nowValue, gate.reason as String)
+            String busyReason = ScriptLoadGate.busyReason()
+            if (busyReason) {
+                Map<String, Object> held = holdForLoad(ec, deployment, nowValue, busyReason)
                 if (held != null) results << held
                 return
             }
@@ -203,7 +202,7 @@ class ScriptDeploymentSupport {
                 return true
             }) as boolean
             if (!claimed) return
-            Map<String, Object> outcome = execute(ec, deployment, true, true)   // admitted: the gate was checked above
+            Map<String, Object> outcome = execute(ec, deployment, true, true)
             def latest = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-167 record outcome on the claimed deployment')
                     .condition('tenantScriptDeploymentId', id).useCache(false).one()
             if (latest != null) recordOutcome(ec, latest, outcome)
@@ -215,21 +214,19 @@ class ScriptDeploymentSupport {
     }
 
     /**
-     * The core is busy: leave this due run for the next scan (WAITING), or, once its window has passed, skip it
-     * (EXPIRED) and schedule the next one. The window ends at the EARLIER of due + scheduledMaxWaitMinutes and the
-     * schedule's own next occurrence (a late run that would collide with the next one is pointless).
+     * The core is busy: leave this due run for the next scan (WAITING), or once its window has passed skip it (EXPIRED),
+     * never forced. The window ends at due + scheduledMaxWaitMinutes, or at the schedule's next run if that is sooner.
      */
     static Map<String, Object> holdForLoad(def ec, def deployment, Timestamp now, String reason) {
         String id = deployment.tenantScriptDeploymentId
         String tenantId = deployment.companyUserGroupId?.toString()
-        String expr = deployment.scheduleExpr?.toString()
+        String scheduleExpr = deployment.scheduleExpr?.toString()
         Timestamp dueAt = deployment.nextRunDate as Timestamp
-        Timestamp nextAfterDue = nextRunDate(ec, tenantId, expr, dueAt)
+        Timestamp followingRun = nextRunDate(ec, tenantId, scheduleExpr, dueAt)
         long windowEnd = dueAt.time + ScriptLoadGate.scheduledMaxWaitMinutes() * 60_000L
-        if (nextAfterDue != null) windowEnd = Math.min(windowEnd, nextAfterDue.time)
-        Timestamp expireAt = new Timestamp(windowEnd)
+        Timestamp expireAt = new Timestamp(followingRun != null ? Math.min(windowEnd, followingRun.time) : windowEnd)
         boolean expired = !now.before(expireAt)
-        Timestamp next = expired ? nextRunDate(ec, tenantId, expr, now) : dueAt
+        Timestamp next = expired ? nextRunDate(ec, tenantId, scheduleExpr, now) : dueAt
         String status = expired ? EXPIRED : WAITING
         String message = expired
                 ? "Not run: Darpan stayed busy (${reason}) from ${utc(dueAt)} until this run expired at ${utc(expireAt)}. Next run ${utc(next)}.".toString()

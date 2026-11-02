@@ -43,9 +43,8 @@ class ScriptArithmetic extends JexlArithmetic {
     @Override
     Object add(Object l, Object r) {
         ScriptBudget.charge()
-        // + on a list joins (list + list) or appends (list + item), counted and capped like any list
-        // NOTE: without this JEXL falls back to text and list + list returns "[I@6eeb90e5[I@..."
-        if (isListLike(l)) return joined(l, r)
+        // NOTE: without this JEXL joins lists as text, and list + list returns "[I@6eeb90e5[I@..."
+        if (isListLike(l)) return appendAll(appendAll(new ScriptList(), l), r)
         if (isListLike(r)) throw new ScriptLimitException("ACCESS", "Put the list first: list + item, or list + list.")
         if (l instanceof Map || r instanceof Map) {
             throw new ScriptLimitException("ACCESS", "+ does not combine a map; set its keys one at a time: m[key] = value.")
@@ -63,37 +62,24 @@ class ScriptArithmetic extends JexlArithmetic {
         return (x instanceof Collection) || (x != null && x.getClass().isArray())
     }
 
-    /** A list the script built itself; only these grow in place under +=, so input lists never change. */
+    /** A list the script built itself; only these grow in place under +=, so an input list never changes. */
     static class ScriptList extends ArrayList<Object> { }
 
-    /**
-     * SELF_ADD overload: list += item or list += list appends in place to a ScriptList (a unit and a size check per
-     * item), so appends in a loop are O(n) rather than a copy each time. Anything else falls back to ordinary +.
-     */
+    /** SELF_ADD: list += x appends in place, so appending in a loop does not copy the list each time. */
     Object selfAdd(Object l, Object r) {
-        // JEXL treats selfAdd as IN PLACE and ignores its result. Anything but a ScriptList (an input list, a [] literal)
-        // goes back to ordinary l = l + r, whose new ScriptList IS assigned; every later += then appends in place.
+        // NOTE: JEXL ignores this result; anything but a ScriptList falls back to l = l + r, which assigns a new ScriptList
         if (!(l instanceof ScriptList)) return JexlEngine.TRY_FAILED
-        ScriptBudget.charge()
-        ScriptList list = (ScriptList) l
-        if (isListLike(r)) {
-            for (Object item : listItems(r)) { ScriptBudget.charge(); list.add(item); ScriptBudget.checkSize(list.size()) }
-        } else {
-            list.add(r); ScriptBudget.checkSize(list.size())
-        }
-        return list
+        return appendAll((ScriptList) l, r)
     }
 
-    /** A new list: the left list's items, then the right list's items or the right item. One unit and a size check per item. */
-    private static List joined(Object left, Object right) {
-        List out = new ScriptList()
-        for (Object item : listItems(left)) { ScriptBudget.charge(); out.add(item); ScriptBudget.checkSize(out.size()) }
-        if (isListLike(right)) {
-            for (Object item : listItems(right)) { ScriptBudget.charge(); out.add(item); ScriptBudget.checkSize(out.size()) }
-        } else {
-            ScriptBudget.charge(); out.add(right); ScriptBudget.checkSize(out.size())
+    /** Appends a list's items, or one item, at a unit and a size check each. */
+    private static List appendAll(List list, Object value) {
+        for (Object item : (isListLike(value) ? listItems(value) : [value])) {
+            ScriptBudget.charge()
+            list.add(item)
+            ScriptBudget.checkSize(list.size())
         }
-        return out
+        return list
     }
 
     private static Iterable listItems(Object x) {
@@ -196,8 +182,7 @@ class ScriptArithmetic extends JexlArithmetic {
             Map map = (Map) target
             Object value = map.get(key)
             if (value == null && key instanceof Number) value = map.get(key.toString())
-            // Legal (optional fields, ?? defaults), but remembered: if this null later breaks a calculation, the
-            // error can name the field the record does not have, and list the ones it does.
+            // an absent field is legal (?? defaults), but remembered so an empty-value error can name it
             if (value == null && !map.containsKey(key) && !(key instanceof Number && map.containsKey(key.toString()))) {
                 ScriptBudget.noteMissing(key, map)
             }

@@ -7,15 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-175: two traps a genuine user fell into (genuine-user runs, 2026-11-02).
- * (1) JEXL list + list / list += x returned "[I@6eeb90e5..." as a SUCCESS: + on a list now joins or appends, counted
- *     and capped like any list. (2) A misspelt field gave "null operand: NullOperand" (JEXL) or "minus() on null
- *     object" (Groovy): the error now names the field, the line, and what the record does have.
+ * Two traps a genuine user fell into: list + list returned "[I@6eeb90e5..." as a success, and a misspelt field gave
+ * "null operand: NullOperand". + on a list now joins or appends, and the error names the field, its line and the
+ * fields the record does have.
  */
 class ScriptUserMistakesTests {
     private static final Map ORDERS = [orders: [[orderId: 'SO-1', lines: [[sku: 'A', ordered: 5, shipped: 3, price: 2.5]]]]]
 
-    private static Map jexl(String body, Object input = null) { ScriptSupervisor.evaluateHere('SCRIPT', body, input) }
+    private static Map jexl(String body, Object input = null) { ScriptSupervisor.evaluateAdmitted('SCRIPT', body, input) }
 
     // -- (1) lists and +
 
@@ -115,52 +114,5 @@ class ScriptUserMistakesTests {
         Map out = jexl("var l = input.orders[0].lines[0]; (l.discount ?? 0) + l.ordered", ORDERS)
         assertTrue(out.ok as boolean, "${out.error}")
         assertEquals(5, (out.result as Number).intValue())
-    }
-
-    @Test
-    void groovyNamesTheMisspeltFieldAndItsLine() {
-        Map out = GroovyGuard.evaluate('def lines = input.orders.collectMany { it.lines }\nlines.sum { it.ordred - it.shipped }', ORDERS)
-        assertFalse(out.ok as boolean)
-        Map error = out.error as Map
-        String message = error.message as String
-        assertEquals('ERROR', error.kind)
-        assertEquals('ordred', error.field)
-        assertTrue(message.contains("'ordred'") && message.contains('line 2'), message)
-        assertFalse(message.contains('NullPointerException'), message)
-    }
-
-    // Security review of dd60a7c: the field hint must not walk what the script built. A script that grows its input
-    // copy and then hits a null must get the hint from the caller's untouched input, with bounded work.
-    @Test
-    void theFieldHintReadsTheOriginalInputNotWhatTheScriptGrew() {
-        long started = System.nanoTime()
-        Map out = GroovyGuard.evaluate('input.junk = (1..200_000).collect { [k: it] }\ninput.orders[0].lines[0].ordred - 1', ORDERS)
-        long ms = (System.nanoTime() - started).intdiv(1_000_000L)
-        assertFalse(out.ok as boolean)
-        Map error = out.error as Map
-        assertTrue(error.kind in ['ERROR', 'MEMORY'], "${error}")
-        if (error.kind == 'ERROR') {
-            assertEquals('ordred', error.field, "${error}")
-            assertFalse((error.message as String).contains(', k,') || (error.message as String).contains('junk'), 'keys come from the original input')
-        }
-        assertTrue(ms < 5_000L, "took ${ms} ms")
-    }
-
-    @Test
-    void theInputWalkIsBoundedByEntriesAndSafeOnCycles() {
-        Map cyclic = [a: 1]; cyclic.self = cyclic
-        Map wide = [rows: (1..300_000).collect { [k: it] }]
-        long started = System.nanoTime()
-        assertEquals(['a', 'self'] as Set, GroovyGuard.inputKeys(cyclic))
-        assertTrue(GroovyGuard.inputKeys(wide).contains('rows'))
-        assertTrue((System.nanoTime() - started).intdiv(1_000_000L) < 2_000L)
-    }
-
-    @Test
-    void groovyExplainsAnEmptyValueThatIsNotAMisspelling() {
-        Map out = GroovyGuard.evaluate('def x = null\nx + 1', null)
-        assertFalse(out.ok as boolean)
-        String message = (out.error as Map).message as String
-        assertTrue(message.contains('empty') && message.contains('line 2'), message)
     }
 }

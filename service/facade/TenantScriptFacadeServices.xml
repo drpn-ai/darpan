@@ -81,16 +81,10 @@
                 <if condition="!validation.ok">
                     <message error="true">${validation.error.line ? 'Line ' + validation.error.line + ': ' : ''}${validation.error.message}</message>
                 </if>
-                <script>
-                    if (sampleInputJson?.toString()?.trim()) {
-                        try { darpan.script.ScriptSupervisor.parseInputJson(sampleInputJson.toString()) }
-                        catch (IllegalArgumentException e) { ec.message.addError("Sample input: ${e.message}") }
-                    }
-                </script>
             </if>
-            <!-- refuse common mistakes before saving: loops that never end, misspelt fields, a failing trial run -->
+            <!-- a trial run on the sample input refuses a script that fails on it or is too heavy -->
             <if condition="!ec.message.hasError()">
-                <set field="check" from="darpan.script.ScriptChecker.check(profileValue, scriptBody, sampleInputJson?.toString())"/>
+                <set field="check" from="darpan.script.ScriptSupervisor.check(profileValue, scriptBody, sampleInputJson?.toString())"/>
                 <set field="validation.problems" from="check.problems"/>
                 <set field="validation.notes" from="check.notes"/>
                 <set field="validation.ok" from="check.ok"/>

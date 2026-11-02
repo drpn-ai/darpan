@@ -346,7 +346,7 @@ class ScriptSupervisorTests {
                 [record: [id: '3', data: '{"order":"SO3","itemsBackordered":[]}']],
                 [record: [id: '4', data: '{"order":"SO4"}']],
         ]
-        List differences = raw.collect { TenantScriptSupport.scriptRow(it) }
+        List differences = raw.collect { TenantScriptSupport.withParsedData(it) }
         assertTrue(((differences[0] as Map).record as Map).data instanceof Map, 'record.data reaches the script parsed')
 
         Map out = run('SCRIPT', BACKORDERS_BY_SKU, [differences: differences])

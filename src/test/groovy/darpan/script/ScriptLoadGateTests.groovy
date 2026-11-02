@@ -4,92 +4,72 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
-import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-/** DAR-BE-175: tenant scripts take last priority behind Darpan's core work. */
+/** Tenant scripts take last priority behind Darpan's own work. */
 class ScriptLoadGateTests {
+    private static final Map CALM = [runsQueued: 0, runsRunning: 1, runsCap: 8, heapPercent: 40, liveHeapPercent: 60, cpuPercent: 30]
     private final Closure original = ScriptLoadGate.probe
 
     @AfterEach
     void restore() {
         ScriptLoadGate.probe = original
-        [ScriptLoadGate.HEAP_PROPERTY, ScriptLoadGate.CPU_PROPERTY].each { System.setProperty(it, '101') }   // as build.gradle sets for tests
-        ScriptLane.setEnabled(null)
+        holdAt(101, 101)   // as build.gradle sets for tests
     }
 
-    private static void readings(Map r) { ScriptLoadGate.probe = { -> r as Map<String, Object> } }
-
-    @Test
-    void calmCoreLetsScriptsRun() {
-        System.setProperty(ScriptLoadGate.HEAP_PROPERTY, '70'); System.setProperty(ScriptLoadGate.CPU_PROPERTY, '75')
-        readings([runsQueued: 0, runsRunning: 2, runsCap: 8, heapPercent: 40, cpuPercent: 30])
-        assertFalse(ScriptLoadGate.check().busy as boolean)
+    private static void holdAt(int heapPercent, int cpuPercent) {
+        System.setProperty('darpan.scripts.holdAtHeapPercent', heapPercent.toString())
+        System.setProperty('darpan.scripts.holdAtCpuPercent', cpuPercent.toString())
     }
+
+    private static void load(Map readings) { ScriptLoadGate.probe = { -> readings as Map<String, Object> } }
 
     @Test
     void eachCoreSignalMakesScriptsWait() {
-        System.setProperty(ScriptLoadGate.HEAP_PROPERTY, '70'); System.setProperty(ScriptLoadGate.CPU_PROPERTY, '75')
-        Map calm = [runsQueued: 0, runsRunning: 1, runsCap: 8, heapPercent: 40, cpuPercent: 30]
+        holdAt(70, 75)
+        load(CALM)
+        assertNull(ScriptLoadGate.busyReason())
         [[runsQueued: 3]: 'waiting to start', [runsRunning: 8]: 'at their limit', [heapPercent: 72]: 'memory is 72%',
          [cpuPercent: 90]: 'CPU is at 90%'].each { Map change, String said ->
-            readings(calm + change)
-            Map gate = ScriptLoadGate.check()
-            assertTrue(gate.busy as boolean, "${change}")
-            assertTrue((gate.reason as String).contains(said), "${change} -> ${gate.reason}")
+            load(CALM + change)
+            assertTrue(String.valueOf(ScriptLoadGate.busyReason()).contains(said), "${change}")
         }
     }
 
     @Test
-    void scriptsBackOffBeforeRunsDo() {
-        assertTrue(ScriptLoadGate.DEFAULT_HOLD_AT_HEAP_PERCENT < 85, 'runs hold at 85% heap; scripts must hold earlier')
+    void liveHeapStandsInOnlyWhileHeapAfterGcIsUnknown() {
+        holdAt(70, 75)
+        load(CALM + [heapPercent: null, liveHeapPercent: 84])
+        assertNull(ScriptLoadGate.busyReason())
+        load(CALM + [heapPercent: null, liveHeapPercent: 85])
+        assertEquals('memory is 85% used', ScriptLoadGate.busyReason())
+        load(CALM + [liveHeapPercent: 92])
+        assertNull(ScriptLoadGate.busyReason(), 'a young-GC spike in live heap does not hold scripts')
     }
 
     @Test
-    void settingsAreSystemPropertiesAnd101SwitchesASignalOff() {
-        readings([runsQueued: 0, runsRunning: 0, runsCap: 8, heapPercent: 95, cpuPercent: 99])
-        System.setProperty(ScriptLoadGate.HEAP_PROPERTY, '101'); System.setProperty(ScriptLoadGate.CPU_PROPERTY, '101')
-        assertFalse(ScriptLoadGate.check().busy as boolean)
-        System.setProperty(ScriptLoadGate.CPU_PROPERTY, '95')
-        assertTrue(ScriptLoadGate.check().busy as boolean)
+    void oneHundredOneSwitchesASignalOff() {
+        load(CALM + [heapPercent: null, liveHeapPercent: 99, cpuPercent: 99])
+        holdAt(101, 101)
+        assertNull(ScriptLoadGate.busyReason())
+        holdAt(101, 95)
+        assertEquals('CPU is at 99%', ScriptLoadGate.busyReason())
     }
 
     @Test
-    void liveHeapBacksUpAnUnknownHeapAfterGc() {
-        System.setProperty(ScriptLoadGate.HEAP_PROPERTY, '70')
-        Map calm = [runsQueued: 0, runsRunning: 1, runsCap: 8, heapPercent: null, cpuPercent: 30]
-        readings(calm + [liveHeapPercent: 84])
-        assertFalse((Boolean) ScriptLoadGate.check().busy)
-        readings(calm + [liveHeapPercent: 85])
-        assertTrue((Boolean) ScriptLoadGate.check().busy)
-        assertTrue(ScriptLoadGate.check().reason.toString().contains('85%'))
-        // a known after-GC reading wins: a young-GC spike in live heap does not hold scripts
-        readings(calm + [heapPercent: 40, liveHeapPercent: 92])
-        assertFalse((Boolean) ScriptLoadGate.check().busy)
-    }
-
-    @Test
-    void aBrokenReadingDoesNotStopScripts() {
+    void aBrokenReadingLetsScriptsRun() {
         ScriptLoadGate.probe = { -> throw new IllegalStateException('no MXBean') }
-        assertFalse(ScriptLoadGate.check().busy as boolean)
+        assertNull(ScriptLoadGate.busyReason())
     }
 
     @Test
-    void theRunButtonIsRefusedWithThePlainReasonWhileBusy() {
-        readings([runsQueued: 2])
+    void theRunButtonIsRefusedWhileBusyButAClaimedScheduledRunIsNot() {
+        load([runsQueued: 2])
         Map out = ScriptSupervisor.evaluate('EXPRESSION', '1 + 1', null)
-        assertFalse(out.ok as boolean)
         assertEquals('BUSY', (out.error as Map).kind)
         assertTrue(((out.error as Map).message as String).contains('scripts run last'), "${out.error}")
         assertEquals(0L, out.units as long, 'not run at all')
-        Map admitted = ScriptSupervisor.evaluateAdmitted('EXPRESSION', '1 + 1', null)
-        assertTrue(admitted.ok as boolean, 'an already-admitted (scheduled) run is not refused a second time')
-    }
-
-    @Test
-    void theLaneRefusesWhileBusy() {
-        readings([runsQueued: 1])
-        Map out = ScriptLane.run('T_GATE', 'JEXL', 1_000L) { -> [ok: true] }
-        assertEquals('BUSY', (out.error as Map).kind)
+        assertTrue(ScriptSupervisor.evaluateAdmitted('EXPRESSION', '1 + 1', null).ok as boolean)
     }
 }

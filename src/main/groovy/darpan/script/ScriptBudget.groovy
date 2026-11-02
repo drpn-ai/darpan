@@ -17,6 +17,9 @@ class ScriptBudget {
     long units = 0L
     long charsMade = 0L
     final List<String> logs = []
+    /** the last field read from a record that lacks it, so an empty-value error can name a misspelt field */
+    String missingField
+    List<String> recordFields = []
 
     ScriptBudget(long unitLimit, int maxStringChars, int maxCollectionSize) {
         this.unitLimit = unitLimit
@@ -24,15 +27,11 @@ class ScriptBudget {
         this.maxCollectionSize = maxCollectionSize
     }
 
-    /** the last field read from a record that doesn't have it, to name a misspelt field in a null error */
-    String missingKey
-    List<String> missingHas = []
-
-    static void noteMissing(Object key, Map record) {
+    static void noteMissing(Object field, Map record) {
         ScriptBudget budget = CURRENT.get()
         if (budget == null) return
-        budget.missingKey = String.valueOf(key)
-        budget.missingHas = record.keySet().take(12).collect { String.valueOf(it) }
+        budget.missingField = String.valueOf(field)
+        budget.recordFields = record.keySet().take(12).collect { String.valueOf(it) }
     }
 
     static ScriptBudget current() { CURRENT.get() }

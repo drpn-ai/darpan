@@ -35,10 +35,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * runs on a small dedicated pool, never on the caller's thread, under a unit budget (ScriptArithmetic), text and
  * collection caps, and a wall-clock stop.
  *
- * <p>Where it runs: in Moqui's JVM by default. The caps bound what one evaluation can hold, but JEXL has no heap limit
- * of its own, so tenants outside Darpan authoring SCRIPT-profile code need the worker JVM (ScriptWorker), switched
- * on by a worker URL. Evaluations never open a transaction or touch the database: the caller
- * reads the input first and writes nothing.</p>
+ * <p>Scripts run last (ScriptLoadGate), never open a transaction or touch the database: the caller reads the input
+ * first and writes nothing.</p>
  */
 @CompileStatic
 class ScriptSupervisor {
@@ -146,23 +144,16 @@ class ScriptSupervisor {
     /**
      * Runs the script against input (any JSON-shaped value, copied before the script sees it).
      * {ok, profile, result, units, elapsedMs, logs, error: {kind, message, line, column}}. Never throws.
-     * With a worker URL configured the script runs in the worker JVM (ScriptWorker) and nowhere else.
      */
     static Map<String, Object> evaluate(Object profile, String body, Object input) {
-        // scripts run last: while the core is busy a script is not started, and not queued either
-        Map<String, Object> gate = ScriptLoadGate.check()
-        if (gate.busy) return notRun(failure(profileOf(profile) ?: SCRIPT, 'BUSY', ScriptLoadGate.busyMessage(gate.reason as String)))
+        // while the core is busy a script is not started, and not queued either
+        String busyReason = ScriptLoadGate.busyReason()
+        if (busyReason) return notRun(failure(profileOf(profile) ?: SCRIPT, 'BUSY', ScriptLoadGate.busyMessage(busyReason)))
         return evaluateAdmitted(profile, body, input)
     }
 
-    /** evaluate for a caller that has already passed ScriptLoadGate (the scheduled scan), so a claimed run is never refused. */
+    /** evaluate for a caller that has already checked ScriptLoadGate (the scheduled scan), so a claimed run is never refused. */
     static Map<String, Object> evaluateAdmitted(Object profile, String body, Object input) {
-        String workerUrl = ScriptWorker.configuredUrl()
-        return workerUrl ? ScriptWorker.call(workerUrl, profile, body, input) : evaluateHere(profile, body, input)
-    }
-
-    /** evaluate in this JVM: Moqui's when no worker is configured, or the worker's own. */
-    static Map<String, Object> evaluateHere(Object profile, String body, Object input) {
         Map<String, Object> checked = validate(profile, body)
         if (!checked.ok) return notRun(checked)
         String p = checked.profile as String
@@ -215,6 +206,49 @@ class ScriptSupervisor {
         out.elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
         out.logs = new ArrayList<String>(budget.logs)
         return out
+    }
+
+    // NOTE: what usually lies behind each limit, so a refused save says what to change
+    private static final Map<String, String> LIMIT_HINTS = [
+            UNITS : 'A loop that never ends, or a loop inside a loop, is the usual cause.',
+            TIME  : 'A loop that never ends, or a loop inside a loop, is the usual cause.',
+            MEMORY: 'A list or text that keeps growing is the usual cause.',
+    ].asImmutable()
+
+    /**
+     * Runs a script on its own sample input before it is saved: {ok, problems: [{rule, line, message}], notes}.
+     * Refused as BAD_SAMPLE, FAILS_ON_SAMPLE, or TOO_HEAVY when the sample alone takes over half the work budget.
+     */
+    static Map<String, Object> check(Object profile, String body, String sampleJson) {
+        if (!sampleJson?.trim()) return passed(null)
+        String profileName = profileOf(profile) ?: SCRIPT
+        Object sample
+        try {
+            sample = parseInputJson(sampleJson)
+        } catch (IllegalArgumentException e) {
+            return refused('BAD_SAMPLE', null, "Sample input: ${e.message}".toString())
+        }
+
+        Map<String, Object> run = evaluate(profileName, body, sample)
+        Map error = run.error as Map
+        if (error?.kind == 'BUSY') return passed('Darpan is busy, so the script was saved without a trial run on its sample input.')
+        if (!run.ok) {
+            String hint = LIMIT_HINTS[error.kind as String]
+            return refused('FAILS_ON_SAMPLE', error.line, "On its sample input the script stops: ${error.message}${hint ? ' ' + hint : ''}".toString())
+        }
+        long unitLimit = (LIMITS[profileName] as Map).unitLimit as long
+        long units = run.units as long
+        if (units * 2 > unitLimit) {
+            return refused('TOO_HEAVY', null, ("On its sample input alone the script uses ${Math.round(100d * units / unitLimit)}% of its work budget, " +
+                    "and real data is usually bigger. A loop inside a loop is the usual cause: build a map keyed by id first, then look items up in it.").toString())
+        }
+        return passed(null)
+    }
+
+    private static Map<String, Object> passed(String note) { [ok: true, problems: [], notes: note ? [note] : []] as Map<String, Object> }
+
+    private static Map<String, Object> refused(String rule, Object line, String message) {
+        return [ok: false, problems: [[rule: rule, line: line, message: message]], notes: []] as Map<String, Object>
     }
 
     /**
@@ -344,6 +378,10 @@ class ScriptSupervisor {
             t = t.cause == t ? null : t.cause
         }
         if (nullOperand) return emptyValueFailure(profile, thrown, body, budget)
+        if (thrown instanceof JexlException.Method) {
+            String name = ((JexlException.Method) thrown).method
+            return failure(profile, 'ACCESS', "'${name}' is not a Darpan function; the d: functions are listed in the editor.".toString(), thrown)
+        }
         String kind = thrown instanceof JexlException.Variable || thrown instanceof JexlException.Property ? 'ACCESS' : 'ERROR'
         String text = thrown instanceof JexlException ? message((JexlException) thrown) : null
         if (thrown instanceof JexlException && thrown.cause != null && !(thrown.cause instanceof JexlException)) {
@@ -362,28 +400,19 @@ class ScriptSupervisor {
         return [ok: false, profile: profile, result: null, error: error] as Map<String, Object>
     }
 
-    /**
-     * A calculation hit an empty value: say where and, when the script just read a field that record doesn't have on
-     * that same line, name it and list the fields the record does have.
-     */
+    /** A calculation hit an empty value: say where, and name the field when that line read one the record lacks. */
     private static Map<String, Object> emptyValueFailure(String profile, Throwable thrown, String body, ScriptBudget budget) {
         JexlInfo info = thrown instanceof JexlException ? ((JexlException) thrown).info : null
         int line = info?.line ?: 0
-        String source = (body != null && line > 0) ? (body.readLines()[line - 1] ?: '').trim().take(120) : ''
-        String where = line > 0 ? "line ${line}".toString() + (source ? ": ${source}" : '') : 'this script'
-        String missing = budget?.missingKey
-        boolean onThisLine = missing && source && (source.contains('.' + missing) || source.contains("'" + missing + "'") || source.contains('"' + missing + '"'))
-        String message
-        Map<String, Object> out
-        if (onThisLine) {
-            message = "'${missing}' is not a field of this record (${where}). The record has: ${budget.missingHas.join(', ')}. " +
-                    "A misspelt field reads as empty: fix the name, or give a default with ?? ."
-            out = failure(profile, 'ERROR', message.toString(), thrown)
-            (out.error as Map).field = missing
-        } else {
-            message = "An empty value (null) was used in a calculation at ${where}. Check that it has a value, or give a default with ?? ."
-            out = failure(profile, 'ERROR', message.toString(), thrown)
+        String source = body && line > 0 ? (body.readLines()[line - 1] ?: '').trim().take(120) : ''
+        String where = line > 0 ? "line ${line}${source ? ': ' + source : ''}" : 'this script'
+        String field = budget?.missingField
+        if (!field || !source || !(source.contains('.' + field) || source.contains("'" + field + "'") || source.contains('"' + field + '"'))) {
+            return failure(profile, 'ERROR', "An empty value (null) was used in a calculation at ${where}. Check that it has a value, or give a default with ?? .".toString(), thrown)
         }
+        Map<String, Object> out = failure(profile, 'ERROR', ("'${field}' is not a field of this record (${where}). The record has: " +
+                "${budget.recordFields.join(', ')}. A misspelt field reads as empty: fix the name, or give a default with ?? .").toString(), thrown)
+        (out.error as Map).field = field
         return out
     }
 

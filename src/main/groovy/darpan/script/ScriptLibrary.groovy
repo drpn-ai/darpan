@@ -12,17 +12,14 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
 
 /**
- * DAR-BE-164. The {@code d:} namespace: the only functions a tenant script can call. Every function takes and returns
- * plain JSON values (text, numbers, true/false, lists, maps, null), so nothing it hands back leads anywhere, and charges
- * units for the work it does. There is no clock and no randomness: the same input always gives the same result.
+ * The d: functions, the only ones a tenant script can call. Each takes and returns plain JSON values and charges the
+ * ScriptBudget for its work. There is no clock and no randomness, so the same input always gives the same result.
  *
- * <p>A request this library cannot serve becomes a new function here (core code), never a looser profile.
- * Names avoid JEXL's reserved words (size, empty, new, not, and, or...).</p>
+ * NOTE: names avoid JEXL's reserved words (size, empty, new, not, and, or); only public static methods are callable
  */
 @CompileStatic
 class ScriptLibrary {
-
-    /** Every function and its one-line help, for the editor. A field, not a property, so Groovy adds no getter. */
+    /** every function and its one-line help, for the editor; a field, not a property, so Groovy adds no getter */
     public static final List<Map<String, String>> CATALOG = [
             [name: 'dec(x)', help: 'x as a decimal number (text or number); null stays null'],
             [name: 'money(x)', help: 'x rounded half-up to 2 decimals'],
@@ -52,14 +49,14 @@ class ScriptLibrary {
 
     // -- numbers
 
-    static BigDecimal dec(Object x) {
+    static BigDecimal dec(Object value) {
         ScriptBudget.charge()
-        if (x == null) return null
-        if (x instanceof BigDecimal) return ScriptBudget.checkDecimal((BigDecimal) x)
-        if (x instanceof Number) return ScriptBudget.checkDecimal(new BigDecimal(x.toString()))
-        String text = x.toString().trim().replace(',', '')
+        if (value == null) return null
+        if (value instanceof BigDecimal) return ScriptBudget.checkDecimal((BigDecimal) value)
+        if (value instanceof Number) return ScriptBudget.checkDecimal(new BigDecimal(value.toString()))
+        String text = value.toString().trim().replace(',', '')
         if (text.isEmpty()) return null
-        if (text.length() > 64) throw new ScriptLimitException("NUMBER", "'${text.take(20)}…' is too long to be a number.".toString())
+        if (text.length() > 64) throw new ScriptLimitException('NUMBER', "'${text.take(20)}…' is too long to be a number.".toString())
         try {
             return ScriptBudget.checkDecimal(new BigDecimal(text))
         } catch (NumberFormatException ignored) {
@@ -67,124 +64,133 @@ class ScriptLibrary {
         }
     }
 
-    static BigDecimal money(Object x) { round(x, 2) }
+    static BigDecimal money(Object value) { round(value, 2) }
 
-    static BigDecimal round(Object x, Object places) {
-        BigDecimal value = dec(x)
+    static BigDecimal round(Object value, Object places) {
+        BigDecimal number = dec(value)
         int scale = places == null ? 0 : dec(places).intValue()
-        if (scale < 0 || scale > 12) throw new IllegalArgumentException("round takes 0 to 12 places.")
-        return value?.setScale(scale, RoundingMode.HALF_UP)
+        if (scale < 0 || scale > 12) throw new IllegalArgumentException('round takes 0 to 12 places.')
+        return number?.setScale(scale, RoundingMode.HALF_UP)
     }
 
-    static BigDecimal abs(Object x) { dec(x)?.abs() }
+    static BigDecimal abs(Object value) { dec(value)?.abs() }
 
-    static BigDecimal min(Object a, Object b) { BigDecimal x = dec(a), y = dec(b); x == null ? y : (y == null ? x : x.min(y)) }
+    static BigDecimal min(Object first, Object second) { pick(dec(first), dec(second), -1) }
 
-    static BigDecimal max(Object a, Object b) { BigDecimal x = dec(a), y = dec(b); x == null ? y : (y == null ? x : x.max(y)) }
+    static BigDecimal max(Object first, Object second) { pick(dec(first), dec(second), 1) }
 
     // -- text
 
-    /** Text of a value. A list or map renders node by node up to the text cap, never through its own toString. */
-    static String str(Object x) {
+    /** Text of a value; a list or map renders node by node up to the text cap, never through its own toString. */
+    static String str(Object value) {
         ScriptBudget.charge()
-        if (x == null) return null
-        if (x instanceof CharSequence) return x.toString()
-        if (x instanceof BigDecimal) return ScriptBudget.checkDecimal((BigDecimal) x).toPlainString()
-        if (ScriptBudget.isScalar(x)) return x.toString()
-        ScriptBudget budget = ScriptBudget.current()
-        String text = ScriptBudget.render(x, budget != null ? budget.maxStringChars : 65_536)
-        return ScriptBudget.checkString(text)
+        if (value == null) return null
+        if (value instanceof CharSequence) return value.toString()
+        if (value instanceof BigDecimal) return ScriptBudget.checkDecimal((BigDecimal) value).toPlainString()
+        if (ScriptBudget.isScalar(value)) return value.toString()
+        int maxChars = ScriptBudget.current()?.maxStringChars ?: 65_536
+        return ScriptBudget.checkString(ScriptBudget.render(value, maxChars))
     }
 
-    static String lower(Object s) { str(s)?.toLowerCase(Locale.ROOT) }
+    static String lower(Object text) { str(text)?.toLowerCase(Locale.ROOT) }
 
-    static String upper(Object s) { str(s)?.toUpperCase(Locale.ROOT) }
+    static String upper(Object text) { str(text)?.toUpperCase(Locale.ROOT) }
 
-    static String trim(Object s) { str(s)?.trim() }
+    static String trim(Object text) { str(text)?.trim() }
 
-    static boolean has(Object s, Object part) {
-        String text = str(s), p = str(part)
-        ScriptBudget.charge(1 + (text?.length() ?: 0).intdiv(64))
-        return text != null && p != null && text.contains(p)
+    static boolean has(Object text, Object part) {
+        String whole = str(text), piece = str(part)
+        ScriptBudget.charge(1 + (whole?.length() ?: 0).intdiv(64))
+        return whole != null && piece != null && whole.contains(piece)
     }
 
-    static boolean begins(Object s, Object part) { String text = str(s), p = str(part); text != null && p != null && text.startsWith(p) }
+    static boolean begins(Object text, Object part) {
+        String whole = str(text), piece = str(part)
+        return whole != null && piece != null && whole.startsWith(piece)
+    }
 
-    static boolean ends(Object s, Object part) { String text = str(s), p = str(part); text != null && p != null && text.endsWith(p) }
+    static boolean ends(Object text, Object part) {
+        String whole = str(text), piece = str(part)
+        return whole != null && piece != null && whole.endsWith(piece)
+    }
 
-    static String replace(Object s, Object from, Object to) {
-        String text = str(s), f = str(from)
-        if (text == null || !f) return text
-        String t = str(to) ?: ''
-        // The result's length is known before it is built: count the matches first.
+    static String replace(Object text, Object from, Object to) {
+        String whole = str(text), target = str(from)
+        if (whole == null || !target) return whole
+        String replacement = str(to) ?: ''
+        // the result's length is known before it is built: count the matches first
         long matches = 0
-        int at = text.indexOf(f)
-        while (at >= 0) {
-            matches++
-            at = text.indexOf(f, at + f.length())
-        }
-        ScriptBudget.charge(1 + text.length().intdiv(64) + matches)
-        ScriptBudget.checkLength(text.length() + matches * (t.length() - f.length()))
-        return ScriptBudget.checkString(text.replace(f, t))
+        for (int at = whole.indexOf(target); at >= 0; at = whole.indexOf(target, at + target.length())) matches++
+        ScriptBudget.charge(1 + whole.length().intdiv(64) + matches)
+        ScriptBudget.checkLength(whole.length() + matches * (replacement.length() - target.length()))
+        return ScriptBudget.checkString(whole.replace(target, replacement))
     }
 
-    static List<String> split(Object s, Object sep) {
-        String text = str(s), separator = str(sep)
-        if (text == null) return []
-        if (!separator) throw new IllegalArgumentException("split needs a separator.")
+    static List<String> split(Object text, Object separator) {
+        String whole = str(text), sep = str(separator)
+        if (whole == null) return []
+        if (!sep) throw new IllegalArgumentException('split needs a separator.')
         List<String> parts = []
         int from = 0
         while (true) {
             ScriptBudget.charge()
-            int at = text.indexOf(separator, from)
-            parts << (at < 0 ? text.substring(from) : text.substring(from, at))
+            int at = whole.indexOf(sep, from)
+            parts << (at < 0 ? whole.substring(from) : whole.substring(from, at))
             ScriptBudget.checkSize(parts.size())
             if (at < 0) break
-            from = at + separator.length()
+            from = at + sep.length()
         }
         return parts
     }
 
-    static String join(Object list, Object sep) {
+    static String join(Object list, Object separator) {
         List items = asList(list, 'join')
         ScriptBudget.charge(items.size())
-        String separator = str(sep) ?: ''
+        String sep = str(separator) ?: ''
         List<String> parts = items.collect { Object item ->
             if (!ScriptBudget.isScalar(item)) throw new IllegalArgumentException('join takes a list of text or numbers.')
             item instanceof BigDecimal ? ScriptBudget.checkDecimal((BigDecimal) item).toPlainString() : String.valueOf(item)
         }
-        // Summed before joining, so the cap holds at the peak allocation.
-        long total = (parts.sum(0L) { String part -> (long) part.length() } as long) + Math.max(0, parts.size() - 1) * (long) separator.length()
+        // summed before joining, so the cap holds at the peak allocation
+        long total = (parts.sum(0L) { String part -> (long) part.length() } as long) + Math.max(0, parts.size() - 1) * (long) sep.length()
         ScriptBudget.checkLength(total)
-        return ScriptBudget.checkString(parts.join(separator))
+        return ScriptBudget.checkString(parts.join(sep))
     }
 
     // -- lists and maps
 
-    static int len(Object x) {
+    static int len(Object value) {
         ScriptBudget.charge()
-        if (x == null) return 0
-        if (x instanceof CharSequence) return ((CharSequence) x).length()
-        if (x instanceof Collection) return ((Collection) x).size()
-        if (x instanceof Map) return ((Map) x).size()
-        if (x.getClass().isArray()) return java.lang.reflect.Array.getLength(x)
-        throw new IllegalArgumentException("len takes text, a list or a map.")
+        if (value == null) return 0
+        if (value instanceof CharSequence) return ((CharSequence) value).length()
+        if (value instanceof Collection) return ((Collection) value).size()
+        if (value instanceof Map) return ((Map) value).size()
+        if (value.getClass().isArray()) return java.lang.reflect.Array.getLength(value)
+        throw new IllegalArgumentException('len takes text, a list or a map.')
     }
 
-    static List keys(Object map) { Map m = asMap(map, 'keys'); ScriptBudget.charge(m.size()); new ArrayList(m.keySet()) }
+    static List keys(Object map) {
+        Map entries = asMap(map, 'keys')
+        ScriptBudget.charge(entries.size())
+        return new ArrayList(entries.keySet())
+    }
 
-    static List vals(Object map) { Map m = asMap(map, 'vals'); ScriptBudget.charge(m.size()); new ArrayList(m.values()) }
+    static List vals(Object map) {
+        Map entries = asMap(map, 'vals')
+        ScriptBudget.charge(entries.size())
+        return new ArrayList(entries.values())
+    }
 
     static List pluck(Object list, Object field) {
         List items = asList(list, 'pluck')
         ScriptBudget.charge(items.size())
-        return items.collect { it instanceof Map ? ((Map) it).get(field) : null }
+        return items.collect { Object item -> fieldOf(item, field) }
     }
 
     static List where(Object list, Object field, Object value) {
         List items = asList(list, 'where')
         ScriptBudget.charge(items.size())
-        return items.findAll { it instanceof Map && same(((Map) it).get(field), value) }
+        return items.findAll { Object item -> item instanceof Map && same(fieldOf(item, field), value) }
     }
 
     static int count(Object list, Object field, Object value) { where(list, field, value).size() }
@@ -195,9 +201,8 @@ class ScriptLibrary {
         List items = asList(list, 'sum')
         ScriptBudget.charge(items.size())
         BigDecimal total = BigDecimal.ZERO
-        items.each { Object item ->
-            Object value = field == null ? item : (item instanceof Map ? ((Map) item).get(field) : null)
-            BigDecimal number = value == null ? null : dec(value)
+        for (Object item : items) {
+            BigDecimal number = dec(field == null ? item : fieldOf(item, field))
             if (number != null) total = total.add(number)
         }
         return total
@@ -206,40 +211,36 @@ class ScriptLibrary {
     static Map<String, Integer> groupCount(Object list, Object field) {
         List items = asList(list, 'groupCount')
         ScriptBudget.charge(items.size())
-        Map<String, Integer> out = new LinkedHashMap<>()
-        items.each { Object item ->
-            String key = ScriptBudget.render(item instanceof Map ? ((Map) item).get(field) : null, 200)
-            out.put(key, (out.get(key) ?: 0) + 1)
+        Map<String, Integer> counts = new LinkedHashMap<>()
+        for (Object item : items) {
+            String key = ScriptBudget.render(fieldOf(item, field), 200)
+            counts.put(key, (counts.get(key) ?: 0) + 1)
         }
-        return out
+        return counts
     }
 
     static List sorted(Object list) {
         List items = new ArrayList(asList(list, 'sorted'))
         if (items.any { !ScriptBudget.isScalar(it) }) throw new IllegalArgumentException('sorted takes a list of text or numbers.')
         ScriptBudget.charge(items.size() * 4L)
-        items.sort { Object a, Object b ->
-            (a instanceof Number && b instanceof Number) ? dec(a) <=> dec(b) : String.valueOf(a) <=> String.valueOf(b)
-        }
+        items.sort { Object first, Object second -> compareValues(first, second) }
         return items
     }
 
     static List sortBy(Object list, Object field) { sortBy(list, field, 'asc') }
 
-    /** The maps in the list ordered by one field: numbers by value, the rest as text; ties keep their order. */
+    /** The maps in the list ordered by one field; ties keep their order. */
     static List sortBy(Object list, Object field, Object direction) {
         List items = new ArrayList(asList(list, 'sortBy'))
         if (items.any { !(it instanceof Map) }) throw new IllegalArgumentException('sortBy takes a list of maps.')
-        String dir = str(direction)?.trim()?.toLowerCase(Locale.ROOT) ?: 'asc'
-        if (!(dir in ['asc', 'desc'])) throw new IllegalArgumentException("sortBy's direction is 'asc' or 'desc'.")
+        String order = str(direction)?.trim()?.toLowerCase(Locale.ROOT) ?: 'asc'
+        if (!(order in ['asc', 'desc'])) throw new IllegalArgumentException("sortBy's direction is 'asc' or 'desc'.")
         ScriptBudget.charge(items.size() * 4L)
-        int sign = dir == 'desc' ? -1 : 1
-        items.sort { Object a, Object b ->
-            Object x = ((Map) a).get(field), y = ((Map) b).get(field)
-            if (!ScriptBudget.isScalar(x) || !ScriptBudget.isScalar(y)) throw new IllegalArgumentException('sortBy sorts on text or numbers.')
-            int c = (x instanceof Number && y instanceof Number) ? dec(x) <=> dec(y)
-                    : (x == null ? (y == null ? 0 : -1) : (y == null ? 1 : String.valueOf(x) <=> String.valueOf(y)))
-            sign * c
+        int sign = order == 'desc' ? -1 : 1
+        items.sort { Object first, Object second ->
+            Object left = fieldOf(first, field), right = fieldOf(second, field)
+            if (!ScriptBudget.isScalar(left) || !ScriptBudget.isScalar(right)) throw new IllegalArgumentException('sortBy sorts on text or numbers.')
+            sign * compareValues(left, right)
         }
         return items
     }
@@ -251,65 +252,87 @@ class ScriptLibrary {
         return new ArrayList(new LinkedHashSet(items))
     }
 
-    // -- dates (from inputs only; there is no clock)
+    // -- dates, from the input only: there is no clock
 
-    static String day(Object x) {
-        Instant at = instant(x)
-        return at == null ? null : at.atOffset(ZoneOffset.UTC).toLocalDate().toString()
-    }
+    static String day(Object value) { instant(value)?.atOffset(ZoneOffset.UTC)?.toLocalDate()?.toString() }
 
-    static Long daysBetween(Object a, Object b) {
-        Instant from = instant(a), to = instant(b)
-        return (from == null || to == null) ? null : Duration.between(from, to).toDays()
-    }
+    static Long daysBetween(Object from, Object to) { between(from, to)?.toDays() }
 
-    static Long hoursBetween(Object a, Object b) {
-        Instant from = instant(a), to = instant(b)
-        return (from == null || to == null) ? null : Duration.between(from, to).toHours()
-    }
+    static Long hoursBetween(Object from, Object to) { between(from, to)?.toHours() }
 
     // -- log
 
-    static Object log(Object x) {
+    static Object log(Object value) {
         ScriptBudget.charge()
-        ScriptBudget.log(ScriptBudget.render(x, 500))
-        return x
+        ScriptBudget.log(ScriptBudget.render(value, 500))
+        return value
     }
 
-    // -- helpers (not public: the permissions admit public static methods only)
+    // -- helpers, private so a script cannot call them
 
-    private static List asList(Object x, String fn) {
-        if (x == null) return []
-        if (x instanceof List) return (List) x
-        // A range (1..100000000) is a lazy collection whose size() can overflow: copy it counted, item by item.
-        if (x instanceof Collection) return ScriptBudget.copyCounted((Collection) x)
-        if (x.getClass().isArray()) return ScriptArithmetic.arrayItems(x)
-        throw new IllegalArgumentException("${fn} takes a list.".toString())
+    private static final List<Closure<Instant>> DATE_FORMATS = [
+            { String text -> Instant.parse(text) },
+            { String text -> OffsetDateTime.parse(text).toInstant() },
+            { String text -> LocalDateTime.parse(text.replace(' ', 'T')).toInstant(ZoneOffset.UTC) },
+            { String text -> LocalDate.parse(text.take(10)).atStartOfDay().toInstant(ZoneOffset.UTC) },
+    ] as List<Closure<Instant>>
+
+    private static List asList(Object value, String function) {
+        if (value == null) return []
+        if (value instanceof List) return (List) value
+        // NOTE: a range (1..100000000) is lazy and its size() can overflow, so it is copied item by item, counted
+        if (value instanceof Collection) return ScriptBudget.copyCounted((Collection) value)
+        if (value.getClass().isArray()) return ScriptArithmetic.arrayItems(value)
+        throw new IllegalArgumentException("${function} takes a list.".toString())
     }
 
-    private static Map asMap(Object x, String fn) {
-        if (x == null) return [:]
-        if (x instanceof Map) return (Map) x
-        throw new IllegalArgumentException("${fn} takes a map.".toString())
+    private static Map asMap(Object value, String function) {
+        if (value == null) return [:]
+        if (value instanceof Map) return (Map) value
+        throw new IllegalArgumentException("${function} takes a map.".toString())
     }
 
-    private static boolean same(Object a, Object b) {
-        if (a instanceof Number && b instanceof Number) return dec(a).compareTo(dec(b)) == 0
-        if (!ScriptBudget.isScalar(a) || !ScriptBudget.isScalar(b)) return a.is(b)
-        return a == b || (a != null && b != null && a.toString() == b.toString())
+    private static Object fieldOf(Object item, Object field) { item instanceof Map ? ((Map) item).get(field) : null }
+
+    private static boolean same(Object first, Object second) {
+        if (first instanceof Number && second instanceof Number) return dec(first).compareTo(dec(second)) == 0
+        if (!ScriptBudget.isScalar(first) || !ScriptBudget.isScalar(second)) return first.is(second)
+        return first == second || (first != null && second != null && first.toString() == second.toString())
     }
 
-    private static Instant instant(Object x) {
+    /** numbers by value, anything else as text, null first */
+    private static int compareValues(Object first, Object second) {
+        if (first instanceof Number && second instanceof Number) return dec(first) <=> dec(second)
+        if (first == null || second == null) return first == null ? (second == null ? 0 : -1) : 1
+        return String.valueOf(first) <=> String.valueOf(second)
+    }
+
+    /** the one that is not null, or of the two the smaller (side -1) or the larger (side 1) */
+    private static BigDecimal pick(BigDecimal first, BigDecimal second, int side) {
+        if (first == null) return second
+        if (second == null) return first
+        return first.compareTo(second) * side >= 0 ? first : second
+    }
+
+    private static Duration between(Object from, Object to) {
+        Instant start = instant(from), end = instant(to)
+        return start == null || end == null ? null : Duration.between(start, end)
+    }
+
+    private static Instant instant(Object value) {
         ScriptBudget.charge()
-        if (x == null) return null
-        if (x instanceof Number) return Instant.ofEpochMilli(((Number) x).longValue())
-        String text = x.toString().trim()
+        if (value == null) return null
+        if (value instanceof Number) return Instant.ofEpochMilli(((Number) value).longValue())
+        String text = value.toString().trim()
         if (text.isEmpty()) return null
-        try { return Instant.parse(text) } catch (DateTimeParseException ignored) { }
-        try { return OffsetDateTime.parse(text).toInstant() } catch (DateTimeParseException ignored) { }
-        try { return LocalDateTime.parse(text.replace(' ', 'T')).toInstant(ZoneOffset.UTC) } catch (DateTimeParseException ignored) { }
-        try { return LocalDate.parse(text.take(10)).atStartOfDay().toInstant(ZoneOffset.UTC) } catch (DateTimeParseException ignored) { }
         if (text.isLong()) return Instant.ofEpochMilli(text.toLong())
+        for (Closure<Instant> format : DATE_FORMATS) {
+            try {
+                return format.call(text)
+            } catch (DateTimeParseException ignored) {
+                // not this format, try the next
+            }
+        }
         throw new IllegalArgumentException("'${text.take(40)}' is not a date or timestamp.".toString())
     }
 }

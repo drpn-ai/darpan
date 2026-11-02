@@ -259,8 +259,7 @@ tasks.register('testAll') {
 
 // Tests read side 2 after side 1: their harness contexts cannot make a worker context (AutomationExecutionSupport).
 tasks.withType(Test).configureEach { systemProperty 'darpan.reconciliation.automation.parallelSourceExtracts', 'false' }
-// DAR-BE-175: ScriptLoadGate reads real CPU and heap; a test JVM booting Moqui would make scripts randomly BUSY.
-// Off in tests (101 = signal off); ScriptLoadGateTests and the deployment hold test drive the readings directly.
+// ScriptLoadGate reads real CPU and heap, which would make scripts randomly BUSY in a test JVM; 101 turns both off
 tasks.withType(Test).configureEach {
     systemProperty 'darpan.scripts.holdAtCpuPercent', '101'
     systemProperty 'darpan.scripts.holdAtHeapPercent', '101'

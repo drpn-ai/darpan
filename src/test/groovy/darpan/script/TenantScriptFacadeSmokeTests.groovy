@@ -120,22 +120,22 @@ class TenantScriptFacadeSmokeTests {
         assertNull(rowNamed("Hostile"))
     }
 
-    // DAR-BE-175: the genuine-user mistakes of 2026-11-02 are refused at save, with the line and a fix, and not saved.
+    // the genuine-user mistakes are refused at save by a trial run on the sample, with the line and a fix, and not saved
     @Test
     void commonMistakesAreRefusedBeforeSavingAndTheFixedScriptSaves() {
         String sample = '{"orders": [{"orderId": "SO-1", "lines": [{"sku": "A", "ordered": 5, "shipped": 3}]}]}'
         Map typo = call("save#TenantScript", [scriptName: "Owed typo", inputSource: "SAMPLE", sampleInputJson: sample,
                 scriptBody: "var t = 0;\nfor (var o : input.orders) {\n  for (var l : o.lines) { t = t + (l.ordred - l.shipped); }\n}\nt"])
         assertFalse(typo.ok as Boolean)
-        assertTrue((typo.errors as List)[0].toString().startsWith("Line 3: 'ordred'"), "${typo.errors}")
-        assertTrue((typo.errors as List)[0].toString().contains("Did you mean 'ordered'"), "${typo.errors}")
-        assertEquals("UNKNOWN_FIELD", ((typo.validation as Map).problems as List<Map>)[0].rule)
+        assertTrue((typo.errors as List)[0].toString().startsWith("Line 3: On its sample input the script stops: 'ordred' is not a field"), "${typo.errors}")
+        assertTrue((typo.errors as List)[0].toString().contains("ordered"), "lists the record's fields: ${typo.errors}")
+        assertEquals("FAILS_ON_SAMPLE", ((typo.validation as Map).problems as List<Map>)[0].rule)
         assertNull(rowNamed("Owed typo"))
 
         Map stuck = call("save#TenantScript", [scriptName: "Owed stuck", inputSource: "SAMPLE", sampleInputJson: sample,
                 scriptBody: "var i = 0;\nvar t = 0;\nwhile (i < size(input.orders)) { t = t + 1; }\nt"])
         assertFalse(stuck.ok as Boolean)
-        assertTrue((stuck.errors as List)[0].toString().startsWith("Line 3: This loop never changes 'i'"), "${stuck.errors}")
+        assertTrue((stuck.errors as List)[0].toString().contains("A loop that never ends"), "${stuck.errors}")
         assertNull(rowNamed("Owed stuck"))
 
         Map fixed = call("save#TenantScript", [scriptName: "Owed", inputSource: "SAMPLE", sampleInputJson: sample,

@@ -6,90 +6,52 @@ import groovy.transform.CompileStatic
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.lang.management.ManagementFactory
-
 /**
- * Tenant scripts run last: a script starts only while Darpan's own work has room. Busy when reconciliation runs are
- * queued or at their cap, when heap after GC is at or above darpan.scripts.holdAtHeapPercent (70, below the 85 runs
- * hold at), or when process CPU is at or above darpan.scripts.holdAtCpuPercent (75). A value of 101 turns a signal off.
- * When heap after GC is unknown, live heap is held at 85% instead, so the heap signal never fails open.
- *
- * NOTE: Java thread priority is not used, the JVM ignores it on Linux.
+ * Tenant scripts run last: one starts only while reconciliation runs have room, heap after GC is under
+ * darpan.scripts.holdAtHeapPercent (70) and process CPU is under darpan.scripts.holdAtCpuPercent (75). 101 turns one off.
  */
 @CompileStatic
 class ScriptLoadGate {
     protected final static Logger logger = LoggerFactory.getLogger(ScriptLoadGate.class)
 
-    static final String HEAP_PROPERTY = 'darpan.scripts.holdAtHeapPercent'
-    static final String CPU_PROPERTY = 'darpan.scripts.holdAtCpuPercent'
-    static final String MAX_WAIT_PROPERTY = 'darpan.scripts.scheduledMaxWaitMinutes'
-    static final int DEFAULT_HOLD_AT_HEAP_PERCENT = 70
-    static final int DEFAULT_HOLD_AT_CPU_PERCENT = 75
-    static final int DEFAULT_SCHEDULED_MAX_WAIT_MINUTES = 60
-    // NOTE: live heap reads ~90% on a healthy JVM just before a young GC, so it only backs up the after-GC reading
-    static final int LIVE_HEAP_BACKSTOP_PERCENT = 85
+    // NOTE: live heap reads ~90% on a healthy JVM just before a young GC, so it is used only while heap after GC is unknown
+    static final int LIVE_HEAP_PERCENT = 85
 
-    /** {runsRunning, runsQueued, runsCap, heapPercent, liveHeapPercent, cpuPercent}, a null value is unknown; replaced in tests */
-    static Closure<Map<String, Object>> probe = { -> defaultReadings() }
+    /** {runsRunning, runsQueued, runsCap, heapPercent, liveHeapPercent, cpuPercent}, null when unknown; replaced in tests */
+    static Closure<Map<String, Object>> probe = { -> readLoad() }
 
-    static int holdAtHeapPercent() { intProperty(HEAP_PROPERTY, DEFAULT_HOLD_AT_HEAP_PERCENT) }
-    static int holdAtCpuPercent() { intProperty(CPU_PROPERTY, DEFAULT_HOLD_AT_CPU_PERCENT) }
-    static int scheduledMaxWaitMinutes() { intProperty(MAX_WAIT_PROPERTY, DEFAULT_SCHEDULED_MAX_WAIT_MINUTES) }
+    static int holdAtHeapPercent() { Integer.getInteger('darpan.scripts.holdAtHeapPercent', 70) }
+    static int holdAtCpuPercent() { Integer.getInteger('darpan.scripts.holdAtCpuPercent', 75) }
+    static int scheduledMaxWaitMinutes() { Integer.getInteger('darpan.scripts.scheduledMaxWaitMinutes', 60) }
 
-    /** {busy, reason, readings}; never throws */
-    static Map<String, Object> check() {
-        Map<String, Object> r
+    /** Why scripts must wait right now, or null when Darpan has room for one. */
+    static String busyReason() {
+        Map<String, Object> load
         try {
-            r = probe.call()
+            load = probe.call()
         } catch (Throwable t) {
-            // a broken reading must not stop every script, so treat it as calm
-            logger.warn("Could not read load for script admission, treating as not busy", t)
-            r = [:]
-        }
-        String reason = null
-        Integer queued = r.runsQueued as Integer, running = r.runsRunning as Integer, cap = r.runsCap as Integer
-        Integer heap = r.heapPercent as Integer, liveHeap = r.liveHeapPercent as Integer, cpu = r.cpuPercent as Integer
-        boolean heapOn = holdAtHeapPercent() <= 100
-        if (queued != null && queued > 0) {
-            reason = "${queued} reconciliation run${queued == 1 ? ' is' : 's are'} waiting to start".toString()
-        } else if (running != null && cap != null && running >= cap) {
-            reason = "reconciliation runs are at their limit (${running} of ${cap})".toString()
-        } else if (heapOn && heap != null && heap >= holdAtHeapPercent()) {
-            reason = "memory is ${heap}% used (scripts wait above ${holdAtHeapPercent()}%)".toString()
-        } else if (heapOn && heap == null && liveHeap != null && liveHeap >= LIVE_HEAP_BACKSTOP_PERCENT) {
-            reason = "memory is ${liveHeap}% used (scripts wait above ${LIVE_HEAP_BACKSTOP_PERCENT}%)".toString()
-        } else if (cpu != null && cpu >= holdAtCpuPercent()) {
-            reason = "CPU is at ${cpu}% (scripts wait above ${holdAtCpuPercent()}%)".toString()
-        }
-        return [busy: reason != null, reason: reason, readings: r] as Map<String, Object>
-    }
-
-    static String busyMessage(String reason) {
-        return "Darpan is busy with its own work (${reason}), and scripts run last. Try again in a minute.".toString()
-    }
-
-    private static Map<String, Object> defaultReadings() {
-        Map<String, Object> runs = RunAdmission.SHARED.snapshot()
-        Runtime rt = Runtime.runtime
-        Integer liveHeap = rt.maxMemory() > 0 ? (int) Math.round(100d * (rt.totalMemory() - rt.freeMemory()) / rt.maxMemory()) : null
-        return [runsRunning: runs.running, runsQueued: runs.queued, runsCap: runs.cap, heapPercent: SystemLoadReader.heapAfterGcPercent(),
-                liveHeapPercent: liveHeap, cpuPercent: processCpuPercent()] as Map<String, Object>
-    }
-
-    private static Integer processCpuPercent() {
-        try {
-            def os = ManagementFactory.operatingSystemMXBean
-            if (!(os instanceof com.sun.management.OperatingSystemMXBean)) return null
-            double load = ((com.sun.management.OperatingSystemMXBean) os).processCpuLoad
-            return load < 0 ? null : (int) Math.round(load * 100)
-        } catch (Throwable t) {
-            logger.debug("Could not read process CPU load", t)
+            logger.warn("Could not read load for tenant scripts, letting them run", t)
             return null
         }
+        int queued = (load.runsQueued ?: 0) as int
+        Integer running = load.runsRunning as Integer, cap = load.runsCap as Integer
+        Integer heap = load.heapPercent as Integer, liveHeap = load.liveHeapPercent as Integer, cpu = load.cpuPercent as Integer
+
+        if (queued > 0) return "${queued} reconciliation run${queued == 1 ? ' is' : 's are'} waiting to start".toString()
+        if (running != null && cap != null && running >= cap) return "reconciliation runs are at their limit (${running} of ${cap})".toString()
+        if (heap != null && heap >= holdAtHeapPercent()) return "memory is ${heap}% used".toString()
+        if (heap == null && liveHeap != null && liveHeap >= Math.max(holdAtHeapPercent(), LIVE_HEAP_PERCENT)) return "memory is ${liveHeap}% used".toString()
+        if (cpu != null && cpu >= holdAtCpuPercent()) return "CPU is at ${cpu}%".toString()
+        return null
     }
 
-    private static int intProperty(String name, int fallback) {
-        String value = System.getProperty(name)
-        return value?.isInteger() ? value.toInteger() : fallback
+    static String busyMessage(String reason) { "Darpan is busy with its own work (${reason}), and scripts run last. Try again in a minute.".toString() }
+
+    private static Map<String, Object> readLoad() {
+        Map<String, Object> runs = RunAdmission.SHARED.snapshot()
+        Runtime runtime = Runtime.runtime
+        int liveHeapPercent = (int) Math.round(100d * (runtime.totalMemory() - runtime.freeMemory()) / runtime.maxMemory())
+        return [runsRunning: runs.running, runsQueued: runs.queued, runsCap: runs.cap, heapPercent: SystemLoadReader.heapAfterGcPercent(),
+                liveHeapPercent: liveHeapPercent, cpuPercent: SystemLoadReader.processCpuPercent()] as Map<String, Object>
     }
 }

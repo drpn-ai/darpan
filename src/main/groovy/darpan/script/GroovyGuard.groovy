@@ -104,7 +104,8 @@ class GroovyGuard {
         } catch (OutOfMemoryError e) {
             return outcome(false, null, [kind: 'MEMORY', message: 'The server ran short of memory during this script.'], budget, started)
         } catch (NullPointerException e) {
-            return outcome(false, null, emptyValueError(e, body, plainInput), budget, started)
+            // The CALLER's input: the script only ever had a copy, so nothing it grew or looped is walked here.
+            return outcome(false, null, emptyValueError(e, body, input), budget, started)
         } catch (Throwable e) {
             return outcome(false, null, [kind: 'ERROR', message: "${e.getClass().simpleName}: ${String.valueOf(e.message).take(240)}".toString()], budget, started)
         } finally {
@@ -201,16 +202,29 @@ class GroovyGuard {
         return [kind: 'ERROR', message: "An empty value (null) was used at ${where}. Check that it has a value, or use ?: for a default.".toString()] as Map<String, Object>
     }
 
-    /** Every map key in the input, walked to a bounded depth and count. */
-    private static Set<String> inputKeys(Object input) {
+    static final int MAX_HINT_ENTRIES = 50_000
+
+    /**
+     * Map key names in the input, for the misspelt-field hint. Bounded by ENTRIES VISITED (every map entry and list
+     * item counts, queued or not) and safe on cycles (identity set); stops quietly at the bound.
+     */
+    static Set<String> inputKeys(Object input) {
         Set<String> keys = new HashSet<>()
+        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>())
         Deque<Object> todo = new ArrayDeque<>()
-        if (input != null) todo.add(input)
-        int seen = 0
-        while (!todo.isEmpty() && seen++ < 50_000) {
+        if (input instanceof Map || input instanceof Collection) todo.add(input)
+        int entries = 0
+        while (!todo.isEmpty()) {
             Object x = todo.poll()
-            if (x instanceof Map) { ((Map) x).each { Object k, Object v -> keys.add(String.valueOf(k)); if (v != null) todo.add(v) } }
-            else if (x instanceof Collection) { for (Object v : (Collection) x) if (v != null) todo.add(v) }
+            if (!visited.add(x)) continue
+            Iterator it = x instanceof Map ? ((Map) x).entrySet().iterator() : ((Collection) x).iterator()
+            while (it.hasNext()) {
+                if (++entries > MAX_HINT_ENTRIES) return keys
+                Object item = it.next()
+                Object child = item
+                if (x instanceof Map) { Map.Entry e = (Map.Entry) item; keys.add(String.valueOf(e.key)); child = e.value }
+                if ((child instanceof Map || child instanceof Collection) && !visited.contains(child)) todo.add(child)
+            }
         }
         return keys
     }

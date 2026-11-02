@@ -129,6 +129,33 @@ class ScriptUserMistakesTests {
         assertFalse(message.contains('NullPointerException'), message)
     }
 
+    // Security review of dd60a7c: the field hint must not walk what the script built. A script that grows its input
+    // copy and then hits a null must get the hint from the caller's untouched input, with bounded work.
+    @Test
+    void theFieldHintReadsTheOriginalInputNotWhatTheScriptGrew() {
+        long started = System.nanoTime()
+        Map out = GroovyGuard.evaluate('input.junk = (1..200_000).collect { [k: it] }\ninput.orders[0].lines[0].ordred - 1', ORDERS)
+        long ms = (System.nanoTime() - started).intdiv(1_000_000L)
+        assertFalse(out.ok as boolean)
+        Map error = out.error as Map
+        assertTrue(error.kind in ['ERROR', 'MEMORY'], "${error}")
+        if (error.kind == 'ERROR') {
+            assertEquals('ordred', error.field, "${error}")
+            assertFalse((error.message as String).contains(', k,') || (error.message as String).contains('junk'), 'keys come from the original input')
+        }
+        assertTrue(ms < 5_000L, "took ${ms} ms")
+    }
+
+    @Test
+    void theInputWalkIsBoundedByEntriesAndSafeOnCycles() {
+        Map cyclic = [a: 1]; cyclic.self = cyclic
+        Map wide = [rows: (1..300_000).collect { [k: it] }]
+        long started = System.nanoTime()
+        assertEquals(['a', 'self'] as Set, GroovyGuard.inputKeys(cyclic))
+        assertTrue(GroovyGuard.inputKeys(wide).contains('rows'))
+        assertTrue((System.nanoTime() - started).intdiv(1_000_000L) < 2_000L)
+    }
+
     @Test
     void groovyExplainsAnEmptyValueThatIsNotAMisspelling() {
         Map out = GroovyGuard.evaluate('def x = null\nx + 1', null)

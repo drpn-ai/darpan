@@ -53,7 +53,17 @@ class GraphQlTransport {
         int timeout = ((connection.timeoutSeconds ?: 120) as Number).intValue()
         int maxInFlight = ((limits.maxInFlight ?: 6) as Number).intValue()
         this.sender = sender ?: defaultSender(timeout)
-        this.governor = sender == null ? CostBucketGovernor.shared(url, maxInFlight) : new CostBucketGovernor(maxInFlight)
+        this.governor = sender == null ? CostBucketGovernor.shared(bucketKey(url, headers), maxInFlight) : new CostBucketGovernor(maxInFlight)
+    }
+
+    /**
+     * The bucket belongs to the credential, not the host: two tenants or two connections on one URL must never pace or
+     * starve each other. Keyed by the URL and a SHA-256 of every header sent (the sign-in included), so no secret is kept.
+     */
+    static String bucketKey(String url, Map<String, String> headers) {
+        String signed = new TreeMap<String, String>(headers ?: [:]).collect { k, v -> "${k}:${v}" }.join("\n")
+        return url + "|" + java.security.MessageDigest.getInstance("SHA-256")
+                .digest(signed.getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
     }
 
     int getCallCount() { return calls.get() }

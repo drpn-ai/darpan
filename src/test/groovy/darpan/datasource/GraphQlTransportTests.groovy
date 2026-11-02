@@ -61,6 +61,26 @@ class GraphQlTransportTests {
     }
 
     @Test
+    void eachCredentialHasItsOwnCostBucketAndNoSecretIsInTheKey() {
+        Map<String, String> one = GraphQlTransport.buildHeaders(definition().connection as Map, RECORD)
+        Map<String, String> other = GraphQlTransport.buildHeaders(definition().connection as Map, RECORD + [token: "t-2"])
+        String url = "https://acme.example/api/graphql"
+        assertEquals(GraphQlTransport.bucketKey(url, one), GraphQlTransport.bucketKey(url, new LinkedHashMap(one)))
+        assertTrue(GraphQlTransport.bucketKey(url, one) != GraphQlTransport.bucketKey(url, other))
+        assertFalse(GraphQlTransport.bucketKey(url, one).contains("t-1"))
+        CostBucketGovernor.resetShared()
+        try {
+            GraphQlTransport a = new GraphQlTransport(definition(), RECORD)
+            GraphQlTransport b = new GraphQlTransport(definition(), RECORD + [token: "t-2"])
+            GraphQlTransport c = new GraphQlTransport(definition(), RECORD)
+            assertTrue(a.governor.is(c.governor))
+            assertFalse(a.governor.is(b.governor))
+        } finally {
+            CostBucketGovernor.resetShared()
+        }
+    }
+
+    @Test
     void extraHeadersCannotSignInOrRouteAndAnUnknownSignInIsRefused() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException) {
             GraphQlTransport.buildHeaders(definition().connection as Map, RECORD + [extraHeaders: '{"Authorization":"Bearer stolen"}'])

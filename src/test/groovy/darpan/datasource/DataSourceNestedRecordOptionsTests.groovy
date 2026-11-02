@@ -1,10 +1,14 @@
 package darpan.datasource
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.Executable
+
+import java.time.Duration
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertThrows
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -181,5 +185,64 @@ class DataSourceNestedRecordOptionsTests {
          "fields lists the line fields", "always is true or false", "notOn is a list of {into, from}", "not {nope}", "not 'SOMETIMES'"].each { String w ->
             assertTrue(errors.any { it.contains(w) }, "${w} in ${errors}")
         }
+    }
+
+    // ---------------------------------------------------------------- an enrich join picks one candidate per target
+
+    /** Runs one enrich join step (copy: got <- v) of `from` into `into`, both keyed on k; returns what each target got. */
+    private static List enrich(List<Map> into, List<Map> from, Map options = [:]) {
+        Map<String, List<Map>> ctx = [into: into, from: from]
+        DataSourceRunner.join([id: "pick", kind: "join", into: "into", from: "from", on: [[into: "k", from: "k"]], copy: [got: "v"]] + options, ctx)
+        return into.collect { it.got }
+    }
+
+    private static List<Map> threeCandidates() {
+        [[k: "A", id: "x1", v: "first"], [k: "A", id: "x2", v: "middle"], [k: "A", id: "x3", v: "last"], [k: "B", id: "y1", v: "other"]]
+    }
+
+    @Test
+    void anEnrichJoinTakesTheFirstCandidateOrTheLastWithLast() {
+        assertEquals(["first", null], enrich([[k: "A", id: "t"], [k: "C", id: "t"]], threeCandidates()))
+        assertEquals(["last", null], enrich([[k: "A", id: "t"], [k: "C", id: "t"]], threeCandidates(), [last: true]))
+    }
+
+    @Test
+    void notOnSkipsCandidatesFromTheFrontOrFromTheBackWithLast() {
+        Map notOn = [notOn: [[into: "id", from: "id"]]]
+        assertEquals(["middle", "first"], enrich([[k: "A", id: "x1"], [k: "A", id: "x2"]], threeCandidates(), notOn))
+        assertEquals(["middle", "last"], enrich([[k: "A", id: "x3"], [k: "A", id: "x1"]], threeCandidates(), notOn + [last: true]))
+        // two notOn pairs: a candidate is skipped when either pair is the same
+        Map both = [notOn: [[into: "id", from: "id"], [into: "grp", from: "grp"]]]
+        List<Map> grouped = [[k: "A", id: "x1", grp: "g1", v: "first"], [k: "A", id: "x2", grp: "g2", v: "middle"], [k: "A", id: "x3", grp: "g3", v: "last"]]
+        assertEquals(["last"], enrich([[k: "A", id: "x1", grp: "g2"]], grouped, both))
+        assertEquals(["first"], enrich([[k: "A", id: "x3", grp: "g2"]], grouped, both + [last: true]))
+    }
+
+    @Test
+    void noAcceptableCandidateAttachesNothing() {
+        List<Map> into = [[k: "B", id: "y1", got: "kept"], [k: "A", id: "t"]]
+        assertEquals(["kept", null], enrich(into, [[k: "B", id: "y1", v: "self"]], [notOn: [[into: "id", from: "id"]]]))
+        assertEquals([null], enrich([[k: "B", id: "y1"]], [[k: "B", id: "y1", v: "self"]], [notOn: [[into: "id", from: "id"]], last: true]))
+    }
+
+    @Test
+    void aSkewedJoinKeyStaysLinear() {
+        // Security review: a key many records share (a blank join key in real data) made each target copy every candidate
+        int size = 50_000
+        List<Map> into = (1..size).collect { [k: "", id: "t${it}".toString()] as Map }
+        List<Map> from = (1..size).collect { [k: "", id: "f${it}".toString(), v: "v${it}".toString()] as Map }
+        // NOTE: one 10 s window per join; 50,000 x 50,000 took over 10 s before (each target copied every candidate)
+        assertTimeoutPreemptively(Duration.ofSeconds(10), {
+            List got = enrich(into, from)
+            assertEquals(size, got.size())
+            assertEquals(["v1"] as Set, got as Set)
+        } as Executable)
+        assertTimeoutPreemptively(Duration.ofSeconds(10), {
+            assertEquals(["v${size}".toString()] as Set, enrich(into, from, [last: true]) as Set)
+        } as Executable)
+        // notOn naming each target's own id: the scan stops at the first candidate that is not itself
+        assertTimeoutPreemptively(Duration.ofSeconds(10), {
+            assertEquals(["v1"] as Set, enrich(into, from, [notOn: [[into: "id", from: "id"]]]) as Set)
+        } as Executable)
     }
 }

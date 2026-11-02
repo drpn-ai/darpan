@@ -71,6 +71,48 @@ class DataSourceRunnerTests {
         assertTrue(badKey.message.contains("refuses the key(s) a b"))
     }
 
+    private static Map parallel(Map d, String mode, int threads) {
+        d.steps = ((List<Map>) d.steps).collect { Map st ->
+            if (st.id != "invoices") return st
+            Map bind = new LinkedHashMap((Map) st.bind)
+            bind[mode] = ((Map) bind[mode]) + [parallel: threads]
+            st + [bind: bind]
+        }
+        d.batchRecords = 1
+        return d
+    }
+
+    private static List<String> keys(List<Map> records) {
+        return records.collect { "${it.invoiceNo}|${it.lineNo}|${it.unitNo}|${it.statusNo}|${it.warehouse}|${it.partTitle}".toString() }.sort()
+    }
+
+    @Test
+    void piecesReadInParallelGiveTheSameRecordsAndCounts() {
+        long from = java.time.Instant.parse("2026-10-01T00:00:00Z").toEpochMilli()
+        long thru = java.time.Instant.parse("2026-10-04T00:00:00Z").toEpochMilli()
+        Map serial = runIt([mode: "window", from: from, thru: thru])
+        Map window = runIt([mode: "window", from: from, thru: thru], new AcmeLedgerFixture.ScriptedTransport(),
+                parallel(AcmeLedgerFixture.definition(), "window", 3))
+        assertEquals(keys(EXPECTED), keys((List<Map>) window.records))
+        assertEquals(serial.counts, window.counts)
+        assertEquals(3, window.rootRecords)
+        Map ids = runIt([mode: "ids", keys: ["A1", "A2", "A3"], keyField: "invoiceNo"], new AcmeLedgerFixture.ScriptedTransport(),
+                parallel(AcmeLedgerFixture.definition(), "ids", 2))
+        assertEquals(keys(EXPECTED), keys((List<Map>) ids.records))
+        assertEquals(serial.counts, ids.counts)
+    }
+
+    @Test
+    void aFailingPieceFailsTheWholeRun() {
+        long from = java.time.Instant.parse("2026-10-01T00:00:00Z").toEpochMilli()
+        long thru = java.time.Instant.parse("2026-10-04T00:00:00Z").toEpochMilli()
+        AcmeLedgerFixture.ScriptedTransport t = new AcmeLedgerFixture.ScriptedTransport(failOn: "2026-10-02T00")
+        DataSourceCallException e = assertThrows(DataSourceCallException) {
+            new DataSourceRunner(parallel(AcmeLedgerFixture.definition(), "window", 3), t).run([mode: "window", from: from, thru: thru]) { }
+        }
+        assertEquals("BROKEN", e.code)
+    }
+
     @Test
     void aCostRefusalHalvesThePageUntilItFits() {
         AcmeLedgerFixture.ScriptedTransport t = new AcmeLedgerFixture.ScriptedTransport(refuseCostAbove: 1)

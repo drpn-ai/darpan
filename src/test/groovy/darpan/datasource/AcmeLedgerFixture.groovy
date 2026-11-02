@@ -86,12 +86,15 @@ class AcmeLedgerFixture {
 
     /** Answers the fixture's queries like a server would: filters by the filter text, pages by first/after. */
     static class ScriptedTransport {
-        final List<Map> calls = []
+        final List<Map> calls = Collections.synchronizedList(new ArrayList<Map>())
+        /** A filter text that fails the call, as a broken server would. */
+        String failOn = null
         /** A call whose `first` is above this is refused for cost, once per call. */
         Integer refuseCostAbove = null
 
         Map execute(String document, Map variables, int reservation) {
             calls << [document: (document =~ /query\s+(\w+)/).with { it.find() ? it.group(1) : "?" }, variables: new LinkedHashMap(variables)]
+            if (failOn != null && (variables.filter as String)?.contains(failOn)) throw new DataSourceCallException("BROKEN", "broken")
             int first = (variables.first as Number).intValue()
             if (refuseCostAbove != null && first > refuseCostAbove) throw new DataSourceCallException("TOO_EXPENSIVE", "too expensive", true)
             int after = variables.after ? (variables.after as String).substring(1) as int : 0

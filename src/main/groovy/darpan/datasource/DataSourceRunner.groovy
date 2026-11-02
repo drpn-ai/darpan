@@ -31,13 +31,14 @@ class DataSourceRunner {
     private final Map definition
     private final def transport
     private final Map<String, Map> stepsById
-    private final Map<String, AtomicInteger> pageSizes = [:]
-    private final Map<String, DeriveEngine> engines = [:]
-    final Map<String, Long> counts = new LinkedHashMap<>()
-    final Map<String, Integer> pagesByStep = new LinkedHashMap<>()
-    int rootRecords = 0
-    int records = 0
-    int batches = 0
+    // Shared by the parallel readers of the first step (bind.<mode>.parallel): each piece is safe to touch from many threads.
+    private final Map<String, AtomicInteger> pageSizes = new java.util.concurrent.ConcurrentHashMap<>()
+    private final Map<String, DeriveEngine> engines = new java.util.concurrent.ConcurrentHashMap<>()
+    final Map<String, Long> counts = java.util.Collections.synchronizedMap(new LinkedHashMap<String, Long>())
+    final Map<String, Integer> pagesByStep = java.util.Collections.synchronizedMap(new LinkedHashMap<String, Integer>())
+    private final AtomicInteger rootRecordCount = new AtomicInteger()
+    private final AtomicInteger recordCount = new AtomicInteger()
+    private final AtomicInteger batchCount = new AtomicInteger()
 
     DataSourceRunner(Map definition, def transport) {
         this.definition = definition
@@ -53,32 +54,79 @@ class DataSourceRunner {
     Map run(Map request, Closure sink) {
         Map first = ((List<Map>) definition.steps)[0]
         int batchSize = ((definition.batchRecords ?: DEFAULT_BATCH_RECORDS) as Number).intValue()
-        List<Map> buffer = []
-        Closure take = { List<Map> page ->
-            buffer.addAll(page)
-            rootRecords += page.size()
-            while (buffer.size() >= batchSize) {
-                List<Map> batch = new ArrayList<>(buffer.subList(0, batchSize))
-                buffer.subList(0, batchSize).clear()
-                sink.call(finish(first, batch))
-            }
-        }
+        List<Map> pieces
+        int parallel
+        if (request.mode == "ids") { pieces = keyPieces(first, request); parallel = parallelOf((Map) ((Map) first.bind).ids) }
+        else if (request.mode == "window") { pieces = windowPieces(first, request); parallel = parallelOf((Map) ((Map) first.bind).window) }
+        else throw new IllegalArgumentException("A run reads by ids or by window, not '${request.mode}'.")
+        Closure safeSink = { List<Map> batch -> synchronized (sink) { sink.call(batch) } }
         try {
-            if (request.mode == "ids") readByKeys(first, request, take)
-            else if (request.mode == "window") readByWindow(first, request, take)
-            else throw new IllegalArgumentException("A run reads by ids or by window, not '${request.mode}'.")
-            if (buffer) sink.call(finish(first, buffer))
+            readPieces(first, pieces, Math.max(1, Math.min(parallel, pieces.size())), batchSize, safeSink)
         } finally {
             engines.values().each { it.close() }
             engines.clear()
         }
-        return [rootRecords: rootRecords, records: records, batches: batches, counts: counts, pages: pagesByStep,
+        return [rootRecords: rootRecordCount.get(), records: recordCount.get(), batches: batchCount.get(),
+                counts: new LinkedHashMap(counts), pages: new LinkedHashMap(pagesByStep),
                 pageSizes: pageSizes.collectEntries { k, v -> [(k): v.get()] }]
+    }
+
+    int getRootRecords() { return rootRecordCount.get() }
+
+    int getRecords() { return recordCount.get() }
+
+    int getBatches() { return batchCount.get() }
+
+    /**
+     * Reads the first step's pieces (window slices or key chunks) on `parallel` threads. Each thread keeps its own batch
+     * and finishes it (the later steps) as soon as it fills, so batches of different pieces run side by side. The first
+     * failure stops every thread before its next piece and is thrown; nothing after it is written.
+     */
+    private void readPieces(Map first, List<Map> pieces, int parallel, int batchSize, Closure sink) {
+        java.util.concurrent.ConcurrentLinkedQueue<Map> queue = new java.util.concurrent.ConcurrentLinkedQueue<>(pieces)
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>()
+        Closure worker = { ->
+            List<Map> buffer = []
+            Closure take = { List<Map> page ->
+                buffer.addAll(page)
+                rootRecordCount.addAndGet(page.size())
+                while (buffer.size() >= batchSize) {
+                    List<Map> batch = new ArrayList<>(buffer.subList(0, batchSize))
+                    buffer.subList(0, batchSize).clear()
+                    sink.call(finish(first, batch))
+                }
+            }
+            try {
+                Map piece
+                while (failure.get() == null && (piece = queue.poll()) != null) readPages(first, piece, take)
+                if (failure.get() == null && buffer) sink.call(finish(first, buffer))
+            } catch (Throwable t) {
+                failure.compareAndSet(null, t)
+            }
+        }
+        if (parallel == 1) {
+            worker.call()
+        } else {
+            List<Thread> threads = (1..parallel).collect { int n ->
+                Thread t = new Thread(worker as Runnable, "data-source-read-${n}")
+                t.daemon = true
+                t.start()
+                t
+            }
+            threads.each { it.join() }
+        }
+        Throwable t = failure.get()
+        if (t != null) throw t
+    }
+
+    private static int parallelOf(Map bind) {
+        return ((bind?.parallel ?: 1) as Number).intValue()
     }
 
     // ---------------------------------------------------------------- reading
 
-    private void readByKeys(Map step, Map request, Closure take) {
+    /** The first step's key chunks, each its query variables. */
+    private List<Map> keyPieces(Map step, Map request) {
         Map b = (Map) ((Map) step.bind).ids
         if (b == null) throw new IllegalArgumentException("Step '${step.id}' cannot be read by ids.")
         Map keyFields = (Map) (b.keyFields ?: [:])
@@ -91,22 +139,23 @@ class DataSourceRunner {
         java.util.regex.Pattern pattern = b.idPattern ? java.util.regex.Pattern.compile((String) b.idPattern) : null
         List<String> bad = pattern ? keys.findAll { !pattern.matcher(it).matches() } : []
         if (bad) throw new IllegalArgumentException("Step '${step.id}' refuses the key(s) ${bad.take(5).join(', ')}.")
-        keys.collate(((b.chunk ?: 100) as Number).intValue()).each { List<String> chunk ->
-            Map vars = fill((Map) b.variables, [ids: chunk.join((b.separator ?: ",") as String), keyField: filterField ?: ""])
-            readPages(step, vars, take)
+        return keys.collate(((b.chunk ?: 100) as Number).intValue()).collect { List<String> chunk ->
+            fill((Map) b.variables, [ids: chunk.join((b.separator ?: ",") as String), keyField: filterField ?: ""])
         }
     }
 
-    private void readByWindow(Map step, Map request, Closure take) {
+    /** The first step's window slices, each its query variables. */
+    private List<Map> windowPieces(Map step, Map request) {
         Map b = (Map) ((Map) step.bind).window
         if (b == null) throw new IllegalArgumentException("Step '${step.id}' cannot be read by window.")
         long from = (request.from as Number).longValue(), thru = (request.thru as Number).longValue()
         long slice = ((b.sliceHours as Number).longValue()) * 3_600_000L
+        List<Map> pieces = []
         for (long start = from; start < thru; start += slice) {
             long end = Math.min(thru, start + slice)
-            Map vars = fill((Map) b.variables, [from: instant(start, (String) b.instantFormat), thru: instant(end, (String) b.instantFormat)])
-            readPages(step, vars, take)
+            pieces << fill((Map) b.variables, [from: instant(start, (String) b.instantFormat), thru: instant(end, (String) b.instantFormat)])
         }
+        return pieces
     }
 
     /** A query step's pages for one set of variables, each page's records to `take`. */
@@ -133,7 +182,7 @@ class DataSourceRunner {
             if (!(connection instanceof Map)) {
                 throw new DataSourceCallException("NO_CONNECTION", "Step '${step.id}': the answer has no ${step.connectionAt}.".toString())
             }
-            pagesByStep.put((String) step.id, (pagesByStep.get(step.id) ?: 0) + 1)
+            synchronized (pagesByStep) { pagesByStep.put((String) step.id, (pagesByStep.get(step.id) ?: 0) + 1) }
             take.call(JsonPathValues.values(connection, (String) step.recordsAt).findAll { it instanceof Map } as List<Map>)
             if (++pages >= maxPages) throw new DataSourceCallException("TOO_MANY_PAGES", "Step '${step.id}' passed ${maxPages} pages.".toString())
             if (JsonPathValues.value(connection, (String) step.hasNextAt) != true) return
@@ -153,7 +202,7 @@ class DataSourceRunner {
     // ---------------------------------------------------------------- one batch
 
     private List<Map> finish(Map first, List<Map> roots) {
-        batches++
+        batchCount.incrementAndGet()
         Map<String, List<Map>> ctx = [(first.id as String): roots]
         String current = (String) first.id
         for (Map step : ((List<Map>) definition.steps).drop(1)) {
@@ -173,7 +222,7 @@ class DataSourceRunner {
             }
         }
         List<Map> out = ctx.get(current).collect { project(it) }
-        records += out.size()
+        recordCount.addAndGet(out.size())
         return out
     }
 
@@ -345,7 +394,7 @@ class DataSourceRunner {
         List<String> distinct = (List<String>) step.distinct
         Collection<Map> matched = (input ?: []).findAll { RecordConditions.matches(it, step.when) }
         long n = distinct ? matched.collect { Map r -> keyOf(distinct.collect { JsonPathValues.value(r, it) }) }.unique().size() : matched.size()
-        counts.put((String) step.name, (counts.get(step.name) ?: 0L) + n)
+        synchronized (counts) { counts.put((String) step.name, (counts.get(step.name) ?: 0L) + n) }
     }
 
     private Map project(Map r) {

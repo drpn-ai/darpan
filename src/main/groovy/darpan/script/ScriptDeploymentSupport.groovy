@@ -5,25 +5,21 @@ import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
+import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
 
 /**
- * DAR-BE-167. A script put to work (SuiteScript's scheduled-script deployment): on its schedule, read the newest result
- * of a saved run (or the script's sample), run the script, and post the text it returns to a chat space.
+ * A script put to work, like a SuiteScript scheduled deployment: on its schedule it reads the newest result of a saved
+ * run (or its sample), runs the script as the deployment's own tenant, and posts the text it returns to a chat space.
  *
- * <p>The script stays pure. It cannot reach a network or write anything; it RETURNS text, and this class delivers it
- * through the same chat path as run notifications (TenantNotificationSupport.postToChatSpace, which re-checks the
- * space belongs to the tenant). Null or empty text means "nothing to say": nothing is sent.</p>
- *
- * <p>Every execution runs as the deployment's own tenant (TenantAccessSupport.withSystemTenant), so the scheduled path
- * reads exactly what that tenant could read, and evaluation happens with no transaction open (ScriptSupervisor).</p>
+ * NOTE: the script stays pure, it returns text and this class delivers it; empty text means nothing is sent
+ * NOTE: not @CompileStatic, the finders and chat helpers it calls return def
  */
 class ScriptDeploymentSupport {
-
-    private static final Logger logger = LoggerFactory.getLogger(ScriptDeploymentSupport.class)
+    protected final static Logger logger = LoggerFactory.getLogger(ScriptDeploymentSupport.class)
 
     static final String ENTITY = 'darpan.script.TenantScriptDeployment'
 
@@ -40,6 +36,9 @@ class ScriptDeploymentSupport {
 
     /** Chat messages are cut here; Google Chat's own limit is 4,096 characters. */
     static final int MAX_MESSAGE_CHARS = 4_000
+
+    private static final List<String> DEPLOYMENT_FIELDS = ['tenantScriptDeploymentId', 'tenantScriptId', 'scheduleExpr',
+            'inputSavedRunId', 'chatSpaceId', 'nextRunDate', 'lastRunDate', 'lastRunStatus', 'lastRunMessage', 'lastRunUnits']
 
     /** The next time a schedule fires after `from`, in the tenant's zone; null when the expression is not a schedule. */
     static Timestamp nextRunDate(def ec, String tenantId, String scheduleExpr, Timestamp from) {
@@ -65,7 +64,7 @@ class ScriptDeploymentSupport {
                 logger.warn("Script deployment {} failed: {}", deployment.tenantScriptDeploymentId, t.toString())
                 outcome = [status: SCRIPT_ERROR, message: "The deployment failed: ${t.message ?: t.getClass().simpleName}".toString()]
             }
-            // A deployment reports through its outcome, never by failing the caller (the scan runs many).
+            // a deployment reports through its outcome, never by failing the caller, since the scan runs many
             ec.message.clearErrors()
             return outcome
         }
@@ -165,7 +164,7 @@ class ScriptDeploymentSupport {
         ec.transaction.runUseOrBegin(30, 'Error recording a script deployment run', {
             deployment.set('lastRunDate', now)
             deployment.set('lastRunStatus', outcome.status?.toString())
-            deployment.set('lastRunMessage', message && message.length() > 255 ? message.substring(0, 254) + '…' : message)
+            deployment.set('lastRunMessage', fitField(message))
             deployment.set('lastRunUnits', run.units != null ? ((Number) run.units).longValue() : null)
             deployment.update()
         })
@@ -177,31 +176,24 @@ class ScriptDeploymentSupport {
      * While the core is busy a due deployment is held instead (holdForLoad).
      */
     static Map<String, Object> scanDue(def ec, Timestamp now, int limit) {
-        Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())
+        Timestamp scanTime = now ?: new Timestamp(System.currentTimeMillis())
         List due = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY,
                 'DAR-BE-167 scheduled scan across tenants; each deployment then runs as its own tenant')
                 .condition('isActive', 'Y')
-                .condition('nextRunDate', org.moqui.entity.EntityCondition.LESS_THAN_EQUAL_TO, nowValue)
+                .condition('nextRunDate', EntityCondition.LESS_THAN_EQUAL_TO, scanTime)
                 .orderBy('nextRunDate').limit(Math.max(1, limit)).useCache(false).list()
         List<Map<String, Object>> results = []
         due.each { def deployment ->
             String id = deployment.tenantScriptDeploymentId
             String busyReason = ScriptLoadGate.busyReason()
             if (busyReason) {
-                Map<String, Object> held = holdForLoad(ec, deployment, nowValue, busyReason)
+                Map<String, Object> held = holdForLoad(ec, deployment, scanTime, busyReason)
                 if (held != null) results << held
                 return
             }
-            Timestamp next = nextRunDate(ec, deployment.companyUserGroupId?.toString(), deployment.scheduleExpr?.toString(), nowValue)
-            boolean claimed = ec.transaction.runUseOrBegin(30, 'Error claiming a script deployment run', {
-                def fresh = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-167 claim re-read of one deployment')
-                        .condition('tenantScriptDeploymentId', id).forUpdate(true).useCache(false).one()
-                if (fresh == null || fresh.isActive != 'Y' || fresh.nextRunDate == null || fresh.nextRunDate.after(nowValue)) return false
-                fresh.set('nextRunDate', next)
-                fresh.update()
-                return true
-            }) as boolean
-            if (!claimed) return
+            Timestamp next = nextRunDate(ec, deployment.companyUserGroupId?.toString(), deployment.scheduleExpr?.toString(), scanTime)
+            // claimed by moving its next run date forward first, so a slow run or an overlapping scan never sends twice
+            if (!updateIfStillDue(ec, id, scanTime) { def current -> current.set('nextRunDate', next) }) return
             Map<String, Object> outcome = execute(ec, deployment, true, true)
             def latest = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-167 record outcome on the claimed deployment')
                     .condition('tenantScriptDeploymentId', id).useCache(false).one()
@@ -231,37 +223,40 @@ class ScriptDeploymentSupport {
         String message = expired
                 ? "Not run: Darpan stayed busy (${reason}) from ${utc(dueAt)} until this run expired at ${utc(expireAt)}. Next run ${utc(next)}.".toString()
                 : "Waiting since ${utc(dueAt)}: Darpan is busy (${reason}) and scripts run last. Expires at ${utc(expireAt)} if it stays busy.".toString()
-        boolean written = ec.transaction.runUseOrBegin(30, 'Error holding a script deployment for load', {
-            def fresh = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-175 hold re-read of one due deployment while the core is busy')
-                    .condition('tenantScriptDeploymentId', id).forUpdate(true).useCache(false).one()
-            if (fresh == null || fresh.isActive != 'Y' || fresh.nextRunDate == null || fresh.nextRunDate.after(now)) return false
-            if (expired) fresh.set('nextRunDate', next)
-            fresh.set('lastRunStatus', status)
-            fresh.set('lastRunMessage', message.length() > 255 ? message.substring(0, 254) + '…' : message)
-            fresh.update()
-            return true
-        }) as boolean
+        boolean written = updateIfStillDue(ec, id, now) { def current ->
+            if (expired) current.set('nextRunDate', next)
+            current.set('lastRunStatus', status)
+            current.set('lastRunMessage', fitField(message))
+        }
         if (!written) return null
         logger.info("Script deployment {} ({}) {}: {}", id, tenantId, status, message)
         return [tenantScriptDeploymentId: id, status: status, message: message, nextRunDate: next, expireAt: expireAt]
     }
 
-    private static String utc(Timestamp t) { t == null ? '-' : t.toInstant().toString().take(16).replace('T', ' ') + ' UTC' }
-
     static Map<String, Object> toDeploymentMap(def row) {
         if (row == null) return null
-        return [
-                tenantScriptDeploymentId: row.tenantScriptDeploymentId,
-                tenantScriptId          : row.tenantScriptId,
-                scheduleExpr            : row.scheduleExpr,
-                inputSavedRunId         : row.inputSavedRunId,
-                chatSpaceId             : row.chatSpaceId,
-                isActive                : row.isActive == 'Y',
-                nextRunDate             : row.nextRunDate,
-                lastRunDate             : row.lastRunDate,
-                lastRunStatus           : row.lastRunStatus,
-                lastRunMessage          : row.lastRunMessage,
-                lastRunUnits            : row.lastRunUnits,
-        ]
+        Map<String, Object> deployment = DEPLOYMENT_FIELDS.collectEntries { String field -> [(field): row.get(field)] }
+        deployment.isActive = row.isActive == 'Y'
+        return deployment
     }
+
+    /**
+     * Re-reads one deployment under a row lock and, while it is still active and due, applies change and saves it.
+     * False when another scan got there first or it was switched off.
+     */
+    private static boolean updateIfStillDue(def ec, String deploymentId, Timestamp now, Closure change) {
+        return ec.transaction.runUseOrBegin(30, 'Error updating a due script deployment', {
+            def current = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-167 re-read of one due deployment under a row lock')
+                    .condition('tenantScriptDeploymentId', deploymentId).forUpdate(true).useCache(false).one()
+            if (current == null || current.isActive != 'Y' || current.nextRunDate == null || current.nextRunDate.after(now)) return false
+            change.call(current)
+            current.update()
+            return true
+        }) as boolean
+    }
+
+    /** a message cut to fit a 255-character field */
+    private static String fitField(String message) { message && message.length() > 255 ? message.substring(0, 254) + '…' : message }
+
+    private static String utc(Timestamp time) { time == null ? '-' : time.toInstant().toString().take(16).replace('T', ' ') + ' UTC' }
 }

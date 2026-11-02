@@ -37,7 +37,7 @@ class TenantScriptFacadeSmokeTests {
     private static final String TENDER_SCRIPT = '''
         var paid = 0;
         for (var p : input.payments) { paid = paid + d:dec(p.amount) }
-        { 'orderId': input.orderId, 'paid': d:money(paid), 'cards': d:count(input.payments, 'tender', 'CARD') }
+        { 'orderId': input.orderId, 'paid': d:round(paid, 2), 'cards': size(d:where(input.payments, 'tender', 'CARD')) }
     '''
     private static final String SAMPLE = '{"orderId":"KRW-1","payments":[{"tender":"CARD","amount":"12.50"},{"tender":"CASH","amount":7}]}'
 
@@ -101,7 +101,7 @@ class TenantScriptFacadeSmokeTests {
 
         // The editor tries an unsaved edit against other input; the saved row is untouched.
         Map draft = call("run#TenantScript", [tenantScriptId: id, scriptProfile: "EXPRESSION",
-                                              scriptBody: "d:len(input.payments) > 1", inputJson: '{"payments":[1,2,3]}'])
+                                              scriptBody: "size(input.payments) > 1", inputJson: '{"payments":[1,2,3]}'])
         assertTrue(draft.ok as Boolean, "${draft.errors}")
         assertEquals(true, (draft.run as Map).result)
         assertEquals(TENDER_SCRIPT, row(id).scriptBody)

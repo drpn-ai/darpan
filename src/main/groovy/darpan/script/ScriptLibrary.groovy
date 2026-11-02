@@ -1,6 +1,7 @@
 package darpan.script
 
 import groovy.transform.CompileStatic
+import org.moqui.util.CollectionUtilities
 
 import java.math.RoundingMode
 import java.time.Duration
@@ -15,6 +16,9 @@ import java.time.format.DateTimeParseException
  * The d: functions, the only ones a tenant script can call. Each takes and returns plain JSON values and charges the
  * ScriptBudget for its work. There is no clock and no randomness, so the same input always gives the same result.
  *
+ * Only what JEXL cannot do itself: size(x), empty(x), =^ / =$ (begins / ends with), =~ on a list (is in), ?: and ??
+ * are built in, so there is no d:len, d:begins, d:ends, d:min, d:max, d:abs or d:count.
+ *
  * NOTE: names avoid JEXL's reserved words (size, empty, new, not, and, or); only public static methods are callable
  */
 @CompileStatic
@@ -22,26 +26,20 @@ class ScriptLibrary {
     /** every function and its one-line help, for the editor; a field, not a property, so Groovy adds no getter */
     public static final List<Map<String, String>> CATALOG = [
             [name: 'dec(x)', help: 'x as a decimal number (text or number); null stays null'],
-            [name: 'money(x)', help: 'x rounded half-up to 2 decimals'],
-            [name: 'round(x, places)', help: 'x rounded half-up to places decimals'],
-            [name: 'abs(x)', help: 'x without its sign'],
-            [name: 'min(a, b) / max(a, b)', help: 'the smaller / larger of two numbers'],
+            [name: 'round(x, places)', help: 'x rounded half-up to places decimals; d:round(x, 2) for money'],
             [name: 'str(x)', help: 'x as text'],
             [name: 'lower(s) / upper(s) / trim(s)', help: 'text case and surrounding spaces'],
             [name: 'has(s, part)', help: 'true when text s contains part'],
-            [name: 'begins(s, part) / ends(s, part)', help: 'true when text s starts / ends with part'],
             [name: 'replace(s, from, to)', help: 'every from in s replaced with to (plain text, no patterns)'],
             [name: 'split(s, sep)', help: 'text s split on sep into a list'],
             [name: 'join(list, sep)', help: 'the list as one text, sep between items'],
-            [name: 'len(x)', help: 'characters in a text, items in a list or keys in a map'],
             [name: 'keys(map) / vals(map)', help: "a map's keys / values as a list"],
             [name: 'pluck(list, field)', help: 'field from each map in the list'],
-            [name: 'where(list, field, value)', help: 'the maps in the list whose field equals value'],
-            [name: 'count(list, field, value)', help: 'how many maps in the list have field equal to value'],
+            [name: 'where(list, field, value)', help: 'the maps in the list whose field equals value; size(...) counts them'],
             [name: 'sum(list) / sum(list, field)', help: 'the total of the numbers, or of field across maps'],
             [name: 'groupCount(list, field)', help: 'a map of each value of field to how many maps have it'],
             [name: 'sorted(list) / distinct(list)', help: 'the list sorted / with repeats removed'],
-            [name: "sortBy(list, field) / sortBy(list, field, 'desc')", help: 'the maps in the list ordered by field (numbers as numbers)'],
+            [name: "sortBy(list, 'field')", help: "the maps ordered by field: '-field' descending, '^field' ignoring case, 'a,b' by several"],
             [name: 'day(x)', help: 'a date or timestamp as yyyy-MM-dd (UTC)'],
             [name: 'daysBetween(a, b) / hoursBetween(a, b)', help: 'whole days / hours from a to b (dates, timestamps or epoch ms)'],
             [name: 'log(x)', help: 'adds x to the run log and returns it'],
@@ -64,20 +62,12 @@ class ScriptLibrary {
         }
     }
 
-    static BigDecimal money(Object value) { round(value, 2) }
-
     static BigDecimal round(Object value, Object places) {
         BigDecimal number = dec(value)
         int scale = places == null ? 0 : dec(places).intValue()
         if (scale < 0 || scale > 12) throw new IllegalArgumentException('round takes 0 to 12 places.')
         return number?.setScale(scale, RoundingMode.HALF_UP)
     }
-
-    static BigDecimal abs(Object value) { dec(value)?.abs() }
-
-    static BigDecimal min(Object first, Object second) { pick(dec(first), dec(second), -1) }
-
-    static BigDecimal max(Object first, Object second) { pick(dec(first), dec(second), 1) }
 
     // -- text
 
@@ -102,16 +92,6 @@ class ScriptLibrary {
         String whole = str(text), piece = str(part)
         ScriptBudget.charge(1 + (whole?.length() ?: 0).intdiv(64))
         return whole != null && piece != null && whole.contains(piece)
-    }
-
-    static boolean begins(Object text, Object part) {
-        String whole = str(text), piece = str(part)
-        return whole != null && piece != null && whole.startsWith(piece)
-    }
-
-    static boolean ends(Object text, Object part) {
-        String whole = str(text), piece = str(part)
-        return whole != null && piece != null && whole.endsWith(piece)
     }
 
     static String replace(Object text, Object from, Object to) {
@@ -159,16 +139,6 @@ class ScriptLibrary {
 
     // -- lists and maps
 
-    static int len(Object value) {
-        ScriptBudget.charge()
-        if (value == null) return 0
-        if (value instanceof CharSequence) return ((CharSequence) value).length()
-        if (value instanceof Collection) return ((Collection) value).size()
-        if (value instanceof Map) return ((Map) value).size()
-        if (value.getClass().isArray()) return java.lang.reflect.Array.getLength(value)
-        throw new IllegalArgumentException('len takes text, a list or a map.')
-    }
-
     static List keys(Object map) {
         Map entries = asMap(map, 'keys')
         ScriptBudget.charge(entries.size())
@@ -193,8 +163,6 @@ class ScriptLibrary {
         return items.findAll { Object item -> item instanceof Map && same(fieldOf(item, field), value) }
     }
 
-    static int count(Object list, Object field, Object value) { where(list, field, value).size() }
-
     static BigDecimal sum(Object list) { sum(list, null) }
 
     static BigDecimal sum(Object list, Object field) {
@@ -211,38 +179,33 @@ class ScriptLibrary {
     static Map<String, Integer> groupCount(Object list, Object field) {
         List items = asList(list, 'groupCount')
         ScriptBudget.charge(items.size())
-        Map<String, Integer> counts = new LinkedHashMap<>()
-        for (Object item : items) {
-            String key = ScriptBudget.render(fieldOf(item, field), 200)
-            counts.put(key, (counts.get(key) ?: 0) + 1)
-        }
-        return counts
+        return items.countBy { Object item -> ScriptBudget.render(fieldOf(item, field), 200) } as Map<String, Integer>
     }
 
     static List sorted(Object list) {
         List items = new ArrayList(asList(list, 'sorted'))
         if (items.any { !ScriptBudget.isScalar(it) }) throw new IllegalArgumentException('sorted takes a list of text or numbers.')
         ScriptBudget.charge(items.size() * 4L)
-        items.sort { Object first, Object second -> compareValues(first, second) }
+        items.sort { Object first, Object second ->
+            if (first instanceof Number && second instanceof Number) return dec(first) <=> dec(second)
+            if (first == null || second == null) return first == null ? (second == null ? 0 : -1) : 1
+            return String.valueOf(first) <=> String.valueOf(second)
+        }
         return items
     }
 
-    static List sortBy(Object list, Object field) { sortBy(list, field, 'asc') }
-
-    /** The maps in the list ordered by one field; ties keep their order. */
-    static List sortBy(Object list, Object field, Object direction) {
+    /** The maps in the list in Moqui order-by form: 'total', '-total' descending, '^name' ignoring case, 'a,b' by several. */
+    static List sortBy(Object list, Object orderBy) {
         List items = new ArrayList(asList(list, 'sortBy'))
         if (items.any { !(it instanceof Map) }) throw new IllegalArgumentException('sortBy takes a list of maps.')
-        String order = str(direction)?.trim()?.toLowerCase(Locale.ROOT) ?: 'asc'
-        if (!(order in ['asc', 'desc'])) throw new IllegalArgumentException("sortBy's direction is 'asc' or 'desc'.")
+        String fields = str(orderBy)?.trim()
+        if (!fields) throw new IllegalArgumentException('sortBy needs a field to sort on.')
         ScriptBudget.charge(items.size() * 4L)
-        int sign = order == 'desc' ? -1 : 1
-        items.sort { Object first, Object second ->
-            Object left = fieldOf(first, field), right = fieldOf(second, field)
-            if (!ScriptBudget.isScalar(left) || !ScriptBudget.isScalar(right)) throw new IllegalArgumentException('sortBy sorts on text or numbers.')
-            sign * compareValues(left, right)
+        try {
+            return CollectionUtilities.orderMapList((List<Map<String, Object>>) items, [fields])
+        } catch (ClassCastException ignored) {
+            throw new IllegalArgumentException('sortBy sorts on text or numbers.')
         }
-        return items
     }
 
     static List distinct(Object list) {
@@ -298,20 +261,6 @@ class ScriptLibrary {
         if (first instanceof Number && second instanceof Number) return dec(first).compareTo(dec(second)) == 0
         if (!ScriptBudget.isScalar(first) || !ScriptBudget.isScalar(second)) return first.is(second)
         return first == second || (first != null && second != null && first.toString() == second.toString())
-    }
-
-    /** numbers by value, anything else as text, null first */
-    private static int compareValues(Object first, Object second) {
-        if (first instanceof Number && second instanceof Number) return dec(first) <=> dec(second)
-        if (first == null || second == null) return first == null ? (second == null ? 0 : -1) : 1
-        return String.valueOf(first) <=> String.valueOf(second)
-    }
-
-    /** the one that is not null, or of the two the smaller (side -1) or the larger (side 1) */
-    private static BigDecimal pick(BigDecimal first, BigDecimal second, int side) {
-        if (first == null) return second
-        if (second == null) return first
-        return first.compareTo(second) * side >= 0 ? first : second
     }
 
     private static Duration between(Object from, Object to) {

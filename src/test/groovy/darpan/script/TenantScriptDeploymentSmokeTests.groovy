@@ -47,7 +47,7 @@ class TenantScriptDeploymentSmokeTests {
         }
         var lines = '';
         for (var sku : d:sorted(d:keys(bySku))) { lines = lines + '\\n' + sku + ': ' + d:str(bySku[sku]) }
-        d:len(bySku) == 0 ? '' : 'Backordered units by SKU' + lines
+        size(bySku) == 0 ? '' : 'Backordered units by SKU' + lines
     '''
     private static final String SAMPLE = '{"differences":[' +
             '{"record":{"data":{"order":"SO1","itemsBackordered":[{"sku":"B:M","quantity":"1"},{"sku":"A:S","quantity":"2"}]}}},' +

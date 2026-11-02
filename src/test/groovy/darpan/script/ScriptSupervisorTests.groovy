@@ -37,7 +37,7 @@ class ScriptSupervisorTests {
 
     @Test
     void anExpressionReadsTheInputThroughTheLibrary() {
-        Map out = run('EXPRESSION', "d:sum(input.payments, 'amount') > d:money('50') && d:hoursBetween(input.placedAt, input.billedAt) <= 36")
+        Map out = run('EXPRESSION', "d:sum(input.payments, 'amount') > d:round('50', 2) && d:hoursBetween(input.placedAt, input.billedAt) <= 36")
         assertTrue(out.ok as boolean, "${out}")
         assertEquals(true, out.result)
         assertTrue((out.units as long) > 0)
@@ -53,7 +53,7 @@ class ScriptSupervisorTests {
                 byTender[p.tender] = d:dec(byTender[p.tender] ?? 0) + d:dec(p.amount);
             }
             d:log('paid ' + paid);
-            { 'orderId': input.orderId, 'paid': d:money(paid), 'tenders': d:join(d:sorted(d:keys(byTender)), '+'), 'byTender': byTender }
+            { 'orderId': input.orderId, 'paid': d:round(paid, 2), 'tenders': d:join(d:sorted(d:keys(byTender)), '+'), 'byTender': byTender }
         '''
         Map out = run('SCRIPT', body)
         assertTrue(out.ok as boolean, "${out}")
@@ -71,7 +71,7 @@ class ScriptSupervisorTests {
             var big = (p) -> d:dec(p.amount) >= 10;
             var n = 0;
             for (var p : input.payments) { if (big(p)) { n = n + 1 } }
-            [n, d:count(input.payments, 'tender', 'CARD'), d:groupCount(input.payments, 'tender'), d:len(input.orderId)]
+            [n, size(d:where(input.payments, 'tender', 'CARD')), d:groupCount(input.payments, 'tender'), size(input.orderId)]
         ''')
         assertTrue(out.ok as boolean, "${out}")
         assertEquals([2, 2, [CARD: 2, GIFT_CARD: 1], 8], out.result)
@@ -261,7 +261,7 @@ class ScriptSupervisorTests {
     @Test
     void aHugeRangeIsNeverCopiedIntoMemory() {
         assertRefused(run('SCRIPT', 'd:sum(1..100000000)'), 'MEMORY')
-        assertRefused(run('SCRIPT', 'd:len(d:distinct(1..100000000))'), 'MEMORY')
+        assertRefused(run('SCRIPT', 'size(d:distinct(1..100000000))'), 'MEMORY')
     }
 
     @Test
@@ -334,7 +334,7 @@ class ScriptSupervisorTests {
                 bySku[line.sku] = row;
             }
         }
-        { 'skus': d:len(bySku), 'units': d:sum(d:vals(bySku), 'units'), 'bySku': d:sortBy(d:vals(bySku), 'units', 'desc') }
+        { 'skus': size(bySku), 'units': d:sum(d:vals(bySku), 'units'), 'bySku': d:sortBy(d:vals(bySku), '-units') }
     '''
 
     @Test
@@ -359,7 +359,7 @@ class ScriptSupervisorTests {
 
     @Test
     void sortByOrdersMapsByAFieldEitherWay() {
-        Map out = run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'b', 'n': 2}, {'k': 'a', 'n': 10}, {'k': 'c', 'n': 1}], 'n', 'desc'), 'k')")
+        Map out = run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'b', 'n': 2}, {'k': 'a', 'n': 10}, {'k': 'c', 'n': 1}], '-n'), 'k')")
         assertEquals(['a', 'b', 'c'], out.result)
         assertEquals(['a', 'b', 'c'], run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'c'}, {'k': 'a'}, {'k': 'b'}], 'k'), 'k')").result)
         assertFalse(run('EXPRESSION', "d:sortBy([1, 2], 'k')").ok as boolean, 'sortBy takes maps')

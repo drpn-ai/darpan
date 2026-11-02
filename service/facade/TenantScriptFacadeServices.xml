@@ -129,8 +129,10 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <!-- its deployments go with it, so nothing keeps firing a script that is gone -->
-                <set field="deploymentRows" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScriptDeployment', 'DAR-BE-167 deployments of a script being deleted, pinned to the active tenant by condition').condition('companyUserGroupId', tenantId).condition('tenantScriptId', scriptRow.tenantScriptId).useCache(false).list()"/>
-                <iterate list="deploymentRows" entry="deploymentRow"><set field="ignoreDeploymentDelete" from="deploymentRow.delete()"/></iterate>
+                <entity-delete-by-condition entity-name="darpan.script.TenantScriptDeployment">
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    <econdition field-name="tenantScriptId" from="scriptRow.tenantScriptId"/>
+                </entity-delete-by-condition>
                 <set field="ignoreDelete" from="scriptRow.delete()"/>
                 <message>Deleted script.</message>
             </if>

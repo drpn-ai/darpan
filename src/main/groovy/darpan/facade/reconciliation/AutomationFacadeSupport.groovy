@@ -34,7 +34,6 @@ class AutomationFacadeSupport {
     static final String INPUT_MODE_API_RANGE = "AUT_IN_API_RANGE"
     static final String INPUT_MODE_SFTP_FILES = "AUT_IN_SFTP_FILES"
     static final String SOURCE_TYPE_SFTP = "AUT_SRC_SFTP"
-    static final String OMS_SYSTEM_ENUM_ID = "OMS"
     static final String SHOPIFY_SYSTEM_ENUM_ID = "SHOPIFY"
     static final String NETSUITE_SYSTEM_ENUM_ID = "NETSUITE"
     // Constants below reference ReconciliationSavedRunSupport to avoid duplicate string literals.
@@ -43,20 +42,12 @@ class AutomationFacadeSupport {
     static final String FILE_SIDE_1 = ReconciliationSavedRunSupport.FILE_SIDE_1
     static final String FILE_SIDE_2 = ReconciliationSavedRunSupport.FILE_SIDE_2
     static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
-    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
     static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_NETSUITE_AUTH
     /** Matches SourceSystemConnector.expectedSourceConfigType on the NETSUITE_SUITEQL row. */
     static final String SOURCE_CONFIG_TYPE_NETSUITE_SUITEQL = "NETSUITE_SUITEQL"
     static final String NETSUITE_SUITEQL_SYSTEM_ENUM_ID = "NETSUITE_SUITEQL"
-    static final String HOTWAX_ORDERS_REMOTE_ID = ReconciliationSavedRunSupport.HOTWAX_ORDERS_REMOTE_ID
-    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.HOTWAX_ORDERS_ENDPOINT_LABEL
     static final String SHOPIFY_ORDERS_REMOTE_ID = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_REMOTE_ID
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_ENDPOINT_LABEL
-    static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
-    static final String OMS_RECON_SYSTEM_ENUM_ID = ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RECON
-    static final String OMS_RETURNS_SYSTEM_ENUM_ID = ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
-    static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.HOTWAX_RECON_ORDERS_ENDPOINT_LABEL
-    static final String HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE
     static final String HOTWAX_OMS_WINDOW_START_PARAMETER = "windowStart"
@@ -1129,15 +1120,6 @@ class AutomationFacadeSupport {
             ec.message.addError("${source.fileSide} API source requires safeMetadataJson.extractServiceName.")
             return
         }
-        // Both OMS orders connectors read their credentials from the same parameter, so both must be
-        // held to the same save-side requirement — keying on one service name alone would let a
-        // recon-orders source save with no config id and fail later inside a scheduled run.
-        if (serviceName == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE || serviceName == HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE) {
-            Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
-            if (!normalize(parameters.omsRestSourceConfigId)) {
-                ec.message.addError("${source.fileSide} OMS API source requires safeMetadataJson.parameters.omsRestSourceConfigId.")
-            }
-        }
         if (serviceName == SHOPIFY_ORDERS_EXTRACT_SERVICE) {
             Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
             if (!normalize(parameters.shopifyAuthConfigId)) {
@@ -1299,14 +1281,35 @@ class AutomationFacadeSupport {
                     description : readString(item, "description"),
                     sequenceNum : readField(item, "sequenceNum"),
                     label       : FacadeSupport.enumLabel(item),
-                    // Only DarpanSystemSource rows populate this (endpoint rows like OMS_RETURNS
+                    // Only DarpanSystemSource rows populate this (endpoint rows like OMS_RETURNS_GQL
                     // point at their parent system, e.g. OMS) — every other enum type's rows have
                     // no parentEnumId value, so findAll below strips the key out entirely rather
                     // than emitting parentEnumId:null, leaving their contract shape unchanged.
                     parentEnumId: readString(item, "parentEnumId"),
             ].findAll { it.value != null }
         } as List<Map<String, Object>>
-        return SettingsFacadeSupport.deduplicateEnumOptions(enumTypeId, mappedOptions)
+        List<Map<String, Object>> deduplicated = SettingsFacadeSupport.deduplicateEnumOptions(enumTypeId, mappedOptions)
+        return enumTypeId == SettingsFacadeSupport.DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID
+                ? extractableSystemOptions(deduplicated, { String id -> SourceSystemConnectorSupport.resolveBySystemEnumId(ec, id) != null })
+                : deduplicated
+    }
+
+    /**
+     * DAR-BE-052: the picker offers only what can be read. An endpoint row (one with a parentEnumId) whose connector
+     * is gone or disabled is dropped; its enum row stays for the history that references it. A parent with no
+     * connector of its own but with readable endpoints stays as their group, marked extractable:false so it is not
+     * offered as an endpoint itself. Top-level rows with no endpoints are unchanged.
+     */
+    static List<Map<String, Object>> extractableSystemOptions(List<Map<String, Object>> options, Closure<Boolean> hasConnector) {
+        List<Map<String, Object>> endpoints = options.findAll { it.parentEnumId && hasConnector.call((String) it.enumId) }
+        Set<String> parentsWithEndpoints = endpoints.collect { (String) it.parentEnumId } as Set<String>
+        return options.findResults { Map<String, Object> option ->
+            if (option.parentEnumId) return option in endpoints ? option : null
+            if (option.enumId in parentsWithEndpoints && !hasConnector.call((String) option.enumId)) {
+                return option + [extractable: false]
+            }
+            return option
+        } as List<Map<String, Object>>
     }
 
     static List<Map<String, Object>> listSftpServerOptions(def ec) {
@@ -1701,15 +1704,6 @@ class AutomationFacadeSupport {
     }
 
     protected static String endpointLabelForSystem(String systemEnumId, String remoteId, String fallbackLabel) {
-        // Checked before the OMS branch: both connectors share HOTWAX_ORDERS_REMOTE_ID (same API
-        // family, same credentials), so the system id is the only thing that separates them here.
-        if (normalize(systemEnumId) == OMS_RECON_SYSTEM_ENUM_ID) {
-            return HOTWAX_RECON_ORDERS_ENDPOINT_LABEL
-        }
-        if (normalize(systemEnumId) == OMS_SYSTEM_ENUM_ID &&
-                normalize(remoteId) == HOTWAX_ORDERS_REMOTE_ID) {
-            return HOTWAX_ORDERS_ENDPOINT_LABEL
-        }
         if (normalize(systemEnumId) == SHOPIFY_SYSTEM_ENUM_ID &&
                 normalize(remoteId) == SHOPIFY_ORDERS_REMOTE_ID) {
             return SHOPIFY_ORDERS_ENDPOINT_LABEL
@@ -1718,14 +1712,7 @@ class AutomationFacadeSupport {
     }
 
     protected static boolean isVirtualApiOrdersRemote(Map<String, Object> source) {
-        return isVirtualHotWaxOrdersRemote(source) || isVirtualShopifyOrdersRemote(source)
-    }
-
-    protected static boolean isVirtualHotWaxOrdersRemote(Map<String, Object> source) {
-        if (normalize(source?.systemEnumId) != OMS_SYSTEM_ENUM_ID) return false
-        if (normalize(source?.systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
-        Map<String, Object> metadata = parseJsonMap(source?.safeMetadataJson)
-        return normalize(metadata.extractServiceName ?: metadata.serviceName) == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
+        return isVirtualShopifyOrdersRemote(source)
     }
 
     protected static boolean isVirtualShopifyOrdersRemote(Map<String, Object> source) {

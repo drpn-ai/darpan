@@ -2,9 +2,9 @@
 <entity-facade-xml type="darpan-seed">
     <moqui.service.message.SystemMessageRemote
             systemMessageRemoteId="HOTWAX_ORDERS_API"
-            description="Orders API"
-            sendUrl="{baseUrl}/rest/s1/oms/orders"
-            sendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"/>
+            description="Orders and payments"
+            sendUrl="{baseUrl}/rest/s1/graphql"
+            sendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"/>
 
     <moqui.service.message.SystemMessageRemote
             systemMessageRemoteId="SHOPIFY_REMOTE"

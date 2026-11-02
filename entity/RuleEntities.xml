@@ -186,7 +186,7 @@
             <description>System-specific API source configuration selected before the endpoint, such as Shopify auth, HotWax OMS REST source, or NetSuite auth.</description>
         </field>
         <field name="sourceConfigType" type="text-short">
-            <description>Type discriminator for sourceConfigId, such as SHOPIFY_AUTH, HOTWAX_OMS_REST, or NETSUITE_AUTH.</description>
+            <description>Type discriminator for sourceConfigId, such as SHOPIFY_AUTH, HOTWAX_OMS_GQL, or NETSUITE_SUITEQL.</description>
         </field>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;

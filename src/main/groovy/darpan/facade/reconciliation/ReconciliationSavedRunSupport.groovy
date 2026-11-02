@@ -129,26 +129,9 @@ class ReconciliationSavedRunSupport {
     static final String SYSTEM_NETSUITE = "NETSUITE"
     static final String SYSTEM_SAPI = "SAPI"
     static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = "SHOPIFY_AUTH"
-    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = "HOTWAX_OMS_REST"
     static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = "NETSUITE_AUTH"
-    static final String HOTWAX_ORDERS_REMOTE_ID = "HOTWAX_ORDERS_API"
-    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = "Orders (REST)"
-    static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
-    // DAR-BE-018: the same OMS sales orders served by /rest/s1/oms/reconciliationOrders. A second
-    // connector row rather than a repoint, so the shipped OMS path stays available as a fallback
-    // while parity is proven. Its system id and config type must both differ from the OMS row's —
-    // the registry resolvers take the first enabled match on each (see SourceSystemConnectorSeedData).
-    static final String SYSTEM_HOTWAX_OMS_RECON = "OMS_RECON_ORDERS"
-    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RECON = "HOTWAX_OMS_REST_RECON"
-    static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = "Sales orders (REST)"
-    static final String HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
-    // DAR-BE-018 returns. Own system id AND own config type — the registry resolvers take the first
-    // enabled match on each, so sharing either would silently shadow a shipped row.
-    static final String SYSTEM_HOTWAX_OMS_RETURNS = "OMS_RETURNS"
-    /** DAR-BE-040 fix 3: OMS returns over GraphQL — the same records as OMS_RETURNS, including pending returns. */
+    /** DAR-BE-040 fix 3: HotWax returns over GraphQL, pending and settled alike. */
     static final String SYSTEM_HOTWAX_OMS_RETURNS_GQL = "OMS_RETURNS_GQL"
-    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RETURNS = "HOTWAX_OMS_REST_RETURNS"
-    static final String HOTWAX_OMS_RETURNS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
     // DAR-BE-018 task 9: Shopify side of the returns-presence gate in runSavedRunDiff.groovy. Own
     // system id — the registry resolvers take the first enabled match on systemEnumId, so sharing
     // one would silently shadow a shipped row.
@@ -1186,17 +1169,7 @@ class ReconciliationSavedRunSupport {
         return enumValue ? FacadeSupport.enumLabel(enumValue) : (fallback ?: normalized)
     }
 
-    static boolean isVirtualHotWaxOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
-        if (canonicalSystemEnumId(systemEnumId) != SYSTEM_HOTWAX_OMS) return false
-        if (normalize(systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
-        String normalizedSourceConfigType = normalize(sourceConfigType)
-        return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
-    }
-
     static String virtualSystemRemoteLabel(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
-        if (isVirtualHotWaxOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)) {
-            return HOTWAX_ORDERS_ENDPOINT_LABEL
-        }
         if (isVirtualShopifyOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)) {
             return SHOPIFY_ORDERS_ENDPOINT_LABEL
         }
@@ -1204,8 +1177,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static boolean isVirtualApiOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
-        return isVirtualHotWaxOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType) ||
-                isVirtualShopifyOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)
+        return isVirtualShopifyOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)
     }
 
     static boolean isVirtualShopifyOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {

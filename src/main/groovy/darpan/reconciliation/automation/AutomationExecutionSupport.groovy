@@ -95,7 +95,6 @@ class AutomationExecutionSupport {
     // (SourceSystemConnectorSupport.allowedServiceNames) + a naming guard, so the old
     // ALLOWED_EXTRACT_SERVICE_NAMES set, the per-system window-parameter constants, and the duplicate
     // OMS/SHOPIFY system-enum-id constants were removed here (DAR-299 constants cleanup).
-    static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE
 

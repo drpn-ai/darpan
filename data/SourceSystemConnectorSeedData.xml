@@ -1,43 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SourceSystemConnector registry seed (DAR-292 / DAR-293, Phase 1).
-     OMS + SHOPIFY rows reproduce the current per-system dispatch switch BYTE-IDENTICALLY. Values
-     mirror the constants in ReconciliationSavedRunSupport / AutomationExecutionSupport:
-       - extractServiceName          <- HOTWAX_OMS_ORDERS_EXTRACT_SERVICE / SHOPIFY_ORDERS_EXTRACT_SERVICE
-       - dateFrom/ToParameterName    <- windowStart / windowEnd (defaultDate*ParameterName switch)
-       - preserveWindowInstants      <- Y only for Shopify (AutomationExecutionSupport:634)
-       - expectedSourceConfigType    <- HOTWAX_OMS_REST / SHOPIFY_AUTH (expectedSourceConfigType switch)
-       - remoteId / endpointLabel    <- HOTWAX_ORDERS_API "Orders API" / SHOPIFY_REMOTE "Admin GraphQL Orders"
-       - sendUrlTemplate             <- the ensureVirtual*OrdersRemote sendUrl templates
-       - systemAliases               <- canonicalSystemEnumId alias table
+     HotWax OMS is read over GraphQL only (DAR-BE-052, 2026-11-02): the REST rows (OMS, OMS_RECON_ORDERS,
+     OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS, OMS_TRANSFER_ORDERS, OMS_RETURNS) were deleted, and migration
+     OMS_REST_RETIRED moves stored runs and automations to their GraphQL endpoints. OMS stays an enum: it is the
+     HotWax parent the source picker groups endpoints under.
      configIdResolverServiceName / validationServiceName are intentionally left blank: today these are
      Groovy static methods, not Moqui services; converting + allow-listing them is a later phase.
      NetSuite / SAPI are intentionally deferred to a later phase. -->
 <entity-facade-xml type="darpan-seed">
-    <darpan.reconciliation.SourceSystemConnector
-            systemEnumId="OMS"
-            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
-            dateFromParameterName="windowStart"
-            dateToParameterName="windowEnd"
-            expectedSourceConfigType="HOTWAX_OMS_REST"
-            configParameterName="omsRestSourceConfigId"
-            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
-            remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Orders (REST)"
-            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
-            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
-            systemAliases="OMS,HOTWAX,DAR_SYS_OMS"
-            preserveWindowInstants="N"
-            keepFieldsParameterName="keepRecordFields"
-            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
-            filterParameterName="sourceFilters"
-            pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
-            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
-            enabled="Y"/>
 
-    <!-- OMS_GQL (DAR-BE-064, DAR-BE-052 re-sequenced): the order-grain presence extract over GraphQL.
-         BESIDE the REST row, not replacing it: a rule set migrates by changing its sourceConfigType
-         from HOTWAX_OMS_REST to HOTWAX_OMS_GQL and reverts the same way. Same config row, same
-         credential. The REST row is disabled only after the diff gate (spec D8) passes. -->
+    <!-- OMS_GQL (DAR-BE-064): the order-grain presence extract over GraphQL. -->
     <!-- DAR-UI-081: an order keeps its basics for audit findings (currency, bill-to customer, ship groups' method). -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="OMS_GQL"
@@ -121,33 +93,10 @@
             preserveWindowInstants="N"
             enabled="Y"/>
 
-    <!-- Transfer orders are served by the SAME /rest/s1/oms/orders endpoint and the SAME credentials as
-         sales orders; only the order type differs, and it is a server-side query filter. The row still
-         needs its own extractServiceName and expectedSourceConfigType because both connector resolvers
-         (resolveByExtractServiceName, resolveByExpectedSourceConfigType) take the first enabled match on
-         those attributes — two rows sharing either one would resolve ambiguously and silently.
-         No pairLookupServiceName: exchange pair verification is a sales-order concern. -->
-    <!-- DAR-BE-050. The order-line UNIT presence pair. Two things below look wrong and are not.
-
-         (1) NO lookupServiceName on either row. A diff here means "this unit is absent". A
-             point-existence verify pass looks up the ORDER, would find it present, and would clear
-             a real finding as a FALSE POSITIVE - silently deleting exactly what this pair exists
-             to surface.
-
-         (2) The OMS row keeps the EXCHANGE exclusion (extract#HotWaxOmsOrderLineUnits passes
-             applyExchangeExclusion: true). It looks like an order-grain artefact - two OMS orders
-             colliding on one compare_id - and therefore looks safe to invert at item grain. It is
-             not. Measured against gorjana production: an OMS EXC- order's externalId names the
-             ORIGINAL Shopify order (15 of 15 resolved), and Shopify adds the exchange line to that
-             original's lineItems (12 of 12, by set difference). That original may be MONTHS old, so
-             a creation-windowed Shopify sweep never includes it while OMS lands a new EXC- order
-             inside the window. Inverting the exclusion makes every exchange a false
-             missing-in-Shopify, roughly 1 order in 9. Exchange-line presence is DAR-BE-004.
-
-         expectedSourceConfigType is distinct on both rows for the reason the transfer-orders
-         comment below gives: both connector resolvers take the FIRST enabled match, so reusing
-         HOTWAX_OMS_REST or SHOPIFY_AUTH here would resolve ambiguously and silently. Both run
-         against the same underlying config row as their parent endpoint. -->
+    <!-- DAR-BE-050. Shopify order lines at UNIT grain. NO lookupServiceName: a diff here means "this unit is
+         absent", and a point-existence verify pass looks up the ORDER, would find it present, and would clear a
+         real finding as a false positive. Its own expectedSourceConfigType because both connector resolvers take
+         the FIRST enabled match, so reusing SHOPIFY_AUTH would resolve ambiguously. -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="SHOPIFY_ORDER_LINE_UNITS"
             extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderLineUnits"
@@ -167,58 +116,10 @@
             evidenceFieldsJson='{"system":"Shopify","state":"unitState","stateLabels":{"OPEN":"Open","FULFILLED":"Fulfilled","REMOVED":"Removed"},"facts":["shopifyOrderName","sku"]}'
             enabled="Y"/>
 
-    <darpan.reconciliation.SourceSystemConnector
-            systemEnumId="OMS_ORDER_LINE_UNITS"
-            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderLineUnits"
-            dateFromParameterName="windowStart"
-            dateToParameterName="windowEnd"
-            expectedSourceConfigType="HOTWAX_OMS_REST_LINE_UNITS"
-            configParameterName="omsRestSourceConfigId"
-            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
-            remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Order lines (REST)"
-            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
-            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderLineUnits"
-            systemAliases="OMS_ORDER_LINE_UNITS,HOTWAX_ORDER_LINE_UNITS,DAR_SYS_OMS_LINE_UNITS"
-            preserveWindowInstants="N"
-            filterParameterName="sourceFilters"
-            windowFieldName="orderDate"
-            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
-            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
-            enabled="Y"/>
-
-    <!-- OMS_ORDER_ITEMS (tri-system spec D4): the same single-unit flattener as OMS_ORDER_LINE_UNITS,
-         for pairing HotWax against NETSUITE rather than Shopify. Two differences, both deliberate:
-         the exchange exclusion is OFF (an EXC- order is a real OMS order that syncs to NetSuite the
-         same day; the exclusion exists only for Shopify's creation-window asymmetry), and items with
-         no Shopify line id are KEPT (NetSuite keys on orderId + orderItemSeqId, not on Shopify ids).
-         A connector rather than a filter because the exclusion is extract behaviour, and changing
-         OMS_ORDER_LINE_UNITS would change the shipped DAR-BE-050 pair. Distinct
-         expectedSourceConfigType for the first-enabled-match reason given above. -->
-    <darpan.reconciliation.SourceSystemConnector
-            systemEnumId="OMS_ORDER_ITEMS"
-            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderItems"
-            dateFromParameterName="windowStart"
-            dateToParameterName="windowEnd"
-            expectedSourceConfigType="HOTWAX_OMS_REST_ORDER_ITEMS"
-            configParameterName="omsRestSourceConfigId"
-            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
-            remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Order lines for NetSuite (REST)"
-            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
-            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderItems"
-            systemAliases="OMS_ORDER_ITEMS,HOTWAX_ORDER_ITEMS,DAR_SYS_OMS_ORDER_ITEMS"
-            preserveWindowInstants="N"
-            filterParameterName="sourceFilters"
-            windowFieldName="orderDate"
-            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
-            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
-            enabled="Y"/>
-
     <!-- DAR-BE-116: OMS_ORDER_ITEMS over GraphQL. Same unit record (OmsOrderLineUnitSupport), same options (exchange
          exclusion off, unkeyed items kept); orders come with their NetSuite identification and ship groups and the
          items are read by orderId in batches. salesChannelEnumId is NOT carried: gorjana's GraphQL Order type has no
-         such field (SDL 2026-10-23), so a run that filters or concludes on it stays on OMS_ORDER_ITEMS. -->
+         such field (SDL 2026-10-23), so a run cannot filter or conclude on it. -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="OMS_ORDER_ITEMS_GQL"
             extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrderItems"
@@ -239,124 +140,7 @@
             evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
             enabled="Y"/>
 
-    <darpan.reconciliation.SourceSystemConnector
-            systemEnumId="OMS_TRANSFER_ORDERS"
-            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
-            dateFromParameterName="windowStart"
-            dateToParameterName="windowEnd"
-            expectedSourceConfigType="HOTWAX_OMS_REST_TRANSFER"
-            configParameterName="omsRestSourceConfigId"
-            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
-            remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Transfer orders (REST)"
-            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
-            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
-            systemAliases="OMS_TRANSFER_ORDERS,HOTWAX_TRANSFER_ORDERS,DAR_SYS_OMS_TO"
-            preserveWindowInstants="N"
-            keepFieldsParameterName="keepRecordFields"
-            keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom"
-            filterParameterName="sourceFilters"
-            windowFieldName="orderDate"
-            supportsStateExtract="Y"
-            statusParameterName="orderStatusIds"
-            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
-            enabled="Y"/>
-
-    <!-- OMS sales orders again, but served by /rest/s1/oms/reconciliationOrders, which filters to
-         comparison-eligible sales orders server-side, projects to the six-field set, honours pageSize
-         and reports hasMore/ordersCount (DAR-BE-018). ADDITIVE and opt-in: the OMS row above is
-         untouched, and a rule set moves across by pointing its source at HOTWAX_OMS_REST_RECON —
-         against the SAME HotWaxOmsRestSourceConfig row, since the credentials and baseUrl are shared.
-
-         Its own systemEnumId AND its own expectedSourceConfigType are both required: the two
-         resolvers take the first enabled match on those attributes, so a row cloning either one
-         would shadow the shipped OMS row silently (SourceSystemConnectorSupportSmokeTests ratchets
-         this). remoteId is deliberately shared with OMS — same API family, same credentials — and
-         costs nothing here because the virtual-remote builder only ever fires for canonical OMS.
-
-         sendUrlTemplate documents the endpoint for the registry and the remote label; it does NOT
-         route the extractor, which pins DEFAULT_RECON_ORDERS_PATH rather than reading the tenant
-         config's (legacy) ordersPath column.
-
-         GATING: the endpoint returns a FIXED field set. Before enabling this connector for a rule
-         set, verify its join key and every field-comparison field fall inside keepFieldsBase below;
-         anything wider must stay on the OMS row. filterParameterName is retained because configured
-         exclusions still run client-side — the endpoint has no knowledge of tenant exclusion rules.
-         No pairLookupServiceName: exchange counterparts arrive inline on the record, so the manifest
-         is built without point lookups. -->
-    <darpan.reconciliation.SourceSystemConnector
-            systemEnumId="OMS_RECON_ORDERS"
-            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
-            dateFromParameterName="windowStart"
-            dateToParameterName="windowEnd"
-            expectedSourceConfigType="HOTWAX_OMS_REST_RECON"
-            configParameterName="omsRestSourceConfigId"
-            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
-            remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Sales orders (REST)"
-            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationOrders"
-            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
-            systemAliases="OMS_RECON_ORDERS,HOTWAX_RECON_ORDERS,DAR_SYS_OMS_RECON"
-            preserveWindowInstants="N"
-            keepFieldsParameterName="keepRecordFields"
-            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
-            filterParameterName="sourceFilters"
-            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
-            enabled="Y"/>
-
-    <!-- OMS returns via /rest/s1/oms/reconciliationReturns (DAR-BE-018). NEW CAPABILITY: Darpan did
-         not reconcile returns before this row, so nothing is being migrated and no existing rule set
-         changes behaviour.
-
-         Its own systemEnumId AND its own expectedSourceConfigType are both required — the resolvers
-         take the first enabled match on either attribute, so a row cloning one would silently shadow
-         a shipped row (SourceSystemConnectorSupportSmokeTests ratchets this). remoteId is shared with
-         the OMS family because the credentials and baseUrl are the same tenant config row.
-
-         sendUrlTemplate documents the endpoint for the registry and the remote label; it does NOT
-         route the extractor, which pins DEFAULT_RETURNS_PATH.
-
-         filterParameterName is REQUIRED here, not optional: the returnChannelEnumId exclusion is part
-         of the phase-1 design (§5), and exclusion dispatch keys on this attribute. Without it the
-         rules board hides the exclusion control and a configured rule would never run.
-
-         keepFieldsBase mirrors the endpoint's header field set. items[] is nested rather than a
-         top-level field and is always retained by the extractor regardless of projection. -->
-    <darpan.reconciliation.SourceSystemConnector
-            systemEnumId="OMS_RETURNS"
-            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
-            dateFromParameterName="windowStart"
-            dateToParameterName="windowEnd"
-            expectedSourceConfigType="HOTWAX_OMS_REST_RETURNS"
-            configParameterName="omsRestSourceConfigId"
-            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
-            remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Refunded returns (REST)"
-            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationReturns"
-            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
-            systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS"
-            preserveWindowInstants="N"
-            keepFieldsParameterName="keepRecordFields"
-            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
-            filterParameterName="sourceFilters"
-            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
-            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
-            returnLinesLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnLinesByOrderExternalId"
-            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
-            lookupIdsParameterName="externalIds"
-            lookupMaxIds="10000"
-            enabled="Y"/>
-
-    <!-- OMS_RETURNS_GQL (DAR-BE-040 fix 3): OMS returns over GraphQL, BESIDE the REST row, not replacing it.
-         reconciliationReturns serves REFUNDED returns only — live on gorjana 2026-10-03 it returned none of
-         the 268 RETURN_REQUESTED returns since Oct 1 — so every pending return Shopify reported read as
-         missing in HotWax. extract#HotWaxOmsGqlReturns builds records to the REST record exactly (110
-         settled returns matched on every field), so this row mirrors OMS_RETURNS in everything but
-         transport: same config row and credential, projection base, filters, by-id lookup and order-state
-         lookup. A rule set migrates by switching its source to this endpoint (sourceConfigType
-         HOTWAX_OMS_REST_RETURNS -> HOTWAX_OMS_GQL_RETURNS) and reverts the same way. The REST row stays
-         enabled: an OMS without the 2026-09-30 GraphQL upgrade still needs it, and there this extract
-         fails rather than returning an empty file. -->
+    <!-- OMS_RETURNS_GQL (DAR-BE-040 fix 3): OMS returns over GraphQL, pending and settled alike. -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="OMS_RETURNS_GQL"
             extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
@@ -398,7 +182,7 @@
          in-parameter — unlike the OMS-family endpoints, the event shape is fixed, not server-side
          projected from a wider document, so there is nothing to select a subset FROM. keepFieldsBase
          below is documentation-only here (mirrors the endpoint's whole fixed output, matching the
-         pattern OMS_RETURNS/OMS_RECON_ORDERS use it for), not a runtime projection input. -->
+         pattern the OMS endpoints use it for), not a runtime projection input. -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="SHOPIFY_RETURN_REFS"
             extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderReturnRefs"
@@ -425,8 +209,8 @@
          behaviour.
 
          WHY ONE ROW. SourceSystemConnector's PK is systemEnumId alone, so a row is an ENDPOINT and
-         "system" has quietly become the endpoint dimension - OMS, OMS_TRANSFER_ORDERS,
-         OMS_RECON_ORDERS and OMS_RETURNS are four ids for one HotWax OMS. Four more within-NetSuite
+         "system" has quietly become the endpoint dimension - OMS_GQL, OMS_ORDER_ITEMS_GQL and
+         OMS_RETURNS_GQL are three ids for one HotWax OMS. Four more within-NetSuite
          pairs on that pattern would mean four more enums, connector rows and extract services, each
          deepening the overload DAR-BE-024 exists to retire. DATABASE is the counter-pattern already
          in this file: one row, both sides using it, differentiated per side by the query config. This

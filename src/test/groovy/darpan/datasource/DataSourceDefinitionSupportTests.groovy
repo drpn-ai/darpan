@@ -178,7 +178,7 @@ fragment F on InvoiceConnection { edges { node { invoiceNo } } meta: __schema { 
         List<String> errors = errorsOf(d)
         ["Step 'keyless': a join needs on or atOn keys", "Step 'badLevels': levels names the record and each list",
          "Step 'units': parse is STRICT_INT or NUMERIC", "Step 'ordinal': field is the name the number is written to",
-         "Step 'weird': a condition is one of IN, NOT_IN, BLANK, NOT_BLANK, not 'LIKE'",
+         "Step 'weird': a condition is one of IN, NOT_IN, BLANK, NOT_BLANK, MATCHES, AFTER_NOW, not 'LIKE'",
          "Step 'later': into names an earlier step"].each { String expected ->
             assertTrue(errors.any { it.contains(expected) }, expected + " in " + errors)
         }

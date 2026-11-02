@@ -18,6 +18,9 @@ import java.time.Instant
  *          list or object; null is 0, any other value 1), distinctSorted (the args' non-blank values, lists flattened,
  *          trimmed, once each, sorted, joined by sep (default ","); none gives empty text), first (a list's first value,
  *          null when empty; any other value itself), atLeast (true when the first arg is a number at least the second),
+ *          firstWhere {list, when, field} (field of the list's first element matching when, else null), multiply and sum
+ *          (numbers; blank counts as 0; sum flattens lists), daysBetween (whole days from the second epoch-millis arg to
+ *          the first, floored; null unless both are numbers),
  *          without (the first arg's list less every value equal to a later arg); join flattens list args
  *
  * Rows fire in order, so a later row's value may read a field an earlier row set, and a later row for the same field
@@ -26,7 +29,8 @@ import java.time.Instant
 class DeriveRules {
 
     static final List<String> FUNCTIONS = ["text", "decimal", "decimalPlain", "epochMillis", "join", "firstPresent", "units",
-                                           "size", "distinctSorted", "first", "atLeast", "without"].asImmutable()
+                                           "size", "distinctSorted", "first", "atLeast", "without", "firstWhere", "multiply",
+                                           "sum", "daysBetween"].asImmutable()
     private static final String NAME = /[A-Za-z][A-Za-z0-9_]{0,59}/
     private static final String PATH = RecordConditions.FIELD
 
@@ -90,12 +94,31 @@ class DeriveRules {
                 List<Object> list = first instanceof Collection ? ((Collection) first).toList() : (first == null ? [] : [first])
                 List<Object> drop = args.drop(1)
                 return list.findAll { Object x -> !drop.any { RecordConditions.same(x, it) } }
+            case "firstWhere":
+                // A path to a list gives the list as one value: its elements are what is searched.
+                Object found = JsonPathValues.values(record, (String) v.list).collectMany { it instanceof Collection ? ((Collection) it).toList() : [it] }
+                        .find { it instanceof Map && RecordConditions.matches((Map) it, v.when) }
+                return found == null ? null : JsonPathValues.value(found, (String) v.field)
+            case "multiply":
+                return args.inject(BigDecimal.ONE) { BigDecimal p, Object a -> p * zeroIfBlank(a) }
+            case "sum":
+                return args.collectMany { it instanceof Collection ? ((Collection) it).toList() : [it] }
+                        .inject(BigDecimal.ZERO) { BigDecimal t, Object a -> t + zeroIfBlank(a) }
+            case "daysBetween":
+                if (!(first instanceof Number) || !(args.size() > 1 && args[1] instanceof Number)) return null
+                return Math.floorDiv(((Number) first).longValue() - ((Number) args[1]).longValue(), 86_400_000L)
             case "atLeast":
                 BigDecimal a = RecordConditions.number(first), b = RecordConditions.number(args.size() > 1 ? args[1] : null)
                 return a != null && b != null && a >= b
             default:
                 throw new IllegalArgumentException("A derive value uses ${FUNCTIONS.join(', ')}, not '${v.fn}'.")
         }
+    }
+
+    /** A number for arithmetic: blank (or not a number) counts as 0, as a missing price or quantity does. */
+    private static BigDecimal zeroIfBlank(Object v) {
+        BigDecimal n = RecordConditions.isBlank(v) ? null : parseDecimal(v)
+        return n ?: BigDecimal.ZERO
     }
 
     static Object epochMillis(Object v) {
@@ -140,8 +163,15 @@ class DeriveRules {
         }
         if (v.fn != null) {
             if (!(v.fn in FUNCTIONS)) return ["${at}: fn is one of ${FUNCTIONS.join(', ')}, not '${v.fn}'.".toString()]
+            if (v.fn == "firstWhere") {
+                if (!(v.list ==~ PATH) || !(v.field ==~ PATH) || v.when == null) {
+                    return ["${at}: firstWhere needs list (a path to a list), when (conditions on each element) and field.".toString()]
+                }
+                return RecordConditions.check(at, v.when)
+            }
             if (!(v.args instanceof List) || ((List) v.args).isEmpty()) return ["${at}: ${v.fn} needs args.".toString()]
             if (v.fn == "atLeast" && ((List) v.args).size() != 2) return ["${at}: atLeast compares two values.".toString()]
+            if (v.fn == "daysBetween" && ((List) v.args).size() != 2) return ["${at}: daysBetween takes the later and the earlier instant.".toString()]
             if (v.fn == "units" && v.parse != null && !(v.parse in DataSourceDefinitionSupport.REPEAT_PARSES)) {
                 return ["${at}: units parse is ${DataSourceDefinitionSupport.REPEAT_PARSES.join(' or ')}.".toString()]
             }

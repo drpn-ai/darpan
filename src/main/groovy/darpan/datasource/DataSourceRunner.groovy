@@ -57,6 +57,9 @@ class DataSourceRunner {
     /** Per drop sidecar suffix: [suffix, entries, truncated]. */
     private final Map<String, Map> sidecars = java.util.Collections.synchronizedMap(new LinkedHashMap<String, Map>())
     private Set<String> keepFields = null
+    /** This run's options: the text each option's value fills its {name} with, and the fields put on every first-step record. */
+    private Map<String, String> optionTexts = [:]
+    private Map<String, Object> optionFields = [:]
 
     DataSourceRunner(Map definition, def transport) {
         this.definition = definition
@@ -76,6 +79,7 @@ class DataSourceRunner {
         filterRules = (List<Map<String, Object>>) (request.filters ?: [])
         checkFilterFields()
         keepFields = keepFieldsOf(request.keep)
+        resolveOptions((Map) request.options)
         List<String> wanted = (((request.keep ?: []) as List) + filterRules.collect { it.fieldExpression })
                 .collect { it?.toString()?.trim() }.findAll { it }.unique()
         ((List<Map>) definition.steps).findAll { it.kind == "query" }.each { plans.put((String) it.id, planOf(it, wanted)) }
@@ -181,15 +185,15 @@ class DataSourceRunner {
         List<String> bad = pattern ? keys.findAll { !pattern.matcher(it).matches() } : []
         if (bad) throw new IllegalArgumentException("Step '${step.id}' refuses the key(s) ${bad.take(5).join(', ')}.")
         return keys.collate(((b.chunk ?: 100) as Number).intValue()).collect { List<String> chunk ->
-            fill((Map) b.variables, [ids: chunk.join((b.separator ?: ",") as String), keyField: filterField ?: ""])
+            fill((Map) b.variables, [ids: chunk.join((b.separator ?: ",") as String), keyField: filterField ?: ""] + optionTexts)
         }
     }
 
     /** A read of every record: one piece, the step's fixed variables. */
-    private static List<Map> allPieces(Map step) {
+    private List<Map> allPieces(Map step) {
         Map b = (Map) ((Map) step.bind).all
         if (b == null) throw new IllegalArgumentException("Step '${step.id}' cannot be read whole.")
-        return [fill((Map) b.variables, [:])]
+        return [fill((Map) b.variables, optionTexts)]
     }
 
     /** The first step's window slices, each its query variables. */
@@ -201,7 +205,7 @@ class DataSourceRunner {
         List<Map> pieces = []
         for (long start = from; start < thru; start += slice) {
             long end = Math.min(thru, start + slice)
-            pieces << fill((Map) b.variables, [from: instant(start, (String) b.instantFormat), thru: instant(end, (String) b.instantFormat)])
+            pieces << fill((Map) b.variables, [from: instant(start, (String) b.instantFormat), thru: instant(end, (String) b.instantFormat)] + optionTexts)
         }
         return pieces
     }
@@ -275,6 +279,7 @@ class DataSourceRunner {
         if (unknown) throw new IllegalArgumentException("This source cannot keep ${unknown}: its records do not carry them.")
         Map keepWith = (Map) (rec.keepWith ?: [:])
         Set<String> out = new LinkedHashSet<String>(asked)
+        ((List) (rec.keepAlways ?: [])).each { out.add(it.toString()) }
         asked.each { String f -> ((List) (keepWith.get(f) ?: [])).each { out.add(it.toString()) } }
         return out
     }
@@ -283,6 +288,7 @@ class DataSourceRunner {
 
     private List<Map> finish(Map first, List<Map> roots) {
         batchCount.incrementAndGet()
+        if (optionFields) roots.each { it.putAll(optionFields) }
         Map<String, List<Map>> ctx = [(first.id as String): roots]
         String current = (String) first.id
         for (Map step : ((List<Map>) definition.steps).drop(1)) {
@@ -292,7 +298,7 @@ class DataSourceRunner {
                 case "join": join(step, ctx); break
                 case "split": ctx.put((String) step.id, split(step, ctx.get((step.from ?: current) as String))); current = (String) step.id; break
                 case "repeat": ctx.put((String) step.id, repeat(step, ctx.get(current))); current = (String) step.id; break
-                case "number": number(step, ctx.get(current)); break
+                case "number": number(step, ctx.get((step.on ?: current) as String)); break
                 case "count": count(step, ctx.get(current)); break
                 case "derive":
                     engines.computeIfAbsent((String) step.id, { DeriveEngine.compile((List<Map>) step.rules) })
@@ -329,11 +335,12 @@ class DataSourceRunner {
         }
         Map b = (Map) ((Map) step.bind).ids
         String[] from = ((String) b.from).split(/\./, 2)
-        List<String> ids = cleanIds(((List<Map>) (ctx.get(from[0]) ?: [])).collectMany { JsonPathValues.values(it, from[1]) })
+        List<String> ids = cleanIds(((List<Map>) (ctx.get(from[0]) ?: [])).findAll { RecordConditions.matches(it, b.when) }
+                .collectMany { JsonPathValues.values(it, from[1]) })
         List<List<String>> chunks = ids.collate(((b.chunk ?: 100) as Number).intValue())
         List<List<Map>> byChunk = chunks.collect { new ArrayList<Map>() }
         Closure readChunk = { int i ->
-            readPages(step, fill((Map) b.variables, [ids: chunks[i].join((b.separator ?: ",") as String), keyField: ""]),
+            readPages(step, fill((Map) b.variables, [ids: chunks[i].join((b.separator ?: ",") as String), keyField: ""] + optionTexts),
                     { List<Map> page -> hold.call(page); byChunk[i].addAll(page) })
         }
         int parallel = Math.max(1, Math.min(((b.parallel ?: 1) as Number).intValue(), chunks.size()))
@@ -371,6 +378,7 @@ class DataSourceRunner {
     private static void join(Map step, Map<String, List<Map>> ctx) {
         List<Map> into = ctx.get((String) step.into) ?: []
         List<Map> from = (ctx.get((String) step.from) ?: []).findAll { RecordConditions.matches(it, step.fromWhen) }
+        if (step.sortBy) from = sortedBy(from, (List) step.sortBy)
         List<Map> on = (List<Map>) (step.on ?: [])
         List<Map> atOn = (List<Map>) (step.atOn ?: [])
         boolean many = step.many == true
@@ -380,19 +388,19 @@ class DataSourceRunner {
         boolean place = many || missing?.create == true
         if (!place) {
             // Enrich: each target looks up its one match and takes its fields.
-            Map<String, Map> index = [:]
+            Map<String, List<Map>> index = [:]
             boolean last = step.last == true
-            from.each { Map f ->
-                String k = key(f, (on + atOn).collect { it.from as String })
-                if (last) index.put(k, f) else index.putIfAbsent(k, f)
-            }
+            List<Map> notOn = (List<Map>) (step.notOn ?: [])
+            from.each { Map f -> index.computeIfAbsent(key(f, (on + atOn).collect { it.from as String }), { [] }).add(f) }
             into.each { Map r ->
                 List<Map> targets = atList ? listAt(r, atList, false) : [r]
                 targets.each { Map t ->
                     Map<String, Object> keyed = [:]
                     on.each { keyed.put((String) it.into, JsonPathValues.value(r, (String) it.into)) }
                     atOn.each { keyed.put((String) it.at, JsonPathValues.value(t, (String) it.at)) }
-                    Map match = index.get(keyOf(on.collect { keyed.get(it.into) } + atOn.collect { keyed.get(it.at) }))
+                    List<Map> candidates = (index.get(keyOf(on.collect { keyed.get(it.into) } + atOn.collect { keyed.get(it.at) })) ?: [])
+                            .findAll { Map f -> notOn.every { keyOf([JsonPathValues.value(r, (String) it.into)]) != keyOf([JsonPathValues.value(f, (String) it.from)]) } }
+                    Map match = candidates ? (last ? candidates.last() : candidates.first()) : null
                     if (match != null) attach(t, match, step, copy, false)
                 }
             }
@@ -419,11 +427,53 @@ class DataSourceRunner {
                 }
                 attach(target, f, step, copy, many)
             }
+            if (many && step.always == true && !atList && r.get(step.as) == null) r.put((String) step.as, [])
+        }
+    }
+
+    /** Records in a declared order (paths, or {path, as: TEXT}), stably. */
+    private static List<Map> sortedBy(List<Map> records, List order) {
+        List<Map> orderBy = order.collect { it instanceof Map ? (Map) it : [path: it] }
+        return records.sort(false) { Map a, Map b ->
+            for (Map o : orderBy) {
+                Object x = JsonPathValues.value(a, (String) o.path), y = JsonPathValues.value(b, (String) o.path)
+                int c = o.as == "TEXT" ? ((x?.toString() ?: "") <=> (y?.toString() ?: "")) : compare(x, y)
+                if (c != 0) return c
+            }
+            return 0
+        }
+    }
+
+    /** The run's option values: declared ones only, true or false (or their text), else the default (else false). */
+    private void resolveOptions(Map given) {
+        List<Map> declared = (List<Map>) (definition.options ?: [])
+        Set<String> names = declared.collect { it.name.toString() } as Set<String>
+        List<String> unknown = ((given ?: [:]).keySet().collect { it.toString() }).findAll { !names.contains(it) }.sort()
+        if (unknown) throw new IllegalArgumentException("This source takes no option ${unknown.join(', ')}.")
+        declared.each { Map opt ->
+            Object raw = given?.get(opt.name)
+            Boolean value
+            if (raw == null || raw.toString().trim().isEmpty()) value = (opt.default == true)
+            else if (raw instanceof Boolean) value = (Boolean) raw
+            else if (raw.toString().trim().toLowerCase() in ["true", "y"]) value = true
+            else if (raw.toString().trim().toLowerCase() in ["false", "n"]) value = false
+            else throw new IllegalArgumentException("The option ${opt.name} is true or false, not '${raw}'.")
+            if (opt.text instanceof Map) optionTexts.put((String) opt.name, (String) ((Map) opt.text).get(value.toString()))
+            if (opt.field) optionFields.put((String) opt.field, value)
         }
     }
 
     private static void attach(Map target, Map match, Map step, Map copy, boolean many) {
-        if (many) { ((List) target.computeIfAbsent((String) step.as, { [] })).add(match); return }
+        if (many) {
+            Map line = match
+            if (step.fields != null || step.optionalFields != null) {
+                line = new LinkedHashMap()
+                ((List) (step.fields ?: [])).each { line.put(it, match.get(it)) }
+                ((List) (step.optionalFields ?: [])).each { if (match.get(it) != null) line.put(it, match.get(it)) }
+            }
+            ((List) target.computeIfAbsent((String) step.as, { [] })).add(line)
+            return
+        }
         if (copy) {
             copy.each { String to, Object path ->
                 Object v = JsonPathValues.value(match, (String) path)

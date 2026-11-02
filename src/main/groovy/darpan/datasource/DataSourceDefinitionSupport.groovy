@@ -13,7 +13,8 @@ import groovy.json.JsonSlurper
  * A query step:
  *   {id, kind: "query", document, connectionAt (the root field), recordsAt, hasNextAt, cursorAt (paths under it),
  *    bind: {window: {variables, field, sliceHours, instantFormat, parallel},
- *           ids: {variables, from (LOOKUP_KEYS or <earlier step>.<field>), chunk, parallel, keyFields, idPattern, separator},
+ *           ids: {variables, from (LOOKUP_KEYS or <earlier step>.<field>), when (only those records' ids), chunk, parallel,
+ *                 keyFields, idPattern, separator},
  *           all: {variables}: every record, fixed variables (no placeholders); on a later step, read once per batch},
  *    paging: {firstVariable, afterVariable, pageSize | {budget, costPerRecord, max}, maxPages}, reservation,
  *    selections: [{at, when, text, cost, set}]}
@@ -25,7 +26,10 @@ import groovy.json.JsonSlurper
  *   unwrap {of (an earlier step), field, path}: the field becomes the list at path inside it (a nested connection's
  *           edges[*].node)
  *   join   {into, from (earlier steps), on: [{into, from}], at: "list[*]", atOn: [{at, from}], many | copy {to: path} | as,
- *           missingAt: {create, set}, fromWhen (only joined records matching it), last (the last match wins, not the first)}
+ *           missingAt: {create, set}, fromWhen (only joined records matching it), last (the last match wins, not the first),
+ *           notOn [{into, from}] (never a match whose from equals the record's into: not itself); a many join also
+ *           sortBy [paths | {path, as}], fields + optionalFields (each line keeps only these), always (an empty list
+ *           when nothing matched)}
  *   split  {from, path: "a[*].b[*]", levels: [root, a, b], copy {to: "level.field"}}
  *   repeat {times (path), parse STRICT_INT|NUMERIC, nullAs, index}
  *   number {field, partitionBy: [paths], orderBy: [paths], sizeField (the partition's size), collect {field, as} (its
@@ -38,7 +42,10 @@ import groovy.json.JsonSlurper
  *          one's fields (DeriveRules values) are written beside the extract, up to max, saying when it stopped
  * record: {fields, optionalFields, keepRecordFields (true: a run's keepRecordFields trims each record, and a field the
  * record cannot carry is refused), keepWith {field: [fields kept with it]}}.
- * Top level: wholeSet (true: every step sees the whole read as one batch; the first query reads with bind.all only, and
+ * Top level: options ([{name, type: BOOLEAN, default, field, text {true, false}}]: a caller's switches; a template may
+ * name an option with text as {name}, filled with the definition's text for the value, and an option with a field puts
+ * its value on every first-step record, so conditions read it; the values must equal the connector's extractOptionsJson),
+ * wholeSet (true: every step sees the whole read as one batch; the first query reads with bind.all only, and
  * more than limits.maxRecordsInMemory records fail the run), batchRecords, metadata (fixed values a run reports, e.g. a count this source never has), and warnings
  * ({count, text}: a warning a run gives when that count is above 0; {n} is the count).
  */
@@ -85,7 +92,8 @@ class DataSourceDefinitionSupport {
         if (!(protocol in PROTOCOLS)) errors << "The protocol is ${PROTOCOLS.join(' or ')}, not '${protocol}'.".toString()
         errors.addAll(checkConnection(d.connection, connectionFields))
         Map limits = checkLimits(d.limits, errors)
-        errors.addAll(checkSteps(protocol, d.steps, limits))
+        Set<String> optionPlaceholders = checkOptions(d.options, errors)
+        errors.addAll(checkSteps(protocol, d.steps, limits, optionPlaceholders))
         if (d.batchRecords != null && !inRange(d.batchRecords, 1, 100_000)) errors << "batchRecords is 1 to 100000."
         if (d.wholeSet != null && !(d.wholeSet instanceof Boolean)) errors << "wholeSet is true or false."
         if (d.wholeSet == true && d.steps instanceof List && ((List) d.steps)[0] instanceof Map) {
@@ -163,6 +171,28 @@ class DataSourceDefinitionSupport {
         return errors
     }
 
+    /** The names a template may use for options (those with text); every problem with the options added to errors. */
+    private static Set<String> checkOptions(Object raw, List<String> errors) {
+        Set<String> placeholders = [] as Set<String>
+        if (raw == null) return placeholders
+        if (!(raw instanceof List)) { errors << "options is a list of {name, type, default, field, text}."; return placeholders }
+        ((List) raw).each { Object o ->
+            Map opt = o instanceof Map ? (Map) o : [:]
+            if (!(opt.name ==~ NAME)) { errors << "options: an option needs a name, one word."; return }
+            String at = "Option '${opt.name}'"
+            if (opt.type != "BOOLEAN") errors << "${at}: options are BOOLEAN.".toString()
+            if (opt.default != null && !(opt.default instanceof Boolean)) errors << "${at}: default is true or false.".toString()
+            if (opt.field != null && !(opt.field ==~ NAME)) errors << "${at}: field is a field name.".toString()
+            if (opt.text != null) {
+                if (!((opt.text instanceof Map) && ((Map) opt.text).keySet().collect { it.toString() }.sort() == ["false", "true"] &&
+                        ((Map) opt.text).values().every { it instanceof String && !((String) it).contains("{") && !((String) it).contains("}") })) {
+                    errors << "${at}: text maps true and false to text (no braces).".toString()
+                } else placeholders << (String) opt.name
+            }
+        }
+        return placeholders
+    }
+
     private static Map checkLimits(Object raw, List<String> errors) {
         if (!(raw instanceof Map)) { errors << "The definition needs limits: at least maxCostPerCall."; return [:] }
         Map l = (Map) raw
@@ -190,7 +220,7 @@ class DataSourceDefinitionSupport {
         return l
     }
 
-    private static List<String> checkSteps(String protocol, Object raw, Map limits) {
+    private static List<String> checkSteps(String protocol, Object raw, Map limits, Set<String> optionPlaceholders) {
         if (!(raw instanceof List) || ((List) raw).isEmpty()) return ["The definition needs steps, the first a query."]
         List<String> errors = []
         Set<String> earlier = [] as Set<String>
@@ -204,7 +234,7 @@ class DataSourceDefinitionSupport {
             else where = "Step '${id}'"
             if (!(s.kind in STEP_KINDS)) errors << "${where} is one of ${STEP_KINDS.join(', ')}, not '${s.kind}'.".toString()
             if (i == 0 && s.kind != "query") errors << "The first step reads: it must be a query."
-            if (s.kind == "query") errors.addAll(checkQueryStep(where, protocol, s, limits, earlier))
+            if (s.kind == "query") errors.addAll(checkQueryStep(where, protocol, s, limits, earlier, optionPlaceholders))
             else if (s.kind in ["unwrap", "join", "split", "repeat", "number", "count"]) errors.addAll(checkShapeStep(where, s, earlier))
             else if (s.kind == "derive") {
                 errors.addAll(DeriveRules.check(where, s.rules))
@@ -222,7 +252,8 @@ class DataSourceDefinitionSupport {
         return errors
     }
 
-    private static List<String> checkQueryStep(String where, String protocol, Map s, Map limits, Set<String> earlier) {
+    private static List<String> checkQueryStep(String where, String protocol, Map s, Map limits, Set<String> earlier,
+                                               Set<String> optionPlaceholders) {
         List<String> errors = []
         Map doc = [variables: [:], rootFields: []]
         List<String> documents = [s.document?.toString()]
@@ -272,7 +303,7 @@ class DataSourceDefinitionSupport {
             Map vars = b.variables instanceof Map ? (Map) b.variables : [:]
             // bind.all may fill nothing: an optional variable left out is null, as a sweep of everything sends it.
             if (!vars && mode != "all") errors << "${where}: bind.${mode} needs variables.".toString()
-            Set<String> allowed = mode == "window" ? WINDOW_PLACEHOLDERS : mode == "ids" ? IDS_PLACEHOLDERS : ([] as Set<String>)
+            Set<String> allowed = (mode == "window" ? WINDOW_PLACEHOLDERS : mode == "ids" ? IDS_PLACEHOLDERS : ([] as Set<String>)) + optionPlaceholders
             vars.each { Object name, Object template ->
                 if (protocol == "GRAPHQL" && !declared.containsKey(name)) {
                     errors << "${where}: bind.${mode} fills \$${name}, which the query does not declare.".toString()
@@ -301,6 +332,7 @@ class DataSourceDefinitionSupport {
                     }
                 }
                 if (!inRange(b.chunk, 1, 1000)) errors << "${where}: bind.ids.chunk is 1 to 1000.".toString()
+                errors.addAll(RecordConditions.check(where, b.when))
                 if (b.idPattern != null) {
                     try { java.util.regex.Pattern.compile(b.idPattern.toString()) }
                     catch (Exception ignored) { errors << "${where}: bind.ids.idPattern is not a pattern.".toString() }
@@ -424,6 +456,20 @@ class DataSourceDefinitionSupport {
                 if ((s.atOn || s.missingAt) && s.at == null) errors << "${where}: atOn and missingAt need at.".toString()
                 errors.addAll(RecordConditions.check(where, s.fromWhen))
                 if (s.last != null && !(s.last instanceof Boolean)) errors << "${where}: last is true or false.".toString()
+                if (!pairs(s.notOn, "into", "from")) errors << "${where}: notOn is a list of {into, from} fields.".toString()
+                if (s.sortBy != null && !((s.sortBy instanceof List) && ((List) s.sortBy).every { Object o ->
+                    isPath(o) || (o instanceof Map && isPath(((Map) o).path) && (((Map) o).as == null || ((Map) o).as in ["TEXT", "NATURAL"])) })) {
+                    errors << "${where}: sortBy is a list of {path, as} (as: TEXT or NATURAL) or paths.".toString()
+                }
+                ["fields", "optionalFields"].each { String k ->
+                    if (s[k] != null && !((s[k] instanceof List) && ((List) s[k]).every { it ==~ NAME })) {
+                        errors << "${where}: ${k} lists the line fields a many join keeps.".toString()
+                    }
+                }
+                if ((s.fields != null || s.optionalFields != null || s.sortBy != null) && s.many != true) {
+                    errors << "${where}: sortBy, fields and optionalFields are for a many join.".toString()
+                }
+                if (s.always != null && !(s.always instanceof Boolean)) errors << "${where}: always is true or false.".toString()
                 if (!s.on && !s.atOn) errors << "${where}: a join needs on or atOn keys.".toString()
                 boolean many = s.many == true
                 if (many && s.copy != null) errors << "${where}: a many join attaches a list; it cannot copy fields.".toString()
@@ -463,6 +509,7 @@ class DataSourceDefinitionSupport {
                 })
                 if (!paths(s.partitionBy) || !orderOk) errors << "${where}: partitionBy and orderBy are lists of fields (orderBy may be {path, as: TEXT}).".toString()
                 if (s.sizeField != null && !(s.sizeField ==~ NAME)) errors << "${where}: sizeField is a field name.".toString()
+                if (s.on != null && !earlier.contains(s.on)) errors << "${where}: on names an earlier step.".toString()
                 if (s.collect != null && !((s.collect instanceof Map) && isPath(((Map) s.collect).field) && ((Map) s.collect).as ==~ NAME)) {
                     errors << "${where}: collect is {field, as}: the field gathered and the name the list is written to.".toString()
                 }
@@ -488,6 +535,9 @@ class DataSourceDefinitionSupport {
         List dupes = all.countBy { it }.findAll { k, v -> v > 1 }.keySet() as List
         if (dupes) errors << "record lists ${dupes.join(', ')} twice.".toString()
         if (r.keepRecordFields != null && !(r.keepRecordFields instanceof Boolean)) errors << "record.keepRecordFields is true or false."
+        if (r.keepAlways != null && !((r.keepAlways instanceof List) && ((List) r.keepAlways).every { all.contains(it) })) {
+            errors << "record.keepAlways lists record fields every kept record carries."
+        }
         if (r.keepWith != null && !((r.keepWith instanceof Map) && ((Map) r.keepWith).every { k, v ->
             all.contains(k) && (v instanceof List) && ((List) v).every { all.contains(it) } })) {
             errors << "record.keepWith maps a record field to the record fields kept with it."

@@ -171,6 +171,10 @@ class DataDefinedExtract {
         Map request
         Long fromMillis = null, thruMillis = null
         Object keys = context.get("lookupKeys")
+        List<String> optionErrors = optionMismatch(definition, connector.extractOptionsJson as String)
+        if (optionErrors) return [errors: optionErrors]
+        Map options = ((List<Map>) (definition.options ?: [])).collectEntries { Map o -> [(o.name): context.get(o.name as String)] }
+                .findAll { k, v -> v != null }
         Object keep = context.get("keepRecordFields")
         List keepList = keep instanceof Collection ? new ArrayList((Collection) keep) : null
         List<Map<String, Object>> filters
@@ -184,21 +188,40 @@ class DataDefinedExtract {
                 context.get((connector.dateFromParameterName ?: "windowStart") as String) != null)
         if (mode == "all") {
             // A whole read: no window, no keys (the coded whole-catalogue reads ignore both too; requestMetadata says so).
-            request = [mode: "all", filters: filters, keep: keepList]
+            request = [mode: "all", filters: filters, keep: keepList, options: options]
         } else if (mode == "ids") {
-            request = [mode: "ids", keys: new ArrayList((Collection) keys), keyField: context.get("lookupKeyField"), filters: filters, keep: keepList]
+            request = [mode: "ids", keys: new ArrayList((Collection) keys), keyField: context.get("lookupKeyField"), filters: filters, keep: keepList, options: options]
         } else {
             fromMillis = windowMillis(context.get((connector.dateFromParameterName ?: "windowStart") as String), "The window start", errors)
             thruMillis = windowMillis(context.get((connector.dateToParameterName ?: "windowEnd") as String), "The window end", errors)
             if (errors) return [errors: errors]
             if (thruMillis <= fromMillis) return [errors: ["The window ends before it starts."]]
-            request = [mode: "window", from: fromMillis, thru: thruMillis, filters: filters, keep: keepList]
+            request = [mode: "window", from: fromMillis, thru: thruMillis, filters: filters, keep: keepList, options: options]
         }
         Map record = [:]
         configDefinition.getAllFieldNames().each { String f -> record.put(f, config.get(f)) }
         return [connector: connector, definitionRow: [id: definitionId, version: row.definitionVersion, protocol: row.protocol],
                 definition: definition, configId: configId, connectionRecord: record, request: request,
                 fromMillis: fromMillis, thruMillis: thruMillis]
+    }
+
+    /**
+     * The definition's options must be the connector's extractOptionsJson (the switches a caller is offered): same names,
+     * each a boolean. Words for a mismatch, else none.
+     */
+    static List<String> optionMismatch(Map definition, String extractOptionsJson) {
+        Map<String, String> declared = ((List<Map>) (definition.options ?: [])).collectEntries { [(it.name.toString()): it.type?.toString()] }
+        Map<String, String> offered = [:]
+        if (extractOptionsJson?.trim()) {
+            Object parsed
+            try { parsed = new groovy.json.JsonSlurper().parseText(extractOptionsJson) } catch (Exception ignored) { parsed = null }
+            if (!(parsed instanceof List)) return ["The connector's extractOptionsJson is not a list of options."]
+            ((List) parsed).each { if (it instanceof Map && ((Map) it).name) offered.put(((Map) it).name.toString(), ((Map) it).type?.toString()) }
+        }
+        if (declared.keySet() != offered.keySet() || offered.values().any { it?.toLowerCase() != "boolean" } ) {
+            return ["The definition's options ${declared.keySet().sort()} are not the connector's ${offered.keySet().sort()} (each a boolean).".toString()]
+        }
+        return []
     }
 
     /**

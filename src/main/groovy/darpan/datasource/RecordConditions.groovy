@@ -7,11 +7,16 @@ package darpan.datasource
  * them. Blank is null, blank text, or an empty list or object.
  *
  * A path through a list (`lines[*].status`) reads every value it reaches: IN and NOT_BLANK hold when any value does,
- * NOT_IN and BLANK when none does (a path that reaches nothing is BLANK and NOT_IN anything). Pure.
+ * NOT_IN and BLANK when none does (a path that reaches nothing is BLANK and NOT_IN anything).
+ *
+ * MATCHES {values: [one pattern, up to 200 characters]}: the value's trimmed text matches it whole. AFTER_NOW: the value
+ * is an ISO instant (or epoch millis) later than now; anything else is not. Pure but for the clock.
  */
 class RecordConditions {
 
-    static final List<String> OPS = ["IN", "NOT_IN", "BLANK", "NOT_BLANK"].asImmutable()
+    static final List<String> OPS = ["IN", "NOT_IN", "BLANK", "NOT_BLANK", "MATCHES", "AFTER_NOW"].asImmutable()
+    static final int MAX_PATTERN = 200
+    private static final Map<String, java.util.regex.Pattern> PATTERNS = new java.util.concurrent.ConcurrentHashMap<>()
     static final String FIELD = /[A-Za-z_][A-Za-z0-9_]*(\[\*\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\*\])?){0,7}/
 
     static boolean matches(Map record, Object conditions) {
@@ -29,6 +34,8 @@ class RecordConditions {
                 case "NOT_BLANK": return found.any { !isBlank(it) }
                 case "IN": return found.any(listed)
                 case "NOT_IN": return !found.any(listed)
+                case "MATCHES": return found.any { matchesPattern(it, c) }
+                case "AFTER_NOW": return found.any { afterNow(it) }
                 default: throw new IllegalArgumentException("A condition is one of ${OPS.join(', ')}, not '${c.op}'.")
             }
         }
@@ -39,6 +46,8 @@ class RecordConditions {
             case "NOT_BLANK": return !blank
             case "IN": return !blank && ((c.values ?: []) as List).any { same(value, it) }
             case "NOT_IN": return blank || !((c.values ?: []) as List).any { same(value, it) }
+            case "MATCHES": return matchesPattern(value, c)
+            case "AFTER_NOW": return afterNow(value)
             default: throw new IllegalArgumentException("A condition is one of ${OPS.join(', ')}, not '${c.op}'.")
         }
     }
@@ -61,7 +70,30 @@ class RecordConditions {
         if (c.op in ["IN", "NOT_IN"] && !((c.values instanceof List) && !((List) c.values).isEmpty())) {
             errors << "${where}: ${c.op} needs values.".toString()
         }
+        if (c.op == "MATCHES") {
+            if (!((c.values instanceof List) && ((List) c.values).size() == 1 && ((List) c.values)[0] instanceof String)) {
+                errors << "${where}: MATCHES takes one pattern.".toString()
+            } else if (((String) ((List) c.values)[0]).length() > MAX_PATTERN) {
+                errors << "${where}: a MATCHES pattern is at most ${MAX_PATTERN} characters.".toString()
+            } else {
+                try { java.util.regex.Pattern.compile((String) ((List) c.values)[0]) }
+                catch (Exception ignored) { errors << "${where}: the MATCHES value is not a pattern.".toString() }
+            }
+        }
         return errors
+    }
+
+    private static boolean matchesPattern(Object value, Map c) {
+        if (isBlank(value) || value instanceof Collection || value instanceof Map) return false
+        String pattern = (String) ((List) c.values)[0]
+        return PATTERNS.computeIfAbsent(pattern, { java.util.regex.Pattern.compile(it) }).matcher(value.toString().trim()).matches()
+    }
+
+    private static boolean afterNow(Object value) {
+        long now = System.currentTimeMillis()
+        if (value instanceof Number) return ((Number) value).longValue() > now
+        if (isBlank(value) || value instanceof Collection || value instanceof Map) return false
+        try { return java.time.Instant.parse(value.toString().trim()).toEpochMilli() > now } catch (Exception ignored) { return false }
     }
 
     static boolean isBlank(Object v) {

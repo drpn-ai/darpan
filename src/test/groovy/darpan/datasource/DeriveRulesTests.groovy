@@ -74,7 +74,7 @@ class DeriveRulesTests {
                 [set: "a", value: [copy: "x", literal: 2]],
                 [set: "b", value: [fn: "eval", args: ["1"]]],
                 [set: "c", value: [map: [A: 1]]],
-                [set: "d", when: [[field: "x", op: "MATCHES"]], value: [literal: 1]],
+                [set: "d", when: [[field: "x", op: "LIKE"]], value: [literal: 1]],
         ])
         ["rule 1 needs set", "rule 2: value is exactly one of", "rule 3: fn is one of text, decimal", "rule 4: map needs",
          "rule 5: a condition is one of"].each { String e -> assertTrue(errors.any { it.contains(e) }, e + " in " + errors) }

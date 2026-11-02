@@ -78,6 +78,7 @@ class DataDefinedExtract {
             context.put("dataAvailable", true)
             context.put("warnings", warningsOf(definition, (Map) result.counts))
             String fileName = safeFileName(context.get("fileName"),
+                    ((Map) prepared.request).mode == "all" ? "${(connector.systemEnumId as String).toLowerCase()}.json".toString() :
                     "${(connector.systemEnumId as String).toLowerCase()}-${prepared.fromMillis ?: 'keys'}-${prepared.thruMillis ?: 'keys'}.json")
             String fileLocation = DataManagerSupport.childLocation(outputBaseLocation, fileName)
             DataManagerSupport.moveIntoLocation(ec, workFile, fileLocation)
@@ -179,7 +180,12 @@ class DataDefinedExtract {
         } catch (IllegalArgumentException e) {
             return [errors: [e.message]]
         }
-        if (keys instanceof Collection && !((Collection) keys).isEmpty()) {
+        String mode = modeFor(definition, keys instanceof Collection && !((Collection) keys).isEmpty(),
+                context.get((connector.dateFromParameterName ?: "windowStart") as String) != null)
+        if (mode == "all") {
+            // A whole read: no window, no keys (the coded whole-catalogue reads ignore both too; requestMetadata says so).
+            request = [mode: "all", filters: filters, keep: keepList]
+        } else if (mode == "ids") {
             request = [mode: "ids", keys: new ArrayList((Collection) keys), keyField: context.get("lookupKeyField"), filters: filters, keep: keepList]
         } else {
             fromMillis = windowMillis(context.get((connector.dateFromParameterName ?: "windowStart") as String), "The window start", errors)
@@ -193,6 +199,18 @@ class DataDefinedExtract {
         return [connector: connector, definitionRow: [id: definitionId, version: row.definitionVersion, protocol: row.protocol],
                 definition: definition, configId: configId, connectionRecord: record, request: request,
                 fromMillis: fromMillis, thruMillis: thruMillis]
+    }
+
+    /**
+     * How a run reads, from what the first step allows: by ids when keys are given and it reads by ids; by window when it
+     * reads by window (the window check then asks for one); else whole when it reads with bind.all; else by ids.
+     */
+    static String modeFor(Map definition, boolean hasKeys, boolean hasWindow) {
+        Map bind = (Map) (((Map) ((List) definition.steps)[0]).bind ?: [:])
+        if (hasKeys && bind.ids) return "ids"
+        if (bind.window) return "window"
+        if (bind.all) return "all"
+        return "ids"
     }
 
     private static Map requestMetadata(Map connector, Map definitionRow, Map definition, Map prepared, Map result, int written) {

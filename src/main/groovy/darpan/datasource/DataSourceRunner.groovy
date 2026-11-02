@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *           or by copying fields; a missing nested target can be created (missingAt)
  *   split   one record per leaf of a nested path, each holding every level by name (order, group, item)
  *   repeat  one record per unit of a quantity field
- *   number  a running number per partition in a declared order
+ *   number  a running number per partition in a declared order, optionally the partition's size and its collected values
  *   count   a named count of the records matching conditions, optionally of distinct keys
  *   derive  fields written by rows of data, fired as Drools rules (DeriveRules, DeriveEngine), on the current records or on an
  *           earlier step's (`on`)
@@ -33,6 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class DataSourceRunner {
 
     static final int DEFAULT_BATCH_RECORDS = 1000
+    static final int DEFAULT_MAX_RECORDS_IN_MEMORY = 1_000_000
+    private int heldCap = 0
 
     private final Map definition
     private final def transport
@@ -77,12 +79,15 @@ class DataSourceRunner {
         List<String> wanted = (((request.keep ?: []) as List) + filterRules.collect { it.fieldExpression })
                 .collect { it?.toString()?.trim() }.findAll { it }.unique()
         ((List<Map>) definition.steps).findAll { it.kind == "query" }.each { plans.put((String) it.id, planOf(it, wanted)) }
-        int batchSize = ((definition.batchRecords ?: DEFAULT_BATCH_RECORDS) as Number).intValue()
+        // A whole-set read is one batch: every step sees every record (a catalogue's ranks and groups), held up to the cap.
+        int batchSize = definition.wholeSet == true ? Integer.MAX_VALUE : ((definition.batchRecords ?: DEFAULT_BATCH_RECORDS) as Number).intValue()
+        heldCap = definition.wholeSet == true ? (((Map) definition.limits)?.maxRecordsInMemory ?: DEFAULT_MAX_RECORDS_IN_MEMORY) as int : 0
         List<Map> pieces
         int parallel
         if (request.mode == "ids") { pieces = keyPieces(first, request); parallel = parallelOf((Map) ((Map) first.bind).ids) }
         else if (request.mode == "window") { pieces = windowPieces(first, request); parallel = parallelOf((Map) ((Map) first.bind).window) }
-        else throw new IllegalArgumentException("A run reads by ids or by window, not '${request.mode}'.")
+        else if (request.mode == "all") { pieces = allPieces(first); parallel = 1 }
+        else throw new IllegalArgumentException("A run reads by ids, by window or all, not '${request.mode}'.")
         Closure safeSink = { List<Map> batch -> synchronized (sink) { sink.call(batch) } }
         try {
             readPieces(first, pieces, Math.max(1, Math.min(parallel, pieces.size())), batchSize, safeSink, progress)
@@ -119,6 +124,9 @@ class DataSourceRunner {
             Closure take = { List<Map> page ->
                 buffer.addAll(page)
                 rootRecordCount.addAndGet(page.size())
+                if (heldCap > 0 && buffer.size() > heldCap) {
+                    throw new DataSourceCallException("TOO_MANY_RECORDS", "Step '${first.id}' read more than ${heldCap} records, the most a whole-set read holds.".toString())
+                }
                 if (parallel == 1 && progress != null) progress.call(rootRecordCount.get())
                 while (buffer.size() >= batchSize) {
                     List<Map> batch = new ArrayList<>(buffer.subList(0, batchSize))
@@ -175,6 +183,13 @@ class DataSourceRunner {
         return keys.collate(((b.chunk ?: 100) as Number).intValue()).collect { List<String> chunk ->
             fill((Map) b.variables, [ids: chunk.join((b.separator ?: ",") as String), keyField: filterField ?: ""])
         }
+    }
+
+    /** A read of every record: one piece, the step's fixed variables. */
+    private static List<Map> allPieces(Map step) {
+        Map b = (Map) ((Map) step.bind).all
+        if (b == null) throw new IllegalArgumentException("Step '${step.id}' cannot be read whole.")
+        return [fill((Map) b.variables, [:])]
     }
 
     /** The first step's window slices, each its query variables. */
@@ -297,6 +312,11 @@ class DataSourceRunner {
     }
 
     private List<Map> readChildren(Map step, Map<String, List<Map>> ctx) {
+        if (((Map) step.bind).all != null && ((Map) step.bind).ids == null) {
+            List<Map> every = []
+            readPages(step, allPieces(step)[0], { List<Map> page -> every.addAll(page) })
+            return every
+        }
         Map b = (Map) ((Map) step.bind).ids
         String[] from = ((String) b.from).split(/\./, 2)
         List<String> ids = cleanIds(((List<Map>) (ctx.get(from[0]) ?: [])).collectMany { JsonPathValues.values(it, from[1]) })
@@ -340,7 +360,7 @@ class DataSourceRunner {
 
     private static void join(Map step, Map<String, List<Map>> ctx) {
         List<Map> into = ctx.get((String) step.into) ?: []
-        List<Map> from = ctx.get((String) step.from) ?: []
+        List<Map> from = (ctx.get((String) step.from) ?: []).findAll { RecordConditions.matches(it, step.fromWhen) }
         List<Map> on = (List<Map>) (step.on ?: [])
         List<Map> atOn = (List<Map>) (step.atOn ?: [])
         boolean many = step.many == true
@@ -351,7 +371,11 @@ class DataSourceRunner {
         if (!place) {
             // Enrich: each target looks up its one match and takes its fields.
             Map<String, Map> index = [:]
-            from.each { Map f -> index.putIfAbsent(key(f, (on + atOn).collect { it.from as String }), f) }
+            boolean last = step.last == true
+            from.each { Map f ->
+                String k = key(f, (on + atOn).collect { it.from as String })
+                if (last) index.put(k, f) else index.putIfAbsent(k, f)
+            }
             into.each { Map r ->
                 List<Map> targets = atList ? listAt(r, atList, false) : [r]
                 targets.each { Map t ->
@@ -482,7 +506,12 @@ class DataSourceRunner {
                 }
                 return 0
             }
-            sorted.eachWithIndex { Map r, int i -> r.put((String) step.field, i + 1) }
+            List<Object> collected = step.collect ? sorted.collect { JsonPathValues.value(it, (String) ((Map) step.collect).field) } : null
+            sorted.eachWithIndex { Map r, int i ->
+                r.put((String) step.field, i + 1)
+                if (step.sizeField) r.put((String) step.sizeField, sorted.size())
+                if (collected != null) r.put((String) ((Map) step.collect).as, new ArrayList<Object>(collected))
+            }
         }
     }
 

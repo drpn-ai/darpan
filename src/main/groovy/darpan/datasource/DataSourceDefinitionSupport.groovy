@@ -13,7 +13,8 @@ import groovy.json.JsonSlurper
  * A query step:
  *   {id, kind: "query", document, connectionAt (the root field), recordsAt, hasNextAt, cursorAt (paths under it),
  *    bind: {window: {variables, field, sliceHours, instantFormat, parallel},
- *           ids: {variables, from (LOOKUP_KEYS or <earlier step>.<field>), chunk, parallel, keyFields, idPattern, separator}},
+ *           ids: {variables, from (LOOKUP_KEYS or <earlier step>.<field>), chunk, parallel, keyFields, idPattern, separator},
+ *           all: {variables}: every record, fixed variables (no placeholders); on a later step, read once per batch},
  *    paging: {firstVariable, afterVariable, pageSize | {budget, costPerRecord, max}, maxPages}, reservation,
  *    selections: [{at, when, text, cost, set}]}
  * Window templates may use {from} {thru}; ids templates {ids} {keyField}. A document may hold slots ({{name}}), each
@@ -24,10 +25,11 @@ import groovy.json.JsonSlurper
  *   unwrap {of (an earlier step), field, path}: the field becomes the list at path inside it (a nested connection's
  *           edges[*].node)
  *   join   {into, from (earlier steps), on: [{into, from}], at: "list[*]", atOn: [{at, from}], many | copy {to: path} | as,
- *           missingAt: {create, set}}
+ *           missingAt: {create, set}, fromWhen (only joined records matching it), last (the last match wins, not the first)}
  *   split  {from, path: "a[*].b[*]", levels: [root, a, b], copy {to: "level.field"}}
  *   repeat {times (path), parse STRICT_INT|NUMERIC, nullAs, index}
- *   number {field, partitionBy: [paths], orderBy: [paths]}
+ *   number {field, partitionBy: [paths], orderBy: [paths], sizeField (the partition's size), collect {field, as} (its
+ *           values of field, in order, as a list)}
  *   count  {name, when (RecordConditions), distinct: [paths]}
  *   derive {rules: [{set, when, value}], on (an earlier step; default the current records)} (DeriveRules)
  *   filter {overlay (a level whose plain fields sit under the record), fields (what rules may read)}
@@ -36,7 +38,8 @@ import groovy.json.JsonSlurper
  *          one's fields (DeriveRules values) are written beside the extract, up to max, saying when it stopped
  * record: {fields, optionalFields, keepRecordFields (true: a run's keepRecordFields trims each record, and a field the
  * record cannot carry is refused), keepWith {field: [fields kept with it]}}.
- * Top level: batchRecords, metadata (fixed values a run reports, e.g. a count this source never has), and warnings
+ * Top level: wholeSet (true: every step sees the whole read as one batch; the first query reads with bind.all only, and
+ * more than limits.maxRecordsInMemory records fail the run), batchRecords, metadata (fixed values a run reports, e.g. a count this source never has), and warnings
  * ({count, text}: a warning a run gives when that count is above 0; {n} is the count).
  */
 class DataSourceDefinitionSupport {
@@ -84,6 +87,11 @@ class DataSourceDefinitionSupport {
         Map limits = checkLimits(d.limits, errors)
         errors.addAll(checkSteps(protocol, d.steps, limits))
         if (d.batchRecords != null && !inRange(d.batchRecords, 1, 100_000)) errors << "batchRecords is 1 to 100000."
+        if (d.wholeSet != null && !(d.wholeSet instanceof Boolean)) errors << "wholeSet is true or false."
+        if (d.wholeSet == true && d.steps instanceof List && ((List) d.steps)[0] instanceof Map) {
+            Map bind = (((Map) ((List) d.steps)[0]).bind instanceof Map) ? (Map) ((Map) ((List) d.steps)[0]).bind : [:]
+            if (!bind.all || bind.window || bind.ids) errors << "A wholeSet reads with bind.all only: no window, no ids."
+        }
         if (d.warnings != null && !((d.warnings instanceof List) && ((List) d.warnings).every { Object w ->
             w instanceof Map && ((Map) w).count ==~ NAME && ((Map) w).text?.toString()?.trim() &&
                     ((List<Map>) (d.steps instanceof List ? d.steps : [])).any { it?.kind == "count" && it?.name == ((Map) w).count }
@@ -163,6 +171,7 @@ class DataSourceDefinitionSupport {
         if (l.maxAttempts != null && !inRange(l.maxAttempts, 1, 10)) errors << "maxAttempts is 1 to 10."
         if (l.retryBackoffMillis != null && !inRange(l.retryBackoffMillis, 0, 60_000)) errors << "retryBackoffMillis is 0 to 60000."
         if (l.maxThrottleWaitSeconds != null && !inRange(l.maxThrottleWaitSeconds, 0, 3600)) errors << "maxThrottleWaitSeconds is 0 to 3600."
+        if (l.maxRecordsInMemory != null && !inRange(l.maxRecordsInMemory, 1, 5_000_000)) errors << "maxRecordsInMemory is 1 to 5000000."
         ["errorCodeAt"].each { if (l[it] != null && !(l[it] ==~ PATH)) errors << "${it} must be a response path.".toString() }
         ["throttledCodes", "costRefusedCodes"].each { String k ->
             if (l[k] != null && !((l[k] instanceof List) && ((List) l[k]).every { it ==~ /[A-Za-z0-9_.-]{1,60}/ })) {
@@ -238,7 +247,7 @@ class DataSourceDefinitionSupport {
         }
         Map bind = s.bind instanceof Map ? (Map) s.bind : [:]
         Map paging = s.paging instanceof Map ? (Map) s.paging : [:]
-        if (!bind.window && !bind.ids) errors << "${where} needs bind.window or bind.ids: how a run's window or ids fill it.".toString()
+        if (!bind.window && !bind.ids && !bind.all) errors << "${where} needs bind.window, bind.ids or bind.all: how a run fills it.".toString()
         List<String> pagingVariables = [paging.firstVariable, paging.afterVariable].findAll { it != null }.collect { it.toString() }
         if (!(paging.firstVariable ==~ NAME) || !(paging.afterVariable ==~ NAME)) {
             errors << "${where} needs paging.firstVariable and paging.afterVariable.".toString()
@@ -256,19 +265,21 @@ class DataSourceDefinitionSupport {
             errors << "${where}: its reservation ${s.reservation} is above maxCostPerCall ${limits.maxCostPerCall}.".toString()
         }
         Map<String, Map> declared = (Map<String, Map>) (doc.variables ?: [:])
-        ["window", "ids"].each { String mode ->
+        ["window", "ids", "all"].each { String mode ->
             if (!bind[mode]) return
             if (!(bind[mode] instanceof Map)) { errors << "${where}: bind.${mode} must be an object.".toString(); return }
             Map b = (Map) bind[mode]
             Map vars = b.variables instanceof Map ? (Map) b.variables : [:]
-            if (!vars) errors << "${where}: bind.${mode} needs variables.".toString()
-            Set<String> allowed = mode == "window" ? WINDOW_PLACEHOLDERS : IDS_PLACEHOLDERS
+            // bind.all may fill nothing: an optional variable left out is null, as a sweep of everything sends it.
+            if (!vars && mode != "all") errors << "${where}: bind.${mode} needs variables.".toString()
+            Set<String> allowed = mode == "window" ? WINDOW_PLACEHOLDERS : mode == "ids" ? IDS_PLACEHOLDERS : ([] as Set<String>)
             vars.each { Object name, Object template ->
                 if (protocol == "GRAPHQL" && !declared.containsKey(name)) {
                     errors << "${where}: bind.${mode} fills \$${name}, which the query does not declare.".toString()
                 }
                 List<String> bad = placeholders(template?.toString()).findAll { !allowed.contains(it) }
-                if (bad) errors << "${where}: bind.${mode} may use ${allowed.collect { '{' + it + '}' }.join(' ')}, not ${bad.collect { '{' + it + '}' }.join(' ')}.".toString()
+                if (bad && mode == "all") errors << "${where}: bind.all takes fixed variables, not ${bad.collect { '{' + it + '}' }.join(' ')}.".toString()
+                else if (bad) errors << "${where}: bind.${mode} may use ${allowed.collect { '{' + it + '}' }.join(' ')}, not ${bad.collect { '{' + it + '}' }.join(' ')}.".toString()
             }
             if (protocol == "GRAPHQL") {
                 Set<String> filled = (vars.keySet().collect { it.toString() } + pagingVariables) as Set<String>
@@ -281,7 +292,7 @@ class DataSourceDefinitionSupport {
                 if (b.instantFormat != null && !(b.instantFormat in INSTANT_FORMATS)) {
                     errors << "${where}: bind.window.instantFormat is ${INSTANT_FORMATS.join(' or ')}.".toString()
                 }
-            } else {
+            } else if (mode == "ids") {
                 String from = b.from?.toString()
                 if (from != LOOKUP_KEYS) {
                     List<String> parts = from?.split(/\./, 2) as List<String>
@@ -411,6 +422,8 @@ class DataSourceDefinitionSupport {
                 if (!pairs(s.atOn, "at", "from")) errors << "${where}: atOn is a list of {at, from} fields.".toString()
                 if (s.at != null && !(s.at ==~ /[A-Za-z_][A-Za-z0-9_]*\[\*\]/)) errors << "${where}: at is one list on the record, e.g. groups[*].".toString()
                 if ((s.atOn || s.missingAt) && s.at == null) errors << "${where}: atOn and missingAt need at.".toString()
+                errors.addAll(RecordConditions.check(where, s.fromWhen))
+                if (s.last != null && !(s.last instanceof Boolean)) errors << "${where}: last is true or false.".toString()
                 if (!s.on && !s.atOn) errors << "${where}: a join needs on or atOn keys.".toString()
                 boolean many = s.many == true
                 if (many && s.copy != null) errors << "${where}: a many join attaches a list; it cannot copy fields.".toString()
@@ -449,6 +462,10 @@ class DataSourceDefinitionSupport {
                     isPath(o) || (o instanceof Map && isPath(((Map) o).path) && (((Map) o).as == null || ((Map) o).as in ["TEXT", "NATURAL"]))
                 })
                 if (!paths(s.partitionBy) || !orderOk) errors << "${where}: partitionBy and orderBy are lists of fields (orderBy may be {path, as: TEXT}).".toString()
+                if (s.sizeField != null && !(s.sizeField ==~ NAME)) errors << "${where}: sizeField is a field name.".toString()
+                if (s.collect != null && !((s.collect instanceof Map) && isPath(((Map) s.collect).field) && ((Map) s.collect).as ==~ NAME)) {
+                    errors << "${where}: collect is {field, as}: the field gathered and the name the list is written to.".toString()
+                }
                 break
             case "count":
                 if (!(s.name ==~ NAME)) errors << "${where}: a count needs a name, one word.".toString()

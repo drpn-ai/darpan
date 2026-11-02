@@ -17,7 +17,8 @@ import java.time.Instant
  *          (a quantity as whole units: parse STRICT_INT|NUMERIC, nullAs, as the repeat step reads it), size (how many in a
  *          list or object; null is 0, any other value 1), distinctSorted (the args' non-blank values, lists flattened,
  *          trimmed, once each, sorted, joined by sep (default ","); none gives empty text), first (a list's first value,
- *          null when empty; any other value itself), atLeast (true when the first arg is a number at least the second)
+ *          null when empty; any other value itself), atLeast (true when the first arg is a number at least the second),
+ *          without (the first arg's list less every value equal to a later arg); join flattens list args
  *
  * Rows fire in order, so a later row's value may read a field an earlier row set, and a later row for the same field
  * overrides an earlier one (a default first, the cases after). Pure.
@@ -25,7 +26,7 @@ import java.time.Instant
 class DeriveRules {
 
     static final List<String> FUNCTIONS = ["text", "decimal", "decimalPlain", "epochMillis", "join", "firstPresent", "units",
-                                           "size", "distinctSorted", "first", "atLeast"].asImmutable()
+                                           "size", "distinctSorted", "first", "atLeast", "without"].asImmutable()
     private static final String NAME = /[A-Za-z][A-Za-z0-9_]{0,59}/
     private static final String PATH = RecordConditions.FIELD
 
@@ -66,7 +67,8 @@ class DeriveRules {
             case "epochMillis":
                 return epochMillis(first)
             case "join":
-                List<String> parts = args.collect { it?.toString()?.trim() }.findAll { it }
+                List<String> parts = args.collectMany { it instanceof Collection ? ((Collection) it).toList() : [it] }
+                        .collect { it?.toString()?.trim() }.findAll { it }
                 return parts ? parts.join((v.sep ?: " ") as String) : null
             case "firstPresent":
                 return args.find { it != null && it.toString().trim() }
@@ -84,6 +86,10 @@ class DeriveRules {
             case "first":
                 if (first instanceof Collection) return ((Collection) first).isEmpty() ? null : ((Collection) first).iterator().next()
                 return first
+            case "without":
+                List<Object> list = first instanceof Collection ? ((Collection) first).toList() : (first == null ? [] : [first])
+                List<Object> drop = args.drop(1)
+                return list.findAll { Object x -> !drop.any { RecordConditions.same(x, it) } }
             case "atLeast":
                 BigDecimal a = RecordConditions.number(first), b = RecordConditions.number(args.size() > 1 ? args[1] : null)
                 return a != null && b != null && a >= b

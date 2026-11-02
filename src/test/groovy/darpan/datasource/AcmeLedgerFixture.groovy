@@ -115,6 +115,7 @@ class AcmeLedgerFixture {
         }
 
         private static boolean matches(Map row, String filter) {
+            if (filter == "*") return true
             def ids = filter =~ /(\w+) in \(([^)]*)\)/
             if (ids.find()) return (ids.group(2).split(",") as List).contains(row.get(ids.group(1))?.toString())
             def window = filter =~ /issued>=(\S+) issued<(\S+)/

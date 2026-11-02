@@ -137,6 +137,23 @@ matched''', sample)
         }
     }
 
+    // Security review of 49dd046: the checker runs on a request thread, outside any script budget. A worst-case script
+    // (60,000 characters of unknown field reads, many while loops) against a wide sample must stay quick and bounded.
+    @Test
+    void aPathologicalScriptIsCheckedQuicklyAndReportsAreCapped() {
+        StringBuilder body = new StringBuilder('var x = input;\n')
+        int n = 0
+        while (body.length() < 58_000) { body.append("x.zz${n} + x.qq${n}\n"); if (n % 40 == 0) body.append('while (x) { x }\n'); n++ }
+        Map wide = [rows: (1..4_000).collect { int i -> [("k${i}".toString()): i, ("zz${i}x".toString()): i] }]
+        long started = System.nanoTime()
+        Map out = ScriptChecker.check('SCRIPT', body.toString(), JsonOutput.toJson(wide))
+        long ms = (System.nanoTime() - started).intdiv(1_000_000L)
+        assertTrue(ms < 2_000L, "checked in ${ms} ms")
+        assertFalse(out.ok as boolean)
+        assertTrue((out.problems as List).size() <= ScriptChecker.MAX_PROBLEMS, "${(out.problems as List).size()} problems")
+        assertTrue(rules(out).count { it == 'UNKNOWN_FIELD' } <= ScriptChecker.MAX_FIELD_REPORTS)
+    }
+
     @Test
     void severalProblemsAreAllReported() {
         Map out = check("var i = 0; while (i < 3) { d:lowr('a'); }\ni", null)

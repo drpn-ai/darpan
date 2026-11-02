@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-164. The tenant script sandbox, no Moqui boot: what a script can do, what each profile refuses, and the
- * hostile suite (sandbox design §8) — host access, runaway loops, memory growth, giant numbers, ReDoS.
+ * The tenant script engine, no Moqui boot: what a script can do, what each profile refuses, and the hostile suite
+ * (host access, runaway loops, memory growth, giant numbers, ReDoS). ScriptLoadGateTests covers the busy gate.
  */
 class ScriptSupervisorTests {
 
@@ -24,8 +24,9 @@ class ScriptSupervisorTests {
             payments: [[tender: 'CARD', amount: '40.00'], [tender: 'GIFT_CARD', amount: 10], [tender: 'CARD', amount: '5.5']],
     ]
 
+    // NOTE: evaluateAdmitted, not evaluate, so the engine is tested without the load gate reading this machine's CPU
     private static Map run(String profile, String body, Object input = ORDER) {
-        return ScriptSupervisor.evaluate(profile, body, input)
+        return ScriptSupervisor.evaluateAdmitted(profile, body, input)
     }
 
     private static void assertRefused(Map out, String kind) {
@@ -75,6 +76,27 @@ class ScriptSupervisorTests {
         ''')
         assertTrue(out.ok as boolean, "${out}")
         assertEquals([2, 2, [CARD: 2, GIFT_CARD: 1], 8], out.result)
+    }
+
+    @Test
+    void jexlsOwnBuiltInsCoverWhatTheLibraryLeavesOut() {
+        // the d: library has no len, begins, ends, min, max, abs, count or money because these do the same
+        Map line = [sku: 'A-1', qty: -3, note: 'abcd']
+        [
+                "size(input.note)"                                   : 4,
+                "size(input.payments)"                               : 3,
+                "empty(input.missing)"                               : true,
+                "input.line.sku =^ 'A-'"                             : true,
+                "input.line.sku =\$ '-1'"                           : true,
+                "'CARD' =~ ['CARD', 'CASH']"                         : true,
+                "var q = input.line.qty; q < 0 ? -q : q"             : 3,
+                "size(d:where(input.payments, 'tender', 'CARD'))"    : 2,
+                "d:round('2.499', 2)"                              : new BigDecimal('2.50'),
+        ].each { String body, Object expected ->
+            Map out = run('SCRIPT', body, ORDER + [line: line, note: 'abcd'])
+            assertTrue(out.ok as boolean, "${body} -> ${out}")
+            assertEquals(expected, out.result, body)
+        }
     }
 
     @Test
@@ -167,16 +189,16 @@ class ScriptSupervisorTests {
 
     @Test
     void permissionsAdmitOnlyTheLibraryAndTheArithmeticOverloads() {
-        ScriptPermissions p = ScriptPermissions.INSTANCE
-        assertFalse(p.allow(Runtime))
-        assertFalse(p.allow(HashMap))
-        assertFalse(p.allow(String.getMethod('length')))
-        assertFalse(p.allow(Object.getMethod('getClass')))
-        assertFalse(p.allow(ScriptLibrary.getMethod('getMetaClass')))
-        assertFalse(p.allow(ScriptLibrary.getDeclaredConstructor()))
-        assertTrue(p.allow(ScriptLibrary.getMethod('dec', Object)))
-        assertTrue(p.allow(ScriptArithmetic.getMethod('forEach', Object)))
-        assertTrue(p.compose('java.lang.*').is(p), 'compose must not widen the set')
+        ScriptPermissions permissions = ScriptPermissions.INSTANCE
+        assertFalse(permissions.allow(Runtime))
+        assertFalse(permissions.allow(HashMap))
+        assertFalse(permissions.allow(String.getMethod('length')))
+        assertFalse(permissions.allow(Object.getMethod('getClass')))
+        assertFalse(permissions.allow(ScriptLibrary.getMethod('getMetaClass')))
+        assertFalse(permissions.allow(ScriptLibrary.getDeclaredConstructor()))
+        assertTrue(permissions.allow(ScriptLibrary.getMethod('dec', Object)))
+        assertTrue(permissions.allow(ScriptArithmetic.getMethod('forEach', Object)))
+        assertTrue(permissions.compose('java.lang.*').is(permissions), 'compose must not widen the set')
     }
 
     @Test
@@ -230,7 +252,7 @@ class ScriptSupervisorTests {
         assertRefused(out, 'MEMORY')
     }
 
-    // -- hostile suite: caps hold at the peak allocation (security review of 52334af)
+    // -- hostile suite: caps hold at the peak allocation, not after it
 
     @Test
     void replaceIsRefusedBeforeItBuildsAnOversizedText() {
@@ -275,12 +297,12 @@ class ScriptSupervisorTests {
         Map out = run('SCRIPT', 'var s = \'x\';\nvar t = `${s}${s}`;\nt')
         assertRefused(out, 'NOT_ALLOWED')
         assertEquals(2, (out.error as Map).line)
-        // A regex literal holding a quote cannot hide a template from the check (second security review).
+        // a regex literal holding a quote cannot hide a template from the check
         assertRefused(run('SCRIPT', 'var r = ~/\'/;\nvar s = \'x\';\n`${s}${s}`'), 'NOT_ALLOWED')
         assertRefused(run('SCRIPT', "'a ` in text'"), 'NOT_ALLOWED')
     }
 
-    // -- hostile suite: second security review of e5ad242
+    // -- hostile suite: work that hides inside one operation
 
     @Test
     void deepEqualityIsChargedAtEveryDepth() {
@@ -358,7 +380,7 @@ class ScriptSupervisorTests {
     }
 
     @Test
-    void sortByOrdersMapsByAFieldEitherWay() {
+    void sortByTakesAMoquiOrderByWithinBounds() {
         Map out = run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'b', 'n': 2}, {'k': 'a', 'n': 10}, {'k': 'c', 'n': 1}], '-n'), 'k')")
         assertEquals(['a', 'b', 'c'], out.result)
         assertEquals(['a', 'b', 'c'], run('EXPRESSION', "d:pluck(d:sortBy([{'k': 'c'}, {'k': 'a'}, {'k': 'b'}], 'k'), 'k')").result)
@@ -380,6 +402,6 @@ class ScriptSupervisorTests {
                 offenders << main.relativize(f).toString()
             }
         }
-        assertEquals([], offenders, 'jexl3 may be referenced only from darpan.script (sandbox design §12)')
+        assertEquals([], offenders, 'jexl3 may be referenced only from darpan.script')
     }
 }

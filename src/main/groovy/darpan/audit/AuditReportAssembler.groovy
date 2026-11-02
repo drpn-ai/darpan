@@ -1039,14 +1039,22 @@ class AuditReportAssembler {
 
     /**
      * DAR-BE-091. One period of an audit as of one morning: its window (first day to the earlier of its last day and
-     * the morning) and whether the period still runs that morning. Null when the period does not parse or has not
+     * the morning), whether the period still runs that morning, and (DAR-BE-178) whether a played run may still record
+     * in it: its own span, or the whole of the period that follows it. Null when the period does not parse or has not
      * started by that morning.
      */
     static Map periodWindow(def ec, Map audit, String period, LocalDate day) {
         String periodCode = enumCodes(ec)[audit.periodEnumId as String]
         List<LocalDate> bounds = periodBounds(period, periodCode)
         if (bounds == null || day < bounds[0]) return null
-        return [period: period, from: bounds[0], thru: day < bounds[1] ? day : bounds[1], end: bounds[1], running: day <= bounds[1]]
+        boolean running = day <= bounds[1]
+        return [period: period, from: bounds[0], thru: running ? day : bounds[1], end: bounds[1], running: running,
+                recordable: running || periodStart(day, periodCode) == bounds[1].plusDays(1)]
+    }
+
+    /** DAR-BE-178. The first day a played run can record on {@code day}: the first day of the period just ended. */
+    static LocalDate recordableFrom(LocalDate day, String periodCode) {
+        return periodStart(periodStart(day, periodCode).minusDays(1), periodCode)
     }
 
     /** DAR-BE-091. The run an audit owes on one morning: its current period, from the period's first day to the morning. */
@@ -1057,7 +1065,8 @@ class AuditReportAssembler {
     /**
      * DAR-BE-091. The period and window of one check's run on one morning, for the ledger writers. A blank period is
      * the morning's own period, which needs the check's audits to share one kind of period. A past period must still
-     * be running. Returns [period, from, thru, ...] or [error: why].
+     * be recordable (DAR-BE-178: the period just ended, when a person plays it). Returns [period, from, thru, ...] or
+     * [error: why].
      */
     static Map resolveCheckRun(def ec, String tenantId, List auditIds, LocalDate day, String period) {
         List<Map> audits = auditIds ? tenantRows(ec, "darpan.audit.Audit", tenantId).condition("auditId", EntityCondition.IN, auditIds)
@@ -1069,8 +1078,8 @@ class AuditReportAssembler {
             period = periodOf(day, kinds[0])
         }
         List<Map> windows = audits.collect { periodWindow(ec, it, period, day) }.findAll { it != null }
-        Map running = windows.find { it.running }
-        if (running != null) return running
+        Map recordable = windows.find { it.running } ?: windows.find { it.recordable }
+        if (recordable != null) return recordable
         if (!audits.any { periodBounds(period, codes[it.periodEnumId as String]) != null }) {
             return [error: "${period} is not a period of the check's audits".toString()]
         }

@@ -116,11 +116,12 @@ class AuditSettingsSupport {
     }
 
     /**
-     * The earliest day play can record this morning: the current period's first day, or (DAR-BE-145) the tenant's go-live
-     * day when that is later. The run page offers nothing before it.
+     * The earliest day play can record this morning: the first day of the period just ended (DAR-BE-178: on Nov 2 a
+     * monthly audit plays October), or (DAR-BE-145) the tenant's go-live day when that is later. The run page offers
+     * nothing before it.
      */
     static String playableFrom(def ec, String tenantId, Map audit, LocalDate today, ZoneId zone) {
-        LocalDate from = (LocalDate) AuditReportAssembler.auditRun(ec, audit, today)?.from
+        LocalDate from = AuditReportAssembler.recordableFrom(today, AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String])
         Timestamp goLive = AuditAutomationSupport.goLive(ec, tenantId)
         LocalDate goLiveDay = goLive != null ? AuditAutomationSupport.goLiveDay(goLive, zone) : null
         return (from != null && goLiveDay != null && goLiveDay > from ? goLiveDay : from)?.toString()
@@ -128,7 +129,7 @@ class AuditSettingsSupport {
 
     /**
      * Play: every check of the audit over [from, thru], days inclusive in the tenant's zone. Refused before anything runs
-     * when the days cannot be recorded (in the future, backwards, or in a period that has ended).
+     * when the days cannot be recorded (in the future, backwards, or in a period that ended before the one just ended).
      * Answers the automations submitted.
      */
     static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead) {

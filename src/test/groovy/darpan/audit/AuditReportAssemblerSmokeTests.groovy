@@ -489,11 +489,12 @@ class AuditReportAssemblerSmokeTests {
         String ext1 = (recordFor(RET, "2026-10-20", null, [[statementCode: "R4", recordKey: "EXT-1", headline: "Late October memo"]])
                 .findingIds as List)[0]
 
-        // Nov 3: October's run is refused, November's runs alone.
+        // Dec 1: October is two months gone, its run is refused (DAR-BE-178: only the period just ended still records).
         ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: GORJANA, checkId: RET,
-                reportDate: Date.valueOf("2026-11-03"), period: "2026-10", sourceReads: []]).call()
+                reportDate: Date.valueOf("2026-12-01"), period: "2026-10", sourceReads: []]).call()
         assertTrue(ec.message.errorsString.contains("Period 2026-10 ended on 2026-10-31"), ec.message.errorsString)
         ec.message.clearErrors()
+        // Nov 3: the morning owes November alone; October records only when played.
         assertEquals([[period: "2026-11", from: "2026-11-01", thru: "2026-11-03"]], runsOn("2026-11-03"))
 
         Map november = report(GORJANA, MONTH_CLOSE, "2026-11-03", null)
@@ -507,6 +508,24 @@ class AuditReportAssemblerSmokeTests {
                 october.report.subMap(["period", "window", "running"]))
         assertEquals("The 2026-10 audit ended on 2026-10-31.", october.categories.refundsAndCredits.statements.R4.checks[0].reason)
         assertEquals("2026-10", finding(GORJANA, ext1).finding.period)
+    }
+
+    // DAR-BE-178: SM on Nov 2 plays October 1-31. The month just ended records under its own period, over its whole span,
+    // and its report shows the run; November's report does not take it.
+    @Test
+    void theMonthJustEndedStillRecordsWhenPlayed() {
+        Map ok = checkRunFor(RET, "2026-11-02", "2026-10", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE", 7, "01:00:00")])
+        noErrors()
+        assertEquals(["AUDCS_RAN", "2026-10"], [ok.checkStatusEnumId, ok.period])
+        Map stored = ec.entity.find("darpan.audit.AuditCheckRun").condition("checkRunId", ok.checkRunId).useCache(false).one().getMap()
+        assertEquals([Date.valueOf("2026-10-01"), Date.valueOf("2026-10-31")], [stored.windowFromDate, stored.windowThruDate])
+
+        Map october = report(GORJANA, MONTH_CLOSE, "2026-11-02", "2026-10")
+        Map octoberCheck = october.categories.refundsAndCredits.statements.R4.checks[0] as Map
+        assertEquals([null, [from: "2026-10-01", thru: "2026-10-31"]], [octoberCheck.reason, octoberCheck.window],
+                "October's report shows the played run over the whole month")
+        Map november = report(GORJANA, MONTH_CLOSE, "2026-11-02", null)
+        assertEquals("The check did not run on the morning of 2026-11-02.", november.categories.refundsAndCredits.statements.R4.checks[0].reason)
     }
 
     @Test

@@ -93,8 +93,8 @@ class AuditSettingsSmokeTests {
         assertEquals([active: false, time: "06:00", timeZone: "America/Los_Angeles", mixed: false, automations: 0, checksWithoutRun: 3],
                 settings.schedule, "no automation yet: paused at 06:00 in the tenant's zone")
         assertEquals(["R1", "R2"], settings.statements*.code)
-        assertEquals(java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles")).withDayOfMonth(1).toString(), settings.playableFrom,
-                "a monthly audit plays from the 1st while no earlier month is extended")
+        assertEquals(java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles")).withDayOfMonth(1).minusMonths(1).toString(), settings.playableFrom,
+                "DAR-BE-178: a monthly audit plays from the 1st of the month just ended")
         assertEquals([[id: "paid-without-opp", label: "paid-without-opp", savedRunId: "TSET_RS2", runName: "TSET_RS2 run"],
                       [id: "paid-without-opp-2", label: "paid-without-opp-2", savedRunId: "TSET_RS2", runName: "TSET_RS2 run"]],
                 settings.statements[1].checks)
@@ -166,7 +166,9 @@ class AuditSettingsSmokeTests {
         assertTrue(future.hadError as boolean)
         assertTrue((future.errorText as String).contains("has not ended"), future.errorText as String)
         String lastMonthDay = java.time.LocalDate.parse(today).withDayOfMonth(1).minusDays(1).toString()
-        Map ended = facade("run#Audit", [audit: "system-health", fromDate: lastMonthDay, thruDate: lastMonthDay])
+        // DAR-BE-178: the month just ended still plays; the one before it has ended for good.
+        String twoMonthsBack = java.time.LocalDate.parse(lastMonthDay).withDayOfMonth(1).minusDays(1).toString()
+        Map ended = facade("run#Audit", [audit: "system-health", fromDate: twoMonthsBack, thruDate: twoMonthsBack])
         assertTrue(ended.hadError as boolean)
         assertTrue((ended.errorText as String).contains("has ended"), ended.errorText as String)
         Map backwards = facade("run#Audit", [audit: "system-health", fromDate: today, thruDate: lastMonthDay])

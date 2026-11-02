@@ -114,36 +114,50 @@ class AuditAutomationSupport {
     }
 
     /**
-     * DAR-UI-063. The days a person picked to play, first to last inclusive, in the automation's zone: one window, dated as
-     * picked and reported on the run's own morning. The days must lie in that morning's period; otherwise the run is
-     * refused before anything is read, because the ledger would refuse each check's write and the run would record nothing.
+     * DAR-UI-063. The days a person picked to play, first to last inclusive, in the automation's zone: one window per audit
+     * period they cross, each dated as picked and recorded under its own period, reported on the run's own morning. Each
+     * period must still be recordable that morning (DAR-BE-178: the morning's own, or the one just ended); otherwise the
+     * run is refused before anything is read, because the ledger would refuse each check's write and the run would record
+     * nothing. A window that ends by the tenant's go-live is left out; a window it cuts starts at go-live (DAR-BE-145).
      */
     static List<Map<String, Object>> pickedWindows(def ec, Map audit, ZoneId zone, LocalDate reportDay, LocalDate from, LocalDate thru,
                                                    List<String> checkIds = null) {
         if (from > thru) throw new IllegalArgumentException("The days run backwards: ${from} to ${thru}.")
         if (thru > reportDay) throw new IllegalArgumentException("${thru} has not ended yet; pick days up to ${reportDay}.")
         String periodCode = AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String]
-        Map w = AuditReportAssembler.auditRun(ec, audit, reportDay)
-        if (from < (w.from as LocalDate)) {
-            throw new IllegalStateException("${AuditReportAssembler.periodOf(from, periodCode)} has ended; pick days in ${w.period}.")
+        List<Map> periods = []
+        for (LocalDate day = from; day <= thru; ) {
+            String period = AuditReportAssembler.periodOf(day, periodCode)
+            Map w = AuditReportAssembler.periodWindow(ec, audit, period, reportDay)
+            if (w == null || !w.recordable) {
+                throw new IllegalStateException("${period} has ended; pick days from ${AuditReportAssembler.recordableFrom(reportDay, periodCode)}.")
+            }
+            LocalDate last = [thru, w.end as LocalDate].min()
+            periods << [period: w.period, from: day, thru: last]
+            day = last.plusDays(1)
         }
-        Timestamp end = Timestamp.from(thru.plusDays(1).atStartOfDay(zone).toInstant())
         Timestamp goLive = goLive(ec, audit.companyUserGroupId as String)
-        Timestamp start = fromGoLive(Timestamp.from(from.atStartOfDay(zone).toInstant()), end, goLive)
-        if (start == null) {
+        List<Map<String, Object>> windows = []
+        periods.each { Map p ->
+            Timestamp end = Timestamp.from((p.thru as LocalDate).plusDays(1).atStartOfDay(zone).toInstant())
+            Timestamp start = fromGoLive(Timestamp.from((p.from as LocalDate).atStartOfDay(zone).toInstant()), end, goLive)
+            if (start == null) return
+            windows << ([sequenceNum         : windows.size() + 1,
+                         windowStartDate     : start,
+                         windowEndDate       : end,
+                         childWindowStartDate: start,
+                         childWindowEndDate  : end,
+                         auditId             : audit.auditId,
+                         auditPeriod         : p.period,
+                         auditReportDate     : Date.valueOf(reportDay),
+                         auditWindowFromDate : Date.valueOf(p.from as LocalDate),
+                         auditWindowThruDate : Date.valueOf(p.thru as LocalDate),
+                         auditRecentReadStartDate: readStart(ec, audit, checkIds, p.period as String, start, end, zone)] as Map<String, Object>)
+        }
+        if (!windows) {
             throw new IllegalStateException("Nothing before go-live (${goLiveText(goLive, zone)}) is audited; pick days from ${goLiveDay(goLive, zone)}.")
         }
-        return [[sequenceNum         : 1,
-                 windowStartDate     : start,
-                 windowEndDate       : end,
-                 childWindowStartDate: start,
-                 childWindowEndDate  : end,
-                 auditId             : audit.auditId,
-                 auditPeriod         : w.period,
-                 auditReportDate     : Date.valueOf(reportDay),
-                 auditWindowFromDate : Date.valueOf(from),
-                 auditWindowThruDate : Date.valueOf(thru),
-                 auditRecentReadStartDate: readStart(ec, audit, checkIds, w.period as String, start, end, zone)] as Map<String, Object>]
+        return windows
     }
 
     /** DAR-BE-145. When the tenant went live (TenantSetting.goLiveDate); null when it has no go-live. */

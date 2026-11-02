@@ -312,9 +312,19 @@ class DataSourceRunner {
     }
 
     private List<Map> readChildren(Map step, Map<String, List<Map>> ctx) {
+        // A child read is held whole for its batch: a read of everything always, and every child read of a whole set, count
+        // against the same cap as the first step, so no step can hold more than a whole-set read may.
+        int cap = heldCap > 0 ? heldCap : DEFAULT_MAX_RECORDS_IN_MEMORY
+        boolean capped = heldCap > 0 || (((Map) step.bind).all != null && ((Map) step.bind).ids == null)
+        java.util.concurrent.atomic.AtomicInteger held = new java.util.concurrent.atomic.AtomicInteger()
+        Closure<Void> hold = { List<Map> page ->
+            if (capped && held.addAndGet(page.size()) > cap) {
+                throw new DataSourceCallException("TOO_MANY_RECORDS", "Step '${step.id}' read more than ${cap} records, the most one step holds.".toString())
+            }
+        }
         if (((Map) step.bind).all != null && ((Map) step.bind).ids == null) {
             List<Map> every = []
-            readPages(step, allPieces(step)[0], { List<Map> page -> every.addAll(page) })
+            readPages(step, allPieces(step)[0], { List<Map> page -> hold.call(page); every.addAll(page) })
             return every
         }
         Map b = (Map) ((Map) step.bind).ids
@@ -324,7 +334,7 @@ class DataSourceRunner {
         List<List<Map>> byChunk = chunks.collect { new ArrayList<Map>() }
         Closure readChunk = { int i ->
             readPages(step, fill((Map) b.variables, [ids: chunks[i].join((b.separator ?: ",") as String), keyField: ""]),
-                    { List<Map> page -> byChunk[i].addAll(page) })
+                    { List<Map> page -> hold.call(page); byChunk[i].addAll(page) })
         }
         int parallel = Math.max(1, Math.min(((b.parallel ?: 1) as Number).intValue(), chunks.size()))
         if (parallel == 1) {
@@ -506,11 +516,13 @@ class DataSourceRunner {
                 }
                 return 0
             }
-            List<Object> collected = step.collect ? sorted.collect { JsonPathValues.value(it, (String) ((Map) step.collect).field) } : null
+            // One read-only list per partition, shared by its records: a copy each would be the partition's size squared.
+            List<Object> collected = step.collect ? java.util.Collections.unmodifiableList(
+                    sorted.collect { JsonPathValues.value(it, (String) ((Map) step.collect).field) }) : null
             sorted.eachWithIndex { Map r, int i ->
                 r.put((String) step.field, i + 1)
                 if (step.sizeField) r.put((String) step.sizeField, sorted.size())
-                if (collected != null) r.put((String) ((Map) step.collect).as, new ArrayList<Object>(collected))
+                if (collected != null) r.put((String) ((Map) step.collect).as, collected)
             }
         }
     }

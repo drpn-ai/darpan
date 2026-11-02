@@ -99,6 +99,30 @@ class DataSourceWholeSetOptionsTests {
     }
 
     @Test
+    void aLaterReadOfEverythingCountsAgainstTheSameCap() {
+        // 4 items fit a cap of 4; the 5 tags read after them do not, and fail the run instead of being held.
+        Map d = catalogue()
+        d.limits = [maxCostPerCall: 100, maxRecordsInMemory: 4]
+        DataSourceCallException e = assertThrows(DataSourceCallException) {
+            new DataSourceRunner(d, new CatalogueTransport()).run([mode: "all"]) { }
+        }
+        assertEquals("TOO_MANY_RECORDS", e.code)
+        assertTrue(e.message.contains("Step 'tags'"), e.message)
+    }
+
+    @Test
+    void aGroupsCollectedValuesAreOneSharedReadOnlyList() {
+        Map d = catalogue()
+        d.record = [fields: ["sku", "code", "group"]]
+        List<Map> records = []
+        new DataSourceRunner(d, new CatalogueTransport()).run([mode: "all"]) { List<Map> b -> records.addAll(b) }
+        Map<String, Map> bySku = records.collectEntries { [(it.sku): it] }
+        assertEquals(["A", "D"], bySku.A.group)
+        assertTrue(bySku.A.group.is(bySku.D.group), "one list per partition, not a copy per record")
+        assertThrows(UnsupportedOperationException) { ((List) bySku.A.group).add("x") }
+    }
+
+    @Test
     void aWholeSetCannotBeReadByWindowOrIdsAndBindAllTakesNoPlaceholders() {
         Map d = catalogue()
         d.steps = ((List<Map>) d.steps).collect { Map s ->

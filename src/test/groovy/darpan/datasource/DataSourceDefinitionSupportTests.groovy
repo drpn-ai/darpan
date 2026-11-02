@@ -54,8 +54,12 @@ class DataSourceDefinitionSupportTests {
                          hasNextAt: "page.more", cursorAt: "page.next",
                          bind: [ids: [variables: [filter: "invoiceNo in ({ids})"], from: "invoices.invoiceNo", chunk: 100]],
                          paging: [firstVariable: "first", afterVariable: "after", pageSize: 100], reservation: 300],
-                        [id: "lineOnInvoice", kind: "join"],
-                        [id: "perLine", kind: "split"],
+                        [id: "linesOnInvoice", kind: "join", into: "invoices", from: "lines",
+                         on: [[into: "invoiceNo", from: "invoiceNo"]], many: true, as: "lines"],
+                        [id: "perLine", kind: "split", from: "invoices", path: "lines[*]", levels: ["invoice", "line"],
+                         copy: [invoiceNo: "invoice.invoiceNo", lineNo: "line.lineNo", amount: "line.amount",
+                                customerRef: "invoice.customerRef", total: "invoice.total"]],
+                        [id: "noAmount", kind: "count", name: "linesWithoutAmount", when: [[field: "line.amount", op: "BLANK"]]],
                 ],
                 record: [fields: ["invoiceNo", "lineNo", "amount", "customerRef"], optionalFields: ["total"]],
                 counts: [[name: "linesWithoutAmount"]],
@@ -157,7 +161,27 @@ fragment F on InvoiceConnection { edges { node { invoiceNo } } meta: __schema { 
         d.steps = ((List) d.steps) + [[id: "invoices", kind: "query"], [id: "guess", kind: "script"]]
         List<String> errors = errorsOf(d)
         assertTrue(errors.any { it.contains("Two steps are named 'invoices'") })
-        assertTrue(errors.any { it.contains("Step 'guess' is one of query, join, split, number, derive, count, filter, not 'script'") })
+        assertTrue(errors.any { it.contains("Step 'guess' is one of query, unwrap, join, split, repeat, number, derive, count, filter, not 'script'") })
+    }
+
+    @Test
+    void joinSplitRepeatNumberAndCountStepsAreCheckedToo() {
+        Map d = definition()
+        d.steps = ((List) d.steps) + [
+                [id: "keyless", kind: "join", into: "invoices", from: "lines", as: "x"],
+                [id: "badLevels", kind: "split", from: "invoices", path: "lines[*]", levels: ["invoice"]],
+                [id: "units", kind: "repeat", times: "line.qty", parse: "ROUND"],
+                [id: "ordinal", kind: "number", partitionBy: ["invoice.invoiceNo"]],
+                [id: "weird", kind: "count", name: "odd", when: [[field: "line.qty", op: "LIKE"]]],
+                [id: "later", kind: "join", into: "nope", from: "lines", on: [[into: "a", from: "b"]], copy: [x: "y"]],
+        ]
+        List<String> errors = errorsOf(d)
+        ["Step 'keyless': a join needs on or atOn keys", "Step 'badLevels': levels names the record and each list",
+         "Step 'units': parse is STRICT_INT or NUMERIC", "Step 'ordinal': field is the name the number is written to",
+         "Step 'weird': a condition is one of IN, NOT_IN, BLANK, NOT_BLANK, not 'LIKE'",
+         "Step 'later': into names an earlier step"].each { String expected ->
+            assertTrue(errors.any { it.contains(expected) }, expected + " in " + errors)
+        }
     }
 
     @Test

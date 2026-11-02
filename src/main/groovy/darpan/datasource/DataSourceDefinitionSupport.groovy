@@ -15,14 +15,23 @@ import groovy.json.JsonSlurper
  *    bind: {window: {variables, field, sliceHours, instantFormat, parallel},
  *           ids: {variables, from (LOOKUP_KEYS or <earlier step>.<field>), chunk, parallel, keyFields, idPattern, separator}},
  *    paging: {firstVariable, afterVariable, pageSize | {budget, costPerRecord}, maxPages}, reservation}
- * Window templates may use {from} {thru}; ids templates {ids} {keyField}. The other step kinds (join, split, number,
- * derive, count, filter) are named here and checked in full by their own step classes.
+ * Window templates may use {from} {thru}; ids templates {ids} {keyField}. The other steps (DataSourceRunner):
+ *   unwrap {of (an earlier step), field, path}: the field becomes the list at path inside it (a nested connection's
+ *           edges[*].node)
+ *   join   {into, from (earlier steps), on: [{into, from}], at: "list[*]", atOn: [{at, from}], many | copy {to: path} | as,
+ *           missingAt: {create, set}}
+ *   split  {from, path: "a[*].b[*]", levels: [root, a, b], copy {to: "level.field"}}
+ *   repeat {times (path), parse STRICT_INT|NUMERIC, nullAs, index}
+ *   number {field, partitionBy: [paths], orderBy: [paths]}
+ *   count  {name, when (RecordConditions), distinct: [paths]}
+ * derive and filter are checked by their own steps when they are built.
  */
 class DataSourceDefinitionSupport {
 
     static final List<String> PROTOCOLS = ["GRAPHQL", "REST_JSON"].asImmutable()
     static final List<String> STATUSES = ["DRAFT", "ACTIVE", "RETIRED"].asImmutable()
-    static final List<String> STEP_KINDS = ["query", "join", "split", "number", "derive", "count", "filter"].asImmutable()
+    static final List<String> STEP_KINDS = ["query", "unwrap", "join", "split", "repeat", "number", "derive", "count", "filter"].asImmutable()
+    static final List<String> REPEAT_PARSES = ["STRICT_INT", "NUMERIC"].asImmutable()
     /** The sign-in methods core implements; which one a connection uses, and from which of its fields, is data. */
     static final List<String> AUTH_KINDS = ["NONE", "BASIC", "BEARER", "HEADER"].asImmutable()
     static final List<String> INSTANT_FORMATS = ["ISO_INSTANT", "EPOCH_MILLIS"].asImmutable()
@@ -60,6 +69,7 @@ class DataSourceDefinitionSupport {
         errors.addAll(checkConnection(d.connection, connectionFields))
         Map limits = checkLimits(d.limits, errors)
         errors.addAll(checkSteps(protocol, d.steps, limits))
+        if (d.batchRecords != null && !inRange(d.batchRecords, 1, 100_000)) errors << "batchRecords is 1 to 100000."
         errors.addAll(checkRecord(d.record))
         errors.addAll(checkCounts(d.counts))
         return errors
@@ -160,6 +170,7 @@ class DataSourceDefinitionSupport {
             if (!(s.kind in STEP_KINDS)) errors << "${where} is one of ${STEP_KINDS.join(', ')}, not '${s.kind}'.".toString()
             if (i == 0 && s.kind != "query") errors << "The first step reads: it must be a query."
             if (s.kind == "query") errors.addAll(checkQueryStep(where, protocol, s, limits, earlier))
+            else if (s.kind in ["unwrap", "join", "split", "repeat", "number", "count"]) errors.addAll(checkShapeStep(where, s, earlier))
             if (id ==~ NAME) earlier << id
         }
         return errors
@@ -239,6 +250,72 @@ class DataSourceDefinitionSupport {
                 }
             }
             if (b.parallel != null && !inRange(b.parallel, 1, 8)) errors << "${where}: bind.${mode}.parallel is 1 to 8.".toString()
+        }
+        return errors
+    }
+
+    private static List<String> checkShapeStep(String where, Map s, Set<String> earlier) {
+        List<String> errors = []
+        Closure<Boolean> isPath = { Object p -> p ==~ PATH }
+        Closure<Boolean> paths = { Object l -> l == null || ((l instanceof List) && ((List) l).every { isPath(it) }) }
+        switch (s.kind) {
+            case "unwrap":
+                if (!earlier.contains(s.of)) errors << "${where}: of names an earlier step.".toString()
+                if (!(s.field ==~ NAME)) errors << "${where}: field is the record field to unwrap.".toString()
+                if (!isPath(s.path)) errors << "${where}: path is where the list sits inside the field, e.g. edges[*].node.".toString()
+                break
+            case "join":
+                ["into", "from"].each { String k ->
+                    if (!earlier.contains(s[k])) errors << "${where}: ${k} names an earlier step.".toString()
+                }
+                Closure<Boolean> pairs = { Object l, String a, String b ->
+                    l == null || ((l instanceof List) && ((List) l).every { it instanceof Map && isPath(((Map) it)[a]) && isPath(((Map) it)[b]) })
+                }
+                if (!pairs(s.on, "into", "from")) errors << "${where}: on is a list of {into, from} fields.".toString()
+                if (!pairs(s.atOn, "at", "from")) errors << "${where}: atOn is a list of {at, from} fields.".toString()
+                if (s.at != null && !(s.at ==~ /[A-Za-z_][A-Za-z0-9_]*\[\*\]/)) errors << "${where}: at is one list on the record, e.g. groups[*].".toString()
+                if ((s.atOn || s.missingAt) && s.at == null) errors << "${where}: atOn and missingAt need at.".toString()
+                if (!s.on && !s.atOn) errors << "${where}: a join needs on or atOn keys.".toString()
+                boolean many = s.many == true
+                if (many && s.copy != null) errors << "${where}: a many join attaches a list; it cannot copy fields.".toString()
+                if (s.copy != null && !((s.copy instanceof Map) && ((Map) s.copy).every { k, v -> k ==~ NAME && isPath(v) })) {
+                    errors << "${where}: copy maps a field name to a path in the joined record.".toString()
+                }
+                if (s.copy == null && !(s.as ==~ NAME)) errors << "${where}: a join without copy needs as, the field it attaches under.".toString()
+                if (s.missingAt != null && !((s.missingAt instanceof Map) && (((Map) s.missingAt).set == null || ((Map) s.missingAt).set instanceof Map))) {
+                    errors << "${where}: missingAt is {create, set}.".toString()
+                }
+                break
+            case "split":
+                if (s.from != null && !earlier.contains(s.from)) errors << "${where}: from names an earlier step.".toString()
+                List<String> segments = (s.path instanceof String) ? ((String) s.path).split(/\./) as List<String> : []
+                if (!segments || !segments.every { it ==~ /[A-Za-z_][A-Za-z0-9_]*\[\*\]/ }) {
+                    errors << "${where}: path is lists to step into, e.g. groups[*].items[*].".toString()
+                }
+                List levels = s.levels instanceof List ? (List) s.levels : []
+                if (levels.size() != segments.size() + 1 || !levels.every { it ==~ NAME } || levels.unique(false).size() != levels.size()) {
+                    errors << "${where}: levels names the record and each list on the path, one word each.".toString()
+                }
+                if (s.copy != null && !((s.copy instanceof Map) && ((Map) s.copy).every { k, v ->
+                    k ==~ NAME && isPath(v) && levels.contains(v.toString().split(/\./)[0]) && !levels.contains(k) })) {
+                    errors << "${where}: copy maps a field name to <level>.<field>.".toString()
+                }
+                break
+            case "repeat":
+                if (!isPath(s.times)) errors << "${where}: times is the quantity field.".toString()
+                if (!(s.parse in REPEAT_PARSES)) errors << "${where}: parse is ${REPEAT_PARSES.join(' or ')}.".toString()
+                if (s.nullAs != null && !inRange(s.nullAs, 0, 10_000)) errors << "${where}: nullAs is a whole number from 0.".toString()
+                if (s.index != null && !(s.index ==~ NAME)) errors << "${where}: index is a field name.".toString()
+                break
+            case "number":
+                if (!(s.field ==~ NAME)) errors << "${where}: field is the name the number is written to.".toString()
+                if (!paths(s.partitionBy) || !paths(s.orderBy)) errors << "${where}: partitionBy and orderBy are lists of fields.".toString()
+                break
+            case "count":
+                if (!(s.name ==~ NAME)) errors << "${where}: a count needs a name, one word.".toString()
+                errors.addAll(RecordConditions.check(where, s.when))
+                if (!paths(s.distinct)) errors << "${where}: distinct is a list of fields.".toString()
+                break
         }
         return errors
     }

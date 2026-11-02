@@ -179,6 +179,35 @@ class DataSourceOrderGrainOptionsTests {
         assertTrue(errorsFor([[at: "extras", text: "note", cost: -1]]).any { it.contains("cost") })
     }
 
+    // ---------------------------------------------------------------- cost refusals in parallel
+
+    @Test
+    void aCostRefusalSeenAfterAnotherReaderHalvedThePageIsRetriedNotFatal() {
+        // Every first-step read of 3 is refused; the second reader's refusal arrives once the first has already halved the
+        // shared size to 1. Judged by the shared size, that refusal looked like "even 1 is refused" and failed the run.
+        java.util.concurrent.CountDownLatch bothAsked = new java.util.concurrent.CountDownLatch(2)
+        AcmeLedgerFixture.ScriptedTransport inner = new AcmeLedgerFixture.ScriptedTransport()
+        def transport = new Expando(execute: { String doc, Map v, int res ->
+            if (doc.contains("AcmeInvoices") && (v.first as int) > 1) {
+                bothAsked.countDown()
+                bothAsked.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                if (Thread.currentThread().name.endsWith("-2")) Thread.sleep(200)
+                throw new DataSourceCallException("TOO_EXPENSIVE", "too expensive", true)
+            }
+            return inner.execute(doc, v, res)
+        })
+        Map d = AcmeLedgerFixture.definition()
+        d.steps = ((List<Map>) d.steps).collect { Map st ->
+            st.id == "invoices" ? st + [bind: (Map) st.bind + [window: ((Map) ((Map) st.bind).window) + [parallel: 2]]] : st
+        }
+        long from = java.time.Instant.parse("2026-10-01T00:00:00Z").toEpochMilli()
+        long thru = java.time.Instant.parse("2026-10-03T00:00:00Z").toEpochMilli()
+        List<Map> records = []
+        Map r = new DataSourceRunner(d, transport).run([mode: "window", from: from, thru: thru]) { List<Map> b -> records.addAll(b) }
+        assertEquals(6, records.size())
+        assertEquals(1, r.pageSizes.invoices)
+    }
+
     // ---------------------------------------------------------------- keepRecordFields
 
     private static Map keeping() {

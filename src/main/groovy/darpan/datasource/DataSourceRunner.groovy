@@ -203,14 +203,17 @@ class DataSourceRunner {
         int pages = 0
         while (true) {
             Map v = new LinkedHashMap(vars)
-            v.put(paging.firstVariable, size.get())
+            int asked = size.get()
+            v.put(paging.firstVariable, asked)
             if (cursor != null) v.put(paging.afterVariable, cursor)
             Map data
             try {
                 data = (Map) transport.execute((String) plan.document, v, (step.reservation as Number).intValue())
             } catch (DataSourceCallException e) {
-                if (!e.costRefused || size.get() <= 1) throw e
-                size.set(Math.max(1, (int) (size.get() / 2)))
+                // Judged by the size THIS call asked: parallel readers share the size, and another may already have halved
+                // it, so a refusal at 3 arriving after the size reached 1 is retried at 1, not taken as "even 1 is refused".
+                if (!e.costRefused || asked <= 1) throw e
+                size.updateAndGet({ int current -> Math.min(current, Math.max(1, (int) (asked / 2))) } as java.util.function.IntUnaryOperator)
                 continue
             }
             Object connection = data?.get(step.connectionAt)

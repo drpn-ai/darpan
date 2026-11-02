@@ -43,8 +43,8 @@
             <parameter name="description"/>
             <parameter name="scriptProfile" default-value="SCRIPT"><description>EXPRESSION or SCRIPT.</description></parameter>
             <parameter name="inputSource" default-value="SAMPLE"><description>SAMPLE or RUN_RESULT.</description></parameter>
-            <parameter name="scriptBody" required="true" allow-html="true"><description>JEXL; holds &lt; and &gt;.</description></parameter>
-            <parameter name="sampleInputJson" allow-html="true"/>
+            <parameter name="scriptBody" required="true" allow-html="any"><description>JEXL; holds &lt; and &gt;.</description></parameter>
+            <parameter name="sampleInputJson" allow-html="any"/>
             <parameter name="isActive" type="Boolean" default-value="true"/>
         </in-parameters>
         <out-parameters>
@@ -52,7 +52,8 @@
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="script" type="Map"/>
-            <parameter name="validation" type="Map"><description>{ok, profile, variables, error: {kind, message, line, column}}</description></parameter>
+            <parameter name="validation" type="Map"><description>{ok, profile, variables, error: {kind, message, line, column},
+                problems: [{rule, line, message}], notes: [text]} (problems/notes from ScriptChecker, DAR-BE-175)</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
@@ -86,6 +87,16 @@
                         catch (IllegalArgumentException e) { ec.message.addError("Sample input: ${e.message}") }
                     }
                 </script>
+            </if>
+            <!-- DAR-BE-175: common mistakes are refused before saving (ScriptChecker: endless loops, loops that never
+                 progress, misspelt fields and d: functions, = in an if, and a trial run on the sample input). -->
+            <if condition="!ec.message.hasError()">
+                <set field="check" from="darpan.script.ScriptChecker.check(profileValue, scriptBody, sampleInputJson?.toString())"/>
+                <script>validation.problems = check.problems; validation.notes = check.notes; validation.ok = check.ok</script>
+                <iterate list="check.problems" entry="problem">
+                    <message error="true">${problem.line ? 'Line ' + problem.line + ': ' : ''}${problem.message}</message>
+                </iterate>
+                <iterate list="check.notes" entry="note"><message>${note}</message></iterate>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
@@ -146,10 +157,10 @@
             is a result (run.ok false, run.error), not a service error. Needs edit access to the tenant.</description>
         <in-parameters>
             <parameter name="tenantScriptId"/>
-            <parameter name="scriptBody" allow-html="true"/>
+            <parameter name="scriptBody" allow-html="any"/>
             <parameter name="scriptProfile"/>
             <parameter name="inputSource"><description>SAMPLE or RUN_RESULT; defaults to the saved script's, else SAMPLE.</description></parameter>
-            <parameter name="inputJson" allow-html="true"><description>SAMPLE input; defaults to the saved sample.</description></parameter>
+            <parameter name="inputJson" allow-html="any"><description>SAMPLE input; defaults to the saved sample.</description></parameter>
             <parameter name="fileName"><description>RUN_RESULT: the run result file, as list#GeneratedOutputs names it.</description></parameter>
         </in-parameters>
         <out-parameters>

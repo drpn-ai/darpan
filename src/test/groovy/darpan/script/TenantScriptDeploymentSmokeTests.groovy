@@ -233,7 +233,19 @@ class TenantScriptDeploymentSmokeTests {
         Map out = call("run#TenantScriptDeployment", [tenantScriptDeploymentId: (quietDeploy.deployment as Map).tenantScriptDeploymentId, send: true])
         assertEquals("NOTHING_TO_SEND", (out.outcome as Map).status)
 
-        String broken = saveScript("Broken", "d:dec('not a number')")
+        // DAR-BE-175: a script that fails on its own sample is refused at save, so the realistic run error is one
+        // that saved cleanly and then met data it could not handle (here: the stored input changes after saving).
+        Map brokenSave = call("save#TenantScript", [scriptName: "Broken", scriptProfile: "SCRIPT", inputSource: "SAMPLE",
+                                                    scriptBody: "d:dec(input.amount)", sampleInputJson: '{"amount": "12.5"}'])
+        assertTrue(brokenSave.ok as Boolean, "${brokenSave.errors}")
+        String broken = (brokenSave.script as Map).tenantScriptId as String
+        boolean authzWasOff = ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", broken).useCache(false).one()
+                    .set("sampleInputJson", '{"amount": "not a number"}').update()
+        } finally {
+            if (!authzWasOff) ec.artifactExecution.enableAuthz()
+        }
         Map brokenDeploy = call("save#TenantScriptDeployment", [tenantScriptId: broken, scheduleExpr: "0 0 9 * * ?", chatSpaceId: "KREWE_SPACE"])
         Map failed = call("run#TenantScriptDeployment", [tenantScriptDeploymentId: (brokenDeploy.deployment as Map).tenantScriptDeploymentId, send: true])
         assertTrue(failed.ok as Boolean, "a script error is an outcome, not a service error: ${failed.errors}")

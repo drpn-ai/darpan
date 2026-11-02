@@ -4,6 +4,7 @@ import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ExchangePairVerificationSupport
 import darpan.facade.reconciliation.MissingDiffVerificationSupport
+import darpan.facade.reconciliation.RebuiltReturnPairingSupport
 import darpan.facade.reconciliation.ReturnPresenceVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
 import groovy.json.JsonOutput
@@ -557,7 +558,8 @@ class TenantNotificationSupport {
             if (!entry) return
             if (entry.startsWith(ExchangePairVerificationSupport.AUDIT_NOTE_PREFIX) ||
                     entry.startsWith(MissingDiffVerificationSupport.AUDIT_NOTE_PREFIX) ||
-                    entry.startsWith(ReturnPresenceVerificationSupport.AUDIT_NOTE_PREFIX)) {
+                    entry.startsWith(ReturnPresenceVerificationSupport.AUDIT_NOTE_PREFIX) ||
+                    entry.startsWith(RebuiltReturnPairingSupport.AUDIT_NOTE_PREFIX)) {
                 auditNotes.add(entry)
             } else {
                 warnings.add(entry)

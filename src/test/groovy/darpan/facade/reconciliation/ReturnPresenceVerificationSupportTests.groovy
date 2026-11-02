@@ -604,22 +604,24 @@ class ReturnPresenceVerificationSupportTests {
     }
 
     @Test
-    void skipsTheLookupEntirelyWhenTheCandidateSetExceedsTheCap() {
-        // Past the cap the sync is broken rather than skewed, and point-checking it only hammers the
-        // source API. Mirrors MissingDiffVerificationSupport's own maxLookupIds posture.
+    void pastTheCapTheLookupChecksWhatFitsAndNamesTheRest() {
+        // DAR-BE-180: skipping every order once one was over the cap left gorjana's first monthly run
+        // (1,297 orders against 1,000) with no cancellation check at all.
         List rows = (1..5).collect { int i ->
             missingInOmsRow("refund-${i}".toString(), OLD, "REFUND", "order-${i}".toString())
         }
         File diff = writeDiffDocument(rows)
-        boolean called = false
+        List<String> looked = []
 
         Map result = verifyWithLookup(diff, { List ids ->
-            called = true; [ok: true, ordersByExternalId: [:], errors: []]
+            looked.addAll(ids)
+            [ok: true, ordersByExternalId: ids.collectEntries { [(it): [[statusId: "ORDER_CANCELLED"]]] }, errors: []]
         }, 4)
 
-        assertFalse(called, "the cap must be enforced before any lookup is dispatched")
-        assertEquals(0, result.cancelledRefundSuppressedCount)
-        assertTrue(((List) result.warnings).any { it.toString().contains("exceeds the 4-lookup cap") })
+        assertEquals(4, looked.size(), "the cap still bounds the lookups")
+        assertEquals(4, result.cancelledRefundSuppressedCount)
+        assertEquals(1, ((List) parseDocument(diff).differences).size(), "the unchecked order stays reported")
+        assertTrue(((List) result.warnings).any { it.toString().contains("covered 4 of 5") }, "${result.warnings}")
     }
 
     @Test

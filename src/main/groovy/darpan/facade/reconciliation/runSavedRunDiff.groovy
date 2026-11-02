@@ -879,6 +879,11 @@ try {
                                             obsRuleExecutionFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
                                             [recordCount: serviceResult.differenceCount, errorMessage: obsRuleExecutionFailed ? "rule execution failed" : null])
                                     obsStep = null
+                                    // DAR-BE-180: free order + line pairing of rebuilt returns, before any paid lookup.
+                                    RunVerificationSupport.pairRebuiltReturns([ec: ec, serviceResult: serviceResult,
+                                            diffFile: { resolveOutputFile(serviceResult) },
+                                            sides: [[source: file1Source, label: file1Label], [source: file2Source, label: file2Label]],
+                                            file1Label: file1Label, file2Label: file2Label])
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label,
                                             savedRun.companyUserGroupId as String)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,

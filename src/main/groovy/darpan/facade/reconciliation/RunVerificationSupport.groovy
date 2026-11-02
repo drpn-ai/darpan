@@ -535,6 +535,57 @@ class RunVerificationSupport {
                 systemEnumId == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS_GQL
     }
 
+    /**
+     * DAR-BE-180: pair rebuilt returns with their HotWax return by order + line in the diff document, BEFORE
+     * the missing-diff pass's paid lookups (see RebuiltReturnPairingSupport). Same returns-pair detection as
+     * {@link #prepareReturnPresencePass}; a no-op for any other run. Folds its counts into serviceResult and
+     * returns whether it ran. Never throws: the compare has already finished.
+     *
+     * <p>args: {@code ec}, {@code serviceResult}, {@code diffFile} (a File, or a Closure resolved inside
+     * this method's guard, as {@link #runMissingDiffPass} takes it), {@code sides} ([source, label]),
+     * {@code file1Label}, {@code file2Label}.</p>
+     */
+    static boolean pairRebuiltReturns(Map args) {
+        Map serviceResult = (Map) args?.get("serviceResult")
+        def ec = args?.get("ec")
+        try {
+            Object rawDiffFile = args?.get("diffFile")
+            File diffFile = (File) (rawDiffFile instanceof Closure ? ((Closure) rawDiffFile).call() : rawDiffFile)
+            if (ec == null || serviceResult == null || diffFile == null || !diffFile.isFile()) return false
+            if (serviceResult.get("ruleExecutionFailed") == true) return false
+            List sides = (args.get("sides") ?: []) as List
+            Map omsSide = (Map) sides.find { Map side ->
+                isOmsReturnsSystem(normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId))
+            }
+            Map shopifySide = (Map) sides.find { Map side ->
+                normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==
+                        ReconciliationSavedRunSupport.SYSTEM_SHOPIFY_RETURN_REFS
+            }
+            if (omsSide == null || shopifySide == null) return false
+            long missingInFile1 = missingCount(serviceResult, "missingInFile1Count")
+            long missingInFile2 = missingCount(serviceResult, "missingInFile2Count")
+            Map verification = RebuiltReturnPairingSupport.pairRebuiltReturns([
+                    diffFile        : diffFile,
+                    file1Label      : normalize(args.get("file1Label")),
+                    file2Label      : normalize(args.get("file2Label")),
+                    omsSideLabel    : normalize(omsSide.get("label")),
+                    shopifySideLabel: normalize(shopifySide.get("label")),
+            ])
+            applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
+            return verification.performed == true
+        } catch (Throwable t) {
+            if (serviceResult != null) {
+                applyVerificationOutcome(serviceResult, [performed: false, rewritten: false,
+                        warnings: ["Rebuilt return pairing failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map, 0L, 0L)
+            }
+            return false
+        } finally {
+            // Like every other verify pass: an error a connector read left behind must not read as the
+            // RUN failing once this pass is over.
+            if (ec?.message?.hasError()) ec.message.clearErrors()
+        }
+    }
+
     static Map prepareReturnPresencePass(Map args) {
         def ec = args?.get("ec")
         File diffFile = (File) args?.get("diffFile")

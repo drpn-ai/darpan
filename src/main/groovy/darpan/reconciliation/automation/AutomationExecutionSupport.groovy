@@ -652,6 +652,16 @@ class AutomationExecutionSupport {
                 // (runSavedRunDiff.groovy writes at writeDiffDatasetOutput, then verifies).
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 if (!evaluateMode) {
+                    // DAR-BE-180: free order + line pairing of rebuilt returns, before any paid lookup.
+                    // Same kill switch as the passes it feeds; the same call runSavedRunDiff makes.
+                    if (isMissingDiffVerificationEnabled()) {
+                        RunVerificationSupport.pairRebuiltReturns([ec: ec, serviceResult: reconcileResult,
+                                diffFile: { resolveDiffFile(ec, reconcileResult) },
+                                sides: [[source: file1Source, label: normalize(reconcileResult?.file1Label) ?: "file1"],
+                                        [source: file2Source, label: normalize(reconcileResult?.file2Label) ?: "file2"]],
+                                file1Label: normalize(reconcileResult?.file1Label) ?: "file1",
+                                file2Label: normalize(reconcileResult?.file2Label) ?: "file2"])
+                    }
                     // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
                     verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
                             mintedRunResultId, stepCtx, executionParams)

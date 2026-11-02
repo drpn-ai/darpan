@@ -137,8 +137,8 @@ class ReturnPresenceVerificationSupport {
     static final String AUDIT_NOTE_PREFIX = "Return presence check: "
     /** Matches lookup#HotWaxOmsOrdersByExternalId's PAIR_LOOKUP_MAX_IDS. Keep the two in sync. */
     static final int ORDER_LOOKUP_CHUNK_SIZE = 100
-    /** Mirrors MissingDiffVerificationSupport.DEFAULT_MAX_LOOKUP_IDS: past this, the sync is broken
-     *  rather than skewed and point-checking it only hammers the source API. */
+    /** Orders the cancellation check and the order + line pairing each look up per run (100 per call).
+     *  Past it they check this many and name the rest (DAR-BE-180), never none. */
     static final int DEFAULT_MAX_ORDER_LOOKUPS = 1000
     static final String CANCELLED_ORDER_STATUS_ID = "ORDER_CANCELLED"
     /** Order-level cancellation marker stamped on every Shopify event row by ShopifyReturnRefsSupport. */
@@ -386,40 +386,42 @@ class ReturnPresenceVerificationSupport {
         int cancelledRefundCount = cancelledByFieldCount
         if (cancelledOrderLookup != null && !candidateRowIdsByOrderId.isEmpty()) {
             List<String> orderIds = new ArrayList<>(candidateRowIdsByOrderId.keySet())
+            // DAR-BE-180: past the cap, check what fits and name the rest. Skipping every order left a
+            // month-long run (gorjana 102152, 1,297 orders) with no cancellation check at all.
             if (orderIds.size() > maxOrderLookups) {
-                warnings.add("Cancellation-refund check skipped: ${orderIds.size()} candidate order(s) exceeds the ${maxOrderLookups}-lookup cap; no rows were suppressed.".toString())
-            } else {
-                orderIds.collate(ORDER_LOOKUP_CHUNK_SIZE).each { List<String> chunk ->
-                    Map chunkResult
-                    try {
-                        chunkResult = (Map) cancelledOrderLookup.call(chunk)
-                    } catch (Throwable t) {
-                        // `return` skips THIS chunk only — one failed chunk must not discard a
-                        // succeeding one, since each chunk is an independent batch of orders.
-                        warnings.add("Cancellation-refund lookup failed for ${chunk.size()} order(s): ${normalize(t.message) ?: t.class.simpleName}".toString())
-                        return
-                    }
-                    if (chunkResult?.ok != true) {
-                        warnings.add("Cancellation-refund lookup did not complete for ${chunk.size()} order(s): ${(chunkResult?.errors ?: []).join('; ')}".toString())
-                        return
-                    }
-                    ((Map) (chunkResult.ordersByExternalId ?: [:])).each { Object orderIdKey, Object group ->
-                        if (!containsCancelledOrder(group)) return
-                        Set<String> rowIds = candidateRowIdsByOrderId.get(normalize(orderIdKey))
-                        if (!rowIds) return
-                        // Count only what this pass actually ADDS. A candidate is collected above
-                        // (the orderCancelledAt key was absent) BEFORE the cancelled-item and
-                        // superseded-sibling branches get their turn, so a row can already be in the
-                        // removal set by the time its order comes back cancelled here. addAll is then
-                        // a no-op on the Set while an unconditional += counted the same row a second
-                        // time. The note's per-reason tallies are read as a breakdown of removedCount
-                        // — a live returns run reported 37 + 15 + 2 = 54 reasons against 48 rows
-                        // removed — so they must never exceed it.
-                        Set<String> omsRemovals = removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }
-                        int alreadyRemoved = omsRemovals.size()
-                        omsRemovals.addAll(rowIds)
-                        cancelledRefundCount += omsRemovals.size() - alreadyRemoved
-                    }
+                warnings.add("Cancellation-refund check covered ${maxOrderLookups} of ${orderIds.size()} candidate order(s) (lookup cap); the other ${orderIds.size() - maxOrderLookups} are left as reported.".toString())
+                orderIds = orderIds.take(maxOrderLookups)
+            }
+            orderIds.collate(ORDER_LOOKUP_CHUNK_SIZE).each { List<String> chunk ->
+                Map chunkResult
+                try {
+                    chunkResult = (Map) cancelledOrderLookup.call(chunk)
+                } catch (Throwable t) {
+                    // `return` skips THIS chunk only — one failed chunk must not discard a
+                    // succeeding one, since each chunk is an independent batch of orders.
+                    warnings.add("Cancellation-refund lookup failed for ${chunk.size()} order(s): ${normalize(t.message) ?: t.class.simpleName}".toString())
+                    return
+                }
+                if (chunkResult?.ok != true) {
+                    warnings.add("Cancellation-refund lookup did not complete for ${chunk.size()} order(s): ${(chunkResult?.errors ?: []).join('; ')}".toString())
+                    return
+                }
+                ((Map) (chunkResult.ordersByExternalId ?: [:])).each { Object orderIdKey, Object group ->
+                    if (!containsCancelledOrder(group)) return
+                    Set<String> rowIds = candidateRowIdsByOrderId.get(normalize(orderIdKey))
+                    if (!rowIds) return
+                    // Count only what this pass actually ADDS. A candidate is collected above
+                    // (the orderCancelledAt key was absent) BEFORE the cancelled-item and
+                    // superseded-sibling branches get their turn, so a row can already be in the
+                    // removal set by the time its order comes back cancelled here. addAll is then
+                    // a no-op on the Set while an unconditional += counted the same row a second
+                    // time. The note's per-reason tallies are read as a breakdown of removedCount
+                    // — a live returns run reported 37 + 15 + 2 = 54 reasons against 48 rows
+                    // removed — so they must never exceed it.
+                    Set<String> omsRemovals = removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }
+                    int alreadyRemoved = omsRemovals.size()
+                    omsRemovals.addAll(rowIds)
+                    cancelledRefundCount += omsRemovals.size() - alreadyRemoved
                 }
             }
         }
@@ -483,8 +485,9 @@ class ReturnPresenceVerificationSupport {
         List<String> orderIds = candidates.collect { it.orderId as String }.unique()
         if (orderIds.isEmpty()) return paired
         if (orderIds.size() > maxOrderLookups) {
-            warnings.add("Order-line pairing skipped: ${orderIds.size()} candidate order(s) exceeds the ${maxOrderLookups}-lookup cap; no rows were paired.".toString())
-            return paired
+            // DAR-BE-180: check what fits, name the rest; candidates on unchecked orders stay reported.
+            warnings.add("Order-line pairing covered ${maxOrderLookups} of ${orderIds.size()} candidate order(s) (lookup cap); the other ${orderIds.size() - maxOrderLookups} are left as reported.".toString())
+            orderIds = orderIds.take(maxOrderLookups)
         }
         Map<String, List<Map>> linesByOrderId = [:]
         orderIds.collate(ORDER_LOOKUP_CHUNK_SIZE).each { List<String> chunk ->
@@ -564,7 +567,7 @@ class ReturnPresenceVerificationSupport {
      * createdAt). Returns null rather than a sentinel on failure — a null date must never look
      * artificially "old" or "young"; see the malformedCount handling at the call site.
      */
-    private static Long parseMillisOrNull(Object rawTimestamp) {
+    static Long parseMillisOrNull(Object rawTimestamp) {
         if (rawTimestamp instanceof Number) return ((Number) rawTimestamp).longValue()
         String value = normalize(rawTimestamp)
         if (!value) return null

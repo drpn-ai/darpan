@@ -33,6 +33,10 @@ class ScriptDeploymentSupport {
     static final String NO_INPUT = 'NO_INPUT'
     static final String NOT_DELIVERED = 'NOT_DELIVERED'
     static final String SCRIPT_MISSING = 'SCRIPT_MISSING'
+    /** DAR-BE-175: due, but Darpan's core is busy and scripts run last; retried on the next scan. */
+    static final String WAITING = 'WAITING'
+    /** DAR-BE-175: the core stayed busy past this run's window; skipped (never forced), next run scheduled. */
+    static final String EXPIRED = 'EXPIRED'
 
     /** Chat messages are cut here; Google Chat's own limit is 4,096 characters. */
     static final int MAX_MESSAGE_CHARS = 4_000
@@ -51,12 +55,12 @@ class ScriptDeploymentSupport {
      * deployment's last-run fields are left alone. Never throws.
      * {status, message, text, run, inputSummary, fileName, delivery}
      */
-    static Map<String, Object> execute(def ec, def deployment, boolean send) {
+    static Map<String, Object> execute(def ec, def deployment, boolean send, boolean admitted = false) {
         String tenantId = deployment.companyUserGroupId?.toString()
         return TenantAccessSupport.withSystemTenant(tenantId) {
             Map<String, Object> outcome
             try {
-                outcome = executeAsTenant(ec, tenantId, deployment, send)
+                outcome = executeAsTenant(ec, tenantId, deployment, send, admitted)
             } catch (Throwable t) {
                 logger.warn("Script deployment {} failed: {}", deployment.tenantScriptDeploymentId, t.toString())
                 outcome = [status: SCRIPT_ERROR, message: "The deployment failed: ${t.message ?: t.getClass().simpleName}".toString()]
@@ -67,7 +71,7 @@ class ScriptDeploymentSupport {
         }
     }
 
-    private static Map<String, Object> executeAsTenant(def ec, String tenantId, def deployment, boolean send) {
+    private static Map<String, Object> executeAsTenant(def ec, String tenantId, def deployment, boolean send, boolean admitted) {
         def script = TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId',
                 deployment.tenantScriptId, tenantId, 'DAR-BE-167 deployment script, owner re-checked against the deployment tenant')
         if (script == null || script.isActive == 'N') {
@@ -88,7 +92,9 @@ class ScriptDeploymentSupport {
             return [status: NO_INPUT, message: why, fileName: fileName]
         }
 
-        Map<String, Object> run = ScriptSupervisor.evaluate(script.scriptProfile, script.scriptBody?.toString(), prepared.input)
+        Map<String, Object> run = admitted
+                ? ScriptSupervisor.evaluateAdmitted(script.scriptProfile, script.scriptBody?.toString(), prepared.input)
+                : ScriptSupervisor.evaluate(script.scriptProfile, script.scriptBody?.toString(), prepared.input)
         Map<String, Object> base = [run: run, inputSummary: prepared.inputSummary, fileName: fileName] as Map<String, Object>
         if (!run.ok) {
             Map error = run.error as Map
@@ -168,6 +174,9 @@ class ScriptDeploymentSupport {
     /**
      * The scheduled pass: every active deployment whose nextRunDate has come, each claimed (its next run date moved
      * forward) before it runs, so a slow run or an overlapping tick never sends twice. Returns one line per run.
+     * DAR-BE-175: scripts run last. While ScriptLoadGate says the core is busy, a due deployment is not claimed: it is
+     * marked WAITING and retried on the next scan, and once its window has passed it is marked EXPIRED and moved to
+     * its next scheduled time. It is never forced to run.
      */
     static Map<String, Object> scanDue(def ec, Timestamp now, int limit) {
         Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())
@@ -179,6 +188,12 @@ class ScriptDeploymentSupport {
         List<Map<String, Object>> results = []
         due.each { def deployment ->
             String id = deployment.tenantScriptDeploymentId
+            Map<String, Object> gate = ScriptLoadGate.check()
+            if (gate.busy) {
+                Map<String, Object> held = holdForLoad(ec, deployment, nowValue, gate.reason as String)
+                if (held != null) results << held
+                return
+            }
             Timestamp next = nextRunDate(ec, deployment.companyUserGroupId?.toString(), deployment.scheduleExpr?.toString(), nowValue)
             boolean claimed = ec.transaction.runUseOrBegin(30, 'Error claiming a script deployment run', {
                 def fresh = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-167 claim re-read of one deployment')
@@ -189,15 +204,53 @@ class ScriptDeploymentSupport {
                 return true
             }) as boolean
             if (!claimed) return
-            Map<String, Object> outcome = execute(ec, deployment, true)
+            Map<String, Object> outcome = execute(ec, deployment, true, true)   // admitted: the gate was checked above
             def latest = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-167 record outcome on the claimed deployment')
                     .condition('tenantScriptDeploymentId', id).useCache(false).one()
             if (latest != null) recordOutcome(ec, latest, outcome)
             logger.info("Script deployment {} ({}) ran: {} {}", id, deployment.companyUserGroupId, outcome.status, outcome.message)
             results << [tenantScriptDeploymentId: id, status: outcome.status, message: outcome.message, nextRunDate: next]
         }
-        return [ran: results.size(), results: results]
+        int held = results.count { Map r -> r.status == WAITING || r.status == EXPIRED } as int
+        return [ran: results.size() - held, held: held, results: results]
     }
+
+    /**
+     * The core is busy: leave this due run for the next scan (WAITING), or, once its window has passed, skip it
+     * (EXPIRED) and schedule the next one. The window ends at the EARLIER of due + scheduledMaxWaitMinutes and the
+     * schedule's own next occurrence (a late run that would collide with the next one is pointless).
+     */
+    static Map<String, Object> holdForLoad(def ec, def deployment, Timestamp now, String reason) {
+        String id = deployment.tenantScriptDeploymentId
+        String tenantId = deployment.companyUserGroupId?.toString()
+        String expr = deployment.scheduleExpr?.toString()
+        Timestamp dueAt = deployment.nextRunDate as Timestamp
+        Timestamp nextAfterDue = nextRunDate(ec, tenantId, expr, dueAt)
+        long windowEnd = dueAt.time + ScriptLoadGate.scheduledMaxWaitMinutes() * 60_000L
+        if (nextAfterDue != null) windowEnd = Math.min(windowEnd, nextAfterDue.time)
+        Timestamp expireAt = new Timestamp(windowEnd)
+        boolean expired = !now.before(expireAt)
+        Timestamp next = expired ? nextRunDate(ec, tenantId, expr, now) : dueAt
+        String status = expired ? EXPIRED : WAITING
+        String message = expired
+                ? "Not run: Darpan stayed busy (${reason}) from ${utc(dueAt)} until this run expired at ${utc(expireAt)}. Next run ${utc(next)}.".toString()
+                : "Waiting since ${utc(dueAt)}: Darpan is busy (${reason}) and scripts run last. Expires at ${utc(expireAt)} if it stays busy.".toString()
+        boolean written = ec.transaction.runUseOrBegin(30, 'Error holding a script deployment for load', {
+            def fresh = TenantScopedFinder.findGlobalUnscoped(ec, ENTITY, 'DAR-BE-175 hold re-read of one due deployment while the core is busy')
+                    .condition('tenantScriptDeploymentId', id).forUpdate(true).useCache(false).one()
+            if (fresh == null || fresh.isActive != 'Y' || fresh.nextRunDate == null || fresh.nextRunDate.after(now)) return false
+            if (expired) fresh.set('nextRunDate', next)
+            fresh.set('lastRunStatus', status)
+            fresh.set('lastRunMessage', message.length() > 255 ? message.substring(0, 254) + '…' : message)
+            fresh.update()
+            return true
+        }) as boolean
+        if (!written) return null
+        logger.info("Script deployment {} ({}) {}: {}", id, tenantId, status, message)
+        return [tenantScriptDeploymentId: id, status: status, message: message, nextRunDate: next, expireAt: expireAt]
+    }
+
+    private static String utc(Timestamp t) { t == null ? '-' : t.toInstant().toString().take(16).replace('T', ' ') + ' UTC' }
 
     static Map<String, Object> toDeploymentMap(def row) {
         if (row == null) return null

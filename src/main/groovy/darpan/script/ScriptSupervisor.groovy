@@ -149,6 +149,14 @@ class ScriptSupervisor {
      * With a worker URL configured the script runs in the worker JVM (ScriptWorker) and nowhere else.
      */
     static Map<String, Object> evaluate(Object profile, String body, Object input) {
+        // DAR-BE-175: scripts run last. While the core is busy, a script is not started (BUSY), not queued.
+        Map<String, Object> gate = ScriptLoadGate.check()
+        if (gate.busy) return notRun(failure(profileOf(profile) ?: SCRIPT, 'BUSY', ScriptLoadGate.busyMessage(gate.reason as String)))
+        return evaluateAdmitted(profile, body, input)
+    }
+
+    /** evaluate for a caller that has already passed ScriptLoadGate (the scheduled scan), so a claimed run is never refused. */
+    static Map<String, Object> evaluateAdmitted(Object profile, String body, Object input) {
         String workerUrl = ScriptWorker.configuredUrl()
         return workerUrl ? ScriptWorker.call(workerUrl, profile, body, input) : evaluateHere(profile, body, input)
     }

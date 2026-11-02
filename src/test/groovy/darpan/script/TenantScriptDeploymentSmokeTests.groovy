@@ -131,6 +131,56 @@ class TenantScriptDeploymentSmokeTests {
         assertNotNull((sent.deployment as Map).lastRunDate)
     }
 
+    // DAR-BE-175: scripts run last. While the core is busy a due deployment WAITS (not claimed, not run); once its
+    // window passes it EXPIRES: skipped, never forced, next run scheduled.
+    @Test
+    void aBusyCoreHoldsADueDeploymentThenExpiresItWithoutEverRunningIt() {
+        String scriptId = saveScript("Held by load", "'should not be sent'")
+        Map saved = call("save#TenantScriptDeployment", [tenantScriptId: scriptId, scheduleExpr: "0 0 9 * * ?",
+                                                         chatSpaceId: "KREWE_SPACE", isActive: true])
+        String id = (saved.deployment as Map).tenantScriptDeploymentId
+        Timestamp due = Timestamp.valueOf("2026-01-01 09:00:00")
+        setDeployment(id, [nextRunDate: due])
+        setDeployment("GORJANA_DEPLOY", [nextRunDate: Timestamp.valueOf("2099-01-01 00:00:00")])
+        Closure original = ScriptLoadGate.probe
+        ScriptLoadGate.probe = { -> [runsQueued: 2, runsRunning: 8, runsCap: 8] as Map<String, Object> }
+        try {
+            Map waiting = scanAt(new Timestamp(due.time + 10 * 60_000L))
+            Map w = (waiting.results as List<Map>).find { it.tenantScriptDeploymentId == id }
+            assertEquals("WAITING", w?.status, "${waiting}")
+            assertEquals(0, waiting.ran)
+            def held = row(id)
+            assertEquals(due, held.nextRunDate, "a waiting run keeps its due date, so the next scan retries it")
+            assertEquals("WAITING", held.lastRunStatus)
+            assertTrue((held.lastRunMessage as String).contains("waiting to start"), held.lastRunMessage as String)
+
+            Timestamp late = new Timestamp(due.time + 61 * 60_000L)   // past the 60-minute window
+            Map expired = scanAt(late)
+            Map e = (expired.results as List<Map>).find { it.tenantScriptDeploymentId == id }
+            assertEquals("EXPIRED", e?.status, "${expired}")
+            def gone = row(id)
+            assertEquals("EXPIRED", gone.lastRunStatus)
+            assertTrue(gone.nextRunDate.after(late), "expired: moved to its next scheduled time")
+            assertTrue((gone.lastRunMessage as String).startsWith("Not run"), gone.lastRunMessage as String)
+
+            ScriptLoadGate.probe = { -> [runsQueued: 0, runsRunning: 0, runsCap: 8] as Map<String, Object> }
+            assertEquals(0, scanAt(late).ran, "the expired run is not made up later")
+            assertEquals([], delivered, "nothing was ever sent")
+        } finally {
+            ScriptLoadGate.probe = original
+        }
+    }
+
+    private Map scanAt(Timestamp now) {
+        ec.user.logoutUser()
+        try {
+            return ec.service.sync().name("script.TenantScriptServices.scan#DueScriptDeployments")
+                    .parameters([nowTimestamp: now]).call() as Map
+        } finally {
+            actAsKreweEditor()
+        }
+    }
+
     @Test
     void theScheduledScanRunsDueDeploymentsWithNoUserEachAsItsOwnTenant() {
         String scriptId = saveScript("Backorders scheduled", BACKORDER_TEXT)

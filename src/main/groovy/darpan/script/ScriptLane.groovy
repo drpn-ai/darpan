@@ -118,6 +118,8 @@ class ScriptLane {
     private static Map<String, Object> admit(String tenantId) {
         if (!isEnabled()) return refused('SWITCHED_OFF', 'Scripts are switched off on this server.')
         if (!tenantId) return refused('NO_TENANT', 'Choose a tenant first.')
+        Map<String, Object> gate = ScriptLoadGate.check()
+        if (gate.busy) return refused('BUSY', ScriptLoadGate.busyMessage(gate.reason as String))
         Runtime rt = Runtime.runtime
         double heapUsed = (rt.totalMemory() - rt.freeMemory()) / (double) rt.maxMemory()
         if (heapUsed > HEAP_GATE) {

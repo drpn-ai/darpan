@@ -5,6 +5,7 @@ import groovy.json.JsonSlurper
 import groovy.transform.CompileStatic
 import org.apache.commons.jexl3.JexlBuilder
 import org.apache.commons.jexl3.JexlEngine
+import org.apache.commons.jexl3.JexlArithmetic
 import org.apache.commons.jexl3.JexlException
 import org.apache.commons.jexl3.JexlFeatures
 import org.apache.commons.jexl3.JexlInfo
@@ -200,7 +201,7 @@ class ScriptSupervisor {
             future.cancel(true)
             out = failure(p, 'TIME', "The script ran past ${limits.timeoutMs} ms and was stopped.".toString())
         } catch (ExecutionException e) {
-            out = failureFrom(p, e.cause ?: e)
+            out = failureFrom(p, e.cause ?: e, body, budget)
         }
         out.units = budget.units
         out.elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
@@ -324,14 +325,17 @@ class ScriptSupervisor {
         return out
     }
 
-    private static Map<String, Object> failureFrom(String profile, Throwable thrown) {
+    private static Map<String, Object> failureFrom(String profile, Throwable thrown, String body = null, ScriptBudget budget = null) {
         Throwable t = thrown
         int guard = 0
+        boolean nullOperand = thrown instanceof JexlException.Variable && !((JexlException.Variable) thrown).isUndefined()
         while (t != null && guard++ < 10) {
             if (t instanceof ScriptLimitException) return failure(profile, ((ScriptLimitException) t).kind, t.message, thrown)
             if (t instanceof JexlException.Cancel || t instanceof InterruptedException) return failure(profile, 'TIME', 'The script ran out of time and was stopped.', thrown)
+            if (t instanceof JexlArithmetic.NullOperand) nullOperand = true
             t = t.cause == t ? null : t.cause
         }
+        if (nullOperand) return emptyValueFailure(profile, thrown, body, budget)
         String kind = thrown instanceof JexlException.Variable || thrown instanceof JexlException.Property ? 'ACCESS' : 'ERROR'
         String text = thrown instanceof JexlException ? message((JexlException) thrown) : null
         if (thrown instanceof JexlException && thrown.cause != null && !(thrown.cause instanceof JexlException)) {
@@ -348,6 +352,31 @@ class ScriptSupervisor {
             error.column = info.column
         }
         return [ok: false, profile: profile, result: null, error: error] as Map<String, Object>
+    }
+
+    /**
+     * DAR-BE-175: a calculation hit an empty value. Instead of JEXL's "null operand: NullOperand", say where, and when
+     * the script just read a field the record does not have (on that same line), name it and list what the record has.
+     */
+    private static Map<String, Object> emptyValueFailure(String profile, Throwable thrown, String body, ScriptBudget budget) {
+        JexlInfo info = thrown instanceof JexlException ? ((JexlException) thrown).info : null
+        int line = info?.line ?: 0
+        String source = (body != null && line > 0) ? (body.readLines()[line - 1] ?: '').trim().take(120) : ''
+        String where = line > 0 ? "line ${line}".toString() + (source ? ": ${source}" : '') : 'this script'
+        String missing = budget?.missingKey
+        boolean onThisLine = missing && source && (source.contains('.' + missing) || source.contains("'" + missing + "'") || source.contains('"' + missing + '"'))
+        String message
+        Map<String, Object> out
+        if (onThisLine) {
+            message = "'${missing}' is not a field of this record (${where}). The record has: ${budget.missingHas.join(', ')}. " +
+                    "A misspelt field reads as empty: fix the name, or give a default with ?? ."
+            out = failure(profile, 'ERROR', message.toString(), thrown)
+            (out.error as Map).field = missing
+        } else {
+            message = "An empty value (null) was used in a calculation at ${where}. Check that it has a value, or give a default with ?? ."
+            out = failure(profile, 'ERROR', message.toString(), thrown)
+        }
+        return out
     }
 
     /** JEXL's message without its "script@1:5 " location prefix (the location is returned as line/column). */

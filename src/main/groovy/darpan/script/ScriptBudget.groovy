@@ -24,6 +24,17 @@ class ScriptBudget {
         this.maxCollectionSize = maxCollectionSize
     }
 
+    /** The last field read from a record that does not have it (DAR-BE-175: names a misspelt field in a null error). */
+    String missingKey
+    List<String> missingHas = []
+
+    static void noteMissing(Object key, Map record) {
+        ScriptBudget budget = CURRENT.get()
+        if (budget == null) return
+        budget.missingKey = String.valueOf(key)
+        budget.missingHas = record.keySet().take(12).collect { String.valueOf(it) }
+    }
+
     static ScriptBudget current() { CURRENT.get() }
 
     static void open(ScriptBudget budget) { CURRENT.set(budget) }

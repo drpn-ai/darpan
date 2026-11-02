@@ -103,6 +103,8 @@ class GroovyGuard {
             return outcome(false, null, [kind: 'MEMORY', message: 'The script recursed too deeply.'], budget, started)
         } catch (OutOfMemoryError e) {
             return outcome(false, null, [kind: 'MEMORY', message: 'The server ran short of memory during this script.'], budget, started)
+        } catch (NullPointerException e) {
+            return outcome(false, null, emptyValueError(e, body, plainInput), budget, started)
         } catch (Throwable e) {
             return outcome(false, null, [kind: 'ERROR', message: "${e.getClass().simpleName}: ${String.valueOf(e.message).take(240)}".toString()], budget, started)
         } finally {
@@ -171,6 +173,46 @@ class GroovyGuard {
     private static Map<String, Object> outcome(boolean ok, Object result, Map error, ScriptBudget budget, long started) {
         return [ok: ok, profile: 'GROOVY', result: result, error: error, units: budget?.units ?: 0L,
                 elapsedMs: (System.nanoTime() - started).intdiv(1_000_000L), logs: budget?.logs ?: []] as Map<String, Object>
+    }
+
+    /**
+     * DAR-BE-175: instead of "NullPointerException: Cannot invoke method minus() on null object", say which line,
+     * and when a field read on that line exists nowhere in the input, name it (a misspelt field reads as null).
+     */
+    static Map<String, Object> emptyValueError(Throwable e, String body, Object input) {
+        StackTraceElement frame = e.stackTrace.find { StackTraceElement f -> f.className.startsWith('TenantGroovy_') && f.lineNumber > 0 }
+        int line = frame?.lineNumber ?: 0
+        String source = line > 0 ? (body.readLines()[line - 1] ?: '').trim().take(120) : ''
+        String where = line > 0 ? "line ${line}".toString() + (source ? ": ${source}" : '') : 'this script'
+        Set<String> known = inputKeys(input)
+        String missing = null
+        if (source) {
+            java.util.regex.Matcher m = (source =~ /\.([A-Za-z_]\w*)\b(?!\s*[({])/)
+            while (m.find()) {
+                String name = m.group(1)
+                if (!known.contains(name) && !['size', 'length', 'value', 'key', 'it'].contains(name)) { missing = name; break }
+            }
+        }
+        if (missing) {
+            List<String> some = known.toList().sort().take(12)
+            return [kind: 'ERROR', field: missing, message: ("'${missing}' is not a field anywhere in the input (${where}). " +
+                    "Fields in the input include: ${some.join(', ')}. A misspelt field reads as empty: fix the name, or use ?: for a default.").toString()] as Map<String, Object>
+        }
+        return [kind: 'ERROR', message: "An empty value (null) was used at ${where}. Check that it has a value, or use ?: for a default.".toString()] as Map<String, Object>
+    }
+
+    /** Every map key in the input, walked to a bounded depth and count. */
+    private static Set<String> inputKeys(Object input) {
+        Set<String> keys = new HashSet<>()
+        Deque<Object> todo = new ArrayDeque<>()
+        if (input != null) todo.add(input)
+        int seen = 0
+        while (!todo.isEmpty() && seen++ < 50_000) {
+            Object x = todo.poll()
+            if (x instanceof Map) { ((Map) x).each { Object k, Object v -> keys.add(String.valueOf(k)); if (v != null) todo.add(v) } }
+            else if (x instanceof Collection) { for (Object v : (Collection) x) if (v != null) todo.add(v) }
+        }
+        return keys
     }
 
     private static String firstLine(MultipleCompilationErrorsException e) {

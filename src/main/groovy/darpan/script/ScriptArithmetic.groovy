@@ -2,6 +2,7 @@ package darpan.script
 
 import groovy.transform.CompileStatic
 import org.apache.commons.jexl3.JexlArithmetic
+import org.apache.commons.jexl3.JexlEngine
 
 import java.lang.reflect.Array
 import java.math.MathContext
@@ -42,6 +43,13 @@ class ScriptArithmetic extends JexlArithmetic {
     @Override
     Object add(Object l, Object r) {
         ScriptBudget.charge()
+        // DAR-BE-175: + on a list joins (list + list) or appends (list + item), counted and capped like any list.
+        // Before, JEXL fell back to text and list + list returned "[I@6eeb90e5[I@..." as a success.
+        if (isListLike(l)) return joined(l, r)
+        if (isListLike(r)) throw new ScriptLimitException("ACCESS", "Put the list first: list + item, or list + list.")
+        if (l instanceof Map || r instanceof Map) {
+            throw new ScriptLimitException("ACCESS", "+ does not combine a map; set its keys one at a time: m[key] = value.")
+        }
         if (l instanceof CharSequence || r instanceof CharSequence) {
             if (!ScriptBudget.isScalar(l) || !ScriptBudget.isScalar(r)) {
                 throw new ScriptLimitException("ACCESS", "Text can only be joined with text or numbers; use d:join for a list.")
@@ -49,6 +57,49 @@ class ScriptArithmetic extends JexlArithmetic {
             ScriptBudget.checkLength(scalarLength(l) + scalarLength(r))
         }
         return guard(super.add(l, r))
+    }
+
+    private static boolean isListLike(Object x) {
+        return (x instanceof Collection) || (x != null && x.getClass().isArray())
+    }
+
+    /** A list the script built itself (DAR-BE-175). Only these grow in place under +=; input lists are never changed. */
+    static class ScriptList extends ArrayList<Object> { }
+
+    /**
+     * SELF_ADD overload: list += item / list += list. Appends IN PLACE to a list the script built (one unit and a size
+     * check per added item), so building a list in a loop costs O(n), not a fresh copy per append (O(n^2), which
+     * spent the whole budget at about 2,000 items). Anything else falls back to ordinary + (numbers, text, and a
+     * first copy of any other list into a ScriptList).
+     */
+    Object selfAdd(Object l, Object r) {
+        // JEXL treats selfAdd as IN PLACE and ignores its result. Anything but a ScriptList (an input list, a [] literal)
+        // goes back to ordinary l = l + r, whose new ScriptList IS assigned; every later += then appends in place.
+        if (!(l instanceof ScriptList)) return JexlEngine.TRY_FAILED
+        ScriptBudget.charge()
+        ScriptList list = (ScriptList) l
+        if (isListLike(r)) {
+            for (Object item : listItems(r)) { ScriptBudget.charge(); list.add(item); ScriptBudget.checkSize(list.size()) }
+        } else {
+            list.add(r); ScriptBudget.checkSize(list.size())
+        }
+        return list
+    }
+
+    /** A new list: the left list's items, then the right list's items or the right item. One unit and a size check per item. */
+    private static List joined(Object left, Object right) {
+        List out = new ScriptList()
+        for (Object item : listItems(left)) { ScriptBudget.charge(); out.add(item); ScriptBudget.checkSize(out.size()) }
+        if (isListLike(right)) {
+            for (Object item : listItems(right)) { ScriptBudget.charge(); out.add(item); ScriptBudget.checkSize(out.size()) }
+        } else {
+            ScriptBudget.charge(); out.add(right); ScriptBudget.checkSize(out.size())
+        }
+        return out
+    }
+
+    private static Iterable listItems(Object x) {
+        return x instanceof Collection ? (Collection) x : arrayItems(x)
     }
 
     private static long scalarLength(Object x) {
@@ -146,7 +197,13 @@ class ScriptArithmetic extends JexlArithmetic {
         if (target instanceof Map) {
             Map map = (Map) target
             Object value = map.get(key)
-            return (value == null && key instanceof Number) ? map.get(key.toString()) : value
+            if (value == null && key instanceof Number) value = map.get(key.toString())
+            // Legal (optional fields, ?? defaults), but remembered: if this null later breaks a calculation, the
+            // error can name the field the record does not have, and list the ones it does.
+            if (value == null && !map.containsKey(key) && !(key instanceof Number && map.containsKey(key.toString()))) {
+                ScriptBudget.noteMissing(key, map)
+            }
+            return value
         }
         if (target instanceof List || (target != null && target.getClass().isArray())) {
             List items = target instanceof List ? (List) target : arrayItems(target)

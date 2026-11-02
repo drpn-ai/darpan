@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicInteger
  *   repeat  one record per unit of a quantity field
  *   number  a running number per partition in a declared order
  *   count   a named count of the records matching conditions, optionally of distinct keys
- * derive and filter come in later build steps.
+ *   derive  fields written by rows of data, fired as Drools rules (DeriveRules, DeriveEngine)
+ * filter comes in a later build step.
  *
  * Records then carry record.fields (always, null when unset) and record.optionalFields (only when set).
  */
@@ -31,6 +32,7 @@ class DataSourceRunner {
     private final def transport
     private final Map<String, Map> stepsById
     private final Map<String, AtomicInteger> pageSizes = [:]
+    private final Map<String, DeriveEngine> engines = [:]
     final Map<String, Long> counts = new LinkedHashMap<>()
     final Map<String, Integer> pagesByStep = new LinkedHashMap<>()
     int rootRecords = 0
@@ -61,10 +63,15 @@ class DataSourceRunner {
                 sink.call(finish(first, batch))
             }
         }
-        if (request.mode == "ids") readByKeys(first, request, take)
-        else if (request.mode == "window") readByWindow(first, request, take)
-        else throw new IllegalArgumentException("A run reads by ids or by window, not '${request.mode}'.")
-        if (buffer) sink.call(finish(first, buffer))
+        try {
+            if (request.mode == "ids") readByKeys(first, request, take)
+            else if (request.mode == "window") readByWindow(first, request, take)
+            else throw new IllegalArgumentException("A run reads by ids or by window, not '${request.mode}'.")
+            if (buffer) sink.call(finish(first, buffer))
+        } finally {
+            engines.values().each { it.close() }
+            engines.clear()
+        }
         return [rootRecords: rootRecords, records: records, batches: batches, counts: counts, pages: pagesByStep,
                 pageSizes: pageSizes.collectEntries { k, v -> [(k): v.get()] }]
     }
@@ -158,6 +165,10 @@ class DataSourceRunner {
                 case "repeat": ctx.put((String) step.id, repeat(step, ctx.get(current))); current = (String) step.id; break
                 case "number": number(step, ctx.get(current)); break
                 case "count": count(step, ctx.get(current)); break
+                case "derive":
+                    engines.computeIfAbsent((String) step.id, { DeriveEngine.compile((List<Map>) step.rules) })
+                            .derive(ctx.get(current), "derive:${step.id}".toString())
+                    break
                 default: throw new UnsupportedOperationException("The ${step.kind} step is not built yet (step '${step.id}').")
             }
         }

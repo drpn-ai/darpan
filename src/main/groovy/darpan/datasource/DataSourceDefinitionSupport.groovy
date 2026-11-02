@@ -24,7 +24,8 @@ import groovy.json.JsonSlurper
  *   repeat {times (path), parse STRICT_INT|NUMERIC, nullAs, index}
  *   number {field, partitionBy: [paths], orderBy: [paths]}
  *   count  {name, when (RecordConditions), distinct: [paths]}
- * derive and filter are checked by their own steps when they are built.
+ *   derive {rules: [{set, when, value}]} (DeriveRules)
+ * filter is checked when it is built.
  */
 class DataSourceDefinitionSupport {
 
@@ -171,6 +172,7 @@ class DataSourceDefinitionSupport {
             if (i == 0 && s.kind != "query") errors << "The first step reads: it must be a query."
             if (s.kind == "query") errors.addAll(checkQueryStep(where, protocol, s, limits, earlier))
             else if (s.kind in ["unwrap", "join", "split", "repeat", "number", "count"]) errors.addAll(checkShapeStep(where, s, earlier))
+            else if (s.kind == "derive") errors.addAll(DeriveRules.check(where, s.rules))
             if (id ==~ NAME) earlier << id
         }
         return errors

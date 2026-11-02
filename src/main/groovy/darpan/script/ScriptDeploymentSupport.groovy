@@ -33,9 +33,9 @@ class ScriptDeploymentSupport {
     static final String NO_INPUT = 'NO_INPUT'
     static final String NOT_DELIVERED = 'NOT_DELIVERED'
     static final String SCRIPT_MISSING = 'SCRIPT_MISSING'
-    /** DAR-BE-175: due, but Darpan's core is busy and scripts run last; retried on the next scan. */
+    /** due but the core is busy, retried on the next scan */
     static final String WAITING = 'WAITING'
-    /** DAR-BE-175: the core stayed busy past this run's window; skipped (never forced), next run scheduled. */
+    /** the core stayed busy past this run's window; skipped, never forced */
     static final String EXPIRED = 'EXPIRED'
 
     /** Chat messages are cut here; Google Chat's own limit is 4,096 characters. */
@@ -174,9 +174,8 @@ class ScriptDeploymentSupport {
     /**
      * The scheduled pass: every active deployment whose nextRunDate has come, each claimed (its next run date moved
      * forward) before it runs, so a slow run or an overlapping tick never sends twice. Returns one line per run.
-     * DAR-BE-175: scripts run last. While ScriptLoadGate says the core is busy, a due deployment is not claimed: it is
-     * marked WAITING and retried on the next scan, and once its window has passed it is marked EXPIRED and moved to
-     * its next scheduled time. It is never forced to run.
+     * While ScriptLoadGate says the core is busy a due deployment is not claimed but marked WAITING, then EXPIRED once
+     * its window passes (see holdForLoad).
      */
     static Map<String, Object> scanDue(def ec, Timestamp now, int limit) {
         Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())

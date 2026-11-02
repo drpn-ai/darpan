@@ -24,7 +24,7 @@ class ScriptBudget {
         this.maxCollectionSize = maxCollectionSize
     }
 
-    /** The last field read from a record that does not have it (DAR-BE-175: names a misspelt field in a null error). */
+    /** the last field read from a record that doesn't have it, to name a misspelt field in a null error */
     String missingKey
     List<String> missingHas = []
 

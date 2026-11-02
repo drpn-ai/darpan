@@ -17,23 +17,17 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * DAR-BE-175 POC: the one place tenant scripts run inside Moqui, whatever the engine (JEXL or Groovy).
- *
- * <p>Provisioning that protects core processes: scripts never run on HTTP, run or Spark threads, only on this
- * lane's {@value #THREADS} threads (so at most {@value #THREADS} cores), with a short queue, one script at a time per
- * tenant, a heap gate that refuses work when memory is tight, and an off switch (DARPAN_SCRIPTS_ENABLED=false or
- * {@link #setEnabled}). A script past its deadline gets an interrupt; one that ignores it (a long call into a
- * library: the JVM cannot force-stop a thread) is counted as STUCK until it really ends, and its tenant stays busy so
- * it cannot pile up more. Every run is logged with tenant, engine, outcome, units and time.</p>
+ * Runs tenant scripts inside Moqui, for any engine, on a small dedicated pool: never on request, run or Spark threads.
+ * One script at a time per tenant; nothing starts while ScriptLoadGate says the core is busy or scripts are switched
+ * off (DARPAN_SCRIPTS_ENABLED=false). A script that ignores its deadline is counted as stuck until it really ends.
  */
 @CompileStatic
 class ScriptLane {
-    private static final Logger logger = LoggerFactory.getLogger(ScriptLane)
+    protected final static Logger logger = LoggerFactory.getLogger(ScriptLane.class)
 
     static final int THREADS = 2
     static final int QUEUE = 4
-    static final double HEAP_GATE = 0.85d
-    /** Grace past the engine's own limit before the lane interrupts and stops waiting. */
+    /** wait this long past the engine's own limit before interrupting */
     static final long GRACE_MS = 1_000L
 
     private static final AtomicInteger threadNo = new AtomicInteger()
@@ -57,13 +51,10 @@ class ScriptLane {
         return !'false'.equalsIgnoreCase(System.getenv('DARPAN_SCRIPTS_ENABLED') ?: System.getProperty('darpan.scripts.enabled'))
     }
 
-    /** The off switch an operator flips without a deploy (POC: in memory; a real build stores it). */
+    // NOTE: in memory only, null goes back to the environment setting
     static void setEnabled(Boolean enabled) { enabledOverride = enabled }
 
-    /**
-     * Runs work (an engine call that returns the usual {ok, result, error, units, elapsedMs, logs} map) on the lane.
-     * limitMs is the engine's own wall limit; the lane waits that plus GRACE_MS. Never throws.
-     */
+    /** Runs work (returns {ok, result, error, units, elapsedMs, logs}) on the lane; never throws. */
     static Map<String, Object> run(String tenantId, String engine, long limitMs, Closure<Map<String, Object>> work) {
         long started = System.nanoTime()
         Map<String, Object> refusal = admit(tenantId)
@@ -73,7 +64,7 @@ class ScriptLane {
         if (!slot.tryAcquire()) {
             return finish(tenantId, engine, refused('TENANT_BUSY', 'This tenant already has a script running; try again when it ends.'), started)
         }
-        // 0 = running, 1 = ended, 2 = past its deadline and still running (stuck). Whoever moves it first wins.
+        // 0 = running, 1 = ended, 2 = stuck (past its deadline, still running)
         AtomicInteger state = new AtomicInteger(0)
         Future<Map<String, Object>> future
         try {
@@ -83,8 +74,9 @@ class ScriptLane {
                     return work.call()
                 } finally {
                     running.decrementAndGet()
-                    if (state.getAndSet(1) == 2) stuck.decrementAndGet()   // a stuck run that finally ended
-                    slot.release()   // the tenant is free only when the work has REALLY ended
+                    if (state.getAndSet(1) == 2) stuck.decrementAndGet()
+                    // release only when the work has really ended, so a stuck script can't pile up more
+                    slot.release()
                 }
             } as java.util.concurrent.Callable<Map<String, Object>>)
         } catch (RejectedExecutionException e) {
@@ -95,7 +87,8 @@ class ScriptLane {
             return finish(tenantId, engine, future.get(limitMs + GRACE_MS, TimeUnit.MILLISECONDS), started)
         } catch (TimeoutException e) {
             if (state.compareAndSet(0, 2)) stuck.incrementAndGet()
-            future.cancel(true)   // a polite interrupt: JEXL and the Groovy checkpoints honour it; a library call may not
+            // NOTE: only a request; JEXL steps and Groovy checkpoints check it, a long library call may not
+            future.cancel(true)
             return finish(tenantId, engine, failure('STUCK', "The script did not stop at its ${limitMs} ms limit. It was asked to stop; the lane counts it as stuck until it really ends.".toString()), started)
         } catch (ExecutionException e) {
             return finish(tenantId, engine, failure('ERROR', String.valueOf(e.cause?.message).take(300)), started)
@@ -105,14 +98,15 @@ class ScriptLane {
         }
     }
 
-    /** What the lane looks like right now, for the operator screen. */
+    /** For the Script Lab screen. */
     static Map<String, Object> status() {
         Runtime rt = Runtime.runtime
         long used = rt.totalMemory() - rt.freeMemory()
         return [enabled: isEnabled(), threads: THREADS, running: running.get(), queued: POOL.queue.size(), queueCapacity: QUEUE,
                 stuck: stuck.get(), runs: runs.get(), refused: refusedBy.collectEntries { String k, AtomicLong v -> [(k): v.get()] },
                 heapUsedMb: used >> 20, heapMaxMb: rt.maxMemory() >> 20, heapPercent: Math.round(100d * used / rt.maxMemory()),
-                heapGatePercent: Math.round(HEAP_GATE * 100), busyTenants: TENANT_SLOTS.findAll { String k, Semaphore s -> s.availablePermits() == 0 }.keySet().sort()] as Map<String, Object>
+                heapGatePercent: ScriptLoadGate.holdAtHeapPercent(),
+                busyTenants: TENANT_SLOTS.findAll { String k, Semaphore s -> s.availablePermits() == 0 }.keySet().sort()] as Map<String, Object>
     }
 
     private static Map<String, Object> admit(String tenantId) {
@@ -120,11 +114,6 @@ class ScriptLane {
         if (!tenantId) return refused('NO_TENANT', 'Choose a tenant first.')
         Map<String, Object> gate = ScriptLoadGate.check()
         if (gate.busy) return refused('BUSY', ScriptLoadGate.busyMessage(gate.reason as String))
-        Runtime rt = Runtime.runtime
-        double heapUsed = (rt.totalMemory() - rt.freeMemory()) / (double) rt.maxMemory()
-        if (heapUsed > HEAP_GATE) {
-            return refused('HEAP', "The server's memory is ${Math.round(heapUsed * 100)}% used; scripts wait until it is under ${Math.round(HEAP_GATE * 100)}%.".toString())
-        }
         return null
     }
 

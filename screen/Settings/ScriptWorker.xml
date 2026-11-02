@@ -1,18 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-169. Operator screen for the tenant-script worker: shows where scripts run (worker URL, caller token
-     configured, live /health from Moqui) and runs a script through the SAME service the app uses
-     (facade.TenantScriptFacadeServices.run#TenantScript), so it proves the real path without darpan-ui.
-     Super-admin only, enforced in always-actions: Settings.xml's gate is in pre-actions, which Moqui does not run for
-     transitions (ScreenRenderImpl: runPreActions only for the "actions" transition), so a child transition would
-     otherwise be open to any signed-in user. Writes nothing: run#TenantScript reads its input and evaluates. -->
+<!-- Script Worker: shows where scripts run (worker URL, caller token set or not, live /health) and runs a script
+     through run#TenantScript, the same service the app uses; writes nothing. Super-admin only. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         default-menu-title="Script Worker" require-authentication="true">
 
     <parameter name="example"/>
     <parameter name="savedId"/>
 
-    <!-- Throw, not <return error>: Moqui still runs a transition's actions after an always-actions error message
-         (ScreenDefinition: "run actions if any defined ... even if" errors), so only an exception stops both paths. -->
+    <!-- NOTE: throw, not return error, Moqui still runs a transition's actions after an always-actions error message -->
     <always-actions>
         <if condition="!darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)">
             <script>throw new org.moqui.context.ArtifactAuthorizationException('The script worker screen is limited to super-admin users.')</script>
@@ -30,20 +25,19 @@
     <transition name="runScript">
         <actions>
             <if condition="!darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)"><return error="true" message="Super-admin only."/></if>
-            <!-- A loaded saved script runs by its id (the stored body and sample unless edited here). -->
+            <!-- a loaded saved script runs by its id -->
             <service-call name="facade.TenantScriptFacadeServices.run#TenantScript" out-map="runOut"
                     in-map="[tenantScriptId: tenantScriptId ?: null, scriptProfile: scriptProfile, scriptBody: scriptBody, inputSource: 'SAMPLE', inputJson: inputJson ?: '{}']"/>
             <set field="lastRun" from="[tenantScriptId: tenantScriptId, scriptProfile: scriptProfile, scriptBody: scriptBody, inputJson: inputJson,
                     run: runOut?.run, ranAt: ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd HH:mm:ss'), workerUrl: darpan.script.ScriptWorker.configuredUrl()]"/>
-            <!-- As JSON text: Moqui refuses a non-serializable session attribute (WebUtilities warns and drops it), and
-                 the run map is not reliably serializable. A String always is. -->
+            <!-- NOTE: stored as JSON text, Moqui drops a non-serializable session attribute -->
             <script>ec.web.sessionAttributes.put('darpanScriptWorkerLastRun', groovy.json.JsonOutput.toJson(lastRun))</script>
         </actions>
         <default-response url="."/>
     </transition>
 
     <actions>
-        <!-- Where scripts run. The token is reported as configured or not, never shown. -->
+        <!-- where scripts run; the token is reported as set or not, never shown -->
         <set field="workerUrl" from="darpan.script.ScriptWorker.configuredUrl()"/>
         <set field="tokenConfigured" from="darpan.script.ScriptWorker.configuredToken() != null"/>
         <set field="health" from="darpan.script.ScriptWorker.probeHealth(workerUrl)"/>
@@ -57,14 +51,14 @@
         <set field="availableTenants" from="sessionOut?.sessionInfo?.availableTenants ?: []"/>
         <set field="tenantText" from="activeTenantUserGroupId ? activeTenantLabel + ' (' + activeTenantUserGroupId + ')' : 'None chosen. Scripts need an active tenant.'"/>
 
-        <!-- The demo set: what each one proves is in its label. -->
+        <!-- demo scripts, each label says what it proves -->
         <set field="examples" from="[
                 one   : [scriptProfile: 'EXPRESSION', scriptBody: '1 + 1', inputJson: '{}'],
                 sum   : [scriptProfile: 'SCRIPT', scriptBody: 'var total = 0;\nfor (var line : input.lines) { total = total + line.qty; }\nd:log(&quot;lines &quot; + size(input.lines));\ntotal', inputJson: '{&quot;lines&quot;: [{&quot;sku&quot;: &quot;A&quot;, &quot;qty&quot;: 3}, {&quot;sku&quot;: &quot;B&quot;, &quot;qty&quot;: 4}, {&quot;sku&quot;: &quot;C&quot;, &quot;qty&quot;: 5}]}'],
                 escape: [scriptProfile: 'SCRIPT', scriptBody: '\'\'.class.forName(\'java.lang.Runtime\')', inputJson: '{}'],
                 loop  : [scriptProfile: 'SCRIPT', scriptBody: 'while (true) {}', inputJson: '{}']]"/>
 
-        <!-- The active tenant's saved scripts (the sample data), through the same facade the app's Scripts page uses. -->
+        <!-- the active tenant's saved scripts, through the same service the app's Scripts page uses -->
         <set field="savedScripts" from="[]"/>
         <if condition="activeTenantUserGroupId">
             <service-call name="facade.TenantScriptFacadeServices.list#TenantScripts" out-map="listOut"/>
@@ -74,7 +68,7 @@
         <set field="savedValues" from="savedPick ? [tenantScriptId: savedPick.tenantScriptId, scriptProfile: savedPick.scriptProfile,
                 scriptBody: savedPick.scriptBody, inputJson: savedPick.sampleInputJson ?: '{}'] : null"/>
 
-        <!-- The last run (shown once), else a loaded saved script, else the chosen example, else 1 + 1. -->
+        <!-- the last run (shown once), else a loaded saved script, else the chosen example, else 1 + 1 -->
         <set field="lastRunJson" from="ec.web.sessionAttributes.remove('darpanScriptWorkerLastRun')"/>
         <set field="lastRun" from="lastRunJson instanceof String ? new groovy.json.JsonSlurper().parseText(lastRunJson) : null"/>
         <set field="formValues" from="lastRun ?: (savedValues ?: (examples[example] ?: examples.one))"/>

@@ -24,17 +24,14 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 /**
- * DAR-BE-175 POC: a tenant's Groovy script, guarded for running inside Moqui (genuine users, not attackers).
+ * Runs a tenant's Groovy script inside Moqui with compile-time rules (no imports, no System/Runtime/Thread/File or
+ * reflection) and a checkpoint at every loop, closure and method entry that spends ScriptBudget units and checks the
+ * thread's allocated bytes, CPU and a wall deadline. The binding is only input and the d library.
  *
- * <p>Not Moqui's ec.resource.script/expression: that path binds the whole ec and caches every script text in a
- * never-evicted map on one shared classloader. Here each compiled script gets its own classloader in a small LRU,
- * so an edited script's old classes unload; the binding is only {@code input} and the {@code d} library.</p>
- *
- * <p>Guards: compile-time rules (no imports, no System/Runtime/Thread/File/reflection, no shell, no sleep, no method
- * definitions) and a checkpoint injected at every loop head, closure and method entry that spends ScriptBudget units
- * (shared with JEXL: same UNITS/TIME errors, same d: library caps) and samples this thread's allocated bytes, CPU
- * and a wall deadline. Known gap, by design of the JVM: a single long call into Groovy's own library, or one huge
- * allocation, runs between checkpoints and cannot be stopped in-process (ScriptLane reports such threads as stuck).</p>
+ * NOTE: not ec.resource.script/expression, those bind the whole ec and cache every script text on one shared
+ *     classloader that never unloads; here each compiled script has its own classloader in a small LRU.
+ * NOTE: a single long call into Groovy's own library, or one huge allocation, runs between checkpoints and can't be
+ *     stopped in-process; ScriptLane counts such a thread as stuck.
  */
 @CompileStatic
 class GroovyGuard {
@@ -54,16 +51,16 @@ class GroovyGuard {
     private static final com.sun.management.ThreadMXBean TMX = (com.sun.management.ThreadMXBean) ManagementFactory.threadMXBean
     private static final ThreadLocal<long[]> SAMPLE = new ThreadLocal<>()   // [startAlloc, startCpu, deadlineNanos, checks]
 
-    /** Compiled scripts by source hash: LRU, each entry its own classloader, so evicted classes can unload. */
+    /** compiled scripts by source hash, each with its own classloader so evicted ones can unload */
     private static final Map<String, Class> CACHE = Collections.synchronizedMap(new CompiledScripts())
 
-    /** Access-ordered LRU of compiled script classes; the eldest drops out (and its classloader can unload). */
+    /** access-ordered, the eldest drops out */
     private static class CompiledScripts extends LinkedHashMap<String, Class> {
         CompiledScripts() { super(16, 0.75f, true) }
         @Override protected boolean removeEldestEntry(Map.Entry<String, Class> eldest) { return this.size() > GroovyGuard.CACHE_SIZE }
     }
 
-    /** Runs on the CALLER's thread (ScriptLane supplies it). {ok, profile, result, units, elapsedMs, logs, error}. Never throws. */
+    /** Runs on the calling thread (ScriptLane supplies it); returns {ok, profile, result, units, elapsedMs, logs, error}, never throws. */
     static Map<String, Object> evaluate(String body, Object input) {
         long started = System.nanoTime()
         if (!body?.trim()) return outcome(false, null, [kind: 'SYNTAX', message: 'The script is empty.'], null, started)
@@ -104,7 +101,7 @@ class GroovyGuard {
         } catch (OutOfMemoryError e) {
             return outcome(false, null, [kind: 'MEMORY', message: 'The server ran short of memory during this script.'], budget, started)
         } catch (NullPointerException e) {
-            // The CALLER's input: the script only ever had a copy, so nothing it grew or looped is walked here.
+            // the caller's input, not the script's copy, so nothing the script grew or looped is walked
             return outcome(false, null, emptyValueError(e, body, input), budget, started)
         } catch (Throwable e) {
             return outcome(false, null, [kind: 'ERROR', message: "${e.getClass().simpleName}: ${String.valueOf(e.message).take(240)}".toString()], budget, started)
@@ -115,9 +112,8 @@ class GroovyGuard {
     }
 
     /**
-     * The checkpoint the compiler injects (through ConditionalInterrupt) at every loop head, closure and method entry.
-     * Spends one ScriptBudget unit (which also honours an interrupt as TIME) and, every 256th call, samples the thread.
-     * Throws ScriptLimitException to stop; returns false to continue.
+     * Injected by ConditionalInterrupt at every loop, closure and method entry. Spends a unit (an interrupt stops it
+     * as TIME) and every 256th call checks the thread; throws ScriptLimitException to stop, returns false to go on.
      */
     static boolean checkpoint() {
         ScriptBudget.charge()
@@ -176,10 +172,7 @@ class GroovyGuard {
                 elapsedMs: (System.nanoTime() - started).intdiv(1_000_000L), logs: budget?.logs ?: []] as Map<String, Object>
     }
 
-    /**
-     * DAR-BE-175: instead of "NullPointerException: Cannot invoke method minus() on null object", say which line,
-     * and when a field read on that line exists nowhere in the input, name it (a misspelt field reads as null).
-     */
+    /** Says which line used an empty value and, when a field read there is nowhere in the input, names it. */
     static Map<String, Object> emptyValueError(Throwable e, String body, Object input) {
         StackTraceElement frame = e.stackTrace.find { StackTraceElement f -> f.className.startsWith('TenantGroovy_') && f.lineNumber > 0 }
         int line = frame?.lineNumber ?: 0
@@ -204,10 +197,7 @@ class GroovyGuard {
 
     static final int MAX_HINT_ENTRIES = 50_000
 
-    /**
-     * Map key names in the input, for the misspelt-field hint. Bounded by ENTRIES VISITED (every map entry and list
-     * item counts, queued or not) and safe on cycles (identity set); stops quietly at the bound.
-     */
+    /** Map key names in the input for the misspelt-field hint; stops at MAX_HINT_ENTRIES entries, safe on cycles. */
     static Set<String> inputKeys(Object input) {
         Set<String> keys = new HashSet<>()
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>())

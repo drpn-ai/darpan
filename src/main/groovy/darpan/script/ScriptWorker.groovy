@@ -17,17 +17,13 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * DAR-BE-169. The worker JVM (sandbox design §4, stage 2a): tenant scripts run in a separate process that holds no
- * database credentials, no tenant tokens and no network route out, so a script that escaped the JEXL sandbox would
- * find nothing to read and nowhere to send it, and one that exhausted memory takes down only this process.
+ * Runs tenant scripts in a separate JVM that holds no database credentials, tenant tokens or network route out.
+ * main() is the worker: the JDK HTTP server, POST /evaluate runs ScriptSupervisor.evaluateHere, GET /health for the
+ * probe. call() is the Moqui side, used by ScriptSupervisor.evaluate once a worker URL is configured (property
+ * darpan.script.worker.url or env DARPAN_SCRIPT_WORKER_URL).
  *
- * <p>Two halves in one class. {@link #main} is the worker: the JDK's own HTTP server, {@code POST /evaluate} runs
- * {@link ScriptSupervisor#evaluateHere} and returns its map as JSON, {@code GET /health} answers for the probe.
- * {@link #call} is the Moqui side: {@link ScriptSupervisor#evaluate} sends every script here once a worker URL is
- * configured (system property {@code darpan.script.worker.url} or env {@code DARPAN_SCRIPT_WORKER_URL}).</p>
- *
- * <p>An unreachable worker is an error, never a reason to run the script in Moqui instead: otherwise crashing the
- * worker on purpose would be the way back into the privileged JVM.</p>
+ * NOTE: an unreachable worker is an error, never a reason to run the script in Moqui instead, otherwise crashing the
+ *     worker on purpose would be the way back into the privileged JVM.
  */
 @CompileStatic
 class ScriptWorker {
@@ -54,8 +50,8 @@ class ScriptWorker {
         return url?.trim() ?: null
     }
 
-    // Caller authentication. Moqui sends the token; the worker holds only its SHA-256 (hex), so a script that escaped
-    // the sandbox and read the worker's own environment learns nothing it could call the worker with.
+    // caller authentication: Moqui sends the token, the worker holds only its SHA-256 so a script that reads the
+    // worker's environment learns nothing it could call the worker with
     static final String TOKEN_PROPERTY = 'darpan.script.worker.token'
     static final String TOKEN_ENV = 'DARPAN_SCRIPT_WORKER_TOKEN'
     static final String TOKEN_SHA256_ENV = 'DARPAN_SCRIPT_WORKER_TOKEN_SHA256'
@@ -167,7 +163,7 @@ class ScriptWorker {
         println "Script worker listening on :${server.address.port} (caller token ${expectedSha256 ? 'required' : 'NOT required'})"
     }
 
-    /** A cold JVM's first evaluation (class loading, first JEXL compile) ran past EXPRESSION's 250 ms on 0.25 vCPU. */
+    // NOTE: a cold JVM's first evaluation (class loading, first JEXL compile) runs past EXPRESSION's 250 ms on 0.25 vCPU
     static final int WARM_UP_ROUNDS = 3
     private static final Map<String, String> WARM_UP_BODIES = [
             (ScriptSupervisor.EXPRESSION): '1 + 1',
@@ -175,9 +171,8 @@ class ScriptWorker {
     ] as Map<String, String>
 
     /**
-     * Runs every profile in this JVM until it succeeds (at most WARM_UP_ROUNDS times) and returns the last outcome per
-     * profile. main() calls it before the port opens, so a health check, and with it service discovery, never shows
-     * Moqui a cold worker. A profile that still fails is reported, not fatal: the worker starts and the caps still hold.
+     * Runs each profile until it succeeds, at most WARM_UP_ROUNDS times, and returns the last outcome per profile.
+     * Called before the port opens so the health check never shows Moqui a cold worker; a failure is reported, not fatal.
      */
     static Map<String, Map<String, Object>> warmUp() {
         Map<String, Map<String, Object>> out = [:]

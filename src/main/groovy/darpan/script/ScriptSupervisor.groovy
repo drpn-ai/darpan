@@ -36,8 +36,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * collection caps, and a wall-clock stop.
  *
  * <p>Where it runs: in Moqui's JVM by default. The caps bound what one evaluation can hold, but JEXL has no heap limit
- * of its own, so tenants outside Darpan authoring SCRIPT-profile code need the worker JVM (§4, stage 2a; ScriptWorker,
- * DAR-BE-169), switched on by a worker URL. Evaluations never open a transaction or touch the database: the caller
+ * of its own, so tenants outside Darpan authoring SCRIPT-profile code need the worker JVM (ScriptWorker), switched
+ * on by a worker URL. Evaluations never open a transaction or touch the database: the caller
  * reads the input first and writes nothing.</p>
  */
 @CompileStatic
@@ -149,7 +149,7 @@ class ScriptSupervisor {
      * With a worker URL configured the script runs in the worker JVM (ScriptWorker) and nowhere else.
      */
     static Map<String, Object> evaluate(Object profile, String body, Object input) {
-        // DAR-BE-175: scripts run last. While the core is busy, a script is not started (BUSY), not queued.
+        // scripts run last: while the core is busy a script is not started, and not queued either
         Map<String, Object> gate = ScriptLoadGate.check()
         if (gate.busy) return notRun(failure(profileOf(profile) ?: SCRIPT, 'BUSY', ScriptLoadGate.busyMessage(gate.reason as String)))
         return evaluateAdmitted(profile, body, input)
@@ -363,8 +363,8 @@ class ScriptSupervisor {
     }
 
     /**
-     * DAR-BE-175: a calculation hit an empty value. Instead of JEXL's "null operand: NullOperand", say where, and when
-     * the script just read a field the record does not have (on that same line), name it and list what the record has.
+     * A calculation hit an empty value: say where and, when the script just read a field that record doesn't have on
+     * that same line, name it and list the fields the record does have.
      */
     private static Map<String, Object> emptyValueFailure(String profile, Throwable thrown, String body, ScriptBudget budget) {
         JexlInfo info = thrown instanceof JexlException ? ((JexlException) thrown).info : null

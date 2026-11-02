@@ -53,7 +53,7 @@
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="script" type="Map"/>
             <parameter name="validation" type="Map"><description>{ok, profile, variables, error: {kind, message, line, column},
-                problems: [{rule, line, message}], notes: [text]} (problems/notes from ScriptChecker, DAR-BE-175)</description></parameter>
+                problems: [{rule, line, message}], notes: [text]}</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
@@ -88,11 +88,12 @@
                     }
                 </script>
             </if>
-            <!-- DAR-BE-175: common mistakes are refused before saving (ScriptChecker: endless loops, loops that never
-                 progress, misspelt fields and d: functions, = in an if, and a trial run on the sample input). -->
+            <!-- refuse common mistakes before saving: loops that never end, misspelt fields, a failing trial run -->
             <if condition="!ec.message.hasError()">
                 <set field="check" from="darpan.script.ScriptChecker.check(profileValue, scriptBody, sampleInputJson?.toString())"/>
-                <script>validation.problems = check.problems; validation.notes = check.notes; validation.ok = check.ok</script>
+                <set field="validation.problems" from="check.problems"/>
+                <set field="validation.notes" from="check.notes"/>
+                <set field="validation.ok" from="check.ok"/>
                 <iterate list="check.problems" entry="problem">
                     <message error="true">${problem.line ? 'Line ' + problem.line + ': ' : ''}${problem.message}</message>
                 </iterate>

@@ -71,7 +71,7 @@ class ScriptLabScreenTests {
         ScreenTest.ScreenTestRender str = lab().render('ScriptLab', [example: 'g-gap-call'], 'get')
         String out = str.output ?: ''
         assertFalse(str.errorMessages as boolean, "errors: ${str.errorMessages}")
-        assertTrue(out.contains('Script lane') && out.contains('threads busy') && out.contains('scripts refused above'), out.take(1500))
+        assertTrue(out.contains('Script lane') && out.contains('threads busy') && out.contains('scripts wait while heap after GC'), out.take(1500))
         assertTrue(out.contains('Groovy gap: one long library call') && out.contains('JEXL: endless loop'), 'examples listed')
         assertTrue(out.contains('Loaded: Groovy gap: one long library call'), 'example loaded into the form')
     }

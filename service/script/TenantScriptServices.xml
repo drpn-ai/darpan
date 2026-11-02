@@ -10,10 +10,8 @@
         <description>Runs every active script deployment whose nextRunDate has come (ServiceJob
             scan_TenantScriptDeployments_5m). Each is claimed by moving its nextRunDate forward before it runs, then its
             outcome is stamped on it (lastRunStatus SENT, NOTHING_TO_SEND, SCRIPT_ERROR, NO_INPUT, NOT_DELIVERED,
-            SCRIPT_MISSING). One deployment failing never stops the others. DAR-BE-175: scripts run last; while
-            ScriptLoadGate says Darpan's core is busy a due deployment is not run but marked WAITING, and once its window
-            passes (the earlier of scheduledMaxWaitMinutes and its next occurrence) EXPIRED and moved to its next run.
-            Never forced.</description>
+            SCRIPT_MISSING). One deployment failing never stops the others. While Darpan's core is busy a due deployment
+            is not run: it is marked WAITING, then EXPIRED once its window passes, never forced.</description>
         <in-parameters>
             <parameter name="nowTimestamp" type="Timestamp"/>
             <parameter name="limit" type="Integer" default-value="50"/>

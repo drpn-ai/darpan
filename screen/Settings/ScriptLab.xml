@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-175 POC. Script Lab: run a tenant script INSIDE the main server, on the ScriptLane, in JEXL or in guarded
-     Groovy, and watch the lane (threads, queue, stuck, refusals, heap gate, off switch). Super-admin only (URL authz on
-     component://darpan/screen/.* plus the exception in always-actions: Moqui skips pre-actions for transitions and runs a
-     transition's actions even after an always-actions error message). Writes nothing. -->
+<!-- Script Lab: run a draft script on the ScriptLane in JEXL or guarded Groovy and watch the lane; writes nothing.
+     NOTE: the gate throws in always-actions because Moqui skips pre-actions for transitions and still runs a
+     transition's actions after an error message. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         default-menu-title="Script Lab" require-authentication="true">
 
@@ -21,19 +20,19 @@
         <default-response url="."/>
     </transition>
 
-    <!-- The off switch an operator would flip without a deploy. -->
+    <!-- the off switch, no deploy needed -->
     <transition name="setLane">
         <actions><script>darpan.script.ScriptLane.setEnabled(laneOn == 'Y')</script></actions>
         <default-response url="."/>
     </transition>
 
-    <!-- No transaction: a script must never hold row locks or a pooled connection while it runs. -->
+    <!-- no transaction: a script must never hold row locks or a pooled connection while it runs -->
     <transition name="runScript" begin-transaction="false">
         <actions>
             <set field="out" from="darpan.script.ScriptLab.run(ec, engine, scriptProfile, scriptBody, inputJson)"/>
             <set field="lastRun" from="[engine: engine, scriptProfile: scriptProfile, scriptBody: scriptBody, inputJson: inputJson,
                     out: out, ranAt: ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd HH:mm:ss')]"/>
-            <!-- As JSON text: Moqui drops a non-serializable session attribute. -->
+            <!-- NOTE: stored as JSON text, Moqui drops a non-serializable session attribute -->
             <script>ec.web.sessionAttributes.put('darpanScriptLabLastRun', groovy.json.JsonOutput.toJson(lastRun))</script>
         </actions>
         <default-response url="."/>
@@ -42,7 +41,7 @@
     <actions>
         <set field="lane" from="darpan.script.ScriptLane.status()"/>
         <set field="laneText" from="(lane.enabled ? 'On' : 'SWITCHED OFF') + ' · ' + lane.running + ' of ' + lane.threads + ' threads busy · ' + lane.queued + ' of ' + lane.queueCapacity + ' queued · stuck ' + lane.stuck + ' · runs ' + lane.runs"/>
-        <set field="heapText" from="'Heap ' + lane.heapPercent + '% (' + lane.heapUsedMb + ' of ' + lane.heapMaxMb + ' MB) · scripts refused above ' + lane.heapGatePercent + '%'"/>
+        <set field="heapText" from="'Heap ' + lane.heapPercent + '% (' + lane.heapUsedMb + ' of ' + lane.heapMaxMb + ' MB) · scripts wait while heap after GC is at or above ' + lane.heapGatePercent + '%'"/>
         <set field="refusedText" from="lane.refused ? lane.refused.collect { k, v -> k + ' ' + v }.join(' · ') : 'none'"/>
         <set field="busyText" from="lane.busyTenants ? lane.busyTenants.join(', ') : 'none'"/>
         <set field="groovyCacheText" from="'Compiled Groovy scripts held: ' + darpan.script.GroovyGuard.cachedScripts() + ' of ' + darpan.script.GroovyGuard.CACHE_SIZE"/>

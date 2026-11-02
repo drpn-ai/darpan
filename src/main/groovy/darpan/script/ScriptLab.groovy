@@ -3,10 +3,7 @@ package darpan.script
 import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonSlurper
 
-/**
- * DAR-BE-175 POC: runs a script inside the main server, on the ScriptLane, with the chosen engine (JEXL or Groovy),
- * for the Settings > Script Lab screen. Super-admin only; the active tenant decides the per-tenant slot.
- */
+/** Runs a draft script on the ScriptLane in JEXL or Groovy for the Settings > Script Lab screen; super-admin only. */
 class ScriptLab {
     static final List<String> ENGINES = ['JEXL', 'GROOVY']
 
@@ -14,7 +11,7 @@ class ScriptLab {
         String e = engine?.trim()?.toUpperCase() ?: 'JEXL'
         if (!TenantAccessSupport.isSuperAdmin(ec)) return failure(e, 'NOT_ALLOWED', 'The script lab is limited to super-admin users.')
         if (!ENGINES.contains(e)) return failure(e, 'INPUT', "Unknown engine '${e}'.".toString())
-        // Scripts never hold a transaction (row locks, a pooled connection): the caller must not have one open.
+        // scripts never hold a transaction, it would keep row locks and a pooled connection for the whole run
         if (ec.transaction.isTransactionInPlace()) return failure(e, 'TRANSACTION', 'A script cannot run inside an open transaction.')
 
         String text = inputJson?.trim() ?: 'null'
@@ -39,7 +36,7 @@ class ScriptLab {
 
     private static final String LINES = '{"lines": [{"sku": "MUG-01", "ordered": 5, "shipped": 3}, {"sku": "TEE-02", "ordered": 4, "shipped": 4}, {"sku": "CAP-03", "ordered": 7, "shipped": 2}]}'
 
-    /** The demo set: the same jobs in both engines, then each guard, then Groovy's two known in-process gaps. */
+    /** Same jobs in both engines, then each guard, then Groovy's two known in-process gaps. */
     static List<Map<String, String>> examples() {
         return [
             [key: 'j-owed', label: 'JEXL: units still owed', expect: 'ok, 7', engine: 'JEXL', profile: 'SCRIPT', input: LINES,

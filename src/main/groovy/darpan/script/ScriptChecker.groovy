@@ -8,22 +8,14 @@ import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 /**
- * DAR-BE-175: refuses common mistakes before a JEXL script is saved, with the line and a fix. Built from what genuine
- * users did on 2026-11-02 (a loop that never counts up, a misspelt field) and other common slips.
+ * Checks a JEXL script before it is saved and returns each problem with its line and a fix: ENDLESS_LOOP,
+ * NO_PROGRESS, UNKNOWN_FIELD (against the sample input; ?? or ?. marks a field optional), UNKNOWN_FUNCTION,
+ * ASSIGN_IN_CONDITION, then one trial run on the sample: FAILS_ON_SAMPLE and TOO_HEAVY (over half the unit budget).
+ * Static checks read the source with text literals and comments blanked out.
  *
- * <p>Without running anything (on the source with text literals and comments blanked, so words inside them never
- * count): ENDLESS_LOOP (while (true) with no break/return), NO_PROGRESS (a while whose condition names nothing its
- * body changes), UNKNOWN_FIELD (a .field found nowhere in the sample input and not made by the script; reading it
- * with ?? or ?. marks it optional), UNKNOWN_FUNCTION (d:name not in the library), ASSIGN_IN_CONDITION (if (x = 1)).
- * Then one trial run on the sample input: FAILS_ON_SAMPLE (stopped or errored), TOO_HEAVY (over half its unit
- * budget on the sample; real data is usually bigger). The trial run goes through ScriptSupervisor.evaluate, so it
- * runs last like any script: while Darpan is busy it is skipped with a note, never a refusal.</p>
- *
- * <p>Bounded (security review of 49dd046): it runs on a request thread outside any script budget. The source is
- * already capped by validate (64,000 characters); here every pass is linear in the source, lines come from one
- * offset table, known sample keys stop at {@value #MAX_KNOWN_KEYS}, suggestions only compare names of similar length,
- * reports stop at {@value #MAX_FIELD_REPORTS} fields and {@value #MAX_PROBLEMS} problems, at most {@value #MAX_LOOPS}
- * loops are analysed, and the static pass stops at {@value #STATIC_DEADLINE_MS} ms (with a note, never a refusal).</p>
+ * NOTE: runs on a request thread outside any script budget, so every pass is linear in the source and capped: known
+ *     keys, reports, loops analysed, and a deadline after which the static pass stops with a note.
+ * NOTE: the trial run goes through ScriptSupervisor.evaluate, so while Darpan is busy it is skipped, not refused.
  */
 @CompileStatic
 class ScriptChecker {
@@ -40,7 +32,7 @@ class ScriptChecker {
     private static final Pattern WHILE = ~/\bwhile\s*\(/
     private static final Pattern D_CALL = ~/\bd\s*:\s*([A-Za-z_]\w*)\s*\(/
     private static final Pattern ASSIGN_IN_IF = ~/\bif\s*\(\s*[A-Za-z_][\w.]*\s*=(?!=)/
-    /** .name after a value; group 1 = ?. (optional), group 2 = the name, group 3 = a following ?? (optional). */
+    /** .name after a value: group 1 is ?. (optional), 2 the name, 3 a following ?? (optional) */
     private static final Pattern FIELD_READ = ~/(?<=[\w\])])\s*(\?)?\.\s*([A-Za-z_]\w*)(\s*\?\?)?/
     private static final Pattern QUOTED_KEY = ~/['"]([A-Za-z_]\w*)['"]\s*:/
     private static final Pattern SET_FIELD = ~/\.([A-Za-z_]\w*)\s*=(?!=)/
@@ -49,7 +41,7 @@ class ScriptChecker {
     private static final Set<String> NOT_VARIABLES = ['input', 'true', 'false', 'null', 'and', 'or', 'not', 'eq', 'ne', 'lt', 'le',
                                                       'gt', 'ge', 'size', 'empty'] as Set<String>
 
-    /** One check's working state: line offsets, the static deadline, the problems so far. */
+    /** one check's state: line offsets, the static deadline, problems so far */
     private static class Pass {
         final String source
         final String code
@@ -72,7 +64,7 @@ class ScriptChecker {
             return (i >= 0 ? i : -i - 2) + 1
         }
 
-        /** True once the static pass must stop: out of time, or enough problems to report. */
+        /** out of time, or enough problems to report */
         boolean done() {
             if (problems.size() >= MAX_PROBLEMS) return true
             if (System.nanoTime() > deadline) { cut = true; return true }
@@ -84,7 +76,7 @@ class ScriptChecker {
         }
     }
 
-    /** {ok, problems: [{rule, line, message}], notes: [String]}. */
+    /** Returns {ok, problems: [{rule, line, message}], notes: [String]}. */
     static Map<String, Object> check(Object profile, String body, String sampleJson) {
         String p = ScriptSupervisor.profileOf(profile) ?: ScriptSupervisor.SCRIPT
         Pass pass = new Pass(body ?: '')
@@ -102,7 +94,7 @@ class ScriptChecker {
         if (pass.cut) notes << 'This script is long, so some checks stopped early; the rest still ran.'
         if (pass.problems.size() >= MAX_PROBLEMS) notes << "Only the first ${MAX_PROBLEMS} problems are listed.".toString()
 
-        // Only a script with no static problem gets a trial run (a NO_PROGRESS loop would just burn its budget).
+        // only trial-run a script with no static problem, a NO_PROGRESS loop would just burn its budget
         if (pass.problems.isEmpty() && sample != null) {
             Map<String, Object> run = ScriptSupervisor.evaluate(p, pass.source, sample)
             Map error = run.error as Map
@@ -192,8 +184,8 @@ class ScriptChecker {
 
     private static void fields(Pass pass, Object sample) {
         Set<String> known = keysOf(sample)
-        // Fields the script makes itself: quoted map literal keys ({'k': ..}) and m.k = ... (in JEXL an unquoted key
-        // {k: ..} is a variable's value, not a name, so it does not count).
+        // fields the script makes itself: quoted map keys and m.k = ...
+        // NOTE: in JEXL an unquoted key {k: ..} is a variable's value, not a name, so it doesn't count
         Matcher q = QUOTED_KEY.matcher(pass.source)
         while (q.find() && known.size() < MAX_KNOWN_KEYS * 2) known << q.group(1)
         Matcher s = SET_FIELD.matcher(pass.code)
@@ -213,7 +205,7 @@ class ScriptChecker {
 
     // -- helpers
 
-    /** Text literals and comments replaced by spaces, newlines kept, so positions and lines still match the source. */
+    /** Text literals and comments replaced by spaces, newlines kept, so offsets and lines still match the source. */
     static String mask(String source) {
         StringBuilder out = new StringBuilder(source)
         int i = 0

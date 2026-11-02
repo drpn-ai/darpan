@@ -43,8 +43,8 @@ class ScriptArithmetic extends JexlArithmetic {
     @Override
     Object add(Object l, Object r) {
         ScriptBudget.charge()
-        // DAR-BE-175: + on a list joins (list + list) or appends (list + item), counted and capped like any list.
-        // Before, JEXL fell back to text and list + list returned "[I@6eeb90e5[I@..." as a success.
+        // + on a list joins (list + list) or appends (list + item), counted and capped like any list
+        // NOTE: without this JEXL falls back to text and list + list returns "[I@6eeb90e5[I@..."
         if (isListLike(l)) return joined(l, r)
         if (isListLike(r)) throw new ScriptLimitException("ACCESS", "Put the list first: list + item, or list + list.")
         if (l instanceof Map || r instanceof Map) {
@@ -63,14 +63,12 @@ class ScriptArithmetic extends JexlArithmetic {
         return (x instanceof Collection) || (x != null && x.getClass().isArray())
     }
 
-    /** A list the script built itself (DAR-BE-175). Only these grow in place under +=; input lists are never changed. */
+    /** A list the script built itself; only these grow in place under +=, so input lists never change. */
     static class ScriptList extends ArrayList<Object> { }
 
     /**
-     * SELF_ADD overload: list += item / list += list. Appends IN PLACE to a list the script built (one unit and a size
-     * check per added item), so building a list in a loop costs O(n), not a fresh copy per append (O(n^2), which
-     * spent the whole budget at about 2,000 items). Anything else falls back to ordinary + (numbers, text, and a
-     * first copy of any other list into a ScriptList).
+     * SELF_ADD overload: list += item or list += list appends in place to a ScriptList (a unit and a size check per
+     * item), so appends in a loop are O(n) rather than a copy each time. Anything else falls back to ordinary +.
      */
     Object selfAdd(Object l, Object r) {
         // JEXL treats selfAdd as IN PLACE and ignores its result. Anything but a ScriptList (an input list, a [] literal)

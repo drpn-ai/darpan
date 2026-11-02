@@ -93,7 +93,7 @@ class AcmeLedgerFixture {
         Integer refuseCostAbove = null
 
         Map execute(String document, Map variables, int reservation) {
-            calls << [document: (document =~ /query\s+(\w+)/).with { it.find() ? it.group(1) : "?" }, variables: new LinkedHashMap(variables)]
+            calls << [document: (document =~ /query\s+(\w+)/).with { it.find() ? it.group(1) : "?" }, variables: new LinkedHashMap(variables), text: document]
             if (failOn != null && (variables.filter as String)?.contains(failOn)) throw new DataSourceCallException("BROKEN", "broken")
             int first = (variables.first as Number).intValue()
             if (refuseCostAbove != null && first > refuseCostAbove) throw new DataSourceCallException("TOO_EXPENSIVE", "too expensive", true)

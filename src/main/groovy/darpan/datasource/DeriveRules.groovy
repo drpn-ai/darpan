@@ -9,20 +9,25 @@ import java.time.Instant
  *
  *   set    the field written (one word)
  *   when   RecordConditions, read on the record as it entered the step; absent = always
- *   value  {literal}, {copy: path}, {map: {..}, from: path, default}, or {fn, args: [values], sep}
+ *   value  {literal}, {copy: path}, {map: {..}, from: path, default}, or {fn, args: [values], sep}; a copy path through a
+ *          list (`opps[*].method`) gives the list of every value it reaches
  *          fn: text (trimmed text, blank = null), decimal (text that parses as a number becomes one; anything else is
  *          kept), decimalPlain (a number with no trailing zeros; blank = null), epochMillis (an ISO instant becomes epoch
  *          millis; anything else, numbers included, is kept), join (non-blank args joined by sep), firstPresent, units
- *          (a quantity as whole units: parse STRICT_INT|NUMERIC, nullAs, as the repeat step reads it)
+ *          (a quantity as whole units: parse STRICT_INT|NUMERIC, nullAs, as the repeat step reads it), size (how many in a
+ *          list or object; null is 0, any other value 1), distinctSorted (the args' non-blank values, lists flattened,
+ *          trimmed, once each, sorted, joined by sep (default ","); none gives empty text), first (a list's first value,
+ *          null when empty; any other value itself), atLeast (true when the first arg is a number at least the second)
  *
  * Rows fire in order, so a later row's value may read a field an earlier row set, and a later row for the same field
  * overrides an earlier one (a default first, the cases after). Pure.
  */
 class DeriveRules {
 
-    static final List<String> FUNCTIONS = ["text", "decimal", "decimalPlain", "epochMillis", "join", "firstPresent", "units"].asImmutable()
+    static final List<String> FUNCTIONS = ["text", "decimal", "decimalPlain", "epochMillis", "join", "firstPresent", "units",
+                                           "size", "distinctSorted", "first", "atLeast"].asImmutable()
     private static final String NAME = /[A-Za-z][A-Za-z0-9_]{0,59}/
-    private static final String PATH = /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,7}/
+    private static final String PATH = RecordConditions.FIELD
 
     static boolean matches(Map record, Map rule) {
         return RecordConditions.matches(record, rule.when)
@@ -34,7 +39,10 @@ class DeriveRules {
 
     static Object valueOf(Map record, Map v) {
         if (v.containsKey("literal")) return v.literal
-        if (v.copy != null) return JsonPathValues.value(record, (String) v.copy)
+        if (v.copy != null) {
+            String path = (String) v.copy
+            return path.contains("[*]") ? JsonPathValues.values(record, path) : JsonPathValues.value(record, path)
+        }
         if (v.map instanceof Map) {
             Object key = JsonPathValues.value(record, (String) v.from)
             Map m = (Map) v.map
@@ -64,6 +72,21 @@ class DeriveRules {
                 return args.find { it != null && it.toString().trim() }
             case "units":
                 return DataSourceRunner.units(first, (v.parse ?: "STRICT_INT") as String, ((v.nullAs != null ? v.nullAs : 1) as Number).intValue())
+            case "size":
+                if (first == null) return 0
+                if (first instanceof Collection) return ((Collection) first).size()
+                if (first instanceof Map) return ((Map) first).size()
+                return 1
+            case "distinctSorted":
+                List<String> values = args.collectMany { it instanceof Collection ? ((Collection) it).toList() : [it] }
+                        .collect { it?.toString()?.trim() }.findAll { it }.unique().sort()
+                return values.join((v.sep ?: ",") as String)
+            case "first":
+                if (first instanceof Collection) return ((Collection) first).isEmpty() ? null : ((Collection) first).iterator().next()
+                return first
+            case "atLeast":
+                BigDecimal a = RecordConditions.number(first), b = RecordConditions.number(args.size() > 1 ? args[1] : null)
+                return a != null && b != null && a >= b
             default:
                 throw new IllegalArgumentException("A derive value uses ${FUNCTIONS.join(', ')}, not '${v.fn}'.")
         }
@@ -93,6 +116,11 @@ class DeriveRules {
         return errors
     }
 
+    /** Words for each problem in one value spec, for steps that compute values outside derive rows (a drop's sidecar). */
+    static List<String> checkValueSpec(String at, Object raw) {
+        return checkValue(at, raw, 0)
+    }
+
     private static List<String> checkValue(String at, Object raw, int depth) {
         if (!(raw instanceof Map)) return ["${at}: value is {literal}, {copy}, {map, from} or {fn, args}.".toString()]
         if (depth > 4) return ["${at}: values nest at most 4 deep.".toString()]
@@ -107,6 +135,7 @@ class DeriveRules {
         if (v.fn != null) {
             if (!(v.fn in FUNCTIONS)) return ["${at}: fn is one of ${FUNCTIONS.join(', ')}, not '${v.fn}'.".toString()]
             if (!(v.args instanceof List) || ((List) v.args).isEmpty()) return ["${at}: ${v.fn} needs args.".toString()]
+            if (v.fn == "atLeast" && ((List) v.args).size() != 2) return ["${at}: atLeast compares two values.".toString()]
             if (v.fn == "units" && v.parse != null && !(v.parse in DataSourceDefinitionSupport.REPEAT_PARSES)) {
                 return ["${at}: units parse is ${DataSourceDefinitionSupport.REPEAT_PARSES.join(' or ')}.".toString()]
             }

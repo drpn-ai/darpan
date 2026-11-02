@@ -161,7 +161,7 @@ fragment F on InvoiceConnection { edges { node { invoiceNo } } meta: __schema { 
         d.steps = ((List) d.steps) + [[id: "invoices", kind: "query"], [id: "guess", kind: "script"]]
         List<String> errors = errorsOf(d)
         assertTrue(errors.any { it.contains("Two steps are named 'invoices'") })
-        assertTrue(errors.any { it.contains("Step 'guess' is one of query, unwrap, join, split, repeat, number, derive, count, filter, not 'script'") })
+        assertTrue(errors.any { it.contains("Step 'guess' is one of query, unwrap, join, split, repeat, number, derive, count, filter, drop, not 'script'") })
     }
 
     @Test

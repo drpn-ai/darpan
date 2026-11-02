@@ -23,8 +23,12 @@ import java.util.concurrent.atomic.AtomicInteger
  *           earlier step's (`on`)
  *   filter  the run's exclusion rules (SourceFilterSupport) on each finished record, with a level's plain fields laid under
  *           it (`overlay`); only the declared `fields` may be filtered on, and excluded records go to the sidecar collector
+ *   drop    records the source itself leaves out (a definition condition), removed from their step in place so later reads
+ *           never fetch their children; counted, and optionally kept as sidecar entries
  *
- * Records then carry record.fields (always, null when unset) and record.optionalFields (only when set).
+ * A query's selections are chosen once per run from the fields it keeps or filters on (request.keep + the rules' fields).
+ * Records then carry record.fields (always, null when unset) and record.optionalFields (only when set), trimmed to the
+ * run's keep fields (and their keepWith companions) when record.keepRecordFields is true.
  */
 class DataSourceRunner {
 
@@ -46,12 +50,17 @@ class DataSourceRunner {
     final Map<Integer, Integer> excludedByRule = java.util.Collections.synchronizedMap(new LinkedHashMap<Integer, Integer>())
     final Map<Integer, Integer> fieldAbsentByRule = java.util.Collections.synchronizedMap(new LinkedHashMap<Integer, Integer>())
     private List<Map<String, Object>> filterRules = []
+    /** Per query step, this run's document, cost per record and fixed values (its selections). */
+    private final Map<String, Map> plans = [:]
+    /** Per drop sidecar suffix: [suffix, entries, truncated]. */
+    private final Map<String, Map> sidecars = java.util.Collections.synchronizedMap(new LinkedHashMap<String, Map>())
+    private Set<String> keepFields = null
 
     DataSourceRunner(Map definition, def transport) {
         this.definition = definition
         this.transport = transport
         this.stepsById = ((List<Map>) definition.steps).collectEntries { [(it.id): it] }
-        ((List<Map>) definition.steps).findAll { it.kind == "count" }.each { counts.put((String) it.name, 0L) }
+        ((List<Map>) definition.steps).findAll { it.kind in ["count", "drop"] }.each { counts.put((String) it.name, 0L) }
     }
 
     /**
@@ -64,6 +73,10 @@ class DataSourceRunner {
         Map first = ((List<Map>) definition.steps)[0]
         filterRules = (List<Map<String, Object>>) (request.filters ?: [])
         checkFilterFields()
+        keepFields = keepFieldsOf(request.keep)
+        List<String> wanted = (((request.keep ?: []) as List) + filterRules.collect { it.fieldExpression })
+                .collect { it?.toString()?.trim() }.findAll { it }.unique()
+        ((List<Map>) definition.steps).findAll { it.kind == "query" }.each { plans.put((String) it.id, planOf(it, wanted)) }
         int batchSize = ((definition.batchRecords ?: DEFAULT_BATCH_RECORDS) as Number).intValue()
         List<Map> pieces
         int parallel
@@ -81,6 +94,7 @@ class DataSourceRunner {
                 counts: new LinkedHashMap(counts), pages: new LinkedHashMap(pagesByStep),
                 excludedByRule: new LinkedHashMap(excludedByRule), fieldAbsentByRule: new LinkedHashMap(fieldAbsentByRule),
                 metadata: new LinkedHashMap((Map) (definition.metadata ?: [:])),
+                sidecars: sidecars.values().collect { Map sc -> [suffix: sc.suffix, entries: new ArrayList((List) sc.entries), truncated: sc.truncated] },
                 pageSizes: pageSizes.collectEntries { k, v -> [(k): v.get()] }]
     }
 
@@ -180,7 +194,9 @@ class DataSourceRunner {
     /** A query step's pages for one set of variables, each page's records to `take`. */
     private void readPages(Map step, Map vars, Closure take) {
         Map paging = (Map) step.paging
-        AtomicInteger size = pageSizes.computeIfAbsent((String) step.id, { new AtomicInteger(initialPageSize(paging)) })
+        Map plan = plans.get((String) step.id) ?: [document: step.document, extraCost: 0d, set: [:]]
+        Map set = (Map) plan.set
+        AtomicInteger size = pageSizes.computeIfAbsent((String) step.id, { new AtomicInteger(initialPageSize(paging, (double) plan.extraCost)) })
         int maxPages = ((paging.maxPages ?: 20_000) as Number).intValue()
         String cursor = null
         Set<String> seen = [] as Set<String>
@@ -191,7 +207,7 @@ class DataSourceRunner {
             if (cursor != null) v.put(paging.afterVariable, cursor)
             Map data
             try {
-                data = (Map) transport.execute((String) step.document, v, (step.reservation as Number).intValue())
+                data = (Map) transport.execute((String) plan.document, v, (step.reservation as Number).intValue())
             } catch (DataSourceCallException e) {
                 if (!e.costRefused || size.get() <= 1) throw e
                 size.set(Math.max(1, (int) (size.get() / 2)))
@@ -202,7 +218,9 @@ class DataSourceRunner {
                 throw new DataSourceCallException("NO_CONNECTION", "Step '${step.id}': the answer has no ${step.connectionAt}.".toString())
             }
             synchronized (pagesByStep) { pagesByStep.put((String) step.id, (pagesByStep.get(step.id) ?: 0) + 1) }
-            take.call(JsonPathValues.values(connection, (String) step.recordsAt).findAll { it instanceof Map } as List<Map>)
+            List<Map> page = JsonPathValues.values(connection, (String) step.recordsAt).findAll { it instanceof Map } as List<Map>
+            if (set) page.each { Map r -> r.putAll(set) }
+            take.call(page)
             if (++pages >= maxPages) throw new DataSourceCallException("TOO_MANY_PAGES", "Step '${step.id}' passed ${maxPages} pages.".toString())
             if (JsonPathValues.value(connection, (String) step.hasNextAt) != true) return
             cursor = JsonPathValues.value(connection, (String) step.cursorAt)?.toString()
@@ -212,10 +230,35 @@ class DataSourceRunner {
         }
     }
 
-    private static int initialPageSize(Map paging) {
+    private static int initialPageSize(Map paging, double extraCost) {
         if (paging.pageSize instanceof Number) return ((Number) paging.pageSize).intValue()
         Map p = (Map) paging.pageSize
-        return Math.max(1, (int) Math.floor(((p.budget as Number).doubleValue()) / ((p.costPerRecord as Number).doubleValue())))
+        int size = Math.max(1, (int) Math.floor(((p.budget as Number).doubleValue()) / (((p.costPerRecord as Number).doubleValue()) + extraCost)))
+        return p.max != null ? Math.min(size, ((Number) p.max).intValue()) : size
+    }
+
+    /** A query step's selections for this run: the ones whose when holds for {wanted}, their document, cost and values. */
+    private static Map planOf(Map step, List<String> wanted) {
+        List<Map> on = ((List<Map>) (step.selections ?: [])).findAll { RecordConditions.matches([wanted: wanted], it.when) }
+        String document = step.selections != null ? DataSourceDefinitionSupport.fillSlots((String) step.document, on) : (String) step.document
+        double extra = (on.collect { ((it.cost ?: 0) as Number).doubleValue() }.sum() ?: 0d) as double
+        Map set = [:]
+        on.each { if (it.set instanceof Map) set.putAll((Map) it.set) }
+        return [document: document, extraCost: extra, set: set, selections: on.collect { it.at + ":" + it.text }]
+    }
+
+    /** The fields a run keeps (with their companions), or null for the whole record. A field the record cannot carry is refused. */
+    private Set<String> keepFieldsOf(Object keep) {
+        Map rec = (Map) definition.record
+        if (rec.keepRecordFields != true || !(keep instanceof Collection) || ((Collection) keep).isEmpty()) return null
+        Set<String> known = ((((List) rec.fields) ?: []) + (((List) rec.optionalFields) ?: [])).collect { it.toString() } as Set<String>
+        Set<String> asked = ((Collection) keep).collect { it?.toString()?.trim() }.findAll { it } as LinkedHashSet<String>
+        List<String> unknown = asked.findAll { !known.contains(it) }.sort()
+        if (unknown) throw new IllegalArgumentException("This source cannot keep ${unknown}: its records do not carry them.")
+        Map keepWith = (Map) (rec.keepWith ?: [:])
+        Set<String> out = new LinkedHashSet<String>(asked)
+        asked.each { String f -> ((List) (keepWith.get(f) ?: [])).each { out.add(it.toString()) } }
+        return out
     }
 
     // ---------------------------------------------------------------- one batch
@@ -238,10 +281,14 @@ class DataSourceRunner {
                             .derive(ctx.get((step.on ?: current) as String), "derive:${step.id}".toString())
                     break
                 case "filter": ctx.put((String) step.id, filter(step, ctx.get(current))); current = (String) step.id; break
+                case "drop": drop(step, ctx.get((step.on ?: current) as String)); break
                 default: throw new UnsupportedOperationException("The ${step.kind} step is not built yet (step '${step.id}').")
             }
         }
-        List<Map> out = ctx.get(current).collect { project(it) }
+        List<Map> out = ctx.get(current).collect { Map r ->
+            Map p = project(r)
+            keepFields == null ? p : p.findAll { k, v -> keepFields.contains(k) }
+        }
         recordCount.addAndGet(out.size())
         return out
     }
@@ -464,6 +511,30 @@ class DataSourceRunner {
         Set<String> offered = ((step.fields ?: []) as List).collect { it.toString() } as Set<String>
         List<String> unknown = filterRules.collect { (String) it.fieldExpression }.findAll { !offered.contains(it) }.unique().sort()
         if (unknown) throw new IllegalArgumentException("This source cannot filter on ${unknown}: its records do not carry them.")
+    }
+
+    private void drop(Map step, List<Map> input) {
+        if (!input) return
+        Map sc = (Map) step.sidecar
+        List<Map> entries = []
+        long n = 0
+        Iterator<Map> it = input.iterator()
+        while (it.hasNext()) {
+            Map r = it.next()
+            if (!RecordConditions.matches(r, step.when)) continue
+            it.remove()
+            n++
+            if (sc) entries << ((Map) sc.fields).collectEntries { k, v -> [(k): DeriveRules.valueOf(r, (Map) v)] }
+        }
+        synchronized (counts) { counts.put((String) step.name, (counts.get(step.name) ?: 0L) + n) }
+        if (sc && entries) {
+            synchronized (sidecars) {
+                Map held = sidecars.computeIfAbsent((String) sc.suffix, { [suffix: sc.suffix, entries: [], truncated: false] })
+                int room = Math.max(0, ((sc.max as Number).intValue()) - ((List) held.entries).size())
+                ((List) held.entries).addAll(entries.take(room))
+                if (entries.size() > room) held.truncated = true
+            }
+        }
     }
 
     private void count(Map step, List<Map> input) {

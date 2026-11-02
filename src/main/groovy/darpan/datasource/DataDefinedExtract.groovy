@@ -25,7 +25,8 @@ import java.time.ZoneOffset
  * Gate (as every coded extract): the config id is present, the config is the tenant's own or shared with it, the
  * endpoint is enabled for it, and it is not inactive. Then the definition runs (DataSourceRunner over GraphQlTransport)
  * by the run's lookup keys or its window, its records streamed into a work file that is moved into place only when the
- * whole read succeeded; excluded records go to the sidecar beside it. Outputs are the extract contract's: fileName,
+ * whole read succeeded; excluded records go to the sidecar beside it, and each drop step's sidecar to
+ * `<file>.<suffix>.json` ({manifest, truncated, sourceFileName}). Outputs are the extract contract's: fileName,
  * fileLocation, recordCount, dataAvailable, warnings, errors, requestMetadata.
  */
 class DataDefinedExtract {
@@ -87,6 +88,7 @@ class DataDefinedExtract {
             } catch (Exception sidecarError) {
                 context.put("warnings", ((List) context.get("warnings")) + ["Excluded-records sidecar not written: ${sidecarError.message}".toString()])
             }
+            writeDropSidecars(ec, context, (List<Map>) (result.sidecars ?: []), outputBaseLocation, fileName, outputDirectory)
         } catch (Exception e) {
             String code = e instanceof DataSourceCallException ? "[${((DataSourceCallException) e).code}] " : ""
             context.put("errors", ["${connector.systemEnumId} read failed: ${code}${e.message}".toString()])
@@ -98,6 +100,28 @@ class DataDefinedExtract {
             if (workFile.exists()) workFile.delete()
             // The excluded-records spill holds customer records: gone whether the sidecar was written or not.
             ExcludedRecordsSidecar.discard(runner.excludedCollector)
+        }
+    }
+
+    /**
+     * Each drop step's sidecar beside the extract, as `<file without .json>.<suffix>.json`. Advisory, as the coded sidecars
+     * are: the extract has already succeeded, so a failure is a warning. A drop that left nothing out writes nothing.
+     */
+    private static void writeDropSidecars(def ec, Map context, List<Map> sidecars, String outputBaseLocation, String fileName,
+                                          File outputDirectory) {
+        sidecars.findAll { it.entries }.each { Map sc ->
+            File work = null
+            try {
+                String name = fileName.replaceAll(/(?i)\.json$/, "") + ".${sc.suffix}.json"
+                work = outputDirectory != null ? File.createTempFile("data-defined-sidecar-", ".partial", outputDirectory)
+                        : File.createTempFile("data-defined-sidecar-", ".partial")
+                work.setText(JsonOutput.toJson([manifest: sc.entries, truncated: sc.truncated == true, sourceFileName: fileName]), "UTF-8")
+                DataManagerSupport.moveIntoLocation(ec, work, DataManagerSupport.childLocation(outputBaseLocation, name))
+            } catch (Exception e) {
+                context.put("warnings", ((List) context.get("warnings")) + ["The ${sc.suffix} sidecar was not written: ${e.message}".toString()])
+            } finally {
+                if (work != null && work.exists()) work.delete()
+            }
         }
     }
 
@@ -146,6 +170,8 @@ class DataDefinedExtract {
         Map request
         Long fromMillis = null, thruMillis = null
         Object keys = context.get("lookupKeys")
+        Object keep = context.get("keepRecordFields")
+        List keepList = keep instanceof Collection ? new ArrayList((Collection) keep) : null
         List<Map<String, Object>> filters
         try {
             Object rawFilters = connector.filterParameterName ? context.get(connector.filterParameterName) : null
@@ -154,13 +180,13 @@ class DataDefinedExtract {
             return [errors: [e.message]]
         }
         if (keys instanceof Collection && !((Collection) keys).isEmpty()) {
-            request = [mode: "ids", keys: new ArrayList((Collection) keys), keyField: context.get("lookupKeyField"), filters: filters]
+            request = [mode: "ids", keys: new ArrayList((Collection) keys), keyField: context.get("lookupKeyField"), filters: filters, keep: keepList]
         } else {
             fromMillis = windowMillis(context.get((connector.dateFromParameterName ?: "windowStart") as String), "The window start", errors)
             thruMillis = windowMillis(context.get((connector.dateToParameterName ?: "windowEnd") as String), "The window end", errors)
             if (errors) return [errors: errors]
             if (thruMillis <= fromMillis) return [errors: ["The window ends before it starts."]]
-            request = [mode: "window", from: fromMillis, thru: thruMillis, filters: filters]
+            request = [mode: "window", from: fromMillis, thru: thruMillis, filters: filters, keep: keepList]
         }
         Map record = [:]
         configDefinition.getAllFieldNames().each { String f -> record.put(f, config.get(f)) }

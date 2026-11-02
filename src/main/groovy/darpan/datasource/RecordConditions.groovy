@@ -4,11 +4,15 @@ package darpan.datasource
  * DAR-BE-176. The conditions a data-defined step reads a record with: {field, op, values} with op IN, NOT_IN, BLANK or
  * NOT_BLANK, and {any: [...]} / {all: [...]} to combine them. A field is a path (`item.externalId`). Values compare as
  * numbers when both sides are numbers (1, "1" and 1.0 are one value), else as text. A list of conditions means all of
- * them. Pure.
+ * them. Blank is null, blank text, or an empty list or object.
+ *
+ * A path through a list (`lines[*].status`) reads every value it reaches: IN and NOT_BLANK hold when any value does,
+ * NOT_IN and BLANK when none does (a path that reaches nothing is BLANK and NOT_IN anything). Pure.
  */
 class RecordConditions {
 
     static final List<String> OPS = ["IN", "NOT_IN", "BLANK", "NOT_BLANK"].asImmutable()
+    static final String FIELD = /[A-Za-z_][A-Za-z0-9_]*(\[\*\])?(\.[A-Za-z_][A-Za-z0-9_]*(\[\*\])?){0,7}/
 
     static boolean matches(Map record, Object conditions) {
         if (conditions == null) return true
@@ -16,8 +20,20 @@ class RecordConditions {
         Map c = (Map) conditions
         if (c.any instanceof List) return ((List) c.any).any { matches(record, it) }
         if (c.all instanceof List) return ((List) c.all).every { matches(record, it) }
-        Object value = JsonPathValues.value(record, (String) c.field)
-        boolean blank = value == null || value.toString().trim().isEmpty()
+        String field = (String) c.field
+        if (field.contains("[*]")) {
+            List<Object> found = JsonPathValues.values(record, field)
+            Closure<Boolean> listed = { Object v -> !isBlank(v) && ((c.values ?: []) as List).any { same(v, it) } }
+            switch (c.op) {
+                case "BLANK": return found.every { isBlank(it) }
+                case "NOT_BLANK": return found.any { !isBlank(it) }
+                case "IN": return found.any(listed)
+                case "NOT_IN": return !found.any(listed)
+                default: throw new IllegalArgumentException("A condition is one of ${OPS.join(', ')}, not '${c.op}'.")
+            }
+        }
+        Object value = JsonPathValues.value(record, field)
+        boolean blank = isBlank(value)
         switch (c.op) {
             case "BLANK": return blank
             case "NOT_BLANK": return !blank
@@ -40,12 +56,19 @@ class RecordConditions {
             else errors.addAll(check(where, inner))
             return errors
         }
-        if (!(c.field ==~ /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,7}/)) errors << "${where}: a condition needs a field.".toString()
+        if (!(c.field ==~ FIELD)) errors << "${where}: a condition needs a field.".toString()
         if (!(c.op in OPS)) errors << "${where}: a condition is one of ${OPS.join(', ')}, not '${c.op}'.".toString()
         if (c.op in ["IN", "NOT_IN"] && !((c.values instanceof List) && !((List) c.values).isEmpty())) {
             errors << "${where}: ${c.op} needs values.".toString()
         }
         return errors
+    }
+
+    static boolean isBlank(Object v) {
+        if (v == null) return true
+        if (v instanceof Collection) return ((Collection) v).isEmpty()
+        if (v instanceof Map) return ((Map) v).isEmpty()
+        return v.toString().trim().isEmpty()
     }
 
     static boolean same(Object a, Object b) {

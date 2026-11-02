@@ -14,8 +14,13 @@ import groovy.json.JsonSlurper
  *   {id, kind: "query", document, connectionAt (the root field), recordsAt, hasNextAt, cursorAt (paths under it),
  *    bind: {window: {variables, field, sliceHours, instantFormat, parallel},
  *           ids: {variables, from (LOOKUP_KEYS or <earlier step>.<field>), chunk, parallel, keyFields, idPattern, separator}},
- *    paging: {firstVariable, afterVariable, pageSize | {budget, costPerRecord}, maxPages}, reservation}
- * Window templates may use {from} {thru}; ids templates {ids} {keyField}. The other steps (DataSourceRunner):
+ *    paging: {firstVariable, afterVariable, pageSize | {budget, costPerRecord, max}, maxPages}, reservation,
+ *    selections: [{at, when, text, cost, set}]}
+ * Window templates may use {from} {thru}; ids templates {ids} {keyField}. A document may hold slots ({{name}}), each
+ * filled by the selections `at` it whose `when` holds for {wanted: [the fields the run keeps or filters on]}, their text
+ * joined by spaces; an `on` selection adds its cost to costPerRecord and its `set` values to every record the step reads.
+ * A selection's text has balanced brackets and no " # $ or {{, and the document is checked with every selection on,
+ * with none on, and with each alone, so no document a run can send is unchecked. The other steps (DataSourceRunner):
  *   unwrap {of (an earlier step), field, path}: the field becomes the list at path inside it (a nested connection's
  *           edges[*].node)
  *   join   {into, from (earlier steps), on: [{into, from}], at: "list[*]", atOn: [{at, from}], many | copy {to: path} | as,
@@ -26,6 +31,11 @@ import groovy.json.JsonSlurper
  *   count  {name, when (RecordConditions), distinct: [paths]}
  *   derive {rules: [{set, when, value}], on (an earlier step; default the current records)} (DeriveRules)
  *   filter {overlay (a level whose plain fields sit under the record), fields (what rules may read)}
+ *   drop   {name, when, on (an earlier step; default the current records), sidecar {suffix, fields {name: value}, max}}:
+ *          records the source itself leaves out, counted under name, never in the run-rule sidecar; with a sidecar, each
+ *          one's fields (DeriveRules values) are written beside the extract, up to max, saying when it stopped
+ * record: {fields, optionalFields, keepRecordFields (true: a run's keepRecordFields trims each record, and a field the
+ * record cannot carry is refused), keepWith {field: [fields kept with it]}}.
  * Top level: batchRecords, metadata (fixed values a run reports, e.g. a count this source never has), and warnings
  * ({count, text}: a warning a run gives when that count is above 0; {n} is the count).
  */
@@ -33,7 +43,7 @@ class DataSourceDefinitionSupport {
 
     static final List<String> PROTOCOLS = ["GRAPHQL", "REST_JSON"].asImmutable()
     static final List<String> STATUSES = ["DRAFT", "ACTIVE", "RETIRED"].asImmutable()
-    static final List<String> STEP_KINDS = ["query", "unwrap", "join", "split", "repeat", "number", "derive", "count", "filter"].asImmutable()
+    static final List<String> STEP_KINDS = ["query", "unwrap", "join", "split", "repeat", "number", "derive", "count", "filter", "drop"].asImmutable()
     static final List<String> REPEAT_PARSES = ["STRICT_INT", "NUMERIC"].asImmutable()
     /** The sign-in methods core implements; which one a connection uses, and from which of its fields, is data. */
     static final List<String> AUTH_KINDS = ["NONE", "BASIC", "BEARER", "HEADER"].asImmutable()
@@ -45,6 +55,7 @@ class DataSourceDefinitionSupport {
     private static final java.util.regex.Pattern PLACEHOLDER = ~/\{([A-Za-z][A-Za-z0-9_]*)\}/
     private static final Set<String> WINDOW_PLACEHOLDERS = ["from", "thru"] as Set<String>
     private static final Set<String> IDS_PLACEHOLDERS = ["ids", "keyField"] as Set<String>
+    static final java.util.regex.Pattern SLOT = ~/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/
 
     /** The definition as a Map, or IllegalArgumentException naming every problem. */
     static Map parse(String protocol, String json, Collection<String> connectionFields = null) {
@@ -189,6 +200,8 @@ class DataSourceDefinitionSupport {
             else if (s.kind == "derive") {
                 errors.addAll(DeriveRules.check(where, s.rules))
                 if (s.on != null && !earlier.contains(s.on)) errors << "${where}: on names an earlier step.".toString()
+            } else if (s.kind == "drop") {
+                errors.addAll(checkDropStep(where, s, earlier))
             } else if (s.kind == "filter") {
                 if (s.overlay != null && !(s.overlay ==~ NAME)) errors << "${where}: overlay is a level name.".toString()
                 if (!((s.fields instanceof List) && !((List) s.fields).isEmpty() && ((List) s.fields).every { it ==~ NAME })) {
@@ -203,9 +216,18 @@ class DataSourceDefinitionSupport {
     private static List<String> checkQueryStep(String where, String protocol, Map s, Map limits, Set<String> earlier) {
         List<String> errors = []
         Map doc = [variables: [:], rootFields: []]
-        if (protocol == "GRAPHQL") {
-            doc = GraphQlDocumentCheck.check(s.document?.toString())
-            ((List<String>) doc.errors).each { errors << "${where}: ${it}".toString() }
+        List<String> documents = [s.document?.toString()]
+        if (s.selections != null || slots(s.document?.toString())) {
+            List<String> selectionErrors = checkSelections(where, s)
+            errors.addAll(selectionErrors)
+            documents = selectionErrors ? [] : selectionDocuments(s)
+        }
+        if (protocol == "GRAPHQL" && documents) {
+            documents.each { String text ->
+                Map checked = GraphQlDocumentCheck.check(text)
+                ((List<String>) checked.errors).each { String e -> if (!errors.contains("${where}: ${e}".toString())) errors << "${where}: ${e}".toString() }
+                if (doc.rootFields == []) doc = checked   // the first document is the one with every selection on
+            }
             if (!(s.connectionAt ==~ NAME)) errors << "${where} needs connectionAt, the root field its records come from.".toString()
             else if (!((List) (doc.rootFields ?: [])).contains(s.connectionAt)) {
                 errors << "${where}: the query does not select '${s.connectionAt}' at its root.".toString()
@@ -225,6 +247,9 @@ class DataSourceDefinitionSupport {
         boolean budgeted = paging.pageSize instanceof Map && inRange(((Map) paging.pageSize).budget, 1, 1_000_000) &&
                 isPositiveNumber(((Map) paging.pageSize).costPerRecord)
         if (!fixed && !budgeted) errors << "${where} needs paging.pageSize: a number, or {budget, costPerRecord}.".toString()
+        if (budgeted && ((Map) paging.pageSize).max != null && !inRange(((Map) paging.pageSize).max, 1, 10_000)) {
+            errors << "${where}: paging.pageSize.max is 1 to 10000.".toString()
+        }
         if (paging.maxPages != null && !inRange(paging.maxPages, 1, 1_000_000)) errors << "${where}: paging.maxPages is above 0.".toString()
         if (!inRange(s.reservation, 1, 1_000_000)) errors << "${where} needs reservation, the cost held for one call.".toString()
         else if (inRange(limits.maxCostPerCall, 1, 1_000_000) && (s.reservation as long) > (limits.maxCostPerCall as long)) {
@@ -275,6 +300,92 @@ class DataSourceDefinitionSupport {
                 }
             }
             if (b.parallel != null && !inRange(b.parallel, 1, 8)) errors << "${where}: bind.${mode}.parallel is 1 to 8.".toString()
+        }
+        return errors
+    }
+
+    /** The slots ({{name}}) a document holds, in order. */
+    static List<String> slots(String document) {
+        if (!document) return []
+        List<String> out = []
+        def m = SLOT.matcher(document)
+        while (m.find()) out << m.group(1)
+        return out
+    }
+
+    /** The document with the given selections on: each slot their texts joined by spaces, empty when none is on. */
+    static String fillSlots(String document, List<Map> on) {
+        return SLOT.matcher(document).replaceAll({ java.util.regex.MatchResult m ->
+            java.util.regex.Matcher.quoteReplacement(on.findAll { it.at == m.group(1) }.collect { it.text.toString() }.join(" "))
+        } as java.util.function.Function<java.util.regex.MatchResult, String>)
+    }
+
+    /** Every document the checks read: all selections on (first), none on, and each alone. */
+    static List<String> selectionDocuments(Map s) {
+        String document = s.document.toString()
+        List<Map> all = (List<Map>) (s.selections ?: [])
+        return ([fillSlots(document, all), fillSlots(document, [])] + all.collect { fillSlots(document, [it]) }).unique()
+    }
+
+    private static List<String> checkSelections(String where, Map s) {
+        List<String> errors = []
+        List<String> used = slots(s.document?.toString())
+        if (!(s.selections instanceof List)) return ["${where}: selections is a list of {at, when, text, cost, set}.".toString()]
+        List<Map> selections = []
+        ((List) s.selections).eachWithIndex { Object o, int i ->
+            String at = "${where}, selection ${i + 1}"
+            if (!(o instanceof Map)) { errors << "${at} must be an object.".toString(); return }
+            Map sel = (Map) o
+            selections << sel
+            if (!(sel.at ==~ NAME)) errors << "${at} needs at, the slot it fills.".toString()
+            else if (!used.contains(sel.at)) errors << "${at}: the document has no {{${sel.at}}}.".toString()
+            String text = sel.text?.toString()
+            if (!text?.trim() || text.length() > 2000) errors << "${at} needs text, up to 2000 characters.".toString()
+            else {
+                if (text.contains('"') || text.contains("#") || text.contains('$') || text.contains("{{") || text.contains("}}")) {
+                    errors << "${at}: text holds no \" # \$ {{ or }}.".toString()
+                }
+                if (!balanced(text)) errors << "${at}: text has balanced brackets: it stays inside its selection.".toString()
+            }
+            errors.addAll(RecordConditions.check(at, sel.when))
+            if (sel.cost != null && !(sel.cost instanceof Number && ((Number) sel.cost).doubleValue() >= 0d)) {
+                errors << "${at}: cost is a number from 0.".toString()
+            }
+            if (sel.set != null && !((sel.set instanceof Map) && ((Map) sel.set).every { k, v -> k ==~ NAME && !(v instanceof Map) && !(v instanceof Collection) })) {
+                errors << "${at}: set maps field names to plain values.".toString()
+            }
+        }
+        used.unique().each { String slot ->
+            if (!selections.any { it.at == slot }) errors << "${where}: {{${slot}}} has no selection.".toString()
+        }
+        return errors
+    }
+
+    private static boolean balanced(String text) {
+        Map<Character, Character> closes = [(')' as char): ('(' as char), ('}' as char): ('{' as char), (']' as char): ('[' as char)]
+        Deque<Character> open = new ArrayDeque<>()
+        for (char c : text.toCharArray()) {
+            if (c in ['(' as char, '{' as char, '[' as char]) open.push(c)
+            else if (closes.containsKey(c)) { if (open.isEmpty() || open.pop() != closes.get(c)) return false }
+        }
+        return open.isEmpty()
+    }
+
+    private static List<String> checkDropStep(String where, Map s, Set<String> earlier) {
+        List<String> errors = []
+        if (!(s.name ==~ NAME)) errors << "${where}: a drop needs a name, one word: the count of what it left out.".toString()
+        if (s.when == null) errors << "${where}: a drop needs when, the records it leaves out.".toString()
+        else errors.addAll(RecordConditions.check(where, s.when))
+        if (s.on != null && !earlier.contains(s.on)) errors << "${where}: on names an earlier step.".toString()
+        if (s.sidecar != null) {
+            Map sc = s.sidecar instanceof Map ? (Map) s.sidecar : [:]
+            if (!(sc.suffix ==~ /[a-z][a-z0-9-]{0,39}/)) errors << "${where}: the sidecar suffix is lower-case words joined by -.".toString()
+            if (!inRange(sc.max, 1, 10_000)) errors << "${where}: the sidecar max is 1 to 10000.".toString()
+            if (!((sc.fields instanceof Map) && !((Map) sc.fields).isEmpty() && ((Map) sc.fields).keySet().every { it ==~ NAME })) {
+                errors << "${where}: the sidecar fields map names to values.".toString()
+            } else {
+                ((Map) sc.fields).each { k, v -> errors.addAll(DeriveRules.checkValueSpec("${where}, sidecar ${k}".toString(), v)) }
+            }
         }
         return errors
     }
@@ -359,6 +470,11 @@ class DataSourceDefinitionSupport {
         if (all.any { !(it ==~ NAME) }) errors << "record.fields and record.optionalFields hold field names only."
         List dupes = all.countBy { it }.findAll { k, v -> v > 1 }.keySet() as List
         if (dupes) errors << "record lists ${dupes.join(', ')} twice.".toString()
+        if (r.keepRecordFields != null && !(r.keepRecordFields instanceof Boolean)) errors << "record.keepRecordFields is true or false."
+        if (r.keepWith != null && !((r.keepWith instanceof Map) && ((Map) r.keepWith).every { k, v ->
+            all.contains(k) && (v instanceof List) && ((List) v).every { all.contains(it) } })) {
+            errors << "record.keepWith maps a record field to the record fields kept with it."
+        }
         return errors
     }
 

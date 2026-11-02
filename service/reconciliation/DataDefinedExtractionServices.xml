@@ -30,6 +30,9 @@
                 accepts and its default.</description></parameter>
             <parameter name="sourceFilters" type="List"><description>Exclusion rules, under the connector's
                 filterParameterName.</description></parameter>
+            <parameter name="keepRecordFields" type="List"><description>The record fields the caller keeps; honoured when
+                the definition's record.keepRecordFields is true. A field the definition cannot carry is refused.</description>
+                <parameter name="keepRecordField"/></parameter>
             <parameter name="companyUserGroupId"><description>The run's tenant; the config must be its own or shared with it.</description></parameter>
             <parameter name="automationExecutionId"/>
             <parameter name="outputLocation"/>

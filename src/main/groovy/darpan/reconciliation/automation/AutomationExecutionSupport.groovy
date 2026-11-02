@@ -1974,6 +1974,14 @@ class AutomationExecutionSupport {
         Map<String, Object> metadata = resolveSourceExtractorMetadata(ec, source,
                 params?.sourceExtractorConfigDefaults instanceof Map ? (Map<String, Object>) params.sourceExtractorConfigDefaults : [:])
         String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
+        // DAR-BE-176: a data-defined endpoint's connector names the extract to run, whatever an older snapshot says, so
+        // cutting an endpoint over to its data definition (and back) is the connector row alone: no stored automation is
+        // rewritten, so no migration.
+        String endpoint = normalize(readField(source, "systemEnumId"))
+        Map<String, Object> currentConnector = endpoint ? SourceSystemConnectorSupport.resolve(ec, endpoint) : null
+        if (normalize(currentConnector?.dataSourceDefinitionId) && normalize(currentConnector?.extractServiceName)) {
+            serviceName = normalize(currentConnector.extractServiceName)
+        }
         if (!serviceName) {
             String systemEnumId = normalize(readField(source, "systemEnumId")) ?: "unknown system"
             String fileSide = normalize(readField(source, "fileSide")) ?: "source"

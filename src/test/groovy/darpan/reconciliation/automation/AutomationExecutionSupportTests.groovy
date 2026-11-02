@@ -2176,6 +2176,38 @@ class AutomationExecutionSupportTests {
         assertEquals(3, result.recordCount)
     }
 
+    /**
+     * DAR-BE-176: once an endpoint's connector is data-defined, an automation calls the connector's extract, not the
+     * service its older snapshot names: the cutover is the connector row alone, with no stored automation rewritten.
+     */
+    @Test
+    void aDataDefinedEndpointsConnectorDecidesTheExtractOverTheSnapshot() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String generic = "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource"
+        Map shopify = (Map) ec.entity.rows[SourceSystemConnectorSupport.ENTITY_NAME].find { it.systemEnumId == "SHOPIFY" }
+        shopify.extractServiceName = generic
+        shopify.dataSourceDefinitionId = "SOME_DEFINITION_V1"
+        List<String> called = []
+        ec.service.responder = { FakeServiceCall call ->
+            called << call.serviceName
+            return [dataAvailable: true, fileLocation: "runtime://tmp/f.json", fileName: "f.json", recordCount: 2]
+        }
+        def source = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.systemEnumId == "SHOPIFY" }
+        Map<String, Object> result = AutomationExecutionSupport.callConfiguredSourceExtractor(ec,
+                ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"][0], source,
+                [childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")], [:])
+        assertEquals(2, result.recordCount)
+        assertEquals([generic], called.findAll { it.contains("#") && !it.startsWith("create#") && !it.startsWith("update#") })
+        // A coded endpoint keeps the service its snapshot names.
+        shopify.remove("dataSourceDefinitionId")
+        shopify.extractServiceName = AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE
+        called.clear()
+        AutomationExecutionSupport.callConfiguredSourceExtractor(ec, ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"][0], source,
+                [childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")], [:])
+        assertTrue(called.contains(AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE), called.toString())
+    }
+
     /** DAR-BE-129: an extract that reports progress is told the run's row and its own side's stage. */
     @Test
     void anExtractThatReportsProgressGetsTheRunAndItsSidesStage() {

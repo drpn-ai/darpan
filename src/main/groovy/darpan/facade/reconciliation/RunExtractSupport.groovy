@@ -137,6 +137,9 @@ class RunExtractSupport {
                 (normalize(connector?.dateToParameterName) ?: "windowEnd")     : windowBound(windowEndDate),
                 outputLocation: DataManagerSupport.childLocation(artifactContext?.location as String, "${token}-api"),
                 fileName      : DataManagerSupport.runArtifactFileName(artifactContext?.runToken, token, fileNameValue),
+                // DAR-BE-176: the endpoint being read, as the automation path always sends it; a data-defined
+                // extract (one service, many endpoints) reads its connector row by it.
+                systemEnumId  : normalize(connector?.systemEnumId),
         ] as Map<String, Object>
         if (connector?.preserveWindowInstants) extractParams.preserveWindowInstants = true
 

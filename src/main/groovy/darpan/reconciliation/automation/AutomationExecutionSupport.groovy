@@ -2031,7 +2031,11 @@ class AutomationExecutionSupport {
         // Date-parameter names + the Shopify preserve-window flag are now data-driven: look the connector
         // up by the service being invoked (what the pre-registry switch keyed on). A source-level override
         // still wins; fall back to fromDate/toDate when no connector matches.
-        Map<String, Object> connectorForService = SourceSystemConnectorSupport.resolveByExtractServiceName(ec, serviceName)
+        // DAR-BE-176: data-defined endpoints share one extract service, so the source's own endpoint decides first.
+        String sourceSystem = normalize(readField(source, "systemEnumId"))
+        Map<String, Object> bySystem = sourceSystem ? SourceSystemConnectorSupport.resolve(ec, sourceSystem) : null
+        Map<String, Object> connectorForService = bySystem?.extractServiceName == serviceName ? bySystem :
+                SourceSystemConnectorSupport.resolveByExtractServiceName(ec, serviceName)
         applyWindowParameters(serviceParams, automation, source, connectorForService, window)
         if (connectorForService?.preserveWindowInstants) serviceParams.preserveWindowInstants = true
 

@@ -56,9 +56,11 @@ class DataSourceRunner {
 
     /**
      * request: [mode: "ids", keys: [..], keyField] or [mode: "window", from: epoch millis, thru: epoch millis (excluded)].
-     * sink: called with each batch's finished records. Answers what the run did.
+     * sink: called with each batch's finished records. progress (optional): called with the root records read so
+     * far, always on the calling thread (a Moqui context is bound to its thread), at most every PROGRESS_EVERY_MS
+     * while parallel readers run. Answers what the run did.
      */
-    Map run(Map request, Closure sink) {
+    Map run(Map request, Closure sink, Closure progress = null) {
         Map first = ((List<Map>) definition.steps)[0]
         filterRules = (List<Map<String, Object>>) (request.filters ?: [])
         checkFilterFields()
@@ -70,7 +72,7 @@ class DataSourceRunner {
         else throw new IllegalArgumentException("A run reads by ids or by window, not '${request.mode}'.")
         Closure safeSink = { List<Map> batch -> synchronized (sink) { sink.call(batch) } }
         try {
-            readPieces(first, pieces, Math.max(1, Math.min(parallel, pieces.size())), batchSize, safeSink)
+            readPieces(first, pieces, Math.max(1, Math.min(parallel, pieces.size())), batchSize, safeSink, progress)
         } finally {
             engines.values().each { it.close() }
             engines.clear()
@@ -93,7 +95,9 @@ class DataSourceRunner {
      * and finishes it (the later steps) as soon as it fills, so batches of different pieces run side by side. The first
      * failure stops every thread before its next piece and is thrown; nothing after it is written.
      */
-    private void readPieces(Map first, List<Map> pieces, int parallel, int batchSize, Closure sink) {
+    static final long PROGRESS_EVERY_MS = 2000L
+
+    private void readPieces(Map first, List<Map> pieces, int parallel, int batchSize, Closure sink, Closure progress) {
         java.util.concurrent.ConcurrentLinkedQueue<Map> queue = new java.util.concurrent.ConcurrentLinkedQueue<>(pieces)
         java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>()
         Closure worker = { ->
@@ -101,6 +105,7 @@ class DataSourceRunner {
             Closure take = { List<Map> page ->
                 buffer.addAll(page)
                 rootRecordCount.addAndGet(page.size())
+                if (parallel == 1 && progress != null) progress.call(rootRecordCount.get())
                 while (buffer.size() >= batchSize) {
                     List<Map> batch = new ArrayList<>(buffer.subList(0, batchSize))
                     buffer.subList(0, batchSize).clear()
@@ -124,7 +129,10 @@ class DataSourceRunner {
                 t.start()
                 t
             }
-            threads.each { it.join() }
+            while (threads.any { it.alive }) {
+                threads.find { it.alive }?.join(PROGRESS_EVERY_MS)
+                if (progress != null) progress.call(rootRecordCount.get())
+            }
         }
         Throwable t = failure.get()
         if (t != null) throw t

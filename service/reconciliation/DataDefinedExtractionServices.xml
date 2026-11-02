@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-176. The one extract service every data-defined endpoint names. Generic by rule: it reads the endpoint the
+  caller names (systemEnumId), and that endpoint's SourceSystemConnector row says which DataSourceDefinition to run and
+  under which names its config id, window and filters arrive. No system is named here; systems live in their own repos'
+  data.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- validate="false": the config id and filters arrive under the names the endpoint's connector row gives them
+         (configParameterName, filterParameterName), which differ by endpoint and cannot all be declared here.
+         DataDefinedExtract checks every value it reads. -->
+    <service verb="extract" noun="DataDefinedSource" type="inline" transaction="ignore" allow-remote="false"
+            authenticate="true" validate="false">
+        <description>Reads a data-defined endpoint into one extract file ({records, metadata}), by the run's window or by
+            lookup keys, with the run's exclusion rules applied and the excluded records written beside it. Same output
+            contract as every coded extract.</description>
+        <in-parameters>
+            <parameter name="systemEnumId" required="true"><description>The endpoint read: its connector row names the
+                definition.</description></parameter>
+            <parameter name="sourceConfigId"><description>The config id, when the caller does not send it under the
+                connector's configParameterName.</description></parameter>
+            <parameter name="windowStart"><description>Window start, under the connector's dateFromParameterName
+                (windowStart when blank).</description></parameter>
+            <parameter name="windowEnd"><description>Window end (excluded), under dateToParameterName.</description></parameter>
+            <parameter name="lookupKeys" type="List"><description>Read only these records by key, instead of the window.</description>
+                <parameter name="lookupKey"/></parameter>
+            <parameter name="lookupKeyField"><description>The field lookupKeys are values of; the definition says which it
+                accepts and its default.</description></parameter>
+            <parameter name="sourceFilters" type="List"><description>Exclusion rules, under the connector's
+                filterParameterName.</description></parameter>
+            <parameter name="companyUserGroupId"><description>The run's tenant; the config must be its own or shared with it.</description></parameter>
+            <parameter name="automationExecutionId"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="reconciliationRunResultId"/>
+            <parameter name="progressStageCode"/>
+            <parameter name="expectedRecordCount" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dataAvailable" type="Boolean"/>
+            <parameter name="fileLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="requestMetadata" type="Map"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>darpan.datasource.DataDefinedExtract.run(ec, context)</script>
+        </actions>
+    </service>
+</services>

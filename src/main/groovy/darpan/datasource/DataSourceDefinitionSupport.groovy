@@ -26,7 +26,8 @@ import groovy.json.JsonSlurper
  *   count  {name, when (RecordConditions), distinct: [paths]}
  *   derive {rules: [{set, when, value}], on (an earlier step; default the current records)} (DeriveRules)
  *   filter {overlay (a level whose plain fields sit under the record), fields (what rules may read)}
- * Top level: batchRecords, and metadata (fixed values a run reports, e.g. a count this source never has).
+ * Top level: batchRecords, metadata (fixed values a run reports, e.g. a count this source never has), and warnings
+ * ({count, text}: a warning a run gives when that count is above 0; {n} is the count).
  */
 class DataSourceDefinitionSupport {
 
@@ -72,6 +73,12 @@ class DataSourceDefinitionSupport {
         Map limits = checkLimits(d.limits, errors)
         errors.addAll(checkSteps(protocol, d.steps, limits))
         if (d.batchRecords != null && !inRange(d.batchRecords, 1, 100_000)) errors << "batchRecords is 1 to 100000."
+        if (d.warnings != null && !((d.warnings instanceof List) && ((List) d.warnings).every { Object w ->
+            w instanceof Map && ((Map) w).count ==~ NAME && ((Map) w).text?.toString()?.trim() &&
+                    ((List<Map>) (d.steps instanceof List ? d.steps : [])).any { it?.kind == "count" && it?.name == ((Map) w).count }
+        })) {
+            errors << "warnings is a list of {count, text}, each naming a count step; {n} in text is the count."
+        }
         if (d.metadata != null && !((d.metadata instanceof Map) && ((Map) d.metadata).every { k, v -> k ==~ NAME && !(v instanceof Map) && !(v instanceof Collection) })) {
             errors << "metadata maps names to plain values."
         }

@@ -1,7 +1,6 @@
 package darpan.datasource
 
 import java.time.Instant
-import java.time.OffsetDateTime
 
 /**
  * DAR-BE-176. The rows of a derive step, as data: each `{set, when, value}` writes one field of a record. DeriveEngine
@@ -11,15 +10,17 @@ import java.time.OffsetDateTime
  *   set    the field written (one word)
  *   when   RecordConditions, read on the record as it entered the step; absent = always
  *   value  {literal}, {copy: path}, {map: {..}, from: path, default}, or {fn, args: [values], sep}
- *          fn: text (trimmed text, blank = null), decimal, decimalPlain (no trailing zeros), epochMillis (an ISO instant
- *          or a number; anything else is kept as it came), join (non-blank args joined by sep), firstPresent
+ *          fn: text (trimmed text, blank = null), decimal (text that parses as a number becomes one; anything else is
+ *          kept), decimalPlain (a number with no trailing zeros; blank = null), epochMillis (an ISO instant becomes epoch
+ *          millis; anything else, numbers included, is kept), join (non-blank args joined by sep), firstPresent, units
+ *          (a quantity as whole units: parse STRICT_INT|NUMERIC, nullAs, as the repeat step reads it)
  *
  * Rows fire in order, so a later row's value may read a field an earlier row set, and a later row for the same field
  * overrides an earlier one (a default first, the cases after). Pure.
  */
 class DeriveRules {
 
-    static final List<String> FUNCTIONS = ["text", "decimal", "decimalPlain", "epochMillis", "join", "firstPresent"].asImmutable()
+    static final List<String> FUNCTIONS = ["text", "decimal", "decimalPlain", "epochMillis", "join", "firstPresent", "units"].asImmutable()
     private static final String NAME = /[A-Za-z][A-Za-z0-9_]{0,59}/
     private static final String PATH = /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,7}/
 
@@ -46,10 +47,13 @@ class DeriveRules {
                 String s = first?.toString()?.trim()
                 return s ? s : null
             case "decimal":
-                BigDecimal d = RecordConditions.number(first)
+                if (!(first instanceof CharSequence)) return first
+                BigDecimal d = parseDecimal(first)
                 return d != null ? d : first
             case "decimalPlain":
-                BigDecimal p = RecordConditions.number(first)
+                String text = first?.toString()?.trim()
+                if (!text) return null
+                BigDecimal p = parseDecimal(text)
                 return p != null ? new BigDecimal(p.stripTrailingZeros().toPlainString()) : first
             case "epochMillis":
                 return epochMillis(first)
@@ -58,18 +62,20 @@ class DeriveRules {
                 return parts ? parts.join((v.sep ?: " ") as String) : null
             case "firstPresent":
                 return args.find { it != null && it.toString().trim() }
+            case "units":
+                return DataSourceRunner.units(first, (v.parse ?: "STRICT_INT") as String, ((v.nullAs != null ? v.nullAs : 1) as Number).intValue())
             default:
                 throw new IllegalArgumentException("A derive value uses ${FUNCTIONS.join(', ')}, not '${v.fn}'.")
         }
     }
 
     static Object epochMillis(Object v) {
-        if (v instanceof Number) return ((Number) v).longValue()
-        String s = v?.toString()?.trim()
-        if (!s) return v
-        try { return Instant.parse(s).toEpochMilli() } catch (Exception ignored) { }
-        try { return OffsetDateTime.parse(s).toInstant().toEpochMilli() } catch (Exception ignored) { }
-        return v
+        if (!(v instanceof CharSequence)) return v
+        try { return Instant.parse(v.toString()).toEpochMilli() } catch (Exception ignored) { return v }
+    }
+
+    private static BigDecimal parseDecimal(Object v) {
+        try { return new BigDecimal(v.toString().trim()) } catch (Exception ignored) { return null }
     }
 
     /** Words for each problem in a derive step's rows. */
@@ -101,6 +107,9 @@ class DeriveRules {
         if (v.fn != null) {
             if (!(v.fn in FUNCTIONS)) return ["${at}: fn is one of ${FUNCTIONS.join(', ')}, not '${v.fn}'.".toString()]
             if (!(v.args instanceof List) || ((List) v.args).isEmpty()) return ["${at}: ${v.fn} needs args.".toString()]
+            if (v.fn == "units" && v.parse != null && !(v.parse in DataSourceDefinitionSupport.REPEAT_PARSES)) {
+                return ["${at}: units parse is ${DataSourceDefinitionSupport.REPEAT_PARSES.join(' or ')}.".toString()]
+            }
             return ((List) v.args).collectMany { Object a -> a instanceof Map ? checkValue(at, a, depth + 1) : [] }
         }
         return []

@@ -19,8 +19,10 @@ import java.util.concurrent.atomic.AtomicInteger
  *   repeat  one record per unit of a quantity field
  *   number  a running number per partition in a declared order
  *   count   a named count of the records matching conditions, optionally of distinct keys
- *   derive  fields written by rows of data, fired as Drools rules (DeriveRules, DeriveEngine)
- * filter comes in a later build step.
+ *   derive  fields written by rows of data, fired as Drools rules (DeriveRules, DeriveEngine), on the current records or on an
+ *           earlier step's (`on`)
+ *   filter  the run's exclusion rules (SourceFilterSupport) on each finished record, with a level's plain fields laid under
+ *           it (`overlay`); only the declared `fields` may be filtered on, and excluded records go to the sidecar collector
  *
  * Records then carry record.fields (always, null when unset) and record.optionalFields (only when set).
  */
@@ -39,6 +41,11 @@ class DataSourceRunner {
     private final AtomicInteger rootRecordCount = new AtomicInteger()
     private final AtomicInteger recordCount = new AtomicInteger()
     private final AtomicInteger batchCount = new AtomicInteger()
+    /** Filter results: excluded records (capped, ExcludedRecordsSidecar) and counts per rule sequence. */
+    final Map excludedCollector = darpan.reconciliation.conclusion.ExcludedRecordsSidecar.newCollector()
+    final Map<Integer, Integer> excludedByRule = java.util.Collections.synchronizedMap(new LinkedHashMap<Integer, Integer>())
+    final Map<Integer, Integer> fieldAbsentByRule = java.util.Collections.synchronizedMap(new LinkedHashMap<Integer, Integer>())
+    private List<Map<String, Object>> filterRules = []
 
     DataSourceRunner(Map definition, def transport) {
         this.definition = definition
@@ -53,6 +60,8 @@ class DataSourceRunner {
      */
     Map run(Map request, Closure sink) {
         Map first = ((List<Map>) definition.steps)[0]
+        filterRules = (List<Map<String, Object>>) (request.filters ?: [])
+        checkFilterFields()
         int batchSize = ((definition.batchRecords ?: DEFAULT_BATCH_RECORDS) as Number).intValue()
         List<Map> pieces
         int parallel
@@ -68,6 +77,8 @@ class DataSourceRunner {
         }
         return [rootRecords: rootRecordCount.get(), records: recordCount.get(), batches: batchCount.get(),
                 counts: new LinkedHashMap(counts), pages: new LinkedHashMap(pagesByStep),
+                excludedByRule: new LinkedHashMap(excludedByRule), fieldAbsentByRule: new LinkedHashMap(fieldAbsentByRule),
+                metadata: new LinkedHashMap((Map) (definition.metadata ?: [:])),
                 pageSizes: pageSizes.collectEntries { k, v -> [(k): v.get()] }]
     }
 
@@ -130,7 +141,7 @@ class DataSourceRunner {
         Map b = (Map) ((Map) step.bind).ids
         if (b == null) throw new IllegalArgumentException("Step '${step.id}' cannot be read by ids.")
         Map keyFields = (Map) (b.keyFields ?: [:])
-        String asked = request.keyField?.toString()
+        String asked = request.keyField?.toString() ?: b.defaultKeyField?.toString()
         String filterField = asked == null ? null : (keyFields ? (String) keyFields.get(asked) : asked)
         if (keyFields && filterField == null) {
             throw new IllegalArgumentException("Step '${step.id}' is asked by ${keyFields.keySet().join(', ')}, not '${asked}'.")
@@ -216,8 +227,9 @@ class DataSourceRunner {
                 case "count": count(step, ctx.get(current)); break
                 case "derive":
                     engines.computeIfAbsent((String) step.id, { DeriveEngine.compile((List<Map>) step.rules) })
-                            .derive(ctx.get(current), "derive:${step.id}".toString())
+                            .derive(ctx.get((step.on ?: current) as String), "derive:${step.id}".toString())
                     break
+                case "filter": ctx.put((String) step.id, filter(step, ctx.get(current))); current = (String) step.id; break
                 default: throw new UnsupportedOperationException("The ${step.kind} step is not built yet (step '${step.id}').")
             }
         }
@@ -360,12 +372,13 @@ class DataSourceRunner {
 
     /**
      * How many units a quantity gives. STRICT_INT: a number's whole part (never below 0); text must be a whole number
-     * ("1.0" gives 0). NUMERIC: any number or numeric text, its whole part. Null gives nullAs.
+     * ("1.0" gives 0). NUMERIC: any number or numeric text, its whole part. Null or blank gives nullAs.
      */
     static int units(Object quantity, String parse, int nullAs) {
         if (quantity == null) return nullAs
         if (quantity instanceof Number) return Math.max(0, ((Number) quantity).intValue())
         String s = quantity.toString().trim()
+        if (!s) return nullAs
         if (parse == "NUMERIC") {
             BigDecimal n = RecordConditions.number(s)
             return n == null ? 0 : Math.max(0, n.intValue())
@@ -375,19 +388,50 @@ class DataSourceRunner {
 
     private static void number(Map step, List<Map> input) {
         List<String> partitionBy = (List<String>) (step.partitionBy ?: [])
-        List<String> orderBy = (List<String>) (step.orderBy ?: [])
+        List<Map> orderBy = ((List) (step.orderBy ?: [])).collect { it instanceof Map ? (Map) it : [path: it] }
         Map<String, List<Map>> groups = new LinkedHashMap<>()
         (input ?: []).each { Map r -> groups.computeIfAbsent(keyOf(partitionBy.collect { JsonPathValues.value(r, it) }), { [] }).add(r) }
         groups.values().each { List<Map> group ->
             List<Map> sorted = group.sort(false) { Map a, Map b ->
-                for (String p : orderBy) {
-                    int c = compare(JsonPathValues.value(a, p), JsonPathValues.value(b, p))
+                for (Map o : orderBy) {
+                    Object x = JsonPathValues.value(a, (String) o.path), y = JsonPathValues.value(b, (String) o.path)
+                    int c = o.as == "TEXT" ? ((x?.toString() ?: "") <=> (y?.toString() ?: "")) : compare(x, y)
                     if (c != 0) return c
                 }
                 return 0
             }
             sorted.eachWithIndex { Map r, int i -> r.put((String) step.field, i + 1) }
         }
+    }
+
+    private List<Map> filter(Map step, List<Map> input) {
+        if (!filterRules) return input
+        List<Map> kept = []
+        (input ?: []).each { Map r ->
+            Map projected = project(r)
+            Map view = new LinkedHashMap()
+            Object under = step.overlay ? r.get(step.overlay) : null
+            if (under instanceof Map) ((Map) under).each { k, v -> if (!(v instanceof Map) && !(v instanceof Collection)) view.put(k?.toString(), v) }
+            view.putAll(projected)
+            Map<String, Object> verdict = darpan.reconciliation.source.SourceFilterSupport.evaluate(view, filterRules)
+            if (verdict == null) { kept.add(r); return }
+            Map rule = (Map) verdict.rule
+            synchronized (excludedCollector) { darpan.reconciliation.conclusion.ExcludedRecordsSidecar.collect(excludedCollector, projected, rule) }
+            Map<Integer, Integer> bucket = darpan.reconciliation.source.SourceFilterSupport.REASON_FIELD_ABSENT == verdict.reason ? fieldAbsentByRule : excludedByRule
+            Integer seq = (Integer) rule.sequenceNum
+            synchronized (bucket) { bucket.put(seq, (bucket.get(seq) ?: 0) + 1) }
+        }
+        return kept
+    }
+
+    /** A rule on a field the filter step does not offer would silently exclude nothing: refused before any read. */
+    private void checkFilterFields() {
+        if (!filterRules) return
+        Map step = ((List<Map>) definition.steps).find { it.kind == "filter" }
+        if (step == null) throw new IllegalArgumentException("This source takes no exclusion rules.")
+        Set<String> offered = ((step.fields ?: []) as List).collect { it.toString() } as Set<String>
+        List<String> unknown = filterRules.collect { (String) it.fieldExpression }.findAll { !offered.contains(it) }.unique().sort()
+        if (unknown) throw new IllegalArgumentException("This source cannot filter on ${unknown}: its records do not carry them.")
     }
 
     private void count(Map step, List<Map> input) {

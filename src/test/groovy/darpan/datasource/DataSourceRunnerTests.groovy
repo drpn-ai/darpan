@@ -114,6 +114,42 @@ class DataSourceRunnerTests {
     }
 
     @Test
+    void theNewerOptionsWorkOnAnySystem() {
+        Map d = AcmeLedgerFixture.definition()
+        List<Map> steps = ((List<Map>) d.steps).collect { Map st ->
+            if (st.id == "invoices") {
+                Map bind = new LinkedHashMap((Map) st.bind)
+                bind.ids = ((Map) bind.ids) + [defaultKeyField: "invoiceNo"]
+                return st + [bind: bind]
+            }
+            if (st.id == "unitNo") return st + [orderBy: [[path: "line.lineNo", as: "TEXT"], "unit"]]
+            return st
+        }
+        int split = steps.findIndexOf { it.id == "perLine" }
+        // A derive on an earlier step (the invoices), before the lines are split out of them.
+        steps.add(split, [id: "invoiceFacts", kind: "derive", on: "invoices", rules: [[set: "issuedMillis", value: [fn: "epochMillis", args: [[copy: "issued"]]]]]])
+        steps << [id: "units", kind: "derive", rules: [[set: "units", value: [fn: "units", parse: "STRICT_INT", args: [[copy: "line.qty"]]]]]]
+        steps << [id: "exclusions", kind: "filter", overlay: "invoice", fields: ["status", "customerRef", "issuedMillis"]]
+        d.steps = steps
+        d.metadata = [neverDropped: 0]
+        d.record = (Map) d.record + [fields: ((List) ((Map) d.record).fields) + ["units"]]
+        List<Map> rules = darpan.reconciliation.source.SourceFilterSupport.parseRules(
+                [[fieldExpression: "customerRef", operator: "EXCLUDE_IN", filterValues: "C2", sequenceNum: 1]])
+        Map r = runIt([mode: "ids", keys: ["A1", "A2"], filters: rules], new AcmeLedgerFixture.ScriptedTransport(), d)
+        // C2 is A2's customer, on the invoice level under each record: A2's three units are excluded.
+        assertEquals(["A1"], r.records*.invoiceNo.unique())
+        assertEquals([1: 3], r.excludedByRule)
+        assertEquals([neverDropped: 0], r.metadata)
+        assertEquals([1, 2, 2], r.records*.units)
+        IllegalArgumentException e = assertThrows(IllegalArgumentException) {
+            new DataSourceRunner(d, new AcmeLedgerFixture.ScriptedTransport()).run([mode: "ids", keys: ["A1"],
+                    filters: darpan.reconciliation.source.SourceFilterSupport.parseRules([[fieldExpression: "partNo", operator: "EXCLUDE_IN", filterValues: "P1", sequenceNum: 1]])]) { }
+        }
+        assertTrue(e.message.contains("cannot filter on [partNo]"))
+        assertEquals(1, DataSourceRunner.units(" ", "STRICT_INT", 1))
+    }
+
+    @Test
     void aCostRefusalHalvesThePageUntilItFits() {
         AcmeLedgerFixture.ScriptedTransport t = new AcmeLedgerFixture.ScriptedTransport(refuseCostAbove: 1)
         Map r = runIt([mode: "ids", keys: ["A1", "A2", "A3"], keyField: "invoiceNo"], t)

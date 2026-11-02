@@ -24,8 +24,9 @@ import groovy.json.JsonSlurper
  *   repeat {times (path), parse STRICT_INT|NUMERIC, nullAs, index}
  *   number {field, partitionBy: [paths], orderBy: [paths]}
  *   count  {name, when (RecordConditions), distinct: [paths]}
- *   derive {rules: [{set, when, value}]} (DeriveRules)
- * filter is checked when it is built.
+ *   derive {rules: [{set, when, value}], on (an earlier step; default the current records)} (DeriveRules)
+ *   filter {overlay (a level whose plain fields sit under the record), fields (what rules may read)}
+ * Top level: batchRecords, and metadata (fixed values a run reports, e.g. a count this source never has).
  */
 class DataSourceDefinitionSupport {
 
@@ -71,6 +72,9 @@ class DataSourceDefinitionSupport {
         Map limits = checkLimits(d.limits, errors)
         errors.addAll(checkSteps(protocol, d.steps, limits))
         if (d.batchRecords != null && !inRange(d.batchRecords, 1, 100_000)) errors << "batchRecords is 1 to 100000."
+        if (d.metadata != null && !((d.metadata instanceof Map) && ((Map) d.metadata).every { k, v -> k ==~ NAME && !(v instanceof Map) && !(v instanceof Collection) })) {
+            errors << "metadata maps names to plain values."
+        }
         errors.addAll(checkRecord(d.record))
         errors.addAll(checkCounts(d.counts))
         return errors
@@ -172,7 +176,15 @@ class DataSourceDefinitionSupport {
             if (i == 0 && s.kind != "query") errors << "The first step reads: it must be a query."
             if (s.kind == "query") errors.addAll(checkQueryStep(where, protocol, s, limits, earlier))
             else if (s.kind in ["unwrap", "join", "split", "repeat", "number", "count"]) errors.addAll(checkShapeStep(where, s, earlier))
-            else if (s.kind == "derive") errors.addAll(DeriveRules.check(where, s.rules))
+            else if (s.kind == "derive") {
+                errors.addAll(DeriveRules.check(where, s.rules))
+                if (s.on != null && !earlier.contains(s.on)) errors << "${where}: on names an earlier step.".toString()
+            } else if (s.kind == "filter") {
+                if (s.overlay != null && !(s.overlay ==~ NAME)) errors << "${where}: overlay is a level name.".toString()
+                if (!((s.fields instanceof List) && !((List) s.fields).isEmpty() && ((List) s.fields).every { it ==~ NAME })) {
+                    errors << "${where}: fields lists the record fields exclusion rules may read.".toString()
+                }
+            }
             if (id ==~ NAME) earlier << id
         }
         return errors
@@ -247,6 +259,7 @@ class DataSourceDefinitionSupport {
                     try { java.util.regex.Pattern.compile(b.idPattern.toString()) }
                     catch (Exception ignored) { errors << "${where}: bind.ids.idPattern is not a pattern.".toString() }
                 }
+                if (b.defaultKeyField != null && !(b.defaultKeyField ==~ NAME)) errors << "${where}: bind.ids.defaultKeyField is a field name.".toString()
                 if (b.keyFields != null && !((b.keyFields instanceof Map) && ((Map) b.keyFields).every { k, v -> k ==~ NAME && v ==~ NAME })) {
                     errors << "${where}: bind.ids.keyFields maps each key field a run may ask by to the field the query filters on.".toString()
                 }
@@ -311,7 +324,10 @@ class DataSourceDefinitionSupport {
                 break
             case "number":
                 if (!(s.field ==~ NAME)) errors << "${where}: field is the name the number is written to.".toString()
-                if (!paths(s.partitionBy) || !paths(s.orderBy)) errors << "${where}: partitionBy and orderBy are lists of fields.".toString()
+                boolean orderOk = s.orderBy == null || ((s.orderBy instanceof List) && ((List) s.orderBy).every { Object o ->
+                    isPath(o) || (o instanceof Map && isPath(((Map) o).path) && (((Map) o).as == null || ((Map) o).as in ["TEXT", "NATURAL"]))
+                })
+                if (!paths(s.partitionBy) || !orderOk) errors << "${where}: partitionBy and orderBy are lists of fields (orderBy may be {path, as: TEXT}).".toString()
                 break
             case "count":
                 if (!(s.name ==~ NAME)) errors << "${where}: a count needs a name, one word.".toString()

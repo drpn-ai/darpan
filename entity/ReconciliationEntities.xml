@@ -1399,6 +1399,10 @@
                 {"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed"},"facts":["facilityId","orderItemSeqId"]}.
                 Absent = the expanded row shows the record id only.</description>
         </field>
+        <field name="dataSourceDefinitionId" type="id">
+            <description>DAR-BE-176. The DataSourceDefinition this endpoint reads with, when its extract is data-defined
+                (extractServiceName is then the generic extract#DataDefinedSource). Blank: the endpoint's own coded extract.</description>
+        </field>
         <field name="enabled" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

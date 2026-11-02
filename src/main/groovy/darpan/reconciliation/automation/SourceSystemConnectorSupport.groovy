@@ -214,6 +214,8 @@ class SourceSystemConnectorSupport {
                 healthCheckServiceName     : readString(record, "healthCheckServiceName"),
                 // DAR-UI-064: the extract options a run side may set, [{name, label, type}] (SourceExtractOptionsSupport).
                 extractOptionsJson         : readString(record, "extractOptionsJson"),
+                // DAR-BE-176: the data definition a data-defined endpoint reads with (blank: its coded extract).
+                dataSourceDefinitionId     : readString(record, "dataSourceDefinitionId"),
                 enabled                    : isEnabled(record),
         ] as Map<String, Object>
     }

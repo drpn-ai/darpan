@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-176. A data-defined source: how to read a system's records, held entirely as data (the query documents, how a
+  run's window or ids fill them, paging, cost and throttling behaviour, joins, splits, derived fields, counts, the
+  record's fields). Generic by rule: nothing here names a system. A system appears only in a definition's values and on
+  the SourceSystemConnector row that points an endpoint at a definition (dataSourceDefinitionId).
+  Read by darpan.datasource.*; validated by DataSourceDefinitionSupport on load and on save.
+  Platform-level in this first version (no tenant column); tenant-owned definitions come with the tenant scope filter.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="DataSourceDefinition" package="darpan.datasource" use="configuration" cache="never">
+        <description>One data-defined read: a protocol and a definition document. The protocol says how core talks to the
+            endpoint; everything system-specific is in definitionJson.</description>
+        <field name="dataSourceDefinitionId" type="id" is-pk="true"/>
+        <field name="definitionName" type="text-medium" not-null="true"><description>A name people read.</description></field>
+        <field name="protocol" type="text-short" not-null="true">
+            <description>GRAPHQL or REST_JSON: the wire protocol, never a system.</description></field>
+        <field name="definitionVersion" type="number-integer" not-null="true">
+            <description>Raised on every change, so a run can say which version read its records.</description></field>
+        <field name="statusId" type="text-short" not-null="true">
+            <description>DRAFT (validated, not used by any connector), ACTIVE, or RETIRED (kept for history).</description></field>
+        <field name="definitionJson" type="text-very-long" not-null="true">
+            <description>{connection, limits, steps, record, counts}. Shape and rules: DataSourceDefinitionSupport and
+                docs/superpowers/specs/2026-11-02-data-defined-order-items-read-design.md.</description></field>
+        <field name="description" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+    </entity>
+</entities>

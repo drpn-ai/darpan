@@ -61,6 +61,10 @@ dependencies {
     // DAR-BE-164: tenant scripts (Apache-2.0, ASF). Its only runtime dependency is commons-logging, which the framework
     // already ships (1.3.5); excluded so this does not move the shipped version. Only darpan.script.* may reference it.
     implementation('org.apache.commons:commons-jexl3:3.7.1') { exclude group: 'commons-logging' }
+    // DAR-BE-176: parse a data-defined source's GraphQL documents to check them (query only, declared variables) on load
+    // and save. The same version moqui-gql already ships (MIT), declared here so darpan core does not depend on another
+    // component being installed. Only darpan.datasource.* may reference it.
+    implementation 'com.graphql-java:graphql-java:25.0'
     // json-path -> json-smart -> accessors-smart pins org.ow2.asm:asm:9.3, which cannot read Java 21
     // bytecode (max major 63). addRuntime merges component libs into the exec war's WEB-INF/lib, where
     // the stale ASM wins the flat classloader and Jetty ee11 annotation scanning fails on every

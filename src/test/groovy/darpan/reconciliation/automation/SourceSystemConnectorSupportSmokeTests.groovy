@@ -1005,4 +1005,21 @@ class SourceSystemConnectorSupportSmokeTests {
                 .create()
         assertEquals(false, SourceSystemConnectorSupport.resolve(ec, "UNWINDOWED_PHASE1").windowed)
     }
+
+    // DAR-BE-176: a data-defined endpoint names its DataSourceDefinition, and the resolver carries it; a coded one has none.
+    @Test
+    void aDataDefinedEndpointCarriesItsDefinition() {
+        ec.entity.makeValue("darpan.datasource.DataSourceDefinition")
+                .setAll([dataSourceDefinitionId: "ACME_INVOICES_V1", definitionName: "Acme invoices", protocol: "GRAPHQL",
+                         definitionVersion: 1, statusId: "DRAFT", definitionJson: "{}"])
+                .create()
+        ec.entity.makeValue(SourceSystemConnectorSupport.ENTITY_NAME)
+                .setAll([systemEnumId: "ACME_INVOICES", extractServiceName: "reconciliation.FakeExtractionServices.extract#FakeAcmeInvoices",
+                         expectedSourceConfigType: "FAKE_ACME_INVOICES", dataSourceDefinitionId: "ACME_INVOICES_V1", enabled: "Y"])
+                .create()
+        assertEquals("ACME_INVOICES_V1", SourceSystemConnectorSupport.resolve(ec, "ACME_INVOICES").dataSourceDefinitionId)
+        assertEquals("GRAPHQL", ec.entity.find("darpan.datasource.DataSourceDefinition")
+                .condition("dataSourceDefinitionId", "ACME_INVOICES_V1").one().protocol)
+        assertNull(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY").dataSourceDefinitionId)
+    }
 }

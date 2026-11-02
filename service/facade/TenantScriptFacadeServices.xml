@@ -34,9 +34,10 @@
         </actions>
     </service>
 
-    <service verb="save" noun="TenantScript" allow-remote="true" authenticate="true">
-        <description>Create or update one of the active tenant's scripts. The body must parse under its profile; a script
-            that does not is refused with the line, never saved half-checked. Needs edit access to the tenant.</description>
+    <service verb="save" noun="TenantScript" transaction="ignore" allow-remote="true" authenticate="true">
+        <description>Create or update one of the active tenant's scripts. The body must parse under its profile and run
+            cleanly on its sample input; a script that does not is refused with the line, never saved half-checked. No
+            transaction is open while the trial run runs; the store opens its own. Needs edit access to the tenant.</description>
         <in-parameters>
             <parameter name="tenantScriptId"/>
             <parameter name="scriptName" required="true"/>

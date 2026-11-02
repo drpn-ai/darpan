@@ -113,12 +113,15 @@ class DataSourceDefinitionSupport {
                     List<String> fields = []
                     if (method == "BASIC") fields = [k.userField, k.passwordField].collect { it?.toString() }
                     if (method in ["BEARER", "HEADER"]) fields = ((k.tokenFields instanceof List) ? (List) k.tokenFields : [null]).collect { it?.toString() }
-                    if (method == "HEADER" && !(k.header?.toString() ==~ /[A-Za-z0-9-]{1,64}/)) {
+                    if (method == "HEADER" && !(k.header?.toString() ==~ /[A-Za-z0-9_.-]{1,64}/)) {
                         errors << "Auth kind '${value}' needs the header it sends.".toString()
                     }
                     if (fields.any { !(it ==~ NAME) }) errors << "Auth kind '${value}' names a field that is not a field name.".toString()
                     used.addAll(fields.findAll { it })
                 }
+            }
+            if (a.defaultKind != null && !((kinds instanceof Map) && ((Map) kinds).containsKey(a.defaultKind))) {
+                errors << "The auth defaultKind must be one of its kinds.".toString()
             }
             if (a.headersJsonField != null) {
                 if (!(a.headersJsonField ==~ NAME)) errors << "The auth headersJsonField must be a field name."

@@ -198,7 +198,7 @@ class GraphQlTransport {
             ((Map) extra).each { k, v ->
                 String name = k?.toString()?.trim()
                 String value = v?.toString()
-                if (!name || BLOCKED_HEADERS.contains(name.toLowerCase()) || !(name ==~ /[A-Za-z0-9-]{1,64}/)) {
+                if (!name || BLOCKED_HEADERS.contains(name.toLowerCase()) || !(name ==~ /[A-Za-z0-9_.-]{1,64}/)) {
                     throw new IllegalArgumentException("The connection's extra headers may not set '${name}'.")
                 }
                 if (value == null || value.length() > 4096 || value =~ /[\x00-\x1F\x7F]/) {
@@ -209,6 +209,8 @@ class GraphQlTransport {
         }
         Map kinds = (Map) auth.kinds
         String kind = auth.kindField ? record.get(auth.kindField)?.toString()?.trim()?.toUpperCase() : (kinds.size() == 1 ? kinds.keySet()[0] : null)
+        // A connection whose kind field is blank signs in as the definition's defaultKind, when it names one.
+        if (!kind && auth.defaultKind) kind = auth.defaultKind.toString().toUpperCase()
         Map spec = (Map) kinds.find { k, v -> k.toString().toUpperCase() == kind }?.value
         if (spec == null) throw new IllegalArgumentException("The connection signs in as '${kind}', which the definition does not know.")
         switch (spec.method) {

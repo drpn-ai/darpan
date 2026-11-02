@@ -50,7 +50,7 @@ Object identity and per-file primary-ID extraction come from RuleSet compare sco
 
 ## 3. Spark base compare
 
-`reconciliation.ReconciliationCoreServices` runs the diff on Apache Spark 3.5.1 (local master,
+`reconciliation.ReconciliationCoreServices` runs the diff on Apache Spark 4.2.1 (local master,
 in-process; JVM module flags documented in [runtime-baseline](../runtime-baseline.md)):
 
 - `reconcile#IdDataFrames` / `reconcile#UnifiedFiles` — core anti-join comparison primitives.

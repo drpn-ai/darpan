@@ -51,10 +51,13 @@ dependencies {
     // moqui-sftp is deliberately NOT a compile dependency (ADR 0001 rule 1: plugins depend on
     // core, never the reverse). SftpAutomationSupport resolves org.moqui.sftp.SftpClient at
     // runtime from the Moqui classloader; the component is a deploy-time plugin.
-    implementation 'org.apache.spark:spark-sql_2.13:4.2.1'
-    // Spark 3.5.x is built against the legacy javax.servlet API (UI + MetricsServlet); Moqui 4 only ships
-    // jakarta.servlet, so provide javax.servlet-api for Spark. Different namespace — coexists with jakarta.
-    implementation 'javax.servlet:javax.servlet-api:4.0.1'
+    // DAR-BE-185: Spark 4.2.1 (Scala 2.13, ANTLR 4.13.1 — the same serialized-parser format Drools 10 needs).
+    // Spark 4 brings javax.servlet-api itself. Its jakarta.servlet-api 6.0.0 is excluded because the Moqui
+    // servlet container supplies that API (6.1.0; the framework declares it compileOnlyApi), and a second
+    // copy in this component's lib/ would sit beside the container's.
+    implementation('org.apache.spark:spark-sql_2.13:4.2.1') {
+        exclude group: 'jakarta.servlet', module: 'jakarta.servlet-api'
+    }
     implementation 'com.networknt:json-schema-validator:1.5.5' // bumped from 1.0.87: 4-major behind + transitive CVEs
     implementation 'com.jayway.jsonpath:json-path:2.9.0'       // bumped from 2.8.0 for CVE-2023-51074 (stack-overflow DoS in Criteria.parse)
     implementation 'org.apache.lucene:lucene-core:9.12.3' // DAR-BE-161: knowledge base keyword search (Apache-2.0, no runtime deps)
@@ -95,17 +98,6 @@ dependencies {
     implementation 'org.drools:drools-xml-support:8.44.0.Final'
     implementation 'org.kie:kie-api:8.44.0.Final'
 
-    // Transitive-CVE pins. Spark 3.5.1 inherits older protobuf/avro/netty versions with public advisories;
-    // we pin forward without bumping Spark itself. Netty uses its BOM (pulls every netty-* artifact to 4.1.125).
-    //   protobuf-java 3.25.5  — CVE-2024-7254 (HIGH, stack-overflow on nested groups)
-    //   avro 1.11.4           — CVE-2024-47561 (CRITICAL, RCE on Avro schema parse)
-    //   netty-bom 4.1.125     — HTTP request-smuggling chain (GHSA-fghv-69vj-qj49 / -38f8-5428-x5cv / -84h7-rjj3-6jx4 / -wm47-8v5p-wjpj)
-    implementation platform('io.netty:netty-bom:4.1.125.Final')
-    constraints {
-        implementation('com.google.protobuf:protobuf-java:3.25.5') { because 'CVE-2024-7254 (HIGH)' }
-        implementation('org.apache.avro:avro:1.11.4')              { because 'CVE-2024-47561 (CRITICAL)' }
-    }
-
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
@@ -117,8 +109,15 @@ dependencies {
 // by default the Java plugin runs test on build, change to not do that (only run test if explicit task)
 check.dependsOn.clear()
 
-// Apache Spark requires these JDK module openings on Java 17+/21 (Spark's own JavaModuleOptions);
-// without them Spark SQL throws IllegalAccessError on sun.nio.ch.DirectBuffer at SparkContext init.
+// Apache Spark requires these JDK module openings on Java 17+/21; without them Spark SQL throws
+// IllegalAccessError on sun.nio.ch.DirectBuffer at SparkContext init. The list follows Spark 4.2.1's own
+// launcher (launcher/src/main/java/org/apache/spark/launcher/JavaModuleOptions.java, DAR-BE-185).
+// Left out of Spark's list on purpose:
+//   -Dio.netty.handler.ssl.defaultEndpointVerificationAlgorithm=NONE  turns off TLS hostname checks JVM-wide
+//   --sun-misc-unsafe-memory-access=allow                             a JDK 23+ flag; we run JDK 21
+//   --add-modules=jdk.incubator.vector                                optional incubator module, warns on every start
+//   -XX:+IgnoreUnrecognizedVMOptions                                  would hide a mistyped flag
+// Keep in step with darpan-docker-config docker/entrypoint.sh + docker/prod/entrypoint.sh and dev-stack.sh.
 ext.sparkJava21Opens = [
         '--add-opens=java.base/java.lang=ALL-UNNAMED',
         '--add-opens=java.base/java.lang.invoke=ALL-UNNAMED',
@@ -129,11 +128,14 @@ ext.sparkJava21Opens = [
         '--add-opens=java.base/java.util=ALL-UNNAMED',
         '--add-opens=java.base/java.util.concurrent=ALL-UNNAMED',
         '--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+        '--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED',
         '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
         '--add-opens=java.base/sun.nio.cs=ALL-UNNAMED',
         '--add-opens=java.base/sun.security.action=ALL-UNNAMED',
         '--add-opens=java.base/sun.util.calendar=ALL-UNNAMED',
-        '--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED'
+        '--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED',
+        '-Dio.netty.tryReflectionSetAccessible=true',
+        '-Dio.netty.allocator.type=pooled'
 ]
 
 // Fork width for every Test task here. The old value was 1, which is stricter than the

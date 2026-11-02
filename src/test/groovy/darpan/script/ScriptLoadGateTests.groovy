@@ -50,11 +50,11 @@ class ScriptLoadGateTests {
 
     @Test
     void oneHundredOneSwitchesASignalOff() {
-        load(CALM + [heapPercent: null, liveHeapPercent: 99, cpuPercent: 99])
+        load(CALM + [heapPercent: null, liveHeapPercent: 99, cpuPercent: 140])
         holdAt(101, 101)
         assertNull(ScriptLoadGate.busyReason())
         holdAt(101, 95)
-        assertEquals('CPU is at 99%', ScriptLoadGate.busyReason())
+        assertEquals('CPU is at 140%', ScriptLoadGate.busyReason())
     }
 
     @Test

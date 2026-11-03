@@ -49,6 +49,13 @@ class SparkClasspathGuardTests {
         assertEquals("true", spark.conf().get("spark.sql.ansi.enabled"))
     }
 
+    /** DAR-BE-184: Drools 10.x, which needs the same ANTLR 4.13 runtime as Spark 4. */
+    @Test
+    void droolsIsVersionTen() {
+        String kieApiJar = org.kie.api.KieServices.protectionDomain.codeSource.location.path
+        assertTrue(kieApiJar.contains("kie-api-10."), "kie-api on the classpath is ${kieApiJar}".toString())
+    }
+
     @Test
     void everyFilterStringWeUseParses() {
         List<String> filters = [

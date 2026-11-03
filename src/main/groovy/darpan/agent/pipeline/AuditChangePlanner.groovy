@@ -30,8 +30,10 @@ class AuditChangePlanner {
     private static final int INTERMEDIATE = 1023
     private static final String WHY = "agent proposal: tenant compared on the row"
 
-    /** Task 5 replaces this with AuditChangeBacktest.run(ec, tenantId, kind, target, merged). */
-    static Closure backtest = { def ec, String tenantId, String kind, Map target, Map merged -> [supported: false, reason: "not built"] }
+    /** What the change would close and open, from landed data only; writes nothing (AuditChangeBacktest). */
+    static Closure backtest = { def ec, String tenantId, String kind, Map target, Map merged ->
+        AuditChangeBacktest.run(ec, tenantId, kind, target, merged)
+    }
 
     // ---------------------------------------------------------------- create
 

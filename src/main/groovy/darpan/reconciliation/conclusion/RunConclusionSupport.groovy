@@ -79,7 +79,32 @@ class RunConclusionSupport {
         minus("missingObjectDifferenceCount", onlyIn1 + onlyIn2)
     }
 
-    private static Map concludeWith(ConclusionTreeEngine engine, List<Map> rules, Map args) {
+    /**
+     * DAR-BE-159. The conclusion each row of a result document reaches under these rules, read-only: the same evidence and
+     * the same compiled tree the conclude pass uses, but the document is not rewritten, no lookup is asked and no brain is
+     * consulted, so no system is read live. visit(row, conclusion [code, label, nodeId, ...]) per row, in order.
+     */
+    static void concludeEach(Map args, Closure visit) {
+        List<Map> rules = (List<Map>) (args.rules ?: [])
+        ConclusionTreeEngine engine = rules ? ConclusionTreeEngine.compile(rules) : null
+        try {
+            Map prepared = evidenceOf(args)
+            Closure<Map> finding = (Closure<Map>) prepared.finding
+            DiffDocumentStreamSupport.forEachRow((File) args.diffFile) { Map row ->
+                Map f = finding(row)
+                visit.call(row, engine ? engine.conclude([f])[0] :
+                        ConclusionTreeSupport.result(ConclusionTreeSupport.newFact((String) f.bucket, (Map) f.sides)))
+            }
+        } finally {
+            engine?.close()
+        }
+    }
+
+    /**
+     * Both sides' evidence for every row of the document: each side's KEPT and EXCLUDED records for the keys the rows
+     * need, and finding(row) -> [bucket, sides]. Reads the document and the extracts; writes nothing.
+     */
+    private static Map evidenceOf(Map args) {
         File diffFile = (File) args.diffFile
         String file1Label = (String) args.file1Label
         String file2Label = (String) args.file2Label
@@ -87,7 +112,6 @@ class RunConclusionSupport {
         // DAR-BE-198 (b): the run's Unexplained rows are expected (RuleSetCompareScope.unexplainedOutcome EXPECTED).
         boolean unexplainedExpected = args.unexplainedExpected == true
         Map sideSpecs = [FILE_1: (Map) args.file1, FILE_2: singleSided ? null : (Map) args.file2]
-
         // DAR-BE-157: a side's evidence may name the field holding the OTHER side's key (a HotWax product's NetSuite id), so
         // a row keyed apart from it (DUPLICATE:22139:M100880) still shows the record the other side has. Evidence only.
         Map<String, String> otherSideKeyFields = [:]
@@ -121,26 +145,6 @@ class RunConclusionSupport {
             if (sideIndex.unknownWhenAbsent) unknownSides.add(side)
         }
 
-        Map<String, Integer> counts = new LinkedHashMap<>()
-        Map<String, String> labels = new LinkedHashMap<>()
-        rules.each { Map rule ->
-            String code = rule.get("conclusionEnumId")?.toString()
-            if (code && !counts.containsKey(code)) {
-                counts.put(code, 0)
-                labels.put(code, rule.get("label")?.toString() ?: code)
-            }
-        }
-        counts.put(ConclusionTreeSupport.UNEXPLAINED, 0)
-        labels.put(ConclusionTreeSupport.UNEXPLAINED, ConclusionTreeSupport.UNEXPLAINED_LABEL)
-        // DAR-BE-157: a rule whose outcome is HIDE concludes rows that are not differences anyone needs to see (an item NetSuite
-        // no longer uses); they leave the result, and the summary says how many and why.
-        Set<String> hiddenCodes = rules.findAll { it.get("outcome")?.toString() == OUTCOME_HIDE }
-                .collect { it.get("conclusionEnumId")?.toString() }.findAll { it } as Set<String>
-        Set<String> expectedCodes = rules.findAll { it.get("outcome")?.toString() == OUTCOME_EXPECTED }
-                .collect { it.get("conclusionEnumId")?.toString() }.findAll { it } as Set<String>
-        Map<String, Integer> hidden = new LinkedHashMap<>()
-        Map<String, Integer> hiddenByBucket = new LinkedHashMap<>()
-
         JsonSlurper slurper = new JsonSlurper()
         Closure<Map> finding = { Map row ->
             String bucket = singleSided ? "FINDING" : bucketOf(row, file1Label, file2Label)
@@ -164,6 +168,42 @@ class RunConclusionSupport {
             }
             return [bucket: bucket, sides: sides]
         }
+        return [sideSpecs: sideSpecs, otherSideKeyFields: otherSideKeyFields, index: index, unknownSides: unknownSides,
+                finding: finding]
+    }
+
+    private static Map concludeWith(ConclusionTreeEngine engine, List<Map> rules, Map args) {
+        File diffFile = (File) args.diffFile
+        String file1Label = (String) args.file1Label
+        String file2Label = (String) args.file2Label
+        Map prepared = evidenceOf(args)
+        Map sideSpecs = (Map) prepared.sideSpecs
+        Map<String, String> otherSideKeyFields = (Map<String, String>) prepared.otherSideKeyFields
+        Map<String, Map> index = (Map<String, Map>) prepared.index
+        List<String> unknownSides = (List<String>) prepared.unknownSides
+        Closure<Map> finding = (Closure<Map>) prepared.finding
+        JsonSlurper slurper = new JsonSlurper()
+
+        Map<String, Integer> counts = new LinkedHashMap<>()
+        Map<String, String> labels = new LinkedHashMap<>()
+        rules.each { Map rule ->
+            String code = rule.get("conclusionEnumId")?.toString()
+            if (code && !counts.containsKey(code)) {
+                counts.put(code, 0)
+                labels.put(code, rule.get("label")?.toString() ?: code)
+            }
+        }
+        counts.put(ConclusionTreeSupport.UNEXPLAINED, 0)
+        labels.put(ConclusionTreeSupport.UNEXPLAINED, ConclusionTreeSupport.UNEXPLAINED_LABEL)
+        // DAR-BE-157: a rule whose outcome is HIDE concludes rows that are not differences anyone needs to see (an item NetSuite
+        // no longer uses); they leave the result, and the summary says how many and why.
+        Set<String> hiddenCodes = rules.findAll { it.get("outcome")?.toString() == OUTCOME_HIDE }
+                .collect { it.get("conclusionEnumId")?.toString() }.findAll { it } as Set<String>
+        Set<String> expectedCodes = rules.findAll { it.get("outcome")?.toString() == OUTCOME_EXPECTED }
+                .collect { it.get("conclusionEnumId")?.toString() }.findAll { it } as Set<String>
+        Map<String, Integer> hidden = new LinkedHashMap<>()
+        Map<String, Integer> hiddenByBucket = new LinkedHashMap<>()
+
         Map<String, Map<String, Map>> answers = engine ? lookUp(engine, rules, args, diffFile, finding) : [:]
         // DAR-BE-151: a scope in the brain is concluded by it first; the tree concludes what the brain leaves unexplained.
         Map brain = null

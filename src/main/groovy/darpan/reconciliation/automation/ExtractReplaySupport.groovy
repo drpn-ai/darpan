@@ -95,6 +95,29 @@ class ExtractReplaySupport {
         return landed
     }
 
+    static final String RESULT = "RESULT"
+
+    /**
+     * DAR-BE-159. What a SUCCEEDED execution landed and still has on disk, read-only, for a backtest: FILE_1 / FILE_2 (the
+     * extracts) and RESULT (the concluded result document), each [dataManagerPath, fileName, file]. A file that is gone,
+     * empty or outside the data manager root is left out. Empty for an execution that is not the tenant's or did not
+     * succeed. The replay above stays failed-only (AutomationExecutionSupport.replayFromExecutionId); nothing here replays.
+     */
+    static Map<String, Map<String, Object>> landedFilesOfSucceeded(def ec, String tenantId, String executionId) {
+        def execution = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
+                "automationExecutionId", executionId, tenantId, "backtest: the execution's owner is checked on the row")
+        if (execution == null || readField(execution, "statusEnumId") != AutomationExecutionSupport.STATUS_SUCCEEDED) return [:]
+        Map<String, Map<String, Object>> landed = [:]
+        [(SIDE_1): ["file1DataManagerPath", "file1Name"], (SIDE_2): ["file2DataManagerPath", "file2Name"],
+         (RESULT): ["resultDataManagerPath", "resultFileName"]].each { String part, List<String> fields ->
+            String path = normalize(readField(execution, fields[0]))
+            File onDisk = path ? DataManagerSupport.resolveDataManagerFile(ec, path) : null
+            if (onDisk == null || !onDisk.isFile() || onDisk.length() == 0) return
+            landed[part] = [dataManagerPath: path, fileName: normalize(readField(execution, fields[1])) ?: onDisk.name, file: onDisk] as Map<String, Object>
+        }
+        return landed
+    }
+
     /**
      * Pure: each side's newest extract folder under one execution's run folder, and the one extract file in it.
      * Answers [files: [FILE_1: [fileLocation, fileName, exchangeManifestFileLocation?], FILE_2: ...]] or [error: words].

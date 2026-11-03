@@ -46,17 +46,8 @@ class RunConclusionStep {
         Map stepCtx = (args.get("stepCtx") ?: [:]) as Map
         def step = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_CONCLUDE) : null
         try {
-            List conditionRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionCondition")
-                    .condition("compareScopeId", compareScopeId).orderBy("sequenceNum,conditionSeq").useCache(false).list() ?: []
-            Map<String, String> labels = [:]
-            ruleRows.each { Object row ->
-                String enumId = normalize(row.conclusionEnumId)
-                if (enumId && !labels.containsKey(enumId)) {
-                    def enumValue = FacadeSupport.findEnum(ec, enumId)
-                    labels.put(enumId, normalize(enumValue?.description) ?: enumId)
-                }
-            }
-            List<Map> rules = buildRules(ruleRows.collect { toMap(it) }, conditionRows.collect { toMap(it) }, labels)
+            Map<String, String> labels = labelsOf(ec, ruleRows)
+            List<Map> rules = scopeRules(ec, compareScopeId, ruleRows)
 
             Map documentLabels = documentLabels(diffFile)
             boolean singleSided = documentLabels.file2Label == null || args.get("file2Result") == null
@@ -114,6 +105,31 @@ class RunConclusionStep {
                     [errorMessage: "Conclusions not drawn: ${normalize(t.message) ?: t.class.simpleName}".toString()])
             return [ran: false, warning: t.message]
         }
+    }
+
+    /**
+     * DAR-BE-159. The scope's saved conclusion rows as this step compiles them (BRAIN rows left out), read as the active
+     * tenant. ruleRows: the scope's RuleSetConclusionRule rows when already read.
+     */
+    static List<Map> scopeRules(def ec, String compareScopeId, List ruleRows = null) {
+        List rows = ruleRows != null ? ruleRows : (TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
+                .condition("compareScopeId", compareScopeId).orderBy("sequenceNum").useCache(false).list() ?: [])
+        List conditionRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionCondition")
+                .condition("compareScopeId", compareScopeId).orderBy("sequenceNum,conditionSeq").useCache(false).list() ?: []
+        return buildRules(rows.collect { toMap(it) }, conditionRows.collect { toMap(it) }, labelsOf(ec, rows))
+    }
+
+    /** Each conclusion's label (its enumeration's description), by enum id. */
+    static Map<String, String> labelsOf(def ec, List ruleRows) {
+        Map<String, String> labels = [:]
+        (ruleRows ?: []).each { Object row ->
+            String enumId = normalize(row.conclusionEnumId)
+            if (enumId && !labels.containsKey(enumId)) {
+                def enumValue = FacadeSupport.findEnum(ec, enumId)
+                labels.put(enumId, normalize(enumValue?.description) ?: enumId)
+            }
+        }
+        return labels
     }
 
     /**
@@ -229,7 +245,8 @@ class RunConclusionStep {
         return labels
     }
 
-    private static Map sideSpec(def ec, String compareScopeId, String fileSide, Object source, Map fileResult) {
+    /** One side as the conclude pass reads it: its extract, how the compare keyed it, and its connector's evidence fields. */
+    static Map sideSpec(def ec, String compareScopeId, String fileSide, Object source, Map fileResult) {
         Map key = keySpecFor(ec, compareScopeId, fileSide)
         Map<String, Object> connector = RunVerificationSupport.resolveConnector(ec, source)
         return [extractFile : RunVerificationSupport.resolveLocationFile(ec, normalize(fileResult?.fileLocation)),

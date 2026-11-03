@@ -56,6 +56,16 @@ class AgentProvenanceTests {
     }
 
     @Test
+    void "trailing sentence punctuation ends an id but a dot inside a token does not"() {
+        ["exclude M1088731.", "is M1088731? odd", "M1088731! yes", "(M1088731)", "say \"M1088731\" now", "a, M1088731: b"].each { String t ->
+            assertEquals("PASS", AgentProvenance.check("EXCLUSION_FILTER", [filterValues: ["M1088731"]], [t], [:], [] as Set).status, t)
+        }
+        ["M1088731.5", "M1088731.x", "M1088731.5."].each { String t ->
+            assertEquals("BLOCKED", AgentProvenance.check("EXCLUSION_FILTER", [filterValues: ["M1088731"]], [t], [:], [] as Set).status, t)
+        }
+    }
+
+    @Test
     void "matching is case sensitive"() {
         Map r = AgentProvenance.check("EXCLUSION_FILTER", [filterValues: ["M1088731"]], ["exclude m1088731"], [:], [] as Set)
         assertEquals("BLOCKED", r.status)

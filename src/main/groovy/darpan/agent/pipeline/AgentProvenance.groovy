@@ -15,6 +15,9 @@ class AgentProvenance {
     /** Characters that continue a token; an id matches only when neither neighbour is one of these. */
     private static final String TOKEN_CHARS = "A-Za-z0-9#_\\-."
 
+    /** Sentence punctuation that ends an id when followed by whitespace or the end of the text ("exclude M1.", "is M1? odd"). */
+    private static final String TRAILING_PUNCT = "[.?!,:;)\\]\"']"
+
     /** The record-specific literals of a proposal, normalized. Unknown kinds throw (fail closed). */
     static Set<String> identifiersOf(String kind, Map after) {
         Set<String> out = new LinkedHashSet<String>()
@@ -65,8 +68,9 @@ class AgentProvenance {
         else sources.add(AgentRedaction.normalize(node.toString()))
     }
 
-    /** Case-sensitive whole-token occurrence: the neighbours are the string edge or a character outside the token set. */
+    /** Case-sensitive whole-token occurrence: the neighbours are the string edge or a character outside the token set; trailing sentence punctuation before whitespace/end also ends it. */
     private static boolean containsToken(String source, String id) {
-        return Pattern.compile("(?<![" + TOKEN_CHARS + "])" + Pattern.quote(id) + "(?![" + TOKEN_CHARS + "])").matcher(source).find()
+        return Pattern.compile("(?<![" + TOKEN_CHARS + "])" + Pattern.quote(id) +
+                "(?:(?![" + TOKEN_CHARS + "])|(?=" + TRAILING_PUNCT + "+(?:\\s|\\z)))").matcher(source).find()
     }
 }

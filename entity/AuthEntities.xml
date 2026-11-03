@@ -88,6 +88,10 @@
             <description>DAR-BE-145. When the tenant went live. No audit reads data from before it: every audit window
                 starts here at the earliest. Null = no floor.</description>
         </field>
+        <field name="agentEnabled" type="text-indicator" default="'N'">
+            <description>DAR-BE-159. Y lets this tenant use the embedded agent. The agent also needs the deployment
+                property darpan.agent.enabled=true (darpan.agent.AgentSwitch); either off means off.</description>
+        </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
 

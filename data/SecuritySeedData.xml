@@ -379,6 +379,27 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.knowledge.KnowledgeEntry"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-159 — the embedded agent's conversations, turns, messages, proposals and tickets; every read also names the tenant. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AGENT_CONVERSATION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.AgentConversation"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AGENT_TURN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.AgentTurn"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AGENT_MESSAGE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.AgentMessage"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUDIT_CHANGE_PROPOSAL"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.AuditChangeProposal"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_BRAIN_CHANGE_TICKET"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.BrainChangeTicket"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <!-- DAR-BE-164 — a tenant's scripts; every read also names the tenant. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_SCRIPT"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"

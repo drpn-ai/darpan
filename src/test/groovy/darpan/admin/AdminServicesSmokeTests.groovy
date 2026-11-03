@@ -199,7 +199,7 @@ class AdminServicesSmokeTests {
         assertEquals(false, alpha.result.tenantDetail.disabled)
 
         Map charlie = callAs(SUPER_USERNAME, "admin.TenantAdminServices.get#TenantDetail", [tenantUserGroupId: CHARLIE])
-        assertEquals([tenantUserGroupId: CHARLIE, label: CHARLIE, timeZone: null, goLiveDate: null, disabled: false,
+        assertEquals([tenantUserGroupId: CHARLIE, label: CHARLIE, timeZone: null, goLiveDate: null, agentEnabled: false, disabled: false,
                       createdDate: null, members: []], charlie.result.tenantDetail,
                 "no TenantSetting row: label falls back to the id, nothing else is invented")
     }

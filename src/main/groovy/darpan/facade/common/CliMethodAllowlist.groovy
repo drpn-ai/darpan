@@ -44,7 +44,9 @@ class CliMethodAllowlist {
 
             "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess",
 
+            "facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema",
             "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs",
+            "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery",
 
             "facade.JsonSchemaFacadeServices.get#JsonSchema",
             "facade.JsonSchemaFacadeServices.list#JsonSchemas",

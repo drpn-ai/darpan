@@ -258,7 +258,13 @@
                                         "$ref": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetOmsGraphqlSchemaRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListHotWaxOmsRestSourceConfigsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RunOmsGraphqlAgentQueryRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveHotWaxOmsRestSourceConfigRequest"
@@ -726,7 +732,9 @@
                                         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "#/components/schemas/ListConfigTenantAccessRequest",
                                         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "#/components/schemas/RevokeConfigTenantAccessRequest",
                                         "facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigRequest",
+                                        "facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema": "#/components/schemas/GetOmsGraphqlSchemaRequest",
                                         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "#/components/schemas/ListHotWaxOmsRestSourceConfigsRequest",
+                                        "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery": "#/components/schemas/RunOmsGraphqlAgentQueryRequest",
                                         "facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig": "#/components/schemas/SaveHotWaxOmsRestSourceConfigRequest",
                                         "facade.JsonSchemaFacadeServices.delete#JsonSchema": "#/components/schemas/DeleteJsonSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.flatten#JsonSchema": "#/components/schemas/FlattenJsonSchemaRequest",
@@ -1106,7 +1114,13 @@
                                             "$ref": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetOmsGraphqlSchemaResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ListHotWaxOmsRestSourceConfigsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RunOmsGraphqlAgentQueryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveHotWaxOmsRestSourceConfigResponse"
@@ -10424,6 +10438,101 @@
                     "result"
                 ]
             },
+            "GetOmsGraphqlSchemaParams": {
+                "type": "object",
+                "properties": {
+                    "omsRestSourceConfigId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "omsRestSourceConfigId"
+                ],
+                "description": "DAR-CLI-003. The HotWax OMS GraphQL schema a tenant's agent can ask about, trimmed to the types reachable\n            from the Query root (names, kinds, fields, arguments, enum values and descriptions; mutations and subscriptions\n            left out). Read from the OMS once and kept 24 hours per connection. Needs view access."
+            },
+            "GetOmsGraphqlSchemaResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "schema": {
+                        "type": "object"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "GetOmsGraphqlSchemaRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema",
+                "x-darpan-method": "facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetOmsGraphqlSchemaParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetOmsGraphqlSchemaResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetOmsGraphqlSchemaResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListHotWaxOmsRestSourceConfigsParams": {
                 "type": "object",
                 "properties": {
@@ -10591,6 +10700,118 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ListHotWaxOmsRestSourceConfigsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RunOmsGraphqlAgentQueryParams": {
+                "type": "object",
+                "properties": {
+                    "omsRestSourceConfigId": {
+                        "type": "string"
+                    },
+                    "document": {
+                        "type": "string"
+                    },
+                    "variables": {
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "omsRestSourceConfigId",
+                    "document"
+                ],
+                "description": "DAR-CLI-003. Runs one fresh, read-only GraphQL query a tenant user's agent wrote, through a HotWax OMS\n            connection the active tenant stores. One query only (no mutation, subscription or introspection); the answer\n            is returned as the OMS gave it, up to 5 MB; the connection's credentials are never returned. Needs run\n            access. Every call is logged for the tenant."
+            },
+            "RunOmsGraphqlAgentQueryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "data": {
+                        "type": "object"
+                    },
+                    "rowCount": {
+                        "type": "integer",
+                        "description": "The edge count when the answer is one connection, else blank."
+                    },
+                    "truncated": {
+                        "type": "boolean"
+                    },
+                    "durationMs": {
+                        "type": "integer"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "RunOmsGraphqlAgentQueryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery",
+                "x-darpan-method": "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunOmsGraphqlAgentQueryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunOmsGraphqlAgentQueryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunOmsGraphqlAgentQueryResult"
                     }
                 },
                 "required": [
@@ -28238,7 +28459,9 @@
         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "ListConfigTenantAccess",
         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "RevokeConfigTenantAccess",
         "facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig": "DeleteHotWaxOmsRestSourceConfig",
+        "facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema": "GetOmsGraphqlSchema",
         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "ListHotWaxOmsRestSourceConfigs",
+        "facade.HotWaxOmsFacadeServices.run#OmsGraphqlAgentQuery": "RunOmsGraphqlAgentQuery",
         "facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig": "SaveHotWaxOmsRestSourceConfig",
         "facade.JsonSchemaFacadeServices.delete#JsonSchema": "DeleteJsonSchema",
         "facade.JsonSchemaFacadeServices.flatten#JsonSchema": "FlattenJsonSchema",

@@ -74,7 +74,8 @@ class AgentProvenance {
         switch (kind) {
             case "EXCLUSION_FILTER":
                 keys(after, ["fieldExpression", "operator", "filterValues", "fieldLabel"], "after")
-                str(after, "fieldExpression", true, "after"); str(after, "operator", false, "after"); str(after, "fieldLabel", false, "after")
+                // R44: fieldExpression may be left out; the planner then excludes by the run side's primary id expression.
+                str(after, "fieldExpression", false, "after"); str(after, "operator", false, "after"); str(after, "fieldLabel", false, "after")
                 freeText(after, "fieldLabel", "after")
                 canon(after, ["fieldExpression", "operator"], "after")
                 strList(after, "filterValues", true, "after")

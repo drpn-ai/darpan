@@ -61,11 +61,31 @@ class AuditChangePlanner {
         row.create()
 
         Map current = AuditChangeLevers.current(ec, kind, target)
+        // R44: an exclusion that names no field excludes by the run side's primary id expression. The resolved expression
+        // is stored in afterJson, so the backtest, the plan and the person all see it before apply.
+        boolean noPrimaryId = false
+        if (kind == "EXCLUSION_FILTER" && current != null && after.get("fieldExpression") == null) {
+            String primary = AuditChangeLevers.primaryIdExpressionOf(current, target.fileSide as String)
+            if (primary) {
+                after = new LinkedHashMap(after)
+                after.put("fieldExpression", primary)
+                row.afterJson = JsonOutput.toJson(after)
+            } else {
+                noPrimaryId = true
+            }
+        }
         Map provenance = AgentProvenance.check(kind, after, humanTexts(ec, tenantId, conversationId), openContext(ec, tenantId, conversation),
                 AuditChangeLevers.configValues(kind, current))
         row.setAll([provenanceStatus: provenance.status, blockedIds: fittedList((List<String>) provenance.blockedIds)])
         // R27: anyone in the tenant may chat, but only an editor's session runs the validating save; a viewer's proposal
         // waits as a DRAFT for an editor to plan from the app.
+        if (noPrimaryId) {
+            ec.message.clearErrors()
+            row.setAll([status: "INVALID", statusMessage: AuditChangeLevers.NO_PRIMARY_ID_MESSAGE, planHash: null])
+            row.update()
+            return [proposalId: row.proposalId, status: row.status, statusMessage: row.statusMessage, provenanceStatus: row.provenanceStatus,
+                    blockedIds: provenance.blockedIds, backtest: null]
+        }
         Map planned = current == null ? invalid(ec, row) :
                 (TenantAccessSupport.hasActiveTenantWriteAccess(ec) ? planRow(ec, row, current) : draftForEditor(ec, row, current))
         return [proposalId: row.proposalId, status: row.status, statusMessage: row.statusMessage, provenanceStatus: row.provenanceStatus,
@@ -309,11 +329,14 @@ class AuditChangePlanner {
     private static Map backtestOf(def ec, def row, Map merged, Map current) {
         List<String> prior = ec.message.hasError() ? new ArrayList<String>(ec.message.errors) : []
         ec.message.clearErrors()
+        // R44: an exclusion's backtest names the field it excludes by (possibly the defaulted primary id), so the person sees it.
+        Map shown = row.kind == "EXCLUSION_FILTER" ? [excludesBy: parse(row.afterJson).fieldExpression] : [:]
         try {
             Map tested = (Map) backtest.call(ec, row.companyUserGroupId as String, row.kind as String, parse(row.targetJson), merged, current)
-            return ec.message.hasError() ? backtestFailed(ec.message.errors[0] as String) : tested
+            if (ec.message.hasError()) return backtestFailed(ec.message.errors[0] as String) + shown
+            return tested == null ? null : tested + shown
         } catch (Exception e) {
-            return backtestFailed(rootMessage(e) ?: e.class.simpleName)
+            return backtestFailed(rootMessage(e) ?: e.class.simpleName) + shown
         } finally {
             ec.message.clearErrors()
             prior.each { ec.message.addError(it) }

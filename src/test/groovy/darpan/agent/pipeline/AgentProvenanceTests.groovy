@@ -115,7 +115,6 @@ class AgentProvenanceTests {
         bad("EXCLUSION_FILTER", [fieldExpression: "o", filterValues: "M1088731"])               // String filterValues
         bad("EXCLUSION_FILTER", [fieldExpression: "o", filterValues: []])                       // empty filterValues
         bad("EXCLUSION_FILTER", [fieldExpression: "o", filterValues: ["A", 5]])                 // non-string entry
-        bad("EXCLUSION_FILTER", [filterValues: ["A"]])                                          // fieldExpression missing
         bad("CONCLUSION_ROWS", [rows: ["not a map"]])                                           // non-Map row
         bad("CONCLUSION_ROWS", [rows: []])
         bad("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", conditions: [[fieldExpression: "a", operator: "EQUALS", checkValue: 5]]]]]) // non-String checkValue
@@ -126,6 +125,9 @@ class AgentProvenanceTests {
         bad("FIX_TEXT", [fixActionTemplate: "x", text: "y"])
         assertThrows(IllegalArgumentException) { AgentProvenance.identifiersOf("EXCLUSION_FILTER", [fieldExpression: "o", filterValues: "A"]) }
         assertThrows(IllegalArgumentException) { AgentProvenance.validateShape("FIX_TEXT", null) }
+        // R44: an exclusion may leave fieldExpression out (the planner defaults it to the run's primary id); blank is still refused.
+        AgentProvenance.validateShape("EXCLUSION_FILTER", [filterValues: ["A"]])
+        bad("EXCLUSION_FILTER", [fieldExpression: "", filterValues: ["A"]])
     }
 
     private static Map pass(String kind, Map after, List<String> human = [], Map ctx = [:], Set<String> cfg = [] as Set) {

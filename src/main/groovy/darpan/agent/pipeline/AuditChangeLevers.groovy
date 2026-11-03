@@ -136,6 +136,21 @@ class AuditChangeLevers {
         return [kind: kind, target: target, savedRunId: target.savedRunId, conclusions: nodes]
     }
 
+    /**
+     * R44. What an EXCLUSION_FILTER that names no fieldExpression excludes by: the target side's single primary id
+     * expression, from the state {@link #current} read. Null when the side has none, or a composite key (several
+     * primaryIdExpressions): the planner then marks the proposal INVALID with {@link #NO_PRIMARY_ID_MESSAGE}, never a guess.
+     */
+    static String primaryIdExpressionOf(Map state, String fileSide) {
+        Map sides = state?.run instanceof Map && ((Map) state.run).sides instanceof Map ? (Map) ((Map) state.run).sides : null
+        Map side = sides == null ? null : (Map) sides.get(fileSide)
+        if (side == null || ((List) (side.primaryIdExpressions ?: [])).size() > 1) return null
+        return normalize(side.primaryIdExpression) ?: null
+    }
+
+    /** The INVALID statusMessage (a constant, so a reader can match it by identity) when R44's default has nothing to use. */
+    static final String NO_PRIMARY_ID_MESSAGE = "NO_PRIMARY_ID_EXPRESSION: this run side has no single primary id expression to exclude by; name the field (fieldExpression)."
+
     // ---------------------------------------------------------------- merge
 
     /**
@@ -148,6 +163,8 @@ class AuditChangeLevers {
         Map target = (Map) state.target
         switch (kind) {
             case "EXCLUSION_FILTER":
+                // The planner resolves an omitted fieldExpression (R44) before it merges; none here is a caller bug.
+                if (!after.fieldExpression) throw new IllegalArgumentException(NO_PRIMARY_ID_MESSAGE)
                 Map filter = [fieldExpression: after.fieldExpression as String,
                               operator       : ((after.operator ?: "EXCLUDE_IN") as String).toUpperCase(Locale.ROOT),
                               filterValues   : ((List) after.filterValues).collect { it as String }]

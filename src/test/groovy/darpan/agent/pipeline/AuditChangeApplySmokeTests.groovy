@@ -3,6 +3,7 @@ package darpan.agent.pipeline
 import darpan.agent.AgentCallMarker
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -642,6 +643,66 @@ class AuditChangeApplySmokeTests {
         } finally {
             AuditChangePlanner.backtest = was
         }
+    }
+
+    // ------------------------------------------------------------------ R44: an exclusion that names no field
+
+    /** A fresh run of the tenant: FILE_1 on TAC_Q by tranId and, when file2Primary is given, FILE_2 on TAC_Q2 by it. */
+    private Map newRun(String name, String file2Primary = null) {
+        Map params = [runName: name, scopeMode: file2Primary ? "COMPARE" : "EVALUATE",
+                      file1SystemEnumId: "NETSUITE_SUITEQL", file1SourceTypeEnumId: "AUT_SRC_API", file1SourceConfigId: "TAC_Q",
+                      file1SourceConfigType: "NETSUITE_SUITEQL", file1PrimaryIdExpression: NEW_FIELD, rules: []]
+        if (file2Primary) params += [file2SystemEnumId: "NETSUITE_SUITEQL", file2SourceTypeEnumId: "AUT_SRC_API", file2SourceConfigId: "TAC_Q2",
+                                     file2SourceConfigType: "NETSUITE_SUITEQL", file2PrimaryIdExpression: file2Primary]
+        Map run = ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun").parameters(params).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        return (Map) run.savedRun
+    }
+
+    private Map storedAfter(Object proposalId) { (Map) new JsonSlurper().parseText(proposal(proposalId).afterJson as String) }
+
+    @Test
+    void "an exclusion that names no field excludes by the run's primary id expression"() {
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        assertFalse(p.hadError as boolean, p.errorText as String)
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        assertEquals("PASS", p.provenanceStatus)
+        assertEquals([filterValues: ["M1088731"], fieldExpression: NEW_FIELD], storedAfter(p.proposalId), "the stored proposal shows the resolved field")
+        assertEquals(NEW_FIELD, p.backtest.excludesBy, "so does the backtest")
+        Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
+        assertFalse(plan.hadError as boolean, plan.errorText as String)
+        Map added = ((List<Map>) plan.after.filters.FILE_1).find { it.filterValues == ["M1088731"] }
+        assertEquals([fieldExpression: NEW_FIELD, operator: "EXCLUDE_IN", filterValues: ["M1088731"]], added)
+    }
+
+    @Test
+    void "a two-sided run defaults each side to its own primary id expression"() {
+        Map run = newRun("Memos against origins", '$.records[*].memoOrigin')
+        Map second = propose("EXCLUSION_FILTER", [savedRunId: run.savedRunId, fileSide: "FILE_2"], [filterValues: ["STORE"]])
+        assertFalse(second.hadError as boolean, second.errorText as String)
+        assertEquals('$.records[*].memoOrigin', storedAfter(second.proposalId).fieldExpression)
+        assertEquals('$.records[*].memoOrigin', second.backtest.excludesBy)
+        Map first = propose("EXCLUSION_FILTER", [savedRunId: run.savedRunId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        assertEquals(NEW_FIELD, storedAfter(first.proposalId).fieldExpression)
+        assertEquals(["PLANNED", "PLANNED"], [second.status, first.status])
+    }
+
+    @Test
+    void "with no single primary id expression the exclusion is INVALID, never a guess"() {
+        Map run = newRun("Memos with no key")
+        asSystem {
+            ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", run.compareScopeId).condition("fileSide", "FILE_1")
+                    .one().set("primaryIdExpression", null).update()
+        }
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: run.savedRunId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        assertFalse(p.hadError as boolean, p.errorText as String)
+        assertEquals("INVALID", p.status)
+        assertEquals(AuditChangeLevers.NO_PRIMARY_ID_MESSAGE, p.statusMessage)
+        assertNull(proposal(p.proposalId).planHash)
+        assertEquals([filterValues: ["M1088731"]], storedAfter(p.proposalId), "nothing was filled in")
+        assertNull(AuditChangeLevers.primaryIdExpressionOf([run: [sides: [FILE_1: [primaryIdExpression: null, primaryIdExpressions: ['$.a', '$.b']]]]], "FILE_1"),
+                "a composite key is no single primary id")
+        assertNull(AuditChangeLevers.primaryIdExpressionOf([run: [sides: [FILE_1: [primaryIdExpression: NEW_FIELD]]]], "FILE_2"), "a side the run lacks")
     }
 
     private void setRule(Long sequenceNum, Map fields) {

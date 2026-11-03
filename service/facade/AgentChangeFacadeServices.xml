@@ -121,4 +121,72 @@
             <set field="planHash" from="reverted.planHash"/>
         </actions>
     </service>
+
+    <!-- DAR-BE-159. A request that needs code (a new cause, a missing field, a product bug) becomes a ticket for Darpan staff
+         instead of a config change. The agent raises it in-JVM (never remote); the tenant lists its own. -->
+
+    <service verb="create" noun="BrainChangeTicket" allow-remote="false" authenticate="true" authz-action="view">
+        <description>Raises a ticket for staff. The category must be one of the R30 levers. Evidence and refs have every
+            customer-data leaf (email, phone, Shopify id) stored as "&lt;populated&gt;"; verbatimText is stored as given. One ticket
+            per (conversation, verbatimText): a repeat answers the first ticket's id.</description>
+        <in-parameters>
+            <parameter name="conversationId" required="true"/>
+            <parameter name="category" required="true"><description>THRESHOLD_OR_WINDOW, EXCLUSION, STATEMENT_SCOPE, FIX_WORDING, CAUSE_STANCE,
+                NEW_CHECK_EXISTING_READ, NEW_OR_WIDER_CAUSE, MISSING_FIELD, NEW_SYSTEM_OR_PACK, PRODUCT_BUG or DISPLAY.</description></parameter>
+            <parameter name="verbatimText" required="true"><description>The person's own words.</description></parameter>
+            <parameter name="refs" type="Object"/>
+            <parameter name="evidence" type="Object"/>
+            <parameter name="placement" type="Object"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ticketId"/>
+            <parameter name="duplicate" type="Boolean"><description>True when the ticket already existed.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!darpan.agent.BrainTicketSupport.CATEGORIES.contains(category)">
+                <return error="true" message="Category ${category} is not one of: ${darpan.agent.BrainTicketSupport.CATEGORIES.join(', ')}."/></if>
+            <if condition="!verbatimText?.trim()"><return error="true" message="verbatimText is required."/></if>
+            <set field="conversation" from="darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.agent.AgentConversation', 'conversationId', conversationId, tenantId, 'brain ticket: tenant compared on the row')"/>
+            <if condition="conversation == null"><return error="true" message="Conversation ${conversationId} was not found."/></if>
+            <set field="refsJson" from="darpan.agent.BrainTicketSupport.redactedJson(refs)"/>
+            <set field="evidenceJson" from="darpan.agent.BrainTicketSupport.redactedJson(evidence)"/>
+            <set field="placementJson" from="darpan.agent.BrainTicketSupport.redactedJson(placement)"/>
+            <if condition="refsJson != null &amp;&amp; refsJson.length() > darpan.agent.BrainTicketSupport.INTERMEDIATE">
+                <return error="true" message="refs is longer than ${darpan.agent.BrainTicketSupport.INTERMEDIATE} characters; send fewer."/></if>
+
+            <set field="textHash" from="darpan.agent.BrainTicketSupport.sha256(verbatimText)"/>
+            <entity-find entity-name="darpan.agent.BrainChangeTicket" list="sameConversation">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="conversationId"/>
+            </entity-find>
+            <set field="existing" from="sameConversation.find { darpan.agent.BrainTicketSupport.sha256(it.verbatimText) == textHash }"/>
+            <if condition="existing != null">
+                <set field="ticketId" from="existing.ticketId"/><set field="duplicate" from="true"/><return/></if>
+
+            <set field="ticketId" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.agent.BrainChangeTicket', 'ticketId')"/>
+            <service-call name="create#darpan.agent.BrainChangeTicket" in-map="[ticketId: ticketId, companyUserGroupId: tenantId,
+                    conversationId: conversationId, category: category, verbatimText: verbatimText, refsJson: refsJson,
+                    evidenceJson: evidenceJson, placementJson: placementJson, status: 'RECEIVED',
+                    createdByUserId: ec.user.userId, createdDate: ec.user.nowTimestamp]"/>
+            <set field="duplicate" from="false"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="BrainChangeTickets" allow-remote="true" authenticate="true" authz-action="view">
+        <description>The active tenant's tickets, newest first.</description>
+        <in-parameters><parameter name="status"><description>Only tickets in this status.</description></parameter></in-parameters>
+        <out-parameters><parameter name="tickets" type="List"/></out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><set field="tickets" from="[]"/><return/></if>
+            <entity-find entity-name="darpan.agent.BrainChangeTicket" list="rows">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="status" ignore-if-empty="true"/>
+                <order-by field-name="-createdDate"/>
+            </entity-find>
+            <set field="tickets" from="rows.collect { darpan.agent.BrainTicketSupport.toMap(it) }"/>
+        </actions>
+    </service>
+
 </services>

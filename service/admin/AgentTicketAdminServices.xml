@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-159. Darpan staff (super admins) read the brain change tickets the agent raised, across tenants, and move one
+  through RECEIVED, ACCEPTED, DECLINED, SHIPPED. admin.* and therefore inside the DARPAN_ADMIN_API fence (the pattern
+  admin\..* already covers this file), which carries no tenant filter; each service checks super admin again first.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="list" noun="BrainChangeTickets" allow-remote="true" authenticate="true" authz-action="view">
+        <description>Tickets across tenants, newest first; one tenant or one status when named.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId"><description>Only this tenant's tickets.</description></parameter>
+            <parameter name="status"><description>Only tickets in this status.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="tickets" type="List"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find entity-name="darpan.agent.BrainChangeTicket" list="rows">
+                <econdition field-name="companyUserGroupId" from="tenantUserGroupId" ignore-if-empty="true"/>
+                <econdition field-name="status" ignore-if-empty="true"/>
+                <order-by field-name="-createdDate"/>
+            </entity-find>
+            <set field="tickets" from="rows.collect { darpan.agent.BrainTicketSupport.toMap(it) }"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="BrainChangeTicket" allow-remote="true" authenticate="true">
+        <description>Moves a ticket to RECEIVED, ACCEPTED, DECLINED or SHIPPED. DECLINED needs statusReason; SHIPPED needs shippedVersion.</description>
+        <in-parameters>
+            <parameter name="ticketId" required="true"/>
+            <parameter name="status" required="true"/>
+            <parameter name="statusReason"/>
+            <parameter name="shippedVersion"/>
+        </in-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!darpan.agent.BrainTicketSupport.STATUSES.contains(status)">
+                <return error="true" message="Status ${status} is not one of: ${darpan.agent.BrainTicketSupport.STATUSES.join(', ')}."/></if>
+            <if condition="status == 'DECLINED' &amp;&amp; !statusReason?.trim()"><return error="true" message="A declined ticket needs a statusReason."/></if>
+            <if condition="status == 'SHIPPED' &amp;&amp; !shippedVersion?.trim()"><return error="true" message="A shipped ticket needs a shippedVersion."/></if>
+            <if condition="statusReason != null &amp;&amp; statusReason.length() > darpan.agent.BrainTicketSupport.MEDIUM">
+                <return error="true" message="statusReason is longer than ${darpan.agent.BrainTicketSupport.MEDIUM} characters."/></if>
+            <entity-find-one entity-name="darpan.agent.BrainChangeTicket" value-field="ticket">
+                <field-map field-name="ticketId"/></entity-find-one>
+            <if condition="ticket == null"><return error="true" message="Ticket ${ticketId} was not found."/></if>
+            <service-call name="update#darpan.agent.BrainChangeTicket" in-map="[ticketId: ticketId, status: status,
+                    statusReason: statusReason, shippedVersion: shippedVersion]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.AgentTicketAdminServices.update#BrainChangeTicket', targetType: 'BrainChangeTicket',
+                    targetId: ticketId, detailText: 'Ticket ' + ticketId + ' of ' + ticket.companyUserGroupId + ' moved from ' + ticket.status + ' to ' + status + '.',
+                    auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
+    </service>
+</services>

@@ -88,6 +88,22 @@ class AgentRedaction {
         return [untrusted_customer_text: clean] as Map
     }
 
+    /**
+     * Every leaf string of a nested Map/List, normalised, with a customer-data shape (email, phone, shopifyGid) replaced by
+     * "<populated>". Other text is kept: a ticket's evidence is the agent's own account, not a system record. The input is not changed.
+     */
+    static Object redactLeaves(Object v) {
+        if (v == null || v instanceof Boolean || v instanceof Number) return v
+        if (v instanceof Map) {
+            Map out = new LinkedHashMap()
+            ((Map) v).each { Object k, Object x -> out.put(k, redactLeaves(x)) }
+            return out
+        }
+        if (v instanceof Collection) return ((Collection) v).collect { Object x -> redactLeaves(x) }
+        String clean = normalize(v.toString())
+        return isCustomerShape(clean) ? POPULATED : clean
+    }
+
     /** The one normalising step for every string value: invisible characters out, then NFKC (fullwidth digits and the like fold), before any check. */
     static String normalize(String s) {
         return java.text.Normalizer.normalize(stripInvisible(s), java.text.Normalizer.Form.NFKC)

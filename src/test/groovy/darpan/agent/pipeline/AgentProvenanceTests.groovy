@@ -154,20 +154,6 @@ class AgentProvenanceTests {
     }
 
     @Test
-    void "literals in free text outside placeholders need provenance"() {
-        Map r = pass("FIX_TEXT", [fixActionTemplate: "Refund {orderId} and M7777777"])
-        assertEquals("BLOCKED", r.status)
-        assertEquals(["M7777777"], r.blockedIds)
-        assertEquals("PASS", pass("FIX_TEXT", [fixActionTemplate: "Refund {orderId} and M7777777"], ["use M7777777"]).status)
-        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Close it within {graceDays} days"]))
-        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Re-import after 30 days"]))
-        assertEquals(["ORD-123"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Check ORD-123."]))
-        assertEquals(["R1088"] as Set, AgentProvenance.identifiersOf("EXCLUSION_FILTER", filter(["x"]) + [fieldLabel: "see R1088"]) - ["x"] as Set)
-        Map rows = [rows: [[conclusionCode: "X", fixActionTemplate: "Fix M7777777 via {a}"]]]
-        assertEquals(["M7777777"], pass("CONCLUSION_ROWS", rows).blockedIds)
-    }
-
-    @Test
     void "an empty narrowing, blank values and blank required strings throw"() {
         assertThrows(IllegalArgumentException) { pass("STATEMENT_NARROWING", [diffTypes: []]) }
         assertThrows(IllegalArgumentException) { pass("STATEMENT_NARROWING", [diffTypes: [], ruleIds: []]) }
@@ -199,34 +185,11 @@ class AgentProvenanceTests {
     }
 
     @Test
-    void "only renderer placeholders without digits are skipped, other brace content is text"() {
-        assertEquals(["M7777777"], pass("FIX_TEXT", [fixActionTemplate: "also exclude {M7777777}"]).blockedIds)
-        assertEquals(["M7777777"], pass("FIX_TEXT", [fixActionTemplate: "{please exclude M7777777}"]).blockedIds)
-        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "{orderId} {graceDays} days {a.b_c}"]))
-    }
-
-    @Test
     void "free text must already be normalized"() {
         assertThrows(IllegalArgumentException) { pass("FIX_TEXT", [fixActionTemplate: "also \uFF5BM7777777\uFF5D"]) }
         assertThrows(IllegalArgumentException) { pass("FIX_TEXT", [fixActionTemplate: "fix M77${ZW}77777".toString()]) }
         assertThrows(IllegalArgumentException) { pass("EXCLUSION_FILTER", filter(["A"]) + [fieldLabel: "L${ZW}1".toString()]) }
         assertThrows(IllegalArgumentException) { pass("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", fixActionTemplate: "a${ZW}b".toString()]]]) }
-    }
-
-    @Test
-    void "digit pieces join, links and emails are identifiers, a leading dash is dropped"() {
-        assertEquals(["77 77 777"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Refund 77 77 777 today"]))
-        assertEquals(["10, 20/30"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "see 10, 20/30 now"]))
-        assertEquals("BLOCKED", pass("FIX_TEXT", [fixActionTemplate: "Refund 77 77 777"], ["refund 7777777"]).status)
-        assertEquals("PASS", pass("FIX_TEXT", [fixActionTemplate: "Refund 77 77 777"], ["refund 77 77 777"]).status)
-        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Close it within {graceDays} days"]))
-        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Re-import after 30 days"]))
-        assertEquals(["bob@example.com"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Email bob@example.com."]))
-        assertEquals(["https://evil.example/x"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Open (https://evil.example/x)"]))
-        assertEquals(["www.evil.example"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Open www.evil.example now"]))
-        assertEquals("PASS", pass("FIX_TEXT", [fixActionTemplate: "Email bob@example.com."], ["use bob@example.com"]).status)
-        assertEquals(["M7777777"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "see -M7777777"]))
-        assertEquals(["#GOR196940093"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "order #GOR196940093"]))
     }
 
     @Test
@@ -238,5 +201,48 @@ class AgentProvenanceTests {
                 }
             }
         }
+    }
+
+    private static Set<String> fixIds(String text) { AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: text]) }
+
+    @Test
+    void "plain prose with placeholders has no identifiers"() {
+        assertEquals([] as Set, fixIds("Close warranty {warranty} ({channel}) in HotWax: return {return} already exchanged {sku}. Then exchange {exchange} syncs to NetSuite."))
+        assertEquals([] as Set, fixIds("don't re-import, check the warranty's status"))
+        assertEquals([] as Set, fixIds("Close it within {graceDays} days"))
+    }
+
+    @Test
+    void "any word with a digit or symbol is an identifier needing provenance"() {
+        assertEquals(["30"] as Set, fixIds("Re-import after 30 days"))
+        assertEquals(["12;34;56"] as Set, fixIds("see 12;34;56 now"))
+        assertEquals(["evil.example/x"] as Set, fixIds("open evil.example/x"))
+        assertEquals(["bit.ly/abc"] as Set, fixIds("open bit.ly/abc."))
+        assertEquals(["//evil.com"] as Set, fixIds("open //evil.com"))
+        assertEquals(["https://evil.example/x"] as Set, fixIds("Open (https://evil.example/x)"))
+        assertEquals(["bob@example.com"] as Set, fixIds("Email bob@example.com."))
+        assertEquals(["{x.com}"] as Set, fixIds("go to {x.com}"))
+        assertEquals(["{M7777777}"] as Set, fixIds("also exclude {M7777777}"))
+        assertEquals(["{please", "M7777777}"] as Set, fixIds("{please exclude M7777777}"))
+        assertEquals(["a|b", "x=y", "p*q", "snake_case"] as Set, fixIds("a|b x=y p*q snake_case"))
+        assertEquals(["#GOR196940093"] as Set, fixIds("order #GOR196940093"))
+        assertEquals(["-M7777777"] as Set, fixIds("see -M7777777"))
+        assertEquals("BLOCKED", pass("FIX_TEXT", [fixActionTemplate: "also exclude {M7777777}"]).status)
+        assertEquals("PASS", pass("FIX_TEXT", [fixActionTemplate: "Email bob@example.com."], ["use bob@example.com"]).status)
+        assertEquals(["M7777777"], pass("FIX_TEXT", [fixActionTemplate: "Refund {orderId} and M7777777"]).blockedIds)
+    }
+
+    @Test
+    void "code-like fields and narrowing entries must be canonical and non-blank"() {
+        Closure bad = { String kind, Map after -> assertThrows(IllegalArgumentException) { pass(kind, after) } }
+        bad("EXCLUSION_FILTER", [fieldExpression: "o\u200Bx", filterValues: ["A"]])
+        bad("EXCLUSION_FILTER", [fieldExpression: "o", operator: " IN", filterValues: ["A"]])
+        bad("CONCLUSION_ROWS", [rows: [[conclusionCode: " X"]]])
+        bad("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", parentConclusionCode: ""]]])
+        bad("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", bucket: "b\uFF21"]]])
+        bad("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", conditions: [[fieldExpression: "a ", operator: "EQUALS"]]]]])
+        bad("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", conditions: [[fieldExpression: "a", operator: "EQ\u200BUALS"]]]]])
+        bad("STATEMENT_NARROWING", [ruleIds: ["R1", ""]])
+        bad("STATEMENT_NARROWING", [diffTypes: ["x\u200By"]])
     }
 }

@@ -16,9 +16,9 @@ class AgentProvenance {
     private static final String TOKEN_CHARS = "\\p{L}\\p{N}\\p{M}#_\\-."
     private static final int MAX_LEAF_TOKEN = 64
     private static final String UNTRUSTED_KEY = "untrusted_customer_text"
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[A-Za-z][A-Za-z_.]*\\}")
-    private static final Pattern FREE_TEXT_TOKEN = Pattern.compile("[" + TOKEN_CHARS + "]+")
-    private static final Pattern PIECE_GAP = Pattern.compile("[\\s/:+,\\-]+")
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[A-Za-z][A-Za-z_]*\\}")
+    private static final Pattern EDGE_PUNCT = Pattern.compile("^[.,:;!?()\"']+|[.,:;!?()\"']+\$")
+    private static final Pattern PLAIN_WORD = Pattern.compile("^[\\p{L}\\p{M}]+(?:['\\-][\\p{L}\\p{M}]+)*\$")
 
     /** Sentence punctuation that ends an id when followed by whitespace or the end of the text ("exclude M1.", "is M1? odd"). */
     private static final String TRAILING_PUNCT = "[.?!,:;)\\]\"']"
@@ -55,33 +55,16 @@ class AgentProvenance {
     }
 
     /**
-     * Free-text identifiers (R19). Only renderer placeholders ({name}, letters/underscore/dot, no digit) are skipped; any other
-     * brace content is text. A digit-bearing piece of 3+ characters is an identifier; adjacent digit-bearing pieces separated by
-     * whitespace or [/:+,-] join into ONE candidate ("77 77 777"); an email, a URL or a www. host is always an identifier.
+     * Free-text identifiers (R22), one fail-closed rule. Remove only renderer placeholders {letters_and_underscore}; split the rest
+     * on whitespace; trim edge punctuation . , : ; ! ? ( ) " ' from each word. A word is plain only if it is letters/marks with at most
+     * single internal ' or - between letters ("don't", "re-import"). Anything else (a digit, '.', '@', '/', '#', '_', '|', '=', '*',
+     * braces, other symbols) makes the whole trimmed word an identifier that needs provenance.
      */
     private static void freeTextIds(Set<String> out, String text) {
         String plain = PLACEHOLDER.matcher(text).replaceAll(" ")
         plain.split(/\s+/).each { String word ->
-            String w = word.replaceAll(/^[(\["'<]+|[.,;:!?)\]"'>]+$/, "")
-            if (w && (w.contains("@") || w.contains("://") || w.toLowerCase().startsWith("www."))) out.add(w)
-        }
-        List<int[]> pieces = []   // [start, end) of each digit-bearing piece, after trimming a leading '-' and trailing '.'/'-'
-        def m = FREE_TEXT_TOKEN.matcher(plain)
-        while (m.find()) {
-            int st = m.start(), en = m.end()
-            while (st < en && plain.charAt(st) == ('-' as char)) st++
-            while (en > st && (plain.charAt(en - 1) == ('.' as char) || plain.charAt(en - 1) == ('-' as char))) en--
-            if (en > st && plain.substring(st, en).any { Character.isDigit(it as char) }) pieces.add([st, en] as int[])
-            else pieces.add(null)
-        }
-        int i = 0
-        while (i < pieces.size()) {
-            if (pieces[i] == null) { i++; continue }
-            int[] first = pieces[i]; int[] last = first; int j = i + 1
-            while (j < pieces.size() && pieces[j] != null && PIECE_GAP.matcher(plain.substring(last[1], pieces[j][0])).matches()) { last = pieces[j]; j++ }
-            String cand = plain.substring(first[0], last[1])
-            if (cand.length() >= 3) out.add(cand)
-            i = j
+            String w = EDGE_PUNCT.matcher(word).replaceAll("")
+            if (w && !PLAIN_WORD.matcher(w).matches()) out.add(w)
         }
     }
 
@@ -93,11 +76,15 @@ class AgentProvenance {
                 keys(after, ["fieldExpression", "operator", "filterValues", "fieldLabel"], "after")
                 str(after, "fieldExpression", true, "after"); str(after, "operator", false, "after"); str(after, "fieldLabel", false, "after")
                 freeText(after, "fieldLabel", "after")
+                canon(after, ["fieldExpression", "operator"], "after")
                 strList(after, "filterValues", true, "after")
                 break
             case "STATEMENT_NARROWING":
                 keys(after, ["diffTypes", "conclusionCodes", "ruleIds"], "after")
-                ["diffTypes", "conclusionCodes", "ruleIds"].each { String k -> strList(after, k, false, "after") }
+                ["diffTypes", "conclusionCodes", "ruleIds"].each { String k ->
+                    strList(after, k, false, "after")
+                    if (after.get(k) != null) ((List) after.get(k)).each { Object e -> canonical((String) e, "after.${k} entry".toString(), true) }
+                }
                 if (["diffTypes", "conclusionCodes", "ruleIds"].every { String k -> !(after.get(k) instanceof List) || ((List) after.get(k)).isEmpty() })
                     throw new IllegalArgumentException("after needs at least one non-empty list of diffTypes, conclusionCodes, ruleIds")
                 break
@@ -118,6 +105,7 @@ class AgentProvenance {
                     str(r, "conclusionCode", true, where)
                     ["parentConclusionCode", "bucket", "fixActionTemplate"].each { String k -> str(r, k, false, where) }
                     freeText(r, "fixActionTemplate", where)
+                    canon(r, ["conclusionCode", "parentConclusionCode", "bucket"], where)
                     Object conds = r.get("conditions")
                     if (conds == null) return
                     if (!(conds instanceof List)) throw new IllegalArgumentException("${where}.conditions must be a list".toString())
@@ -126,6 +114,7 @@ class AgentProvenance {
                         if (!(c instanceof Map)) throw new IllegalArgumentException("${cw} must be a map".toString())
                         keys((Map) c, ["fieldExpression", "operator", "checkValue"], cw)
                         str((Map) c, "fieldExpression", true, cw); str((Map) c, "operator", true, cw); str((Map) c, "checkValue", false, cw)
+                        canon((Map) c, ["fieldExpression", "operator"], cw)
                         Object cv = ((Map) c).get("checkValue")
                         if (cv != null) {
                             String op = ((Map) c).get("operator")
@@ -145,6 +134,11 @@ class AgentProvenance {
         if (notBlank && !raw.trim()) throw new IllegalArgumentException("${where} must not be blank".toString())
         if (raw != AgentRedaction.normalize(raw).trim())
             throw new IllegalArgumentException("${where} contains invisible, compatibility or surrounding-space characters".toString())
+    }
+
+    /** Code-like strings must be present-and-non-blank in normalized, trimmed form when given. */
+    private static void canon(Map m, List<String> keys, String where) {
+        keys.each { String k -> if (m.get(k) != null) canonical((String) m.get(k), "${where}.${k}".toString(), true) }
     }
 
     /** Free text reaches people as written, so it must already be in normalized form (no invisible characters, no fullwidth braces). */

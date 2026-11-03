@@ -68,9 +68,9 @@ class CliLoginSmokeTests {
         Map out = call.out
         assertTrue(out.userCode ==~ USER_CODE_PATTERN, "user code ${out.userCode}")
         assertTrue((out.deviceCode as String).length() >= 43, "device code ${out.deviceCode}")
-        assertEquals("/cli-login?code=${out.userCode}".toString(), out.verificationPath)
+        assertEquals("/cli-login", out.verificationPath)
         assertTrue((out.verificationUrl as String).startsWith("http"), "verification url ${out.verificationUrl}")
-        assertTrue((out.verificationUrl as String).endsWith("/cli-login?code=${out.userCode}"), "verification url ${out.verificationUrl}")
+        assertTrue((out.verificationUrl as String).endsWith("/cli-login"), "verification url ${out.verificationUrl}")
         assertEquals(600, out.expiresInSeconds as int)
         assertEquals(3, out.intervalSeconds as int)
 
@@ -99,6 +99,7 @@ class CliLoginSmokeTests {
         assertEquals(HOST, request.out.hostLabel)
         assertEquals("PENDING", request.out.status)
         assertNotNull(request.out.expiresDate)
+        assertNotNull(request.out.createdDate)
 
         assertEquals("EXPIRED", anon("poll#CliLogin", [deviceCode: "not-a-real-device-code"]).out.status)
     }

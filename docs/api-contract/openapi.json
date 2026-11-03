@@ -9340,7 +9340,7 @@
                 "properties": {
                     "userCode": {
                         "type": "string",
-                        "description": "The user code from the CLI or its link."
+                        "description": "The user code the person typed from their terminal."
                     }
                 },
                 "required": [
@@ -9387,6 +9387,17 @@
                             }
                         ],
                         "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When the request expires."
+                    },
+                    "createdDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When the CLI started the request."
                     }
                 }
             },
@@ -9925,11 +9936,11 @@
                     },
                     "verificationUrl": {
                         "type": "string",
-                        "description": "The Darpan app page that approves this sign-in: app base URL + verificationPath."
+                        "description": "The Darpan app page that approves this sign-in: app base URL + verificationPath. It carries no code: the person types the code their terminal shows."
                     },
                     "verificationPath": {
                         "type": "string",
-                        "description": "/cli-login?code=USER-CODE, for a CLI that knows its own app URL."
+                        "description": "/cli-login, for a CLI that knows its own app URL."
                     },
                     "expiresInSeconds": {
                         "type": "integer",

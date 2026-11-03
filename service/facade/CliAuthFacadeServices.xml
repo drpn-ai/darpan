@@ -25,9 +25,9 @@
             <parameter name="userCode" type="String">
                 <description>The code the person approves, XXXX-XXXX.</description></parameter>
             <parameter name="verificationUrl" type="String">
-                <description>The Darpan app page that approves this sign-in: app base URL + verificationPath.</description></parameter>
+                <description>The Darpan app page that approves this sign-in: app base URL + verificationPath. It carries no code: the person types the code their terminal shows.</description></parameter>
             <parameter name="verificationPath" type="String">
-                <description>/cli-login?code=USER-CODE, for a CLI that knows its own app URL.</description></parameter>
+                <description>/cli-login, for a CLI that knows its own app URL.</description></parameter>
             <parameter name="expiresInSeconds" type="Integer"><description>Seconds until the codes expire: 600.</description></parameter>
             <parameter name="intervalSeconds" type="Integer"><description>Seconds the CLI waits between polls: 3.</description></parameter>
         </out-parameters>
@@ -54,7 +54,7 @@
                           expiresDate: new java.sql.Timestamp(nowDate.time + expiresInSeconds * 1000L)]"/>
             <entity-create value-field="deviceRow"/>
 
-            <set field="verificationPath" from="'/cli-login?code=' + userCode"/>
+            <set field="verificationPath" value="/cli-login"/>
             <set field="verificationUrl" from="darpan.facade.auth.CliAuthSupport.appBaseUrl(ec) + verificationPath"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -130,7 +130,7 @@
     <service verb="get" noun="CliLoginRequest" allow-remote="true">
         <description>What a CLI sign-in asks for, so the person can check the computer before approving.</description>
         <in-parameters>
-            <parameter name="userCode" required="true"><description>The user code from the CLI or its link.</description></parameter>
+            <parameter name="userCode" required="true"><description>The user code the person typed from their terminal.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
@@ -140,6 +140,7 @@
             <parameter name="status" type="String">
                 <description>PENDING (waiting for approval), APPROVED, DENIED, or EXPIRED (expired or unknown code).</description></parameter>
             <parameter name="expiresDate" type="Timestamp"><description>When the request expires.</description></parameter>
+            <parameter name="createdDate" type="Timestamp"><description>When the CLI started the request.</description></parameter>
         </out-parameters>
         <actions>
             <set field="nowDate" from="ec.user.nowTimestamp"/>
@@ -152,6 +153,7 @@
                 <else>
                     <set field="hostLabel" from="deviceRow.hostLabel"/>
                     <set field="expiresDate" from="deviceRow.expiresDate"/>
+                    <set field="createdDate" from="deviceRow.createdDate"/>
                     <if condition="deviceRow.statusId == 'CLAIMED' || deviceRow.statusId == 'APPROVED'">
                         <set field="status" value="APPROVED"/>
                         <else-if condition="deviceRow.statusId == 'DENIED'"><set field="status" value="DENIED"/></else-if>

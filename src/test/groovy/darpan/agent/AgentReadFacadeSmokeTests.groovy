@@ -26,6 +26,7 @@ class AgentReadFacadeSmokeTests {
     private static final String OTHER = "AGR_OTHER"
 
     private ExecutionContext ec
+    private List<String> sameCheckForeign
     private String f1, f2, f3, fNoCause, otherFinding
 
     @BeforeAll
@@ -69,6 +70,13 @@ class AgentReadFacadeSmokeTests {
             otherFinding = findingIds(OTHER, morning(OTHER, ["INV-O1", "INV-O2"]))[0]
             conclude(otherFinding, "AGR_C1")
             conclude(findingIds(OTHER)[1], "AGR_C2")
+            // I2: the OTHER tenant's findings on MINE's check: one with the same conclusion, one different.
+            sameCheckForeign = ["AGR_X1": "AGR_C1", "AGR_X2": "AGR_C2"].collect { String id, String conc ->
+                insert("darpan.audit.AuditFinding", [findingId: id, companyUserGroupId: OTHER, statementId: "${OTHER}_R2".toString(),
+                        checkId: "${MINE}_INV".toString(), recordKey: "FOREIGN-${id}".toString(), period: "2026-10", stateEnumId: "AUDFS_OPEN",
+                        headline: "foreign", firstFoundDate: Date.valueOf("2026-10-08"), lastSeenDate: Date.valueOf("2026-10-08"), conclusionEnumId: conc])
+                id
+            }
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
@@ -83,7 +91,8 @@ class AgentReadFacadeSmokeTests {
         ec.service.sync().name("${LEDGER}.record#CheckRun").parameters(base + [automationExecutionId: "${tenant}_EX".toString(), sourceReads: [[systemEnumId: "NETSUITE_SUITEQL",
                 statusEnumId: "AUDSR_COMPLETE", recordCount: 10L, readStamp: new java.sql.Timestamp(System.currentTimeMillis())]]]).call()
         ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters(base + [findings: invoices.collect { String inv -> [statementCode: "R2",
-                recordKey: inv, headline: "Invoice ${inv} has no Etail id".toString(),
+                recordKey: inv, headline: (inv == "INV-1" ? "Ann Lee ann@example.com 415-555-0132 has no Etail id" : "Invoice ${inv} has no Etail id").toString(),
+                checks: [[label: "Customer on invoice", passed: false, value: "Ann Lee, ann@example.com, 415-555-0132"]],
                 records: [[systemEnumId: "NETSUITE_SUITEQL", recordType: "invoice", recordId: inv,
                            recordData: [status: "Billed", customerName: "Ann Lee", email: "ann@example.com", total: 12.5, tranDate: "2026-10-02"]]]] }]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
@@ -123,6 +132,8 @@ class AgentReadFacadeSmokeTests {
         assertNotNull(row.state)
         assertTrue(row.conditionValues instanceof List)
         assertFalse(out.toString().contains(otherFinding), "nothing of the other tenant")
+        sameCheckForeign.each { assertFalse(out.toString().contains(it), "foreign finding ${it} on the same check must be absent: ${out}") }
+        ["Ann Lee", "ann@example.com", "415-555-0132"].each { assertFalse(out.toString().contains(it), "${it} survived in the lookalikes") }
 
         Map foreign = call("find#AuditFindingLookalikes", [findingId: otherFinding])
         assertTrue(foreign.hadError as boolean, "another tenant's finding reads as not found")
@@ -135,7 +146,7 @@ class AgentReadFacadeSmokeTests {
         assertFalse(out.hadError as boolean, out.errorText as String)
         String text = out.finding.toString()
         assertFalse(text.contains("ann@example.com"), text)
-        assertFalse(text.contains("Ann Lee"), text)
+        ["Ann", "Lee", "415-555-0132"].each { assertFalse(text.contains(it), "${it} survived: ${text}") }
         assertTrue(text.contains("Billed"), text)
         Map foreign = call("get#AgentFinding", [findingId: otherFinding])
         assertTrue(foreign.hadError as boolean)
@@ -195,7 +206,7 @@ class AgentReadFacadeSmokeTests {
             Map out = call("inspect#AgentRecord", [readId: "AGR_DOC_BY_ID", key: "D1"])
             assertFalse(out.hadError as boolean, out.errorText as String)
             assertEquals(true, out.found)
-            assertEquals([docId: "D1", status: "PAID", total: 12.5, note: "[untrusted_customer_text: please leave at the door]"], out.record)
+            assertEquals([docId: "D1", status: "PAID", total: 12.5, note: [untrusted_customer_text: "please leave at the door"]], out.record)
             assertEquals([[filter: "docId in (D1)", endpoint: "https://acme.test"]], calls, "the signed-in tenant's own config, one call")
             assertEquals([], ec.entity.find("darpan.agent.AgentTurn").list(), "nothing written")
             Map missing = call("inspect#AgentRecord", [readId: "AGR_DOC_BY_ID", key: "D9"])
@@ -203,6 +214,25 @@ class AgentReadFacadeSmokeTests {
             assertEquals(false, missing.found)
             Map bad = call("inspect#AgentRecord", [readId: "AGR_DOC_BY_ID", key: "d 1; drop"])
             assertTrue(bad.hadError as boolean, "a key outside the definition's id pattern is refused")
+        } finally {
+            darpan.datasource.DataDefinedExtract.transportFactory = previous
+        }
+    }
+
+    @Test
+    void "an upstream error carrying customer data reaches the agent as a code only"() {
+        def previous = darpan.datasource.DataDefinedExtract.transportFactory
+        darpan.datasource.DataDefinedExtract.transportFactory = { Map d, Map conn ->
+            [execute: { String doc, Map vars, int reservation ->
+                throw new darpan.datasource.DataSourceCallException("UPSTREAM", "bad row for ann@example.com Ann Lee 415-555-0132")
+            }]
+        }
+        try {
+            Map out = call("inspect#AgentRecord", [readId: "AGR_DOC_BY_ID", key: "D1"])
+            assertTrue(out.hadError as boolean)
+            String text = out.errorText as String
+            assertTrue(text.contains("UPSTREAM"), text)
+            ["ann@example.com", "Ann Lee", "415-555-0132"].each { assertFalse(text.contains(it), text) }
         } finally {
             darpan.datasource.DataDefinedExtract.transportFactory = previous
         }

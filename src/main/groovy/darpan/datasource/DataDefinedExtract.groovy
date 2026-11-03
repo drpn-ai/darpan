@@ -31,6 +31,7 @@ import java.time.ZoneOffset
  */
 class DataDefinedExtract {
 
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(DataDefinedExtract)
     static final String SERVICE_NAME = "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource"
     static final String DEFINITION_ENTITY = "darpan.datasource.DataSourceDefinition"
     static final long PROGRESS_MIN_INTERVAL_MS = 2000L
@@ -131,8 +132,11 @@ class DataDefinedExtract {
             context.put("dataAvailable", true)
             context.put("warnings", warningsOf(definition, (Map) result.counts))
         } catch (Exception e) {
-            String code = e instanceof DataSourceCallException ? "[${((DataSourceCallException) e).code}] " : ""
-            context.put("errors", ["read failed: ${code}${e.message}".toString()])
+            // Upstream error text can carry record data, and this path hands its errors to the agent: code only.
+            String code = e instanceof DataSourceCallException ? ((DataSourceCallException) e).code : "ERROR"
+            logger.warn("In-memory data-defined read failed [{}] ({})", code, e.getClass().simpleName)
+            logger.debug("In-memory data-defined read failure detail", e)
+            context.put("errors", ["read failed: ${code}".toString()])
             context.put("records", [])
         } finally {
             // The excluded-records spill holds customer records: gone whether or not anything read it.

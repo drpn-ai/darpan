@@ -17,7 +17,7 @@
         <actions>
             <service-call name="facade.AuditFacadeServices.get#AuditFinding" in-map="[findingId:findingId]" out-map="found"/>
             <if condition="ec.message.hasError() || !found?.finding"><return error="true"/></if>
-            <set field="finding" from="darpan.agent.AgentRedaction.redactFindingRecords(found.finding)"/>
+            <set field="finding" from="darpan.agent.AgentRedaction.agentFindingView(found.finding)"/>
         </actions>
     </service>
 

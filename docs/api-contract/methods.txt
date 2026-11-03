@@ -34,6 +34,7 @@ admin.UserAdminServices.get#UserDetail
 admin.UserAdminServices.get#UserList
 admin.UserAdminServices.reset#Password
 admin.UserAdminServices.update#UserAccount
+facade.AgentFacadeServices.list#AgentQueryLogs
 facade.AuditFacadeServices.add#AuditStatement
 facade.AuditFacadeServices.create#Audit
 facade.AuditFacadeServices.get#AuditCheckExtracts

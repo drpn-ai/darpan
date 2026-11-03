@@ -132,6 +132,9 @@
                                         "$ref": "#/components/schemas/UpdateUserAccountRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ListAgentQueryLogsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/AddAuditStatementRequest"
                                     },
                                     {
@@ -675,6 +678,7 @@
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
+                                        "facade.AgentFacadeServices.list#AgentQueryLogs": "#/components/schemas/ListAgentQueryLogsRequest",
                                         "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
                                         "facade.AuditFacadeServices.create#Audit": "#/components/schemas/CreateAuditRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckExtracts": "#/components/schemas/GetAuditCheckExtractsRequest",
@@ -966,6 +970,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateUserAccountResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListAgentQueryLogsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/AddAuditStatementResponse"
@@ -5174,6 +5181,165 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateUserAccountResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListAgentQueryLogsParams": {
+                "type": "object",
+                "properties": {
+                    "pageIndex": {
+                        "type": "integer"
+                    },
+                    "pageSize": {
+                        "type": "integer"
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "description": "Only rows with this outcome: OK, REFUSED, THROTTLED, ERROR or TIMEOUT."
+                    }
+                },
+                "description": "List the fresh queries agents sent to this tenant's systems, newest first. Tenant admins only."
+            },
+            "ListAgentQueryLogsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "pagination": {
+                        "type": "object",
+                        "properties": {
+                            "pageIndex": {
+                                "type": "integer"
+                            },
+                            "pageSize": {
+                                "type": "integer"
+                            },
+                            "totalCount": {
+                                "type": "integer"
+                            },
+                            "pageCount": {
+                                "type": "integer"
+                            }
+                        }
+                    },
+                    "logs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "agentQueryLogId": {
+                                    "type": "string"
+                                },
+                                "userId": {
+                                    "type": "string"
+                                },
+                                "systemEnumId": {
+                                    "type": "string"
+                                },
+                                "connectionId": {
+                                    "type": "string"
+                                },
+                                "queryHash": {
+                                    "type": "string"
+                                },
+                                "queryText": {
+                                    "type": "string"
+                                },
+                                "rowCount": {
+                                    "type": "integer"
+                                },
+                                "durationMs": {
+                                    "type": "integer"
+                                },
+                                "outcome": {
+                                    "type": "string"
+                                },
+                                "createdDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "ListAgentQueryLogsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentFacadeServices.list#AgentQueryLogs",
+                "x-darpan-method": "facade.AgentFacadeServices.list#AgentQueryLogs",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentFacadeServices.list#AgentQueryLogs"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListAgentQueryLogsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListAgentQueryLogsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentFacadeServices.list#AgentQueryLogs. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListAgentQueryLogsResult"
                     }
                 },
                 "required": [
@@ -27795,6 +27961,7 @@
         "admin.UserAdminServices.get#UserList": "GetUserList",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
+        "facade.AgentFacadeServices.list#AgentQueryLogs": "ListAgentQueryLogs",
         "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
         "facade.AuditFacadeServices.create#Audit": "CreateAudit",
         "facade.AuditFacadeServices.get#AuditCheckExtracts": "GetAuditCheckExtracts",

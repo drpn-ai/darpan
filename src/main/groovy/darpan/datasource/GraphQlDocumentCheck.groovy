@@ -27,6 +27,14 @@ class GraphQlDocumentCheck {
      * errors is empty when the document may be stored.
      */
     static Map check(String document) {
+        return check(document, false)
+    }
+
+    /**
+     * Same check; allowIntrospection true lets __schema and __type through (DAR-CLI-003: an agent exploring a tenant's
+     * own GraphQL schema). Still exactly one query: a mutation or subscription is refused either way.
+     */
+    static Map check(String document, boolean allowIntrospection) {
         List<String> errors = []
         if (!document?.trim()) return [errors: ["The query is empty."]]
         Document doc
@@ -49,7 +57,7 @@ class GraphQlDocumentCheck {
         }
         Set<String> refused = [] as Set<String>
         collectFields(op.selectionSet, fragments, [] as Set<String>, refused)
-        if (refused) errors << "The query may not ask for ${refused.sort().join(', ')} (introspection).".toString()
+        if (refused && !allowIntrospection) errors << "The query may not ask for ${refused.sort().join(', ')} (introspection).".toString()
 
         Map<String, Map> variables = (op.variableDefinitions ?: []).collectEntries { VariableDefinition v ->
             [(v.name): [required: (v.type instanceof NonNullType) && v.defaultValue == null]]

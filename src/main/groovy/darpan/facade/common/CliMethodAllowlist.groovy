@@ -22,6 +22,9 @@ class CliMethodAllowlist {
     static final List<String> CLI_PATHS = ["/rpc/json", "/rest/s1/graphql"].asImmutable()
 
     static final Set<String> ALLOWED = ([
+            // The service itself requires tenant-admin; an admin's agent may read the fresh-query log.
+            "facade.AgentFacadeServices.list#AgentQueryLogs",
+
             "facade.AuditFacadeServices.get#AuditCheckExtracts",
             "facade.AuditFacadeServices.get#AuditCheckOptions",
             "facade.AuditFacadeServices.get#AuditFinding",

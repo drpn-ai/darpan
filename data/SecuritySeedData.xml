@@ -141,6 +141,10 @@
 
     <moqui.security.EntityFilterSet entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             description="Filter Darpan tenant-owned rows by the active tenant in user context"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AGENT_QUERY_LOG"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.AgentQueryLog"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JSON_SCHEMA"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.JsonSchema"

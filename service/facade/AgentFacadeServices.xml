@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-CLI-003. Fresh read-only queries an agent sends to a tenant's own systems. The log is tenant-owned
+         (DARPAN_SCOPE_AGENT_QUERY_LOG); this listing also conditions on the tenant itself, because the filter is
+         skipped when authorization is disabled. -->
+
+    <service verb="list" noun="AgentQueryLogs" authz-action="view" allow-remote="true" authenticate="true">
+        <description>List the fresh queries agents sent to this tenant's systems, newest first. Tenant admins only.</description>
+        <in-parameters>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="50"/>
+            <parameter name="outcome"><description>Only rows with this outcome: OK, REFUSED, THROTTLED, ERROR or TIMEOUT.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="pagination" type="Map">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="logs" type="List">
+                <parameter name="agentQueryLogId"/>
+                <parameter name="userId"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="connectionId"/>
+                <parameter name="queryHash"/>
+                <parameter name="queryText"/>
+                <parameter name="rowCount" type="Integer"/>
+                <parameter name="durationMs" type="Integer"/>
+                <parameter name="outcome"/>
+                <parameter name="createdDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="pageIndexSafe" from="Math.max(0, ((pageIndex != null ? pageIndex : 0) as Integer))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 50) as Integer)))"/>
+            <set field="logs" from="[]"/>
+            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
+            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="activeTenantUserGroupId &amp;&amp; darpan.facade.common.TenantAccessSupport.requireTenantAdmin(ec, activeTenantUserGroupId)">
+                <entity-find entity-name="darpan.agent.AgentQueryLog" list="logRows" offset="pageIndexSafe * pageSizeSafe"
+                        limit="pageSizeSafe" use-cache="false" distinct="false">
+                    <econdition field-name="companyUserGroupId" from="activeTenantUserGroupId"/>
+                    <econdition field-name="outcome" from="outcome" ignore-if-empty="true"/>
+                    <order-by field-name="-createdDate"/>
+                </entity-find>
+                <entity-find-count entity-name="darpan.agent.AgentQueryLog" count-field="totalCount">
+                    <econdition field-name="companyUserGroupId" from="activeTenantUserGroupId"/>
+                    <econdition field-name="outcome" from="outcome" ignore-if-empty="true"/>
+                </entity-find-count>
+                <set field="logs" from="logRows.collect { it.getMap().findAll { k, v -> k != 'companyUserGroupId' } }"/>
+                <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, Math.ceil(totalCount / (double) pageSizeSafe) as int)]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

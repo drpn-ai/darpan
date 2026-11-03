@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <!-- DAR-CLI-003. Tenant-owned: under DARPAN_ACTIVE_COMPANY_SCOPE (DARPAN_SCOPE_AGENT_QUERY_LOG). -->
+
+    <entity entity-name="AgentQueryLog" package="darpan.agent" use="transactional" cache="never">
+        <description>One row per fresh read-only query an agent sent (or tried to send) to a tenant's system through
+            Darpan's stored connection: who, which system and connection, what was asked, and how it ended.
+            Written in its own transaction, so a failed query still leaves its row.</description>
+        <field name="agentQueryLogId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id">
+            <description>The tenant the query ran for.</description></field>
+        <field name="userId" type="id">
+            <description>The person whose agent sent it.</description></field>
+        <field name="systemEnumId" type="id">
+            <description>The system queried (NetSuite, HotWax OMS or Shopify).</description></field>
+        <field name="connectionId" type="id-long">
+            <description>The stored connection used.</description></field>
+        <field name="queryHash" type="id-long">
+            <description>SHA-256 (hex) of the full query text.</description></field>
+        <field name="queryText" type="text-medium">
+            <description>The first 2,000 characters of the query.</description></field>
+        <field name="rowCount" type="number-integer"/>
+        <field name="durationMs" type="number-integer"/>
+        <field name="outcome" type="id">
+            <description>OK, REFUSED, THROTTLED, ERROR or TIMEOUT.</description></field>
+        <field name="createdDate" type="date-time"/>
+        <index name="AGQLOG_TENANT_DATE"><index-field name="companyUserGroupId"/><index-field name="createdDate"/></index>
+    </entity>
+</entities>

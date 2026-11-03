@@ -214,17 +214,94 @@ class RpcMethodFenceTests {
         RpcMethodFence.enforce([getWeb: { -> null }] as ExecutionContext)
     }
 
-    /** An ExecutionContext on one web request. isCliSession reads its answer from the request memo, so no database. */
-    private static ExecutionContext stubEc(boolean cliSession, String path, Map params) {
-        Map<String, Object> attributes = [(CliAuthSupport.CLI_SESSION_ATTRIBUTE): cliSession]
-        HttpServletRequest request = [
-                getServletPath: { -> path },
-                getPathInfo   : { -> null },
-                getRequestURI : { -> path },
+    // ---- DAR-BE-189: the fence judges the raw path Moqui routes on, not only the container's normalised one ----
+    // Jetty 12.1.5 probe (2026-11-03): each raw URI below reaches the servlet with the pathInfo beside it, while
+    // Moqui routes on the raw URI's segments (WebFacadeImpl.getPathInfoList), dot segments unresolved.
+
+    private static final String NS_AUTH_CONFIGS = "facade.SettingsFacadeServices.list#NsAuthConfigs"
+    private static final Map<String, String> DOT_PROBES = [
+            "/rpc/json/../../rest/s1/graphql"                   : "/rest/s1/graphql",
+            "/rpc/json/./../../rest/s1/graphql"                 : "/rest/s1/graphql",
+            "/rest/e1/moqui.security.UserAccount/../../../rpc/json": "/rpc/json",
+    ].asImmutable()
+
+    @Test
+    void routedSegmentsAreTheRawUriAsMoquiSplitsIt() {
+        assertEquals(["rpc", "json", "..", "..", "rest", "s1", "graphql"],
+                RpcMethodFence.routedSegments(request("/rpc/json/../../rest/s1/graphql", "/rest/s1/graphql", [:])))
+        assertEquals(["rpc", "json"], RpcMethodFence.routedSegments(request("//rpc//json/", "/rpc/json", [:])))
+        HttpServletRequest withContext = [getServletPath: { -> "" }, getPathInfo: { -> "/rpc/json" },
+                                          getContextPath: { -> "/darpan" }, getRequestURI: { -> "/darpan/rpc/json" }] as HttpServletRequest
+        assertEquals(["rpc", "json"], RpcMethodFence.routedSegments(withContext))
+    }
+
+    @Test
+    void cliDotSegmentsCannotHideAJsonRpcCall() {
+        DOT_PROBES.each { String rawUri, String pathInfo ->
+            [NS_AUTH_CONFIGS, SESSION_INFO].each { String method ->
+                ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException, {
+                    RpcMethodFence.enforce(stubEc(true, pathInfo, [method: method], rawUri))
+                }, "CLI let through ${rawUri} -> ${method}".toString())
+                // the general fence may refuse first (the views disagree about JSON-RPC); either refusal holds
+                assertTrue(refused.message in [CLI_PATH_REFUSAL, RpcMethodFence.DOT_SEGMENT_REFUSAL], "${rawUri}: ${refused.message}".toString())
+            }
+        }
+        // the pure check: a raw path that differs from the normalised one, or carries . / .. / ~ segments
+        assertEquals(CLI_PATH_REFUSAL, RpcMethodFence.cliRejection(["rpc", "json", "..", "..", "rest", "s1", "graphql"],
+                ["rest", "s1", "graphql"], []))
+        assertEquals(CLI_PATH_REFUSAL, RpcMethodFence.cliRejection(["rpc", ".", "json"], ["rpc", ".", "json"], [SESSION_INFO]))
+        assertEquals(CLI_PATH_REFUSAL, RpcMethodFence.cliRejection(["~admin", "rpc", "json"], ["~admin", "rpc", "json"], []))
+        assertEquals(CLI_PATH_REFUSAL, RpcMethodFence.cliRejection(["rpc", "json"], ["rest", "s1", "graphql"], []))
+    }
+
+    @Test
+    void anonymousDotSegmentsCannotReachFrameworkServices() {
+        // DAR-BE-078's own fence, not a CLI session: the framework password service stays out on every probe shape
+        DOT_PROBES.each { String rawUri, String pathInfo ->
+            ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException, {
+                RpcMethodFence.enforce(stubEc(false, pathInfo, [method: UPDATE_PASSWORD], rawUri))
+            }, "fence let through ${rawUri}".toString())
+            assertEquals("JSON-RPC method is not available: ${UPDATE_PASSWORD}".toString(), refused.message, rawUri)
+        }
+        assertNotNull(RpcMethodFence.rejection(["rpc", "json", "..", "..", "rest", "s1", "graphql"], ["rest", "s1", "graphql"],
+                [method: UPDATE_PASSWORD]))
+        // /rest/login and /Login/resetPassword behind dot segments, either way round
+        assertNotNull(RpcMethodFence.rejection(["x", "..", "rest", "login"], ["rest", "login"], [:]))
+        assertNotNull(RpcMethodFence.rejection(["Login", "resetPassword", "..", ".."], [], [:]))
+    }
+
+    @Test
+    void aDotPathOnWhichTheViewsDisagreeAboutJsonRpcIsRefused() {
+        // even a method the fence would admit: the disagreement itself is the refusal
+        ["/rpc/json/../../rest/s1/graphql", "/rpc/json/./../../rest/s1/graphql"].each { String rawUri ->
+            ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException) {
+                RpcMethodFence.enforce(stubEc(false, "/rest/s1/graphql", [method: SESSION_INFO], rawUri))
+            }
+            assertEquals(RpcMethodFence.DOT_SEGMENT_REFUSAL, refused.message, rawUri)
+        }
+        // the other way round: the container sees /rpc/json, the raw path does not
+        assertEquals(RpcMethodFence.DOT_SEGMENT_REFUSAL, RpcMethodFence.rejection(["rpc", "x", "..", "json"], ["rpc", "json"], [:]))
+        // a dot path both views read the same way is judged as before; a plain path is untouched
+        assertNull(RpcMethodFence.rejection(["apps", "x", "..", "Settings"], ["apps", "Settings"], [method: UPDATE_PASSWORD]))
+        RpcMethodFence.enforce(stubEc(false, "/rpc/json", [method: SAVE_ACTIVE_TENANT], "/rpc/json"))
+    }
+
+    /** An ExecutionContext on one web request. isCliSession reads its answer from the request memo, so no database.
+     *  pathInfo is what the container hands the servlet; rawUri (default: the same) is what Moqui routes on. */
+    private static ExecutionContext stubEc(boolean cliSession, String path, Map params, String rawUri = null) {
+        HttpServletRequest request = request(rawUri != null ? rawUri : path, path, [(CliAuthSupport.CLI_SESSION_ATTRIBUTE): cliSession])
+        WebFacade web = [getRequest: { -> request }, getRequestParameters: { -> params }] as WebFacade
+        return [getWeb: { -> web }, getContext: { -> null }] as ExecutionContext
+    }
+
+    private static HttpServletRequest request(String rawUri, String pathInfo, Map<String, Object> attributes) {
+        return [
+                getServletPath: { -> "" },
+                getPathInfo   : { -> pathInfo },
+                getContextPath: { -> "" },
+                getRequestURI : { -> rawUri },
                 getAttribute  : { String name -> attributes[name] },
                 setAttribute  : { String name, Object value -> attributes[name] = value },
         ] as HttpServletRequest
-        WebFacade web = [getRequest: { -> request }, getRequestParameters: { -> params }] as WebFacade
-        return [getWeb: { -> web }, getContext: { -> null }] as ExecutionContext
     }
 }

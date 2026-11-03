@@ -3,6 +3,7 @@ package darpan.facade.common
 import darpan.facade.auth.CliAuthSupport
 import org.moqui.context.ArtifactAuthorizationException
 import org.moqui.context.ExecutionContext
+import org.moqui.util.StringUtilities
 
 /**
  * DAR-BE-078 — the JSON-RPC endpoint only dispatches Darpan's own remote API.
@@ -29,30 +30,50 @@ import org.moqui.context.ExecutionContext
  *
  * <p>Runs from the webroot before-request hook (darpan MoquiConf.xml) on every webroot request. It reads the same
  * parsed request-parameter map the dispatcher reads, so the method checked is the method dispatched.
+ *
+ * <p>DAR-BE-189: and it judges the path Moqui routes on. Moqui does not route on the container's servletPath + pathInfo
+ * (dot segments resolved) but on the raw request URI, split and URL-decoded with nothing resolved
+ * (WebFacadeImpl.getPathInfoList -> ScreenRenderImpl.render), and a transition takes any trailing segments. So
+ * /rpc/json/../../rest/s1/graphql looks like /rest/s1/graphql to the container yet dispatches JSON-RPC. Both views
+ * are judged, and a raw path with . or .. segments on which they disagree about JSON-RPC is refused outright.
  */
 class RpcMethodFence {
 
     static final List<String> ALLOWED_METHOD_PREFIXES = ["facade.", "admin.", "gql."].asImmutable()
 
     static final String CLI_PATH_REFUSAL = "This address is not available to the Darpan CLI."
+    static final String DOT_SEGMENT_REFUSAL = "A path with . or .. segments is not available here."
 
     static void enforce(ExecutionContext ec) {
         def request = ec.web?.request
         if (request == null) return
-        String path = requestPath(request)
+        List<String> routed = routedSegments(request)
+        List<String> normalised = segmentsOf(requestPath(request))
         Map params = ec.web.requestParameters
-        String reason = rejection(path, params)
+        String reason = rejection(routed, normalised, params)
         if (reason) throw new ArtifactAuthorizationException(reason)
         if (CliAuthSupport.isCliSession(ec)) {
-            String cliReason = cliRejection(path, isJsonRpc(segmentsOf(path)) ? requestedMethods(params) : [])
+            String cliReason = cliRejection(routed, normalised, isJsonRpc(routed) ? requestedMethods(params) : [])
             if (cliReason) throw new ArtifactAuthorizationException(cliReason)
         }
     }
 
-    /** For a CLI session: null when the request may proceed, otherwise the refusal. Pure, for unit tests. A null
-     *  method (a call with none) is left to the dispatcher, which answers it with a JSON-RPC error. */
+    /** cliRejection for a path both views agree on. Pure, for unit tests. */
     static String cliRejection(String path, List<String> methods) {
-        if (!isCliPath(path)) return CLI_PATH_REFUSAL
+        List<String> segments = segmentsOf(path)
+        return cliRejection(segments, segments, methods)
+    }
+
+    /**
+     * For a CLI session: null when the request may proceed, otherwise the refusal. Pure, for unit tests. The raw
+     * (routed) path must be plain: no . or .. or ~ segment, and the same as the container's normalised path, so the
+     * CLI path matched is the one Moqui routes to. A null method (a call with none) is left to the dispatcher, which
+     * answers it with a JSON-RPC error.
+     */
+    static String cliRejection(List<String> routed, List<String> normalised, List<String> methods) {
+        if (routed == null || routed != normalised) return CLI_PATH_REFUSAL
+        if (routed.any { String segment -> isDotSegment(segment) || segment.startsWith("~") }) return CLI_PATH_REFUSAL
+        if (!isCliPath(routed)) return CLI_PATH_REFUSAL
         for (String method in (methods ?: [])) {
             if (method == null) continue
             if (!CliMethodAllowlist.ALLOWED.contains(method)) return "${method} is not available to the Darpan CLI; use the app.".toString()
@@ -61,9 +82,22 @@ class RpcMethodFence {
     }
 
     /** Exactly one of CliMethodAllowlist.CLI_PATHS, segment for segment: no prefix, suffix or render-mode extension. */
-    static boolean isCliPath(String path) {
-        List<String> segments = segmentsOf(path)
+    static boolean isCliPath(List<String> segments) {
         return CliMethodAllowlist.CLI_PATHS.any { String cliPath -> segmentsOf(cliPath) == segments }
+    }
+
+    /**
+     * The path as Moqui routes it: the servlet path's segments, then the raw request URI split and URL-decoded past
+     * the context and servlet path, exactly as WebFacadeImpl.getPathInfoList builds it (nothing resolved), then
+     * cleaned like segmentsOf. Computed here rather than calling WebFacadeImpl, whose class init loads a signing key.
+     */
+    static List<String> routedSegments(def request) {
+        String servletPath = (request.servletPath ?: "") as String
+        String contextPath = (request.contextPath ?: "") as String
+        int skip = (servletPath.isEmpty() ? 0 : servletPath.split("/").length - 1) +
+                (contextPath.isEmpty() ? 0 : contextPath.split("/").length - 1)
+        List<String> routed = StringUtilities.pathStringToList(request.requestURI as String, skip) as List<String>
+        return segmentsOf(servletPath) + cleanSegments(routed)
     }
 
     /** The path inside the webapp, as the container decoded it (no context path, no ;params). */
@@ -72,9 +106,32 @@ class RpcMethodFence {
         return path ?: (request.requestURI as String)
     }
 
-    /** Null when the request may proceed; otherwise the refusal reason. Pure, for unit tests. */
+    /** rejection for a path both views agree on. Pure, for unit tests. */
     static String rejection(String path, Map params) {
         List<String> segments = segmentsOf(path)
+        return rejection(segments, segments, params)
+    }
+
+    /**
+     * Null when the request may proceed; otherwise the refusal reason. Pure, for unit tests. Judges the path Moqui
+     * routes on and the container's normalised one, and refuses a raw path with . or .. segments when the two
+     * disagree on whether it is JSON-RPC: the disagreement itself is the refusal, whichever view is right.
+     */
+    static String rejection(List<String> routed, List<String> normalised, Map params) {
+        String reason = rejectionOf(routed, params)
+        if (reason == null && normalised != routed) reason = rejectionOf(normalised, params)
+        if (reason) return reason
+        if (routed.any { String segment -> isDotSegment(segment) } && isJsonRpc(routed) != isJsonRpc(normalised)) {
+            return DOT_SEGMENT_REFUSAL
+        }
+        return null
+    }
+
+    static boolean isDotSegment(String segment) {
+        return segment == "." || segment == ".."
+    }
+
+    private static String rejectionOf(List<String> segments, Map params) {
         // A transition takes trailing path segments, so match the pair, not the exact path.
         if (hasPair(segments, "rest", "login")) return "The /rest/login endpoint is not available."
         // DAR-BE-028: Darpan has its own reset (facade.AuthFacadeServices.request#PasswordReset), so the framework's
@@ -129,7 +186,12 @@ class RpcMethodFence {
     }
 
     static List<String> segmentsOf(String path) {
-        return (path ?: "").split("/").findAll { String s -> s }.collect { String s ->
+        return cleanSegments((path ?: "").split("/") as List<String>)
+    }
+
+    /** Each segment's name before any ;params, empty segments dropped. */
+    static List<String> cleanSegments(List<String> segments) {
+        return (segments ?: []).findAll { String s -> s }.collect { String s ->
             int semi = s.indexOf(';')
             semi >= 0 ? s.substring(0, semi) : s
         }.findAll { String s -> s }

@@ -10,5 +10,6 @@ import groovy.transform.TupleConstructor
 @EqualsAndHashCode
 class Answered {
     String question
-    Order subject
+    /** An Order (orderPayments) or a Product (productNetsuiteId, DAR-BE-186). */
+    Object subject
 }

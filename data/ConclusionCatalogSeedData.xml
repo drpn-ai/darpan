@@ -8,4 +8,9 @@
     <!-- DAR-BE-151: concluded by brain/oms-netsuite.drl (Cause.expected), so every install needs its label. -->
     <moqui.basic.Enumeration enumId="CONC_PARTIAL_PAYMENT_GIVEN_BACK" enumTypeId="DarpanConclusion"
             enumCode="CONC_PARTIAL_PAYMENT_GIVEN_BACK" description="Partial payment given back"/>
+    <!-- DAR-BE-186: concluded by brain/oms-netsuite.drl (Cause.fix) for an order NetSuite does not have. -->
+    <moqui.basic.Enumeration enumId="CONC_RETIRED_SKU" enumTypeId="DarpanConclusion"
+            enumCode="CONC_RETIRED_SKU" description="Sold on a retired SKU"/>
+    <moqui.basic.Enumeration enumId="CONC_PRODUCT_NOT_IN_NETSUITE" enumTypeId="DarpanConclusion"
+            enumCode="CONC_PRODUCT_NOT_IN_NETSUITE" description="Product not in NetSuite"/>
 </entity-facade-xml>

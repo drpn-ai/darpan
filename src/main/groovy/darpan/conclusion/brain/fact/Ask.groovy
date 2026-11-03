@@ -10,5 +10,8 @@ import groovy.transform.TupleConstructor
 @EqualsAndHashCode
 class Ask {
     String question
-    Order subject
+    /** An Order (orderPayments) or a Product (productNetsuiteId, DAR-BE-186). */
+    Object subject
+    /** DAR-BE-186: the order whose best cause decides whether asking can still change anything; null: the subject. */
+    Order forOrder
 }

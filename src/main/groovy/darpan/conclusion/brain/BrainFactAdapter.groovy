@@ -2,8 +2,10 @@ package darpan.conclusion.brain
 
 import darpan.conclusion.brain.fact.Answered
 import darpan.conclusion.brain.fact.Finding
+import darpan.conclusion.brain.fact.Item
 import darpan.conclusion.brain.fact.Order
 import darpan.conclusion.brain.fact.Payment
+import darpan.conclusion.brain.fact.Product
 import darpan.conclusion.brain.fact.Return
 
 import static darpan.common.ValueSupport.normalize
@@ -18,6 +20,8 @@ import static darpan.common.ValueSupport.normalize
 class BrainFactAdapter {
 
     static final String ORDER_PAYMENTS = "orderPayments"
+    /** DAR-BE-186: is an item's product known to NetSuite (its NETSUITE_PRODUCT_ID in HotWax)? Asked by product id. */
+    static final String PRODUCT_NETSUITE_ID = "productNetsuiteId"
 
     /**
      * The record fields facts() reads, per RuleSetCompareScope.conclusionBrain and side. The extract must keep them, or a
@@ -26,20 +30,25 @@ class BrainFactAdapter {
     static List<String> recordFieldsFor(Object conclusionBrain, String fileSide) {
         if (fileSide != "FILE_1") return []
         switch (conclusionBrain?.toString()?.trim()) {
-            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal"]
+            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal", "productId", "sku"]
             case "RETURN": return ["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"]
             default: return []
         }
     }
 
-    static List<Object> facts(String kind, Map finding, Map<String, Map> answersByOrderId, Map<String, Order> world = null) {
+    /**
+     * world: one Order per order id and, DAR-BE-186, one Product per product id (under "product|" + id) and one Item per
+     * order and product, so a second finding reuses them. productAnswers: productNetsuiteId answers by product id.
+     */
+    static List<Object> facts(String kind, Map finding, Map<String, Map> answersByOrderId, Map<String, ?> world = null,
+                              Map<String, Map> productAnswers = null) {
         Map sides = (Map) (finding?.sides ?: [:])
         Map record = (Map) (((Map) (sides.FILE_1 ?: [:])).record ?: [:])
         List<Object> facts = []
-        Map<String, Order> orders = world != null ? world : [:]
+        Map<String, Object> orders = world != null ? (Map<String, Object>) world : [:]
         Closure<Order> orderFor = { String orderId, Object total, String netsuiteOrderId ->
             if (!orderId) return null
-            Order order = orders.get(orderId)
+            Order order = (Order) orders.get(orderId)
             if (order != null) {
                 if (order.netsuiteOrderId == null) order.netsuiteOrderId = netsuiteOrderId
                 if (order.total == null) order.total = number(total)
@@ -56,6 +65,24 @@ class BrainFactAdapter {
         if (kind == Finding.ORDER_LINE) {
             f.order = orderFor(normalize(record.omsOrderId), record.orderGrandTotal, null)
             f.netsuiteHasOrderLine = ((Map) (sides.FILE_2 ?: [:])).firstFieldPresence != "ABSENT"
+            String productId = normalize(record.productId)
+            if (f.order != null && productId) {
+                Product product = (Product) orders.get("product|" + productId)
+                if (product == null) {
+                    product = new Product(productId: productId, sku: normalize(record.sku))
+                    orders.put("product|" + productId, product)
+                    facts.add(product)
+                    addProductAnswer(facts, product, productAnswers)
+                } else if (product.sku == null) {
+                    product.sku = normalize(record.sku)
+                }
+                String itemKey = "item|${f.order.orderId}|${productId}".toString()
+                if (!orders.containsKey(itemKey)) {
+                    Item item = new Item(f.order, product)
+                    orders.put(itemKey, item)
+                    facts.add(item)
+                }
+            }
         } else if (kind == Finding.RETURN) {
             Order order = orderFor(normalize(record.orderId), record.orderGrandTotal, normalize(record.orderNetsuiteId))
             if (order != null) {
@@ -66,6 +93,15 @@ class BrainFactAdapter {
         }
         facts.add(0, f)
         return facts
+    }
+
+    /** DAR-BE-186: an answered product carries its NETSUITE_PRODUCT_ID, or none (asked, nothing found or no id). */
+    private static void addProductAnswer(List<Object> facts, Product product, Map<String, Map> productAnswers) {
+        if (productAnswers == null || !productAnswers.containsKey(product.productId)) return
+        Map answer = productAnswers.get(product.productId)
+        product.netsuiteProductId = normalize(answer?.netsuiteProductId)
+        if (product.sku == null) product.sku = normalize(answer?.internalName)
+        facts.add(new Answered(PRODUCT_NETSUITE_ID, product))
     }
 
     /** Amounts lose trailing zeros so "181" and "181.00" are the same amount to a rule. */

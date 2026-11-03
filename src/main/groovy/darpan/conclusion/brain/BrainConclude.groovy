@@ -27,14 +27,16 @@ class BrainConclude {
         BrainEngine engine = BrainEngine.forPacks((List<String>) (args.packs ?: PILOT_PACKS))
         List<List<Map>> batches = batches(kind, (List<Map>) (args.findings ?: []))
         Map<String, Map> answers = [:]
+        // DAR-BE-186: productNetsuiteId answers, by product id.
+        Map<String, Map> productAnswers = [:]
         List<String> warnings = []
 
-        List<Map> round = batches.collect { fire(engine, kind, it, answers) }
+        List<Map> round = batches.collect { fire(engine, kind, it, answers, productAnswers) }
         List<Ask> asks = (List<Ask>) round.collectMany { (List) it.asks }
         Map<Object, Cause> best = [:]
         round.each { best.putAll((Map) it.bestCauses) }
         Map plan = BrainAskPlanner.plan(asks, best, tenantId, BrainQuestions.mayEnableRanks(engine))
-        ((Map<String, Map>) plan.answered).each { String q, Map byId -> if (q == BrainQuestions.ORDER_PAYMENTS) answers.putAll(byId) }
+        ((Map<String, Map>) plan.answered).each { String q, Map byId -> answersFor(q, answers, productAnswers)?.putAll(byId) }
         int asked = 0
         ((Map<String, List<String>>) plan.toFetch).each { String question, List<String> allIds ->
             // Bounded calls; a failed batch fails alone and is not remembered.
@@ -44,7 +46,7 @@ class BrainConclude {
                     ids.each { String id ->
                         Map answer = (Map) found.get(id)
                         BrainAnswerStore.put(tenantId, question, id, answer)
-                        if (question == BrainQuestions.ORDER_PAYMENTS) answers.put(id, answer)
+                        answersFor(question, answers, productAnswers)?.put(id, answer)
                     }
                     asked += ids.size()
                 } catch (Throwable t) {
@@ -52,9 +54,10 @@ class BrainConclude {
                 }
             }
         }
-        if (answers) {
+        if (answers || productAnswers) {
             round = batches.withIndex().collect { List<Map> batch, int i ->
-                batch.any { answers.containsKey(orderIdOf(kind, it)) } ? fire(engine, kind, batch, answers) : round[i]
+                batch.any { answers.containsKey(orderIdOf(kind, it)) || productAnswers.containsKey(productIdOf(kind, it)) } ?
+                        fire(engine, kind, batch, answers, productAnswers) : round[i]
             }
         }
         Map<String, Map> byKey = [:]
@@ -76,9 +79,23 @@ class BrainConclude {
         return out
     }
 
-    private static Map fire(BrainEngine engine, String kind, List<Map> batch, Map<String, Map> answers) {
-        Map<String, Order> world = [:]
-        return engine.fire(batch.collectMany { BrainFactAdapter.facts(kind, it, answers, world) } as List<Object>)
+    private static Map fire(BrainEngine engine, String kind, List<Map> batch, Map<String, Map> answers, Map<String, Map> productAnswers) {
+        Map<String, Object> world = [:]
+        return engine.fire(batch.collectMany { BrainFactAdapter.facts(kind, it, answers, world, productAnswers) } as List<Object>)
+    }
+
+    /** Where a question's answers are kept; null for a question this pass does not know. */
+    private static Map<String, Map> answersFor(String question, Map<String, Map> answers, Map<String, Map> productAnswers) {
+        if (question == BrainQuestions.ORDER_PAYMENTS) return answers
+        if (question == BrainQuestions.PRODUCT_NETSUITE_ID) return productAnswers
+        return null
+    }
+
+    /** DAR-BE-186: an R1 line's product id. */
+    private static String productIdOf(String kind, Map finding) {
+        if (kind != "orderLine") return null
+        Map record = (Map) (((Map) (((Map) (finding?.sides ?: [:])).FILE_1 ?: [:])).record ?: [:])
+        return record.productId?.toString()?.trim() ?: null
     }
 
     private static String orderIdOf(String kind, Map finding) {

@@ -4,7 +4,9 @@
 package darpan.conclusion.brain.omsnetsuite
 
 import darpan.conclusion.brain.fact.Finding
+import darpan.conclusion.brain.fact.Item
 import darpan.conclusion.brain.fact.Order
+import darpan.conclusion.brain.fact.Product
 import darpan.conclusion.brain.fact.Payment
 import darpan.conclusion.brain.fact.Return
 import darpan.conclusion.brain.fact.Ask
@@ -38,6 +40,17 @@ declare PartialPaymentGivenBack
     @label("Part of the order was paid and given back") @value("{taken} of {order.total}")
     order : Order @key
     taken : BigDecimal
+end
+
+declare ProductNotInNetsuite
+    @label("The item's product has no NetSuite id in HotWax") @value("{product.sku}")
+    product : Product @key
+end
+
+declare SoldOnRetiredSku
+    @label("Sold on a retired -OLD SKU; its live SKU") @value("{product.sku} -> {liveSku}")
+    product : Product @key
+    liveSku : String
 end
 
 // ---- each fact read once
@@ -86,7 +99,39 @@ then
     insertLogical( new Ask( "orderPayments", $o ) );
 end
 
+// DAR-BE-186: only for the items of an order NetSuite does not have; one read per 100 products, dropped when the order's
+// best cause already outranks what the answer could unlock.
+rule "Ask whether an item's product is known to NetSuite, when its order never reached NetSuite"
+    @reads("OrderNotInNetsuite, Item, Answered") @asks("productNetsuiteId") @mayEnable("CONC_RETIRED_SKU,CONC_PRODUCT_NOT_IN_NETSUITE")
+when
+    OrderNotInNetsuite( $o : order )
+    Item( order == $o, $p : product )
+    not Answered( question == "productNetsuiteId", subject == $p )
+then
+    insertLogical( new Ask( "productNetsuiteId", $p, $o ) );
+end
+
 // ---- pieces
+
+rule "An item's product has no NetSuite id in HotWax"
+    @reads("Product, Answered") @produces("ProductNotInNetsuite")
+when
+    $p : Product( netsuiteProductId == null )
+    Answered( question == "productNetsuiteId", subject == $p )
+then
+    insertLogical( new ProductNotInNetsuite( $p ) );
+end
+
+// gorjana 2026-11-03: HotWax kept the old Shopify variant (238-007-G-OLD) beside the re-created product (238-007-G, same
+// UPC), and only the live one carries the NetSuite id. Its live SKU is the same SKU without -OLD.
+rule "A product with no NetSuite id is a retired -OLD SKU"
+    @reads("ProductNotInNetsuite, Product") @produces("SoldOnRetiredSku")
+when
+    ProductNotInNetsuite( $p : product )
+    Product( this == $p, sku != null, sku matches "(?i).+-OLD" )
+then
+    insertLogical( new SoldOnRetiredSku( $p, $p.getSku().replaceAll( "(?i)-OLD$", "" ) ) );
+end
 
 rule "Every tender taken was given back, and nothing else was"
     @reads("Order, Payment, TenderGivenBack") @produces("PaymentsGivenBack")
@@ -120,6 +165,26 @@ when
     $p : PartialPaymentGivenBack( order == $o )
 then
     insertLogical( Cause.expected( $o, "CONC_PARTIAL_PAYMENT_GIVEN_BACK", 80, $n, $p ) );
+end
+
+rule "Order cause · sold on a retired SKU"
+    @reads("OrderNotInNetsuite, Item, SoldOnRetiredSku") @concludes("CONC_RETIRED_SKU") @rank(66)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    Item( order == $o, $p : product )
+    $r : SoldOnRetiredSku( product == $p )
+then
+    insertLogical( Cause.fix( $o, "CONC_RETIRED_SKU", 66, $n, $r ) );
+end
+
+rule "Order cause · product not in NetSuite"
+    @reads("OrderNotInNetsuite, Item, ProductNotInNetsuite") @concludes("CONC_PRODUCT_NOT_IN_NETSUITE") @rank(65)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    Item( order == $o, $p : product )
+    $q : ProductNotInNetsuite( product == $p )
+then
+    insertLogical( Cause.fix( $o, "CONC_PRODUCT_NOT_IN_NETSUITE", 65, $n, $q ) );
 end
 
 // ---- one rule picks every subject's best cause

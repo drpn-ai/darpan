@@ -9,6 +9,7 @@ package darpan.conclusion.brain
 class BrainQuestions {
 
     static final String ORDER_PAYMENTS = BrainFactAdapter.ORDER_PAYMENTS
+    static final String PRODUCT_NETSUITE_ID = BrainFactAdapter.PRODUCT_NETSUITE_ID
 
     static Map<String, Integer> mayEnableRanks(BrainEngine engine) {
         Map<String, Map<String, Object>> meta = engine.ruleMetadata()
@@ -27,11 +28,18 @@ class BrainQuestions {
     static String lookupNameFor(String question) { return question }
 
     /**
-     * The read a question takes when its scope names no lookup for it: orderPayments reads the order's raw OPP rows from
-     * the scope's own HotWax config (the FILE_1 source's), by OMS order id. Null for a question with no default.
+     * The read a question takes when its scope names no lookup for it, from the scope's own HotWax config (the FILE_1
+     * source's): orderPayments reads the order's raw OPP rows by OMS order id; productNetsuiteId (DAR-BE-186) the named
+     * products' NETSUITE_PRODUCT_ID by product id. Null for a question with no default.
      */
     static Map defaultLookup(String question, String hotwaxSourceConfigId) {
-        if (question != ORDER_PAYMENTS || !hotwaxSourceConfigId) return null
+        if (!hotwaxSourceConfigId) return null
+        // DAR-BE-186: the products named by id, each with its NETSUITE_PRODUCT_ID (extract#HotWaxOmsGqlProducts lookupKeys).
+        if (question == PRODUCT_NETSUITE_ID) {
+            return [name: PRODUCT_NETSUITE_ID, subject: "FILE_1", idField: "productId", systemEnumId: "OMS_PRODUCTS_GQL",
+                    sourceConfigId: hotwaxSourceConfigId, keyField: "productId", parameters: [:]]
+        }
+        if (question != ORDER_PAYMENTS) return null
         return [name: ORDER_PAYMENTS, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_GQL", sourceConfigId: hotwaxSourceConfigId,
                 keyField: "orderId", parameters: [keepRecordFields: ["orderId", "grandTotal", "paymentPreferences"]]]
     }

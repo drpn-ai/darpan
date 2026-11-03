@@ -178,14 +178,20 @@ class AgentQuerySupport {
         try {
             // The slot belongs to the worker from here: only its own finally gives it back.
             WORKERS.execute({
-                workerThread.set(Thread.currentThread())
+                Map result = null
+                Throwable failure = null
+                synchronized (workerThread) { workerThread.set(Thread.currentThread()) }
                 try {
-                    future.complete(work.call())
+                    result = work.call()
                 } catch (Throwable t) {
-                    future.completeExceptionally(t)
+                    failure = t
                 } finally {
+                    // Order matters: forget the thread (so a late interrupt cannot hit the next query this pooled thread
+                    // runs), free the slot, and only then hand the answer back, so a caller that wakes sees the slot free.
+                    synchronized (workerThread) { workerThread.set(null) }
                     AgentQueryLane.release(tenantId)
                 }
+                if (failure != null) future.completeExceptionally(failure) else future.complete(result)
             } as Runnable)
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
             AgentQueryLane.release(tenantId)     // no worker ever started, so the slot is still ours
@@ -197,7 +203,7 @@ class AgentQuerySupport {
         try {
             raw = future.get(timeoutMillis, TimeUnit.MILLISECONDS)
         } catch (TimeoutException ignored) {
-            workerThread.get()?.interrupt()     // a nudge only; the slot stays with the worker until it ends
+            synchronized (workerThread) { workerThread.get()?.interrupt() }     // a nudge only; the slot stays with the worker until it ends
             return failure(meta, logSink, started, OUTCOME_TIMEOUT,
                     "The system did not answer within ${(long) (timeoutMillis / 1000)} seconds.".toString())
         } catch (ExecutionException e) {

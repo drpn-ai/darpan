@@ -104,6 +104,18 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 - Shared constants/utilities: `common/DarpanEntityConstants.groovy`, `common/ValueSupport.groovy`,
   `common/CryptRotationSupport.groovy`, `common/TransactionDetachSupport.groovy`
 
+### Agent (DAR-BE-159)
+
+The embedded Claude agent for audit findings. Core `darpan` holds the data, the tool services and the guards; the Anthropic
+client and the loop live in the optional `darpan-agent` component (`drpn-ai/darpan-agent`), which the images clone and build.
+
+- Entities: `entity/AgentEntities.xml` (conversations, turns with token and `costMicros` ledger, messages, change proposals and versions, tickets); `darpan-agent/entity/AgentViewEntities.xml`
+- Core services (`service/facade/`): `AgentReadFacadeServices.xml` (finding, lookalikes, brain catalog, record inspection, knowledge search; in-JVM only, `allow-remote="false"`), `AgentChangeFacadeServices.xml` (`plan`/`apply`/`reject`/`revert#AuditChange` remote for a person, `create#AuditChangeProposal` and `create#BrainChangeTicket` in-JVM for the agent, `list#BrainChangeTickets`); `service/admin/AgentTicketAdminServices.xml` (staff ticket queue)
+- Core helpers (`src/main/groovy/darpan/agent/`): `AgentSwitch`, `AgentCallMarker`, `AgentReadSupport`, `AgentRedaction`, `BrainTicketSupport`, `pipeline/AuditChangePlanner` (plan, backtest, `planHash`, apply, revert)
+- `darpan-agent`: `service/facade/AgentFacadeServices.xml` (`facade.AgentFacadeServices.send#AgentTurn`, the only entry point), `AgentOrchestrator` (router, item loop, caps), `claude/AgentClientFactory` + `AnthropicModelGateway` (Anthropic Java SDK, behind the `ModelGateway` seam), `loop/AgentRoleLoop` + `AgentToolExecutor` + `AgentUsageLedger`, `PasteScrubber`, `AgentAvailability`; opt-in evals via `./gradlew :runtime:component:darpan-agent:agentEval -PagentEvalConfirm=yes` (needs a key, spends money; see the build.gradle header)
+- Switch: `darpan.agent.enabled` (conf default-property from env `DARPAN_AGENT_ENABLED`, default `false`) AND `TenantSetting.agentEnabled=Y`; either off returns `AGENT_OFF`. The key is read only from env `ANTHROPIC_API_KEY` (never conf, never the database); missing key returns `AGENT_UNAVAILABLE`
+- Rule of Two: the agent drafts, a person applies. `apply#AuditChange` needs the `planHash` of the plan the person saw (config drift turns the proposal `STALE`, nothing written) and write access; `AgentCallMarker` (set around every agent tool call) makes apply, reject and revert refuse with `AGENT_CANNOT_APPROVE`. Applies leave `AGENT_APPLY` config versions and `revert#AuditChange` plans the inverse
+
 ### Runbooks and platform docs
 
 - End-to-end pipeline: `docs/reconciliation/reconciliation-flow.md`

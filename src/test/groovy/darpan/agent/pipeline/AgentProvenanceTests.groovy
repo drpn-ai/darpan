@@ -82,7 +82,7 @@ class AgentProvenanceTests {
 
     @Test
     void "conclusion row check values are identifiers and in and not-in values are split"() {
-        Map after = [rows: [[conclusionCode: "X", conditions: [[fieldExpression: "a", operator: "IN", checkValue: "A1, B2"],
+        Map after = [rows: [[conclusionCode: "X", conditions: [[fieldExpression: "a", operator: "IN", checkValue: "A1,B2"],
                                                                   [fieldExpression: "b", operator: "EQUALS", checkValue: "C3, D4"]]],
                             [conclusionCode: "Y", conditions: [[fieldExpression: "c", operator: "IS_EMPTY"]]]]]
         assertEquals(["A1", "B2", "C3, D4"] as Set, AgentProvenance.identifiersOf("CONCLUSION_ROWS", after))
@@ -196,5 +196,47 @@ class AgentProvenanceTests {
         Map miss = pass("EXCLUSION_FILTER", filter(["M1088731"]), [], [:], ["M9999999"] as Set)
         assertEquals("BLOCKED", miss.status)
         assertEquals("BLOCKED", pass("EXCLUSION_FILTER", filter(["M1088731"]), [], [:], ["M1088731 and more"] as Set).status)
+    }
+
+    @Test
+    void "only renderer placeholders without digits are skipped, other brace content is text"() {
+        assertEquals(["M7777777"], pass("FIX_TEXT", [fixActionTemplate: "also exclude {M7777777}"]).blockedIds)
+        assertEquals(["M7777777"], pass("FIX_TEXT", [fixActionTemplate: "{please exclude M7777777}"]).blockedIds)
+        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "{orderId} {graceDays} days {a.b_c}"]))
+    }
+
+    @Test
+    void "free text must already be normalized"() {
+        assertThrows(IllegalArgumentException) { pass("FIX_TEXT", [fixActionTemplate: "also \uFF5BM7777777\uFF5D"]) }
+        assertThrows(IllegalArgumentException) { pass("FIX_TEXT", [fixActionTemplate: "fix M77${ZW}77777".toString()]) }
+        assertThrows(IllegalArgumentException) { pass("EXCLUSION_FILTER", filter(["A"]) + [fieldLabel: "L${ZW}1".toString()]) }
+        assertThrows(IllegalArgumentException) { pass("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", fixActionTemplate: "a${ZW}b".toString()]]]) }
+    }
+
+    @Test
+    void "digit pieces join, links and emails are identifiers, a leading dash is dropped"() {
+        assertEquals(["77 77 777"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Refund 77 77 777 today"]))
+        assertEquals(["10, 20/30"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "see 10, 20/30 now"]))
+        assertEquals("BLOCKED", pass("FIX_TEXT", [fixActionTemplate: "Refund 77 77 777"], ["refund 7777777"]).status)
+        assertEquals("PASS", pass("FIX_TEXT", [fixActionTemplate: "Refund 77 77 777"], ["refund 77 77 777"]).status)
+        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Close it within {graceDays} days"]))
+        assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Re-import after 30 days"]))
+        assertEquals(["bob@example.com"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Email bob@example.com."]))
+        assertEquals(["https://evil.example/x"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Open (https://evil.example/x)"]))
+        assertEquals(["www.evil.example"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Open www.evil.example now"]))
+        assertEquals("PASS", pass("FIX_TEXT", [fixActionTemplate: "Email bob@example.com."], ["use bob@example.com"]).status)
+        assertEquals(["M7777777"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "see -M7777777"]))
+        assertEquals(["#GOR196940093"] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "order #GOR196940093"]))
+    }
+
+    @Test
+    void "in and not-in parts must be exact: no empty part, no surrounding space"() {
+        ["A1, B2", "A1,,B2", "A1,B2,", " A1,B2", "A1 ,B2"].each { String v ->
+            ["IN", "NOT_IN"].each { String op ->
+                assertThrows(IllegalArgumentException) {
+                    pass("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", conditions: [[fieldExpression: "a", operator: op, checkValue: v]]]]])
+                }
+            }
+        }
     }
 }

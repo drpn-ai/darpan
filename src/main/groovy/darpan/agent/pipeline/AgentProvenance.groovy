@@ -16,8 +16,9 @@ class AgentProvenance {
     private static final String TOKEN_CHARS = "\\p{L}\\p{N}\\p{M}#_\\-."
     private static final int MAX_LEAF_TOKEN = 64
     private static final String UNTRUSTED_KEY = "untrusted_customer_text"
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[^{}]*\\}")
-    private static final Pattern FREE_TEXT_SPLIT = Pattern.compile("[^" + TOKEN_CHARS + "]+")
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[A-Za-z][A-Za-z_.]*\\}")
+    private static final Pattern FREE_TEXT_TOKEN = Pattern.compile("[" + TOKEN_CHARS + "]+")
+    private static final Pattern PIECE_GAP = Pattern.compile("[\\s/:+,\\-]+")
 
     /** Sentence punctuation that ends an id when followed by whitespace or the end of the text ("exclude M1.", "is M1? odd"). */
     private static final String TRAILING_PUNCT = "[.?!,:;)\\]\"']"
@@ -45,7 +46,7 @@ class AgentProvenance {
                     Object cv = ((Map) c).get("checkValue")
                     if (cv == null) return
                     String op = ((Map) c).get("operator")
-                    if (op == "IN" || op == "NOT_IN") cv.toString().split(",").each { String part -> if (part.trim()) out.add(part.trim()) }
+                    if (op == "IN" || op == "NOT_IN") cv.toString().split(",", -1).each { String part -> out.add(part) }
                     else out.add((String) cv)
                 }
             }
@@ -53,12 +54,34 @@ class AgentProvenance {
         return out
     }
 
+    /**
+     * Free-text identifiers (R19). Only renderer placeholders ({name}, letters/underscore/dot, no digit) are skipped; any other
+     * brace content is text. A digit-bearing piece of 3+ characters is an identifier; adjacent digit-bearing pieces separated by
+     * whitespace or [/:+,-] join into ONE candidate ("77 77 777"); an email, a URL or a www. host is always an identifier.
+     */
     private static void freeTextIds(Set<String> out, String text) {
-        if (text == null) return
-        String plain = PLACEHOLDER.matcher(AgentRedaction.normalize(text)).replaceAll(" ")
-        FREE_TEXT_SPLIT.split(plain).each { String raw ->
-            String tok = raw.replaceAll(/[.\-]+$/, "")
-            if (tok.length() >= 3 && tok.any { Character.isDigit(it as char) }) out.add(tok)
+        String plain = PLACEHOLDER.matcher(text).replaceAll(" ")
+        plain.split(/\s+/).each { String word ->
+            String w = word.replaceAll(/^[(\["'<]+|[.,;:!?)\]"'>]+$/, "")
+            if (w && (w.contains("@") || w.contains("://") || w.toLowerCase().startsWith("www."))) out.add(w)
+        }
+        List<int[]> pieces = []   // [start, end) of each digit-bearing piece, after trimming a leading '-' and trailing '.'/'-'
+        def m = FREE_TEXT_TOKEN.matcher(plain)
+        while (m.find()) {
+            int st = m.start(), en = m.end()
+            while (st < en && plain.charAt(st) == ('-' as char)) st++
+            while (en > st && (plain.charAt(en - 1) == ('.' as char) || plain.charAt(en - 1) == ('-' as char))) en--
+            if (en > st && plain.substring(st, en).any { Character.isDigit(it as char) }) pieces.add([st, en] as int[])
+            else pieces.add(null)
+        }
+        int i = 0
+        while (i < pieces.size()) {
+            if (pieces[i] == null) { i++; continue }
+            int[] first = pieces[i]; int[] last = first; int j = i + 1
+            while (j < pieces.size() && pieces[j] != null && PIECE_GAP.matcher(plain.substring(last[1], pieces[j][0])).matches()) { last = pieces[j]; j++ }
+            String cand = plain.substring(first[0], last[1])
+            if (cand.length() >= 3) out.add(cand)
+            i = j
         }
     }
 
@@ -69,6 +92,7 @@ class AgentProvenance {
             case "EXCLUSION_FILTER":
                 keys(after, ["fieldExpression", "operator", "filterValues", "fieldLabel"], "after")
                 str(after, "fieldExpression", true, "after"); str(after, "operator", false, "after"); str(after, "fieldLabel", false, "after")
+                freeText(after, "fieldLabel", "after")
                 strList(after, "filterValues", true, "after")
                 break
             case "STATEMENT_NARROWING":
@@ -80,6 +104,7 @@ class AgentProvenance {
             case "FIX_TEXT":
                 keys(after, ["fixActionTemplate"], "after")
                 str(after, "fixActionTemplate", true, "after")
+                freeText(after, "fixActionTemplate", "after")
                 break
             case "CONCLUSION_ROWS":
                 keys(after, ["rows"], "after")
@@ -92,6 +117,7 @@ class AgentProvenance {
                     keys(r, ["conclusionCode", "parentConclusionCode", "bucket", "fixActionTemplate", "conditions"], where)
                     str(r, "conclusionCode", true, where)
                     ["parentConclusionCode", "bucket", "fixActionTemplate"].each { String k -> str(r, k, false, where) }
+                    freeText(r, "fixActionTemplate", where)
                     Object conds = r.get("conditions")
                     if (conds == null) return
                     if (!(conds instanceof List)) throw new IllegalArgumentException("${where}.conditions must be a list".toString())
@@ -103,7 +129,7 @@ class AgentProvenance {
                         Object cv = ((Map) c).get("checkValue")
                         if (cv != null) {
                             String op = ((Map) c).get("operator")
-                            if (op == "IN" || op == "NOT_IN") cv.toString().split(",").each { String part -> canonical(part.trim(), "${cw}.checkValue part".toString(), false) }
+                            if (op == "IN" || op == "NOT_IN") cv.toString().split(",", -1).each { String part -> canonical(part, "${cw}.checkValue part".toString(), true) }
                             else canonical((String) cv, "${cw}.checkValue".toString(), true)
                         }
                     }
@@ -119,6 +145,13 @@ class AgentProvenance {
         if (notBlank && !raw.trim()) throw new IllegalArgumentException("${where} must not be blank".toString())
         if (raw != AgentRedaction.normalize(raw).trim())
             throw new IllegalArgumentException("${where} contains invisible, compatibility or surrounding-space characters".toString())
+    }
+
+    /** Free text reaches people as written, so it must already be in normalized form (no invisible characters, no fullwidth braces). */
+    private static void freeText(Map m, String key, String where) {
+        Object v = m.get(key)
+        if (v != null && v.toString() != AgentRedaction.normalize(v.toString()))
+            throw new IllegalArgumentException("${where}.${key} contains invisible or compatibility characters".toString())
     }
 
     private static void keys(Map m, List<String> allowed, String where) {

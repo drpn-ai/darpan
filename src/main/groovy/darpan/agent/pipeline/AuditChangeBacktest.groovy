@@ -47,7 +47,8 @@ import static darpan.common.ValueSupport.normalize
  *   closes, unless the record still raises it. Two-sided runs: a dropped record the other side's landed extract holds
  *   becomes "missing" on the dropped side (MISSING_IN_FILE_1 when FILE_1 drops it), so a link counting that diff type
  *   with any conclusion reports it (opened, or kept); a link that also narrows by conclusion cannot be decided
- *   (OPENED_NOT_COMPUTED). EVALUATE runs: CLOSES_ONLY.</li>
+ *   (OPENED_NOT_COMPUTED), and an open finding on it for that record is left out of closed (it may stay). A rule on a
+ *   data-defined field no landed record carries is refused (FIELD_NOT_IN_LANDED_RECORDS). EVALUATE runs: CLOSES_ONLY.</li>
  *   <li>STATEMENT_NARROWING: from AuditFinding rows alone (CLOSES_ONLY); the target statement's open findings whose
  *   conclusion is outside the new codes close. A finding does not record its diff type or rule, so a change to those is
  *   refused (DIFF_TYPE_NOT_ON_FINDINGS).</li>
@@ -68,13 +69,14 @@ class AuditChangeBacktest {
     static final int BASIS_LOOKBACK = 20
     private static final String WHY = "agent backtest: explicit companyUserGroupId condition applied"
 
-    static Map run(def ec, String tenantId, String kind, Map target, Map merged) {
+    /** current: the lever state the planner merged into (AuditChangeLevers.current); read here when not given. */
+    static Map run(def ec, String tenantId, String kind, Map target, Map merged, Map current = null) {
         // The planner pins the proposal's tenant; it must be the session's active tenant, whose rows every read here is.
         if (!tenantId || tenantId != TenantAccessSupport.currentActiveTenantUserGroupId(ec)) return unsupported("TENANT_MISMATCH")
         if (merged == null) return unsupported("NO_CHANGE")
         try {
             switch (kind) {
-                case "EXCLUSION_FILTER": return exclusion(ec, tenantId, target, merged)
+                case "EXCLUSION_FILTER": return exclusion(ec, tenantId, target, merged, current)
                 case "STATEMENT_NARROWING": return narrowing(ec, tenantId, target, merged)
                 case "FIX_TEXT": return result(true, "DISPLAY_ONLY", null, [], [], 0, [])
                 case "CONCLUSION_ROWS": return conclusionRows(ec, tenantId, target, merged)
@@ -88,7 +90,7 @@ class AuditChangeBacktest {
 
     // ---------------------------------------------------------------- EXCLUSION_FILTER
 
-    private static Map exclusion(def ec, String tenantId, Map target, Map merged) {
+    private static Map exclusion(def ec, String tenantId, Map target, Map merged, Map current) {
         String savedRunId = target.savedRunId as String
         String side = target.fileSide as String
         String other = side == ExtractReplaySupport.SIDE_1 ? ExtractReplaySupport.SIDE_2 : ExtractReplaySupport.SIDE_1
@@ -120,7 +122,8 @@ class AuditChangeBacktest {
 
         List<String> limits = [LATEST_WINDOW_ONLY]
         if (evaluate) limits.add(0, CLOSES_ONLY)
-        if (loosens(((Map) AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target)?.filters)?.get(side) as List<Map>, candidate)) {
+        Map state = current ?: AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target)
+        if (loosens(((Map) state?.filters)?.get(side) as List<Map>, candidate)) {
             limits << WIDENING_NOT_COMPUTED
         }
         List<String> checkIds = checkIdsOf(ec, tenantId, savedRunId)
@@ -128,12 +131,16 @@ class AuditChangeBacktest {
         // A record the other side holds turns "missing" on the side that drops it.
         String newType = side == ExtractReplaySupport.SIDE_1 ? "MISSING_IN_FILE_1" : "MISSING_IN_FILE_2"
         boolean undecided = false
+        long recordsRead = 0
         Set<String> carried = new HashSet<String>()
+        // Findings a new MISSING row may keep open on a link that also narrows by conclusion: never listed as closed.
+        Set<String> maybeKept = new HashSet<String>()
         Map<String, Set<String>> droppedByBasis = [:]
         Set<String> reportedAfter = new HashSet<String>()
         bases.each { Map basis ->
             Set<String> dropped = new LinkedHashSet<String>()
             JsonRecordStream.forEachRecord(fileOf(basis, side), "records") { Map record ->
+                recordsRead++
                 if (dataDefined) ruleFields.each { String f -> if (record.containsKey(f)) carried.add(f) }
                 if (SourceFilterSupport.evaluate(record, rules) == null) return
                 String recordKey = ConclusionKeySupport.compareKey(record, (List<String>) key.keyFields, (String) key.idNormalizer)
@@ -141,23 +148,31 @@ class AuditChangeBacktest {
             }
             droppedByBasis[basis.executionId as String] = dropped
             if (evaluate || !dropped) return
-            if (!otherKey.keyReliable) { undecided = true; return }
-            Set<String> held = new HashSet<String>()
-            JsonRecordStream.forEachRecord(fileOf(basis, other), "records") { Map record ->
-                String k = ConclusionKeySupport.compareKey(record, (List<String>) otherKey.keyFields, (String) otherKey.idNormalizer)
-                if (k && dropped.contains(k)) held.add(k)
+            // Keys the other side cannot be keyed by: any dropped record may still be held there.
+            boolean otherKnown = otherKey.keyReliable as boolean
+            Set<String> held = otherKnown ? new HashSet<String>() : dropped
+            if (otherKnown) {
+                JsonRecordStream.forEachRecord(fileOf(basis, other), "records") { Map record ->
+                    String k = ConclusionKeySupport.compareKey(record, (List<String>) otherKey.keyFields, (String) otherKey.idNormalizer)
+                    if (k && dropped.contains(k)) held.add(k)
+                }
+            } else {
+                undecided = true
             }
             held.each { String k ->
                 links.each { Map link ->
                     if (!AuditAutomationSupport.matches(link.diffTypes as String, newType) ||
                             !AuditAutomationSupport.matches(link.ruleIds as String, null)) return
-                    if (normalize(link.conclusionCodes)) { undecided = true; return }
-                    reportedAfter.add(findingId(link.checkId, link.statementId, k))
+                    String id = findingId(link.checkId, link.statementId, k)
+                    if (!otherKnown || normalize(link.conclusionCodes)) { undecided = true; maybeKept.add(id); return }
+                    reportedAfter.add(id)
                 }
             }
         }
-        // The extract refuses a rule on a field its records do not carry (DataSourceRunner.checkFilterFields).
-        if (dataDefined && !carried.containsAll(ruleFields)) return unsupported("FILTER_FIELD_NOT_OFFERED")
+        // Not the extract's own check (checkFilterFields tests only the offered fields): a rule on a field no landed record
+        // carries would drop nothing here, so the backtest would read as "closes nothing" for the wrong reason. An empty
+        // basis carries nothing and drops nothing, which is a real answer.
+        if (dataDefined && recordsRead > 0 && !carried.containsAll(ruleFields)) return unsupported("FIELD_NOT_IN_LANDED_RECORDS")
         if (undecided) limits << OPENED_NOT_COMPUTED
 
         List open = openFindings(ec, tenantId, checkIds, null)
@@ -166,7 +181,8 @@ class AuditChangeBacktest {
         bases.each { Map basis ->
             Set<String> dropped = droppedByBasis[basis.executionId as String]
             open.each { f ->
-                if (dropped.contains(f.recordKey as String) && !reportedAfter.contains(findingId(f.checkId, f.statementId, f.recordKey)) &&
+                String id = findingId(f.checkId, f.statementId, f.recordKey)
+                if (dropped.contains(f.recordKey as String) && !reportedAfter.contains(id) && !maybeKept.contains(id) &&
                         periodHolds(f, periodKinds, basis)) closedIds.add(f.findingId as String)
             }
         }

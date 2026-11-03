@@ -612,7 +612,7 @@ class AuditChangeApplySmokeTests {
     @Test
     void "a backtest that throws is recorded and the plan still completes"() {
         Closure was = AuditChangePlanner.backtest
-        AuditChangePlanner.backtest = { def ec, String tenantId, String kind, Map target, Map merged -> throw new IOException("disk gone") }
+        AuditChangePlanner.backtest = { def ec, String tenantId, String kind, Map target, Map merged, Map current -> throw new IOException("disk gone") }
         try {
             Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
             assertFalse(p.hadError as boolean, p.errorText as String)
@@ -620,6 +620,25 @@ class AuditChangeApplySmokeTests {
             assertEquals(false, p.backtest.supported)
             assertEquals("BACKTEST_FAILED", p.backtest.reason)
             assertEquals("disk gone", p.backtest.detail)
+        } finally {
+            AuditChangePlanner.backtest = was
+        }
+    }
+
+    @Test
+    void "a backtest that leaves an error is recorded and the plan still completes"() {
+        Closure was = AuditChangePlanner.backtest
+        AuditChangePlanner.backtest = { def ec, String tenantId, String kind, Map target, Map merged, Map current ->
+            ec.message.addError("x" * 300)
+            [supported: true, reason: null, basisExecutionId: null, closed: [], opened: [], unchanged: 0, limits: []]
+        }
+        try {
+            Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
+            assertFalse(p.hadError as boolean, "the backtest's error is not the plan's: ${p.errorText}")
+            assertEquals("PLANNED", p.status)
+            assertEquals(false, p.backtest.supported)
+            assertEquals("BACKTEST_FAILED", p.backtest.reason)
+            assertEquals("x" * 255, p.backtest.detail, "the first message, at most 255 characters")
         } finally {
             AuditChangePlanner.backtest = was
         }

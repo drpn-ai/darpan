@@ -31,8 +31,8 @@ class AuditChangePlanner {
     private static final String WHY = "agent proposal: tenant compared on the row"
 
     /** What the change would close and open, from landed data only; writes nothing (AuditChangeBacktest). */
-    static Closure backtest = { def ec, String tenantId, String kind, Map target, Map merged ->
-        AuditChangeBacktest.run(ec, tenantId, kind, target, merged)
+    static Closure backtest = { def ec, String tenantId, String kind, Map target, Map merged, Map current ->
+        AuditChangeBacktest.run(ec, tenantId, kind, target, merged, current)
     }
 
     // ---------------------------------------------------------------- create
@@ -82,7 +82,7 @@ class AuditChangePlanner {
             return invalid(ec, row)
         }
         if (unsafeTree(ec, row)) return unsafe(row)
-        Map tested = backtestOf(ec, row, merged)
+        Map tested = backtestOf(ec, row, merged, current)
         row.setAll([backtestJson: JsonOutput.toJson(tested), status: "DRAFT", statusMessage: EDITOR_MESSAGE])
         row.update()
         return [status: "DRAFT", statusMessage: EDITOR_MESSAGE, backtest: tested]
@@ -121,7 +121,7 @@ class AuditChangePlanner {
             ec.message.addError(refused)
             return invalid(ec, row)
         }
-        Map tested = backtestOf(ec, row, merged)
+        Map tested = backtestOf(ec, row, merged, current)
         String hash = planHash(row.proposalId as String, merged, current)
         row.setAll([beforeJson: JsonOutput.toJson(current), backtestJson: JsonOutput.toJson(tested), planHash: hash, status: "PLANNED",
                     statusMessage: null])
@@ -302,14 +302,27 @@ class AuditChangePlanner {
         return row.revertOfProposalId ? AuditChangeLevers.restore(kind, current, after) : AuditChangeLevers.merge(kind, current, after)
     }
 
-    /** The backtest never fails a plan or a draft: anything it throws is recorded as BACKTEST_FAILED. */
-    private static Map backtestOf(def ec, def row, Map merged) {
+    /**
+     * The backtest never fails a plan or a draft: whatever it throws, or any error it leaves on ec.message, is recorded as
+     * BACKTEST_FAILED and cleared; errors already on ec.message before it ran are kept.
+     */
+    private static Map backtestOf(def ec, def row, Map merged, Map current) {
+        List<String> prior = ec.message.hasError() ? new ArrayList<String>(ec.message.errors) : []
+        ec.message.clearErrors()
         try {
-            return (Map) backtest.call(ec, row.companyUserGroupId as String, row.kind as String, parse(row.targetJson), merged)
+            Map tested = (Map) backtest.call(ec, row.companyUserGroupId as String, row.kind as String, parse(row.targetJson), merged, current)
+            return ec.message.hasError() ? backtestFailed(ec.message.errors[0] as String) : tested
         } catch (Exception e) {
-            return [supported: false, reason: "BACKTEST_FAILED", detail: (rootMessage(e) ?: e.class.simpleName)?.take(255),
-                    basisExecutionId: null, closed: [], opened: [], unchanged: 0, limits: []]
+            return backtestFailed(rootMessage(e) ?: e.class.simpleName)
+        } finally {
+            ec.message.clearErrors()
+            prior.each { ec.message.addError(it) }
         }
+    }
+
+    private static Map backtestFailed(String why) {
+        return [supported: false, reason: "BACKTEST_FAILED", detail: why?.take(255), basisExecutionId: null, closed: [], opened: [],
+                unchanged: 0, limits: []]
     }
 
     /** R29: FIX_TEXT and CONCLUSION_ROWS are refused while the run's tree holds a row the tree save cannot keep. */

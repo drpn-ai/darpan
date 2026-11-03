@@ -183,6 +183,8 @@ class AuditChangeBacktestSmokeTests {
             finding("F-TBT22", "TBT_R4", "CM-4", "AUDFS_OPEN", null, "2026-11", CHECK2)
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R3")
                     .one().set("conclusionCodes", null).update()
+            ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R4")
+                    .one().setAll([diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_2", conclusionCodes: null]).update()
         }
         ec.message.clearAll()
     }
@@ -327,6 +329,23 @@ class AuditChangeBacktestSmokeTests {
     }
 
     @Test
+    void "an undecided link never lists the finding the new missing row may keep"() {
+        // R4 now also counts a memo whose application stands alone, but only for one conclusion.
+        asSystem {
+            ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R4")
+                    .one().setAll([diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_1", conclusionCodes: "CONC_TBT_A"]).update()
+        }
+        Map target = [savedRunId: run2Id, fileSide: "FILE_1"]
+        Map out = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
+                AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].tranId', filterValues: ["CM-1", "CM-4"]]))
+        assertEquals(true, out.supported, out.toString())
+        assertEquals(["F-TBT22"], out.closed, "F-TBT21 (CM-1, whose application the other side holds) may stay open under R4")
+        assertEquals("OPENED_NOT_COMPUTED", out.reason)
+        assertTrue("OPENED_NOT_COMPUTED" in out.limits)
+        assertEquals(["CM-1"], out.opened, "R3 still counts it with any conclusion")
+    }
+
+    @Test
     void "an exclusion the extract would not take is refused as the extract refuses it"() {
         Map target = [savedRunId: runId, fileSide: "FILE_1"]
         Closure<Map> backtest = { String field ->
@@ -349,7 +368,19 @@ class AuditChangeBacktestSmokeTests {
             assertEquals(true, ok.supported, ok.toString())
             assertEquals(["F-TBT2", "F-TBT3"], ok.closed)
             assertEquals("FILTER_FIELD_NOT_OFFERED", backtest('$.records[*].status').reason, "the filter step does not offer status")
-            assertEquals("FILTER_FIELD_NOT_OFFERED", backtest('$.records[*].batch').reason, "offered, but no landed record carries it")
+            assertEquals("FIELD_NOT_IN_LANDED_RECORDS", backtest('$.records[*].batch').reason, "offered, but no landed record carries it")
+            File extract = landed("TBT_EXEC1", "memos.json")
+            String whole = extract.text
+            extract.text = JsonOutput.toJson([metadata: [recordCount: 0], records: []])
+            try {
+                Map empty = backtest('$.records[*].batch')
+                assertEquals(true, empty.supported, "an empty window drops nothing, which is an answer: ${empty}")
+                assertEquals([], empty.closed)
+                assertEquals("TBT_EXEC1", empty.basisExecutionId)
+                assertTrue("LATEST_WINDOW_ONLY" in empty.limits)
+            } finally {
+                extract.text = whole
+            }
         }
         withConnector([extractServiceName: "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource",
                        dataSourceDefinitionId: "TBT_DEF_NONE"]) {

@@ -270,7 +270,7 @@ class SourceSystemConnectorSupportSmokeTests {
         // Asserting the other two are ABSENT is the load-bearing half: a pill naming a field the extract
         // no longer emits is a permanent silent no-op for any rule drawn on it.
         ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+                "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
         Collection<String> paths = pillPaths("SHOPIFY_RETURN_REFS")
         assertTrue(paths.contains('$.records[*].orderReturnStatus'),
                 "orderReturnStatus must be offerable as an exclusion pill: ${paths}")
@@ -315,7 +315,7 @@ class SourceSystemConnectorSupportSmokeTests {
         // filters SM's order runs use are offered on OMS_GQL though neither is compared. Primary-ID choice stays
         // the three order identifiers.
         ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+                "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
         Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS_GQL")
         assertNotNull(oms, "OMS_GQL connector row should resolve")
         List<String> pillFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_GQL")
@@ -379,7 +379,7 @@ class SourceSystemConnectorSupportSmokeTests {
     @Test
     void everyPillNamesATopLevelScalarKey() {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+                "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
 
         List rows = ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .useCache(false).list() ?: []
@@ -418,7 +418,7 @@ class SourceSystemConnectorSupportSmokeTests {
     @Test
     void pillLookupsComeFromTheRegistry() {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+                "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
 
         // The endpoints that had NO case in the old switch must now return real options.
         assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_RETURNS_GQL").isEmpty(),
@@ -442,7 +442,7 @@ class SourceSystemConnectorSupportSmokeTests {
     @Test
     void returnsSystemOffersTheChannelPill() {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+                "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
 
         List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
 
@@ -463,7 +463,7 @@ class SourceSystemConnectorSupportSmokeTests {
     @Test
     void returnsPillsNameOnlyTopLevelRecordKeys() {
         ReconciliationSmokeTestSupport.loadSeedData(ec,
-                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+                "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
 
         List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS_GQL")
         options.each { Map<String, Object> option ->
@@ -484,7 +484,7 @@ class SourceSystemConnectorSupportSmokeTests {
      */
     @Test
     void retiresAPillThatWasWithdrawnFromSeedData() {
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
         // Simulate a database that loaded the older seed, which still carried the withdrawn pill.
         ec.entity.makeValue("darpan.reconciliation.SourceSystemConnectorField")
                 .setAll([systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].orderName",
@@ -540,7 +540,7 @@ class SourceSystemConnectorSupportSmokeTests {
      */
     @Test
     void reRunningTheMigrationDeletesNothingTheSecondTime() {
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
         ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .condition("systemEnumId", "SHOPIFY_RETURN_REFS")
                 .condition("fieldPath", "\$.records[*].orderName")
@@ -563,7 +563,7 @@ class SourceSystemConnectorSupportSmokeTests {
     @Test
     void noRetiredFieldReappearsInTheSeedFile() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
-        Path seedPath = backendRoot.resolve("runtime/component/darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        Path seedPath = backendRoot.resolve("runtime/component/darpan/data/SourceSystemConnectorSeedDataFields.xml")
         assertTrue(Files.exists(seedPath), "seed file not found at ${seedPath}")
 
         List seedRows = new XmlParser(false, false).parse(seedPath.toFile()).children()
@@ -577,7 +577,7 @@ class SourceSystemConnectorSupportSmokeTests {
         }.collect { "${it.systemEnumId} / ${it.fieldPath}".toString() }
 
         assertTrue(offenders.isEmpty(),
-                "RETIRED_FIELDS entries still present in SourceSystemConnectorFieldSeedData.xml — the seed " +
+                "RETIRED_FIELDS entries still present in SourceSystemConnectorSeedDataFields.xml — the seed " +
                 "loader would recreate a row this migration deletes, so the resulting state would depend on " +
                 "run order: ${offenders}")
     }

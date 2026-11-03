@@ -5,7 +5,7 @@ package darpan.reconciliation.automation
  * had already shipped.
  *
  * <p>Moqui seed loads are {@code createOrUpdate} and never delete, so removing a row from
- * {@code SourceSystemConnectorFieldSeedData.xml} has no effect on a database that already loaded the
+ * {@code SourceSystemConnectorSeedDataFields.xml} has no effect on a database that already loaded the
  * earlier version of that file — the row survives, and the rules board keeps offering it. This is
  * exactly what happened to {@code SHOPIFY_RETURN_REFS} / {@code $.records[*].orderName}: Task 3 (Plan
  * 2) dropped it from the seed as an unevidenced primary-ID candidate, the evidence gate fired, and

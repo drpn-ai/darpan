@@ -97,7 +97,7 @@
 
     <!-- One-time upgrade migration (Plan 2 Task 10): delete SourceSystemConnectorField pill rows
          explicitly withdrawn from seed data. Moqui seed loads are createOrUpdate and never delete, so
-         removing a row from SourceSystemConnectorFieldSeedData.xml has no effect on a database that
+         removing a row from SourceSystemConnectorSeedDataFields.xml has no effect on a database that
          already loaded the earlier version of that file — the row survives and the rules board keeps
          offering it (see SourceSystemConnectorFieldWriteSupport Javadoc for the SHOPIFY_RETURN_REFS /
          orderName case this fixes). authenticate="false" + allow-remote="false" by design, exactly like

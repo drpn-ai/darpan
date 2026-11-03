@@ -2,7 +2,11 @@
 <!-- Rules-board pills, migrated from the AutomationFacadeSupport constants they replace.
 
      LOAD ORDER: every row references a SourceSystemConnector by systemEnumId, so
-     SourceSystemConnectorSeedData.xml must load first. When this file is folded into a release
+     SourceSystemConnectorSeedData.xml must load first. Moqui loads a component's data files in
+     file-name order and skips the rest of a file at the first FK error, so this file's NAME must sort
+     after its parent's (DAR-BE-187: as SourceSystemConnectorFieldSeedData.xml it sorted first, and a
+     fresh database got no connector fields at all). ConnectorSeedLoadOrderContractTests guards it.
+     When this file is folded into a release
      upgrade-data.xml, re-check parent-before-child BY HAND after generating — the generator sorts
      alphabetically and has broken Moqui FK load order before.
 

@@ -158,7 +158,7 @@ class ReturnPresenceVerificationSupport {
 
     // All-digits form: what a JSON epoch-millis integer looks like once ValueSupport.normalize has
     // already turned it into a String (OMS entryDate is serialized this way — see the retired C3 fix
-    // this class used to carry, and SourceSystemConnectorFieldSeedData's OMS_RETURNS entryDate pill).
+    // this class used to carry, and SourceSystemConnectorSeedDataFields's OMS_RETURNS entryDate pill).
     private static final Pattern ALL_DIGITS_PATTERN = Pattern.compile(/^\d+$/)
 
     /**

@@ -9,7 +9,7 @@ order-state and health-check services that verification and diagnostics call.
   plus `SourceSystemConnectorField` for rules-board field pills and `SourceConfigEndpointAccess`
   for which endpoints a config may use)
 - Seed rows: `runtime/component/darpan/data/SourceSystemConnectorSeedData.xml` and
-  `runtime/component/darpan/data/SourceSystemConnectorFieldSeedData.xml`
+  `runtime/component/darpan/data/SourceSystemConnectorSeedDataFields.xml`
 - Resolver: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/automation/SourceSystemConnectorSupport.groovy`
 
 ## Seed a new connector

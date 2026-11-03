@@ -50,7 +50,7 @@ class AutomationFacadeSmokeTests {
         // of hand-written AutomationFacadeSupport constants — without it, every source option's
         // primaryIdOptions/fieldOptions comes back empty. Loads AFTER the connector file, per the
         // seed file's own load-order note (rows reference SourceSystemConnector by systemEnumId).
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedDataFields.xml")
         seedLegacyPollInputMode()
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
         ReconciliationSmokeTestSupport.seedSftpServerFixtures(ec)

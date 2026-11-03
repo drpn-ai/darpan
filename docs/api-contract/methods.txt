@@ -185,7 +185,9 @@ facade.SettingsFacadeServices.save#UserNotificationDefault
 facade.SettingsFacadeServices.test#SourceConnection
 facade.ShopifyFacadeServices.delete#ShopifyAuthConfig
 facade.ShopifyFacadeServices.get#ShopifyAuthConfig
+facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema
 facade.ShopifyFacadeServices.list#ShopifyAuthConfigs
+facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery
 facade.ShopifyFacadeServices.save#ShopifyAuthConfig
 facade.SlackFacadeServices.begin#SlackInstall
 facade.SlackFacadeServices.disconnect#SlackWorkspace

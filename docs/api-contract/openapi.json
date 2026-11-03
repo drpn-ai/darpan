@@ -585,7 +585,13 @@
                                         "$ref": "#/components/schemas/GetShopifyAuthConfigRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetShopifyGraphqlSchemaRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListShopifyAuthConfigsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RunShopifyGraphqlAgentQueryRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveShopifyAuthConfigRequest"
@@ -841,7 +847,9 @@
                                         "facade.SettingsFacadeServices.test#SourceConnection": "#/components/schemas/TestSourceConnectionRequest",
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "#/components/schemas/GetShopifyAuthConfigRequest",
+                                        "facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema": "#/components/schemas/GetShopifyGraphqlSchemaRequest",
                                         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "#/components/schemas/ListShopifyAuthConfigsRequest",
+                                        "facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery": "#/components/schemas/RunShopifyGraphqlAgentQueryRequest",
                                         "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "#/components/schemas/SaveShopifyAuthConfigRequest",
                                         "facade.SlackFacadeServices.begin#SlackInstall": "#/components/schemas/BeginSlackInstallRequest",
                                         "facade.SlackFacadeServices.disconnect#SlackWorkspace": "#/components/schemas/DisconnectSlackWorkspaceRequest",
@@ -1441,7 +1449,13 @@
                                             "$ref": "#/components/schemas/GetShopifyAuthConfigResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetShopifyGraphqlSchemaResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ListShopifyAuthConfigsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RunShopifyGraphqlAgentQueryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveShopifyAuthConfigResponse"
@@ -26017,6 +26031,101 @@
                     "result"
                 ]
             },
+            "GetShopifyGraphqlSchemaParams": {
+                "type": "object",
+                "properties": {
+                    "shopifyAuthConfigId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "shopifyAuthConfigId"
+                ],
+                "description": "DAR-CLI-003. The Shopify Admin GraphQL schema a tenant's agent can ask about, trimmed to the types\n            reachable from the Query root (names, kinds, fields, arguments, enum values and descriptions; mutations and\n            subscriptions left out). Read from Shopify once and kept 24 hours per connection. Needs view access."
+            },
+            "GetShopifyGraphqlSchemaResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "schema": {
+                        "type": "object"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "GetShopifyGraphqlSchemaRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema",
+                "x-darpan-method": "facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetShopifyGraphqlSchemaParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetShopifyGraphqlSchemaResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetShopifyGraphqlSchemaResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListShopifyAuthConfigsParams": {
                 "type": "object",
                 "properties": {
@@ -26166,6 +26275,118 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ListShopifyAuthConfigsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RunShopifyGraphqlAgentQueryParams": {
+                "type": "object",
+                "properties": {
+                    "shopifyAuthConfigId": {
+                        "type": "string"
+                    },
+                    "document": {
+                        "type": "string"
+                    },
+                    "variables": {
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "shopifyAuthConfigId",
+                    "document"
+                ],
+                "description": "DAR-CLI-003. Runs one fresh, read-only GraphQL query a tenant user's agent wrote, through a Shopify\n            connection the active tenant stores. One query only (no mutation, subscription or introspection); the answer\n            is returned as Shopify gave it, up to 5 MB, or refused with advice when larger; the connection's access token\n            is never returned. Needs run access. Every call is logged for the tenant."
+            },
+            "RunShopifyGraphqlAgentQueryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "data": {
+                        "type": "object"
+                    },
+                    "rowCount": {
+                        "type": "integer",
+                        "description": "The edge count when the answer is one connection, else blank."
+                    },
+                    "truncated": {
+                        "type": "boolean"
+                    },
+                    "durationMs": {
+                        "type": "integer"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "RunShopifyGraphqlAgentQueryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery",
+                "x-darpan-method": "facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunShopifyGraphqlAgentQueryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunShopifyGraphqlAgentQueryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunShopifyGraphqlAgentQueryResult"
                     }
                 },
                 "required": [
@@ -28568,7 +28789,9 @@
         "facade.SettingsFacadeServices.test#SourceConnection": "TestSourceConnection",
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",
         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "GetShopifyAuthConfig",
+        "facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema": "GetShopifyGraphqlSchema",
         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "ListShopifyAuthConfigs",
+        "facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery": "RunShopifyGraphqlAgentQuery",
         "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "SaveShopifyAuthConfig",
         "facade.SlackFacadeServices.begin#SlackInstall": "BeginSlackInstall",
         "facade.SlackFacadeServices.disconnect#SlackWorkspace": "DisconnectSlackWorkspace",

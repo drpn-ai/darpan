@@ -96,6 +96,8 @@ class CliMethodAllowlist {
 
             "facade.ShopifyFacadeServices.get#ShopifyAuthConfig",
             "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs",
+            "facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema",
+            "facade.ShopifyFacadeServices.run#ShopifyGraphqlAgentQuery",
 
             "facade.SlackFacadeServices.get#SlackInstall",
             "facade.SlackFacadeServices.list#SlackChannels",

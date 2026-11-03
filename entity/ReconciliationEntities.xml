@@ -1171,6 +1171,12 @@
             <description>DAR-BE-111. The mapped record field holding the OMS order id (custbody_hc_order_id), for
                 omsStatusConfigId. A record with no value there is not asked about.</description>
         </field>
+        <field name="omsStatusLineKeyField" type="text-short">
+            <description>DAR-BE-190. The record field holding the OMS order item seq id (on SALES_LINES, the template's
+                orderLineId: custcol_hc_order_line_id). With it the record gets omsItemStatusId, that item's HotWax
+                statusId (NOT_IN_OMS: no item of the order; NO_SUCH_ITEM: the order lacks this one), instead of
+                omsStatusId. Needs omsStatusKeyField.</description>
+        </field>
         <field name="lineKeyColumn" type="text-short">
             <description>SALES_LINES only: the transactionline column that names the line on the other
                 side of the pair - for gorjana custcol_hc_order_line_id, the OMS orderItemSeqId HotWax

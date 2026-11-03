@@ -292,7 +292,7 @@ class TenantAccessSupport {
         try {
             def web = ec.web
             if (web == null) return null
-            return normalize(web.request?.getHeader(REQUESTED_TENANT_HEADER))
+            return normalize(web.request?.getHeader(REQUESTED_TENANT_HEADER)) ?: null
         } catch (MissingPropertyException | NullPointerException ignored) {
             return null
         }

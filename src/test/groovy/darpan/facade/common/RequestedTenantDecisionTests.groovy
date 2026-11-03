@@ -35,4 +35,29 @@ class RequestedTenantDecisionTests {
         assertEquals(null, TenantAccessSupport.requestedTenantHeader(null))
         assertEquals(null, TenantAccessSupport.requestedTenantHeader([web: null]))
     }
+
+    private static Map ecWithHeader(String value) {
+        return [web: [request: [getHeader: { String n -> n == "X-Darpan-Tenant" ? value : null }]]]
+    }
+
+    @Test
+    void "reads and trims the X-Darpan-Tenant header"() {
+        assertEquals("B", TenantAccessSupport.requestedTenantHeader(ecWithHeader(" B ")))
+    }
+
+    @Test
+    void "a blank header is no request"() {
+        assertEquals(null, TenantAccessSupport.requestedTenantHeader(ecWithHeader("   ")))
+        assertEquals(null, TenantAccessSupport.requestedTenantHeader(ecWithHeader(null)))
+    }
+
+    @Test
+    void "the ThreadLocal wins over the header"() {
+        Map ec = ecWithHeader("A")
+        Map picked = TenantAccessSupport.withRequestedTenant("B") {
+            TenantAccessSupport.resolveEffectiveActiveTenant(ec, AVAILABLE)
+        }
+        assertEquals("B", picked.userGroupId)
+        assertEquals("A", TenantAccessSupport.resolveEffectiveActiveTenant(ec, AVAILABLE).userGroupId, "header alone is used when no ThreadLocal")
+    }
 }

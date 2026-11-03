@@ -1,7 +1,12 @@
 package darpan.facade.common
 
+import darpan.facade.auth.CliAuthSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.Test
+import org.moqui.context.ArtifactAuthorizationException
+import org.moqui.context.ExecutionContext
+import org.moqui.context.WebFacade
 
 import java.nio.file.Files
 import java.nio.file.Path
@@ -10,12 +15,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-/** DAR-BE-078 — the /rpc/json method fence. Pure decision tests; no Moqui boot. */
+/** DAR-BE-078 — the /rpc/json method fence; DAR-CLI-003 — the CLI-session allowlist on top. Pure decision tests and
+ *  stubbed requests; no Moqui boot. */
 class RpcMethodFenceTests {
 
     private static final String UPDATE_PASSWORD = "org.moqui.impl.UserServices.update#Password"
+    private static final String SESSION_INFO = "facade.AuthFacadeServices.get#SessionInfo"
+    private static final String SAVED_RUNS = "facade.ReconciliationFacadeServices.list#SavedRuns"
+    private static final String SAVE_ACTIVE_TENANT = "facade.AuthFacadeServices.save#ActiveTenant"
+    private static final String CLI_PATH_REFUSAL = "This address is not available to the Darpan CLI."
 
     @Test
     void refusesFrameworkPasswordServicesOnJsonRpc() {
@@ -132,5 +143,88 @@ class RpcMethodFenceTests {
         }
         assertTrue(anonymousRemote.contains(UPDATE_PASSWORD), "scan found nothing, so it proves nothing: ${anonymousRemote}")
         anonymousRemote.each { String name -> assertFalse(RpcMethodFence.isAllowedMethod(name), "fence lets through ${name}") }
+    }
+
+    // ---- DAR-CLI-003: a CLI session reaches only CliMethodAllowlist.ALLOWED, on /rpc/json and /rest/s1/graphql ----
+
+    @Test
+    void cliAnAllowedMethodPasses() {
+        assertNull(RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO]))
+        assertNull(RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO, SAVED_RUNS]))
+        assertNull(RpcMethodFence.cliRejection("/rpc/json", []))
+        assertNull(RpcMethodFence.cliRejection("/rpc/json/", ["facade.TenantScriptFacadeServices.save#TenantScript"]))
+    }
+
+    @Test
+    void cliABatchWithOneExcludedMethodIsRefused() {
+        assertEquals("${SAVE_ACTIVE_TENANT} is not available to the Darpan CLI; use the app.".toString(),
+                RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO, SAVE_ACTIVE_TENANT, SAVED_RUNS]))
+        assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["admin.TenantAdminServices.get#TenantList"]))
+        assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["gql.QueryServices.get#Sdl"]))
+        assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantScriptFacadeServices.run#TenantScriptDeployment"]))
+        // through enforce, where the batch comes from the parsed body as the dispatcher reads it
+        ExecutionContext cli = stubEc(true, "/rpc/json", [_requestBodyJsonList: [[method: SESSION_INFO], [method: SAVE_ACTIVE_TENANT]]])
+        ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException) { RpcMethodFence.enforce(cli) }
+        assertTrue(refused.message.contains("${SAVE_ACTIVE_TENANT} is not available to the Darpan CLI"), refused.message)
+        // the top-level method counts too, whatever the batch holds
+        assertThrows(ArtifactAuthorizationException) {
+            RpcMethodFence.enforce(stubEc(true, "/rpc/json", [method: SAVE_ACTIVE_TENANT, _requestBodyJsonList: [[method: SESSION_INFO]]]))
+        }
+    }
+
+    @Test
+    void cliRestE1IsRefused() {
+        ["/rest/e1/moqui.security.UserAccount", "/rest/s1/moqui/users", "/rest/s1/darpan/anything", "/rest/login",
+         "/apps/darpan/Settings", "/qapps/darpan/rpc/json", "/rpc/json/extra", "/rpc/json.json", "/rest/s1/graphql/public",
+         "/", "", null].each { String path ->
+            assertEquals(CLI_PATH_REFUSAL, RpcMethodFence.cliRejection(path, []), "CLI let through: ${path}")
+        }
+        ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException) {
+            RpcMethodFence.enforce(stubEc(true, "/rest/e1/moqui.security.UserAccount", [:]))
+        }
+        assertTrue(refused.message.contains(CLI_PATH_REFUSAL), refused.message)
+    }
+
+    @Test
+    void cliRestS1GraphqlIsAdmitted() {
+        assertNull(RpcMethodFence.cliRejection("/rest/s1/graphql", []))
+        assertNull(RpcMethodFence.cliRejection("/rest/s1/graphql/", []))
+        assertNull(RpcMethodFence.cliRejection("/rest/s1/graphql;jsessionid=x", []))
+        // a method parameter means nothing to the GraphQL endpoint, so enforce does not read one there
+        RpcMethodFence.enforce(stubEc(true, "/rest/s1/graphql", [method: SAVE_ACTIVE_TENANT, query: "{ orders { id } }"]))
+        RpcMethodFence.enforce(stubEc(true, "/rpc/json", [method: SESSION_INFO]))
+    }
+
+    @Test
+    void nonCliRequestsAreUnchanged() {
+        // what the browser and admin app reach today still passes
+        RpcMethodFence.enforce(stubEc(false, "/rest/e1/moqui.security.UserAccount", [:]))
+        RpcMethodFence.enforce(stubEc(false, "/apps/darpan/Settings", [:]))
+        RpcMethodFence.enforce(stubEc(false, "/rpc/json", [method: SAVE_ACTIVE_TENANT]))
+        RpcMethodFence.enforce(stubEc(false, "/rpc/json", [_requestBodyJsonList: [[method: "admin.TenantAdminServices.get#TenantList"],
+                                                                                [method: "gql.QueryServices.get#Sdl"]]]))
+        // and the DAR-BE-078 fence still refuses with its own reason, CLI or not
+        [false, true].each { boolean cli ->
+            ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException) {
+                RpcMethodFence.enforce(stubEc(cli, "/rpc/json", [method: UPDATE_PASSWORD]))
+            }
+            assertEquals("JSON-RPC method is not available: ${UPDATE_PASSWORD}".toString(), refused.message)
+        }
+        // no web request (a service call, a job): nothing to fence
+        RpcMethodFence.enforce([getWeb: { -> null }] as ExecutionContext)
+    }
+
+    /** An ExecutionContext on one web request. isCliSession reads its answer from the request memo, so no database. */
+    private static ExecutionContext stubEc(boolean cliSession, String path, Map params) {
+        Map<String, Object> attributes = [(CliAuthSupport.CLI_SESSION_ATTRIBUTE): cliSession]
+        HttpServletRequest request = [
+                getServletPath: { -> path },
+                getPathInfo   : { -> null },
+                getRequestURI : { -> path },
+                getAttribute  : { String name -> attributes[name] },
+                setAttribute  : { String name, Object value -> attributes[name] = value },
+        ] as HttpServletRequest
+        WebFacade web = [getRequest: { -> request }, getRequestParameters: { -> params }] as WebFacade
+        return [getWeb: { -> web }, getContext: { -> null }] as ExecutionContext
     }
 }

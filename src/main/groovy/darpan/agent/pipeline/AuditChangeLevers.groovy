@@ -308,6 +308,21 @@ class AuditChangeLevers {
         }
     }
 
+    static final String UNSAFE_TREE_MESSAGE = "This run's conclusions include hidden or brain rows that cannot be saved safely yet; raise a ticket."
+
+    /**
+     * R29. save#RunConclusions rewrites every row without its HIDE outcome or BRAIN engine flag, so a FIX_TEXT or
+     * CONCLUSION_ROWS change to a run whose tree holds either would silently un-hide rows or turn brain rows into tree rows.
+     * True when the active tenant's run has such a row now.
+     */
+    static boolean treeHasUnsavableRows(def ec, String savedRunId) {
+        def scope = savedRunId ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope").condition("ruleSetId", savedRunId)
+                .useCache(false).list().find() : null
+        if (scope == null) return false
+        return TenantScopedFinder.findTenantScoped(ec, RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scope.compareScopeId)
+                .useCache(false).list().any { normalize(it.outcome) == "HIDE" || normalize(it.engine) == "BRAIN" }
+    }
+
     // ---------------------------------------------------------------- provenance and drift
 
     /** The lever's current literal values, which may vouch for a proposal's identifiers (R21). */

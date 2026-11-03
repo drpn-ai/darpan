@@ -102,48 +102,13 @@ class RunConclusionAuthoringSupport {
                 .useCache(false).list().collectEntries { [("${it.sequenceNum}".toString()): it] }
         // DAR-BE-168: an older scope has no scopeMode (COMPARE); `?.` would hand conditionsOf a null boolean.
         boolean evaluate = "EVALUATE".equalsIgnoreCase(scope.scopeMode as String)
-        Map<String, Integer> seqByKey = [:], depthByKey = [:]
-        List<Map<String, Object>> nodes = []
-        ((submitted as List)).eachWithIndex { Object o, int i ->
-            if (ec.message.hasError()) return
-            if (!(o instanceof Map)) { ec.message.addError("Conclusion ${i + 1} is not readable."); return }
-            Map n = (Map) o
-            String key = normalize(n.key) ?: "${i + 1}".toString()
-            if (seqByKey.containsKey(key)) { ec.message.addError("Two conclusions share the key '${key}'."); return }
-            String conclusion = normalize(n.conclusion)
+        Map converted = toRows((List) submitted, evaluate, priorByKey) { String conclusion ->
             def e = ConclusionCatalogSupport.visibleConclusion(ec, conclusion)
-            if (e == null) { ec.message.addError("'${conclusion}' is not a conclusion."); return }
-            String label = (e.description ?: conclusion) as String
-            String parent = normalize(n.parent)
-            if (parent && !seqByKey.containsKey(parent)) { ec.message.addError("'${label}' names a parent that is not above it."); return }
-            int depth = parent ? depthByKey[parent] + 1 : 1
-            if (depth > MAX_DEPTH) { ec.message.addError("'${label}' is more than ${MAX_DEPTH} levels deep."); return }
-            String bucket = normalize(n.bucket)?.toUpperCase()
-            if (bucket && !(bucket in BUCKETS)) { ec.message.addError("'${label}' applies to ${BUCKETS.join(', ')} or any, not '${bucket}'."); return }
-            if (bucket && parent) { ec.message.addError("Only a top-level conclusion says which rows it applies to ('${label}')."); return }
-            String question = normalize(n.question)
-            if (question && question.length() > 255) { ec.message.addError("'${label}' has a question longer than 255 characters."); return }
-            String fix = normalize(n.fix)
-            if (fix && fix.length() > 1000) { ec.message.addError("'${label}' has a fix longer than 1000 characters."); return }
-            List<Map<String, Object>> conditions = conditionsOf(ec, label, n.conditions, evaluate)
-            if (conditions == null) return
-            def prior = priorByKey[key]
-            if (prior != null && prior.conclusionEnumId != conclusion) prior = null
-            String outcome = n.containsKey("outcome") ? normalize(n.outcome)?.toUpperCase() : (prior?.outcome as String)
-            if (outcome && !(outcome in [RunConclusionSupport.OUTCOME_HIDE, RunConclusionSupport.OUTCOME_EXPECTED])) {
-                ec.message.addError("'${label}' has outcome '${outcome}'; it is HIDE or EXPECTED, or blank."); return
-            }
-            String engine = n.containsKey("engine") ? normalize(n.engine)?.toUpperCase() : (prior?.engine as String)
-            if (engine && engine != "BRAIN") { ec.message.addError("'${label}' has engine '${engine}'; it is BRAIN, or blank."); return }
-            String suggestedFilterJson = n.containsKey("suggestedFilterJson") ? normalize(n.suggestedFilterJson) : (prior?.suggestedFilterJson as String)
-            int seq = (nodes.size() + 1) * 10
-            seqByKey[key] = seq
-            depthByKey[key] = depth
-            nodes << [sequenceNum: seq, parentSequenceNum: parent ? seqByKey[parent] : null, conclusionEnumId: conclusion,
-                      appliesToBucket: bucket, questionText: question, fixActionTemplate: fix, outcome: outcome ?: null,
-                      engine: engine ?: null, suggestedFilterJson: suggestedFilterJson ?: null, conditions: conditions] as Map<String, Object>
+            e == null ? null : ((e.description ?: conclusion) as String)
         }
+        ((List<String>) converted.errors).each { ec.message.addError(it) }
         if (ec.message.hasError()) return null
+        List<Map<String, Object>> nodes = (List<Map<String, Object>>) converted.rows
 
         String compareScopeId = scope.compareScopeId as String
         String tenantId = scope.companyUserGroupId as String
@@ -169,40 +134,101 @@ class RunConclusionAuthoringSupport {
         return get(ec, savedRunId)
     }
 
-    private static List<Map<String, Object>> conditionsOf(def ec, String label, Object raw, boolean evaluate) {
+    /**
+     * DAR-BE-159. Pure: submitted nodes to the rows the save stores, or the first refusal in words. Each row is
+     * [sequenceNum (10, 20, ...), parentSequenceNum, conclusionEnumId, appliesToBucket, questionText, fixActionTemplate,
+     * conditions: [subject, presence, keyScope, quantifier, fieldExpression, operator, conditionValues (comma-joined, null
+     * when none), checkLabel]]. A node without a key is keyed by its position (1, 2, ...). labelOfConclusion answers a
+     * visible DarpanConclusion's label, or null when the id is not one. Answers [rows, errors]; rows is null on an error.
+     */
+    static Map toRows(List submitted, boolean evaluate, Closure<String> labelOfConclusion) {
+        return toRows(submitted, evaluate, [:], labelOfConclusion)
+    }
+
+    /**
+     * DAR-BE-198 in toRows: priorByKey holds the rules as get read them (key = the rule's sequenceNum). A node that does not
+     * name outcome, engine or suggestedFilterJson keeps its prior rule's (same key and same conclusion); one that names it
+     * sets it (HIDE or EXPECTED, BRAIN, or blank). Each row then also carries outcome, engine and suggestedFilterJson.
+     */
+    static Map toRows(List submitted, boolean evaluate, Map priorByKey, Closure<String> labelOfConclusion) {
+        List<String> errors = []
+        Map<String, Integer> seqByKey = [:], depthByKey = [:]
+        List<Map<String, Object>> nodes = []
+        for (int i = 0; i < ((submitted ?: []) as List).size(); i++) {
+            Object o = submitted[i]
+            if (!(o instanceof Map)) { errors << "Conclusion ${i + 1} is not readable.".toString(); break }
+            Map n = (Map) o
+            String key = normalize(n.key) ?: "${i + 1}".toString()
+            if (seqByKey.containsKey(key)) { errors << "Two conclusions share the key '${key}'.".toString(); break }
+            String conclusion = normalize(n.conclusion)
+            String label = conclusion ? labelOfConclusion.call(conclusion) : null
+            if (label == null) { errors << "'${conclusion}' is not a conclusion.".toString(); break }
+            String parent = normalize(n.parent)
+            if (parent && !seqByKey.containsKey(parent)) { errors << "'${label}' names a parent that is not above it.".toString(); break }
+            int depth = parent ? depthByKey[parent] + 1 : 1
+            if (depth > MAX_DEPTH) { errors << "'${label}' is more than ${MAX_DEPTH} levels deep.".toString(); break }
+            String bucket = normalize(n.bucket)?.toUpperCase()
+            if (bucket && !(bucket in BUCKETS)) { errors << "'${label}' applies to ${BUCKETS.join(', ')} or any, not '${bucket}'.".toString(); break }
+            if (bucket && parent) { errors << "Only a top-level conclusion says which rows it applies to ('${label}').".toString(); break }
+            String question = normalize(n.question)
+            if (question && question.length() > 255) { errors << "'${label}' has a question longer than 255 characters.".toString(); break }
+            String fix = normalize(n.fix)
+            if (fix && fix.length() > 1000) { errors << "'${label}' has a fix longer than 1000 characters.".toString(); break }
+            List<Map<String, Object>> conditions = conditionsOf(errors, label, n.conditions, evaluate)
+            if (conditions == null) break
+            def prior = priorByKey?.get(key)
+            if (prior != null && prior.conclusionEnumId != conclusion) prior = null
+            String outcome = n.containsKey("outcome") ? normalize(n.outcome)?.toUpperCase() : (prior?.outcome as String)
+            if (outcome && !(outcome in [RunConclusionSupport.OUTCOME_HIDE, RunConclusionSupport.OUTCOME_EXPECTED])) {
+                errors << "'${label}' has outcome '${outcome}'; it is HIDE or EXPECTED, or blank.".toString(); break
+            }
+            String engine = n.containsKey("engine") ? normalize(n.engine)?.toUpperCase() : (prior?.engine as String)
+            if (engine && engine != "BRAIN") { errors << "'${label}' has engine '${engine}'; it is BRAIN, or blank.".toString(); break }
+            String suggestedFilterJson = n.containsKey("suggestedFilterJson") ? normalize(n.suggestedFilterJson) : (prior?.suggestedFilterJson as String)
+            int seq = (nodes.size() + 1) * 10
+            seqByKey[key] = seq
+            depthByKey[key] = depth
+            nodes << [sequenceNum: seq, parentSequenceNum: parent ? seqByKey[parent] : null, conclusionEnumId: conclusion,
+                      appliesToBucket: bucket, questionText: question, fixActionTemplate: fix, outcome: outcome ?: null,
+                      engine: engine ?: null, suggestedFilterJson: suggestedFilterJson ?: null, conditions: conditions] as Map<String, Object>
+        }
+        return [rows: errors ? null : nodes, errors: errors]
+    }
+
+    private static List<Map<String, Object>> conditionsOf(List<String> errors, String label, Object raw, boolean evaluate) {
         List<Map<String, Object>> out = []
         for (Object o : ((raw ?: []) as List)) {
             Map c = o instanceof Map ? (Map) o : [:]
             String subject = (normalize(c.subject) ?: "FILE_1").toUpperCase()
-            if (!(subject in ["FILE_1", "FILE_2"])) { ec.message.addError("'${label}': a condition reads FILE_1 or FILE_2."); return null }
-            if (subject == "FILE_2" && evaluate) { ec.message.addError("'${label}': this run reads one system, so a condition reads FILE_1."); return null }
+            if (!(subject in ["FILE_1", "FILE_2"])) { errors << "'${label}': a condition reads FILE_1 or FILE_2.".toString(); return null }
+            if (subject == "FILE_2" && evaluate) { errors << "'${label}': this run reads one system, so a condition reads FILE_1.".toString(); return null }
             String presence = (normalize(c.presence) ?: "ANY").toUpperCase()
             String keyScope = (normalize(c.keyScope) ?: "FULL").toUpperCase()
             String quantifier = (normalize(c.quantifier) ?: "ALL").toUpperCase()
             if (!(presence in PRESENCE) || !(keyScope in KEY_SCOPES) || !(quantifier in QUANTIFIERS)) {
-                ec.message.addError("'${label}': a condition's presence, key scope or quantifier is not one the conclude step reads."); return null
+                errors << "'${label}': a condition's presence, key scope or quantifier is not one the conclude step reads.".toString(); return null
             }
             String field = normalize(c.field)
             String operator = normalize(c.operator)?.toUpperCase()
-            if (field && !(field ==~ FIELD_PATTERN)) { ec.message.addError("'${label}': '${field}' is not a record field."); return null }
-            if (operator && !(operator in OPERATORS)) { ec.message.addError("'${label}': a condition is one of ${OPERATORS.join(', ')}, not '${operator}'."); return null }
-            if (operator && !field) { ec.message.addError("'${label}': ${operator} needs a field."); return null }
-            if (field && !operator) { ec.message.addError("'${label}': say what '${field}' must be."); return null }
-            if (!field && presence == "ANY") { ec.message.addError("'${label}': a condition needs a field or a presence."); return null }
+            if (field && !(field ==~ FIELD_PATTERN)) { errors << "'${label}': '${field}' is not a record field.".toString(); return null }
+            if (operator && !(operator in OPERATORS)) { errors << "'${label}': a condition is one of ${OPERATORS.join(', ')}, not '${operator}'.".toString(); return null }
+            if (operator && !field) { errors << "'${label}': ${operator} needs a field.".toString(); return null }
+            if (field && !operator) { errors << "'${label}': say what '${field}' must be.".toString(); return null }
+            if (!field && presence == "ANY") { errors << "'${label}': a condition needs a field or a presence.".toString(); return null }
             List<String> values = ((c.values ?: []) as List).collect { normalize(it) }.findAll { it } as List<String>
             if (operator in ["IN", "NOT_IN"] && (!values || values.any { it.contains(",") || it.length() > 100 })) {
-                ec.message.addError("'${label}': '${field}' ${operator == 'IN' ? 'is' : 'is not'} needs values without commas."); return null
+                errors << "'${label}': '${field}' ${operator == 'IN' ? 'is' : 'is not'} needs values without commas.".toString(); return null
             }
             if (operator in ["GT", "WITHIN_HOURS"] && !(values.size() == 1 && values[0] ==~ /-?[0-9]{1,15}(\.[0-9]{1,6})?/)) {
-                ec.message.addError("'${label}': '${field}' ${operator == 'GT' ? 'is more than' : 'within hours'} needs one number."); return null
+                errors << "'${label}': '${field}' ${operator == 'GT' ? 'is more than' : 'within hours'} needs one number.".toString(); return null
             }
-            if (!(operator in ["IN", "NOT_IN", "GT", "WITHIN_HOURS"]) && values) { ec.message.addError("'${label}': ${operator ?: 'a presence check'} takes no values."); return null }
+            if (!(operator in ["IN", "NOT_IN", "GT", "WITHIN_HOURS"]) && values) { errors << "'${label}': ${operator ?: 'a presence check'} takes no values.".toString(); return null }
             String checkLabel = normalize(c.checkLabel)
-            if (!checkLabel) { ec.message.addError("'${label}': every condition says what it checks."); return null }
+            if (!checkLabel) { errors << "'${label}': every condition says what it checks.".toString(); return null }
             out << [subject: subject, presence: presence, keyScope: keyScope, quantifier: quantifier, fieldExpression: field,
                     operator: operator, conditionValues: values ? values.join(",") : null, checkLabel: checkLabel] as Map<String, Object>
         }
-        if (!out) { ec.message.addError("'${label}' needs at least one condition."); return null }
+        if (!out) { errors << "'${label}' needs at least one condition.".toString(); return null }
         return out
     }
 

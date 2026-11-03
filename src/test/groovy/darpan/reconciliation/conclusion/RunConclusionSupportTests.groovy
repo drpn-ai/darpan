@@ -238,6 +238,35 @@ class RunConclusionSupportTests {
         assertTrue(parse(doc).summary.conclusions.enabled as boolean)
     }
 
+    /**
+     * DAR-BE-159. The read-only pass a backtest uses reaches, row by row, exactly the conclusion the conclude step writes:
+     * two sides, a filtered side whose excluded records sit in its sidecar, rows missing from either side.
+     */
+    @Test
+    void concludeEachVisitsTheConclusionTheConcludeStepWrites() {
+        List<Map> rows = [
+                missingRow("M1${SEP}01", FILE1, FILE2, [omsOrderId: "M1", orderItemSeqId: "01", statusId: "ITEM_COMPLETED"]),
+                missingRow("M5${SEP}01", FILE1, FILE2, [omsOrderId: "M5", orderItemSeqId: "01"]),
+                missingRow("M6${SEP}02", FILE1, FILE2, [omsOrderId: "M6", orderItemSeqId: "02"]),
+                missingRow("M7${SEP}01", FILE2, FILE1, [orderId: "M7", orderLineId: "01"])]
+        File original = writeDiffDocument(rows)
+        File copy = new File(tempDir, "copy-${original.name}")
+        copy.bytes = original.bytes
+        File ns = extract("ns-each.json", [[orderId: "M6", orderLineId: "01"]], [configuredExclusions: [[sequenceNum: 1]]])
+        sidecar(ns, [[orderId: "M1", orderLineId: "01", quantityShipped: "0", quantityBackordered: "1", status: "B"]])
+        File oms = extract("oms-each.json", [[omsOrderId: "M1", orderItemSeqId: "01"]])
+        List rules = BACKORDER_RULES + NEVER_REACHED_RULES
+
+        List<String> visited = []
+        RunConclusionSupport.concludeEach(args(original, rules, ns, oms)) { Map row, Map conclusion -> visited << (conclusion.code as String) }
+        RunConclusionSupport.concludeRun(args(copy, rules, ns, oms))
+
+        List<String> written = ((List<Map>) parse(copy).differences).collect { ((Map) it.conclusion).code as String }
+        assertEquals(written, visited)
+        assertEquals(["CONC_NS_BACKORDERED", "CONC_NEVER_REACHED_NS", "UNEXPLAINED", "UNEXPLAINED"], visited, "the case is not hollow")
+        assertFalse(original.text.contains("\"conclusion\""), "concludeEach leaves the document untouched")
+    }
+
     @Test
     void countsSumToTheRowsWritten() {
         File doc = writeDiffDocument([missingRow("A${SEP}1", FILE1, FILE2), missingRow("B${SEP}1", FILE1, FILE2),

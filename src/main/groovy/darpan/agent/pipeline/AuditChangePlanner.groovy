@@ -81,7 +81,8 @@ class AuditChangePlanner {
             ec.message.addError(e.message)
             return invalid(ec, row)
         }
-        Map tested = (Map) backtest.call(ec, row.companyUserGroupId as String, row.kind as String, parse(row.targetJson), merged)
+        if (unsafeTree(ec, row)) return unsafe(row)
+        Map tested = backtestOf(ec, row, merged)
         row.setAll([backtestJson: JsonOutput.toJson(tested), status: "DRAFT", statusMessage: EDITOR_MESSAGE])
         row.update()
         return [status: "DRAFT", statusMessage: EDITOR_MESSAGE, backtest: tested]
@@ -108,6 +109,7 @@ class AuditChangePlanner {
             ec.message.addError(e.message)
             return invalid(ec, row)
         }
+        if (unsafeTree(ec, row)) return unsafe(row)
         if (kind == "STATEMENT_NARROWING" && !row.revertOfProposalId) {
             Set<String> catalog = ConclusionCatalogSupport.catalog(ec)*.id.collect { it as String } as Set<String>
             ((parse(row.afterJson).conclusionCodes ?: []) as List).findAll { !(it in catalog) }
@@ -119,7 +121,7 @@ class AuditChangePlanner {
             ec.message.addError(refused)
             return invalid(ec, row)
         }
-        Map tested = (Map) backtest.call(ec, row.companyUserGroupId as String, kind, parse(row.targetJson), merged)
+        Map tested = backtestOf(ec, row, merged)
         String hash = planHash(row.proposalId as String, merged, current)
         row.setAll([beforeJson: JsonOutput.toJson(current), backtestJson: JsonOutput.toJson(tested), planHash: hash, status: "PLANNED",
                     statusMessage: null])
@@ -167,6 +169,8 @@ class AuditChangePlanner {
         }
         String kind = row.kind as String
         String tenantId = row.companyUserGroupId as String
+        // R29: the hash cannot see a HIDE or BRAIN row (the tree state holds neither), so this is checked again here.
+        if (unsafeTree(ec, row)) return unsafe(row)
         Map current = AuditChangeLevers.current(ec, kind, parse(row.targetJson))
         Map merged = null
         if (current != null) {
@@ -296,6 +300,28 @@ class AuditChangePlanner {
         String kind = row.kind as String
         Map after = parse(row.afterJson)
         return row.revertOfProposalId ? AuditChangeLevers.restore(kind, current, after) : AuditChangeLevers.merge(kind, current, after)
+    }
+
+    /** The backtest never fails a plan or a draft: anything it throws is recorded as BACKTEST_FAILED. */
+    private static Map backtestOf(def ec, def row, Map merged) {
+        try {
+            return (Map) backtest.call(ec, row.companyUserGroupId as String, row.kind as String, parse(row.targetJson), merged)
+        } catch (Exception e) {
+            return [supported: false, reason: "BACKTEST_FAILED", detail: (rootMessage(e) ?: e.class.simpleName)?.take(255),
+                    basisExecutionId: null, closed: [], opened: [], unchanged: 0, limits: []]
+        }
+    }
+
+    /** R29: FIX_TEXT and CONCLUSION_ROWS are refused while the run's tree holds a row the tree save cannot keep. */
+    private static boolean unsafeTree(def ec, def row) {
+        return (row.kind in ["FIX_TEXT", "CONCLUSION_ROWS"]) &&
+                AuditChangeLevers.treeHasUnsavableRows(ec, parse(row.targetJson).savedRunId as String)
+    }
+
+    private static Map unsafe(def row) {
+        row.setAll([status: "INVALID", statusMessage: AuditChangeLevers.UNSAFE_TREE_MESSAGE, planHash: null])
+        row.update()
+        return [status: "INVALID", statusMessage: AuditChangeLevers.UNSAFE_TREE_MESSAGE]
     }
 
     private static Map invalid(def ec, def row) {

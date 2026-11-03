@@ -29,7 +29,10 @@ class AuditChangeBacktestSmokeTests {
     private static final String USER = "TEST_CUSTOMER_USER"
     private static final String USERNAME = "test.customer"
     private static final String AUTO = "TBT_AUTO"
+    private static final String AUTO2 = "TBT_AUTO2"
     private static final String CHECK = "TBT_CHK"
+    private static final String CHECK2 = "TBT_CHK2"
+    private static final String CONNECTOR = "darpan.reconciliation.SourceSystemConnector"
     private static final String FINDING = "darpan.audit.AuditFinding"
     private static final String EXECUTION = "darpan.reconciliation.ReconciliationAutomationExecution"
     private static final Timestamp FROM = Timestamp.valueOf("2026-04-21 00:00:00")
@@ -38,12 +41,18 @@ class AuditChangeBacktestSmokeTests {
     private ExecutionContext ec
     private String runId
     private String scopeId
+    private String run2Id
+    private String scope2Id
 
     /** The records the basis execution read, after the run's own filter (memoOrigin HOTWAX). */
     private static final List<Map> RECORDS = [
             [tranId: "CM-1", memoOrigin: "HOTWAX", status: "Open"],
             [tranId: "CM-2", memoOrigin: "HOTWAX", status: "Closed"],
             [tranId: "CM-3", memoOrigin: "HOTWAX", status: "Voided"]].asImmutable()
+    /** The two-sided run: memos (FILE_1) against applications (FILE_2); CM-4 has no application. */
+    private static final List<Map> MEMOS = [[tranId: "CM-1", memoOrigin: "HOTWAX"], [tranId: "CM-2", memoOrigin: "HOTWAX"],
+                                            [tranId: "CM-4", memoOrigin: "HOTWAX"]].asImmutable()
+    private static final List<Map> APPLICATIONS = [[tranId: "CM-1", status: "Applied"], [tranId: "CM-2", status: "Applied"]].asImmutable()
 
     @BeforeAll
     void setup() {
@@ -63,11 +72,13 @@ class AuditChangeBacktestSmokeTests {
             }
             upsert("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "TBT_AUTH", companyUserGroupId: MINE, authType: "NONE",
                     isActive: "Y", description: "test"])
-            upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TBT_Q", nsAuthConfigId: "TBT_AUTH",
-                    recordType: "CustCred", companyUserGroupId: MINE, isActive: "Y", description: "open credit memos"])
-            [["tranId", "tranid"], ["memoOrigin", "memoorigin"], ["status", "status"]].eachWithIndex { List f, int i ->
-                upsert("darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: "TBT_Q", recordFieldName: f[0],
-                        sourceColumn: f[1], sequenceNum: (i + 1) as Long])
+            ["TBT_Q": "open credit memos", "TBT_Q2": "credit memo applications"].each { String q, String label ->
+                upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: q, nsAuthConfigId: "TBT_AUTH",
+                        recordType: "CustCred", companyUserGroupId: MINE, isActive: "Y", description: label])
+                [["tranId", "tranid"], ["memoOrigin", "memoorigin"], ["status", "status"]].eachWithIndex { List f, int i ->
+                    upsert("darpan.reconciliation.NsSuiteQlSourceQueryField", [nsSuiteQlSourceQueryId: q, recordFieldName: f[0],
+                            sourceColumn: f[1], sequenceNum: (i + 1) as Long])
+                }
             }
         }
         actAs(MINE)
@@ -78,6 +89,15 @@ class AuditChangeBacktestSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         runId = run.savedRun.savedRunId as String
         scopeId = run.savedRun.compareScopeId as String
+        Map run2 = ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun").parameters([
+                runName: "Memos against applications", scopeMode: "COMPARE",
+                file1SystemEnumId: "NETSUITE_SUITEQL", file1SourceTypeEnumId: "AUT_SRC_API", file1SourceConfigId: "TBT_Q",
+                file1SourceConfigType: "NETSUITE_SUITEQL", file1PrimaryIdExpression: '$.records[*].tranId',
+                file2SystemEnumId: "NETSUITE_SUITEQL", file2SourceTypeEnumId: "AUT_SRC_API", file2SourceConfigId: "TBT_Q2",
+                file2SourceConfigType: "NETSUITE_SUITEQL", file2PrimaryIdExpression: '$.records[*].tranId', rules: []]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        run2Id = run2.savedRun.savedRunId as String
+        scope2Id = run2.savedRun.compareScopeId as String
         asSystem {
             upsert("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 1L,
                     fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN", filterValues: "HOTWAX", companyUserGroupId: MINE])
@@ -88,9 +108,18 @@ class AuditChangeBacktestSmokeTests {
             upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO, fileSide: "FILE_1",
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                     safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"TBT_Q"}}'])
+            upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTO2, automationName: "memos against applications",
+                    companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: run2Id, savedRunType: "ruleset",
+                    ruleSetId: run2Id, compareScopeId: scope2Id, isActive: "N", relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
+                    windowTimeZone: "UTC", scheduleExpr: "0 0 6 * * ?"])
+            ["FILE_1": "TBT_Q", "FILE_2": "TBT_Q2"].each { String side, String q ->
+                upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO2, fileSide: side,
+                        companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
+                        safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"' + q + '"}}'])
+            }
             upsert("darpan.audit.Audit", [auditId: "${MINE}_TBT".toString(), companyUserGroupId: MINE, auditCode: "month-close-tbt",
                     auditName: "Month close", periodEnumId: "AUDP_MONTH"])
-            ["R1", "R2"].eachWithIndex { String code, int i ->
+            ["R1", "R2", "R3", "R4"].eachWithIndex { String code, int i ->
                 upsert("darpan.audit.AuditStatement", [statementId: "TBT_${code}".toString(), companyUserGroupId: MINE,
                         auditId: "${MINE}_TBT".toString(), statementCode: code, categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM",
                         sequenceNum: (i + 1) as Long, statementText: "${code} text".toString(), isActive: "Y"])
@@ -102,6 +131,14 @@ class AuditChangeBacktestSmokeTests {
                     sequenceNum: 1L, diffTypes: "FINDING"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R2", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING", conclusionCodes: "CONC_TBT_B"])
+            // The two-sided check: R3 counts a memo with no application row on file 1's side missing; R4 a mismatch or a
+            // memo with no application.
+            upsert("darpan.audit.AuditCheck", [checkId: CHECK2, companyUserGroupId: MINE, checkCode: "memos-applied-tbt",
+                    label: "Memos applied", savedRunId: run2Id, automationId: AUTO2, graceDays: 1L, headlineTemplate: "Memo {tranId}"])
+            upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R3", companyUserGroupId: MINE,
+                    sequenceNum: 1L, diffTypes: "MISSING_IN_FILE_1"])
+            upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R4", companyUserGroupId: MINE,
+                    sequenceNum: 1L, diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_2"])
         }
         // A memo still Open or Pending is left open; any other memo with an origin, the store kept the item.
         ec.service.sync().name("facade.RunConclusionFacadeServices.save#RunConclusions").parameters([savedRunId: runId,
@@ -119,6 +156,7 @@ class AuditChangeBacktestSmokeTests {
             execution("TBT_EXEC2", "AUT_STAT_SUCCESS", "2026-11-03 06:10:00", false)
             // Newer still with its files, but failed: never a basis.
             execution("TBT_EXEC3", "AUT_STAT_FAILED", "2026-11-03 07:10:00", true)
+            twoSidedExecution("TBT_EXEC21")
         }
     }
 
@@ -138,7 +176,13 @@ class AuditChangeBacktestSmokeTests {
             finding("F-TBT3", "TBT_R2", "CM-2", "AUDFS_OPEN", "CONC_TBT_B")
             finding("F-TBT4", "TBT_R1", "CM-3", "AUDFS_PENDING", "CONC_TBT_B")
             finding("F-TBT5", "TBT_R2", "CM-3", "AUDFS_OPEN", "CONC_TBT_B")
-            finding("F-TBT6", "TBT_R1", "CM-2", "AUDFS_FIXED", "CONC_TBT_B", "2026-10")
+            finding("F-TBT6", "TBT_R1", "CM-2", "AUDFS_FIXED", "CONC_TBT_B", "2026-09")
+            // Open, but in the period before the basis window: no basis of this month may close it.
+            finding("F-TBT7", "TBT_R1", "CM-2", "AUDFS_OPEN", "CONC_TBT_B", "2026-10")
+            finding("F-TBT21", "TBT_R4", "CM-1", "AUDFS_OPEN", null, "2026-11", CHECK2)
+            finding("F-TBT22", "TBT_R4", "CM-4", "AUDFS_OPEN", null, "2026-11", CHECK2)
+            ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R3")
+                    .one().set("conclusionCodes", null).update()
         }
         ec.message.clearAll()
     }
@@ -155,9 +199,10 @@ class AuditChangeBacktestSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals(true, out.supported, out.toString())
         assertEquals("TBT_EXEC1", out.basisExecutionId, "the latest succeeded execution that still has its extract")
-        assertEquals(["F-TBT2", "F-TBT3"], out.closed, "both open findings of CM-2; the fixed one is not counted")
+        assertEquals(["F-TBT2", "F-TBT3"], out.closed, "both open findings of CM-2 this month; not the fixed one, not October's")
         assertEquals([], out.opened)
-        assertEquals(3, out.unchanged)
+        assertEquals(4, out.unchanged)
+        assertEquals(["CLOSES_ONLY", "LATEST_WINDOW_ONLY"], out.limits)
         assertEquals(before, snapshot(), "no finding, execution, ledger row, pending mark or file was written")
 
         Map voided = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
@@ -165,8 +210,13 @@ class AuditChangeBacktestSmokeTests {
         assertEquals(["F-TBT4", "F-TBT5"], voided.closed, "values match without case, as the extract's own filter does; a pending finding closes too")
         assertEquals(before, snapshot())
 
+        Map wider = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
+                AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN",
+                                                                            filterValues: ["HOTWAX", "STORE"]]))
+        assertTrue("WIDENING_NOT_COMPUTED" in wider.limits, "an include that lists more lets records back in: ${wider}")
+
         Map other = AuditChangeBacktest.run(ec, "TBT_OTHER_TENANT", "EXCLUSION_FILTER", target, merged)
-        assertEquals([supported: false, reason: "TENANT_MISMATCH", basisExecutionId: null, closed: [], opened: [], unchanged: 0], other,
+        assertEquals([supported: false, reason: "TENANT_MISMATCH", basisExecutionId: null, closed: [], opened: [], unchanged: 0, limits: []], other,
                 "only the session's active tenant is ever read")
     }
 
@@ -202,10 +252,16 @@ class AuditChangeBacktestSmokeTests {
 
         assertEquals(true, out.supported, out.toString())
         assertNull(out.basisExecutionId, "the findings ledger alone")
-        assertEquals(["F-TBT2", "F-TBT4"], out.closed, "R1's open findings concluded other than CONC_TBT_A")
+        assertEquals(["F-TBT2", "F-TBT4", "F-TBT7"], out.closed, "R1's open findings concluded other than CONC_TBT_A, any period")
         assertEquals([], out.opened)
         assertEquals(1, out.unchanged, "R1's CM-1 stays")
+        assertEquals(["CLOSES_ONLY"], out.limits)
         assertEquals(before, snapshot())
+
+        Map r2 = [auditId: "${MINE}_TBT".toString(), checkCode: "credits-open-tbt", statementCode: "R2"]
+        Map wider = AuditChangeBacktest.run(ec, MINE, "STATEMENT_NARROWING", r2, AuditChangeLevers.merge("STATEMENT_NARROWING",
+                AuditChangeLevers.current(ec, "STATEMENT_NARROWING", r2), [conclusionCodes: ["CONC_TBT_B", "CONC_TBT_A"]]))
+        assertEquals(["CLOSES_ONLY", "WIDENING_NOT_COMPUTED"], wider.limits, "adding a code lets findings in")
 
         Map byType = AuditChangeBacktest.run(ec, MINE, "STATEMENT_NARROWING", target, AuditChangeLevers.merge("STATEMENT_NARROWING",
                 AuditChangeLevers.current(ec, "STATEMENT_NARROWING", target), [diffTypes: ["MISSING_IN_FILE_2"]]))
@@ -228,13 +284,9 @@ class AuditChangeBacktestSmokeTests {
         assertEquals("TBT_EXEC1", out.basisExecutionId)
         assertEquals(["F-TBT3"], out.closed, "R2 no longer counts CM-2; R1 counts any conclusion, so F-TBT2 stays")
         assertEquals(["CM-1"], out.opened, "R2 would newly count CM-1")
-        assertEquals(4, out.unchanged)
+        assertEquals(5, out.unchanged)
+        assertEquals(["LATEST_WINDOW_ONLY"], out.limits)
         assertEquals(before, snapshot())
-
-        Map same = AuditChangeBacktest.run(ec, MINE, "CONCLUSION_ROWS", target, AuditChangeLevers.current(ec, "CONCLUSION_ROWS", target))
-        assertEquals([], same.closed, "the saved tree re-run over the landed rows changes nothing")
-        assertEquals([], same.opened)
-        assertEquals(5, same.unchanged)
     }
 
     @Test
@@ -242,7 +294,85 @@ class AuditChangeBacktestSmokeTests {
         Map target = [savedRunId: runId, conclusionCode: "CONC_TBT_A"]
         Map merged = AuditChangeLevers.merge("FIX_TEXT", AuditChangeLevers.current(ec, "FIX_TEXT", target), [fixActionTemplate: "Re-import the memo"])
         Map out = AuditChangeBacktest.run(ec, MINE, "FIX_TEXT", target, merged)
-        assertEquals([supported: true, reason: "DISPLAY_ONLY", basisExecutionId: null, closed: [], opened: [], unchanged: 0], out)
+        assertEquals([supported: true, reason: "DISPLAY_ONLY", basisExecutionId: null, closed: [], opened: [], unchanged: 0, limits: []], out)
+    }
+
+    @Test
+    void "a two-sided exclusion opens the other side's record it leaves unmatched"() {
+        Map target = [savedRunId: run2Id, fileSide: "FILE_1"]
+        Map merged = AuditChangeLevers.merge("EXCLUSION_FILTER", AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target),
+                [fieldExpression: '$.records[*].tranId', filterValues: ["CM-1", "CM-4"]])
+        Map before = snapshot()
+
+        Map out = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, merged)
+
+        assertEquals(true, out.supported, out.toString())
+        assertNull(out.reason)
+        assertEquals("TBT_EXEC21", out.basisExecutionId)
+        assertEquals(["F-TBT21", "F-TBT22"], out.closed, "R4 counts neither a dropped memo nor its application left alone")
+        assertEquals(["CM-1"], out.opened, "CM-1's application is now missing on file 1's side, which R3 counts")
+        assertEquals(["LATEST_WINDOW_ONLY"], out.limits)
+        assertEquals(before, snapshot())
+
+        asSystem {
+            ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R3")
+                    .one().set("conclusionCodes", "CONC_TBT_A").update()
+        }
+        Map undecided = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, merged)
+        assertEquals(true, undecided.supported, "closings still hold")
+        assertEquals("OPENED_NOT_COMPUTED", undecided.reason, "R3 also asks for a conclusion the new row has not reached")
+        assertEquals(["F-TBT21", "F-TBT22"], undecided.closed)
+        assertEquals([], undecided.opened)
+        assertTrue("OPENED_NOT_COMPUTED" in undecided.limits)
+    }
+
+    @Test
+    void "an exclusion the extract would not take is refused as the extract refuses it"() {
+        Map target = [savedRunId: runId, fileSide: "FILE_1"]
+        Closure<Map> backtest = { String field ->
+            AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
+                    AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: field, filterValues: ["CM-2"]]))
+        }
+        withConnector([filterParameterName: null]) {
+            assertEquals("SOURCE_TAKES_NO_FILTERS", backtest('$.records[*].tranId').reason)
+        }
+        asSystem {
+            upsert("darpan.datasource.DataSourceDefinition", [dataSourceDefinitionId: "TBT_DEF", definitionName: "memos", protocol: "GRAPHQL",
+                    definitionVersion: 1L, statusId: "ACTIVE",
+                    definitionJson: JsonOutput.toJson([steps: [[id: "exclusions", kind: "filter", fields: ["tranId", "memoOrigin", "batch"]]]])])
+            upsert("darpan.datasource.DataSourceDefinition", [dataSourceDefinitionId: "TBT_DEF_NONE", definitionName: "memos", protocol: "GRAPHQL",
+                    definitionVersion: 1L, statusId: "ACTIVE", definitionJson: JsonOutput.toJson([steps: [[id: "read", kind: "query"]]])])
+        }
+        withConnector([extractServiceName: "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource",
+                       dataSourceDefinitionId: "TBT_DEF"]) {
+            Map ok = backtest('$.records[*].tranId')
+            assertEquals(true, ok.supported, ok.toString())
+            assertEquals(["F-TBT2", "F-TBT3"], ok.closed)
+            assertEquals("FILTER_FIELD_NOT_OFFERED", backtest('$.records[*].status').reason, "the filter step does not offer status")
+            assertEquals("FILTER_FIELD_NOT_OFFERED", backtest('$.records[*].batch').reason, "offered, but no landed record carries it")
+        }
+        withConnector([extractServiceName: "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource",
+                       dataSourceDefinitionId: "TBT_DEF_NONE"]) {
+            assertEquals("SOURCE_TAKES_NO_FILTERS", backtest('$.records[*].tranId').reason, "a definition with no filter step")
+        }
+    }
+
+    @Test
+    void "a truncated landed extract is a failed backtest, not a failed plan"() {
+        File extract = landed("TBT_EXEC1", "memos.json")
+        String whole = extract.text
+        extract.text = whole.substring(0, whole.length() - 20)
+        try {
+            Map target = [savedRunId: runId, fileSide: "FILE_1"]
+            Map out = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
+                    AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].tranId', filterValues: ["CM-2"]]))
+            assertEquals(false, out.supported)
+            assertEquals("BACKTEST_FAILED", out.reason, out.toString())
+            assertNotNull(out.detail)
+            assertEquals([], out.closed)
+        } finally {
+            extract.text = whole
+        }
     }
 
     // ------------------------------------------------------------------ fixtures
@@ -276,8 +406,39 @@ class AuditChangeBacktestSmokeTests {
         return DataManagerSupport.resolveDataManagerFile(ec, "${RUNS}/${executionId}/20261102-060000000/${name}".toString(), false)
     }
 
-    private void finding(String id, String statementId, String recordKey, String state, String conclusion, String period = "2026-11") {
-        upsert(FINDING, [findingId: id, companyUserGroupId: MINE, statementId: statementId, checkId: CHECK, recordKey: recordKey,
+    private void twoSidedExecution(String id) {
+        String dir = "${RUNS}/${id}/20261102-060000000"
+        upsert(EXECUTION, [automationExecutionId: id, automationId: AUTO2, companyUserGroupId: MINE, statusEnumId: "AUT_STAT_SUCCESS",
+                completedDate: Timestamp.valueOf("2026-11-02 06:10:00"), createdDate: Timestamp.valueOf("2026-11-02 06:10:00"),
+                windowStartDate: Timestamp.valueOf("2026-11-01 00:00:00"), windowEndDate: Timestamp.valueOf("2026-11-02 00:00:00"),
+                file1Name: "memos.json", file1DataManagerPath: "${dir}/memos.json".toString(),
+                file2Name: "applications.json", file2DataManagerPath: "${dir}/applications.json".toString(),
+                resultFileName: "${id}-result.json".toString(), resultDataManagerPath: "${dir}/${id}-result.json".toString()])
+        DataManagerSupport.resolveDataManagerFile(ec, "${dir}/memos.json", true).text = JsonOutput.toJson([records: MEMOS])
+        DataManagerSupport.resolveDataManagerFile(ec, "${dir}/applications.json", true).text = JsonOutput.toJson([records: APPLICATIONS])
+        String row = JsonOutput.toJson([diffType: "MISSING_IN_FILE_2", primaryId: "CM-4", data: MEMOS[2]])
+        DataManagerSupport.resolveDataManagerFile(ec, "${dir}/${id}-result.json", true).text =
+                '{\n"metadata":{"file1Label":"Memos","file2Label":"Applications"},\n"summary":{"totalDifferences":1},\n"differences":[\n' + row + "]\n}\n"
+    }
+
+    /** The run's NETSUITE_SUITEQL connector with these fields for the closure, then as it was. */
+    private void withConnector(Map fields, Closure work) {
+        Map was = asSystem {
+            def row = ec.entity.find(CONNECTOR).condition("systemEnumId", "NETSUITE_SUITEQL").one()
+            Map before = fields.keySet().collectEntries { [(it): row.get(it)] }
+            row.setAll(fields).update()
+            before
+        }
+        try {
+            work.call()
+        } finally {
+            asSystem { ec.entity.find(CONNECTOR).condition("systemEnumId", "NETSUITE_SUITEQL").one().setAll(was).update() }
+        }
+    }
+
+    private void finding(String id, String statementId, String recordKey, String state, String conclusion, String period = "2026-11",
+                         String checkId = CHECK) {
+        upsert(FINDING, [findingId: id, companyUserGroupId: MINE, statementId: statementId, checkId: checkId, recordKey: recordKey,
                 period: period, stateEnumId: state, headline: "Memo ${recordKey} is open".toString(),
                 firstFoundDate: Date.valueOf("2026-11-01"), lastSeenDate: Date.valueOf("2026-11-02"), timesSeen: 1L,
                 conclusionEnumId: conclusion])

@@ -470,7 +470,7 @@ class AuditChangeApplySmokeTests {
         assertEquals("DRAFT", p.status)
         assertEquals("An editor must plan and approve this change.", p.statusMessage)
         assertEquals("PASS", p.provenanceStatus)
-        assertEquals([supported: true, reason: "DISPLAY_ONLY", basisExecutionId: null, closed: [], opened: [], unchanged: 0], p.backtest)
+        assertEquals([supported: true, reason: "DISPLAY_ONLY", basisExecutionId: null, closed: [], opened: [], unchanged: 0, limits: []], p.backtest)
         assertNull(proposal(p.proposalId).planHash)
         Map viewerPlan = call("plan#AuditChange", [proposalId: p.proposalId])
         assertTrue(viewerPlan.hadError as boolean, "a viewer cannot plan")
@@ -572,6 +572,64 @@ class AuditChangeApplySmokeTests {
         Map reverted = AgentCallMarker.run { this.call("revert#AuditChange", [proposalId: p.proposalId]) }
         assertTrue((reverted.errorText as String).contains("AGENT_CANNOT_APPROVE"), reverted.errorText as String)
         assertEquals(1L, asSystem { ec.entity.find(PROPOSAL).count() }, "no revert proposal was made")
+    }
+
+    // ------------------------------------------------------------------ Task 5 fix round 1
+
+    private static final String UNSAFE = "This run's conclusions include hidden or brain rows that cannot be saved safely yet; raise a ticket."
+
+    /** R29: the tree save drops HIDE and BRAIN, so a tree change is refused while the run holds either. */
+    @Test
+    void "a tree change is refused while the run has hidden or brain rows"() {
+        setRule(10L, [outcome: "HIDE"])
+        ["FIX_TEXT": [savedRunId: runId, conclusionCode: "CONC_TAC_A"], "CONCLUSION_ROWS": [savedRunId: runId]].each { String kind, Map target ->
+            Map after = kind == "FIX_TEXT" ? [fixActionTemplate: "Re-import the memo"] :
+                    [rows: [[conclusionCode: "CONC_TAC_A", fixActionTemplate: "Re-import the memo"]]]
+            Map p = propose(kind, target, after)
+            assertFalse(p.hadError as boolean, p.errorText as String)
+            assertEquals("INVALID", p.status, kind)
+            assertEquals(UNSAFE, p.statusMessage)
+            assertNull(proposal(p.proposalId).planHash)
+        }
+        assertEquals("Re-sync the memo", node(tree(), "CONC_TAC_A").fix, "nothing saved")
+    }
+
+    @Test
+    void "apply refuses a tree change planned before a brain row appeared"() {
+        Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
+        assertEquals("PLANNED", p.status)
+        String hash = proposal(p.proposalId).planHash as String
+        setRule(20L, [engine: "BRAIN"])
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: hash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("INVALID", out.status)
+        assertEquals(UNSAFE, out.statusMessage)
+        assertEquals("INVALID", proposal(p.proposalId).status)
+        assertEquals(0L, versionCount(), "no version kept, nothing saved")
+        assertEquals("Re-sync the memo", node(tree(), "CONC_TAC_A").fix)
+    }
+
+    @Test
+    void "a backtest that throws is recorded and the plan still completes"() {
+        Closure was = AuditChangePlanner.backtest
+        AuditChangePlanner.backtest = { def ec, String tenantId, String kind, Map target, Map merged -> throw new IOException("disk gone") }
+        try {
+            Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
+            assertFalse(p.hadError as boolean, p.errorText as String)
+            assertEquals("PLANNED", p.status)
+            assertEquals(false, p.backtest.supported)
+            assertEquals("BACKTEST_FAILED", p.backtest.reason)
+            assertEquals("disk gone", p.backtest.detail)
+        } finally {
+            AuditChangePlanner.backtest = was
+        }
+    }
+
+    private void setRule(Long sequenceNum, Map fields) {
+        asSystem {
+            ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", scopeId).condition("sequenceNum", sequenceNum)
+                    .one().setAll(fields).update()
+        }
     }
 
     // ------------------------------------------------------------------ helpers

@@ -8,7 +8,7 @@ name: Darpan Backend CI
 # shopify-darpan + database-darpan) -> load (H2) -> test. The 4 integration components are mandatory, not optional:
 # darpan's own main code and tests resolve their entities by name (darpan.hotwax.*, ShopifyAuthConfig,
 # Ns* configs), so omitting them makes those entity reads throw EntityNotFoundException at runtime.
-# The Spark 3.5 / JDK 21 `--add-opens` set is already injected by the component's own test task
+# The Spark 4.2 / JDK 21 `--add-opens` set is already injected by the component's own test task
 # jvmArgs (build.gradle: sparkJava21Opens), so it does not need to be re-declared here.
 #
 # Two datasources, on purpose. The bulk of the suite runs on the embedded H2 datasource. A small

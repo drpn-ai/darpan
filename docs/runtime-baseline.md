@@ -11,14 +11,14 @@ JDK 17 + Atomikos notes (archived at `archive/build/java17-compatibility.md`).
 | Framework | **Moqui 4** from the `drpn-ai/moqui-framework` fork, branch `master` (upstream v4.0.0 + embedded Bitronix + the login self-deadlock fix). `moqui/moqui-runtime` is pinned at `v3.9.9`. | framework checkout in `darpan-backend`; component `.github/workflows/ci.yml`; `MOQUI_FRAMEWORK_REF` / `MOQUI_RUNTIME_REF` in both `darpan-docker-config` Dockerfiles (move all three together) |
 | Build | Gradle 9 | framework/root Gradle wrapper |
 | JTA transaction manager | **Embedded Bitronix** (`TransactionInternalBitronix`), the Moqui 4 default. `moqui-atomikos` is retired and removed from the build graph and Dockerfiles. | `build.gradle` comment near the dependency block |
-| Spark | `org.apache.spark:spark-sql_2.12:3.5.1`, plus `javax.servlet:javax.servlet-api:4.0.1` because Spark 3.5.x still uses the legacy `javax.servlet` API while Moqui 4 ships only `jakarta.servlet` | `build.gradle` |
+| Spark | `org.apache.spark:spark-sql_2.13:4.2.1` (Scala 2.13, ANTLR 4.13.1; DAR-BE-185). Spark 4 brings `javax.servlet-api` itself; its `jakarta.servlet-api` is excluded because the Moqui servlet container supplies that API. Moqui's own Jackson, commons-io, commons-codec and log4j versions match Spark 4.2.1's, so `lib/` carries no second copy of a framework jar. | `build.gradle`; the `drpn-ai/moqui-framework` fork's `framework/build.gradle` |
 | Drools / MVEL | **Drools 8.44.0.Final**: `drools-engine`, `drools-mvel` (still required for `dialect "mvel"` constraints), `drools-xml-support` (kmodule.xml) and `kie-api`. MVEL is managed transitively by 8.x, so the old manual MVEL2 2.5.x pin is gone. `drools-mvel`'s legacy evaluators need a classloader workaround around `buildAll()`; see the comment in `build.gradle`. | `build.gradle` |
 
 ## Required JVM flags
 
-Spark 3.5.x on JDK 17+/21 needs the canonical `--add-opens` module openings (Spark's own
-`JavaModuleOptions` list); without them Spark SQL throws `IllegalAccessError` on
-`sun.nio.ch.DirectBuffer` at `SparkContext` init:
+Spark 4.2.1 on JDK 21 needs the module openings and Netty properties from Spark's own launcher
+(`launcher/src/main/java/org/apache/spark/launcher/JavaModuleOptions.java`); without them Spark SQL
+throws `IllegalAccessError` on `sun.nio.ch.DirectBuffer` at `SparkContext` init:
 
 ```text
 --add-opens=java.base/java.lang=ALL-UNNAMED
@@ -30,12 +30,25 @@ Spark 3.5.x on JDK 17+/21 needs the canonical `--add-opens` module openings (Spa
 --add-opens=java.base/java.util=ALL-UNNAMED
 --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
 --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED
 --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
 --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
 --add-opens=java.base/sun.security.action=ALL-UNNAMED
 --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
 --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED
+-Dio.netty.tryReflectionSetAccessible=true
+-Dio.netty.allocator.type=pooled
 ```
+
+Four entries of Spark's list are left out on purpose:
+
+- `-Dio.netty.handler.ssl.defaultEndpointVerificationAlgorithm=NONE` turns off TLS hostname checks JVM-wide
+- `--sun-misc-unsafe-memory-access=allow` is a JDK 23+ flag; we run JDK 21
+- `--add-modules=jdk.incubator.vector` is an optional incubator module that warns on every start
+- `-XX:+IgnoreUnrecognizedVMOptions` would hide a mistyped flag
+
+Spark 4 runs SQL in ANSI mode by default. It stays on; a cast that can fail is written with
+`try_cast` or a null guard in our code, never by turning ANSI off.
 
 Two more flags quiet known JDK 21 warnings:
 

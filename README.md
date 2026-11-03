@@ -12,7 +12,7 @@ sync issues surface as flagged differences, and notifies tenants on run completi
   self-deadlock fix); `moqui/moqui-runtime` is pinned at `v3.9.9`. CI and both Docker images build
   the same refs.
 - JTA transaction manager is the Moqui 4 embedded **Bitronix**; `moqui-atomikos` is retired.
-- Apache Spark 3.5.1 for reconciliation diffs; Drools **8.44.0.Final** (`drools-engine`,
+- Apache Spark 4.2.1 (Scala 2.13, ANSI mode on) for reconciliation diffs; Drools **8.44.0.Final** (`drools-engine`,
   `drools-mvel`, `drools-xml-support`, `kie-api`) for rules. MVEL comes in transitively; there is
   no manual MVEL pin.
 - Spark needs the canonical `--add-opens` JVM flag set, wired in `build.gradle` (tests),

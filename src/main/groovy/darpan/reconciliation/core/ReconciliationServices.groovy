@@ -191,7 +191,7 @@ class ReconciliationServices {
                     .master(sparkMaster)
                     .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
                      .config("spark.sql.adaptive.enabled", "true")
-                    .config("spark.ui.enabled", "false") // embedded batch use; Spark UI needs legacy javax.servlet, absent under Moqui 4 jakarta
+                    .config("spark.ui.enabled", "false") // embedded batch use: no unauthenticated UI port; the UI's jakarta.servlet is the container's
                     .getOrCreate()
             // Audit 2026-06-11 #18: getOrCreate returns a JVM singleton, so per-call builder .config()
             // is ignored after the first session. Set shuffle partitions at runtime so embedded local[*]

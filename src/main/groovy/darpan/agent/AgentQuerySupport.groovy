@@ -39,6 +39,10 @@ class AgentQuerySupport {
     static final String OUTCOME_ERROR = "ERROR"
     static final String OUTCOME_TIMEOUT = "TIMEOUT"
 
+    /** Final review R25: the answer when a connection another tenant granted is asked for a fresh query or a schema. */
+    static final String SHARED_CONNECTION_REFUSAL =
+            "This connection is shared with your tenant; fresh queries run only on your own connections."
+
     /** Wall clock for one query. Not final so a test can shorten it; production leaves it at 60 s. */
     static volatile long timeoutMillis = 60_000L
 
@@ -156,12 +160,36 @@ class AgentQuerySupport {
         return runCore(meta, tenantId, work) { Map row -> writeLog(ec, tenantId, userId, row) }
     }
 
+    /**
+     * Final review R25: fresh queries and schema reads run only on a connection the ACTIVE tenant owns. A connection
+     * another tenant granted (ConfigTenantAccess) keeps working for saved runs, never for an agent's own queries, so
+     * the owner never has queries against its system that it did not see. Each system calls this after its own gate
+     * with the config's owning companyUserGroupId; null means owned, otherwise the refusal in words.
+     */
+    static String requireOwnedConnection(def ec, Object ownerCompanyUserGroupId) {
+        return ownedConnectionRefusal(darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec), ownerCompanyUserGroupId)
+    }
+
+    /** Pure: null when the owner is the active tenant, else {@link #SHARED_CONNECTION_REFUSAL}. */
+    static String ownedConnectionRefusal(String activeTenantUserGroupId, Object ownerCompanyUserGroupId) {
+        String active = activeTenantUserGroupId?.trim()
+        String owner = ownerCompanyUserGroupId?.toString()?.trim()
+        return active && owner && owner == active ? null : SHARED_CONNECTION_REFUSAL
+    }
+
+    /** A refusal's words with the connection's secrets (meta.secrets) removed. */
+    static String refusalText(Map meta, String reason) {
+        return strip(reason, ((meta?.secrets ?: []) as List).collect { it?.toString() }.findAll { it } as List<String>)
+    }
+
     /** Logs a request refused before it was sent (a failed check), so the refusal is on the record. */
     static Map refuse(def ec, Map meta, String reason) {
         String tenantId = darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         Map row = logRow(meta, OUTCOME_REFUSED, 0, 0)
         writeLog(ec, tenantId, ec?.user?.userId, row)
-        return [error: reason, code: OUTCOME_REFUSED]
+        // Final review B7: a refusal's words can carry the connection's host or token URL; strip them here, in the
+        // core, so every system's refusals are covered (callers set meta.secrets before anything can refuse).
+        return [error: refusalText(meta, reason), code: OUTCOME_REFUSED]
     }
 
     /** The body of {@link #run} without Moqui: tenant and a log sink are passed in. */
@@ -208,7 +236,7 @@ class AgentQuerySupport {
                     "The system did not answer within ${(long) (timeoutMillis / 1000)} seconds.".toString())
         } catch (ExecutionException e) {
             Throwable cause = e.cause ?: e
-            if (cause instanceof AgentQueryRefused) return failure(meta, logSink, started, OUTCOME_REFUSED, cause.message)
+            if (cause instanceof AgentQueryRefused) return failure(meta, logSink, started, OUTCOME_REFUSED, strip(cause.message, secrets))
             return failure(meta, logSink, started, OUTCOME_ERROR, strip(cause.message ?: cause.class.simpleName, secrets))
         }
         Map shaped = shape(raw ?: [:])

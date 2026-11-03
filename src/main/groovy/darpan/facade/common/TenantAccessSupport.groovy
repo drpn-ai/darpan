@@ -317,6 +317,21 @@ class TenantAccessSupport {
     }
 
     /**
+     * Final review B1: runs {@code body} in the tenant a request already resolved, on a thread with no web
+     * request and no requested-tenant ThreadLocal (Moqui's async worker re-logs the caller and nothing else).
+     * The tenant is checked again here: it must still be one of the caller's tenants. Blank runs
+     * {@code body} as it is (today's preference-then-first resolution).
+     */
+    static <T> T withCallerTenant(def ec, String tenantUserGroupId, Closure<T> body) {
+        String tenant = normalize(tenantUserGroupId)
+        if (!tenant) return body.call()
+        if (!listAvailableTenants(ec).any { it.userGroupId == tenant }) {
+            throw new org.moqui.context.ArtifactAuthorizationException("Tenant ${tenant} is not one of your tenants")
+        }
+        return withRequestedTenant(tenant, body)
+    }
+
+    /**
      * Runs {@code work} with {@code tenantUserGroupId} as the fallback active tenant for this thread.
      *
      * <p>UAT 2026-07-31: the {@code scan_ReconciliationAutomations_5m} job runs with the anonymous

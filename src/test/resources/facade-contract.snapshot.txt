@@ -687,6 +687,7 @@ SERVICE get CliLoginRequest
   IN:
     userCode : String [required]
   OUT:
+    createdDate : Timestamp
     errors : List
     errors.error : String
     expiresDate : Timestamp

@@ -122,6 +122,36 @@ class AgentQuerySupportTests {
     }
 
     @Test
+    void "run: a refusal thrown by the work loses the secret and host too (final review B7)"() {
+        Map result = AgentQuerySupport.runCore([queryText: "SELECT 1", secrets: ["s3cr3t-token", "acme-123.suitetalk.api.netsuite.com"]],
+                "T1", { throw new AgentQuerySupport.AgentQueryRefused("token URL blocked by outbound policy: https://acme-123.suitetalk.api.netsuite.com/x s3cr3t-token") },
+                { })
+        assertEquals("REFUSED", result.code)
+        String msg = result.error as String
+        assertFalse(msg.contains("s3cr3t-token"), msg)
+        assertFalse(msg.contains("acme-123.suitetalk"), msg)
+        assertTrue(msg.contains("[hidden]"), msg)
+    }
+
+    @Test
+    void "refusal text is stripped with the meta secrets (final review B7)"() {
+        String text = AgentQuerySupport.refusalText([secrets: ["acme-123.suitetalk.api.netsuite.com"]],
+                "token URL blocked by outbound policy: https://acme-123.suitetalk.api.netsuite.com/token")
+        assertEquals("token URL blocked by outbound policy: https://[hidden]/token", text)
+        assertEquals("plain", AgentQuerySupport.refusalText(null, "plain"))
+    }
+
+    @Test
+    void "owned connection: only the active tenant's own connection passes (final review R25)"() {
+        assertNull(AgentQuerySupport.ownedConnectionRefusal("KREWE", "KREWE"))
+        assertEquals(AgentQuerySupport.SHARED_CONNECTION_REFUSAL, AgentQuerySupport.ownedConnectionRefusal("KREWE", "GORJANA"))
+        assertEquals(AgentQuerySupport.SHARED_CONNECTION_REFUSAL, AgentQuerySupport.ownedConnectionRefusal("KREWE", null))
+        assertEquals(AgentQuerySupport.SHARED_CONNECTION_REFUSAL, AgentQuerySupport.ownedConnectionRefusal(null, "KREWE"))
+        assertEquals("This connection is shared with your tenant; fresh queries run only on your own connections.",
+                AgentQuerySupport.SHARED_CONNECTION_REFUSAL)
+    }
+
+    @Test
     void "run: success returns rows and logs one OK row"() {
         List<Map> logged = []
         Map result = AgentQuerySupport.runCore([systemEnumId: "NETSUITE", connectionId: "C1", queryText: "SELECT 1"], "T1",

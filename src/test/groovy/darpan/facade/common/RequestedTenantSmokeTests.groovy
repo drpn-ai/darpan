@@ -123,6 +123,50 @@ class RequestedTenantSmokeTests {
         assertEquals(TENANT_A, ec.user.getPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY))
     }
 
+    /**
+     * Final review B1: run#Reconciliation goes async; the worker thread has no web request and no
+     * requested-tenant ThreadLocal. A flowchart started under B (preference A) must still walk in B.
+     */
+    @Test
+    void "a flowchart run started under the requested tenant runs in the background under it"() {
+        String executionId = TenantAccessSupport.withRequestedTenant(TENANT_B) {
+            String recId = ec.service.sync().name("facade.ReconciliationFacadeServices.save#Reconciliation")
+                    .parameters([reconciliationName: "Requested chart ${UUID.randomUUID()}".toString()])
+                    .disableAuthz().call().reconciliation.reconciliationId as String
+            ec.service.sync().name("facade.ReconciliationFacadeServices.save#ReconciliationQuestion")
+                    .parameters([reconciliationId: recId, ruleSetId: savedRunB]).disableAuthz().call()
+            assertFalse(ec.message.hasError(), ec.message.errorsString)
+            Map out = ec.service.sync().name("facade.ReconciliationFacadeServices.run#Reconciliation").parameters([
+                    reconciliationId: recId,
+                    windowStartDate : Timestamp.valueOf("2026-08-14 00:00:00"),
+                    windowEndDate   : Timestamp.valueOf("2026-08-17 00:00:00")]).disableAuthz().call()
+            assertTrue(out.ok as boolean, out.errors?.toString())
+            return out.reconciliationExecutionId as String
+        }
+        assertNotNull(executionId)
+        List rows = []
+        long deadline = System.currentTimeMillis() + 60_000L
+        while (!rows && System.currentTimeMillis() < deadline) {
+            Thread.sleep(250L)
+            rows = ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                    .condition("reconciliationExecutionId", executionId).disableAuthz().useCache(false).list() ?: []
+        }
+        assertFalse(rows.isEmpty(), "the background walk must find the run and record its question under B")
+        assertTrue(rows.every { it.companyUserGroupId == TENANT_B }, rows*.companyUserGroupId.toString())
+        assertEquals(TENANT_A, ec.user.getPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY))
+    }
+
+    @Test
+    void "withCallerTenant refuses a tenant that is not one of the caller's tenants"() {
+        assertThrows(ArtifactAuthorizationException) {
+            TenantAccessSupport.withCallerTenant(ec, FOREIGN) { TenantAccessSupport.currentActiveTenantUserGroupId(ec) }
+        }
+        assertEquals(TENANT_B, TenantAccessSupport.withCallerTenant(ec, TENANT_B) {
+            TenantAccessSupport.currentActiveTenantUserGroupId(ec) })
+        assertEquals(TENANT_A, TenantAccessSupport.withCallerTenant(ec, null) {
+            TenantAccessSupport.currentActiveTenantUserGroupId(ec) })
+    }
+
     private void seedTenant(String tenantId, String label, Timestamp thruDate, boolean member = true) {
         ec.entity.makeValue("moqui.security.UserGroup").setAll([
                 userGroupId: tenantId, description: label,

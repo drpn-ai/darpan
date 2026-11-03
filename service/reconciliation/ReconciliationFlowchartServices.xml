@@ -96,10 +96,13 @@
             <parameter name="windowEndDate" type="Timestamp"/>
             <parameter name="windowStartLocalDate"/>
             <parameter name="windowEndLocalDate"/>
+            <parameter name="callerTenantUserGroupId"><description>Final review B1: the tenant the starting request
+                resolved (header or preference). Checked again here against the caller's tenants; blank = today's
+                preference-then-first resolution.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="summary" type="Map"/></out-parameters>
         <actions>
-            <set field="summary" from="darpan.common.TransactionDetachSupport.runDetachedFromCallerTransaction(ec) { -> darpan.reconciliation.flowchart.RunFlowchartSupport.runReconciliation(ec, [reconciliationId: reconciliationId, reconciliationExecutionId: reconciliationExecutionId, windowStartDate: windowStartDate, windowEndDate: windowEndDate, windowStartLocalDate: windowStartLocalDate, windowEndLocalDate: windowEndLocalDate]) }"/>
+            <set field="summary" from="darpan.facade.common.TenantAccessSupport.withCallerTenant(ec, callerTenantUserGroupId) { -> darpan.common.TransactionDetachSupport.runDetachedFromCallerTransaction(ec) { -> darpan.reconciliation.flowchart.RunFlowchartSupport.runReconciliation(ec, [reconciliationId: reconciliationId, reconciliationExecutionId: reconciliationExecutionId, windowStartDate: windowStartDate, windowEndDate: windowEndDate, windowStartLocalDate: windowStartLocalDate, windowEndLocalDate: windowEndLocalDate]) } }"/>
         </actions>
     </service>
 </services>

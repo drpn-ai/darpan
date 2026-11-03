@@ -84,9 +84,13 @@ class CliAuthSupport {
         return letters.substring(0, 4) + "-" + letters.substring(4)
     }
 
-    /** The CLI's hostname as shown to the person: printable, one line, at most 60 characters. */
+    /**
+     * The CLI's hostname as shown to the person: printable, one line, at most 60 characters. Control characters
+     * (C0 and C1), format characters (final review R26: bidi overrides and isolates, zero-width characters, the BOM)
+     * and line/paragraph separators become spaces, so a label cannot reorder or hide text on the approval page.
+     */
     static String normalizeHostLabel(Object hostLabel) {
-        String value = hostLabel?.toString()?.replaceAll(/\p{Cntrl}/, " ")?.replaceAll(/\s+/, " ")?.trim()
+        String value = hostLabel?.toString()?.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/, " ")?.replaceAll(/\s+/, " ")?.trim()
         if (!value) return null
         return value.length() > HOST_LABEL_MAX_LENGTH ? value.substring(0, HOST_LABEL_MAX_LENGTH) : value
     }

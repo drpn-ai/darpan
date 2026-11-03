@@ -8,7 +8,7 @@ package darpan.facade.common
  *
  * <p>ALLOWED: every facade get#/list#/search# that writes nothing and returns no credential, the run starters,
  * preview#NsSuiteQlSourceQuery and test#SourceConnection, the Scripts page's services except the send-now
- * run#TenantScriptDeployment, and the CLI's own start/poll/logout. EXCLUDED: everything else in
+ * run#TenantScriptDeployment, and the CLI's own logout (its start/poll sign-in runs anonymously). EXCLUDED: everything else in
  * docs/api-contract/methods.txt, with a note on each getter left out. CliMethodAllowlistTests fails when a published
  * method is in neither list, so a new service is placed here in the change that adds it.
  *
@@ -39,8 +39,6 @@ class CliMethodAllowlist {
             "facade.AuthFacadeServices.get#SessionInfo",
 
             "facade.CliAuthFacadeServices.logout#CliSession",
-            "facade.CliAuthFacadeServices.poll#CliLogin",
-            "facade.CliAuthFacadeServices.start#CliLogin",
 
             "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess",
 
@@ -183,6 +181,10 @@ class CliMethodAllowlist {
             "facade.CliAuthFacadeServices.approve#CliLogin",
             "facade.CliAuthFacadeServices.deny#CliLogin",
             "facade.CliAuthFacadeServices.get#CliLoginRequest", // browser-only: the approval page reads it
+            // Final review Important 2: a CLI session must never mint another CLI key (an agent could print it into its
+            // transcript). The CLI's own sign-in calls these anonymously, before it has a key, so the fence never needs them.
+            "facade.CliAuthFacadeServices.poll#CliLogin",
+            "facade.CliAuthFacadeServices.start#CliLogin",
             "facade.CliAuthFacadeServices.list#CliSessions", // browser-only: listing and revoking CLI sessions is the app's
             "facade.CliAuthFacadeServices.revoke#CliSession",
 

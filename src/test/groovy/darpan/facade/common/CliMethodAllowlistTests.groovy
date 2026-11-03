@@ -52,13 +52,17 @@ class CliMethodAllowlistTests {
             "facade.CliAuthFacadeServices.get#CliLoginRequest",
             "facade.CliAuthFacadeServices.list#CliSessions",
             "facade.CliAuthFacadeServices.revoke#CliSession",
+            // final review Important 2: a CLI session must never mint another CLI key (the CLI's own sign-in calls
+            // these anonymously, so the fence never needs them)
+            "facade.CliAuthFacadeServices.start#CliLogin",
+            "facade.CliAuthFacadeServices.poll#CliLogin",
             // it can send now
             "facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
     ].asImmutable()
 
-    /** Verbs an allowed method may have: reads, run starters, and the CLI's own sign-in. */
+    /** Verbs an allowed method may have: reads and run starters. */
     private static final Set<String> READ_OR_RUN_VERBS = ["get", "list", "search", "preview", "test",
-                                                          "run", "retry", "cancel", "start", "poll"] as Set
+                                                          "run", "retry", "cancel"] as Set
     private static final String TENANT_SCRIPT_SERVICES = "facade.TenantScriptFacadeServices."
     private static final String CLI_LOGOUT = "facade.CliAuthFacadeServices.logout#CliSession"
 

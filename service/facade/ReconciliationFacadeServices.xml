@@ -2172,8 +2172,12 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="reconciliationExecutionId" from="java.util.UUID.randomUUID().toString().replace('-', '')"/>
+                <!-- Final review B1: the async worker has no web request (no X-Darpan-Tenant) and no requested-tenant
+                     ThreadLocal, so it would walk in the saved preference. Hand it the tenant this request resolved. -->
+                <set field="callerTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
                 <service-call name="reconciliation.ReconciliationFlowchartServices.run#Reconciliation" async="true"
                         in-map="[reconciliationId: reconciliationId, reconciliationExecutionId: reconciliationExecutionId,
+                        callerTenantUserGroupId: callerTenantUserGroupId,
                         windowStartDate: windowStartDate, windowEndDate: windowEndDate,
                         windowStartLocalDate: windowStartLocalDate, windowEndLocalDate: windowEndLocalDate]"/>
             </if>

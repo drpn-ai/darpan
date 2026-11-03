@@ -22,6 +22,16 @@ class CliAuthSupportTests {
     private static final String APP_KEY = "app-raw-key"
 
     @Test
+    @DisplayName("final review R26: the host label loses bidi and other format characters, not only control characters")
+    void hostLabelStripsFormatCharacters() {
+        // U+202E right-to-left override, U+200B zero-width space, U+2066 left-to-right isolate, U+FEFF BOM.
+        String label = CliAuthSupport.normalizeHostLabel("laptop\u202Ecod.exe\u200B\u2066x\uFEFF\u0007y")
+        assertEquals("laptop cod.exe x y", label)
+        assertFalse(label.codePoints().anyMatch { int cp -> Character.getType(cp) == Character.FORMAT })
+        assertNull(CliAuthSupport.normalizeHostLabel("\u202E\u200B"))
+    }
+
+    @Test
     @DisplayName("a login_key header that is a CLI key is a CLI session")
     void loginKeyHeaderIsACliSession() {
         assertTrue(CliAuthSupport.isCliSession(ec(new RequestStub(headers: [login_key: " ${CLI_KEY} ".toString()]))))

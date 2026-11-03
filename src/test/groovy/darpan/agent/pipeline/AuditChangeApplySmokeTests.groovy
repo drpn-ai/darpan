@@ -809,6 +809,93 @@ class AuditChangeApplySmokeTests {
         assertEquals("REVERTED", proposal(p.proposalId).status)
     }
 
+    // ------------------------------------------------------------------ R55: a revert never undoes a later change
+
+    private long proposalCount() { asSystem { ec.entity.find(PROPOSAL).count() } }
+
+    private void refusedStale(Object proposalId) {
+        long proposals = proposalCount(), versions = versionCount()
+        List<Map> rows = filterRows()
+        Map r = call("revert#AuditChange", [proposalId: proposalId])
+        assertTrue(r.hadError as boolean, "the revert is refused")
+        assertTrue((r.errorText as String).contains(AuditChangePlanner.REVERT_STALE_PREFIX) &&
+                (r.errorText as String).contains("changed after proposal ${proposalId} was applied"), r.errorText as String)
+        assertEquals(proposals, proposalCount(), "no revert row was written")
+        assertEquals(versions, versionCount(), "no version was kept")
+        assertEquals(rows, filterRows())
+        assertEquals("APPLIED", proposal(proposalId).status)
+    }
+
+    private void revertApplied(Object proposalId) {
+        Map r = call("revert#AuditChange", [proposalId: proposalId])
+        assertFalse(r.hadError as boolean, r.errorText as String)
+        assertEquals("PLANNED", r.status, r.statusMessage as String)
+        Map out = call("apply#AuditChange", [proposalId: r.newProposalId, planHash: r.planHash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("REVERTED", proposal(proposalId).status)
+    }
+
+    @Test
+    void "reverting an exclusion a later exclusion built on is refused, and newest first restores the list"() {
+        existingFilter("EXCLUDE_IN", "M1000001,M1000002")
+        List<Map> original = filterRows()
+        Map p1 = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        applied(p1)
+        Map p2 = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["Voided"]])
+        applied(p2)
+        assertEquals("M1000001,M1000002,M1088731,Voided", filterRows().find { it.fieldExpression == NEW_FIELD }.filterValues)
+        refusedStale(p1.proposalId)
+
+        revertApplied(p2.proposalId)
+        assertEquals("M1000001,M1000002,M1088731", filterRows().find { it.fieldExpression == NEW_FIELD }.filterValues)
+        revertApplied(p1.proposalId)
+        assertEquals(original, filterRows(), "newest first, both reverts land and the list is the original")
+        assertEquals(filterRows(), automationFilterRows())
+    }
+
+    @Test
+    void "a hand edit of the filter after the apply makes its revert refuse"() {
+        existingFilter("EXCLUDE_IN", "M1000001,M1000002")
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        applied(p)
+        asSystem {
+            ec.entity.find(FILTER).condition([compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 2L]).one()
+                    .set("filterValues", "M1000001,M1000002,M1088731,M5555555").update()
+        }
+        sync(AUTO)
+        refusedStale(p.proposalId)
+    }
+
+    @Test
+    void "a later fix text makes reverting the earlier one refuse"() {
+        Map f1 = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
+        applied(f1)
+        Map f2 = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo for {tranId}"])
+        applied(f2)
+        refusedStale(f1.proposalId)
+        assertEquals("Re-import the memo for {tranId}", node(tree(), "CONC_TAC_A").fix, "the later fix stands")
+        revertApplied(f2.proposalId)
+        revertApplied(f1.proposalId)
+        assertEquals("Re-sync the memo", node(tree(), "CONC_TAC_A").fix)
+    }
+
+    @Test
+    void "an unchanged narrowing or tree change still reverts"() {
+        Map target = [auditId: "${MINE}_MC".toString(), checkCode: "credits-open", statementCode: "R1"]
+        Map n = propose("STATEMENT_NARROWING", target, [conclusionCodes: ["CONC_TAC_A"]])
+        applied(n)
+        revertApplied(n.proposalId)
+        assertNull(link("R1").conclusionCodes, "the narrowing is gone")
+
+        Map rows = propose("CONCLUSION_ROWS", [savedRunId: runId], [rows: [
+                [conclusionCode: "CONC_TAC_B", fixActionTemplate: "Ask the store again"],
+                [conclusionCode: "CONC_TAC_C", bucket: "FINDING", conditions: [[fieldExpression: "status", operator: "IN", checkValue: "Voided"]]]]])
+        applied(rows)
+        revertApplied(rows.proposalId)
+        assertEquals(["CONC_TAC_A", "CONC_TAC_B"], tree()*.conclusion)
+        assertEquals("Ask the store", node(tree(), "CONC_TAC_B").fix)
+    }
+
     // ------------------------------------------------------------------ R50: agent text columns hold long text
 
     /**

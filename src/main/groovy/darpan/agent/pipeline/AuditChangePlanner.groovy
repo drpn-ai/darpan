@@ -256,16 +256,51 @@ class AuditChangePlanner {
         if (open) { ec.message.addError("Proposal ${proposalId} already has a revert; plan, apply or reject that one.".toString()); return null }
         String kind = row.kind as String
         Map after = parse(row.afterJson)
-        Map lever = AuditChangeLevers.leverOf(kind, parse(row.beforeJson), after)
+        Map before = parse(row.beforeJson)
+        Map current = AuditChangeLevers.current(ec, kind, parse(row.targetJson))
+        if (current == null) return null
+        // R55: a revert puts back what the proposal moved only while that part still reads as the proposal left it; a
+        // later change to it (another proposal, a hand edit) would be silently undone too, so it is refused instead.
+        String changed = leverChangedSinceApply(row, kind, before, after, current)
+        if (changed) { ec.message.addError(changed); return null }
+        Map lever = AuditChangeLevers.leverOf(kind, before, after)
         def revert = ec.entity.makeValue(ENTITY)
         revert.setAll([proposalId: TenantScopedFinder.mintId(ec, ENTITY, "proposalId"), companyUserGroupId: tenantId,
                        conversationId: row.conversationId, kind: kind, targetJson: row.targetJson, afterJson: JsonOutput.toJson(lever),
                        reasonText: "Revert of proposal ${row.proposalId}".toString(), provenanceStatus: "PASS", blockedIds: "[]",
                        status: "DRAFT", proposedForUserId: TenantAccessSupport.currentUserId(ec), revertOfProposalId: row.proposalId])
         revert.create()
-        Map current = AuditChangeLevers.current(ec, kind, parse(row.targetJson))
-        Map planned = current == null ? invalid(ec, revert) : planRow(ec, revert, current)
+        Map planned = planRow(ec, revert, current)
         return [newProposalId: revert.proposalId, status: revert.status, statusMessage: revert.statusMessage, planHash: planned.planHash]
+    }
+
+    /** The STALE refusal of a revert whose lever changed after the apply it undoes; it starts with this constant. */
+    static final String REVERT_STALE_PREFIX = "STALE: "
+
+    /**
+     * R55. The lever as the applied proposal left it (its change merged over the config it was planned against) against the
+     * lever now, both canonical (keys sorted, as the planHash compares). Null when they match; otherwise the refusal.
+     */
+    private static String leverChangedSinceApply(def row, String kind, Map before, Map after, Map current) {
+        Map applied
+        try {
+            applied = mergedFor(row, before)
+        } catch (IllegalArgumentException e) {
+            applied = null
+        }
+        Map was = applied == null ? null : AuditChangeLevers.leverOf(kind, applied, after)
+        Map now = AuditChangeLevers.leverOf(kind, current, after)
+        if (was != null && JsonOutput.toJson(TenantConfigVersionSupport.canonical(was)) == JsonOutput.toJson(TenantConfigVersionSupport.canonical(now))) return null
+        return "${REVERT_STALE_PREFIX}${leverName(kind)} changed after proposal ${row.proposalId} was applied; revert the newer change first.".toString()
+    }
+
+    private static String leverName(String kind) {
+        switch (kind) {
+            case "EXCLUSION_FILTER": return "the run's exclusion filter"
+            case "STATEMENT_NARROWING": return "the statement's link to the check"
+            case "FIX_TEXT": return "the conclusion's fix text"
+            default: return "the run's conclusion rows"
+        }
     }
 
     // ---------------------------------------------------------------- provenance inputs (R21)

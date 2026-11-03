@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-159. An agent's proposed audit change, from draft to live config (darpan.agent.pipeline.AuditChangePlanner).
+         The agent only creates drafts (create#AuditChangeProposal, in-JVM, never remote); a person plans, applies, rejects
+         or reverts. Apply goes through the existing save of the lever (save#RuleSetRun + sync#Automation, save#AuditCheck,
+         save#RunConclusions), only while the plan's hash still matches the config, with a config version kept before and
+         after. Every service reads the ACTIVE tenant from the session; another tenant's proposal reads as not found. -->
+
+    <service verb="create" noun="AuditChangeProposal" allow-remote="false" authenticate="true">
+        <description>The agent's draft change: refused when it is off the R18 contract; otherwise kept as DRAFT, checked for
+            provenance (every record id must come from the person, the opened finding or the config), backtested and
+            planned. Ends PLANNED, or INVALID with the save's own refusal.</description>
+        <in-parameters>
+            <parameter name="conversationId" required="true"/>
+            <parameter name="kind" required="true"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, FIX_TEXT or CONCLUSION_ROWS.</description></parameter>
+            <parameter name="target" type="Map" required="true"/>
+            <parameter name="after" type="Map" required="true"/>
+            <parameter name="reasonText"/>
+            <parameter name="evidence" type="Object"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="proposalId"/>
+            <parameter name="status"/>
+            <parameter name="statusMessage"/>
+            <parameter name="provenanceStatus"/>
+            <parameter name="blockedIds" type="List"/>
+            <parameter name="backtest" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="created" from="darpan.agent.pipeline.AuditChangePlanner.create(ec, conversationId, kind, target, after, reasonText, evidence)"/>
+            <if condition="created == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="proposalId" from="created.proposalId"/>
+            <set field="status" from="created.status"/>
+            <set field="statusMessage" from="created.statusMessage"/>
+            <set field="provenanceStatus" from="created.provenanceStatus"/>
+            <set field="blockedIds" from="created.blockedIds"/>
+            <set field="backtest" from="created.backtest"/>
+        </actions>
+    </service>
+
+    <service verb="plan" noun="AuditChange" allow-remote="true" authenticate="true">
+        <description>Plans an open proposal again against the current config: the change is checked by its real save, which
+            is rolled back, and planHash covers the change and the config it was planned against. Ends PLANNED, or INVALID
+            with the save's refusal.</description>
+        <in-parameters><parameter name="proposalId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="planHash"/>
+            <parameter name="before" type="Map"/>
+            <parameter name="after" type="Map"/>
+            <parameter name="backtest" type="Map"/>
+            <parameter name="status"/>
+            <parameter name="statusMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="planned" from="darpan.agent.pipeline.AuditChangePlanner.plan(ec, proposalId)"/>
+            <if condition="planned == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="planHash" from="planned.planHash"/>
+            <set field="before" from="planned.before"/>
+            <set field="after" from="planned.after"/>
+            <set field="backtest" from="planned.backtest"/>
+            <set field="status" from="planned.status"/>
+            <set field="statusMessage" from="planned.statusMessage"/>
+        </actions>
+    </service>
+
+    <service verb="apply" noun="AuditChange" allow-remote="true" authenticate="true">
+        <description>A person applies a planned proposal. Refused without write access, for a BLOCKED proposal, and (an
+            exclusion) when an automation's filters differ from its run's (AUTOMATION_DRIFT). When the config changed since
+            the plan the proposal turns STALE and nothing is written.</description>
+        <in-parameters>
+            <parameter name="proposalId" required="true"/>
+            <parameter name="planHash" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="appliedVersionId"/>
+            <parameter name="status"/>
+            <parameter name="statusMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="applied" from="darpan.agent.pipeline.AuditChangePlanner.apply(ec, proposalId, planHash)"/>
+            <if condition="applied == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="appliedVersionId" from="applied.appliedVersionId"/>
+            <set field="status" from="applied.status"/>
+            <set field="statusMessage" from="applied.statusMessage"/>
+        </actions>
+    </service>
+
+    <service verb="reject" noun="AuditChange" allow-remote="true" authenticate="true">
+        <description>A person declines an open proposal; it can no longer be applied.</description>
+        <in-parameters>
+            <parameter name="proposalId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="status"/></out-parameters>
+        <actions>
+            <set field="rejected" from="darpan.agent.pipeline.AuditChangePlanner.reject(ec, proposalId, reason)"/>
+            <if condition="rejected == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="status" from="rejected.status"/>
+        </actions>
+    </service>
+
+    <service verb="revert" noun="AuditChange" allow-remote="true" authenticate="true">
+        <description>A new planned proposal that puts back what an applied proposal changed, applied through apply#AuditChange
+            with its own planHash.</description>
+        <in-parameters><parameter name="proposalId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="newProposalId"/>
+            <parameter name="status"/>
+            <parameter name="statusMessage"/>
+            <parameter name="planHash"/>
+        </out-parameters>
+        <actions>
+            <set field="reverted" from="darpan.agent.pipeline.AuditChangePlanner.revert(ec, proposalId)"/>
+            <if condition="reverted == null || ec.message.hasError()"><return error="true"/></if>
+            <set field="newProposalId" from="reverted.newProposalId"/>
+            <set field="status" from="reverted.status"/>
+            <set field="statusMessage" from="reverted.statusMessage"/>
+            <set field="planHash" from="reverted.planHash"/>
+        </actions>
+    </service>
+</services>

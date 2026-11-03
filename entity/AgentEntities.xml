@@ -103,7 +103,7 @@
         <field name="reasonText" type="text-medium"/>
         <field name="provenanceStatus" type="text-short"><description>PASS or BLOCKED.</description></field>
         <field name="blockedIds" type="text-medium"/>
-        <field name="planHash" type="text-short"/>
+        <field name="planHash" type="text-medium"><description>Hex SHA-256 (64 characters) of the planned change and the config it was planned against.</description></field>
         <field name="status" type="text-short"><description>DRAFT, PLANNED, APPLIED, REJECTED, REVERTED, STALE or INVALID.</description></field>
         <field name="statusMessage" type="text-medium"/>
         <field name="proposedForUserId" type="id"/>

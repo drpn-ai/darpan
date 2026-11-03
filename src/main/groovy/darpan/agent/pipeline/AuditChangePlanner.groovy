@@ -1,0 +1,314 @@
+package darpan.agent.pipeline
+
+import darpan.config.TenantConfigVersionSupport
+import darpan.facade.common.TenantAccessSupport
+import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.conclusion.ConclusionCatalogSupport
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+
+/**
+ * DAR-BE-159. An agent proposal from draft to live config, with no model in the loop: create (the agent's only write: a
+ * DRAFT row, provenance, plan), plan (the change checked by the real save inside a transaction that is rolled back, and a
+ * planHash over the change and the config it was planned against), apply (a person, write access, provenance PASS, the
+ * same planHash, then a config version before and after the save), reject, and revert (a new planned proposal that puts
+ * the moved lever back). Every read and write is the active tenant's; another tenant's proposal reads as not found.
+ */
+class AuditChangePlanner {
+
+    static final String ENTITY = "darpan.agent.AuditChangeProposal"
+    static final String CHANGE_SOURCE = "AGENT_APPLY"
+    static final List<String> OPEN = ["DRAFT", "PLANNED", "STALE", "INVALID"].asImmutable()
+    static final String STALE_MESSAGE = "The config changed since this was planned. Plan it again."
+    private static final int VALIDATE_TIMEOUT_SECONDS = 120
+    /** text-medium columns (statusMessage, reasonText, blockedIds, targetJson) hold 255 characters. */
+    private static final int MEDIUM = 255
+    private static final String WHY = "agent proposal: tenant compared on the row"
+
+    /** Task 5 replaces this with AuditChangeBacktest.run(ec, tenantId, kind, target, merged). */
+    static Closure backtest = { def ec, String tenantId, String kind, Map target, Map merged -> [supported: false, reason: "not built"] }
+
+    // ---------------------------------------------------------------- create
+
+    /** The agent's draft, provenance-checked and planned. Null (with an error, nothing written) when it is off-contract. */
+    static Map create(def ec, String conversationId, String kind, Map target, Map after, String reasonText, Object evidence) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        def conversation = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.agent.AgentConversation", "conversationId",
+                conversationId, tenantId, WHY)
+        if (conversation == null) { ec.message.addError("Conversation ${conversationId} was not found.".toString()); return null }
+        try {
+            AgentProvenance.validateShape(kind, after)
+            AuditChangeLevers.validateTarget(kind, target)
+        } catch (IllegalArgumentException e) {
+            ec.message.addError(e.message)
+            return null
+        }
+        String targetJson = JsonOutput.toJson(target)
+        if (targetJson.length() > MEDIUM) { ec.message.addError("The target is longer than ${MEDIUM} characters.".toString()); return null }
+        if (reasonText != null && reasonText.length() > MEDIUM) { ec.message.addError("The reason is longer than ${MEDIUM} characters; say it shorter.".toString()); return null }
+        def row = ec.entity.makeValue(ENTITY)
+        row.setAll([proposalId: TenantScopedFinder.mintId(ec, ENTITY, "proposalId"), companyUserGroupId: tenantId,
+                    conversationId: conversationId, kind: kind, targetJson: targetJson, afterJson: JsonOutput.toJson(after),
+                    evidenceJson: evidence == null ? null : JsonOutput.toJson(evidence), reasonText: reasonText, status: "DRAFT",
+                    proposedForUserId: conversation.userId])
+        row.create()
+
+        Map current = AuditChangeLevers.current(ec, kind, target)
+        Map provenance = AgentProvenance.check(kind, after, humanTexts(ec, tenantId, conversationId), openContext(ec, tenantId, conversation),
+                AuditChangeLevers.configValues(kind, current))
+        row.setAll([provenanceStatus: provenance.status, blockedIds: fittedList((List<String>) provenance.blockedIds)])
+        Map planned = current == null ? invalid(ec, row) : planRow(ec, row, current)
+        return [proposalId: row.proposalId, status: row.status, statusMessage: row.statusMessage, provenanceStatus: row.provenanceStatus,
+                blockedIds: provenance.blockedIds, backtest: planned.backtest]
+    }
+
+    // ---------------------------------------------------------------- plan
+
+    static Map plan(def ec, String proposalId) {
+        def row = proposalFor(ec, proposalId)
+        if (row == null) return null
+        if (!(row.status in OPEN)) { ec.message.addError("Proposal ${proposalId} is ${row.status}; it cannot be planned again.".toString()); return null }
+        Map current = AuditChangeLevers.current(ec, row.kind as String, parse(row.targetJson))
+        return current == null ? invalid(ec, row) : planRow(ec, row, current)
+    }
+
+    /** Merge, check by saving and rolling back, backtest and hash; the row ends PLANNED or INVALID. Never leaves an error. */
+    private static Map planRow(def ec, def row, Map current) {
+        String kind = row.kind as String
+        Map merged
+        try {
+            merged = mergedFor(row, current)
+        } catch (IllegalArgumentException e) {
+            ec.message.addError(e.message)
+            return invalid(ec, row)
+        }
+        if (kind == "STATEMENT_NARROWING" && !row.revertOfProposalId) {
+            Set<String> catalog = ConclusionCatalogSupport.catalog(ec)*.id.collect { it as String } as Set<String>
+            ((parse(row.afterJson).conclusionCodes ?: []) as List).findAll { !(it in catalog) }
+                    .each { ec.message.addError("'${it}' is not one of this tenant's conclusion codes.".toString()) }
+            if (ec.message.hasError()) return invalid(ec, row)
+        }
+        String refused = validateBySave(ec, kind, merged)
+        if (refused) {
+            ec.message.addError(refused)
+            return invalid(ec, row)
+        }
+        Map tested = (Map) backtest.call(ec, row.companyUserGroupId as String, kind, parse(row.targetJson), merged)
+        String hash = planHash(row.proposalId as String, merged, current)
+        row.setAll([beforeJson: JsonOutput.toJson(current), backtestJson: JsonOutput.toJson(tested), planHash: hash, status: "PLANNED",
+                    statusMessage: null])
+        row.update()
+        return [planHash: hash, before: current, after: merged, backtest: tested, status: "PLANNED"]
+    }
+
+    /**
+     * Runs the lever's save in its own transaction and rolls it back, so the existing validators decide and nothing
+     * persists; the config-change tracker marks a tenant pending only after a commit, so a rollback marks nothing.
+     * Answers the refusal in words, or null when the save would succeed.
+     */
+    private static String validateBySave(def ec, String kind, Map merged) {
+        String refused = null
+        try {
+            ec.transaction.runRequireNew(VALIDATE_TIMEOUT_SECONDS, "Agent proposal check") {
+                try {
+                    AuditChangeLevers.save(ec, kind, merged)
+                    if (ec.message.hasError()) refused = ec.message.errorsString?.trim()
+                } finally {
+                    ec.transaction.rollback("Agent proposal check: validate only, nothing is kept", null)
+                }
+            }
+        } catch (Throwable t) {
+            refused = refused ?: rootMessage(t)
+        }
+        if (ec.message.hasError()) refused = refused ?: ec.message.errorsString?.trim()
+        ec.message.clearErrors()
+        return refused
+    }
+
+    // ---------------------------------------------------------------- apply
+
+    /** A person applies a planned, provenance-PASS proposal whose plan still matches the config. Null (with an error) when refused. */
+    static Map apply(def ec, String proposalId, String expectedHash) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot apply a change.")) return null
+        def row = proposalFor(ec, proposalId)
+        if (row == null) return null
+        if (row.status != "PLANNED") { ec.message.addError("Proposal ${proposalId} is ${row.status}; only a planned proposal can be applied.".toString()); return null }
+        if (row.provenanceStatus != "PASS") {
+            Object blocked = row.blockedIds ? new JsonSlurper().parseText(row.blockedIds as String) : []
+            ec.message.addError("Proposal ${proposalId} is BLOCKED: ${blocked} did not come from you, the finding or the config. Confirm them in the conversation first.".toString())
+            return null
+        }
+        String kind = row.kind as String
+        String tenantId = row.companyUserGroupId as String
+        Map current = AuditChangeLevers.current(ec, kind, parse(row.targetJson))
+        Map merged = null
+        if (current != null) {
+            try { merged = mergedFor(row, current) } catch (IllegalArgumentException ignored) { merged = null }
+        }
+        if (merged == null || expectedHash == null || planHash(row.proposalId as String, merged, current) != expectedHash) {
+            ec.message.clearErrors()
+            row.setAll([status: "STALE", statusMessage: STALE_MESSAGE])
+            row.update()
+            return [status: "STALE", statusMessage: STALE_MESSAGE]
+        }
+        if (kind == "EXCLUSION_FILTER") {
+            List<String> drifted = AuditChangeLevers.automationDrift(ec, current)
+            if (drifted) {
+                ec.message.addError("AUTOMATION_DRIFT: ${drifted.join(', ')}. The automation's filters differ from its run's; sync or edit it first.".toString())
+                return null
+            }
+        }
+        String approver = TenantAccessSupport.currentUserId(ec)
+        String reason = "Agent proposal ${row.proposalId} for ${row.proposedForUserId}, approved by ${approver}".toString()
+        Map before = TenantConfigVersionSupport.snapshot(ec, tenantId, reason, CHANGE_SOURCE, approver)
+        if (before == null || ec.message.hasError()) return null
+        AuditChangeLevers.save(ec, kind, merged)
+        if (ec.message.hasError()) return null
+        Map after = TenantConfigVersionSupport.snapshot(ec, tenantId, reason, CHANGE_SOURCE, approver)
+        if (after == null || ec.message.hasError()) return null
+        row.setAll([status: "APPLIED", statusMessage: null, approvedByUserId: approver, approvedDate: ec.user.nowTimestamp,
+                    beforeVersionId: before.version?.id, appliedVersionId: after.version?.id])
+        row.update()
+        if (row.revertOfProposalId) {
+            def original = TenantScopedFinder.findOneOwnedByTenant(ec, ENTITY, "proposalId", row.revertOfProposalId, tenantId, WHY)
+            if (original != null) { original.set("status", "REVERTED"); original.update() }
+        }
+        return [status: "APPLIED", appliedVersionId: row.appliedVersionId]
+    }
+
+    // ---------------------------------------------------------------- reject and revert
+
+    static Map reject(def ec, String proposalId, String reason) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot reject a change.")) return null
+        def row = proposalFor(ec, proposalId)
+        if (row == null) return null
+        if (!(row.status in OPEN)) { ec.message.addError("Proposal ${proposalId} is ${row.status}; it cannot be rejected.".toString()); return null }
+        row.setAll([status: "REJECTED", statusMessage: reason?.trim()?.take(MEDIUM) ?: null])
+        row.update()
+        return [status: "REJECTED"]
+    }
+
+    /** A new planned proposal that puts back what an applied one moved; its values came from config, so provenance is PASS. */
+    static Map revert(def ec, String proposalId) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot revert a change.")) return null
+        def row = proposalFor(ec, proposalId)
+        if (row == null) return null
+        if (row.status != "APPLIED") { ec.message.addError("Proposal ${proposalId} is ${row.status}; only an applied proposal can be reverted.".toString()); return null }
+        String tenantId = row.companyUserGroupId as String
+        boolean open = ec.entity.find(ENTITY).condition("companyUserGroupId", tenantId).condition("revertOfProposalId", row.proposalId)
+                .condition("status", "in", ["DRAFT", "PLANNED", "APPLIED"]).useCache(false).count() > 0
+        if (open) { ec.message.addError("Proposal ${proposalId} already has a revert.".toString()); return null }
+        String kind = row.kind as String
+        Map after = parse(row.afterJson)
+        List<String> codes = kind == "CONCLUSION_ROWS" ? ((List<Map>) ((after.rows ?: []) as List)).collect { (it.conclusionCode ?: it.code) as String } : null
+        Map lever = AuditChangeLevers.leverOf(kind, parse(row.beforeJson), codes)
+        def revert = ec.entity.makeValue(ENTITY)
+        revert.setAll([proposalId: TenantScopedFinder.mintId(ec, ENTITY, "proposalId"), companyUserGroupId: tenantId,
+                       conversationId: row.conversationId, kind: kind, targetJson: row.targetJson, afterJson: JsonOutput.toJson(lever),
+                       reasonText: "Revert of proposal ${row.proposalId}".toString(), provenanceStatus: "PASS", blockedIds: "[]",
+                       status: "DRAFT", proposedForUserId: TenantAccessSupport.currentUserId(ec), revertOfProposalId: row.proposalId])
+        revert.create()
+        Map current = AuditChangeLevers.current(ec, kind, parse(row.targetJson))
+        Map planned = current == null ? invalid(ec, revert) : planRow(ec, revert, current)
+        return [newProposalId: revert.proposalId, status: revert.status, statusMessage: revert.statusMessage, planHash: planned.planHash]
+    }
+
+    // ---------------------------------------------------------------- provenance inputs (R21)
+
+    /** The human's own words: text of the conversation's USER messages; tool results inside them are never text. */
+    static List<String> humanTexts(def ec, String tenantId, String conversationId) {
+        List<String> out = []
+        ec.entity.find("darpan.agent.AgentMessage").condition("companyUserGroupId", tenantId).condition("conversationId", conversationId)
+                .condition("kind", "USER").orderBy("sequenceNum").useCache(false).list().each { msg ->
+            String raw = msg.contentJson as String
+            if (!raw) return
+            Object parsed
+            try { parsed = new JsonSlurper().parseText(raw) } catch (Exception ignored) { out.add(raw); return }
+            textsOf(parsed, out)
+        }
+        return out
+    }
+
+    private static void textsOf(Object node, List<String> out) {
+        if (node instanceof String) { out.add((String) node); return }
+        if (node instanceof List) { ((List) node).each { textsOf(it, out) }; return }
+        if (node instanceof Map) {
+            Map m = (Map) node
+            Object type = m.get("type")
+            if ((type == null || type == "text") && m.get("text") instanceof String) out.add((String) m.get("text"))
+        }
+    }
+
+    /** The opened finding's structured fields only, never its records or record data. */
+    static Map openContext(def ec, String tenantId, def conversation) {
+        String findingId = conversation?.findingId as String
+        if (!findingId) return [:]
+        def f = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY)
+        if (f == null) return [:]
+        def statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId", f.statementId, tenantId, WHY)
+        def check = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditCheck", "checkId", f.checkId, tenantId, WHY)
+        return [findingId: f.findingId, recordKey: f.recordKey, statementCode: statement?.statementCode, checkCode: check?.checkCode,
+                conclusionCode: f.conclusionEnumId].findAll { it.value != null }
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    /** sha256 of the proposal id, the merged state as JSON with sorted keys, and the sha256 of the current state's JSON. */
+    static String planHash(String proposalId, Map merged, Map current) {
+        String text = proposalId + "\n" + JsonOutput.toJson(TenantConfigVersionSupport.canonical(merged)) + "\n" +
+                sha256(JsonOutput.toJson(TenantConfigVersionSupport.canonical(current)))
+        return sha256(text)
+    }
+
+    /** An agent proposal merges its validated R18 after; a revert restores the lever it carries. */
+    private static Map mergedFor(def row, Map current) {
+        String kind = row.kind as String
+        Map after = parse(row.afterJson)
+        return row.revertOfProposalId ? AuditChangeLevers.restore(kind, current, after) : AuditChangeLevers.merge(kind, current, after)
+    }
+
+    private static Map invalid(def ec, def row) {
+        String why = ec.message.errorsString?.trim() ?: "The change cannot be planned."
+        ec.message.clearErrors()
+        row.setAll([status: "INVALID", statusMessage: why.take(MEDIUM), planHash: null])
+        row.update()
+        return [status: "INVALID", statusMessage: why]
+    }
+
+    /** The blocked ids as a JSON list that fits its column: as many as fit, then "+N more". The service answers them all. */
+    private static String fittedList(List<String> ids) {
+        List<String> kept = new ArrayList<String>(ids ?: [])
+        String json = JsonOutput.toJson(kept)
+        while (json.length() > MEDIUM && kept) {
+            kept.remove(kept.size() - 1)
+            json = JsonOutput.toJson(kept + ["+${ids.size() - kept.size()} more".toString()])
+        }
+        return json
+    }
+
+    private static def proposalFor(def ec, String proposalId) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        def row = TenantScopedFinder.findOneOwnedByTenant(ec, ENTITY, "proposalId", proposalId, tenantId, WHY)
+        if (row == null) ec.message.addError("Proposal ${proposalId} was not found.".toString())
+        return row
+    }
+
+    private static Map parse(Object json) {
+        if (!json) return null
+        Object v = new JsonSlurper().parseText(json as String)
+        return v instanceof Map ? (Map) v : [list: v]
+    }
+
+    private static String sha256(String text) {
+        return MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)).collect { String.format("%02x", it) }.join()
+    }
+
+    private static String rootMessage(Throwable t) {
+        Throwable cause = t
+        while (cause.cause != null && cause.cause != cause) cause = cause.cause
+        return (cause.message ?: t.message ?: t.class.simpleName).trim()
+    }
+}

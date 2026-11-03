@@ -55,7 +55,7 @@ class AgentReadSupport {
             List<Map> checks = ec.entity.find("darpan.audit.AuditFindingCondition").condition("companyUserGroupId", tenantId)
                     .condition("findingId", f.findingId).orderBy("sequenceNum").useCache(false).list()
                     .collect { [label: it.label, passed: it.passed == "Y", value: AgentRedaction.safeValue(it.checkValue ?: null)] as Map }
-            [findingId: f.findingId, recordKey: f.recordKey, state: stateWords.get(f.stateEnumId as String) ?: f.stateEnumId,
+            [findingId: f.findingId, recordKey: AgentRedaction.safeValue(f.recordKey), state: stateWords.get(f.stateEnumId as String) ?: f.stateEnumId,
              conclusionCode: f.conclusionEnumId, statementCode: statementCodes.get(statementId), conditionValues: checks] as Map
         }
         return [sameCause: sameCause.collect(row), controls: controls.collect(row)]

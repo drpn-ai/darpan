@@ -63,7 +63,7 @@ class AgentReadFacadeSmokeTests {
                 insert("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
             }
             seedInspectFixtures()
-            f1 = morning(MINE, ["INV-1", "INV-2", "INV-3", "INV-4"])
+            f1 = morning(MINE, ["INV-1", "INV-2@example.com", "INV-3", "INV-4"])
             def ids = findingIds(MINE)
             (f1, f2, f3, fNoCause) = ids
             conclude(f1, "AGR_C1"); conclude(f2, "AGR_C1"); conclude(f3, "AGR_C2")
@@ -123,7 +123,7 @@ class AgentReadFacadeSmokeTests {
         Map out = call("find#AuditFindingLookalikes", [findingId: f1])
         assertFalse(out.hadError as boolean, out.errorText as String)
         assertEquals([f2], (out.sameCause as List<Map>)*.findingId, "same check and conclusion, not itself, not the other tenant's")
-        assertEquals(["INV-2"], (out.sameCause as List<Map>)*.recordKey)
+        assertEquals(["<populated>"], (out.sameCause as List<Map>)*.recordKey, "an email-shaped record key is redacted")
         Set<String> controls = ((out.controls as List<Map>)*.findingId) as Set
         assertEquals([f3, fNoCause] as Set, controls, "same check, different conclusion (blank included)")
         Map row = (out.sameCause as List<Map>)[0]

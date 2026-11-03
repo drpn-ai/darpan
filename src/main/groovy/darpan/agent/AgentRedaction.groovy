@@ -70,8 +70,8 @@ class AgentRedaction {
             return out
         }
         if (v instanceof Collection) return ((Collection) v).collect { Object x -> safeValue(x) }
-        String s = v.toString()
-        return TOKEN.matcher(s).matches() && !isCustomerShape(s) ? v : POPULATED
+        String clean = normalize(v.toString())
+        return TOKEN.matcher(clean).matches() && !isCustomerShape(clean) ? clean : POPULATED
     }
 
     /**
@@ -82,12 +82,15 @@ class AgentRedaction {
     private static Object fenceValue(Object v) {
         if (v == null || v instanceof Boolean || v instanceof Number) return v
         if (v instanceof Map || v instanceof Collection) return POPULATED
-        String s = v.toString()
-        if (isCustomerShape(s)) return POPULATED
-        if (s.length() > MAX_TOKEN || s.any { Character.isWhitespace(it as char) }) {
-            return [untrusted_customer_text: stripInvisible(s)] as Map
-        }
-        return v
+        String clean = normalize(v.toString())
+        if (isCustomerShape(clean)) return POPULATED
+        if (TOKEN.matcher(clean).matches()) return clean
+        return [untrusted_customer_text: clean] as Map
+    }
+
+    /** The one normalising step for every string value: invisible characters out, then NFKC (fullwidth digits and the like fold), before any check. */
+    static String normalize(String s) {
+        return java.text.Normalizer.normalize(stripInvisible(s), java.text.Normalizer.Form.NFKC)
     }
 
     static String stripInvisible(String s) {

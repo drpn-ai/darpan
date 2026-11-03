@@ -151,11 +151,52 @@ class AuditChangeLevers {
     /** The INVALID statusMessage (a constant, so a reader can match it by identity) when R44's default has nothing to use. */
     static final String NO_PRIMARY_ID_MESSAGE = "NO_PRIMARY_ID_EXPRESSION: this run side has no single primary id expression to exclude by; name the field (fieldExpression)."
 
+    static final String EXCLUDE_IN = "EXCLUDE_IN"
+
+    /**
+     * R51: the statusMessage prefix (a constant, matched by identity of its start) when the field already has a filter
+     * whose operator is not EXCLUDE_IN (an INCLUDE_IN or INCLUDE_PREFIX scope); the rest of the message names the operator.
+     */
+    static final String EXISTING_FILTER_OPERATOR_PREFIX = "EXISTING_FILTER_OPERATOR: "
+
+    /** R51: the INVALID statusMessage when every proposed value is already excluded on the field. */
+    static final String NO_CHANGE_MESSAGE = "NO_CHANGE: every value is already excluded on this field; nothing would change."
+
+    /** A stored filter's operator; blank reads as EXCLUDE_IN, as the extract reads it (SourceFilterSupport). */
+    private static String existingOperator(Map filter) {
+        return (normalize(filter?.operator) ?: EXCLUDE_IN).toUpperCase(Locale.ROOT)
+    }
+
+    /**
+     * The proposed values an EXCLUSION_FILTER would add to the field's existing exclusions, in the order proposed: those
+     * not already excluded (compared ignoring case, as the extract matches) and each once. All of them when the field has
+     * no filter. Answers [] when the field has a filter that is not EXCLUDE_IN (merge refuses that).
+     */
+    static List<String> addedValues(Map existing, List<String> proposed) {
+        if (existing != null && existingOperator(existing) != EXCLUDE_IN) return []
+        Set<String> seen = new HashSet<String>(((List) (existing?.filterValues ?: [])).collect { (it as String).toUpperCase(Locale.ROOT) })
+        List<String> out = []
+        (proposed ?: []).each { String v -> if (seen.add(v.toUpperCase(Locale.ROOT))) out << v }
+        return out
+    }
+
+    /** What an EXCLUSION_FILTER `after` adds on top of the state it is merged into: [fieldExpression, values]. */
+    static Map exclusionAdds(Map current, Map after) {
+        String field = after?.fieldExpression as String
+        String side = ((Map) current?.target)?.fileSide as String
+        Map existing = field && current?.filters instanceof Map ?
+                ((List<Map>) (((Map) current.filters).get(side) ?: [])).find { it.fieldExpression == field } : null
+        return [fieldExpression: field, values: addedValues(existing, ((List) (after?.filterValues ?: [])).collect { it as String })]
+    }
+
     // ---------------------------------------------------------------- merge
 
     /**
      * The state after the proposal: a copy of current with only the lever changed. `after` must already have passed
      * AgentProvenance.validateShape; only its R18 keys are read. Throws IllegalArgumentException when it cannot apply.
+     * EXCLUSION_FILTER (R51): the values are added to the side's EXCLUDE_IN filter on the field (kept in order, new ones
+     * appended, none twice), or a new EXCLUDE_IN filter is added; a field filtered with another operator is refused
+     * (EXISTING_FILTER_OPERATOR), and values all already excluded are refused (NO_CHANGE). An exclusion is never removed.
      */
     static Map merge(String kind, Map current, Map after) {
         AgentProvenance.validateShape(kind, after)
@@ -165,12 +206,22 @@ class AuditChangeLevers {
             case "EXCLUSION_FILTER":
                 // The planner resolves an omitted fieldExpression (R44) before it merges; none here is a caller bug.
                 if (!after.fieldExpression) throw new IllegalArgumentException(NO_PRIMARY_ID_MESSAGE)
-                Map filter = [fieldExpression: after.fieldExpression as String,
-                              operator       : ((after.operator ?: "EXCLUDE_IN") as String).toUpperCase(Locale.ROOT),
-                              filterValues   : ((List) after.filterValues).collect { it as String }]
+                String field = after.fieldExpression as String
+                List<String> proposed = ((List) after.filterValues).collect { it as String }
                 List<Map> side = (List<Map>) ((Map) state.filters)[target.fileSide]
-                int at = side.findIndexOf { it.fieldExpression == filter.fieldExpression }
-                if (at >= 0) side[at] = filter else side << filter
+                int at = side.findIndexOf { it.fieldExpression == field }
+                if (at < 0) {
+                    side << [fieldExpression: field, operator: EXCLUDE_IN, filterValues: addedValues(null, proposed)]
+                    break
+                }
+                // R51: the values join the field's existing exclusions; an include scope on the field is never replaced.
+                Map existing = side[at]
+                String operator = existingOperator(existing)
+                if (operator != EXCLUDE_IN) throw new IllegalArgumentException(EXISTING_FILTER_OPERATOR_PREFIX + "this run side already filters ${field} with ${operator}; an exclusion cannot change that scope. Edit the run's filters instead.".toString())
+                List<String> added = addedValues(existing, proposed)
+                if (!added) throw new IllegalArgumentException(NO_CHANGE_MESSAGE)
+                side[at] = [fieldExpression: field, operator: EXCLUDE_IN,
+                            filterValues   : ((List) existing.filterValues).collect { it as String } + added]
                 break
             case "STATEMENT_NARROWING":
                 Map link = ((List<Map>) state.statements).find { it.id == target.statementCode }
@@ -221,7 +272,7 @@ class AuditChangeLevers {
         Map target = (Map) state.target
         switch (kind) {
             case "EXCLUSION_FILTER":
-                // Only the proposal's own entry: null when it added the filter, the old entry when it replaced one.
+                // Only the proposal's own entry: null when it added the filter, the exact old entry when it added to one (R51).
                 String field = after.fieldExpression as String
                 Map was = ((List<Map>) ((Map) state.filters)[target.fileSide]).find { it.fieldExpression == field }
                 return [fieldExpression: field, entry: copy(was)]

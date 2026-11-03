@@ -3,7 +3,8 @@
   DAR-BE-159. The embedded agent's records: the conversation and its turns and messages (the transcript), the changes it
   proposes to an audit (AuditChangeProposal) and the brain-change tickets it files. Every entity is tenant-owned and under
   DARPAN_ACTIVE_COMPANY_SCOPE (data/SecuritySeedData.xml, DARPAN_SCOPE_AGENT_* and friends).
-  MySQL row size: at most four text-long fields per entity.
+  Long text (transcript content, proposal states, ticket text) is text-very-long (R50): text-long is VARCHAR(4095) on H2 and
+  MySQL, too short for what these rows hold; text-very-long is LONGTEXT on MySQL 8, stored off the row.
 -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
@@ -78,7 +79,7 @@
         <field name="turnId" type="id"/>
         <field name="sequenceNum" type="number-integer"/>
         <field name="kind" type="text-short"><description>USER, ASSISTANT, TOOL_RESULT or OPERATOR.</description></field>
-        <field name="contentJson" type="text-long"/>
+        <field name="contentJson" type="text-very-long"/>
         <relationship type="one" related="darpan.agent.AgentConversation" fk-name="AGENT_MSG_CONV">
             <key-map field-name="conversationId"/>
         </relationship>
@@ -96,10 +97,10 @@
         <field name="conversationId" type="id"/>
         <field name="kind" type="text-short"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, FIX_TEXT or CONCLUSION_ROWS.</description></field>
         <field name="targetJson" type="text-intermediate"/>
-        <field name="beforeJson" type="text-long"/>
-        <field name="afterJson" type="text-long"/>
-        <field name="evidenceJson" type="text-long"/>
-        <field name="backtestJson" type="text-long"/>
+        <field name="beforeJson" type="text-very-long"/>
+        <field name="afterJson" type="text-very-long"/>
+        <field name="evidenceJson" type="text-very-long"/>
+        <field name="backtestJson" type="text-very-long"/>
         <field name="reasonText" type="text-intermediate"/>
         <field name="provenanceStatus" type="text-short"><description>PASS or BLOCKED.</description></field>
         <field name="blockedIds" type="text-intermediate"/>
@@ -122,14 +123,14 @@
         <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
         <field name="conversationId" type="id"/>
         <field name="category" type="text-short"><description>The lever (spec section 9.2).</description></field>
-        <field name="verbatimText" type="text-long"><description>What the user said, word for word.</description></field>
+        <field name="verbatimText" type="text-very-long"><description>What the user said, word for word.</description></field>
         <field name="textHash" type="text-medium"><description>sha256 hex of the trimmed, normalised verbatimText: one ticket per conversation and text.</description></field>
         <field name="refsJson" type="text-intermediate"/>
-        <field name="evidenceJson" type="text-long"/>
-        <field name="placementJson" type="text-long"/>
+        <field name="evidenceJson" type="text-very-long"/>
+        <field name="placementJson" type="text-very-long"/>
         <field name="status" type="text-short"><description>RECEIVED, ACCEPTED, DECLINED or SHIPPED.</description></field>
         <field name="statusReason" type="text-medium"/>
-        <field name="shippedVersion" type="text-short"/>
+        <field name="shippedVersion" type="text-medium"><description>At most 255 characters, as the status service checks.</description></field>
         <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
         <index name="BRAIN_TICKET_TENANT"><index-field name="companyUserGroupId"/></index>
@@ -142,7 +143,7 @@
             filter; a tenant's own config supplies the connection. A system repo that supplies a read ships its row.</description>
         <field name="readId" type="id" is-pk="true"/>
         <field name="definitionId" type="id" not-null="true"><description>The DataSourceDefinition that runs.</description></field>
-        <field name="system" type="text-short" not-null="true"><description>OMS, SHOPIFY or NETSUITE.</description></field>
+        <field name="systemCode" type="text-short" not-null="true"><description>OMS, SHOPIFY or NETSUITE. Not "system": a reserved word in MySQL 8.</description></field>
         <field name="recordKind" type="text-short"/>
         <field name="lookupKeyField" type="text-short" not-null="true"><description>The field the key is a value of.</description></field>
         <field name="allowedFields" type="text-medium" not-null="true"><description>Comma-separated; status, type, date, amount, id

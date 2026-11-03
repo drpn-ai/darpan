@@ -118,7 +118,7 @@ class AgentReadSupport {
             "N" != row.get("isActive")?.toString()?.toUpperCase() &&
                     darpan.reconciliation.automation.SourceEndpointAccessSupport.isEndpointEnabled(ec, configType, row.get(type.pkField) as String, connector.systemEnumId as String)
         }
-        if (config == null) { ec.message.addError("Your tenant has no connection for ${entry.system}.".toString()); return null }
+        if (config == null) { ec.message.addError("Your tenant has no connection for ${entry.systemCode}.".toString()); return null }
 
         Set<String> allowed = (entry.allowedFields as String).split(",").collect { it.trim() }.findAll { it } as LinkedHashSet<String>
         Map context = [systemEnumId: connector.systemEnumId, sourceConfigId: config.get(type.pkField), lookupKeys: [trimmed],
@@ -129,7 +129,7 @@ class AgentReadSupport {
         if (errors) { errors.each { ec.message.addError(it.toString()) }; return null }
         List<Map> records = (List<Map>) (context.records ?: [])
         return [record: records ? AgentRedaction.redactRecord(records[0], allowed) : null, found: !records.isEmpty(),
-                recordKind: entry.recordKind, system: entry.system]
+                recordKind: entry.recordKind, systemCode: entry.systemCode]
     }
 
     // ---------------------------------------------------------------- knowledge

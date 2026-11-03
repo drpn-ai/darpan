@@ -10,7 +10,7 @@ class AgentProvenanceTests {
 
     private static final String ZW = "​"
 
-    private static Map filter(List<String> values) { [fieldExpression: "orderId", operator: "IN", filterValues: values] }
+    private static Map filter(List<String> values) { [fieldExpression: "orderId", operator: "EXCLUDE_IN", filterValues: values] }
 
     @Test
     void "an id the human typed passes"() {
@@ -239,6 +239,9 @@ class AgentProvenanceTests {
         Closure bad = { String kind, Map after -> assertThrows(IllegalArgumentException) { pass(kind, after) } }
         bad("EXCLUSION_FILTER", [fieldExpression: "o\u200Bx", filterValues: ["A"]])
         bad("EXCLUSION_FILTER", [fieldExpression: "o", operator: " IN", filterValues: ["A"]])
+        // R51: an exclusion's operator is EXCLUDE_IN or left out; an include scope is never an agent change.
+        ["IN", "INCLUDE_IN", "INCLUDE_PREFIX", "exclude_in"].each { String op -> bad("EXCLUSION_FILTER", [fieldExpression: "o", operator: op, filterValues: ["A"]]) }
+        assertEquals("PASS", pass("EXCLUSION_FILTER", [fieldExpression: "o", operator: "EXCLUDE_IN", filterValues: ["A"]], ["exclude A"]).status)
         bad("CONCLUSION_ROWS", [rows: [[conclusionCode: " X"]]])
         bad("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", parentConclusionCode: ""]]])
         bad("CONCLUSION_ROWS", [rows: [[conclusionCode: "X", bucket: "b\uFF21"]]])

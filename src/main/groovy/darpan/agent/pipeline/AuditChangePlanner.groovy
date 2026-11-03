@@ -330,7 +330,13 @@ class AuditChangePlanner {
         List<String> prior = ec.message.hasError() ? new ArrayList<String>(ec.message.errors) : []
         ec.message.clearErrors()
         // R44: an exclusion's backtest names the field it excludes by (possibly the defaulted primary id), so the person sees it.
-        Map shown = row.kind == "EXCLUSION_FILTER" ? [excludesBy: parse(row.afterJson).fieldExpression] : [:]
+        // R51: and the values this proposal adds to that field's exclusions, not the whole merged list.
+        Map shown = [:]
+        if (row.kind == "EXCLUSION_FILTER") {
+            Map after = parse(row.afterJson)
+            shown.excludesBy = after.fieldExpression
+            if (!row.revertOfProposalId) shown.adds = AuditChangeLevers.exclusionAdds(current, after).values
+        }
         try {
             Map tested = (Map) backtest.call(ec, row.companyUserGroupId as String, row.kind as String, parse(row.targetJson), merged, current)
             if (ec.message.hasError()) return backtestFailed(ec.message.errors[0] as String) + shown

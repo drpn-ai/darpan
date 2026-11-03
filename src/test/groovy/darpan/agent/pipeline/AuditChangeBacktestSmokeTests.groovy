@@ -212,9 +212,10 @@ class AuditChangeBacktestSmokeTests {
         assertEquals(["F-TBT4", "F-TBT5"], voided.closed, "values match without case, as the extract's own filter does; a pending finding closes too")
         assertEquals(before, snapshot())
 
-        Map wider = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
-                AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN",
-                                                                            filterValues: ["HOTWAX", "STORE"]]))
+        // R51: an agent exclusion never loosens (merge refuses another operator), but a revert's restored state may.
+        Map widerState = (Map) AuditChangeLevers.copy(AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target))
+        ((List<Map>) ((Map) widerState.filters).FILE_1).find { it.fieldExpression == '$.records[*].memoOrigin' }.filterValues = ["HOTWAX", "STORE"]
+        Map wider = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, widerState)
         assertTrue("WIDENING_NOT_COMPUTED" in wider.limits, "an include that lists more lets records back in: ${wider}")
 
         Map other = AuditChangeBacktest.run(ec, "TBT_OTHER_TENANT", "EXCLUSION_FILTER", target, merged)

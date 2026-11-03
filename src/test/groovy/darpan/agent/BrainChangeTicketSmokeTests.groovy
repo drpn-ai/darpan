@@ -247,6 +247,12 @@ class BrainChangeTicketSmokeTests {
         assertFalse(update(d, [status: "DECLINED", statusReason: "No."]).hasError as boolean)
         assertTrue(update(d, [status: "RECEIVED"]).hasError as boolean)
         assertEquals("DECLINED", status(d))
+        // The column holds what the service allows: 255 characters.
+        String v = create(CONV, "PRODUCT_BUG", "Ship me with a long version.").ticketId
+        assertFalse(update(v, [status: "ACCEPTED"]).hasError as boolean)
+        Map fits = update(v, [status: "SHIPPED", shippedVersion: "v" + "9" * 254])
+        assertFalse(fits.hasError as boolean, "a 255-character version fits its column: ${fits}")
+        assertEquals(255, (asSystem { ec.entity.find(TICKET).condition("ticketId", v).useCache(false).one() }.shippedVersion as String).length())
     }
 
     // ------------------------------------------------------------------ helpers

@@ -183,7 +183,7 @@ class AgentReadFacadeSmokeTests {
         insert("darpan.reconciliation.SourceSystemConnector", [systemEnumId: "AGR_DOCS", extractServiceName: darpan.datasource.DataDefinedExtract.SERVICE_NAME,
                 expectedSourceConfigType: "SCFG_NS_RESTLET", configParameterName: "nsRestletConfigId", configEntityName: "darpan.reconciliation.NsRestletConfig",
                 dataSourceDefinitionId: "AGR_DOCS_V1", enabled: "Y"])
-        insert("darpan.agent.AgentReadCatalog", [readId: "AGR_DOC_BY_ID", definitionId: "AGR_DOCS_V1", system: "NETSUITE", recordKind: "doc",
+        insert("darpan.agent.AgentReadCatalog", [readId: "AGR_DOC_BY_ID", definitionId: "AGR_DOCS_V1", systemCode: "NETSUITE", recordKind: "doc",
                 lookupKeyField: "docId", allowedFields: "docId,status,total,note", description: "test"])
         insert("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "AGR_CFG_MINE", companyUserGroupId: MINE, endpointUrl: "https://acme.test",
                 authType: "TOKEN", apiToken: "t", isActive: "Y"])

@@ -78,6 +78,9 @@ class AgentProvenance {
                 str(after, "fieldExpression", false, "after"); str(after, "operator", false, "after"); str(after, "fieldLabel", false, "after")
                 freeText(after, "fieldLabel", "after")
                 canon(after, ["fieldExpression", "operator"], "after")
+                // R51: an exclusion only excludes; an include scope is a person's edit of the run, never an agent proposal.
+                if (after.get("operator") != null && after.get("operator") != "EXCLUDE_IN")
+                    throw new IllegalArgumentException("after.operator must be EXCLUDE_IN or left out")
                 strList(after, "filterValues", true, "after")
                 break
             case "STATEMENT_NARROWING":

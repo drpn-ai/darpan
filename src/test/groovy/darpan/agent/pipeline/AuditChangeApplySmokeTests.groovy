@@ -705,6 +705,159 @@ class AuditChangeApplySmokeTests {
         assertNull(AuditChangeLevers.primaryIdExpressionOf([run: [sides: [FILE_1: [primaryIdExpression: NEW_FIELD]]]], "FILE_2"), "a side the run lacks")
     }
 
+    // ------------------------------------------------------------------ R51: exclusions add to the field's list
+
+    /** The run's FILE_1 exclusion on NEW_FIELD, as config already holds it; its automation synced to it. */
+    private void existingFilter(String operator, String values) {
+        asSystem {
+            upsert(FILTER, [compareScopeId: scopeId, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: NEW_FIELD, operator: operator,
+                    filterValues: values, companyUserGroupId: MINE])
+        }
+        sync(AUTO)
+    }
+
+    private Map applied(Map p) {
+        Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
+        assertEquals("PLANNED", plan.status, plan.statusMessage as String)
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("APPLIED", out.status)
+        return plan
+    }
+
+    @Test
+    void "an exclusion adds its values to the field's existing exclusions"() {
+        existingFilter("EXCLUDE_IN", "M1000001,M1000002")
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        assertEquals("PASS", p.provenanceStatus, "the existing values are config; the new one is the human's")
+        assertEquals(["M1088731"], p.backtest.adds, "the backtest shows what is added, not the whole list")
+        assertEquals(NEW_FIELD, p.backtest.excludesBy)
+        Map plan = applied(p)
+        assertEquals([fieldExpression: NEW_FIELD, operator: "EXCLUDE_IN", filterValues: ["M1000001", "M1000002", "M1088731"]],
+                ((List<Map>) plan.after.filters.FILE_1).find { it.fieldExpression == NEW_FIELD })
+        assertEquals([[fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN", filterValues: "HOTWAX"],
+                      [fieldExpression: NEW_FIELD, operator: "EXCLUDE_IN", filterValues: "M1000001,M1000002,M1088731"]], filterRows(),
+                "the scope on memoOrigin stands and the earlier exclusions stay excluded")
+        assertEquals(filterRows(), automationFilterRows())
+
+        // A second agent exclusion on the same field keeps the first one's value too.
+        Map second = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["Voided", "M1088731"]])
+        assertEquals(["Voided"], second.backtest.adds, "a value already excluded is not added twice")
+        applied(second)
+        assertEquals("M1000001,M1000002,M1088731,Voided", filterRows().find { it.fieldExpression == NEW_FIELD }.filterValues)
+    }
+
+    @Test
+    void "an exclusion of values all already excluded is INVALID NO_CHANGE"() {
+        existingFilter("EXCLUDE_IN", "M1000001,M1000002")
+        List<Map> before = filterRows()
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1000002"]])
+        assertFalse(p.hadError as boolean, p.errorText as String)
+        assertEquals("INVALID", p.status)
+        assertEquals(AuditChangeLevers.NO_CHANGE_MESSAGE, p.statusMessage)
+        assertNull(proposal(p.proposalId).planHash)
+        assertEquals(before, filterRows())
+    }
+
+    @Test
+    void "an exclusion never replaces an include scope on its field"() {
+        existingFilter("INCLUDE_PREFIX", "M10")
+        List<Map> before = filterRows()
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        assertFalse(p.hadError as boolean, p.errorText as String)
+        assertEquals("INVALID", p.status)
+        assertTrue((p.statusMessage as String).startsWith(AuditChangeLevers.EXISTING_FILTER_OPERATOR_PREFIX), p.statusMessage as String)
+        assertTrue((p.statusMessage as String).contains("INCLUDE_PREFIX"), "it names the operator: ${p.statusMessage}")
+        Map scope = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: '$.records[*].memoOrigin', filterValues: ["Voided"]])
+        assertEquals("INVALID", scope.status)
+        assertTrue((scope.statusMessage as String).contains("INCLUDE_IN"), scope.statusMessage as String)
+        assertEquals(before, filterRows())
+        assertEquals(0L, versionCount())
+    }
+
+    @Test
+    void "an exclusion proposal may not name another operator"() {
+        ["INCLUDE_IN", "INCLUDE_PREFIX", "exclude_in"].each { String op ->
+            Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, operator: op, filterValues: ["M1088731"]])
+            assertTrue(p.hadError as boolean, op)
+            assertTrue((p.errorText as String).contains("EXCLUDE_IN"), p.errorText as String)
+        }
+        assertEquals(0L, asSystem { ec.entity.find(PROPOSAL).count() }, "nothing was written")
+        assertThrows(IllegalArgumentException) {
+            AuditChangeLevers.merge("EXCLUSION_FILTER", AuditChangeLevers.current(ec, "EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"]),
+                    [fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN", filterValues: ["HOTWAX", "STORE"]])
+        }
+    }
+
+    @Test
+    void "reverting an added exclusion restores the field's exact earlier list"() {
+        existingFilter("EXCLUDE_IN", "M1000001,M1000002")
+        List<Map> before = filterRows()
+        Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["M1088731"]])
+        applied(p)
+        assertNotEquals(before, filterRows())
+        Map r = call("revert#AuditChange", [proposalId: p.proposalId])
+        assertFalse(r.hadError as boolean, r.errorText as String)
+        assertEquals("PLANNED", r.status, r.statusMessage as String)
+        assertEquals([fieldExpression: NEW_FIELD, entry: [fieldExpression: NEW_FIELD, operator: "EXCLUDE_IN", filterValues: ["M1000001", "M1000002"]]],
+                storedAfter(r.newProposalId), "the revert carries the exact earlier entry")
+        Map out = call("apply#AuditChange", [proposalId: r.newProposalId, planHash: r.planHash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals(before, filterRows(), "[A,B] again, in order")
+        assertEquals(filterRows(), automationFilterRows())
+        assertEquals("REVERTED", proposal(p.proposalId).status)
+    }
+
+    // ------------------------------------------------------------------ R50: agent text columns hold long text
+
+    /**
+     * R50. text-long is VARCHAR(4095) (MoquiDefaultConf), but the agent writes up to 20,000-character messages, 60,000-character
+     * tool results and ticket text, and whole lever states. Every such column is text-very-long, so these writes land.
+     */
+    @Test
+    void "agent text columns hold more than 4095 characters"() {
+        String conv = "TAC_CONV_LONG"
+        String longText = ("Exclude nothing yet; this is a long note. " * 250).take(10_000)
+        assertEquals(10_000, longText.length())
+        asSystem {
+            upsert("darpan.agent.AgentConversation", [conversationId: conv, companyUserGroupId: MINE, userId: USER,
+                    auditId: "${MINE}_MC".toString(), createdDate: FROM])
+            upsert("darpan.agent.AgentMessage", [messageId: "TAC_LONG_USER", conversationId: conv, companyUserGroupId: MINE, sequenceNum: 1,
+                    kind: "USER", contentJson: groovy.json.JsonOutput.toJson([[type: "text", text: longText]])])
+            upsert("darpan.agent.AgentMessage", [messageId: "TAC_LONG_TOOL", conversationId: conv, companyUserGroupId: MINE, sequenceNum: 2,
+                    kind: "TOOL_RESULT", contentJson: groovy.json.JsonOutput.toJson([text: longText])])
+        }
+        def stored = asSystem { ec.entity.find("darpan.agent.AgentMessage").condition("messageId", "TAC_LONG_TOOL").useCache(false).one() }
+        assertTrue((stored.contentJson as String).length() > 10_000, "the whole tool result is kept")
+
+        Map ticket = call("create#BrainChangeTicket", [conversationId: conv, category: "FIX_WORDING", verbatimText: longText])
+        assertFalse(ticket.hadError as boolean, ticket.errorText as String)
+        def ticketRow = asSystem { ec.entity.find("darpan.agent.BrainChangeTicket").condition("ticketId", ticket.ticketId).useCache(false).one() }
+        assertEquals(longText, ticketRow.verbatimText)
+
+        // A tree whose state is well over 4 KB, so the plan's beforeJson is too.
+        String fix = "Re-sync the memo and check the store " * 27
+        List<Map> conditions = ["status", "memoOrigin", "tranId"].collect { String f ->
+            [field: f, operator: "NOT_BLANK", checkLabel: ("${f} is present on the memo " * 7).take(200).trim()] as Map
+        }
+        Map tree = ec.service.sync().name("facade.RunConclusionFacadeServices.save#RunConclusions").parameters([savedRunId: runId,
+                conclusions: ["CONC_TAC_A", "CONC_TAC_B", "CONC_TAC_C"].withIndex().collect { String code, int i ->
+                    [key: "${i + 1}".toString(), conclusion: code, bucket: "FINDING", fix: fix.take(1000).trim(),
+                     question: ("Is the memo still open in the store " * 8).take(255).trim(), conditions: conditions]
+                }]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertNotNull(tree)
+        ec.message.clearAll()
+        Map p = call("create#AuditChangeProposal", [conversationId: conv, kind: "FIX_TEXT", target: [savedRunId: runId, conclusionCode: "CONC_TAC_A"],
+                after: [fixActionTemplate: "Re-import the memo"], reasonText: "test", evidence: [notes: [longText]]])
+        assertFalse(p.hadError as boolean, p.errorText as String)
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        def row = proposal(p.proposalId)
+        assertTrue((row.beforeJson as String).length() > 4096, "beforeJson is ${(row.beforeJson as String).length()} characters")
+        assertTrue((row.evidenceJson as String).length() > 10_000)
+    }
+
     private void setRule(Long sequenceNum, Map fields) {
         asSystem {
             ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", scopeId).condition("sequenceNum", sequenceNum)

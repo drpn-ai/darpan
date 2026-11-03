@@ -19,6 +19,11 @@ class TenantAccessSupport {
      */
     private static final ThreadLocal<String> SYSTEM_TENANT_USER_GROUP_ID = new ThreadLocal<String>()
 
+    /** Per-request tenant for non-web callers and tests; see {@link #withRequestedTenant}. */
+    private static final ThreadLocal<String> REQUESTED_TENANT_USER_GROUP_ID = new ThreadLocal<String>()
+
+    /** Request header naming the tenant for this one request (value = tenant userGroupId). */
+    static final String REQUESTED_TENANT_HEADER = "X-Darpan-Tenant"
     static final String ADMIN_USER_GROUP_ID = "ADMIN"
     static final String ALL_USERS_GROUP_ID = "ALL_USERS"
     static final String ACTIVE_TENANT_PREFERENCE_KEY = "darpan.auth.activeTenantUserGroupId"
@@ -109,7 +114,7 @@ class TenantAccessSupport {
         }
 
         List<Map<String, Object>> availableTenants = listAvailableTenants(ec)
-        Map<String, Object> activeTenant = resolveActiveTenant(availableTenants, readPreferredActiveTenantUserGroupId(ec))
+        Map<String, Object> activeTenant = resolveEffectiveActiveTenant(ec, availableTenants)
         Map<String, Object> activeTenantPermissionScope = resolveActiveTenantPermissionScope(ec, activeTenant?.userGroupId, superAdmin)
         return [
             isSuperAdmin                : superAdmin,
@@ -264,7 +269,51 @@ class TenantAccessSupport {
     private static String userDerivedActiveTenantUserGroupId(def ec) {
         if (!currentUserId(ec)) return null
         List<Map<String, Object>> availableTenants = listAvailableTenants(ec)
-        return resolveActiveTenant(availableTenants, readPreferredActiveTenantUserGroupId(ec))?.userGroupId
+        return resolveEffectiveActiveTenant(ec, availableTenants)?.userGroupId
+    }
+
+    /**
+     * The tenant for this request: an explicitly requested one (ThreadLocal, else the
+     * X-Darpan-Tenant header) must be a current membership and never falls back to another tenant
+     * or reads/writes the saved preference; with none requested, today's preference-then-first.
+     */
+    private static Map<String, Object> resolveEffectiveActiveTenant(def ec, List<Map<String, Object>> availableTenants) {
+        String requested = REQUESTED_TENANT_USER_GROUP_ID.get() ?: requestedTenantHeader(ec)
+        if (requested) {
+            String decided = decideRequestedTenant(requested, availableTenants)
+            return availableTenants.find { it.userGroupId == decided }
+        }
+        return resolveActiveTenant(availableTenants, readPreferredActiveTenantUserGroupId(ec))
+    }
+
+    /** The X-Darpan-Tenant header of the current web request, or null when absent/blank/no request. */
+    static String requestedTenantHeader(def ec) {
+        if (ec == null) return null
+        try {
+            def web = ec.web
+            if (web == null) return null
+            return normalize(web.request?.getHeader(REQUESTED_TENANT_HEADER))
+        } catch (MissingPropertyException | NullPointerException ignored) {
+            return null
+        }
+    }
+
+    /** Pure: the requested tenant if it is one of the available tenants, else refused (never the first one). */
+    static String decideRequestedTenant(String requested, List<Map> availableTenants) {
+        if (availableTenants?.any { it.userGroupId == requested }) return requested
+        throw new org.moqui.context.ArtifactAuthorizationException("Tenant ${requested} is not one of your tenants")
+    }
+
+    /** Runs {@code body} with {@code tenantUserGroupId} as this thread's requested tenant; previous value restored. */
+    static <T> T withRequestedTenant(String tenantUserGroupId, Closure<T> body) {
+        String previous = REQUESTED_TENANT_USER_GROUP_ID.get()
+        REQUESTED_TENANT_USER_GROUP_ID.set(normalize(tenantUserGroupId))
+        try {
+            return body.call()
+        } finally {
+            if (previous == null) REQUESTED_TENANT_USER_GROUP_ID.remove()
+            else REQUESTED_TENANT_USER_GROUP_ID.set(previous)
+        }
     }
 
     /**
@@ -705,7 +754,7 @@ class TenantAccessSupport {
      */
     private static void applyFinderDefaults(def finder, def ec, boolean includeDateFilter = true) {
         if (finder.metaClass.respondsTo(finder, "disableAuthz")) finder.disableAuthz()
-        if (includeDateFilter && finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
+        if (includeDateFilter && finder.metaClass.respondsTo(finder, "conditionDate", String, String, java.sql.Timestamp)) {
             finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
         }
         if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(false)

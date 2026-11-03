@@ -10,9 +10,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.sql.Timestamp
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.Future
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -49,13 +47,17 @@ class AgentQuerySupport {
         AgentQueryRefused(String message) { super(message) }
     }
 
-    // Worker threads for the bounded wait. Daemon, so they never hold the JVM open. A hung client call keeps its thread
-    // until the call returns; the lane (4 per instance) bounds how many can pile up.
-    private static final ExecutorService WORKERS = Executors.newCachedThreadPool({ Runnable r ->
-        Thread t = new Thread(r, "agent-query-worker")
-        t.setDaemon(true)
-        return t
-    } as ThreadFactory)
+    // The only threads a fresh query may use: AgentQueryLane.MAX_PER_INSTANCE daemon threads, handed work directly (no
+    // queue), so a full pool rejects and the caller answers THROTTLED. A lane slot is held until the worker really ends
+    // (see runCore), so a call stuck in non-interruptible I/O keeps its slot and its thread counted: the pool cannot grow.
+    private static final java.util.concurrent.atomic.AtomicInteger WORKER_SEQ = new java.util.concurrent.atomic.AtomicInteger()
+    private static final java.util.concurrent.ThreadPoolExecutor WORKERS = new java.util.concurrent.ThreadPoolExecutor(
+            AgentQueryLane.MAX_PER_INSTANCE, AgentQueryLane.MAX_PER_INSTANCE, 60L, TimeUnit.SECONDS,
+            new java.util.concurrent.SynchronousQueue<Runnable>(), { Runnable r ->
+                Thread t = new Thread(r, "darpan-agent-query-" + WORKER_SEQ.incrementAndGet())
+                t.setDaemon(true)
+                return t
+            } as ThreadFactory, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy())
 
     // ---- read-only checks: null means fine, otherwise the refusal in words -------------------------------------------
 
@@ -137,6 +139,10 @@ class AgentQuerySupport {
      * <p>meta keys: systemEnumId, connectionId, queryText (all logged), and secrets, a List of strings (the connection's
      * credentials and its host) that are removed from any error text before it is returned or logged.
      *
+     * <p>The work closure's HTTP client MUST set connect and read timeouts below the 60 s wall clock. A timed-out query
+     * answers TIMEOUT at once, but its lane slot is kept until the worker really ends (4 worker threads in all), so a call
+     * with no socket timeout would hold its slot, and starve the lane, for as long as the remote end stays silent.
+     *
      * <p>work runs on a worker thread, so it must not touch the ExecutionContext: resolve the connection first, make the
      * HTTP call inside, and return [rows: List, hasMore: Boolean, nextOffset: Integer, offset: Integer]. Throwing
      * {@link AgentQueryRefused} answers REFUSED; any other exception answers ERROR.
@@ -167,28 +173,43 @@ class AgentQuerySupport {
             return [error: "Too many fresh queries are running; try again in ${AgentQueryLane.RETRY_AFTER_SECONDS} seconds.".toString(),
                     code: OUTCOME_THROTTLED, retryAfterSeconds: AgentQueryLane.RETRY_AFTER_SECONDS]
         }
+        CompletableFuture<Map> future = new CompletableFuture<Map>()
+        java.util.concurrent.atomic.AtomicReference<Thread> workerThread = new java.util.concurrent.atomic.AtomicReference<Thread>()
         try {
-            Future<Map> future = WORKERS.submit({ work.call() } as java.util.concurrent.Callable<Map>)
-            Map raw
-            try {
-                raw = future.get(timeoutMillis, TimeUnit.MILLISECONDS)
-            } catch (TimeoutException ignored) {
-                future.cancel(true)
-                return failure(meta, logSink, started, OUTCOME_TIMEOUT,
-                        "The system did not answer within ${(long) (timeoutMillis / 1000)} seconds.".toString())
-            } catch (ExecutionException e) {
-                Throwable cause = e.cause ?: e
-                if (cause instanceof AgentQueryRefused) return failure(meta, logSink, started, OUTCOME_REFUSED, cause.message)
-                return failure(meta, logSink, started, OUTCOME_ERROR, strip(cause.message ?: cause.class.simpleName, secrets))
-            }
-            Map shaped = shape(raw ?: [:])
-            long duration = System.currentTimeMillis() - started
-            shaped.durationMs = duration
-            sink(logSink, logRow(meta, OUTCOME_OK, (int) shaped.rowCount, duration))
-            return shaped
-        } finally {
-            AgentQueryLane.release(tenantId)
+            // The slot belongs to the worker from here: only its own finally gives it back.
+            WORKERS.execute({
+                workerThread.set(Thread.currentThread())
+                try {
+                    future.complete(work.call())
+                } catch (Throwable t) {
+                    future.completeExceptionally(t)
+                } finally {
+                    AgentQueryLane.release(tenantId)
+                }
+            } as Runnable)
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            AgentQueryLane.release(tenantId)     // no worker ever started, so the slot is still ours
+            sink(logSink, logRow(meta, OUTCOME_THROTTLED, 0, 0))
+            return [error: "Too many fresh queries are running; try again in ${AgentQueryLane.RETRY_AFTER_SECONDS} seconds.".toString(),
+                    code: OUTCOME_THROTTLED, retryAfterSeconds: AgentQueryLane.RETRY_AFTER_SECONDS]
         }
+        Map raw
+        try {
+            raw = future.get(timeoutMillis, TimeUnit.MILLISECONDS)
+        } catch (TimeoutException ignored) {
+            workerThread.get()?.interrupt()     // a nudge only; the slot stays with the worker until it ends
+            return failure(meta, logSink, started, OUTCOME_TIMEOUT,
+                    "The system did not answer within ${(long) (timeoutMillis / 1000)} seconds.".toString())
+        } catch (ExecutionException e) {
+            Throwable cause = e.cause ?: e
+            if (cause instanceof AgentQueryRefused) return failure(meta, logSink, started, OUTCOME_REFUSED, cause.message)
+            return failure(meta, logSink, started, OUTCOME_ERROR, strip(cause.message ?: cause.class.simpleName, secrets))
+        }
+        Map shaped = shape(raw ?: [:])
+        long duration = System.currentTimeMillis() - started
+        shaped.durationMs = duration
+        sink(logSink, logRow(meta, OUTCOME_OK, (int) shaped.rowCount, duration))
+        return shaped
     }
 
     private static Map failure(Map meta, Closure logSink, long started, String code, String message) {

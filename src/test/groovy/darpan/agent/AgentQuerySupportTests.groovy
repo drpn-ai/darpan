@@ -178,4 +178,61 @@ class AgentQuerySupportTests {
         assertEquals("REFUSED", result.code)
         assertEquals("REFUSED", logged[0].outcome)
     }
+
+    /** A worker that ignores interrupt until the test lets it go. */
+    private static Closure<Map> stubborn(java.util.concurrent.CountDownLatch release, java.util.concurrent.CountDownLatch started = null) {
+        return {
+            started?.countDown()
+            while (true) {
+                try { release.await(); break } catch (InterruptedException ignored) { /* keep going */ }
+            }
+            [rows: []]
+        }
+    }
+
+    private static boolean eventually(Closure<Boolean> cond) {
+        for (int i = 0; i < 100; i++) { if (cond.call()) return true; Thread.sleep(50) }
+        return false
+    }
+
+    @Test
+    void "lane: a worker that ignores interrupt keeps its tenant slot until it really ends"() {
+        long previous = AgentQuerySupport.timeoutMillis
+        AgentQuerySupport.timeoutMillis = 150
+        def gate = new java.util.concurrent.CountDownLatch(1)
+        try {
+            assertEquals("TIMEOUT", AgentQuerySupport.runCore([queryText: "q"], "T1", stubborn(gate), { })?.code)
+            assertEquals(1, AgentQueryLane.inFlight("T1"), "the timed-out worker still holds the slot")
+            assertEquals("TIMEOUT", AgentQuerySupport.runCore([queryText: "q"], "T1", stubborn(gate), { })?.code)
+            Map third = AgentQuerySupport.runCore([queryText: "q"], "T1", { [rows: []] }, { })
+            assertEquals("THROTTLED", third.code, "the tenant's two slots are both held by running workers")
+            gate.countDown()
+            assertTrue(eventually { AgentQueryLane.inFlight("T1") == 0 }, "slots free once the workers end")
+            assertEquals(0, AgentQuerySupport.runCore([queryText: "q"], "T1", { [rows: []] }, { }).rowCount)
+        } finally { gate.countDown(); AgentQuerySupport.timeoutMillis = previous }
+    }
+
+    @Test
+    void "lane: the instance cap holds while timed-out workers are still running"() {
+        long previous = AgentQuerySupport.timeoutMillis
+        AgentQuerySupport.timeoutMillis = 150
+        def gate = new java.util.concurrent.CountDownLatch(1)
+        try {
+            ["A", "A", "B", "B"].each { AgentQuerySupport.runCore([queryText: "q"], it, stubborn(gate), { }) }
+            Map fifth = AgentQuerySupport.runCore([queryText: "q"], "C", { [rows: []] }, { })
+            assertEquals("THROTTLED", fifth.code)
+            assertEquals(4, ["A", "B"].sum { AgentQueryLane.inFlight(it) })
+            gate.countDown()
+            assertTrue(eventually { AgentQueryLane.inFlight("A") + AgentQueryLane.inFlight("B") == 0 })
+            assertEquals(0, AgentQuerySupport.runCore([queryText: "q"], "C", { [rows: []] }, { }).rowCount)
+        } finally { gate.countDown(); AgentQuerySupport.timeoutMillis = previous }
+    }
+
+    @Test
+    void "lane: normal completion and a throwing worker free the slot"() {
+        AgentQuerySupport.runCore([queryText: "q"], "T1", { [rows: []] }, { })
+        assertTrue(eventually { AgentQueryLane.inFlight("T1") == 0 })
+        AgentQuerySupport.runCore([queryText: "q"], "T1", { throw new IllegalStateException("x") }, { })
+        assertTrue(eventually { AgentQueryLane.inFlight("T1") == 0 })
+    }
 }

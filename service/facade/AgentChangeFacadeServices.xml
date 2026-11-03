@@ -144,9 +144,12 @@
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><return error="true" message="No active tenant."/></if>
             <if condition="!darpan.agent.BrainTicketSupport.CATEGORIES.contains(category)">
                 <return error="true" message="Category ${category} is not one of: ${darpan.agent.BrainTicketSupport.CATEGORIES.join(', ')}."/></if>
             <if condition="!verbatimText?.trim()"><return error="true" message="verbatimText is required."/></if>
+            <if condition="verbatimText.length() > darpan.agent.BrainTicketSupport.LONG">
+                <return error="true" message="verbatimText is longer than ${darpan.agent.BrainTicketSupport.LONG} characters; say it shorter."/></if>
             <set field="conversation" from="darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.agent.AgentConversation', 'conversationId', conversationId, tenantId, 'brain ticket: tenant compared on the row')"/>
             <if condition="conversation == null"><return error="true" message="Conversation ${conversationId} was not found."/></if>
             <set field="refsJson" from="darpan.agent.BrainTicketSupport.redactedJson(refs)"/>
@@ -154,22 +157,22 @@
             <set field="placementJson" from="darpan.agent.BrainTicketSupport.redactedJson(placement)"/>
             <if condition="refsJson != null &amp;&amp; refsJson.length() > darpan.agent.BrainTicketSupport.INTERMEDIATE">
                 <return error="true" message="refs is longer than ${darpan.agent.BrainTicketSupport.INTERMEDIATE} characters; send fewer."/></if>
+            <if condition="evidenceJson != null &amp;&amp; evidenceJson.length() > darpan.agent.BrainTicketSupport.LONG">
+                <return error="true" message="evidence is longer than ${darpan.agent.BrainTicketSupport.LONG} characters; send less."/></if>
+            <if condition="placementJson != null &amp;&amp; placementJson.length() > darpan.agent.BrainTicketSupport.LONG">
+                <return error="true" message="placement is longer than ${darpan.agent.BrainTicketSupport.LONG} characters; send less."/></if>
 
-            <set field="textHash" from="darpan.agent.BrainTicketSupport.sha256(verbatimText)"/>
-            <entity-find entity-name="darpan.agent.BrainChangeTicket" list="sameConversation">
-                <econdition field-name="companyUserGroupId" from="tenantId"/>
-                <econdition field-name="conversationId"/>
-            </entity-find>
-            <set field="existing" from="sameConversation.find { darpan.agent.BrainTicketSupport.sha256(it.verbatimText) == textHash }"/>
-            <if condition="existing != null">
-                <set field="ticketId" from="existing.ticketId"/><set field="duplicate" from="true"/><return/></if>
+            <set field="textHash" from="darpan.agent.BrainTicketSupport.textHash(verbatimText)"/>
+            <set field="existingId" from="darpan.agent.BrainTicketSupport.existingId(ec, tenantId, conversationId, textHash)"/>
+            <if condition="existingId != null">
+                <set field="ticketId" from="existingId"/><set field="duplicate" from="true"/><return/></if>
 
-            <set field="ticketId" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.agent.BrainChangeTicket', 'ticketId')"/>
-            <service-call name="create#darpan.agent.BrainChangeTicket" in-map="[ticketId: ticketId, companyUserGroupId: tenantId,
-                    conversationId: conversationId, category: category, verbatimText: verbatimText, refsJson: refsJson,
+            <set field="newId" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.agent.BrainChangeTicket', 'ticketId')"/>
+            <set field="ticketId" from="darpan.agent.BrainTicketSupport.insertOnce(ec, [ticketId: newId, companyUserGroupId: tenantId,
+                    conversationId: conversationId, category: category, verbatimText: verbatimText, textHash: textHash, refsJson: refsJson,
                     evidenceJson: evidenceJson, placementJson: placementJson, status: 'RECEIVED',
-                    createdByUserId: ec.user.userId, createdDate: ec.user.nowTimestamp]"/>
-            <set field="duplicate" from="false"/>
+                    createdByUserId: ec.user.userId, createdDate: ec.user.nowTimestamp])"/>
+            <set field="duplicate" from="ticketId != newId"/>
         </actions>
     </service>
 

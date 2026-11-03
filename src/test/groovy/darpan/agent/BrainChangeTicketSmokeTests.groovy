@@ -96,7 +96,7 @@ class BrainChangeTicketSmokeTests {
     void emailInEvidenceIsPopulated() {
         Map out = create(CONV, "PRODUCT_BUG", "The memo total is wrong.",
                 [note: "mail jane.doe@example.com"],
-                [orderRef: "M-1", customer: [email: "jane.doe@example.com", phone: "+1 415 555 0134", notes: ["gid://shopify/Order/12345", "plain note"]]],
+                [orderRef: "M-1", customer: [email: "jane.doe@example.com", phone: "+1 415 555 0134", notes: ["gid://shopify/Order/12345", "M-2"]]],
                 [lever: "display"])
         assertFalse(out.hadError as boolean, out.errorText as String)
         def row = asSystem { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }
@@ -105,7 +105,6 @@ class BrainChangeTicketSmokeTests {
         assertFalse(evidence.contains("555"), evidence)
         assertFalse(evidence.contains("gid://shopify"), evidence)
         assertTrue(evidence.contains("<populated>"), evidence)
-        assertTrue(evidence.contains("plain note"), evidence)
         assertTrue(evidence.contains("M-1"), evidence)
         assertFalse((row.refsJson as String).contains("jane.doe"), row.refsJson as String)
         assertTrue((row.refsJson as String).contains("<populated>"))
@@ -192,6 +191,62 @@ class BrainChangeTicketSmokeTests {
         assertEquals([a], (onThread(SUPER_USERNAME, "${ADMIN}.list#BrainChangeTickets", [status: "SHIPPED"], false).result.tickets as List<Map>)*.ticketId)
         // the tenant sees the status its ticket reached
         assertEquals("SHIPPED", (call(FACADE, "list#BrainChangeTickets", [:]).tickets as List<Map>)[0].status)
+    }
+
+    @Test
+    @DisplayName("prose, keys and addresses in evidence never survive; ids, states, amounts and dates do")
+    void typedEvidenceOnly() {
+        Map out = create(CONV, "PRODUCT_BUG", "Typed evidence.",
+                [orderId: "M1088731"],
+                [customerNote: "Jane Doe, 12 Elm St, Springfield", state: "OPEN", amount: 12.5, count: 3, shipped: true, date: "2026-10-08",
+                 "jane.doe@example.com": "x", "gid://shopify/Order/1": "y", "free text key": "z", rows: [[id: "INV-1"], "ship to 12 Elm St"]],
+                [target: "invoices-without-etail-id"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        String ev = asSystem { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }.evidenceJson
+        ["Jane", "Elm", "Springfield", "jane.doe", "gid://", "free text", "ship to"].each { assertFalse(ev.contains(it), "${it} in ${ev}") }
+        assertTrue(ev.contains('"customerNote":"<populated>"'), ev)
+        ["OPEN", "12.5", "\"count\":3", "true", "2026-10-08", "INV-1"].each { assertTrue(ev.contains(it), "${it} missing in ${ev}") }
+        assertEquals(3, ev.count("<populated>#"), ev)
+        assertTrue(asSystem { ec.entity.find(TICKET).condition("ticketId", out.ticketId).useCache(false).one() }.refsJson.contains("M1088731"))
+    }
+
+    @Test
+    @DisplayName("the same text, even padded, is one ticket; over-long text, evidence and placement are refused cleanly")
+    void hashAndCaps() {
+        Map a = create(CONV, "DISPLAY", "Same words.")
+        Map b = create(CONV, "DISPLAY", "  Same words.  \n")
+        assertEquals(a.ticketId, b.ticketId)
+        assertEquals(true, b.duplicate)
+        assertEquals(1L, count(MINE))
+        // a lost race: the unique index refuses a second row, and the winner's id comes back
+        String winner = darpan.agent.BrainTicketSupport.insertOnce(ec, [ticketId: "BCT_LOSER", companyUserGroupId: MINE, conversationId: CONV,
+                category: "DISPLAY", verbatimText: "Same words.", textHash: darpan.agent.BrainTicketSupport.textHash("Same words."), status: "RECEIVED"])
+        assertEquals(a.ticketId, winner)
+        assertEquals(1L, count(MINE))
+        String big = "x" * 60001
+        assertTrue(create(CONV, "DISPLAY", big).hadError as boolean)
+        assertTrue(create(CONV, "DISPLAY", "ok text", null, [a: (1..20000).collect { "zzz" }]).hadError as boolean)
+        assertTrue(create(CONV, "DISPLAY", "ok text 2", null, null, [a: (1..30000).collect { "id${it}".toString() }]).hadError as boolean)
+        assertEquals(1L, count(MINE))
+    }
+
+    @Test
+    @DisplayName("update clears the reason or version that does not apply and allows only forward moves")
+    void transitions() {
+        String a = create(CONV, "PRODUCT_BUG", "Move me.").ticketId
+        assertFalse(update(a, [status: "ACCEPTED", statusReason: "stale", shippedVersion: "v0"]).hasError as boolean)
+        def row = asSystem { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }
+        assertNull(row.statusReason); assertNull(row.shippedVersion)
+        assertTrue(update(a, [status: "RECEIVED"]).hasError as boolean)
+        assertTrue(update(a, [status: "SHIPPED", shippedVersion: "v" + "9" * 300]).hasError as boolean)
+        assertFalse(update(a, [status: "SHIPPED", shippedVersion: "v2.2.0", statusReason: "ignored"]).hasError as boolean)
+        assertNull(asSystem { ec.entity.find(TICKET).condition("ticketId", a).useCache(false).one() }.statusReason)
+        assertTrue(update(a, [status: "ACCEPTED"]).hasError as boolean)
+        assertTrue(update(a, [status: "DECLINED", statusReason: "late"]).hasError as boolean)
+        String d = create(CONV, "PRODUCT_BUG", "Decline me.").ticketId
+        assertFalse(update(d, [status: "DECLINED", statusReason: "No."]).hasError as boolean)
+        assertTrue(update(d, [status: "RECEIVED"]).hasError as boolean)
+        assertEquals("DECLINED", status(d))
     }
 
     // ------------------------------------------------------------------ helpers

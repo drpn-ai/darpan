@@ -89,19 +89,23 @@ class AgentRedaction {
     }
 
     /**
-     * Every leaf string of a nested Map/List, normalised, with a customer-data shape (email, phone, shopifyGid) replaced by
-     * "<populated>". Other text is kept: a ticket's evidence is the agent's own account, not a system record. The input is not changed.
+     * Typed data only, for a ticket's evidence, refs and placement: every leaf goes through safeValue (booleans, numbers and
+     * strict tokens stay; any other string is "<populated>") and every map key must be a strict token that is not a
+     * customer-data shape, else it becomes "<populated>#<n>". The input is not changed.
      */
-    static Object redactLeaves(Object v) {
-        if (v == null || v instanceof Boolean || v instanceof Number) return v
+    static Object redactTyped(Object v) {
         if (v instanceof Map) {
             Map out = new LinkedHashMap()
-            ((Map) v).each { Object k, Object x -> out.put(k, redactLeaves(x)) }
+            int n = 0
+            ((Map) v).each { Object k, Object x ->
+                String key = normalize(String.valueOf(k))
+                if (!TOKEN.matcher(key).matches() || isCustomerShape(key)) key = POPULATED + "#" + (++n)
+                out.put(key, redactTyped(x))
+            }
             return out
         }
-        if (v instanceof Collection) return ((Collection) v).collect { Object x -> redactLeaves(x) }
-        String clean = normalize(v.toString())
-        return isCustomerShape(clean) ? POPULATED : clean
+        if (v instanceof Collection) return ((Collection) v).collect { Object x -> redactTyped(x) }
+        return safeValue(v)
     }
 
     /** The one normalising step for every string value: invisible characters out, then NFKC (fullwidth digits and the like fold), before any check. */

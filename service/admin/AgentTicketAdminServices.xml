@@ -39,13 +39,17 @@
                 <return error="true" message="Status ${status} is not one of: ${darpan.agent.BrainTicketSupport.STATUSES.join(', ')}."/></if>
             <if condition="status == 'DECLINED' &amp;&amp; !statusReason?.trim()"><return error="true" message="A declined ticket needs a statusReason."/></if>
             <if condition="status == 'SHIPPED' &amp;&amp; !shippedVersion?.trim()"><return error="true" message="A shipped ticket needs a shippedVersion."/></if>
+            <if condition="shippedVersion != null &amp;&amp; shippedVersion.length() > darpan.agent.BrainTicketSupport.MEDIUM">
+                <return error="true" message="shippedVersion is longer than ${darpan.agent.BrainTicketSupport.MEDIUM} characters."/></if>
             <if condition="statusReason != null &amp;&amp; statusReason.length() > darpan.agent.BrainTicketSupport.MEDIUM">
                 <return error="true" message="statusReason is longer than ${darpan.agent.BrainTicketSupport.MEDIUM} characters."/></if>
             <entity-find-one entity-name="darpan.agent.BrainChangeTicket" value-field="ticket">
                 <field-map field-name="ticketId"/></entity-find-one>
             <if condition="ticket == null"><return error="true" message="Ticket ${ticketId} was not found."/></if>
+            <if condition="!(darpan.agent.BrainTicketSupport.MOVES[ticket.status] ?: []).contains(status)">
+                <return error="true" message="A ${ticket.status} ticket cannot move to ${status}."/></if>
             <service-call name="update#darpan.agent.BrainChangeTicket" in-map="[ticketId: ticketId, status: status,
-                    statusReason: statusReason, shippedVersion: shippedVersion]"/>
+                    statusReason: status == 'DECLINED' ? statusReason : null, shippedVersion: status == 'SHIPPED' ? shippedVersion : null]"/>
             <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
                     serviceName: 'admin.AgentTicketAdminServices.update#BrainChangeTicket', targetType: 'BrainChangeTicket',
                     targetId: ticketId, detailText: 'Ticket ' + ticketId + ' of ' + ticket.companyUserGroupId + ' moved from ' + ticket.status + ' to ' + status + '.',

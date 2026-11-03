@@ -4,8 +4,12 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.moqui.util.ContextStack
 
+import java.sql.Timestamp
+
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -104,11 +108,74 @@ class CliAuthSupportTests {
         assertFalse(CliAuthSupport.isCliSession(stubEc))
     }
 
+    // ---- revalidateCliWebSession (R9: revoke and disable end a CLI key's web session at once) ----
+
+    @Test
+    @DisplayName("revalidate: a live CLI key's session passes")
+    void revalidateLiveSessionPasses() {
+        def session = new SessionStub()
+        def first = ec(new RequestStub(headers: [login_key: CLI_KEY], session: session))
+        assertNull(CliAuthSupport.revalidateCliWebSession(first))
+        assertEquals("hash:${CLI_KEY}".toString(), session.attributes[CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE],
+                "the mark carries the key's hash, not a bare TRUE")
+        def later = ec(new RequestStub(session: session), [:], first.entity)
+        assertNull(CliAuthSupport.revalidateCliWebSession(later))
+        assertFalse(session.invalidated)
+        assertFalse(later.user.loggedOutLocal)
+    }
+
+    @Test
+    @DisplayName("revalidate: a revoked key's marked session is refused and ended")
+    void revalidateRevokedKeysSessionIsRefused() {
+        def session = new SessionStub()
+        def first = ec(new RequestStub(headers: [login_key: CLI_KEY], session: session))
+        assertNull(CliAuthSupport.revalidateCliWebSession(first))
+
+        first.entity.rows["darpan.auth.CliSession"][0].revokedDate = new Timestamp(System.currentTimeMillis() - 1000L)
+        def later = ec(new RequestStub(session: session), [:], first.entity)   // JSESSIONID only, no key
+        assertNotNull(CliAuthSupport.revalidateCliWebSession(later))
+        assertTrue(session.invalidated, "the web session must be invalidated")
+        assertTrue(later.user.loggedOutLocal, "the user must be logged out of this request")
+    }
+
+    @Test
+    @DisplayName("revalidate: an expired key's marked session is refused")
+    void revalidateExpiredKeyIsRefused() {
+        def entity = new EntityStub()
+        entity.rows["moqui.security.UserLoginKey"][0].thruDate = new Timestamp(System.currentTimeMillis() - 1000L)
+        def session = new SessionStub(attributes: [(CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE): "hash:${CLI_KEY}".toString()])
+        def stubEc = ec(new RequestStub(session: session), [:], entity)
+        assertNotNull(CliAuthSupport.revalidateCliWebSession(stubEc))
+        assertTrue(session.invalidated)
+    }
+
+    @Test
+    @DisplayName("revalidate: a disabled user's marked session is refused")
+    void revalidateDisabledUserIsRefused() {
+        def entity = new EntityStub()
+        entity.rows["moqui.security.UserAccount"][0].disabled = "Y"
+        def session = new SessionStub(attributes: [(CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE): "hash:${CLI_KEY}".toString()])
+        def stubEc = ec(new RequestStub(session: session), [:], entity)
+        assertNotNull(CliAuthSupport.revalidateCliWebSession(stubEc))
+        assertTrue(session.invalidated)
+    }
+
+    @Test
+    @DisplayName("revalidate: a session with no mark is left alone")
+    void revalidateUnmarkedSessionPasses() {
+        def session = new SessionStub()
+        def stubEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: session))
+        assertNull(CliAuthSupport.revalidateCliWebSession(stubEc))
+        assertNull(session.attributes[CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE])
+        assertFalse(session.invalidated)
+        assertNull(CliAuthSupport.revalidateCliWebSession(new Expando(context: [:], web: null, entity: new EntityStub())))
+    }
+
     // ---- stubs ----
 
-    private static def ec(RequestStub request, Map secureParameters = [:]) {
+    private static def ec(RequestStub request, Map secureParameters = [:], EntityStub entity = new EntityStub()) {
         def web = new Expando(request: request, secureRequestParameters: secureParameters)
-        return new Expando(context: [:], web: web, factory: new FactoryStub(), entity: new EntityStub())
+        return new Expando(context: [:], web: web, factory: new FactoryStub(), entity: entity, user: new UserStub())
     }
 
     static class FactoryStub {
@@ -116,17 +183,33 @@ class CliAuthSupportTests {
         String getSimpleHash(String input, String salt, Object hashType, boolean base64) { "hash:${input}" }
     }
 
+    static class UserStub {
+        String userId = "CLI_USER"
+        boolean loggedOutLocal = false
+        void logoutLocal() { loggedOutLocal = true; userId = null }
+    }
+
+    /** One live CLI session for CLI_KEY: unrevoked, key valid for a day, account enabled. */
     static class EntityStub {
         int lookups = 0
-        FinderStub find(String entityName) { lookups++; new FinderStub() }
+        Map<String, List<Map>> rows = [
+                "darpan.auth.CliSession"     : [[loginKeyHash: "hash:${CLI_KEY}".toString(), userId: "CLI_USER", revokedDate: null]],
+                "moqui.security.UserLoginKey": [[loginKey: "hash:${CLI_KEY}".toString(), userId: "CLI_USER",
+                                                 thruDate: new Timestamp(System.currentTimeMillis() + 86_400_000L)]],
+                "moqui.security.UserAccount" : [[userId: "CLI_USER", username: "cli.user", disabled: "N"]],
+        ]
+        FinderStub find(String entityName) { lookups++; new FinderStub(rows: rows[entityName] ?: []) }
     }
 
     static class FinderStub {
+        List<Map> rows = []
         Map<String, Object> conditions = [:]
         FinderStub disableAuthz() { this }
         FinderStub useCache(boolean ignored) { this }
         FinderStub condition(String field, Object value) { conditions[field] = value; this }
-        long count() { conditions.loginKeyHash?.toString() == "hash:${CLI_KEY}" ? 1L : 0L }
+        private List<Map> matches() { rows.findAll { Map row -> conditions.every { k, v -> row[k]?.toString() == v?.toString() } } }
+        long count() { matches().size() }
+        Map one() { matches() ? matches()[0] : null }
     }
 
     static class RequestStub {
@@ -138,13 +221,15 @@ class CliAuthSupportTests {
         CookieStub[] getCookies() { cookies ? cookies.toArray(new CookieStub[0]) : null }
         Object getAttribute(String name) { attributes[name] }
         void setAttribute(String name, Object value) { attributes[name] = value }
-        SessionStub getSession(boolean create) { session }
+        SessionStub getSession(boolean create) { session?.invalidated ? null : session }
     }
 
     static class SessionStub {
         Map<String, Object> attributes = [:]
+        boolean invalidated = false
         Object getAttribute(String name) { attributes[name] }
         void setAttribute(String name, Object value) { attributes[name] = value }
+        void invalidate() { invalidated = true; attributes.clear() }
     }
 
     static class CookieStub {

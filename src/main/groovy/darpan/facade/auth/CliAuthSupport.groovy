@@ -5,6 +5,8 @@ import darpan.reconciliation.notification.TenantNotificationSupport
 import org.moqui.entity.EntityCondition
 import org.moqui.util.ContextStack
 import org.moqui.util.StringUtilities
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -19,6 +21,8 @@ import static darpan.common.ValueSupport.normalize
  * per-address start limit. Spec: wrapper docs/superpowers/specs/2026-11-03-tenant-agent-cli-mcp-design.md 6.2, 7.
  */
 class CliAuthSupport {
+    private static final Logger logger = LoggerFactory.getLogger(CliAuthSupport.class)
+
     static final int DEVICE_CODE_LIFETIME_SECONDS = 600
     static final int POLL_INTERVAL_SECONDS = 3
     static final int MAX_STARTS_PER_ADDRESS_PER_MINUTE = 10
@@ -28,8 +32,11 @@ class CliAuthSupport {
     static final String UNKNOWN_ADDRESS = "unknown"
     /** The memo key on ec.context's shared map (and, TRUE only, its stack). See isCliSession for which values count. */
     static final String CLI_SESSION_CONTEXT_KEY = "darpanCliSession"
-    /** The memo on the servlet request, and the mark on a web session a CLI key signed in. A client cannot set either. */
+    /** The memo on the servlet request (a Boolean). A client cannot set it. */
     static final String CLI_SESSION_ATTRIBUTE = "darpan.cliSession"
+    /** The mark on a web session a CLI key signed in: that key's hash, so revalidateCliWebSession can re-check it.
+     *  A client cannot set it. */
+    static final String CLI_SESSION_MARK_ATTRIBUTE = "darpan.cliSessionKeyHash"
     static final int HOST_LABEL_MAX_LENGTH = 60
     static final int CLI_SESSION_ID_LENGTH = 12
 
@@ -163,8 +170,9 @@ class CliAuthSupport {
      *
      * The keys looked at are every place the framework or Darpan signs a request in from: the api_key and
      * login_key headers and parameters (UserFacadeImpl.initFromHttpRequest) and the persistent-login cookie
-     * (AuthSessionSupport.restoreAuthenticatedSession). A web session a CLI key signed in is marked, so a later
-     * request on that session alone (no key) is still a CLI session. A revoked CLI session's key still counts.
+     * (AuthSessionSupport.restoreAuthenticatedSession). A web session a CLI key signed in is marked with that key's
+     * hash, so a later request on that session alone (no key) is still a CLI session, and revalidateCliWebSession
+     * can re-check it. A revoked CLI session's key still counts.
      */
     static boolean isCliSession(def ec) {
         Map shared = sharedMap(ec)
@@ -178,9 +186,11 @@ class CliAuthSupport {
         if (known instanceof Boolean) {
             answer = (Boolean) known
         } else {
-            answer = sessionMarked(request) || requestLoginKeyHashes(ec).any { String hash -> isCliKeyHash(ec, hash) }
+            String mark = sessionMark(request)
+            String cliKeyHash = mark ? null : requestLoginKeyHashes(ec).find { String hash -> isCliKeyHash(ec, hash) }
+            answer = mark != null || cliKeyHash != null
             request.setAttribute(CLI_SESSION_ATTRIBUTE, answer)
-            if (answer) markSession(request)
+            if (cliKeyHash) markSession(request, cliKeyHash)
         }
         shared?.put(CLI_SESSION_CONTEXT_KEY, answer)
         return answer
@@ -212,16 +222,74 @@ class CliAuthSupport {
     }
 
     private static boolean isCliKeyHash(def ec, String hash) {
-        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.CliSession",
+        return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.auth.CliSession",
                         "self-scoped auth: is the request's login key a CLI key (pre-auth path, no active tenant)")
                 .condition("loginKeyHash", hash).useCache(false).count() > 0
     }
 
-    private static boolean sessionMarked(def request) {
-        return request.getSession(false)?.getAttribute(CLI_SESSION_ATTRIBUTE) == Boolean.TRUE
+    /** The CLI key hash a web session was marked with, or null. */
+    private static String sessionMark(def request) {
+        Object mark = request.getSession(false)?.getAttribute(CLI_SESSION_MARK_ATTRIBUTE)
+        return mark instanceof String && mark ? (String) mark : null
     }
 
-    private static void markSession(def request) {
-        request.getSession(false)?.setAttribute(CLI_SESSION_ATTRIBUTE, Boolean.TRUE)
+    private static void markSession(def request, String cliKeyHash) {
+        request.getSession(false)?.setAttribute(CLI_SESSION_MARK_ATTRIBUTE, cliKeyHash)
+    }
+
+    // ---- a CLI key's web session, re-checked on every request ----
+
+    /**
+     * Null when the request may go on; otherwise why it is refused, after the web session has been ended.
+     *
+     * A key login lives on in the Moqui web session (UserFacadeImpl.initFromHttpRequest stores the Shiro subject
+     * in it and later requests are restored from it without the key: only hasLoggedOut is checked). So a session a
+     * CLI key opened is re-checked here on every request, from the webroot before-request hook: its CliSession is
+     * not revoked, its UserLoginKey has not expired, and the account can still sign in. Revoking, signing out or
+     * disabling therefore takes effect on the next call. On a failure the user is logged out of this request
+     * (logoutLocal: never hasLoggedOut, which would sign the person out of the app everywhere too) and the web
+     * session is invalidated. Calls isCliSession first, which marks a session a CLI key has just signed in.
+     */
+    static String revalidateCliWebSession(def ec) {
+        def request = ec?.web?.request
+        if (request == null) return null
+        isCliSession(ec)
+        String cliKeyHash = sessionMark(request)
+        if (!cliKeyHash) return null
+        String reason = cliSessionProblem(ec, cliKeyHash)
+        if (reason) endWebSession(ec, request)
+        return reason
+    }
+
+    private static String cliSessionProblem(def ec, String cliKeyHash) {
+        def cliSession = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.auth.CliSession",
+                        "self-scoped auth: re-check a CLI key's web session (pre-auth path, no active tenant)")
+                .condition("loginKeyHash", cliKeyHash).useCache(false).one()
+        if (cliSession == null || cliSession.revokedDate != null) return "This CLI session was signed out. Run darpan login to sign in again."
+        def loginKey = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
+                        "self-scoped auth: re-check a CLI key's expiry for its web session")
+                .condition("loginKey", cliKeyHash).useCache(false).one()
+        Timestamp thruDate = (Timestamp) loginKey?.thruDate
+        if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) {
+            return "This CLI session has expired. Run darpan login to sign in again."
+        }
+        def account = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserAccount",
+                        "self-scoped auth: re-check that a CLI session's account can still sign in")
+                .condition("userId", cliSession.userId).useCache(false).one()
+        if (!canSignIn(ec, account)) return "This account can no longer sign in."
+        return null
+    }
+
+    private static void endWebSession(def ec, def request) {
+        try {
+            if (ec.user?.userId) ec.user.logoutLocal()
+        } catch (Exception e) {
+            logger.warn("Could not log out a refused CLI web session: ${e.message}")
+        }
+        try {
+            request.getSession(false)?.invalidate()
+        } catch (IllegalStateException ignored) {
+            // already invalidated by the logout
+        }
     }
 }

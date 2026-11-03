@@ -180,6 +180,20 @@ class TenantScopedFinder {
     }
 
     static def findGlobalUnscoped(def ec, String entityName, String reason) {
+        requireReason(reason)
+        logger.info("[tenant-scope] GLOBAL unscoped read of {}: {}", entityName, reason)
+        return ec.entity.find(entityName).disableAuthz()
+    }
+
+    /** findGlobalUnscoped for a read that runs on every request (DAR-CLI-003: is this a CLI key): the same gate,
+     *  logged at DEBUG so it does not put a line in the INFO log for each request. */
+    static def findGlobalUnscopedPerRequest(def ec, String entityName, String reason) {
+        requireReason(reason)
+        logger.debug("[tenant-scope] GLOBAL unscoped per-request read of {}: {}", entityName, reason)
+        return ec.entity.find(entityName).disableAuthz()
+    }
+
+    private static void requireReason(String reason) {
         if (!reason?.trim()) {
             throw new IllegalArgumentException(
                     "findGlobalUnscoped requires a non-blank reason; got: '${reason}'. " +
@@ -187,8 +201,6 @@ class TenantScopedFinder {
                     "this is the opt-out gate for tenant-neutral reads."
             )
         }
-        logger.info("[tenant-scope] GLOBAL unscoped read of {}: {}", entityName, reason)
-        return ec.entity.find(entityName).disableAuthz()
     }
 
     /**

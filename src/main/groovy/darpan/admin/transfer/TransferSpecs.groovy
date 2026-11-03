@@ -120,8 +120,10 @@ class TransferSpecs {
             [kind: AUDIT, entityName: "darpan.audit.Audit", pkField: "auditId", naturalKey: "auditCode"],
             [kind: STATEMENT, entityName: "darpan.audit.AuditStatement", pkField: "statementId", naturalKey: "statementCode",
              refFields: [auditId: AUDIT]],
+            // DAR-BE-188. automationId is no value; it travels as a ref (heldRefs) only in a transfer that carries automations,
+            // and only when the bundle holds the automation the check runs under. A version leaves it out, as before.
             [kind: CHECK, entityName: "darpan.audit.AuditCheck", pkField: "checkId", naturalKey: "checkCode",
-             refFields: [savedRunId: RUN], dropFields: ["automationId"],
+             refFields: [savedRunId: RUN], dropFields: ["automationId"], heldRefs: [automationId: AUTOMATION],
              // A check's links to statements: only those of the audits in the bundle travel; links to other audits stay.
              links: [entityName: "darpan.audit.AuditStatementCheck", parentFields: ["checkId"], refFields: [statementId: STATEMENT],
                      textListRefs: [ruleIds: RULE, conclusionCodes: CONC]]],
@@ -138,8 +140,10 @@ class TransferSpecs {
                      parentFields: ["reconciliationId"], orderBy: ["runSequence", "reconciliationRunId"], activeOnly: "isActive",
                      selfRef: "parentReconciliationRunId", refFields: [ruleSetId: RUN, parentReconciliationRunId: QUESTION]]]],
             // DAR-BE-188. Matched by spaceName, unique per tenant whatever its case. The webhooks are sealed secrets; the
-            // Slack workspace install it posts through, and when it last sent a badge GIF, are this instance's.
+            // Slack workspace install it posts through, and when it last sent a badge GIF, are this instance's. Transfer
+            // only (notInVersion): a version's automations name their space by id, so a version holds no space.
             [kind: CHAT_SPACE, entityName: "darpan.reconciliation.TenantChatSpace", pkField: "chatSpaceId", naturalKey: "spaceName",
+             notInVersion: true,
              extraSecretFields: ["webhookUrl", "googleChatWebhookUrl"], dropFields: ["slackInstallId", "lastBadgeGifDate"]],
             // savedRunId names a run, or a lifecycle when savedRunType is "reconciliation" (polymorphicKind). In a transfer
             // its run, compare scope and chat space travel as refs; the legacy question and mapping ids stay behind (a
@@ -190,6 +194,18 @@ class TransferSpecs {
         out.dropFields = ((spec.dropFields ?: []) as List<String>).findAll { !(it in plain) }
         out.remove("versionPlainFields")
         return out.asImmutable()
+    }
+
+    /**
+     * DAR-BE-188. A record's heldRefs: each column naming a record the bundle holds becomes a ref; one naming a record it
+     * does not hold is left out, as a dropped column is.
+     */
+    static void addHeldRefs(Map spec, Map rec, def row, Set<String> held) {
+        ((spec.heldRefs ?: [:]) as Map<String, String>).each { String f, String kind ->
+            String value = text(row.get(f))
+            String r = value ? ref(kind, value) : null
+            if (r && r in held) ((Map) rec.refs).put(f, r)
+        }
     }
 
     /** DAR-BE-188. The ref of the scope at index in its run (SCOPE_CHILD order). */
@@ -267,6 +283,7 @@ class TransferSpecs {
     static Set<String> refColumns(Map spec) {
         Set<String> out = new HashSet<String>(((spec.refFields ?: [:]) as Map).keySet() as Set<String>)
         out.addAll(((spec.positionRefs ?: [:]) as Map).keySet() as Set<String>)
+        out.addAll(((spec.heldRefs ?: [:]) as Map).keySet() as Set<String>)
         if (spec.polymorphicRef) out.add(spec.polymorphicRef as String)
         return out
     }

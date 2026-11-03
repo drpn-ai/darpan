@@ -145,6 +145,8 @@ class ConfigTransferImporter {
         // DAR-BE-188: the spaces before the automations that post to them.
         records(ctx, "chatSpaces").each { Map s -> writeChatSpace(ctx, s) }
         records(ctx, "automations").each { Map a -> writeAutomation(ctx, a) }
+        // DAR-BE-188: a check's automation is written after the check, so the check is linked to it now.
+        records(ctx, "checks").each { Map c -> linkHeldRefs(ctx, spec(CHECK), c) }
         records(ctx, "knowledge").each { Map k -> writeTree(ctx, spec(KNOWLEDGE), k, "KE_") }
         // DAR-BE-161: the tenant's cached knowledge index is dropped now and again once this transaction completes.
         if (records(ctx, "knowledge")) KnowledgeSupport.invalidateAfterWrite(ec, targetTenantId)
@@ -165,7 +167,7 @@ class ConfigTransferImporter {
                                        boolean ownVersion = false) {
         Map ctx = [ec      : ec, tenantId: tenantId, bundle: bundle ?: [:], map: (connectionMap ?: [:]),
                    blocking: [], warnings: [], resolved: [:], matches: [:], actions: [:], changes: [:], ruleIdentity: [:],
-                   secretValues: [:], fills: [:], kept: [:], unreadable: [:]]
+                   secretValues: [:], fills: [:], kept: [:], unreadable: [:], unlinked: new HashSet<String>()]
         if (text(bundle?.bundleVersion) != text(BUNDLE_VERSION)) {
             block(ctx, "BUNDLE_VERSION", null,
                     "This instance reads bundle version ${BUNDLE_VERSION}, not ${bundle?.bundleVersion}. Export again from a matching source.")
@@ -436,11 +438,20 @@ class ConfigTransferImporter {
         }
         new LinkedHashSet<String>(BUNDLE_LISTS.values()).each { String list ->
             records(ctx, list).findAll { it.kind != CONC }.each { Map rec ->
+                Map<String, String> held = heldRefsOf(rec)
                 allRefs(rec).findAll { it != null }.unique().each { String r ->
                     List<String> parsed = parseRef(r)
                     boolean knownKind = parsed && (parsed[0] in CHILD_KINDS || TransferSpecs.spec(parsed[0]) != null)
                     if (knownKind && !(r in carried)) {
-                        block(ctx, "REF_UNRESOLVED", rec.ref, "${rec.label ?: rec.ref} names ${r}, which the bundle does not carry.")
+                        String heldField = held.find { k, v -> v == r }?.key
+                        if (heldField) {
+                            // DAR-BE-188: a check whose automation stayed behind arrives unlinked; the audit schedule links it.
+                            ((Set) ctx.unlinked).add("${rec.ref}|${heldField}".toString())
+                            warn(ctx, "CHECK_AUTOMATION_NOT_CARRIED", rec.ref, "${rec.label ?: rec.ref} runs under ${r}, which the " +
+                                    "bundle does not carry, so it arrives without one; saving the audit's schedule here links it.")
+                        } else {
+                            block(ctx, "REF_UNRESOLVED", rec.ref, "${rec.label ?: rec.ref} names ${r}, which the bundle does not carry.")
+                        }
                     }
                 }
             }
@@ -748,7 +759,16 @@ class ConfigTransferImporter {
                     .condition("checkId", row.checkId).useCache(false).list() : []
             target.links = ConfigTransferExporter.linkRecords(ec, row.checkId as String, links, statementOrder, targetNamer)
         }
-        Map source = canonical(ec, spec, rec, sourceIdOf(ctx))
+        // DAR-BE-188: a held ref the record carries is compared with the target's own link; one left unlinked is not.
+        Map<String, String> held = heldRefsOf(rec).findAll { k, v -> !("${rec.ref}|${k}".toString() in (Set) ctx.unlinked) }
+        Map heldSpec = (spec.heldRefs ?: [:]) as Map<String, String>
+        held.keySet().each { String f -> if (text(row.get(f))) ((Map) target.refs).put(f, TransferSpecs.ref(heldSpec[f], text(row.get(f)))) }
+        Map sourceRec = rec
+        if (heldRefsOf(rec).size() != held.size()) {
+            sourceRec = new LinkedHashMap(rec)
+            sourceRec.refs = ((rec.refs ?: [:]) as Map).findAll { k, v -> !(k in heldSpec.keySet()) || k in held.keySet() }
+        }
+        Map source = canonical(ec, spec, sourceRec, sourceIdOf(ctx))
         Map existing = canonical(ec, spec, target, targetIdOf(ctx))
         List<Map> changes = changesBetween(existing, source)
         if (changes) {
@@ -1208,6 +1228,29 @@ class ConfigTransferImporter {
         if (action in ["UPDATE", "UNCHANGED"] && fillsFor(ctx, s)) fillMapped(ctx, s)
     }
 
+    /**
+     * DAR-BE-188. After every record is written: a created or updated record's held refs (a check's automation) point at
+     * the target id their record landed on. One the bundle does not carry leaves the column as it is.
+     */
+    private static void linkHeldRefs(Map ctx, Map spec, Map rec) {
+        if (!(ctx.actions[rec.ref] in [CREATE, "UPDATE"])) return
+        heldRefsOf(rec).each { String f, String r ->
+            String id = ctx.idMap[r] as String
+            if (!id || "${rec.ref}|${f}".toString() in (Set) ctx.unlinked) return
+            def row = finder(ctx.ec, spec.entityName as String).condition(spec.pkField as String, ctx.idMap[rec.ref]).useCache(false).one()
+            if (row == null || row.companyUserGroupId != ctx.tenantId) throw new IllegalStateException("${rec.label} changed on this instance during the transfer.")
+            row.set(f, id)
+            row.update()
+        }
+    }
+
+    /** DAR-BE-188. The held refs a record carries: column -> ref. */
+    private static Map<String, String> heldRefsOf(Map rec) {
+        Map kindSpec = TransferSpecs.spec(parseRef(rec.ref)?.get(0))
+        Set<String> fields = ((kindSpec?.heldRefs ?: [:]) as Map).keySet() as Set<String>
+        return ((rec.refs ?: [:]) as Map).findAll { k, v -> k in fields && v }.collectEntries { k, v -> [(k as String): v as String] } as Map<String, String>
+    }
+
     /** A run's rules must compile here too, against this instance's rule engine; the transfer fails if they do not. */
     private static void compile(Map ctx, String ruleSetId, String label) {
         def ec = ctx.ec
@@ -1236,7 +1279,8 @@ class ConfigTransferImporter {
     private static Map<String, Object> columns(Map ctx, Map spec, Map rec) {
         Map<String, Object> out = [:]
         Set<String> values = valueFields(ctx.ec, spec) as Set<String>
-        Set<String> refs = refColumns(spec)
+        // A held ref (DAR-BE-188) names a record written later; linkHeldRefs writes it.
+        Set<String> refs = refColumns(spec) - (((spec.heldRefs ?: [:]) as Map).keySet() as Set<String>)
         Set<String> lists = ((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>
         ((rec.fields ?: [:]) as Map).findAll { k, v -> k in values }.each { k, v ->
             out[k as String] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> targetId(ctx, item.sourceConfigId) }

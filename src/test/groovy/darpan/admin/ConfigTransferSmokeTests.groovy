@@ -3,6 +3,7 @@ package darpan.admin
 import darpan.admin.transfer.ConfigTransferExporter
 import darpan.admin.transfer.ConfigTransferImporter
 import darpan.admin.transfer.SecretHandoff
+import darpan.audit.AuditSettingsSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -45,10 +46,10 @@ class ConfigTransferSmokeTests {
     /** Every entity a transfer writes, children first, so a wipe never trips a foreign key. */
     private static final List<String> TRANSFER_ENTITIES = [
             "darpan.reconciliation.ReconciliationRunResult",
+            "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
             "darpan.reconciliation.ReconciliationAutomationSourceFilter", "darpan.reconciliation.ReconciliationAutomationSource",
             "darpan.reconciliation.ReconciliationAutomation", "darpan.reconciliation.TenantChatSpace",
             "darpan.reconciliation.ReconciliationRun", "darpan.reconciliation.Reconciliation",
-            "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
             "darpan.rule.RuleSetConclusionCondition", "darpan.rule.RuleSetConclusionRule",
             "darpan.rule.RuleSetCompareSourceFilter", "darpan.rule.RuleSetCompareSourceKeyField",
             "darpan.rule.RuleSetCompareSource", "darpan.rule.RuleSetCompareScope", "darpan.rule.Rule", "darpan.rule.RuleSet",
@@ -1243,7 +1244,103 @@ class ConfigTransferSmokeTests {
         }
     }
 
+    @Test
+    void importedChecksLinkToTheImportedAutomationSoTheScheduleMakesNoNewOne() {
+        withAutomation {
+            // A daily automation on the same run as the month-close one: only the export can say which one the checks use.
+            create("darpan.reconciliation.ReconciliationAutomation", [automationId: "XFER_AUTO_DAILY", automationName: "Returns daily",
+                    companyUserGroupId: SRC, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "XFER_RS", savedRunType: "ruleset",
+                    ruleSetId: "XFER_RS", compareScopeId: "XFER_CS", scheduleExpr: "0 0 5 * * ?", isActive: "Y"])
+            linkChecks("XFER_AUTO")
+            try {
+                Map handoff = beginHandoff(DST)
+                Map bundle = exportWhole(handoff.publicKey as String)
+                (bundle.checks as List<Map>).each { Map check ->
+                    assertEquals(AUTO_REF, check.refs.automationId, "${check.ref} names the automation it runs under")
+                    assertFalse((check.fields as Map).containsKey("automationId"))
+                }
+                Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, handoff.handoffToken as String)
+                assertNoErrors(preview)
+                assertEquals([], preview.result.plan.blocking)
+                Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String, handoff.handoffToken as String)
+                assertNoErrors(applied)
+                Map idMap = applied.result.idMap as Map
+                ["CHECK:XFER_CHK1", "CHECK:XFER_CHK2"].each { String ref ->
+                    def check = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", idMap[ref]).disableAuthz().useCache(false).one()
+                    assertEquals(idMap[AUTO_REF], check.automationId, "${ref} runs under the imported month-close automation")
+                    assertNotEquals(idMap["AUTOMATION:XFER_AUTO_DAILY"], check.automationId)
+                }
+
+                List made = AuditSettingsSupport.ensureAutomations(ec, DST, [auditId: idMap["AUDIT:XFER_AUDIT"], auditCode: "month-close",
+                        auditName: "Month close"])
+                assertEquals([], made, "the audit schedule reuses the imported automation")
+                assertEquals(2L, ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("companyUserGroupId", DST)
+                        .disableAuthz().useCache(false).count())
+
+                Map again = beginHandoff(DST)
+                Map plan = importInto(DST, exportWhole(again.publicKey as String), [(AUTH_REF): idMap[AUTH_REF]], false, null,
+                        again.handoffToken as String).result.plan as Map
+                assertEquals([], plan.blocking)
+                (plan.lines as List<Map>).each {
+                    assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+                }
+            } finally {
+                linkChecks(null)
+                ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "XFER_AUTO_DAILY").disableAuthz().deleteAll()
+            }
+        }
+    }
+
+    @Test
+    void aCheckWhoseAutomationIsNotCarriedArrivesUnlinked() {
+        withAutomation {
+            linkChecks("XFER_AUTO")
+            try {
+                Map bundle = copy(exportWhole())
+                bundle.automations = []
+                Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"])
+                assertNoErrors(preview)
+                Map plan = preview.result.plan as Map
+                assertEquals([], plan.blocking, "an automation left out unlinks its checks, it does not block them")
+                assertEquals(["CHECK:XFER_CHK1", "CHECK:XFER_CHK2"], (plan.warnings as List<Map>)
+                        .findAll { it.code == "CHECK_AUTOMATION_NOT_CARRIED" }*.ref.sort(), "${plan.warnings}")
+                Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String)
+                assertNoErrors(applied)
+                assertNull(ec.entity.find("darpan.audit.AuditCheck").condition("checkId", applied.result.idMap["CHECK:XFER_CHK1"])
+                        .disableAuthz().useCache(false).one().automationId)
+            } finally {
+                linkChecks(null)
+            }
+        }
+    }
+
+    @Test
+    void aChecksAutomationTravelsOnlyWithAutomations() {
+        withAutomation {
+            linkChecks("XFER_AUTO")
+            try {
+                Map plain = exportSource()
+                assertFalse(JsonOutput.toJson(plain).contains("AUTOMATION:"), "without includeAutomations a check names no automation")
+                assertEquals(["savedRunId"], ((plain.checks as List<Map>)[0].refs as Map).keySet() as List)
+                Map pack = ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true)
+                (pack.checks as List<Map>).each { Map check ->
+                    assertEquals(["savedRunId"], (check.refs as Map).keySet() as List, "a version's checks are what they were")
+                    assertFalse((check.fields as Map).containsKey("automationId"))
+                }
+            } finally {
+                linkChecks(null)
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- fixtures
+
+    /** Points SRC's two checks at an automation (null unlinks them), as the audit schedule does. */
+    private void linkChecks(String automationId) {
+        ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "in", ["XFER_CHK1", "XFER_CHK2"]).disableAuthz().list().each {
+            it.set("automationId", automationId); it.update()
+        }
+    }
 
     private static final String WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=hook-secret-xfer"
     private static final String OLD_WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=old-hook-secret-xfer"

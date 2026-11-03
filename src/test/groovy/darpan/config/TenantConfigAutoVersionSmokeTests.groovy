@@ -168,7 +168,8 @@ class TenantConfigAutoVersionSmokeTests {
             if (spec.links) held.add((spec.links as Map).entityName as String)
             ((spec.children ?: []) as List<Map>).each { walk(it) }
         }
-        TransferSpecs.KINDS.each { walk(it) }
+        // A kind only a transfer carries (DAR-BE-188 chat spaces) is in no version, so no change to it owes one.
+        TransferSpecs.KINDS.findAll { !it.notInVersion }.each { walk(it) }
         held.remove("moqui.basic.Enumeration")      // a conclusion code is the tenant's through TenantConclusion
         held.add("darpan.rule.TenantConclusion")
         assertEquals(held, TenantConfigChangeTracker.watchedEntities(ec) as Set<String>,

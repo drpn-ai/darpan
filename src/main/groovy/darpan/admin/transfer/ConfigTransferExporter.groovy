@@ -179,6 +179,12 @@ class ConfigTransferExporter {
                     .findAll { (it.savedRunId as String) in (polymorphicKind(ec, spec(AUTOMATION), it) == LIFECYCLE ? heldLifecycles : heldRuns) }
                     .collect { labelled(record(ec, automationSpec, it, namer), it.automationName ?: it.automationId) }
         }
+        // DAR-BE-188: in a transfer a check names the automation it runs under, when that automation travels too (a
+        // daily automation and the audit's own can share a run, so only the source can say which one it is).
+        if (includeAutomations && !forVersion) {
+            Set<String> heldAutomations = automationRecords*.ref.collect { it as String } as Set<String>
+            checks.eachWithIndex { check, int i -> TransferSpecs.addHeldRefs(spec(CHECK), checkRecords[i], check, heldAutomations) }
+        }
 
         // DAR-BE-188: the chat spaces those automations post to, the tenant's own only; no webhook is read here.
         List<Map> chatSpaceRecords = []

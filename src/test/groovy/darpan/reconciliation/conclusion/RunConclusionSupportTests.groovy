@@ -176,6 +176,28 @@ class RunConclusionSupportTests {
         assertEquals(2, result.counts.C_BACKORDER)
     }
 
+    /**
+     * DAR-UI-099 (Aditi: "always make sure all lines are present within the order"): gorjana M1132010 line 01 is a finding;
+     * line 02 is still approved, so R1's unitState filter set it aside. NetSuite's store-credit payment line has no HotWax
+     * line id (SO7365765 "Store Credit - Redemption"). Every line of the order rides on the row, kept or set aside, with its key.
+     */
+    @Test
+    void everyLineOfTheRowsOrderRidesOnTheRow() {
+        File doc = writeDiffDocument([missingRow("M1132010${SEP}01", FILE1, FILE2, [omsOrderId: "M1132010", orderItemSeqId: "01"])])
+        File oms = extract("oms-lines.json", [[omsOrderId: "M1132010", orderItemSeqId: "01", statusId: "ITEM_COMPLETED"],
+                                             [omsOrderId: "M9", orderItemSeqId: "01", statusId: "ITEM_COMPLETED"]],
+                [configuredExclusions: [[sequenceNum: 1]]])
+        sidecar(oms, [[omsOrderId: "M1132010", orderItemSeqId: "02", statusId: "ITEM_APPROVED"]])
+        File ns = extract("ns-lines.json", [], [configuredExclusions: [[sequenceNum: 1]]])
+        sidecar(ns, [[orderId: "M1132010", itemType: "Payment", itemName: "Store Credit - Redemption", lineAmount: "-89.3"]])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns, oms))
+        Map lines = (Map) ((Map) ((List) parse(doc).differences)[0]).firstKeyRecords
+        assertEquals([["M1132010${SEP}01".toString(), "KEPT"], ["M1132010${SEP}02".toString(), "EXCLUDED"]],
+                ((List<Map>) lines.file1).collect { [it.key, it.presence] }, "the other order's line M9 is not this order's")
+        assertEquals([[null, "EXCLUDED", "Store Credit - Redemption"]],
+                ((List<Map>) lines.file2).collect { [it.key, it.presence, ((Map) it.record).itemName] })
+    }
+
     /** Aditi on R1 F-100781: the NetSuite line the run screened out is the finding's NetSuite record; its ids ride on the row. */
     @Test
     void aFoundOtherSideRecordsIdsRideOnTheRow() {

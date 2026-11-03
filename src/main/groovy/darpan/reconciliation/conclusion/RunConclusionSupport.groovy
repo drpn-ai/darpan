@@ -30,6 +30,12 @@ class RunConclusionSupport {
     /** Records kept per key: enough to judge "every record under this key", bounded for a hot key. */
     static final int MAX_RECORDS_PER_KEY = 1000
     /**
+     * DAR-UI-099: the records sharing a row's first key field (every line of its order, on a side keyed by order + line)
+     * that ride on the row as firstKeyRecords, at most this many per side. Aditi: "always make sure all lines are present
+     * within the order".
+     */
+    static final int MAX_FIRST_KEY_RECORDS = 60
+    /**
      * DAR-BE-151: findings the brain takes per run; past it the tree concludes the rest, with a warning. Each is kept slim
      * (the present record and the other side's first-field presence only), so the pass stays bounded. Tunable for tests.
      */
@@ -195,7 +201,7 @@ class RunConclusionSupport {
                 systems.add(evidenceFor(side, evidenceSide(side, sides, index, otherSideKeyFields), (Map) (spec.evidence ?: [:]),
                         side == "FILE_1" ? file1Label : file2Label))
             }
-            return row + otherSideIds(slurper, row, sides) + [conclusion: [code    : code,
+            return row + otherSideIds(slurper, row, sides) + firstKeyRecords(row, index) + [conclusion: [code    : code,
                                        label   : conclusion.label,
                                        systems : systems,
                                        checks  : conclusion.checks,
@@ -298,20 +304,24 @@ class RunConclusionSupport {
         List<String> keyFields = (List<String>) (spec.keyFields ?: [])
         String normalizer = (String) spec.idNormalizer
         Map keptFull = [:], keptFirst = [:], excludedFull = [:], excludedFirst = [:]
+        // DAR-UI-099: on a side keyed by more than one field, every record of a needed first field, kept or excluded.
+        Map<String, List<Map>> byFirst = keyFields.size() > 1 ? [:] : null
         boolean readable = extractFile?.exists() && spec.keyReliable != false
         if (readable) {
             Map head = JsonRecordStream.forEachRecord(extractFile, "records") { Map record ->
                 add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
+                addFirstKeyRecord(byFirst, "KEPT", record, keyFields, normalizer, neededFirstFields)
             }
             List exclusions = configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
             Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
                 add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
+                addFirstKeyRecord(byFirst, "EXCLUDED", record, keyFields, normalizer, neededFirstFields)
             }
             // Extractors write no sidecar when nothing was excluded, so a missing one is only unknown
             // when the side's own metadata does not prove that every rule dropped nothing.
             boolean unknown = exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
             return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
-                    excludedFirst: excludedFirst, unknownWhenAbsent: unknown]
+                    excludedFirst: excludedFirst, unknownWhenAbsent: unknown, byFirst: byFirst]
         }
         // No extract, or a key this pass cannot rebuild: nothing can be claimed absent.
         return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
@@ -340,6 +350,35 @@ class RunConclusionSupport {
         } catch (NumberFormatException ignored) {
             return false
         }
+    }
+
+    /**
+     * DAR-UI-099: one streamed record under its first key field, with its own key and whether the run kept or excluded it.
+     * A record whose key cannot be built (a NetSuite payment line with no HotWax line id) still belongs to its order: its
+     * key is the first field alone.
+     */
+    private static void addFirstKeyRecord(Map<String, List<Map>> byFirst, String presence, Map record, List<String> keyFields,
+                                          String normalizer, Set<String> neededFirstFields) {
+        if (byFirst == null) return
+        String key = ConclusionKeySupport.compareKey(record, keyFields, normalizer)
+        String firstField = key != null ? ConclusionKeySupport.firstField(key) :
+                ConclusionKeySupport.compareKey(record, [keyFields[0]], normalizer)
+        if (firstField == null || !neededFirstFields.contains(firstField)) return
+        List<Map> under = byFirst.computeIfAbsent(firstField) { [] }
+        if (under.size() < MAX_FIRST_KEY_RECORDS) under.add([key: key, presence: presence, record: record])
+    }
+
+    /** DAR-UI-099: every record of the row's first key field on each side that collects them, as firstKeyRecords. */
+    private static Map firstKeyRecords(Map row, Map<String, Map> index) {
+        String key = row.get("primaryId")?.toString()
+        if (!key) return [:]
+        String firstField = ConclusionKeySupport.firstField(key)
+        Map out = [:]
+        index.each { String side, Map sideIndex ->
+            List found = (List) ((Map) sideIndex?.get("byFirst"))?.get(firstField)
+            if (found) out.put(side == "FILE_1" ? "file1" : "file2", found)
+        }
+        return out ? [firstKeyRecords: out] : [:]
     }
 
     /** One streamed record: kept only when a finding needs its key (or its first key field). */

@@ -361,6 +361,7 @@ class AuditAutomationSupport {
             Map row = [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
                        note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
                        ids: AuditAutomationSupport.rowData(raw.ids), sideRecords: AuditAutomationSupport.rowData(raw.sideRecords),
+                       firstKeyRecords: AuditAutomationSupport.rowData(raw.firstKeyRecords),
                        file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
                        systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
                        checks: raw.conclusion instanceof Map ? ((Map) raw.conclusion).checks : null,
@@ -513,7 +514,43 @@ class AuditAutomationSupport {
                     recordData  : whole ?: null]
         }
         Set<String> seen = own.collect { "${rootSystem(it.systemEnumId as String)}|${it.recordType}|${it.recordId}".toString() } as Set
-        return own + related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) }
+        return own + related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) } +
+                orderLineRecords(row, file1Source, file2Source)
+    }
+
+    /** DAR-UI-099: the record type of every other line of a finding's order (firstKeyRecords). */
+    static final String ORDER_LINE = "orderLine"
+
+    /**
+     * DAR-UI-099 (Aditi: "always make sure all lines are present within the order... in the case of store credit, a store
+     * credit line item is added"). The other lines of the row's order on each side, as the run read them (kept or set aside
+     * by a filter), one record per line key: units of one line count as its quantity. A line with no key of its own (a
+     * NetSuite store-credit payment line) is named by its item. The row's own line is not repeated.
+     */
+    static List<Map> orderLineRecords(Map row, def file1Source, def file2Source) {
+        Map byFile = row.firstKeyRecords instanceof Map ? (Map) row.firstKeyRecords : null
+        if (!byFile) return []
+        List<Map> out = []
+        [file1: file1Source, file2: file2Source].each { String file, def source ->
+            String systemEnumId = normalize(readField(source, "systemEnumId"))
+            List entries = byFile.get(file) instanceof List ? (List) byFile.get(file) : []
+            if (!systemEnumId || !entries) return
+            Map<String, Map> byLine = new LinkedHashMap<>()
+            entries.each { Object e ->
+                if (!(e instanceof Map)) return
+                Map entry = (Map) e
+                Map record = entry.record instanceof Map ? (Map) entry.record : [:]
+                String key = normalize(entry.key)
+                if (key && key == row.id) return
+                String id = key ? AuditReportAssembler.displayKey(key) : (normalize(record.itemName) ?: normalize(record.itemType) ?: "line")
+                Map line = byLine.get(id)
+                if (line != null) { line.recordData.units = ((line.recordData.units ?: 1) as int) + 1; return }
+                byLine.put(id, [systemEnumId: systemEnumId, recordType: ORDER_LINE, recordId: id, internalId: null,
+                                recordStatus: null, recordData: record + [presence: normalize(entry.presence), units: 1]])
+            }
+            out.addAll(byLine.values())
+        }
+        return out
     }
 
     /**

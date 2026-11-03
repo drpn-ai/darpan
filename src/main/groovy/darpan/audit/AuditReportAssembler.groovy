@@ -401,6 +401,7 @@ class AuditReportAssembler {
         if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> k != "held" }
         String order = unit.order as String
         List<Map> lines = (unit.entries as List<Map>).collect(line)
+        List<Map> context = takeOrderLineRecords(lines)
         List<Map> stuck = lines.any { it.held } ? lines.findAll { !it.held && it.cause } : []
         List<String> own = lines*.cause.findAll().unique() as List<String>
         String cause = stuck ? stuck[0].cause : (own.size() == 1 ? own[0] : null)
@@ -424,7 +425,70 @@ class AuditReportAssembler {
                 cause     : cause,
                 stuck     : stuck*.id,
                 lines     : lines,
+                orderLines: orderLines(order, lines, context),
                 next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()]
+    }
+
+    /**
+     * DAR-UI-099: the other lines of the order its findings carry (AuditAutomationSupport.ORDER_LINE records), taken off
+     * each line's records so they are listed once, in orderLines, and not as records of their own.
+     */
+    private static List<Map> takeOrderLineRecords(List<Map> lines) {
+        List<Map> context = []
+        lines.each { Map l ->
+            Map copy = new LinkedHashMap()
+            ((Map) (l.records ?: [:])).each { String system, Map byType ->
+                Map kept = new LinkedHashMap(byType)
+                ((List) (kept.remove(AuditAutomationSupport.ORDER_LINE) ?: [])).each { context << [system: system, record: it] }
+                if (kept) copy.put(system, kept)
+            }
+            l.records = copy
+        }
+        return context
+    }
+
+    /**
+     * DAR-UI-099 (Aditi: "always make sure all lines are present within the order... a store credit line item is added").
+     * Every line of the order, in line order: those with a finding (its id, cause and state) and those without (as the run
+     * read them: completed and billed, or set aside, e.g. approved and not yet fulfilled), with SKU, status and units; then
+     * the lines only another system has with no line of their own, e.g. NetSuite's "Store Credit - Redemption".
+     */
+    static List<Map> orderLines(String order, List<Map> lines, List<Map> context) {
+        Map<String, Map> byItem = new LinkedHashMap<>()
+        String ownSystem = null
+        lines.each { Map l ->
+            ((Map) (l.records ?: [:])).each { String system, Map byType ->
+                byType.each { String type, List list ->
+                    list.each { Map r ->
+                        String id = r.id as String
+                        if (!id?.startsWith(order + "/") || byItem.containsKey(id)) return
+                        ownSystem = ownSystem ?: system
+                        if (system != ownSystem) return
+                        byItem.put(id, [line: itemNumber(order, id), item: id,
+                                        sku: r.sku, status: r.status, finding: l.id, cause: l.cause, state: l.state])
+                    }
+                }
+            }
+        }
+        List<Map> others = []
+        context.each { Map c ->
+            Map r = (Map) c.record
+            String id = r.id as String
+            if (id?.startsWith(order + "/")) {
+                if ((ownSystem == null || c.system == ownSystem) && !byItem.containsKey(id)) {
+                    ownSystem = ownSystem ?: c.system
+                    byItem.put(id, [line: itemNumber(order, id), item: id, sku: r.sku,
+                                    status: r.status, quantity: r.quantity, setAside: r.setAside == true, finding: null])
+                }
+            } else if (!others.any { it.system == c.system && it.item == (r.item ?: id) }) {
+                others << [system: c.system, item: r.item ?: id, itemType: r.itemType, amount: r.amount, status: r.status]
+            }
+        }
+        List<Map> sorted = byItem.values().sort(false) { Map a, Map b ->
+            ((a.line as String)?.isInteger() ? (a.line as String).toInteger() : Integer.MAX_VALUE) <=>
+                    ((b.line as String)?.isInteger() ? (b.line as String).toInteger() : Integer.MAX_VALUE) ?: (a.item as String) <=> (b.item as String)
+        }
+        return (sorted.collect { it.findAll { k, v -> v != null } } + others.collect { it.findAll { k, v -> v != null } }) as List<Map>
     }
 
     /**
@@ -464,6 +528,13 @@ class AuditReportAssembler {
         int at = item ? headline.indexOf(item) : -1
         if (at >= 0) return "line ${lineNumber(order, line)}${headline.substring(at + item.length())}".toString()
         return "line ${lineNumber(order, line)}${line.cause ? ', ' + lowerFirst(line.cause as String) : ''}".toString()
+    }
+
+    /** DAR-UI-099: "2" for item M1132010/02 of order M1132010; the item id when it has no number after the order. */
+    static String itemNumber(String order, String item) {
+        if (!item?.startsWith(order) || item.length() <= order.length()) return item
+        String suffix = item.substring(order.length()).replaceFirst(/^[\/\-_ ]+/, "")
+        return suffix.isInteger() ? String.valueOf(suffix.toInteger()) : suffix
     }
 
     /** "1" for item M1168785/01 of order M1168785 (a person reads "line 1", not "/01"); else the line's finding id. */
@@ -908,7 +979,22 @@ class AuditReportAssembler {
                 // Aditi: "order and return totals are missing": an order's own total, else the one its item or return carries.
                 orderTotal : amount(text("grandTotal") ?: text("totalPrice") ?: text("orderGrandTotal")),
                 returnTotal: recordType == "return" ? amount(text("returnTotal")) : null,
-                deposits   : deposits ?: null]
+                deposits   : deposits ?: null] + (recordType == AuditAutomationSupport.ORDER_LINE ? orderLineFacts(data, text, amount) : [:])
+    }
+
+    /**
+     * DAR-UI-099. Another line of the finding's order: how many units the read held of it, whether the run set it aside
+     * (a filter: an item not yet completed, a NetSuite payment line), and for a line with no HotWax line id its item, type
+     * and amount (NetSuite "Store Credit - Redemption", Payment, -89.30). A NetSuite line's status is its line state.
+     */
+    private static Map orderLineFacts(Map data, Closure<String> text, Closure<Map> amount) {
+        Map facts = [quantity: data.get("units") instanceof Number ? data.get("units") : null,
+                     setAside: text("presence") == "EXCLUDED",
+                     item    : text("itemName"),
+                     itemType: text("itemType"),
+                     amount  : amount(text("lineAmount"))]
+        if (!text("statusId") && text("lineState")) facts.status = words(text("lineState"))
+        return facts
     }
 
     /**

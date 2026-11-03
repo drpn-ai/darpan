@@ -62,12 +62,12 @@ class ConfigTransferExporter {
             if (!isEntityAvailable(ec, kindSpec.entityName as String)) return
             finder(ec, kindSpec.entityName as String).condition("companyUserGroupId", tenantId).selectFields([kindSpec.pkField, "description"])
                     .useCache(false).list().each { row ->
-                connections << connectionEntry(kind, row.get(kindSpec.pkField) as String, row.description as String, false)
+                connections << ConfigTransferExporter.connectionEntry(kind, row.get(kindSpec.pkField) as String, row.description as String, false)
             }
             SharedConfigAccessSupport.listSharedConfigIdsForTenant(ec, kindSpec.grantType as String, tenantId).each { String id ->
                 def row = finder(ec, kindSpec.entityName as String).condition(kindSpec.pkField as String, id)
                         .selectFields([kindSpec.pkField, "description"]).useCache(false).one()
-                if (row != null) connections << connectionEntry(kind, id, row.description as String, true)
+                if (row != null) connections << ConfigTransferExporter.connectionEntry(kind, id, row.description as String, true)
             }
         }
         return [audits: auditList, runs: runList, connections: sortConnections(connections)] as Map<String, Object>

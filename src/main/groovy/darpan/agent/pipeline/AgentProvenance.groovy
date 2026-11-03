@@ -13,31 +13,53 @@ import java.util.regex.Pattern
 class AgentProvenance {
 
     /** Characters that continue a token; an id matches only when neither neighbour is one of these. */
-    private static final String TOKEN_CHARS = "A-Za-z0-9#_\\-."
+    private static final String TOKEN_CHARS = "\\p{L}\\p{N}\\p{M}#_\\-."
+    private static final int MAX_LEAF_TOKEN = 64
+    private static final String UNTRUSTED_KEY = "untrusted_customer_text"
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[^{}]*\\}")
+    private static final Pattern FREE_TEXT_SPLIT = Pattern.compile("[^" + TOKEN_CHARS + "]+")
 
     /** Sentence punctuation that ends an id when followed by whitespace or the end of the text ("exclude M1.", "is M1? odd"). */
     private static final String TRAILING_PUNCT = "[.?!,:;)\\]\"']"
 
-    /** The record-specific literals of a proposal, normalized. Validates the shape first; unknown kinds and malformed proposals throw. */
+    /**
+     * The record-specific literals of a proposal, normalized: filter values, condition check values (comma-split for IN/NOT_IN),
+     * and digit-bearing tokens of 3+ characters in free text (fixActionTemplate, fieldLabel) outside {placeholders} (R19).
+     * Validates the shape first; unknown kinds and malformed proposals throw.
+     */
     static Set<String> identifiersOf(String kind, Map after) {
         validateShape(kind, after)
         Set<String> out = new LinkedHashSet<String>()
         if (kind == "EXCLUSION_FILTER") {
-            ((List) after.get("filterValues")).each { Object v -> addId(out, v) }
+            ((List) after.get("filterValues")).each { Object v -> out.add((String) v) }
+            if (after.get("fieldLabel") != null) freeTextIds(out, after.get("fieldLabel").toString())
+        } else if (kind == "FIX_TEXT") {
+            freeTextIds(out, (String) after.get("fixActionTemplate"))
         } else if (kind == "CONCLUSION_ROWS") {
             ((List) after.get("rows")).each { Object row ->
+                Object tpl = ((Map) row).get("fixActionTemplate")
+                if (tpl != null) freeTextIds(out, tpl.toString())
                 Object conds = ((Map) row).get("conditions")
                 if (conds == null) return
                 ((List) conds).each { Object c ->
                     Object cv = ((Map) c).get("checkValue")
                     if (cv == null) return
                     String op = ((Map) c).get("operator")
-                    if (op == "IN" || op == "NOT_IN") cv.toString().split(",").each { String part -> addId(out, part) }
-                    else addId(out, cv)
+                    if (op == "IN" || op == "NOT_IN") cv.toString().split(",").each { String part -> if (part.trim()) out.add(part.trim()) }
+                    else out.add((String) cv)
                 }
             }
         }
         return out
+    }
+
+    private static void freeTextIds(Set<String> out, String text) {
+        if (text == null) return
+        String plain = PLACEHOLDER.matcher(AgentRedaction.normalize(text)).replaceAll(" ")
+        FREE_TEXT_SPLIT.split(plain).each { String raw ->
+            String tok = raw.replaceAll(/[.\-]+$/, "")
+            if (tok.length() >= 3 && tok.any { Character.isDigit(it as char) }) out.add(tok)
+        }
     }
 
     /** Fail-closed contract for `after` (R18). Throws IllegalArgumentException on an unknown kind, unknown key, wrong type or missing required key. */
@@ -52,8 +74,8 @@ class AgentProvenance {
             case "STATEMENT_NARROWING":
                 keys(after, ["diffTypes", "conclusionCodes", "ruleIds"], "after")
                 ["diffTypes", "conclusionCodes", "ruleIds"].each { String k -> strList(after, k, false, "after") }
-                if (["diffTypes", "conclusionCodes", "ruleIds"].every { String k -> after.get(k) == null })
-                    throw new IllegalArgumentException("after needs at least one of diffTypes, conclusionCodes, ruleIds")
+                if (["diffTypes", "conclusionCodes", "ruleIds"].every { String k -> !(after.get(k) instanceof List) || ((List) after.get(k)).isEmpty() })
+                    throw new IllegalArgumentException("after needs at least one non-empty list of diffTypes, conclusionCodes, ruleIds")
                 break
             case "FIX_TEXT":
                 keys(after, ["fixActionTemplate"], "after")
@@ -78,12 +100,25 @@ class AgentProvenance {
                         if (!(c instanceof Map)) throw new IllegalArgumentException("${cw} must be a map".toString())
                         keys((Map) c, ["fieldExpression", "operator", "checkValue"], cw)
                         str((Map) c, "fieldExpression", true, cw); str((Map) c, "operator", true, cw); str((Map) c, "checkValue", false, cw)
+                        Object cv = ((Map) c).get("checkValue")
+                        if (cv != null) {
+                            String op = ((Map) c).get("operator")
+                            if (op == "IN" || op == "NOT_IN") cv.toString().split(",").each { String part -> canonical(part.trim(), "${cw}.checkValue part".toString(), false) }
+                            else canonical((String) cv, "${cw}.checkValue".toString(), true)
+                        }
                     }
                 }
                 break
             default:
                 throw new IllegalArgumentException("Unknown proposal kind: ${kind}".toString())
         }
+    }
+
+    /** An identifier-bearing string must already be in normalized, trimmed form, so the value checked is the value applied. */
+    private static void canonical(String raw, String where, boolean notBlank) {
+        if (notBlank && !raw.trim()) throw new IllegalArgumentException("${where} must not be blank".toString())
+        if (raw != AgentRedaction.normalize(raw).trim())
+            throw new IllegalArgumentException("${where} contains invisible, compatibility or surrounding-space characters".toString())
     }
 
     private static void keys(Map m, List<String> allowed, String where) {
@@ -96,6 +131,7 @@ class AgentProvenance {
         Object v = m.get(key)
         if (v == null) { if (required) throw new IllegalArgumentException("${where}.${key} is required".toString()); return }
         if (!(v instanceof String)) throw new IllegalArgumentException("${where}.${key} must be a string".toString())
+        if (required && !((String) v).trim()) throw new IllegalArgumentException("${where}.${key} must not be blank".toString())
     }
 
     private static void strList(Map m, String key, boolean required, String where) {
@@ -103,34 +139,41 @@ class AgentProvenance {
         if (v == null) { if (required) throw new IllegalArgumentException("${where}.${key} is required".toString()); return }
         if (!(v instanceof List) || (required && ((List) v).isEmpty()) || !((List) v).every { it instanceof String })
             throw new IllegalArgumentException("${where}.${key} must be a ${required ? 'non-empty ' : ''}list of strings".toString())
+        if (key == "filterValues") ((List) v).each { Object e -> canonical((String) e, "${where}.${key} entry".toString(), true) }
     }
 
     static Map check(String kind, Map after, List<String> humanTexts, Map openContext, Set<String> configValues) {
         Set<String> ids = identifiersOf(kind, after)
-        List<String> sources = new ArrayList<String>()
-        humanTexts?.each { String t -> if (t != null) sources.add(AgentRedaction.normalize(t)) }
-        collectLeaves(openContext, sources)
-        configValues?.each { String v -> if (v != null) sources.add(AgentRedaction.normalize(v)) }
-        List<String> blocked = new ArrayList<String>(ids.findAll { String id -> !sources.any { String s -> containsToken(s, id) } })
+        List<String> human = new ArrayList<String>()
+        humanTexts?.each { String t -> if (t != null) human.add(AgentRedaction.normalize(t)) }
+        // Opened-finding and config values vouch only by whole-value equality; their free text never does.
+        Set<String> exact = new HashSet<String>()
+        collectLeaves(openContext, exact)
+        configValues?.each { String v -> if (v != null) exact.add(AgentRedaction.normalize(v).trim()) }
+        List<String> blocked = new ArrayList<String>(ids.findAll { String id ->
+            if (exact.contains(id)) return false
+            Pattern p = tokenPattern(id)
+            return !human.any { String s -> p.matcher(s).find() }
+        })
         return [status: blocked ? "BLOCKED" : "PASS", blockedIds: blocked]
     }
 
-    private static void addId(Set<String> out, Object raw) {
-        if (raw == null) return
-        String id = AgentRedaction.normalize(raw.toString()).trim()
-        if (id) out.add(id)
-    }
-
-    private static void collectLeaves(Object node, List<String> sources) {
+    /** Strict-token leaves only; customer free text (untrusted_customer_text subtrees, whitespace, long values) is never a source. */
+    private static void collectLeaves(Object node, Set<String> leaves) {
         if (node == null) return
-        if (node instanceof Map) ((Map) node).values().each { Object v -> collectLeaves(v, sources) }
-        else if (node instanceof Collection) ((Collection) node).each { Object v -> collectLeaves(v, sources) }
-        else sources.add(AgentRedaction.normalize(node.toString()))
+        if (node instanceof Map) {
+            ((Map) node).each { Object k, Object v -> if (k?.toString() != UNTRUSTED_KEY) collectLeaves(v, leaves) }
+        } else if (node instanceof Collection) {
+            ((Collection) node).each { Object v -> collectLeaves(v, leaves) }
+        } else {
+            String leaf = AgentRedaction.normalize(node.toString()).trim()
+            if (leaf && leaf.length() <= MAX_LEAF_TOKEN && !leaf.any { Character.isWhitespace(it as char) }) leaves.add(leaf)
+        }
     }
 
-    /** Case-sensitive whole-token occurrence: the neighbours are the string edge or a character outside the token set; trailing sentence punctuation before whitespace/end also ends it. */
-    private static boolean containsToken(String source, String id) {
+    /** Case-sensitive whole-token pattern (human text only): the neighbours are the string edge or a character outside the token set; trailing sentence punctuation before whitespace/end also ends it. */
+    private static Pattern tokenPattern(String id) {
         return Pattern.compile("(?<![" + TOKEN_CHARS + "])" + Pattern.quote(id) +
-                "(?:(?![" + TOKEN_CHARS + "])|(?=" + TRAILING_PUNCT + "+(?:\\s|\\z)))").matcher(source).find()
+                "(?:(?![" + TOKEN_CHARS + "])|(?=" + TRAILING_PUNCT + "+(?:\\s|\\z)))")
     }
 }

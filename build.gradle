@@ -85,18 +85,20 @@ dependencies {
     // connector stays for local/dev compose stacks that still point at MySQL.
     runtimeOnly 'org.postgresql:postgresql:42.7.7'
 
-    // Drools (MACH P1: off EOL 7.73.0.Final → 8.44.0.Final). Drools 8.x module set for the classic
-    // KieFileSystem DRL + MVEL-dialect compilation: drools-engine (runtime; pulls drools-core/compiler at
-    // matching versions), drools-mvel (still REQUIRED in 8.x for `dialect "mvel"` constraints — without it
-    // buildAll fails "compile a Drools asset without mvel"), drools-xml-support (kmodule.xml), kie-api.
+    // Drools (MACH P1 -> DAR-BE-184: 8.44.0.Final -> 10.2.0; 10.x drops the .Final suffix). Module set for the
+    // classic KieFileSystem DRL + MVEL-dialect compilation: drools-engine (runtime; pulls drools-core/compiler at
+    // matching versions), drools-mvel (still REQUIRED for `dialect "mvel"` constraints — without it buildAll
+    // fails "compile a Drools asset without mvel"), drools-xml-support (kmodule.xml), kie-api.
     // NOTE: drools-mvel's legacy evaluators trip a cross-classloader EvaluatorDefinition ClassCastException
     // under Moqui's component MClassLoader — RuleEngineSupport.compile pins the thread-context classloader
-    // around buildAll() to resolve it. MVEL is managed transitively by 8.x (its build dropped the
-    // JDK-removed java.lang.Compiler reference, so the old manual mvel2 2.5.x pin is no longer needed).
-    implementation 'org.drools:drools-engine:8.44.0.Final'
-    implementation 'org.drools:drools-mvel:8.44.0.Final'
-    implementation 'org.drools:drools-xml-support:8.44.0.Final'
-    implementation 'org.kie:kie-api:8.44.0.Final'
+    // around buildAll() to resolve it. MVEL is managed transitively (its build dropped the JDK-removed
+    // java.lang.Compiler reference, so the old manual mvel2 2.5.x pin is no longer needed).
+    // ANTLR needs no pin since DAR-BE-185: Spark 4.2.1's antlr4-runtime 4.13.1 and Drools 10's 4.13.2 share
+    // the 4.10+ serialized-parser format, so Gradle's normal conflict resolution picks 4.13.2 for both.
+    implementation 'org.drools:drools-engine:10.2.0'
+    implementation 'org.drools:drools-mvel:10.2.0'
+    implementation 'org.drools:drools-xml-support:10.2.0'
+    implementation 'org.kie:kie-api:10.2.0'
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'

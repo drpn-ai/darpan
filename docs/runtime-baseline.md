@@ -12,7 +12,7 @@ JDK 17 + Atomikos notes (archived at `archive/build/java17-compatibility.md`).
 | Build | Gradle 9 | framework/root Gradle wrapper |
 | JTA transaction manager | **Embedded Bitronix** (`TransactionInternalBitronix`), the Moqui 4 default. `moqui-atomikos` is retired and removed from the build graph and Dockerfiles. | `build.gradle` comment near the dependency block |
 | Spark | `org.apache.spark:spark-sql_2.13:4.2.1` (Scala 2.13, ANTLR 4.13.1; DAR-BE-185). Spark 4 brings `javax.servlet-api` itself; its `jakarta.servlet-api` is excluded because the Moqui servlet container supplies that API. Moqui's own Jackson, commons-io, commons-codec and log4j versions match Spark 4.2.1's, so `lib/` carries no second copy of a framework jar. | `build.gradle`; the `drpn-ai/moqui-framework` fork's `framework/build.gradle` |
-| Drools / MVEL | **Drools 8.44.0.Final**: `drools-engine`, `drools-mvel` (still required for `dialect "mvel"` constraints), `drools-xml-support` (kmodule.xml) and `kie-api`. MVEL is managed transitively by 8.x, so the old manual MVEL2 2.5.x pin is gone. `drools-mvel`'s legacy evaluators need a classloader workaround around `buildAll()`; see the comment in `build.gradle`. | `build.gradle` |
+| Drools / MVEL | **Drools 10.2.0** (DAR-BE-184): `drools-engine`, `drools-mvel` (still required for `dialect "mvel"` constraints), `drools-xml-support` (kmodule.xml) and `kie-api`. MVEL (2.5.2.Final) is managed transitively. Drools 10's ANTLR 4.13.2 shares Spark 4's parser format, so no ANTLR pin is needed. `drools-mvel`'s legacy evaluators need a classloader workaround around `buildAll()`; see the comment in `build.gradle`. | `build.gradle` |
 
 ## Required JVM flags
 

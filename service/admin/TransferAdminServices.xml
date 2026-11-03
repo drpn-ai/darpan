@@ -48,15 +48,20 @@
                 (base64 SPKI). When given, each owned connection's non-empty credentials are sealed to it (sealedSecrets),
                 the bundle carries secrets {wrappedKey, keyFingerprint, alg}, and one AdminAuditLog row records what was
                 sealed to which key. Without it no credential is read.</description></parameter>
+            <parameter name="includeAutomations" type="Boolean" default-value="false"><description>DAR-BE-188. True also sends
+                every lifecycle, the automations of the runs and lifecycles sent, and the chat spaces those automations post
+                to (their webhooks sealed with the credentials, never in clear). Automations an import creates start paused.
+                False (the default) sends exactly what it always has.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="bundle" type="Map"><description>{bundleVersion, source, connections, queries, conclusionCodes,
-                runs, audits, statements, checks}; consumed unchanged by import#ConfigBundle.</description></parameter>
+                runs, audits, statements, checks}, plus lifecycles, chatSpaces and automations with includeAutomations;
+                consumed unchanged by import#ConfigBundle.</description></parameter>
         </out-parameters>
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="bundle" from="darpan.admin.transfer.ConfigTransferExporter.bundle(ec, tenantUserGroupId, auditCodes,
-                    savedRunIds, connectionRefs, sourceInstanceLabel, secretsPublicKey)"/>
+                    savedRunIds, connectionRefs, sourceInstanceLabel, secretsPublicKey, false, includeAutomations as boolean)"/>
             <if condition="bundle == null"><return error="true"/></if>
         </actions>
     </service>

@@ -26,9 +26,10 @@ import static darpan.admin.transfer.TransferSpecs.*
  *
  * <p>Matching: connections only through the operator's connectionMap (an existing target id, or CREATE); queries by
  * description; conclusion codes by id (a shared code) or label; runs by ruleSetName; audits by auditCode; statements by
- * their audit and code; checks by checkCode. A matched record is diffed by exporting the TARGET row with the same
- * exporter and comparing both after every ref is rewritten to the target id it lands on (a rule by its position in its
- * run), so a record that would come out the same is UNCHANGED.</p>
+ * their audit and code; checks by checkCode; chat spaces by spaceName, whatever its case (DAR-BE-188). A matched record
+ * is diffed by exporting the TARGET row with the same exporter and comparing both after every ref is rewritten to the
+ * target id it lands on (a rule or a compare scope by its position in its run), so a record that would come out the
+ * same is UNCHANGED.</p>
  *
  * <p>The dry run predicts the apply: anything the apply would refuse or fail on (a column a transfer does not write,
  * a ref the bundle cannot resolve, a natural key that names no one record, reference data the target lacks, a compare
@@ -141,6 +142,8 @@ class ConfigTransferImporter {
         records(ctx, "audits").each { Map a -> writeTree(ctx, spec(AUDIT), a, "") }
         records(ctx, "statements").each { Map s -> writeStatement(ctx, s) }
         records(ctx, "checks").each { Map c -> writeCheck(ctx, c) }
+        // DAR-BE-188: the spaces before the automations that post to them.
+        records(ctx, "chatSpaces").each { Map s -> writeChatSpace(ctx, s) }
         records(ctx, "automations").each { Map a -> writeAutomation(ctx, a) }
         records(ctx, "knowledge").each { Map k -> writeTree(ctx, spec(KNOWLEDGE), k, "KE_") }
         // DAR-BE-161: the tenant's cached knowledge index is dropped now and again once this transaction completes.
@@ -186,7 +189,9 @@ class ConfigTransferImporter {
         if (ctx.sameTenant) {
             records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
             ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
-             "checks": CHECK, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind -> matchById(ctx, list, spec(kind)) }
+             "checks": CHECK, "chatSpaces": CHAT_SPACE, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
+                matchById(ctx, list, spec(kind))
+            }
         } else {
             matchByKey(ctx, "queries", "description", { Map q -> text(q.fields?.description) }) { Map q ->
                 scoped(ctx, spec(NETSUITE_SUITEQL).entityName as String).condition("description", q.fields?.description).list()
@@ -194,6 +199,10 @@ class ConfigTransferImporter {
             records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
             matchByKey(ctx, "runs", "ruleSetName", { Map r -> text(r.fields?.ruleSetName) }) { Map r ->
                 scoped(ctx, "darpan.rule.RuleSet").condition("ruleSetName", r.fields?.ruleSetName).list()
+            }
+            // Lifecycles before the owned-run gate: a run the bundle's own lifecycle owns here is that lifecycle's.
+            matchByKey(ctx, "lifecycles", "reconciliationName", { Map l -> text(l.fields?.reconciliationName) }) { Map l ->
+                scoped(ctx, spec(LIFECYCLE).entityName as String).condition("reconciliationName", l.fields?.reconciliationName).list()
             }
             ownedRunGate(ctx)   // across tenants only: in its own tenant a version puts its lifecycles' runs back
             matchByKey(ctx, "audits", "auditCode", { Map a -> text(a.fields?.auditCode) }) { Map a ->
@@ -208,22 +217,25 @@ class ConfigTransferImporter {
             matchByKey(ctx, "checks", "checkCode", { Map c -> text(c.fields?.checkCode) }) { Map c ->
                 scoped(ctx, "darpan.audit.AuditCheck").condition("checkCode", c.fields?.checkCode).list()
             }
-            // Only a config version carries automations and lifecycles; from another tenant they match by name.
+            // A config version, or a transfer asked for its automations (DAR-BE-188), carries automations and lifecycles;
+            // from another tenant they match by name. A chat space's name is unique per tenant whatever its case.
+            matchByKey(ctx, "chatSpaces", "spaceName", { Map c -> text(c.fields?.spaceName)?.trim()?.toLowerCase() }) { Map c ->
+                String name = text(c.fields?.spaceName)?.trim()
+                scoped(ctx, spec(CHAT_SPACE).entityName as String).list().findAll { (text(it.spaceName)?.trim() ?: "").equalsIgnoreCase(name) }
+            }
             matchByKey(ctx, "automations", "automationName", { Map a -> text(a.fields?.automationName) }) { Map a ->
                 scoped(ctx, spec(AUTOMATION).entityName as String).condition("automationName", a.fields?.automationName).list()
             }
             matchByKey(ctx, "knowledge", "entryKey", { Map k -> text(k.fields?.entryKey) }) { Map k ->
                 scoped(ctx, spec(KNOWLEDGE).entityName as String).condition("entryKey", k.fields?.entryKey).list()
             }
-            matchByKey(ctx, "lifecycles", "reconciliationName", { Map l -> text(l.fields?.reconciliationName) }) { Map l ->
-                scoped(ctx, spec(LIFECYCLE).entityName as String).condition("reconciliationName", l.fields?.reconciliationName).list()
-            }
         }
+        planChatSpaces(ctx)
 
         sourceRuleIdentities(ctx)
         ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
-         "checks": CHECK, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
-            records(ctx, list).findAll { ctx.matches.containsKey(it.ref) }.each { Map rec -> diff(ctx, spec(kind), rec) }
+         "checks": CHECK, "chatSpaces": CHAT_SPACE, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
+            records(ctx, list).findAll { ctx.matches.containsKey(it.ref) }.each { Map rec -> diff(ctx, kindSpec(ctx, kind), rec) }
         }
         scopeGate(ctx)
         targetOnlyWarnings(ctx)
@@ -238,10 +250,46 @@ class ConfigTransferImporter {
             if (ctx.actions[c.ref]) lines << line(ctx, c.kind as String, c)
         }
         [queries: NETSUITE_SUITEQL, conclusionCodes: CONC, runs: RUN, lifecycles: LIFECYCLE, audits: AUDIT, statements: STATEMENT,
-         checks: CHECK, automations: AUTOMATION, knowledge: KNOWLEDGE].each { String list, String kind ->
+         checks: CHECK, chatSpaces: CHAT_SPACE, automations: AUTOMATION, knowledge: KNOWLEDGE].each { String list, String kind ->
             records(ctx, list).each { Map rec -> if (ctx.actions[rec.ref]) lines << line(ctx, kind, rec) }
         }
         return finish(ctx, lines)
+    }
+
+    /** A kind as this bundle carries it: a same-tenant version restore reads a version's shape (DAR-BE-188). */
+    private static Map kindSpec(Map ctx, String kind) {
+        Map kindSpec = TransferSpecs.spec(kind)
+        return ctx.sameTenant ? versionSpec(kindSpec) : kindSpec
+    }
+
+    /**
+     * DAR-BE-188. A chat space's webhooks are filled as a connection's credentials are: all of them on CREATE, only the
+     * empty ones on a matched space. Without sealed credentials a new space has none (NEEDS_CREDENTIALS). The Slack
+     * workspace install a space posts through is this instance's: a space that would have none here says so.
+     */
+    private static void planChatSpaces(Map ctx) {
+        records(ctx, "chatSpaces").each { Map s ->
+            String action = ctx.actions[s.ref]
+            if (action == null) return
+            def target = ctx.matches[s.ref]
+            if (action == CREATE) {
+                ctx.fills[s.ref] = ((ctx.secretValues[s.ref] ?: [:]) as Map).keySet().sort()
+                List<String> unreadable = (ctx.unreadable[s.ref] ?: []) as List<String>
+                if (!ctx.carriesSecrets || unreadable) {
+                    ctx.actions[s.ref] = "NEEDS_CREDENTIALS"
+                    warn(ctx, "NEEDS_CREDENTIALS", s.ref, "Chat space ${s.label} is created without " +
+                            "${unreadable ? unreadable.join(', ') : 'its webhook'}; enter it on this instance.")
+                }
+            } else {
+                planMappedFills(ctx, spec(CHAT_SPACE), s, target)
+            }
+            Map f = (s.fields ?: [:]) as Map
+            if (text(f.chatProviderEnumId) == "CHAT_PROV_SLACK" && text(f.slackChannelId) && !text(target?.slackInstallId)) {
+                warn(ctx, "SLACK_INSTALL_NOT_COPIED", s.ref, "Chat space ${s.label} posts through a connected Slack workspace, " +
+                        "which does not move; connect the workspace on this instance and pick the channel again. Until then it " +
+                        "posts through its webhook, if it has one.")
+            }
+        }
     }
 
     // ---------------------------------------------------------------- knowledge gates (DAR-BE-161)
@@ -286,7 +334,7 @@ class ConfigTransferImporter {
         new LinkedHashSet<String>(BUNDLE_LISTS.values()).each { String list ->
             records(ctx, list).each { Map rec ->
                 String kind = (rec.kind ?: parseRef(rec.ref)?.get(0)) as String
-                Map kindSpec = TransferSpecs.spec(kind)
+                Map kindSpec = kindSpec(ctx, kind)
                 if (kindSpec == null || !isEntityAvailable(ec, kindSpec.entityName as String)) {
                     block(ctx, "KIND_UNAVAILABLE", rec.ref, "This instance has no ${kindSpec?.entityName ?: kind}, so ${rec.label ?: rec.ref} cannot be transferred.")
                     return
@@ -376,6 +424,9 @@ class ConfigTransferImporter {
                     runOfRule[rule.ref as String] = run.ref as String
                 }
             }
+            // DAR-BE-188: a run's compare scopes by position, as an automation names one.
+            String runId = parseRef(run.ref)?.get(1)
+            if (runId) ((run.children?.RuleSetCompareScope ?: []) as List).eachWithIndex { Object scope, int i -> carried.add(scopeRef(runId, i)) }
         }
         records(ctx, "lifecycles").each { Map l ->
             ((l.children?.ReconciliationRun ?: []) as List<Map>).each { Map q -> if (q.ref) carried.add(q.ref as String) }
@@ -433,8 +484,9 @@ class ConfigTransferImporter {
             return
         }
         ctx.handoffFingerprint = handoff.keyFingerprint
-        records(ctx, "connections").each { Map c ->
-            Map kindSpec = TransferSpecs.spec(c.kind as String)
+        // Connections' credentials, and (DAR-BE-188) chat spaces' webhooks.
+        SEALED_LISTS.collectMany { records(ctx, it) }.each { Map c ->
+            Map kindSpec = TransferSpecs.spec((c.kind ?: parseRef(c.ref)?.get(0)) as String)
             List<String> allowed = kindSpec && isEntityAvailable(ctx.ec, kindSpec.entityName as String) && !c.granted ?
                     secretFields(ctx.ec, kindSpec.entityName as String) : []
             // The source could not decrypt these (Moqui's placeholder): nothing to fill, so the operator enters them here.
@@ -492,7 +544,7 @@ class ConfigTransferImporter {
     }
 
     private static void fillMapped(Map ctx, Map c) {
-        Map kindSpec = TransferSpecs.spec(c.kind as String)
+        Map kindSpec = TransferSpecs.spec((c.kind ?: parseRef(c.ref)?.get(0)) as String)
         List<String> filled = fillEmptySecrets(ctx.ec, kindSpec.entityName as String, kindSpec.pkField as String,
                 ctx.resolved[c.ref] as String, ctx.tenantId as String, fillsFor(ctx, c))
         ctx.filledCount = ((ctx.filledCount ?: 0) as int) + filled.size()
@@ -517,7 +569,13 @@ class ConfigTransferImporter {
      * is itself encrypted), or when it decrypts to ''. A value that does not decrypt is not empty: it is never overwritten.
      */
     private static boolean isSecretEmpty(def ec, String entityName, String pkField, String id, String field) {
-        String column = ec.entity.getEntityDefinition(entityName).getColumnName(field)
+        def ed = ec.entity.getEntityDefinition(entityName)
+        // A column stored in clear (headersJson, a chat space's webhook) reads as it is; no raw SQL on a long text column.
+        if (!ed.getFieldInfo(field).encrypt) {
+            def plain = finder(ec, entityName).condition(pkField, id).selectFields([pkField, field]).useCache(false).one()
+            return plain != null && !(plain.get(field) as String)
+        }
+        String column = ed.getColumnName(field)
         if (finder(ec, entityName).condition(pkField, id)
                 .condition(ec.entity.conditionFactory.makeConditionWhere("(${column} IS NULL OR ${column} = '')".toString()))
                 .useCache(false).count() > 0) return true
@@ -552,11 +610,15 @@ class ConfigTransferImporter {
         }
     }
 
-    /** A run a lifecycle owns here is the lifecycle's to change, never a transfer's. */
+    /**
+     * A run a lifecycle owns here is the lifecycle's to change, never a transfer's, unless that lifecycle is the one the
+     * bundle's run is owned by (DAR-BE-188: a lifecycle carried before, matched by name).
+     */
     private static void ownedRunGate(Map ctx) {
         records(ctx, "runs").each { Map run ->
             def row = ctx.matches[run.ref]
-            if (row != null && text(row.ownerReconciliationId)) {
+            boolean ownLifecycle = run.ownedBy && ctx.resolved[run.ownedBy] == text(row?.ownerReconciliationId)
+            if (row != null && text(row.ownerReconciliationId) && !ownLifecycle) {
                 block(ctx, "TARGET_RUN_OWNED", run.ref, "Run ${run.label} here belongs to a lifecycle; rename one of them first.")
                 ctx.matches.remove(run.ref)
                 ctx.resolved.remove(run.ref)
@@ -769,6 +831,11 @@ class ConfigTransferImporter {
             List<String> parsed = parseRef(value)
             if (parsed == null) return text(value)
             if (parsed[0] == RULE) return (ctx.ruleIdentity[value] ?: "NEW:${value}") as String
+            if (parsed[0] == SCOPE) {
+                List scope = parseScopeId(parsed[1])
+                return scope ? "SCOPE@${ctx.resolved[TransferSpecs.ref(RUN, scope[0] as String)] ?: "NEW:RUN:${scope[0]}"}#${scope[1]}".toString()
+                        : "NEW:${value}".toString()
+            }
             if (ctx.sameTenant) return parsed[1]
             return (ctx.resolved[value] ?: "NEW:${value}") as String
         }
@@ -779,6 +846,10 @@ class ConfigTransferImporter {
         return { Object value ->
             List<String> parsed = parseRef(value)
             if (parsed == null) return text(value)
+            if (parsed[0] == SCOPE) {
+                List scope = parseScopeId(parsed[1])
+                return scope ? "SCOPE@${scope[0]}#${scope[1]}".toString() : "SCOPE?${parsed[1]}".toString()
+            }
             return parsed[0] == RULE ? targetRuleIdentity(ctx, parsed[1]) : parsed[1]
         }
     }
@@ -905,6 +976,9 @@ class ConfigTransferImporter {
                 stamp(ctx, child.entityName as String, value, creating)
                 if (creating) value.create() else value.update()
                 if (childRec.ref) ctx.idMap[childRec.ref] = value.get(child.pkField as String) as String
+                // DAR-BE-188: a compare scope by its run and position, for the automations that name it.
+                String parentId = child.positionKind ? parseRef(rec.ref)?.get(1) : null
+                if (parentId) ctx.idMap[TransferSpecs.ref(child.positionKind as String, "${parentId}#${i}".toString())] = value.get(child.pkField as String) as String
                 writeChildren(ctx, child, value, childRec, creating)
             }
             if (keepsIds) existing.drop(incoming.size()).each { deleteTree(ctx, child, it) }
@@ -1022,11 +1096,18 @@ class ConfigTransferImporter {
         row.delete()
     }
 
-    /** An unchanged run's rules, by position, so the checks that name them resolve. */
+    /** An unchanged run's rules and compare scopes, by position, so the checks and automations that name them resolve. */
     private static void keepRuleIds(Map ctx, Map run) {
         List<String> ruleIds = finder(ctx.ec, "darpan.rule.Rule").condition("ruleSetId", ctx.idMap[run.ref])
                 .orderBy(["sequenceNum", "ruleId"]).useCache(false).list()*.ruleId.collect { it as String }
         ((run.children?.Rule ?: []) as List<Map>).eachWithIndex { Map rule, int i -> if (i < ruleIds.size()) ctx.idMap[rule.ref] = ruleIds[i] }
+        Map scopeSpec = (spec(RUN).children as List<Map>).find { it.positionKind }
+        String runId = parseRef(run.ref)?.get(1)
+        List scopes = ConfigTransferExporter.childRows(ctx.ec, scopeSpec, [ruleSetId: ctx.idMap[run.ref]])
+        int carried = ((run.children?.RuleSetCompareScope ?: []) as List).size()
+        scopes.take(carried).eachWithIndex { scope, int i ->
+            ctx.idMap[TransferSpecs.ref(scopeSpec.positionKind as String, "${runId}#${i}".toString())] = scope.compareScopeId as String
+        }
     }
 
     /** As ConclusionCatalogSupport.create does: a DarpanConclusion enum and the TenantConclusion row that makes it the tenant's. */
@@ -1104,12 +1185,27 @@ class ConfigTransferImporter {
     private static void writeAutomation(Map ctx, Map a) {
         String action = ctx.actions[a.ref]
         if (!(action in [CREATE, "UPDATE"])) return
-        writeTree(ctx, spec(AUTOMATION), a, "")
+        writeTree(ctx, kindSpec(ctx, AUTOMATION), a, "")
         def row = finder(ctx.ec, spec(AUTOMATION).entityName as String).condition("automationId", ctx.idMap[a.ref]).useCache(false).one()
         if (row == null) return
         if (action == CREATE) row.set("isActive", "N")
         row.set("nextScheduledFireTime", AutomationExecutionSupport.resolveNextScheduledFireTime(row, ctx.now as Timestamp, ctx.now as Timestamp))
         row.update()
+    }
+
+    /**
+     * DAR-BE-188. A chat space: created with its opened webhooks, or updated in place; a matched one takes a webhook only
+     * where its own is empty (fillEmptySecrets), so one set here is never overwritten.
+     */
+    private static void writeChatSpace(Map ctx, Map s) {
+        Map spaceSpec = spec(CHAT_SPACE)
+        String action = ctx.actions[s.ref]
+        if (action in [CREATE, "NEEDS_CREDENTIALS"]) {
+            createRow(ctx, spaceSpec, s, newId(ctx, spaceSpec.entityName as String, spaceSpec.pkField as String, s.ref, ""), fillsFor(ctx, s))
+            return
+        }
+        if (action == "UPDATE") updateRow(ctx, spaceSpec, s)
+        if (action in ["UPDATE", "UNCHANGED"] && fillsFor(ctx, s)) fillMapped(ctx, s)
     }
 
     /** A run's rules must compile here too, against this instance's rule engine; the transfer fails if they do not. */
@@ -1215,7 +1311,7 @@ class ConfigTransferImporter {
         Map out = [kind    : kind, ref: rec.ref, label: rec.label, action: action,
                    targetId: action in [CREATE, "NEEDS_CREDENTIALS"] ? null : ctx.resolved[rec.ref],
                    changes : (ctx.changes[rec.ref] ?: []) as List]
-        if (ctx.carriesSecrets && kind in CONNECTION_KINDS) {
+        if (ctx.carriesSecrets && (kind in CONNECTION_KINDS || kind == CHAT_SPACE)) {
             out.secretsFilled = (ctx.fills[rec.ref] ?: []) as List
             out.secretsKept = (ctx.kept[rec.ref] ?: []) as List
         }

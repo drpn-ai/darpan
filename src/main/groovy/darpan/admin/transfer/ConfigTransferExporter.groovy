@@ -80,10 +80,17 @@ class ConfigTransferExporter {
      * <p>DAR-ADMIN-007: with secretsPublicKey (the target's, from begin#SecretHandoff) every owned connection's non-empty
      * secret columns are sealed to that key in sealedSecrets, and one AdminAuditLog row records what was sealed and to
      * which key, never a value. Without it nothing secret is read, exactly as before.</p>
+     *
+     * <p>DAR-BE-188: includeAutomations (an admin transfer of a whole tenant) adds what a version holds beyond audits and
+     * runs: every lifecycle, and the automations of the runs and lifecycles held. In a transfer an automation's run,
+     * compare scope and chat space travel as refs, and the chat spaces it posts to travel too, their webhooks sealed
+     * with the connections' credentials. A version (forVersion) carries automations as it always has.</p>
      */
     static Map<String, Object> bundle(def ec, String tenantId, List auditCodes, List savedRunIds, List connectionRefs,
-                                      String sourceInstanceLabel, String secretsPublicKey = null, boolean forVersion = false) {
+                                      String sourceInstanceLabel, String secretsPublicKey = null, boolean forVersion = false,
+                                      boolean includeAutomations = false) {
         if (!requireTenant(ec, tenantId)) return null
+        boolean withAutomations = forVersion || includeAutomations
         Map<String, Object> bundleKey = null
         if (text(secretsPublicKey)) {
             try {
@@ -126,7 +133,7 @@ class ConfigTransferExporter {
         Set<String> pickedRunIds = ((savedRunIds ?: []) as List).collect { text(it) }.findAll { it } as Set<String>
         runIds.addAll(pickedRunIds)
         // DAR-BE-160: a version holds every lifecycle, and the runs its switched-on questions ask.
-        List lifecycles = forVersion ? finder(ec, spec(LIFECYCLE).entityName as String).condition("companyUserGroupId", tenantId)
+        List lifecycles = withAutomations ? finder(ec, spec(LIFECYCLE).entityName as String).condition("companyUserGroupId", tenantId)
                 .orderBy(["reconciliationName", "reconciliationId"]).useCache(false).list() : []
         if (lifecycles) {
             finder(ec, "darpan.reconciliation.ReconciliationRun").condition("companyUserGroupId", tenantId)
@@ -151,9 +158,9 @@ class ConfigTransferExporter {
         }
         List<Map> runRecords = runs.collect { run ->
             Map rec = labelled(record(ec, spec(RUN), run, namer), run.ruleSetName ?: run.ruleSetId)
-            // A run a lifecycle owns says so: a version restores it as the lifecycle's again (an admin transfer never
-            // carries one; the catalog does not offer them).
-            if (forVersion && text(run.ownerReconciliationId)) rec.ownedBy = namer(LIFECYCLE, run.ownerReconciliationId)
+            // A run a lifecycle owns says so: it lands as that lifecycle's again. Only a bundle that holds lifecycles
+            // carries one (the catalog does not offer them).
+            if (withAutomations && text(run.ownerReconciliationId)) rec.ownedBy = namer(LIFECYCLE, run.ownerReconciliationId)
             return rec
         }
         List<Map> lifecycleRecords = lifecycles.collect {
@@ -163,13 +170,31 @@ class ConfigTransferExporter {
         // DAR-BE-160: a version also holds the automations of the runs it holds (read before the queries: a source can
         // name a query no run uses). A lifecycle's or a mapping's automation has no saved run here and waits.
         List<Map> automationRecords = []
-        if (forVersion) {
+        if (withAutomations) {
             Set<String> heldRuns = runs*.ruleSetId.collect { it as String } as Set<String>
             Set<String> heldLifecycles = lifecycles*.reconciliationId.collect { it as String } as Set<String>
+            Map automationSpec = forVersion ? versionSpec(spec(AUTOMATION)) : spec(AUTOMATION)
             automationRecords = finder(ec, spec(AUTOMATION).entityName as String).condition("companyUserGroupId", tenantId)
                     .orderBy(["automationName", "automationId"]).useCache(false).list()
                     .findAll { (it.savedRunId as String) in (polymorphicKind(ec, spec(AUTOMATION), it) == LIFECYCLE ? heldLifecycles : heldRuns) }
-                    .collect { labelled(record(ec, spec(AUTOMATION), it, namer), it.automationName ?: it.automationId) }
+                    .collect { labelled(record(ec, automationSpec, it, namer), it.automationName ?: it.automationId) }
+        }
+
+        // DAR-BE-188: the chat spaces those automations post to, the tenant's own only; no webhook is read here.
+        List<Map> chatSpaceRecords = []
+        Set<String> spaceIds = reached[CHAT_SPACE]
+        if (spaceIds) {
+            String spaceEntity = spec(CHAT_SPACE).entityName as String
+            List spaces = finder(ec, spaceEntity).condition("companyUserGroupId", tenantId).condition("chatSpaceId", "in", spaceIds)
+                    .selectFields(readableFields(ec, spaceEntity)).orderBy(["spaceName", "chatSpaceId"]).useCache(false).list()
+            (spaceIds - (spaces*.chatSpaceId.collect { it as String } as Set)).each { String id ->
+                ec.message.addError("An automation posts to chat space '${id}', which tenant ${tenantId} does not own.")
+            }
+            chatSpaceRecords = spaces.collect {
+                Map rec = labelled(record(ec, spec(CHAT_SPACE), it, namer), it.spaceName ?: it.chatSpaceId)
+                rec.secretFields = secretFields(ec, spaceEntity)
+                return rec
+            }
         }
 
         // DAR-BE-161: the tenant's knowledge entries, ACTIVE and RETIRED (statusId travels, so a retire reaches the
@@ -208,7 +233,7 @@ class ConfigTransferExporter {
             }
         }
         if (ec.message.hasError()) return null
-        Map<String, Object> secrets = bundleKey == null ? null : sealSecrets(ec, tenantId, connectionRecords, bundleKey)
+        Map<String, Object> secrets = bundleKey == null ? null : sealSecrets(ec, tenantId, connectionRecords, chatSpaceRecords, bundleKey)
 
         Map<String, Object> out = [bundleVersion  : BUNDLE_VERSION,
                 source         : [instanceLabel: sourceInstanceLabel, darpanVersion: darpanVersion(ec), tenantUserGroupId: tenantId],
@@ -219,8 +244,10 @@ class ConfigTransferExporter {
                 audits         : auditRecords,
                 statements     : statementRecords,
                 checks         : checkRecords] as Map<String, Object>
-        if (forVersion) {
+        if (withAutomations) {
             out.lifecycles = lifecycleRecords
+            // A version never holds a space (its automations name theirs by id), so its pack is what it was.
+            if (!forVersion) out.chatSpaces = chatSpaceRecords
             out.automations = automationRecords
         }
         if (knowledgeRecords) out.knowledge = knowledgeRecords
@@ -229,15 +256,16 @@ class ConfigTransferExporter {
     }
 
     /**
-     * Seals each owned connection's non-empty secret columns (TransferSpecs.secretFields) into its sealedSecrets, and
-     * logs one source AdminAuditLog row naming the connections, the fields and the target key's fingerprint. A column this
-     * instance cannot decrypt reads as Moqui's placeholder: it is never sealed (writing it back throws), only named in
-     * unreadableSecrets, so the target asks for it instead.
+     * Seals each owned connection's, and each chat space's, non-empty secret columns (TransferSpecs.secretFields) into its
+     * sealedSecrets, and logs one source AdminAuditLog row naming the records, the fields and the target key's fingerprint.
+     * A column this instance cannot decrypt reads as Moqui's placeholder: it is never sealed (writing it back throws),
+     * only named in unreadableSecrets, so the target asks for it instead.
      */
-    private static Map<String, Object> sealSecrets(def ec, String tenantId, List<Map> connections, Map<String, Object> bundleKey) {
+    private static Map<String, Object> sealSecrets(def ec, String tenantId, List<Map> connections, List<Map> chatSpaces,
+                                                   Map<String, Object> bundleKey) {
         List<String> sealedLines = []
-        connections.findAll { !it.granted }.each { Map rec ->
-            Map kindSpec = TransferSpecs.spec(rec.kind as String)
+        (connections.findAll { !it.granted } + chatSpaces).each { Map rec ->
+            Map kindSpec = TransferSpecs.spec((rec.kind ?: parseRef(rec.ref)[0]) as String)
             String entityName = kindSpec.entityName as String
             List<String> secretColumns = secretFields(ec, entityName)
             String id = parseRef(rec.ref)[1]
@@ -295,6 +323,10 @@ class ConfigTransferExporter {
         if (spec.polymorphicRef && text(row.get(spec.polymorphicRef as String))) {
             refs[spec.polymorphicRef as String] = namer(polymorphicKind(ec, spec, row), row.get(spec.polymorphicRef as String))
         }
+        // DAR-BE-188: a compare scope by its run and position, which is how the target finds its own copy of it.
+        ((spec.positionRefs ?: [:]) as Map<String, String>).each { String f, String kind ->
+            if (text(row.get(f))) refs[f] = scopeRefOf(ec, row, text(row.get(f)))
+        }
         out.refs = refs
         if (spec.children) {
             Map<String, List> children = [:]
@@ -304,6 +336,20 @@ class ConfigTransferExporter {
             out.children = children
         }
         return out
+    }
+
+    /**
+     * SCOPE:<ruleSetId>#<index> for a compare scope of a run the row's tenant owns; a scope that is gone, or another
+     * tenant's, stays SCOPE:<id>, a ref no bundle carries, so the target refuses it by name.
+     */
+    private static String scopeRefOf(def ec, def row, String compareScopeId) {
+        Map scopeSpec = (spec(RUN).children as List<Map>).find { it.positionKind == SCOPE }
+        def scope = finder(ec, scopeSpec.entityName as String).condition("compareScopeId", compareScopeId).useCache(false).one()
+        def run = scope ? finder(ec, "darpan.rule.RuleSet").condition("ruleSetId", scope.ruleSetId)
+                .condition("companyUserGroupId", row.get("companyUserGroupId")).useCache(false).list().find() : null
+        if (run == null) return TransferSpecs.ref(SCOPE, compareScopeId)
+        int index = childRows(ec, scopeSpec, run).findIndexOf { it.compareScopeId == compareScopeId }
+        return TransferSpecs.scopeRef(run.ruleSetId as String, index)
     }
 
     /** A child spec's rows under one parent row, in the spec's order, without encrypted columns. */

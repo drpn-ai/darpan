@@ -1,5 +1,6 @@
 package darpan.admin
 
+import darpan.admin.transfer.ConfigTransferExporter
 import darpan.admin.transfer.ConfigTransferImporter
 import darpan.admin.transfer.SecretHandoff
 import darpan.facade.common.TenantAccessSupport
@@ -44,6 +45,9 @@ class ConfigTransferSmokeTests {
     /** Every entity a transfer writes, children first, so a wipe never trips a foreign key. */
     private static final List<String> TRANSFER_ENTITIES = [
             "darpan.reconciliation.ReconciliationRunResult",
+            "darpan.reconciliation.ReconciliationAutomationSourceFilter", "darpan.reconciliation.ReconciliationAutomationSource",
+            "darpan.reconciliation.ReconciliationAutomation", "darpan.reconciliation.TenantChatSpace",
+            "darpan.reconciliation.ReconciliationRun", "darpan.reconciliation.Reconciliation",
             "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
             "darpan.rule.RuleSetConclusionCondition", "darpan.rule.RuleSetConclusionRule",
             "darpan.rule.RuleSetCompareSourceFilter", "darpan.rule.RuleSetCompareSourceKeyField",
@@ -987,7 +991,300 @@ class ConfigTransferSmokeTests {
         assertFalse((plan.warnings as List<Map>).any { it.code == "NEEDS_CREDENTIALS" })
     }
 
+    // ---------------------------------------------------------------- DAR-BE-188: automations and their chat spaces
+
+    @Test
+    void withoutIncludeAutomationsTheBundleIsUnchanged() {
+        withAutomation {
+            Map plain = exportSource()
+            Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC, auditCodes: ["month-close"],
+                    sourceInstanceLabel: "local", includeAutomations: false])
+            assertNoErrors(out)
+            assertEquals(JsonOutput.toJson(plain), JsonOutput.toJson(out.result.bundle), "false is the default")
+            ["automations", "chatSpaces", "lifecycles"].each { assertFalse(plain.containsKey(it), "${it} only travel when asked for") }
+            assertFalse(JsonOutput.toJson(plain).contains("XFER_SPACE"))
+        }
+    }
+
+    @Test
+    void includeAutomationsCarriesTheAutomationAndItsChatSpaceSealed() {
+        withAutomation {
+            Map handoff = beginHandoff(DST)
+            Map bundle = exportWhole(handoff.publicKey as String)
+            String json = JsonOutput.toJson(bundle)
+            [WEBHOOK, OLD_WEBHOOK, "hook-secret-xfer"].each { assertFalse(json.contains(it), "no webhook in clear: ${it}") }
+
+            Map automation = (bundle.automations as List<Map>).find { it.ref == AUTO_REF }
+            assertNotNull(automation, "the run's automation travels: ${bundle.automations}")
+            assertEquals(SPACE_REF, automation.refs.chatSpaceId)
+            assertEquals("RUN:XFER_RS", automation.refs.savedRunId)
+            assertEquals("RUN:XFER_RS", automation.refs.ruleSetId)
+            assertEquals("SCOPE:XFER_RS#0", automation.refs.compareScopeId, "its compare scope by run and position")
+            ["chatSpaceId", "ruleSetId", "compareScopeId", "savedRunId", "isActive", "reconciliationRunId", "reconciliationMappingId"].each {
+                assertFalse((automation.fields as Map).containsKey(it), "${it} is no plain value in a transfer")
+            }
+
+            Map space = (bundle.chatSpaces as List<Map>).find { it.ref == SPACE_REF }
+            assertNotNull(space, "the space it posts to travels: ${bundle.chatSpaces}")
+            assertEquals("Ops alerts", space.label)
+            assertEquals(["chatProviderEnumId", "isActive", "slackChannelId", "slackChannelName", "spaceName"],
+                    (space.fields as Map).keySet().collect { it as String }.sort())
+            assertEquals(["googleChatWebhookUrl", "webhookUrl"], space.secretFields)
+            assertEquals(["googleChatWebhookUrl", "webhookUrl"], (space.sealedSecrets as Map).keySet().collect { it as String }.sort())
+            assertFalse(JsonOutput.toJson(bundle.chatSpaces).contains("XFER_OTHER_SPACE"), "another tenant's space never travels")
+
+            String detail = ec.entity.find("darpan.admin.AdminAuditLog").condition("serviceName", "admin.TransferAdminServices.export#ConfigBundle")
+                    .disableAuthz().useCache(false).one().detailText
+            [AUTH_REF, SPACE_REF, "webhookUrl"].each { assertTrue(detail.contains(it), "${it} in ${detail}") }
+            assertFalse(detail.contains("hook-secret-xfer"))
+
+            Map unsealed = exportWhole()
+            assertFalse(JsonOutput.toJson(unsealed).contains("hook-secret-xfer"), "without a key nothing secret is read")
+            assertNull((unsealed.chatSpaces as List<Map>)[0].sealedSecrets)
+        }
+    }
+
+    @Test
+    void importCreatesTheSpaceWithItsWebhookAndThePausedAutomationPointsAtIt() {
+        withAutomation {
+            Map handoff = beginHandoff(DST)
+            Map bundle = exportWhole(handoff.publicKey as String)
+            Map map = [(AUTH_REF): "CREATE"]
+            Map preview = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
+            assertNoErrors(preview)
+            Map plan = preview.result.plan as Map
+            assertEquals([], plan.blocking)
+            Map spaceLine = (plan.lines as List<Map>).find { it.ref == SPACE_REF }
+            assertEquals("CHAT_SPACE", spaceLine?.kind, "${plan.lines}")
+            assertEquals("CREATE", spaceLine.action)
+            assertEquals(["googleChatWebhookUrl", "webhookUrl"], spaceLine.secretsFilled)
+            assertEquals("CREATE", (plan.lines as List<Map>).find { it.ref == AUTO_REF }?.action)
+            assertTrue((plan.lines as List<Map>)*.kind.indexOf("CHAT_SPACE") < (plan.lines as List<Map>)*.kind.indexOf("AUTOMATION"))
+
+            Map applied = importInto(DST, bundle, map, true, preview.result.planHash as String, handoff.handoffToken as String)
+            assertNoErrors(applied)
+            Map idMap = applied.result.idMap as Map
+            def space = ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", idMap[SPACE_REF])
+                    .disableAuthz().useCache(false).one()
+            assertNotEquals("XFER_SPACE", space.chatSpaceId)
+            assertEquals(DST, space.companyUserGroupId)
+            assertEquals("Ops alerts", space.spaceName)
+            assertEquals(WEBHOOK, space.webhookUrl, "the webhook is filled from its sealed value")
+            assertEquals(OLD_WEBHOOK, space.googleChatWebhookUrl)
+            assertNull(space.lastBadgeGifDate, "instance-local columns stay behind")
+
+            def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", idMap[AUTO_REF])
+                    .disableAuthz().useCache(false).one()
+            assertEquals(DST, automation.companyUserGroupId)
+            assertEquals(space.chatSpaceId, automation.chatSpaceId, "the automation posts to the new space")
+            assertEquals("N", automation.isActive, "an imported automation starts paused")
+            assertEquals(idMap["RUN:XFER_RS"], automation.savedRunId)
+            assertEquals(idMap["RUN:XFER_RS"], automation.ruleSetId)
+            assertEquals(ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", idMap["RUN:XFER_RS"]).disableAuthz()
+                    .useCache(false).one().compareScopeId, automation.compareScopeId, "and reads the new run's compare scope")
+            def source = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", automation.automationId)
+                    .disableAuthz().useCache(false).one()
+            assertEquals(idMap["NETSUITE_SUITEQL:XFER_Q1"], (new JsonSlurper().parseText(source.safeMetadataJson as String) as Map).parameters.nsSuiteQlSourceQueryId)
+            assertEquals(1L, ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                    .condition("automationId", automation.automationId).disableAuthz().useCache(false).count())
+
+            String everythingSaid = JsonOutput.toJson([preview.result, applied.result,
+                    ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()*.getMap()])
+            assertFalse(everythingSaid.contains("hook-secret-xfer"), "no webhook in a plan or the audit log")
+        }
+    }
+
+    @Test
+    void reimportAfterTheAutomationTransferIsAllUnchanged() {
+        withAutomation {
+            Map handoff = beginHandoff(DST)
+            Map bundle = exportWhole(handoff.publicKey as String)
+            Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, handoff.handoffToken as String)
+            Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String, handoff.handoffToken as String)
+            assertNoErrors(applied)
+
+            Map again = beginHandoff(DST)
+            Map plan = importInto(DST, exportWhole(again.publicKey as String), [(AUTH_REF): applied.result.idMap[AUTH_REF]], false, null,
+                    again.handoffToken as String).result.plan as Map
+            assertEquals([], plan.blocking)
+            (plan.lines as List<Map>).each {
+                assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+            }
+            Map spaceLine = (plan.lines as List<Map>).find { it.ref == SPACE_REF }
+            assertEquals([], spaceLine.secretsFilled)
+            assertEquals(["googleChatWebhookUrl", "webhookUrl"], spaceLine.secretsKept)
+            assertEquals(0, plan.counts.CREDENTIALS_FILLED)
+        }
+    }
+
+    @Test
+    void anExistingSpacesWebhookIsKept() {
+        withAutomation {
+            // Matched by name whatever its case (spaceName is unique per tenant, case-insensitive); only its empty webhook is filled.
+            create("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "XFER_DST_SPACE", companyUserGroupId: DST, spaceName: "ops ALERTS",
+                    chatProviderEnumId: "CHAT_PROV_GOOGLE", webhookUrl: "https://chat.example/dst-own", isActive: "Y"])
+            Map handoff = beginHandoff(DST)
+            Map bundle = exportWhole(handoff.publicKey as String)
+            Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, handoff.handoffToken as String)
+            assertNoErrors(preview)
+            assertEquals([], preview.result.plan.blocking)
+            Map line = (preview.result.plan.lines as List<Map>).find { it.ref == SPACE_REF }
+            assertEquals("XFER_DST_SPACE", line.targetId)
+            assertEquals(["googleChatWebhookUrl"], line.secretsFilled)
+            assertEquals(["webhookUrl"], line.secretsKept)
+            Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String, handoff.handoffToken as String)
+            assertNoErrors(applied)
+            def space = ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "XFER_DST_SPACE").disableAuthz().useCache(false).one()
+            assertEquals("https://chat.example/dst-own", space.webhookUrl, "a set webhook is never overwritten")
+            assertEquals(OLD_WEBHOOK, space.googleChatWebhookUrl, "an empty one is filled")
+            assertEquals(1L, ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("companyUserGroupId", DST).disableAuthz().useCache(false).count())
+            assertEquals("XFER_DST_SPACE", ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", applied.result.idMap[AUTO_REF])
+                    .disableAuthz().useCache(false).one().chatSpaceId)
+        }
+    }
+
+    @Test
+    void anUnsealedSpaceIsCreatedWithoutItsWebhook() {
+        withAutomation {
+            Map bundle = exportWhole()
+            Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"])
+            assertNoErrors(preview)
+            Map plan = preview.result.plan as Map
+            assertEquals([], plan.blocking)
+            assertEquals("NEEDS_CREDENTIALS", (plan.lines as List<Map>).find { it.ref == SPACE_REF }.action)
+            assertTrue((plan.warnings as List<Map>).any { it.code == "NEEDS_CREDENTIALS" && it.ref == SPACE_REF }, "${plan.warnings}")
+            Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String)
+            assertNoErrors(applied)
+            def space = ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", applied.result.idMap[SPACE_REF])
+                    .disableAuthz().useCache(false).one()
+            assertNull(space.webhookUrl)
+        }
+    }
+
+    @Test
+    void aSlackSpaceArrivesWithoutItsWorkspaceInstall() {
+        withAutomation {
+            create("darpan.reconciliation.SlackWorkspaceInstall", [slackInstallId: "XFER_SLACK", companyUserGroupId: SRC, teamId: "T1",
+                    teamName: "Xfer"])
+            ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "XFER_SPACE").disableAuthz().one()
+                    .setAll([chatProviderEnumId: "CHAT_PROV_SLACK", slackInstallId: "XFER_SLACK", slackChannelId: "C123", slackChannelName: "ops"]).update()
+            try {
+                Map bundle = exportWhole()
+                assertFalse(JsonOutput.toJson(bundle).contains("XFER_SLACK"), "the install is this instance's, not config")
+                Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"])
+                Map plan = preview.result.plan as Map
+                assertEquals([], plan.blocking)
+                assertTrue((plan.warnings as List<Map>).any { it.code == "SLACK_INSTALL_NOT_COPIED" && it.ref == SPACE_REF }, "${plan.warnings}")
+                Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String)
+                assertNoErrors(applied)
+                def space = ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", applied.result.idMap[SPACE_REF])
+                        .disableAuthz().useCache(false).one()
+                assertNull(space.slackInstallId)
+                assertEquals("C123", space.slackChannelId)
+            } finally {
+                ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "XFER_SPACE").disableAuthz().one()
+                        .setAll([chatProviderEnumId: "CHAT_PROV_GOOGLE", slackInstallId: null, slackChannelId: null, slackChannelName: null]).update()
+                ec.entity.find("darpan.reconciliation.SlackWorkspaceInstall").condition("slackInstallId", "XFER_SLACK").disableAuthz().deleteAll()
+            }
+        }
+    }
+
+    @Test
+    void aLifecycleItsOwnedRunAndItsAutomationTransferAndConverge() {
+        withAutomation {
+            create("darpan.reconciliation.Reconciliation", [reconciliationId: "XFER_LC", reconciliationName: "Sales orders",
+                    companyUserGroupId: SRC, buildMode: "STAGES"])
+            create("darpan.rule.RuleSet", [ruleSetId: "XFER_RS_LC", ruleSetName: "Sales orders: start", version: "1.0",
+                    companyUserGroupId: SRC, ownerReconciliationId: "XFER_LC"])
+            create("darpan.reconciliation.ReconciliationRun", [reconciliationRunId: "XFER_LC_Q1", reconciliationId: "XFER_LC",
+                    companyUserGroupId: SRC, runName: "Start", ruleSetId: "XFER_RS_LC", runSequence: 1L, questionRole: "START", isActive: "Y"])
+            create("darpan.reconciliation.ReconciliationAutomation", [automationId: "XFER_LC_AUTO", automationName: "Sales orders every morning",
+                    companyUserGroupId: SRC, inputModeEnumId: "AUT_IN_API_RANGE", savedRunType: "reconciliation", savedRunId: "XFER_LC",
+                    scheduleExpr: "0 0 7 * * ?", windowTimeZone: "America/Los_Angeles", chatSpaceId: "XFER_SPACE", isActive: "Y"])
+            try {
+                Map bundle = exportWhole()
+                assertEquals("LIFECYCLE:XFER_LC", (bundle.runs as List<Map>).find { it.ref == "RUN:XFER_RS_LC" }?.ownedBy)
+                Map applied = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+                assertNoErrors(applied)
+                Map idMap = applied.result.idMap as Map
+                assertEquals(idMap["LIFECYCLE:XFER_LC"], ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", idMap["RUN:XFER_RS_LC"])
+                        .disableAuthz().useCache(false).one().ownerReconciliationId, "the run is the new lifecycle's")
+                def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", idMap["AUTOMATION:XFER_LC_AUTO"])
+                        .disableAuthz().useCache(false).one()
+                assertEquals(idMap["LIFECYCLE:XFER_LC"], automation.savedRunId)
+                assertEquals(idMap[SPACE_REF], automation.chatSpaceId)
+                assertEquals("N", automation.isActive)
+
+                Map plan = importInto(DST, exportWhole(), [(AUTH_REF): idMap[AUTH_REF]]).result.plan as Map
+                assertEquals([], plan.blocking, "a run the bundle's own lifecycle owns here is not someone else's")
+                (plan.lines as List<Map>).each {
+                    assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+                }
+            } finally {
+                ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "XFER_LC_AUTO").disableAuthz().deleteAll()
+                ec.entity.find("darpan.reconciliation.ReconciliationRun").condition("reconciliationRunId", "XFER_LC_Q1").disableAuthz().deleteAll()
+                ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "XFER_RS_LC").disableAuthz().deleteAll()
+                ec.entity.find("darpan.reconciliation.Reconciliation").condition("reconciliationId", "XFER_LC").disableAuthz().deleteAll()
+            }
+        }
+    }
+
+    @Test
+    void aVersionKeepsTheAutomationsIdsPlainAndCarriesNoSpaces() {
+        // A tenant config version restores into its own tenant: its pack (and so its hash) is what it was before DAR-BE-188.
+        withAutomation {
+            Map pack = ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true)
+            Map automation = (pack.automations as List<Map>).find { it.ref == AUTO_REF }
+            assertEquals("XFER_SPACE", automation.fields.chatSpaceId)
+            assertEquals("XFER_RS", automation.fields.ruleSetId)
+            assertEquals("XFER_CS", automation.fields.compareScopeId)
+            assertEquals(["savedRunId"], (automation.refs as Map).keySet() as List)
+            assertFalse(pack.containsKey("chatSpaces"))
+        }
+    }
+
     // ---------------------------------------------------------------- fixtures
+
+    private static final String WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=hook-secret-xfer"
+    private static final String OLD_WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=old-hook-secret-xfer"
+    private static final String SPACE_REF = "CHAT_SPACE:XFER_SPACE"
+    private static final String AUTO_REF = "AUTOMATION:XFER_AUTO"
+
+    /** SRC's run gets a morning automation posting to its Google Chat space (and OTHER a space of the same name). */
+    private void withAutomation(Closure body) {
+        create("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "XFER_SPACE", companyUserGroupId: SRC, spaceName: "Ops alerts",
+                chatProviderEnumId: "CHAT_PROV_GOOGLE", webhookUrl: WEBHOOK, googleChatWebhookUrl: OLD_WEBHOOK, isActive: "Y",
+                lastBadgeGifDate: T0, createdByUserId: "XFER_SUPER"])
+        create("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "XFER_OTHER_SPACE", companyUserGroupId: OTHER, spaceName: "Ops alerts",
+                chatProviderEnumId: "CHAT_PROV_GOOGLE", webhookUrl: "https://chat.example/other-hook", isActive: "Y"])
+        create("darpan.reconciliation.ReconciliationAutomation", [automationId: "XFER_AUTO", automationName: "Returns every morning",
+                companyUserGroupId: SRC, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "XFER_RS", savedRunType: "ruleset",
+                ruleSetId: "XFER_RS", compareScopeId: "XFER_CS", scheduleExpr: "0 0 6 * * ?", windowTimeZone: "America/Los_Angeles",
+                chatSpaceId: "XFER_SPACE", isActive: "Y"])
+        create("darpan.reconciliation.ReconciliationAutomationSource", [automationId: "XFER_AUTO", fileSide: "FILE_1",
+                companyUserGroupId: SRC, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
+                safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"XFER_Q1"}}'])
+        create("darpan.reconciliation.ReconciliationAutomationSourceFilter", [automationId: "XFER_AUTO", fileSide: "FILE_1",
+                sequenceNum: 1L, companyUserGroupId: SRC, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: '["Closed"]'])
+        try {
+            body()
+        } finally {
+            wipeTenant(DST)
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
+            ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "in", ["XFER_SPACE", "XFER_OTHER_SPACE"])
+                    .disableAuthz().deleteAll()
+        }
+    }
+
+    private Map exportWhole(String publicKey = null) {
+        Map params = [tenantUserGroupId: SRC, auditCodes: ["month-close"], sourceInstanceLabel: "local", includeAutomations: true]
+        if (publicKey) params.secretsPublicKey = publicKey
+        Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", params)
+        assertNoErrors(out)
+        return out.result.bundle as Map
+    }
 
     private void seedSource() {
         create("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "XFER_NS_AUTH", description: "gorjana prod",

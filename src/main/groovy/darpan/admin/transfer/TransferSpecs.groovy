@@ -32,20 +32,36 @@ class TransferSpecs {
     static final String AUDIT = "AUDIT"
     static final String STATEMENT = "STATEMENT"
     static final String CHECK = "CHECK"
-    /** DAR-BE-160. Carried only by a tenant config version (bundle withAutomations), never by an admin transfer. */
+    /**
+     * DAR-BE-160. Carried by a tenant config version, and (DAR-BE-188) by an admin transfer asked for its automations
+     * (export#ConfigBundle includeAutomations).
+     */
     static final String AUTOMATION = "AUTOMATION"
     /** DAR-BE-160. A lifecycle (darpan.reconciliation.Reconciliation) and its questions; version-only, like AUTOMATION. */
     static final String LIFECYCLE = "LIFECYCLE"
     static final String QUESTION = "QUESTION"
+    /**
+     * DAR-BE-188. A tenant's chat space (darpan.reconciliation.TenantChatSpace), carried when an automation posts to it.
+     * Its webhooks are stored in clear but are bearer secrets, so they travel only sealed, like a connection's credentials.
+     */
+    static final String CHAT_SPACE = "CHAT_SPACE"
+    /**
+     * DAR-BE-188. A run's compare scope by its run and position ({@code SCOPE:<ruleSetId>#<index>}), as an automation
+     * names it in a transfer: a scope has no ref of its own, and keeps its target id by position like a rule does.
+     */
+    static final String SCOPE = "SCOPE"
     /**
      * DAR-BE-161. A tenant's knowledge entries (darpan.knowledge.KnowledgeEntry), ACTIVE and RETIRED (statusId travels, so a
      * retire reaches the target). Imported only into the tenant they came from (ConfigTransferImporter.knowledgeGate).
      */
     static final String KNOWLEDGE = "KNOWLEDGE"
     /** Kinds that live only as children of another kind's record (refs to them resolve inside their parent). */
-    static final List<String> CHILD_KINDS = [RULE, QUESTION].asImmutable()
+    static final List<String> CHILD_KINDS = [RULE, QUESTION, SCOPE].asImmutable()
 
     static final List<String> CONNECTION_KINDS = [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_RESTLET].asImmutable()
+
+    /** DAR-BE-188. The bundle lists whose records may carry sealedSecrets. */
+    static final List<String> SEALED_LISTS = ["connections", "chatSpaces"].asImmutable()
 
     /** Never carried: the tenant, who and when. The importer stamps its own. */
     static final Set<String> STAMP_FIELDS = (["companyUserGroupId", "lastUpdatedStamp", "createdDate", "lastUpdatedDate",
@@ -67,8 +83,10 @@ class TransferSpecs {
 
     private static final Map RULE_CHILD = [kind: RULE, entityName: "darpan.rule.Rule", pkField: "ruleId",
                                            parentFields: ["ruleSetId"], orderBy: ["sequenceNum", "ruleId"]]
+    // positionKind: refs name a scope as SCOPE:<ruleSetId>#<index in this order> (DAR-BE-188); the scope record itself
+    // carries no ref, so a run's records are what they were.
     private static final Map SCOPE_CHILD = [entityName: "darpan.rule.RuleSetCompareScope", pkField: "compareScopeId",
-            mintPrefix: "CS_", parentFields: ["ruleSetId"], orderBy: ["objectType", "compareScopeId"], children: [
+            mintPrefix: "CS_", parentFields: ["ruleSetId"], orderBy: ["objectType", "compareScopeId"], positionKind: SCOPE, children: [
             [entityName: "darpan.rule.RuleSetCompareSource", parentFields: ["compareScopeId"], orderBy: ["fileSide"],
              refFields: [nsRestletConfigId: NETSUITE_RESTLET], polymorphicRef: "sourceConfigId", children: [
                     [entityName: "darpan.rule.RuleSetCompareSourceKeyField", parentFields: ["compareScopeId", "fileSide"],
@@ -119,10 +137,19 @@ class TransferSpecs {
                     [kind: QUESTION, entityName: "darpan.reconciliation.ReconciliationRun", pkField: "reconciliationRunId",
                      parentFields: ["reconciliationId"], orderBy: ["runSequence", "reconciliationRunId"], activeOnly: "isActive",
                      selfRef: "parentReconciliationRunId", refFields: [ruleSetId: RUN, parentReconciliationRunId: QUESTION]]]],
-            // savedRunId names a run, or a lifecycle when savedRunType is "reconciliation" (polymorphicKind).
+            // DAR-BE-188. Matched by spaceName, unique per tenant whatever its case. The webhooks are sealed secrets; the
+            // Slack workspace install it posts through, and when it last sent a badge GIF, are this instance's.
+            [kind: CHAT_SPACE, entityName: "darpan.reconciliation.TenantChatSpace", pkField: "chatSpaceId", naturalKey: "spaceName",
+             extraSecretFields: ["webhookUrl", "googleChatWebhookUrl"], dropFields: ["slackInstallId", "lastBadgeGifDate"]],
+            // savedRunId names a run, or a lifecycle when savedRunType is "reconciliation" (polymorphicKind). In a transfer
+            // its run, compare scope and chat space travel as refs; the legacy question and mapping ids stay behind (a
+            // mapping's automation is never carried). A version keeps all of these as the plain ids they are
+            // (versionPlainFields): it restores into its own tenant, and its pack, so its hash, is what it was before.
             [kind: AUTOMATION, entityName: "darpan.reconciliation.ReconciliationAutomation", pkField: "automationId",
              naturalKey: "automationName", polymorphicRef: "savedRunId",
-             dropFields: ["isActive", "nextScheduledFireTime", "lastScheduledFireTime"], children: [
+             refFields: [ruleSetId: RUN, chatSpaceId: CHAT_SPACE], positionRefs: [compareScopeId: SCOPE],
+             dropFields: ["isActive", "nextScheduledFireTime", "lastScheduledFireTime", "reconciliationRunId", "reconciliationMappingId"],
+             versionPlainFields: ["ruleSetId", "chatSpaceId", "compareScopeId", "reconciliationRunId", "reconciliationMappingId"], children: [
                     [entityName: "darpan.reconciliation.ReconciliationAutomationSource", parentFields: ["automationId"],
                      orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
                             [entityName: "darpan.reconciliation.ReconciliationAutomationSourceFilter",
@@ -140,7 +167,7 @@ class TransferSpecs {
     static final Map<String, String> BUNDLE_LISTS = [(NETSUITE_AUTH): "connections", (SHOPIFY_AUTH): "connections",
             (HOTWAX_OMS_REST): "connections", (NETSUITE_RESTLET): "connections", (NETSUITE_SUITEQL): "queries",
             (CONC): "conclusionCodes", (RUN): "runs", (AUDIT): "audits", (STATEMENT): "statements", (CHECK): "checks",
-            (AUTOMATION): "automations", (LIFECYCLE): "lifecycles", (KNOWLEDGE): "knowledge"].asImmutable()
+            (CHAT_SPACE): "chatSpaces", (AUTOMATION): "automations", (LIFECYCLE): "lifecycles", (KNOWLEDGE): "knowledge"].asImmutable()
 
     static Map spec(String kind) {
         return KINDS.find { it.kind == kind }
@@ -148,6 +175,33 @@ class TransferSpecs {
 
     static Map specForEntity(String entityName) {
         return KINDS.find { it.entityName == entityName }
+    }
+
+    /**
+     * DAR-BE-188. A kind as a tenant config version carries it: its versionPlainFields travel as plain values, neither
+     * refs nor dropped, exactly as before automations could leave their tenant.
+     */
+    static Map versionSpec(Map spec) {
+        List<String> plain = (spec?.versionPlainFields ?: []) as List<String>
+        if (!plain) return spec
+        Map out = new LinkedHashMap(spec)
+        out.refFields = ((spec.refFields ?: [:]) as Map).findAll { k, v -> !(k in plain) }
+        out.positionRefs = ((spec.positionRefs ?: [:]) as Map).findAll { k, v -> !(k in plain) }
+        out.dropFields = ((spec.dropFields ?: []) as List<String>).findAll { !(it in plain) }
+        out.remove("versionPlainFields")
+        return out.asImmutable()
+    }
+
+    /** DAR-BE-188. The ref of the scope at index in its run (SCOPE_CHILD order). */
+    static String scopeRef(String ruleSetId, int index) {
+        return ref(SCOPE, "${ruleSetId}#${index}".toString())
+    }
+
+    /** [ruleSetId, index] of a scope ref's id; null when it is not one. */
+    static List parseScopeId(String id) {
+        int hash = id ? id.lastIndexOf('#') : -1
+        if (hash <= 0 || !(id.substring(hash + 1) ==~ /\d+/)) return null
+        return [id.substring(0, hash), id.substring(hash + 1) as int]
     }
 
     static String ref(String kind, String sourceId) {
@@ -179,6 +233,7 @@ class TransferSpecs {
         skip.addAll((spec.parentFields ?: []) as List<String>)
         skip.addAll((spec.dropFields ?: []) as List<String>)
         skip.addAll(((spec.refFields ?: [:]) as Map).keySet() as Set<String>)
+        skip.addAll(((spec.positionRefs ?: [:]) as Map).keySet() as Set<String>)
         skip.addAll(((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>)
         if (spec.polymorphicRef) skip.add(spec.polymorphicRef as String)
         if (spec.pkField) skip.add(spec.pkField as String)
@@ -211,6 +266,7 @@ class TransferSpecs {
     /** The ref columns a record of this spec may carry. */
     static Set<String> refColumns(Map spec) {
         Set<String> out = new HashSet<String>(((spec.refFields ?: [:]) as Map).keySet() as Set<String>)
+        out.addAll(((spec.positionRefs ?: [:]) as Map).keySet() as Set<String>)
         if (spec.polymorphicRef) out.add(spec.polymorphicRef as String)
         return out
     }

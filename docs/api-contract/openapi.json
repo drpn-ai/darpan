@@ -4143,6 +4143,10 @@
                     "secretsPublicKey": {
                         "type": "string",
                         "description": "DAR-ADMIN-007. The target's publicKey from begin#SecretHandoff\n                (base64 SPKI). When given, each owned connection's non-empty credentials are sealed to it (sealedSecrets),\n                the bundle carries secrets {wrappedKey, keyFingerprint, alg}, and one AdminAuditLog row records what was\n                sealed to which key. Without it no credential is read."
+                    },
+                    "includeAutomations": {
+                        "type": "boolean",
+                        "description": "DAR-BE-188. True also sends\n                every lifecycle, the automations of the runs and lifecycles sent, and the chat spaces those automations post\n                to (their webhooks sealed with the credentials, never in clear). Automations an import creates start paused.\n                False (the default) sends exactly what it always has."
                     }
                 },
                 "required": [
@@ -4155,7 +4159,7 @@
                 "properties": {
                     "bundle": {
                         "type": "object",
-                        "description": "{bundleVersion, source, connections, queries, conclusionCodes,\n                runs, audits, statements, checks}; consumed unchanged by import#ConfigBundle."
+                        "description": "{bundleVersion, source, connections, queries, conclusionCodes,\n                runs, audits, statements, checks}, plus lifecycles, chatSpaces and automations with includeAutomations;\n                consumed unchanged by import#ConfigBundle."
                     }
                 }
             },

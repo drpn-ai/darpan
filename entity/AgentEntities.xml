@@ -8,6 +8,34 @@
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
+    <!-- DAR-CLI-003. Tenant-owned: under DARPAN_ACTIVE_COMPANY_SCOPE (DARPAN_SCOPE_AGENT_QUERY_LOG). -->
+
+    <entity entity-name="AgentQueryLog" package="darpan.agent" use="transactional" cache="never">
+        <description>One row per fresh read-only query an agent sent (or tried to send) to a tenant's system through
+            Darpan's stored connection: who, which system and connection, what was asked, and how it ended.
+            Written in its own transaction, so a failed query still leaves its row.</description>
+        <field name="agentQueryLogId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id">
+            <description>The tenant the query ran for.</description></field>
+        <field name="userId" type="id">
+            <description>The person whose agent sent it.</description></field>
+        <field name="systemEnumId" type="id">
+            <description>The system queried (NetSuite, HotWax OMS or Shopify).</description></field>
+        <field name="connectionId" type="id-long">
+            <description>The stored connection used.</description></field>
+        <field name="queryHash" type="id-long">
+            <description>SHA-256 (hex) of the full query text.</description></field>
+        <field name="queryText" type="text-medium">
+            <description>The first 2,000 characters of the query.</description></field>
+        <field name="rowCount" type="number-integer"/>
+        <field name="durationMs" type="number-integer"/>
+        <field name="outcome" type="id">
+            <description>OK, REFUSED, THROTTLED, ERROR or TIMEOUT.</description></field>
+        <field name="createdDate" type="date-time"/>
+        <index name="AGQLOG_TENANT_DATE"><index-field name="companyUserGroupId"/><index-field name="createdDate"/></index>
+    </entity>
+
+
     <entity entity-name="AgentConversation" package="darpan.agent" cache="never">
         <description>One chat between a user and the agent, optionally about one audit finding.</description>
         <field name="conversationId" type="id" is-pk="true"/>
@@ -106,31 +134,18 @@
         <index name="BRAIN_TICKET_TENANT"><index-field name="companyUserGroupId"/></index>
         <index name="BRAIN_TICKET_CONV"><index-field name="conversationId"/></index>
     </entity>
-
-    <!-- DAR-CLI-003. Tenant-owned: under DARPAN_ACTIVE_COMPANY_SCOPE (DARPAN_SCOPE_AGENT_QUERY_LOG). -->
-
-    <entity entity-name="AgentQueryLog" package="darpan.agent" use="transactional" cache="never">
-        <description>One row per fresh read-only query an agent sent (or tried to send) to a tenant's system through
-            Darpan's stored connection: who, which system and connection, what was asked, and how it ended.
-            Written in its own transaction, so a failed query still leaves its row.</description>
-        <field name="agentQueryLogId" type="id" is-pk="true"/>
-        <field name="companyUserGroupId" type="id">
-            <description>The tenant the query ran for.</description></field>
-        <field name="userId" type="id">
-            <description>The person whose agent sent it.</description></field>
-        <field name="systemEnumId" type="id">
-            <description>The system queried (NetSuite, HotWax OMS or Shopify).</description></field>
-        <field name="connectionId" type="id-long">
-            <description>The stored connection used.</description></field>
-        <field name="queryHash" type="id-long">
-            <description>SHA-256 (hex) of the full query text.</description></field>
-        <field name="queryText" type="text-medium">
-            <description>The first 2,000 characters of the query.</description></field>
-        <field name="rowCount" type="number-integer"/>
-        <field name="durationMs" type="number-integer"/>
-        <field name="outcome" type="id">
-            <description>OK, REFUSED, THROTTLED, ERROR or TIMEOUT.</description></field>
-        <field name="createdDate" type="date-time"/>
-        <index name="AGQLOG_TENANT_DATE"><index-field name="companyUserGroupId"/><index-field name="createdDate"/></index>
+    <entity entity-name="AgentReadCatalog" package="darpan.agent" use="configuration" cache="never">
+        <description>One read the agent may make of a system record, by key (inspect#AgentRecord): which data definition runs, the
+            field the key is a value of, and the only fields that come back. Product-level, so no tenant column and no scope
+            filter; a tenant's own config supplies the connection. A system repo that supplies a read ships its row.</description>
+        <field name="readId" type="id" is-pk="true"/>
+        <field name="definitionId" type="id" not-null="true"><description>The DataSourceDefinition that runs.</description></field>
+        <field name="system" type="text-short" not-null="true"><description>OMS, SHOPIFY or NETSUITE.</description></field>
+        <field name="recordKind" type="text-short"/>
+        <field name="lookupKeyField" type="text-short" not-null="true"><description>The field the key is a value of.</description></field>
+        <field name="allowedFields" type="text-medium" not-null="true"><description>Comma-separated; status, type, date, amount, id
+            and SKU fields only: no name, email, address, phone or note.</description></field>
+        <field name="description" type="text-medium"/>
     </entity>
+
 </entities>

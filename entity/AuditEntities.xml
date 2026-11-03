@@ -329,6 +329,11 @@
             <index-field name="companyUserGroupId"/>
             <index-field name="stateEnumId"/>
         </index>
+        <index name="AUDF_TENANT_CONC">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="checkId"/>
+            <index-field name="conclusionEnumId"/>
+        </index>
     </entity>
 
     <entity entity-name="AuditFindingRecord" package="darpan.audit" use="transactional">

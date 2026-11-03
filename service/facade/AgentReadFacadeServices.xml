@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-159. The embedded agent's read-only tools, as the signed-in user's services. Every one reads the ACTIVE tenant
+         (from the session; no service takes a tenant id), is never remote, and returns what the agent may see: customer data
+         is redacted (AgentRedaction). Another tenant's finding reads as not found. -->
+
+    <service verb="get" noun="AgentFinding" authz-action="view" allow-remote="false" authenticate="true">
+        <description>One finding of the active tenant (darpan.audit.finding/v1) with every record's customer data redacted.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>The finding's id, e.g. F-20761.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="finding" type="Map"/>
+        </out-parameters>
+        <actions>
+            <service-call name="facade.AuditFacadeServices.get#AuditFinding" in-map="[findingId:findingId]" out-map="found"/>
+            <if condition="ec.message.hasError() || !found?.finding"><return error="true"/></if>
+            <set field="finding" from="darpan.agent.AgentRedaction.redactFindingRecords(found.finding)"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="AuditFindingLookalikes" authz-action="view" allow-remote="false" authenticate="true">
+        <description>Findings of the same check as one finding: sameCause (same conclusion, any state) and controls (a different
+            conclusion, any state), each {findingId, recordKey, state, conclusionCode, statementCode, conditionValues}.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"/>
+            <parameter name="limit" type="Integer" default-value="50"><description>At most this many of each list (200 max).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sameCause" type="List"/>
+            <parameter name="controls" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="darpan.agent.AgentReadSupport.lookalikes(ec, findingId, limit)"/>
+            <if condition="found == null"><return error="true"/></if>
+            <set field="sameCause" from="found.sameCause"/>
+            <set field="controls" from="found.controls"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentBrainCatalog" authz-action="view" allow-remote="false" authenticate="true">
+        <description>What the brain can conclude: the conclusion codes the active tenant may name, the brain's rules (concludes,
+            rank, asks) and the tenant's statements with their check codes. Sorted, so it is byte-stable.</description>
+        <out-parameters>
+            <parameter name="conclusions" type="List"/>
+            <parameter name="rules" type="List"/>
+            <parameter name="statements" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="catalog" from="darpan.agent.AgentReadSupport.brainCatalog(ec)"/>
+            <set field="conclusions" from="catalog.conclusions"/>
+            <set field="rules" from="catalog.rules"/>
+            <set field="statements" from="catalog.statements"/>
+        </actions>
+    </service>
+
+    <service verb="inspect" noun="AgentRecord" authz-action="view" allow-remote="false" authenticate="true" transaction="ignore">
+        <description>One record of a catalog read (AgentReadCatalog), found by key through the tenant's own connection and reduced to
+            the read's allowed fields; customer data shapes and free text are neutralised. Writes no file.</description>
+        <in-parameters>
+            <parameter name="readId" required="true"><description>A readId of AgentReadCatalog.</description></parameter>
+            <parameter name="key" required="true"><description>The value of the read's lookup key field.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="record" type="Map"/>
+            <parameter name="found" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="read" from="darpan.agent.AgentReadSupport.inspect(ec, readId, key)"/>
+            <if condition="read == null"><return error="true"/></if>
+            <set field="record" from="read.record"/>
+            <set field="found" from="read.found"/>
+        </actions>
+    </service>
+
+    <service verb="search" noun="AgentKnowledge" authz-action="view" allow-remote="false" authenticate="true">
+        <description>Knowledge-base entries (product and the active tenant's tiers) that match the words.</description>
+        <in-parameters>
+            <parameter name="words" required="true"/>
+            <parameter name="limit" type="Integer" default-value="8"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="hits" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="hits" from="darpan.agent.AgentReadSupport.searchKnowledge(ec, words, limit)"/>
+        </actions>
+    </service>
+</services>

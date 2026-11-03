@@ -50,6 +50,7 @@ class DataDefinedExtract {
         Map definitionRow = (Map) prepared.definitionRow
         Map definition = (Map) prepared.definition
         String configId = (String) prepared.configId
+        if (context.get("returnRecords") == true) { runInMemory(context, prepared); return }
         String timestamp = DataManagerSupport.formatRunTimestamp(ec)
         String outputBaseLocation = context.get("outputLocation") ?: DataManagerSupport.resolveReconciliationRunLocation(
                 ec, context.get("automationExecutionId") ?: configId, timestamp)
@@ -100,6 +101,41 @@ class DataDefinedExtract {
         } finally {
             if (workFile.exists()) workFile.delete()
             // The excluded-records spill holds customer records: gone whether the sidecar was written or not.
+            ExcludedRecordsSidecar.discard(runner.excludedCollector)
+        }
+    }
+
+    /**
+     * DAR-BE-159. The in-memory read for a caller that wants the records, not a file (the agent's inspect#AgentRecord): the
+     * records the definition projects come back in context.records and nothing is written. Held to
+     * IN_MEMORY_MAX_RECORDS, so it is for a read by keys, never a window. The caller's contract is unchanged without
+     * returnRecords.
+     */
+    static final int IN_MEMORY_MAX_RECORDS = 200
+
+    private static void runInMemory(Map context, Map prepared) {
+        Map definition = (Map) prepared.definition
+        Map request = (Map) prepared.request
+        if (request.mode != "ids") { context.put("errors", ["An in-memory read is by lookup keys only."]); return }
+        DataSourceRunner runner = new DataSourceRunner(definition, transportFactory.call(definition, (Map) prepared.connectionRecord))
+        List<Map> collected = []
+        try {
+            Map result = runner.run(request, { List<Map> batch ->
+                if (collected.size() + batch.size() > IN_MEMORY_MAX_RECORDS) {
+                    throw new DataSourceCallException("TOO_MANY_RECORDS", "An in-memory read holds at most ${IN_MEMORY_MAX_RECORDS} records.".toString())
+                }
+                collected.addAll(batch)
+            }, null)
+            context.put("records", collected)
+            context.put("recordCount", collected.size())
+            context.put("dataAvailable", true)
+            context.put("warnings", warningsOf(definition, (Map) result.counts))
+        } catch (Exception e) {
+            String code = e instanceof DataSourceCallException ? "[${((DataSourceCallException) e).code}] " : ""
+            context.put("errors", ["read failed: ${code}${e.message}".toString()])
+            context.put("records", [])
+        } finally {
+            // The excluded-records spill holds customer records: gone whether or not anything read it.
             ExcludedRecordsSidecar.discard(runner.excludedCollector)
         }
     }

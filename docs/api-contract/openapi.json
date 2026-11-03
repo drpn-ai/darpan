@@ -303,10 +303,16 @@
                                         "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ListNsAgentConnectionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/PreviewNsSuiteQlSourceQueryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RunNsSuiteQlAgentQueryRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest"
@@ -735,8 +741,10 @@
                                         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "#/components/schemas/GetLifecycleRuleOptionsRequest",
                                         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions": "#/components/schemas/GetNsSuiteQlQueryOptionsRequest",
                                         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "#/components/schemas/GetNsSuiteQlSourceQueryRequest",
+                                        "facade.NetSuiteQueryFacadeServices.list#NsAgentConnections": "#/components/schemas/ListNsAgentConnectionsRequest",
                                         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest",
                                         "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery": "#/components/schemas/PreviewNsSuiteQlSourceQueryRequest",
+                                        "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery": "#/components/schemas/RunNsSuiteQlAgentQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
                                         "facade.ReconciliationFacadeServices.archive#Automation": "#/components/schemas/ArchiveAutomationRequest",
                                         "facade.ReconciliationFacadeServices.archive#SavedRun": "#/components/schemas/ArchiveSavedRunRequest",
@@ -1143,10 +1151,16 @@
                                             "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/ListNsAgentConnectionsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/PreviewNsSuiteQlSourceQueryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RunNsSuiteQlAgentQueryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryResponse"
@@ -12316,6 +12330,104 @@
                     "result"
                 ]
             },
+            "ListNsAgentConnectionsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-CLI-003. The NetSuite connections the active tenant may query from an agent: id, description and\n            sign-in kind only. No username, client id, certificate id, account host, key or token."
+            },
+            "ListNsAgentConnectionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "connections": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nsAuthConfigId": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "authType": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "ListNsAgentConnectionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteQueryFacadeServices.list#NsAgentConnections",
+                "x-darpan-method": "facade.NetSuiteQueryFacadeServices.list#NsAgentConnections",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteQueryFacadeServices.list#NsAgentConnections"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListNsAgentConnectionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListNsAgentConnectionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteQueryFacadeServices.list#NsAgentConnections. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListNsAgentConnectionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListNsSuiteQlSourceQueriesParams": {
                 "type": "object",
                 "properties": {
@@ -12594,6 +12706,129 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/PreviewNsSuiteQlSourceQueryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RunNsSuiteQlAgentQueryParams": {
+                "type": "object",
+                "properties": {
+                    "nsAuthConfigId": {
+                        "type": "string"
+                    },
+                    "sql": {
+                        "type": "string"
+                    },
+                    "limit": {
+                        "type": "integer"
+                    },
+                    "offset": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "nsAuthConfigId",
+                    "sql"
+                ],
+                "description": "DAR-CLI-003. Runs one fresh, read-only SuiteQL query a tenant user's agent wrote, through a NetSuite\n            connection the active tenant stores. One SELECT or WITH statement; 200 rows by default, 2,000 at most; the\n            connection's credentials are never returned. Every call is logged for the tenant."
+            },
+            "RunNsSuiteQlAgentQueryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "rowCount": {
+                        "type": "integer"
+                    },
+                    "hasMore": {
+                        "type": "boolean"
+                    },
+                    "nextOffset": {
+                        "type": "integer"
+                    },
+                    "truncated": {
+                        "type": "boolean"
+                    },
+                    "durationMs": {
+                        "type": "integer"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "RunNsSuiteQlAgentQueryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery",
+                "x-darpan-method": "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunNsSuiteQlAgentQueryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunNsSuiteQlAgentQueryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunNsSuiteQlAgentQueryResult"
                     }
                 },
                 "required": [
@@ -28018,8 +28253,10 @@
         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "GetLifecycleRuleOptions",
         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions": "GetNsSuiteQlQueryOptions",
         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "GetNsSuiteQlSourceQuery",
+        "facade.NetSuiteQueryFacadeServices.list#NsAgentConnections": "ListNsAgentConnections",
         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "ListNsSuiteQlSourceQueries",
         "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery": "PreviewNsSuiteQlSourceQuery",
+        "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery": "RunNsSuiteQlAgentQuery",
         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
         "facade.ReconciliationFacadeServices.archive#Automation": "ArchiveAutomation",
         "facade.ReconciliationFacadeServices.archive#SavedRun": "ArchiveSavedRun",

@@ -54,8 +54,10 @@ class CliMethodAllowlist {
 
             "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions",
             "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery",
+            "facade.NetSuiteQueryFacadeServices.list#NsAgentConnections",
             "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries",
             "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery",
+            "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery",
 
             "facade.ReconciliationFacadeServices.cancel#ReconciliationRun",
             "facade.ReconciliationFacadeServices.get#ActiveRunResult",

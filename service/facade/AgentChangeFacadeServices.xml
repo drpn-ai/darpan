@@ -11,7 +11,8 @@
     <service verb="create" noun="AuditChangeProposal" allow-remote="false" authenticate="true">
         <description>The agent's draft change: refused when it is off the R18 contract; otherwise kept as DRAFT, checked for
             provenance (every record id must come from the person, the opened finding or the config), backtested and
-            planned. Ends PLANNED, or INVALID with the save's own refusal.</description>
+            planned. Ends PLANNED, or INVALID with the save's own refusal; for a caller without write access (R27) it stays
+            DRAFT, "An editor must plan and approve this change."</description>
         <in-parameters>
             <parameter name="conversationId" required="true"/>
             <parameter name="kind" required="true"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, FIX_TEXT or CONCLUSION_ROWS.</description></parameter>

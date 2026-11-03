@@ -1,5 +1,6 @@
 package darpan.agent.pipeline
 
+import darpan.agent.AgentCallMarker
 import darpan.config.TenantConfigVersionSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -24,8 +25,9 @@ class AuditChangePlanner {
     static final List<String> OPEN = ["DRAFT", "PLANNED", "STALE", "INVALID"].asImmutable()
     static final String STALE_MESSAGE = "The config changed since this was planned. Plan it again."
     private static final int VALIDATE_TIMEOUT_SECONDS = 120
-    /** text-medium columns (statusMessage, reasonText, blockedIds, targetJson) hold 255 characters. */
-    private static final int MEDIUM = 255
+    static final String EDITOR_MESSAGE = "An editor must plan and approve this change."
+    /** text-intermediate columns (statusMessage, reasonText, blockedIds, targetJson) hold 1023 characters (R24). */
+    private static final int INTERMEDIATE = 1023
     private static final String WHY = "agent proposal: tenant compared on the row"
 
     /** Task 5 replaces this with AuditChangeBacktest.run(ec, tenantId, kind, target, merged). */
@@ -47,8 +49,8 @@ class AuditChangePlanner {
             return null
         }
         String targetJson = JsonOutput.toJson(target)
-        if (targetJson.length() > MEDIUM) { ec.message.addError("The target is longer than ${MEDIUM} characters.".toString()); return null }
-        if (reasonText != null && reasonText.length() > MEDIUM) { ec.message.addError("The reason is longer than ${MEDIUM} characters; say it shorter.".toString()); return null }
+        if (targetJson.length() > INTERMEDIATE) { ec.message.addError("The target is longer than ${INTERMEDIATE} characters.".toString()); return null }
+        if (reasonText != null && reasonText.length() > INTERMEDIATE) { ec.message.addError("The reason is longer than ${INTERMEDIATE} characters; say it shorter.".toString()); return null }
         def row = ec.entity.makeValue(ENTITY)
         row.setAll([proposalId: TenantScopedFinder.mintId(ec, ENTITY, "proposalId"), companyUserGroupId: tenantId,
                     conversationId: conversationId, kind: kind, targetJson: targetJson, afterJson: JsonOutput.toJson(after),
@@ -60,14 +62,33 @@ class AuditChangePlanner {
         Map provenance = AgentProvenance.check(kind, after, humanTexts(ec, tenantId, conversationId), openContext(ec, tenantId, conversation),
                 AuditChangeLevers.configValues(kind, current))
         row.setAll([provenanceStatus: provenance.status, blockedIds: fittedList((List<String>) provenance.blockedIds)])
-        Map planned = current == null ? invalid(ec, row) : planRow(ec, row, current)
+        // R27: anyone in the tenant may chat, but only an editor's session runs the validating save; a viewer's proposal
+        // waits as a DRAFT for an editor to plan from the app.
+        Map planned = current == null ? invalid(ec, row) :
+                (TenantAccessSupport.hasActiveTenantWriteAccess(ec) ? planRow(ec, row, current) : draftForEditor(ec, row, current))
         return [proposalId: row.proposalId, status: row.status, statusMessage: row.statusMessage, provenanceStatus: row.provenanceStatus,
                 blockedIds: provenance.blockedIds, backtest: planned.backtest]
+    }
+
+    /** Merged and backtested, not checked by a save: the row stays DRAFT until an editor plans it. */
+    private static Map draftForEditor(def ec, def row, Map current) {
+        Map merged
+        try {
+            merged = mergedFor(row, current)
+        } catch (IllegalArgumentException e) {
+            ec.message.addError(e.message)
+            return invalid(ec, row)
+        }
+        Map tested = (Map) backtest.call(ec, row.companyUserGroupId as String, row.kind as String, parse(row.targetJson), merged)
+        row.setAll([backtestJson: JsonOutput.toJson(tested), status: "DRAFT", statusMessage: EDITOR_MESSAGE])
+        row.update()
+        return [status: "DRAFT", statusMessage: EDITOR_MESSAGE, backtest: tested]
     }
 
     // ---------------------------------------------------------------- plan
 
     static Map plan(def ec, String proposalId) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access; an editor must plan this change.")) return null
         def row = proposalFor(ec, proposalId)
         if (row == null) return null
         if (!(row.status in OPEN)) { ec.message.addError("Proposal ${proposalId} is ${row.status}; it cannot be planned again.".toString()); return null }
@@ -132,6 +153,7 @@ class AuditChangePlanner {
 
     /** A person applies a planned, provenance-PASS proposal whose plan still matches the config. Null (with an error) when refused. */
     static Map apply(def ec, String proposalId, String expectedHash) {
+        if (refusedInAgentLoop(ec)) return null
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot apply a change.")) return null
         def row = proposalFor(ec, proposalId)
         if (row == null) return null
@@ -148,16 +170,19 @@ class AuditChangePlanner {
         if (current != null) {
             try { merged = mergedFor(row, current) } catch (IllegalArgumentException ignored) { merged = null }
         }
-        if (merged == null || expectedHash == null || planHash(row.proposalId as String, merged, current) != expectedHash) {
+        // The hash must be the one the plan stored (what the person saw) and still match the config now.
+        if (merged == null || expectedHash == null || expectedHash != row.planHash ||
+                planHash(row.proposalId as String, merged, current) != expectedHash) {
             ec.message.clearErrors()
             row.setAll([status: "STALE", statusMessage: STALE_MESSAGE])
             row.update()
             return [status: "STALE", statusMessage: STALE_MESSAGE]
         }
         if (kind == "EXCLUSION_FILTER") {
-            List<String> drifted = AuditChangeLevers.automationDrift(ec, current)
+            Map<String, List<String>> drifted = AuditChangeLevers.automationDrift(ec, current)
             if (drifted) {
-                ec.message.addError("AUTOMATION_DRIFT: ${drifted.join(', ')}. The automation's filters differ from its run's; sync or edit it first.".toString())
+                String fields = drifted.collect { String id, List<String> f -> "${id}: ${f.join(', ')}".toString() }.join("; ")
+                ec.message.addError("AUTOMATION_DRIFT: ${drifted.keySet().join(', ')}. Syncing would also change ${fields}; sync or edit the automation first.".toString())
                 return null
             }
         }
@@ -182,29 +207,30 @@ class AuditChangePlanner {
     // ---------------------------------------------------------------- reject and revert
 
     static Map reject(def ec, String proposalId, String reason) {
+        if (refusedInAgentLoop(ec)) return null
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot reject a change.")) return null
         def row = proposalFor(ec, proposalId)
         if (row == null) return null
         if (!(row.status in OPEN)) { ec.message.addError("Proposal ${proposalId} is ${row.status}; it cannot be rejected.".toString()); return null }
-        row.setAll([status: "REJECTED", statusMessage: reason?.trim()?.take(MEDIUM) ?: null])
+        row.setAll([status: "REJECTED", statusMessage: reason?.trim()?.take(INTERMEDIATE) ?: null])
         row.update()
         return [status: "REJECTED"]
     }
 
     /** A new planned proposal that puts back what an applied one moved; its values came from config, so provenance is PASS. */
     static Map revert(def ec, String proposalId) {
+        if (refusedInAgentLoop(ec)) return null
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot revert a change.")) return null
         def row = proposalFor(ec, proposalId)
         if (row == null) return null
         if (row.status != "APPLIED") { ec.message.addError("Proposal ${proposalId} is ${row.status}; only an applied proposal can be reverted.".toString()); return null }
         String tenantId = row.companyUserGroupId as String
         boolean open = ec.entity.find(ENTITY).condition("companyUserGroupId", tenantId).condition("revertOfProposalId", row.proposalId)
-                .condition("status", "in", ["DRAFT", "PLANNED", "APPLIED"]).useCache(false).count() > 0
-        if (open) { ec.message.addError("Proposal ${proposalId} already has a revert.".toString()); return null }
+                .condition("status", "in", OPEN + ["APPLIED"]).useCache(false).count() > 0
+        if (open) { ec.message.addError("Proposal ${proposalId} already has a revert; plan, apply or reject that one.".toString()); return null }
         String kind = row.kind as String
         Map after = parse(row.afterJson)
-        List<String> codes = kind == "CONCLUSION_ROWS" ? ((List<Map>) ((after.rows ?: []) as List)).collect { (it.conclusionCode ?: it.code) as String } : null
-        Map lever = AuditChangeLevers.leverOf(kind, parse(row.beforeJson), codes)
+        Map lever = AuditChangeLevers.leverOf(kind, parse(row.beforeJson), after)
         def revert = ec.entity.makeValue(ENTITY)
         revert.setAll([proposalId: TenantScopedFinder.mintId(ec, ENTITY, "proposalId"), companyUserGroupId: tenantId,
                        conversationId: row.conversationId, kind: kind, targetJson: row.targetJson, afterJson: JsonOutput.toJson(lever),
@@ -273,16 +299,23 @@ class AuditChangePlanner {
     private static Map invalid(def ec, def row) {
         String why = ec.message.errorsString?.trim() ?: "The change cannot be planned."
         ec.message.clearErrors()
-        row.setAll([status: "INVALID", statusMessage: why.take(MEDIUM), planHash: null])
+        row.setAll([status: "INVALID", statusMessage: why.take(INTERMEDIATE), planHash: null])
         row.update()
         return [status: "INVALID", statusMessage: why]
+    }
+
+    /** Defence in depth (R28): an agent tool call never approves, rejects or reverts, whatever the tool allow-list says. */
+    private static boolean refusedInAgentLoop(def ec) {
+        if (!AgentCallMarker.inAgentLoop()) return false
+        ec.message.addError(AgentCallMarker.REFUSAL)
+        return true
     }
 
     /** The blocked ids as a JSON list that fits its column: as many as fit, then "+N more". The service answers them all. */
     private static String fittedList(List<String> ids) {
         List<String> kept = new ArrayList<String>(ids ?: [])
         String json = JsonOutput.toJson(kept)
-        while (json.length() > MEDIUM && kept) {
+        while (json.length() > INTERMEDIATE && kept) {
             kept.remove(kept.size() - 1)
             json = JsonOutput.toJson(kept + ["+${ids.size() - kept.size()} more".toString()])
         }

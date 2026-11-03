@@ -95,17 +95,17 @@
         <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
         <field name="conversationId" type="id"/>
         <field name="kind" type="text-short"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, FIX_TEXT or CONCLUSION_ROWS.</description></field>
-        <field name="targetJson" type="text-medium"/>
+        <field name="targetJson" type="text-intermediate"/>
         <field name="beforeJson" type="text-long"/>
         <field name="afterJson" type="text-long"/>
         <field name="evidenceJson" type="text-long"/>
         <field name="backtestJson" type="text-long"/>
-        <field name="reasonText" type="text-medium"/>
+        <field name="reasonText" type="text-intermediate"/>
         <field name="provenanceStatus" type="text-short"><description>PASS or BLOCKED.</description></field>
-        <field name="blockedIds" type="text-medium"/>
+        <field name="blockedIds" type="text-intermediate"/>
         <field name="planHash" type="text-medium"><description>Hex SHA-256 (64 characters) of the planned change and the config it was planned against.</description></field>
         <field name="status" type="text-short"><description>DRAFT, PLANNED, APPLIED, REJECTED, REVERTED, STALE or INVALID.</description></field>
-        <field name="statusMessage" type="text-medium"/>
+        <field name="statusMessage" type="text-intermediate"/>
         <field name="proposedForUserId" type="id"/>
         <field name="approvedByUserId" type="id"/>
         <field name="approvedDate" type="date-time"/>
@@ -123,8 +123,8 @@
         <field name="conversationId" type="id"/>
         <field name="category" type="text-short"><description>The lever (spec section 9.2).</description></field>
         <field name="verbatimText" type="text-long"><description>What the user said, word for word.</description></field>
-        <field name="refsJson" type="text-medium"/>
-        <field name="evidenceJson" type="text-medium"/>
+        <field name="refsJson" type="text-intermediate"/>
+        <field name="evidenceJson" type="text-long"/>
         <field name="placementJson" type="text-long"/>
         <field name="status" type="text-short"><description>RECEIVED, ACCEPTED, DECLINED or SHIPPED.</description></field>
         <field name="statusReason" type="text-medium"/>

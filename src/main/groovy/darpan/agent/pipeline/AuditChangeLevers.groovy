@@ -2,6 +2,7 @@ package darpan.agent.pipeline
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.AutomationFacadeSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
 import groovy.json.JsonOutput
@@ -195,16 +196,24 @@ class AuditChangeLevers {
 
     // ---------------------------------------------------------------- revert
 
-    /** The part of a state a proposal moved, so a revert can put exactly that back (codes: the rows a CONCLUSION_ROWS named). */
-    static Map leverOf(String kind, Map state, List<String> codes = null) {
+    /**
+     * The part of a state a proposal moved, so a revert can put exactly that back. `after` is the proposal's own (an R18
+     * after, or the lever of the revert being reverted): it names the filter's fieldExpression or the rows it touched.
+     */
+    static Map leverOf(String kind, Map state, Map after) {
         Map target = (Map) state.target
         switch (kind) {
-            case "EXCLUSION_FILTER": return [filters: copy(((Map) state.filters)[target.fileSide])]
+            case "EXCLUSION_FILTER":
+                // Only the proposal's own entry: null when it added the filter, the old entry when it replaced one.
+                String field = after.fieldExpression as String
+                Map was = ((List<Map>) ((Map) state.filters)[target.fileSide]).find { it.fieldExpression == field }
+                return [fieldExpression: field, entry: copy(was)]
             case "STATEMENT_NARROWING": return [link: copy(((List<Map>) state.statements).find { it.id == target.statementCode })]
             case "FIX_TEXT": return [fix: onlyNode((List<Map>) state.conclusions, target.conclusionCode as String).fix]
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
-                return [rows: (codes ?: []).collect { String code ->
+                List<String> codes = ((List<Map>) (after.rows ?: [])).collect { (it.conclusionCode ?: it.code) as String }
+                return [rows: codes.collect { String code ->
                     Map n = nodeOf(nodes, code)
                     [code: code, node: n == null ? null : [parentConclusion: nodes.find { it.key == n.parent }?.conclusion,
                                                          bucket: n.bucket, question: n.question, fix: n.fix, conditions: copy(n.conditions)]]
@@ -218,9 +227,16 @@ class AuditChangeLevers {
         Map target = (Map) state.target
         switch (kind) {
             case "EXCLUSION_FILTER":
-                ((Map) state.filters)[target.fileSide] = ((List) lever.filters).collect { Map f ->
-                    [fieldExpression: f.fieldExpression as String, operator: f.operator as String,
-                     filterValues: ((List) f.filterValues).collect { it as String }] as Map
+                List<Map> side = (List<Map>) ((Map) state.filters)[target.fileSide]
+                String field = lever.fieldExpression as String
+                int at = side.findIndexOf { it.fieldExpression == field }
+                Map was = (Map) lever.entry
+                if (was == null) {
+                    if (at >= 0) side.remove(at)
+                } else {
+                    Map entry = [fieldExpression: field, operator: was.operator as String,
+                                 filterValues: ((List) was.filterValues).collect { it as String }]
+                    if (at >= 0) side[at] = entry else side << entry
                 }
                 break
             case "STATEMENT_NARROWING":
@@ -309,31 +325,37 @@ class AuditChangeLevers {
         return out
     }
 
-    /** Automations of the run (EXCLUSION_FILTER) whose stored filters for the side differ from the run's, which sync would overwrite. */
-    static List<String> automationDrift(def ec, Map state) {
-        Map target = (Map) state.target
-        List<Map> runFilters = ((List<Map>) ((Map) state.filters)[target.fileSide]).collect { Map f ->
-            [fieldExpression: f.fieldExpression, operator: f.operator, filterValues: f.filterValues] as Map
+    /**
+     * Automations of the run (EXCLUSION_FILTER) that sync#Automation would change in any way TODAY, before the proposal:
+     * compare scope, input mode, either side's source or filters, a side added or removed. Applying syncs every automation
+     * of the run, which would silently overwrite such drift, so apply refuses instead. Uses the same derive and the same
+     * comparison sync#Automation reports (AutomationFacadeSupport.buildAutomationSyncStatus). Answers {automationId: fields}.
+     */
+    static Map<String, List<String>> automationDrift(def ec, Map state) {
+        Map<String, List<String>> drifted = new LinkedHashMap<String, List<String>>()
+        automationRowsOf(ec, ((Map) state.run).savedRunId as String).each { automation ->
+            String automationId = automation.automationId as String
+            List stored = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationAutomationSource",
+                    "agent apply: sources of an automation already read as the active tenant's").condition("automationId", automationId)
+                    .orderBy("fileSide").useCache(false).list() ?: []
+            Map derived = AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automation)
+            List<String> changed = (List<String>) AutomationFacadeSupport.buildAutomationSyncStatus(automation,
+                    AutomationFacadeSupport.attachCapturedFilters(ec, stored, automationId), derived).changedFields
+            if (changed) drifted.put(automationId, changed)
         }
-        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        return automationsOf(ec, ((Map) state.run).savedRunId as String).findAll { String automationId ->
-            boolean hasSide = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("companyUserGroupId", tenantId)
-                    .condition("automationId", automationId).condition("fileSide", target.fileSide).useCache(false).count() > 0
-            if (!hasSide) return false
-            List<Map> stored = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("companyUserGroupId", tenantId)
-                    .condition("automationId", automationId).condition("fileSide", target.fileSide).orderBy("sequenceNum").useCache(false).list()
-                    .collect { [fieldExpression: normalize(it.fieldExpression), operator: normalize(it.operator),
-                                filterValues: splitValues(it.filterValues)] as Map }
-            return stored != runFilters
-        }
+        return drifted
     }
 
     private static List<String> automationsOf(def ec, String savedRunId) {
+        return automationRowsOf(ec, savedRunId)*.automationId.collect { it as String }
+    }
+
+    private static List automationRowsOf(def ec, String savedRunId) {
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!tenantId || !savedRunId) return []
         return ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("companyUserGroupId", tenantId)
                 .condition("savedRunId", savedRunId).orderBy("automationId").useCache(false).list()
-                .findAll { (normalize(it.savedRunType) ?: "ruleset").equalsIgnoreCase("ruleset") }*.automationId.collect { it as String }
+                .findAll { (normalize(it.savedRunType) ?: "ruleset").equalsIgnoreCase("ruleset") }
     }
 
     // ---------------------------------------------------------------- helpers

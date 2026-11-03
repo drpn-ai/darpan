@@ -1231,6 +1231,51 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
+    void aLifecycleWhoseQuestionsBranchReimportsUnchanged() {
+        // The shape a real stages lifecycle has: a START question, a child under it, and two grandchildren on its YES and
+        // NO branches, run sequences with gaps, isActive left unset; each question's parent is a QUESTION ref.
+        List<List> questions = [["XFER_BR_Q1", null, 1L, null, "START"], ["XFER_BR_Q2", "XFER_BR_Q1", 9L, "YES", null],
+                                ["XFER_BR_Q3", "XFER_BR_Q2", 10L, "YES", "EXCUSED"], ["XFER_BR_Q4", "XFER_BR_Q2", 11L, "NO", null]]
+        create("darpan.reconciliation.Reconciliation", [reconciliationId: "XFER_BR", reconciliationName: "Branching orders",
+                companyUserGroupId: SRC, buildMode: "STAGES"])
+        questions.each { List q ->
+            create("darpan.rule.RuleSet", [ruleSetId: "RS_${q[0]}".toString(), ruleSetName: "Branching orders: ${q[0]}".toString(),
+                    version: "1.0", companyUserGroupId: SRC, ownerReconciliationId: "XFER_BR"])
+            create("darpan.reconciliation.ReconciliationRun", [reconciliationRunId: q[0], reconciliationId: "XFER_BR", companyUserGroupId: SRC,
+                    runName: "Question ${q[0]}".toString(), ruleSetId: "RS_${q[0]}".toString(), parentReconciliationRunId: q[1],
+                    runSequence: q[2], parentBranch: q[3], questionRole: q[4]])
+        }
+        try {
+            Map bundle = exportWhole()
+            Map lifecycle = (bundle.lifecycles as List<Map>).find { it.ref == "LIFECYCLE:XFER_BR" }
+            assertEquals("QUESTION:XFER_BR_Q2", (lifecycle.children.ReconciliationRun as List<Map>)[3].refs.parentReconciliationRunId)
+            Map applied = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+            assertNoErrors(applied)
+            Map idMap = applied.result.idMap as Map
+            // The data: each question under the TARGET copy of its parent.
+            questions.each { List q ->
+                def row = ec.entity.find("darpan.reconciliation.ReconciliationRun").condition("reconciliationRunId", idMap["QUESTION:${q[0]}"])
+                        .disableAuthz().useCache(false).one()
+                assertEquals(idMap["LIFECYCLE:XFER_BR"], row.reconciliationId)
+                assertEquals(q[1] ? idMap["QUESTION:${q[1]}"] : null, row.parentReconciliationRunId, "${q[0]}'s parent")
+                assertEquals(idMap["RUN:RS_${q[0]}"], row.ruleSetId)
+            }
+
+            Map plan = importInto(DST, exportWhole(), [(AUTH_REF): idMap[AUTH_REF]]).result.plan as Map
+            assertEquals([], plan.blocking)
+            (plan.lines as List<Map>).each {
+                assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+            }
+        } finally {
+            questions.reverse().each { List q ->
+                ec.entity.find("darpan.reconciliation.ReconciliationRun").condition("reconciliationRunId", q[0]).disableAuthz().deleteAll()
+                ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "RS_${q[0]}".toString()).disableAuthz().deleteAll()
+            }
+            ec.entity.find("darpan.reconciliation.Reconciliation").condition("reconciliationId", "XFER_BR").disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
     void aVersionKeepsTheAutomationsIdsPlainAndCarriesNoSpaces() {
         // A tenant config version restores into its own tenant: its pack (and so its hash) is what it was before DAR-BE-188.
         withAutomation {
@@ -1632,6 +1677,10 @@ class ConfigTransferSmokeTests {
                 .disableAuthz().useCache(false).list()*.nsSuiteQlSourceQueryId.collect { it as String }
         if (queryIds) ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQueryField")
                 .condition("nsSuiteQlSourceQueryId", "in", queryIds).disableAuthz().deleteAll()
+        // A question names its parent question: unhook them so one bulk delete never trips that key.
+        ec.entity.find("darpan.reconciliation.ReconciliationRun").condition("companyUserGroupId", tenantId)
+                .condition("parentReconciliationRunId", "is-not-null", null).disableAuthz().useCache(false).list()
+                .each { it.set("parentReconciliationRunId", null); it.update() }
         TRANSFER_ENTITIES.each { String entityName ->
             def find = ec.entity.find(entityName).disableAuthz()
             if (entityName.startsWith("darpan.rule.") && entityName != "darpan.rule.RuleSet" && entityName != "darpan.rule.TenantConclusion") {

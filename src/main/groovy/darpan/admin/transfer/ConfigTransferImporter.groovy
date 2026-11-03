@@ -851,6 +851,8 @@ class ConfigTransferImporter {
             List<String> parsed = parseRef(value)
             if (parsed == null) return text(value)
             if (parsed[0] == RULE) return (ctx.ruleIdentity[value] ?: "NEW:${value}") as String
+            // In its own tenant a question keeps its id (writeChildrenById); elsewhere it lands by position.
+            if (parsed[0] == QUESTION && !ctx.sameTenant) return (ctx.ruleIdentity[value] ?: "NEW:${value}") as String
             if (parsed[0] == SCOPE) {
                 List scope = parseScopeId(parsed[1])
                 return scope ? "SCOPE@${ctx.resolved[TransferSpecs.ref(RUN, scope[0] as String)] ?: "NEW:RUN:${scope[0]}"}#${scope[1]}".toString()
@@ -870,6 +872,7 @@ class ConfigTransferImporter {
                 List scope = parseScopeId(parsed[1])
                 return scope ? "SCOPE@${scope[0]}#${scope[1]}".toString() : "SCOPE?${parsed[1]}".toString()
             }
+            if (parsed[0] == QUESTION && !ctx.sameTenant) return targetQuestionIdentity(ctx, parsed[1])
             return parsed[0] == RULE ? targetRuleIdentity(ctx, parsed[1]) : parsed[1]
         }
     }
@@ -879,6 +882,30 @@ class ConfigTransferImporter {
             String runIdentity = (ctx.resolved[run.ref] ?: "NEW:${run.ref}") as String
             ((run.children?.Rule ?: []) as List<Map>).eachWithIndex { Map rule, int i -> ctx.ruleIdentity[rule.ref] = "RULE@${runIdentity}#${i}".toString() }
         }
+        // DAR-BE-188: a lifecycle's question likewise, by its lifecycle and position, so a question naming its parent
+        // question diffs as the same parent once written (it is never a top-level record, so never in resolved).
+        records(ctx, "lifecycles").each { Map l ->
+            String lifecycleIdentity = (ctx.resolved[l.ref] ?: "NEW:${l.ref}") as String
+            ((l.children?.ReconciliationRun ?: []) as List<Map>).eachWithIndex { Map q, int i ->
+                if (q.ref) ctx.ruleIdentity[q.ref] = "QUESTION@${lifecycleIdentity}#${i}".toString()
+            }
+        }
+    }
+
+    /** DAR-BE-188. A target question as its lifecycle and position among the switched-on questions (the export's order). */
+    private static String targetQuestionIdentity(Map ctx, String questionId) {
+        Map cache = (Map) (ctx.targetQuestions ?: (ctx.targetQuestions = [:]))
+        if (cache.containsKey(questionId)) return cache[questionId]
+        Map questionSpec = (spec(LIFECYCLE).children as List<Map>).find { it.kind == QUESTION }
+        def question = finder(ctx.ec, questionSpec.entityName as String).condition("reconciliationRunId", questionId).useCache(false).one()
+        String identity = "QUESTION?${questionId}"
+        if (question != null) {
+            List<String> ids = ConfigTransferExporter.childRows(ctx.ec, questionSpec, [reconciliationId: question.reconciliationId])
+                    *.reconciliationRunId.collect { it as String }
+            if (questionId in ids) identity = "QUESTION@${question.reconciliationId}#${ids.indexOf(questionId)}".toString()
+        }
+        cache[questionId] = identity
+        return identity
     }
 
     private static String targetRuleIdentity(Map ctx, String ruleId) {

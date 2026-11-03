@@ -320,6 +320,21 @@ class AdminServicesSmokeTests {
                 "admin.TenantAdminServices.get#TenantDetail", [tenantUserGroupId: ALPHA]).result.tenantDetail.goLiveDate as Timestamp).toInstant())
     }
 
+    // DAR-BE-159: agentEnabled is a per-tenant switch; omitting it leaves it alone.
+    @Test
+    void updateTenantTurnsTheAgentOnAndOffAndLeavesItWhenOmitted() {
+        Closure<Object> flag = { callAs(SUPER_USERNAME, "admin.TenantAdminServices.get#TenantDetail", [tenantUserGroupId: ALPHA]).result.tenantDetail.agentEnabled }
+        assertEquals(false, flag())
+        assertNoErrors(callAs(SUPER_USERNAME, "admin.TenantAdminServices.update#Tenant", [tenantUserGroupId: ALPHA, agentEnabled: true]))
+        assertEquals(true, flag())
+        assertEquals("Y", find("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA]).agentEnabled)
+        assertNoErrors(callAs(SUPER_USERNAME, "admin.TenantAdminServices.update#Tenant", [tenantUserGroupId: ALPHA, agentEnabled: false]))
+        assertEquals(false, flag())
+        assertEquals("N", find("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA]).agentEnabled)
+        assertNoErrors(callAs(SUPER_USERNAME, "admin.TenantAdminServices.update#Tenant", [tenantUserGroupId: ALPHA, label: "Alpha Again"]))
+        assertEquals(false, flag(), "omitted: stays N")
+    }
+
     @Test
     void updateTenantRejectsAnUnreadableGoLiveBeforeApplyingTheLabel() {
         Map out = callAs(SUPER_USERNAME, "admin.TenantAdminServices.update#Tenant",

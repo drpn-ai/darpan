@@ -3,7 +3,9 @@ package darpan.agent
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
@@ -44,6 +46,48 @@ class AgentSwitchTests {
     void cleanup() {
         System.clearProperty(AgentSwitch.ENABLED_PROPERTY)
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
+    }
+
+    @BeforeEach
+    void relogin() {
+        Assumptions.assumeTrue(!System.getenv(AgentSwitch.ENABLED_ENV), "${AgentSwitch.ENABLED_ENV} is set in the environment and wins over the property; unset it to run")
+        assertTrue(ec.user.internalLoginUser(EDITOR_USERNAME), "could not log in")
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, TENANT)
+        TenantAccessSupport.syncUserContext(ec)
+        System.setProperty(AgentSwitch.ENABLED_PROPERTY, "true")
+        setFlag("Y")
+    }
+
+    private void setFlag(String flag) {
+        ec.entity.makeValue("darpan.auth.TenantSetting").setAll([companyUserGroupId: TENANT, agentEnabled: flag]).createOrUpdate()
+    }
+
+    @Test
+    void "the tenant comes from the resolver, not the raw context key"() {
+        ec.user.context.remove("activeTenantUserGroupId")
+        assertEquals("ON", AgentSwitch.state(ec))
+    }
+
+    @Test
+    void "a system-tenant session with no user is switched by its tenant flag"() {
+        ec.user.logoutUser()
+        try {
+            TenantAccessSupport.withSystemTenant(TENANT) { assertEquals("ON", AgentSwitch.state(ec)) }
+            setFlag("N")
+            TenantAccessSupport.withSystemTenant(TENANT) { assertEquals("AGENT_OFF", AgentSwitch.state(ec)) }
+            assertEquals("AGENT_OFF", AgentSwitch.state(ec), "no user and no system tenant: off")
+        } finally {
+            assertTrue(ec.user.internalLoginUser(EDITOR_USERNAME))
+        }
+    }
+
+    @Test
+    void "a conf default-property reaches the switch the way prod sets it"() {
+        // Moqui's startup does System.setProperty for each <default-property>; that is the whole mechanism.
+        System.setProperty(AgentSwitch.ENABLED_PROPERTY, "false")
+        assertEquals("AGENT_OFF", AgentSwitch.state(ec))
+        System.setProperty(AgentSwitch.ENABLED_PROPERTY, "true")
+        assertEquals("ON", AgentSwitch.state(ec))
     }
 
     @Test

@@ -95,4 +95,17 @@ fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofT
         if (m.kind == "LIST") return "[" + typeString(m.ofType) + "]"
         return m.name as String
     }
+
+    /**
+     * {@link #trim} for an answer that will be returned to an agent: the 5 MB cap applies to the TRIMMED schema (the raw
+     * introspection answer is never capped). Over the cap, the call is refused with advice fit for a schema.
+     */
+    static Map trimWithinCap(Map data) {
+        Map trimmed = trim(data)
+        if (groovy.json.JsonOutput.toJson(trimmed).getBytes(java.nio.charset.StandardCharsets.UTF_8).length > AgentQuerySupport.MAX_BODY_BYTES - 64) {
+            throw new AgentQuerySupport.AgentQueryRefused("The trimmed schema is larger than 5 MB, which is more than can be returned; " +
+                    "ask the Darpan team to narrow this connection's schema.")
+        }
+        return trimmed
+    }
 }

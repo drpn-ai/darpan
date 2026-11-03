@@ -129,7 +129,7 @@ class AuthSessionSupport {
         String loginKey = readPersistentLoginCookie(ec)
         if (!loginKey) return false
 
-        String hashedKey = ec?.factory?.getSimpleHash(loginKey, "", ec?.factory?.getLoginKeyHashType(), false)
+        String hashedKey = hashLoginKey(ec, loginKey)
         if (!hashedKey) return false
 
         def deleted = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",
@@ -137,6 +137,16 @@ class AuthSessionSupport {
                 .condition("loginKey", hashedKey)
                 .deleteAll()
         return ((deleted ?: 0) as int) > 0
+    }
+
+    /**
+     * The {@code UserLoginKey.loginKey} value for a raw login key: the framework's login-key hash
+     * ({@code login-key.@encrypt-hash-type}, no salt), exactly as {@code UserFacadeImpl.loginUserKey}
+     * hashes before its lookup.
+     */
+    static String hashLoginKey(def ec, String rawKey) {
+        if (!rawKey) return null
+        return ec?.factory?.getSimpleHash(rawKey, "", ec?.factory?.getLoginKeyHashType(), false)
     }
 
     /**
@@ -241,7 +251,7 @@ class AuthSessionSupport {
         String normalizedKey = loginKey?.toString()?.trim()
         if (!normalizedKey) return null
 
-        String hashedKey = ec?.factory?.getSimpleHash(normalizedKey, "", ec?.factory?.getLoginKeyHashType(), false)
+        String hashedKey = hashLoginKey(ec, normalizedKey)
         if (!hashedKey) return null
 
         def userLoginKey = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <!-- DAR-CLI-003. Browser-approved CLI sign-in. Both entities belong to a person, not a tenant: no
+         DARPAN_ACTIVE_COMPANY_SCOPE filter. Every read of a CliSession conditions on userId = ec.user.userId;
+         a CliDeviceCode is found by the hash of the CLI's device code or by the user code the person types. -->
+
+    <entity entity-name="CliDeviceCode" package="darpan.auth" use="transactional" cache="never">
+        <description>One CLI sign-in request (device code flow). The CLI holds the device code and polls with it;
+            the person approves the short user code in their browser. Expires 10 minutes after it starts and
+            is claimed once: the first poll after approval gets the login key, every later poll gets EXPIRED.</description>
+        <field name="deviceCodeHash" type="id-long" is-pk="true">
+            <description>SHA-256 (hex) of the device code; the device code itself is never stored.</description></field>
+        <field name="userCode" type="id" not-null="true">
+            <description>The code the person types or follows in the browser, XXXX-XXXX.</description></field>
+        <field name="hostLabel" type="text-short">
+            <description>The computer the CLI says it runs on, shown to the person before they approve.</description></field>
+        <field name="statusId" type="id">
+            <description>PENDING, APPROVED, DENIED or CLAIMED (approved and the key handed out).</description></field>
+        <field name="approvedByUserId" type="id"/>
+        <field name="issuedLoginKeyHash" type="id-long">
+            <description>Hash of the login key issued at claim (moqui.security.UserLoginKey.loginKey).</description></field>
+        <field name="requestIp" type="text-short">
+            <description>Client IP of the start request, for the per-address limit.</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="expiresDate" type="date-time"/>
+
+        <relationship type="one-nofk" title="ApprovedBy" related="moqui.security.UserAccount" short-alias="approvedBy">
+            <key-map field-name="approvedByUserId" related="userId"/>
+        </relationship>
+        <index name="CLIDEV_USER_CODE" unique="true"><index-field name="userCode"/></index>
+        <index name="CLIDEV_IP_CREATED"><index-field name="requestIp"/><index-field name="createdDate"/></index>
+    </entity>
+
+    <entity entity-name="CliSession" package="darpan.auth" use="transactional" cache="never">
+        <description>Marks a moqui.security.UserLoginKey as issued to the Darpan CLI, so a request signed in with it
+            can be held to what the CLI may call. No FK to UserLoginKey: the framework deletes a user's expired keys
+            when it issues a new one, and this row outlives the key.</description>
+        <field name="loginKeyHash" type="id-long" is-pk="true">
+            <description>moqui.security.UserLoginKey.loginKey: the key's hash, never the key.</description></field>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="hostLabel" type="text-short"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="revokedDate" type="date-time"/>
+
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <relationship type="one-nofk" related="moqui.security.UserLoginKey" short-alias="loginKey">
+            <key-map field-name="loginKeyHash" related="loginKey"/>
+        </relationship>
+        <index name="CLISES_USER"><index-field name="userId"/></index>
+    </entity>
+
+    <view-entity entity-name="CliSessionAndKey" package="darpan.auth">
+        <description>A CLI session with its login key's expiry; a session whose key the framework has purged drops out.</description>
+        <member-entity entity-alias="CLS" entity-name="darpan.auth.CliSession"/>
+        <member-entity entity-alias="ULK" entity-name="moqui.security.UserLoginKey" join-from-alias="CLS">
+            <key-map field-name="loginKeyHash" related="loginKey"/>
+        </member-entity>
+        <alias-all entity-alias="CLS"/>
+        <alias name="expiresDate" entity-alias="ULK" field="thruDate"/>
+    </view-entity>
+</entities>

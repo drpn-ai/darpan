@@ -219,6 +219,30 @@
                                         "$ref": "#/components/schemas/VerifyPasswordResetCodeRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ApproveCliLoginRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DenyCliLoginRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetCliLoginRequestRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListCliSessionsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/LogoutCliSessionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/PollCliLoginRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RevokeCliSessionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/StartCliLoginRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GrantConfigTenantAccessRequest"
                                     },
                                     {
@@ -680,6 +704,14 @@
                                         "facade.AuthFacadeServices.save#UserSettings": "#/components/schemas/SaveUserSettingsRequest",
                                         "facade.AuthFacadeServices.verify#OwnPassword": "#/components/schemas/VerifyOwnPasswordRequest",
                                         "facade.AuthFacadeServices.verify#PasswordResetCode": "#/components/schemas/VerifyPasswordResetCodeRequest",
+                                        "facade.CliAuthFacadeServices.approve#CliLogin": "#/components/schemas/ApproveCliLoginRequest",
+                                        "facade.CliAuthFacadeServices.deny#CliLogin": "#/components/schemas/DenyCliLoginRequest",
+                                        "facade.CliAuthFacadeServices.get#CliLoginRequest": "#/components/schemas/GetCliLoginRequestRequest",
+                                        "facade.CliAuthFacadeServices.list#CliSessions": "#/components/schemas/ListCliSessionsRequest",
+                                        "facade.CliAuthFacadeServices.logout#CliSession": "#/components/schemas/LogoutCliSessionRequest",
+                                        "facade.CliAuthFacadeServices.poll#CliLogin": "#/components/schemas/PollCliLoginRequest",
+                                        "facade.CliAuthFacadeServices.revoke#CliSession": "#/components/schemas/RevokeCliSessionRequest",
+                                        "facade.CliAuthFacadeServices.start#CliLogin": "#/components/schemas/StartCliLoginRequest",
                                         "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "#/components/schemas/GrantConfigTenantAccessRequest",
                                         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "#/components/schemas/ListConfigTenantAccessRequest",
                                         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "#/components/schemas/RevokeConfigTenantAccessRequest",
@@ -1021,6 +1053,30 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/VerifyPasswordResetCodeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ApproveCliLoginResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DenyCliLoginResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetCliLoginRequestResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListCliSessionsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/LogoutCliSessionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PollCliLoginResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RevokeCliSessionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/StartCliLoginResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GrantConfigTenantAccessResponse"
@@ -8879,6 +8935,864 @@
                     "result"
                 ]
             },
+            "ApproveCliLoginParams": {
+                "type": "object",
+                "properties": {
+                    "userCode": {
+                        "type": "string",
+                        "description": "The user code shown by the CLI."
+                    }
+                },
+                "required": [
+                    "userCode"
+                ],
+                "description": "Approve a waiting CLI sign-in as the signed-in person: the CLI's next poll gets a login key for\n            them. Refused from a CLI session, so a CLI cannot sign in another CLI."
+            },
+            "ApproveCliLoginResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the sign-in was approved."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused: expired, already answered, or a CLI session."
+                    }
+                }
+            },
+            "ApproveCliLoginRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.approve#CliLogin",
+                "x-darpan-method": "facade.CliAuthFacadeServices.approve#CliLogin",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.approve#CliLogin"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ApproveCliLoginParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ApproveCliLoginResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.approve#CliLogin. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ApproveCliLoginResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DenyCliLoginParams": {
+                "type": "object",
+                "properties": {
+                    "userCode": {
+                        "type": "string",
+                        "description": "The user code shown by the CLI."
+                    }
+                },
+                "required": [
+                    "userCode"
+                ],
+                "description": "Deny a waiting CLI sign-in: the CLI's next poll answers DENIED and no key is issued. Refused from a\n            CLI session."
+            },
+            "DenyCliLoginResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the sign-in was denied."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused: expired, already answered, or a CLI session."
+                    }
+                }
+            },
+            "DenyCliLoginRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.deny#CliLogin",
+                "x-darpan-method": "facade.CliAuthFacadeServices.deny#CliLogin",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.deny#CliLogin"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DenyCliLoginParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DenyCliLoginResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.deny#CliLogin. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DenyCliLoginResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetCliLoginRequestParams": {
+                "type": "object",
+                "properties": {
+                    "userCode": {
+                        "type": "string",
+                        "description": "The user code from the CLI or its link."
+                    }
+                },
+                "required": [
+                    "userCode"
+                ],
+                "description": "What a CLI sign-in asks for, so the person can check the computer before approving."
+            },
+            "GetCliLoginRequestResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Errors."
+                    },
+                    "hostLabel": {
+                        "type": "string",
+                        "description": "The computer the CLI says it runs on."
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "PENDING (waiting for approval), APPROVED, DENIED, or EXPIRED (expired or unknown code)."
+                    },
+                    "expiresDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When the request expires."
+                    }
+                }
+            },
+            "GetCliLoginRequestRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.get#CliLoginRequest",
+                "x-darpan-method": "facade.CliAuthFacadeServices.get#CliLoginRequest",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.get#CliLoginRequest"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetCliLoginRequestParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetCliLoginRequestResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.get#CliLoginRequest. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetCliLoginRequestResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListCliSessionsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "The signed-in person's own CLI sessions that still work (not revoked, not expired)."
+            },
+            "ListCliSessionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Errors."
+                    },
+                    "cliSessions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "cliSessionId": {
+                                    "type": "string",
+                                    "description": "Identifies the session to revoke#CliSession; not a credential."
+                                },
+                                "hostLabel": {
+                                    "type": "string",
+                                    "description": "The computer it was signed in on."
+                                },
+                                "createdDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When it was signed in."
+                                },
+                                "expiresDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When its key stops working."
+                                }
+                            }
+                        },
+                        "description": "Newest first."
+                    }
+                }
+            },
+            "ListCliSessionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.list#CliSessions",
+                "x-darpan-method": "facade.CliAuthFacadeServices.list#CliSessions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.list#CliSessions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListCliSessionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListCliSessionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.list#CliSessions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListCliSessionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "LogoutCliSessionParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Sign the calling CLI out: revokes the CLI session whose key this request carries."
+            },
+            "LogoutCliSessionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the CLI session was revoked."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Errors, such as a request that is not a CLI session."
+                    }
+                }
+            },
+            "LogoutCliSessionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.logout#CliSession",
+                "x-darpan-method": "facade.CliAuthFacadeServices.logout#CliSession",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.logout#CliSession"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/LogoutCliSessionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "LogoutCliSessionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.logout#CliSession. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/LogoutCliSessionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "PollCliLoginParams": {
+                "type": "object",
+                "properties": {
+                    "deviceCode": {
+                        "type": "string",
+                        "description": "The device code start#CliLogin returned."
+                    }
+                },
+                "required": [
+                    "deviceCode"
+                ],
+                "description": "Ask whether a CLI sign-in was approved. The first poll after approval returns the login key and\n            claims the request; any later poll, and a poll after the 10 minutes, answers EXPIRED."
+            },
+            "PollCliLoginResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Errors."
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "PENDING (keep polling), APPROVED (authToken is set, this once), DENIED, or EXPIRED (expired,\n                    already claimed, or unknown)."
+                    },
+                    "authToken": {
+                        "type": "string",
+                        "description": "Set only on the APPROVED answer: the login key the CLI sends in the `login_key` header."
+                    },
+                    "authTokenHeaderName": {
+                        "type": "string",
+                        "description": "`login_key`, with authToken."
+                    },
+                    "authTokenExpiresInSeconds": {
+                        "type": "integer",
+                        "description": "Key lifetime in seconds, the same as a sign-in in the app."
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "Who approved, with authToken."
+                    }
+                }
+            },
+            "PollCliLoginRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.poll#CliLogin",
+                "x-darpan-method": "facade.CliAuthFacadeServices.poll#CliLogin",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.poll#CliLogin"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PollCliLoginParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PollCliLoginResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.poll#CliLogin. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PollCliLoginResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RevokeCliSessionParams": {
+                "type": "object",
+                "properties": {
+                    "cliSessionId": {
+                        "type": "string",
+                        "description": "From list#CliSessions."
+                    }
+                },
+                "required": [
+                    "cliSessionId"
+                ],
+                "description": "End one of the signed-in person's own CLI sessions: its key stops working at once."
+            },
+            "RevokeCliSessionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the session was revoked."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Errors, such as a session that is not yours or already ended."
+                    }
+                }
+            },
+            "RevokeCliSessionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.revoke#CliSession",
+                "x-darpan-method": "facade.CliAuthFacadeServices.revoke#CliSession",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.revoke#CliSession"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RevokeCliSessionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RevokeCliSessionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.revoke#CliSession. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RevokeCliSessionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "StartCliLoginParams": {
+                "type": "object",
+                "properties": {
+                    "hostLabel": {
+                        "type": "string",
+                        "description": "The computer the CLI runs on (its hostname), shown to the person before they approve."
+                    }
+                },
+                "required": [
+                    "hostLabel"
+                ],
+                "description": "Start a CLI sign-in. Returns the device code the CLI polls with and the user code the person\n            approves in the Darpan app. Expires in 10 minutes. At most 10 starts a minute from one address."
+            },
+            "StartCliLoginResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Errors, such as too many starts from this address."
+                    },
+                    "deviceCode": {
+                        "type": "string",
+                        "description": "Secret the CLI polls with; only its hash is stored. Never show it to the person."
+                    },
+                    "userCode": {
+                        "type": "string",
+                        "description": "The code the person approves, XXXX-XXXX."
+                    },
+                    "verificationUrl": {
+                        "type": "string",
+                        "description": "The Darpan app page that approves this sign-in: app base URL + verificationPath."
+                    },
+                    "verificationPath": {
+                        "type": "string",
+                        "description": "/cli-login?code=USER-CODE, for a CLI that knows its own app URL."
+                    },
+                    "expiresInSeconds": {
+                        "type": "integer",
+                        "description": "Seconds until the codes expire: 600."
+                    },
+                    "intervalSeconds": {
+                        "type": "integer",
+                        "description": "Seconds the CLI waits between polls: 3."
+                    }
+                }
+            },
+            "StartCliLoginRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.CliAuthFacadeServices.start#CliLogin",
+                "x-darpan-method": "facade.CliAuthFacadeServices.start#CliLogin",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.CliAuthFacadeServices.start#CliLogin"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/StartCliLoginParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "StartCliLoginResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.CliAuthFacadeServices.start#CliLogin. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/StartCliLoginResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GrantConfigTenantAccessParams": {
                 "type": "object",
                 "properties": {
@@ -9242,7 +10156,7 @@
                 "required": [
                     "omsRestSourceConfigId"
                 ],
-                "description": "Delete one tenant-owned HotWax OMS REST source configuration."
+                "description": "Delete one tenant-owned HotWax OMS source configuration."
             },
             "DeleteHotWaxOmsRestSourceConfigResult": {
                 "type": "object",
@@ -9343,7 +10257,7 @@
                         "type": "integer"
                     }
                 },
-                "description": "List OMS REST source configurations available to the active tenant."
+                "description": "List OMS source configurations available to the active tenant."
             },
             "ListHotWaxOmsRestSourceConfigsResult": {
                 "type": "object",
@@ -9380,9 +10294,6 @@
                                 "baseUrl": {
                                     "type": "string"
                                 },
-                                "ordersPath": {
-                                    "type": "string"
-                                },
                                 "timeZone": {
                                     "type": "string"
                                 },
@@ -9408,9 +10319,6 @@
                                     "type": "integer"
                                 },
                                 "readTimeoutSeconds": {
-                                    "type": "integer"
-                                },
-                                "returnsPageSize": {
                                     "type": "integer"
                                 },
                                 "isActive": {
@@ -9523,9 +10431,6 @@
                     "baseUrl": {
                         "type": "string"
                     },
-                    "ordersPath": {
-                        "type": "string"
-                    },
                     "timeZone": {
                         "type": "string"
                     },
@@ -9551,10 +10456,6 @@
                     "readTimeoutSeconds": {
                         "type": "integer"
                     },
-                    "returnsPageSize": {
-                        "type": "integer",
-                        "description": "Rows per page requested from the OMS reconciliationReturns endpoint, 1..1000. Omit to keep the stored value; unset means the 500 default. Lower it when OMS cannot build a full page inside its gateway timeout."
-                    },
                     "isActive": {
                         "type": "boolean"
                     },
@@ -9565,7 +10466,7 @@
                 "required": [
                     "baseUrl"
                 ],
-                "description": "Create or update a tenant-owned OMS REST source configuration. Secret fields are stored encrypted and are never returned in clear text."
+                "description": "Create or update a tenant-owned OMS source configuration. Secret fields are stored encrypted and are never returned in clear text."
             },
             "SaveHotWaxOmsRestSourceConfigResult": {
                 "type": "object",
@@ -9600,9 +10501,6 @@
                             "baseUrl": {
                                 "type": "string"
                             },
-                            "ordersPath": {
-                                "type": "string"
-                            },
                             "timeZone": {
                                 "type": "string"
                             },
@@ -9628,9 +10526,6 @@
                                 "type": "integer"
                             },
                             "readTimeoutSeconds": {
-                                "type": "integer"
-                            },
-                            "returnsPageSize": {
                                 "type": "integer"
                             },
                             "isActive": {
@@ -26659,7 +27554,7 @@
                     "scriptName",
                     "scriptBody"
                 ],
-                "description": "Create or update one of the active tenant's scripts. The body must parse under its profile; a script\n            that does not is refused with the line, never saved half-checked. Needs edit access to the tenant."
+                "description": "Create or update one of the active tenant's scripts. The body must parse under its profile and run\n            cleanly on its sample input; a script that does not is refused with the line, never saved half-checked. No\n            transaction is open while the trial run runs; the store opens its own. Needs edit access to the tenant."
             },
             "SaveTenantScriptResult": {
                 "type": "object",
@@ -26684,7 +27579,7 @@
                     },
                     "validation": {
                         "type": "object",
-                        "description": "{ok, profile, variables, error: {kind, message, line, column}}"
+                        "description": "{ok, profile, variables, error: {kind, message, line, column},\n                problems: [{rule, line, message}], notes: [text]}"
                     }
                 }
             },
@@ -26929,6 +27824,14 @@
         "facade.AuthFacadeServices.save#UserSettings": "SaveUserSettings",
         "facade.AuthFacadeServices.verify#OwnPassword": "VerifyOwnPassword",
         "facade.AuthFacadeServices.verify#PasswordResetCode": "VerifyPasswordResetCode",
+        "facade.CliAuthFacadeServices.approve#CliLogin": "ApproveCliLogin",
+        "facade.CliAuthFacadeServices.deny#CliLogin": "DenyCliLogin",
+        "facade.CliAuthFacadeServices.get#CliLoginRequest": "GetCliLoginRequest",
+        "facade.CliAuthFacadeServices.list#CliSessions": "ListCliSessions",
+        "facade.CliAuthFacadeServices.logout#CliSession": "LogoutCliSession",
+        "facade.CliAuthFacadeServices.poll#CliLogin": "PollCliLogin",
+        "facade.CliAuthFacadeServices.revoke#CliSession": "RevokeCliSession",
+        "facade.CliAuthFacadeServices.start#CliLogin": "StartCliLogin",
         "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "GrantConfigTenantAccess",
         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "ListConfigTenantAccess",
         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "RevokeConfigTenantAccess",

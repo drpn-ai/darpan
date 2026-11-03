@@ -63,6 +63,14 @@ facade.AuthFacadeServices.save#RecoveryEmail
 facade.AuthFacadeServices.save#UserSettings
 facade.AuthFacadeServices.verify#OwnPassword
 facade.AuthFacadeServices.verify#PasswordResetCode
+facade.CliAuthFacadeServices.approve#CliLogin
+facade.CliAuthFacadeServices.deny#CliLogin
+facade.CliAuthFacadeServices.get#CliLoginRequest
+facade.CliAuthFacadeServices.list#CliSessions
+facade.CliAuthFacadeServices.logout#CliSession
+facade.CliAuthFacadeServices.poll#CliLogin
+facade.CliAuthFacadeServices.revoke#CliSession
+facade.CliAuthFacadeServices.start#CliLogin
 facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess
 facade.ConfigSharingFacadeServices.list#ConfigTenantAccess
 facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess

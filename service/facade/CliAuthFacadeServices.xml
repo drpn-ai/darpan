@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-CLI-003. Browser-approved sign-in for the Darpan CLI (a device code flow). The CLI starts a sign-in
+         and polls anonymously; the person approves the user code in the Darpan app, signed in as themselves; the
+         first poll after that gets an ordinary Moqui login key for them, marked as a CLI session
+         (darpan.auth.CliSession) so the CLI can be held to its allowlist. Spec: wrapper
+         docs/superpowers/specs/2026-11-03-tenant-agent-cli-mcp-design.md 6.2 and 7. -->
+
+    <service verb="start" noun="CliLogin" allow-remote="true" authenticate="anonymous-all">
+        <description>Start a CLI sign-in. Returns the device code the CLI polls with and the user code the person
+            approves in the Darpan app. Expires in 10 minutes. At most 10 starts a minute from one address.</description>
+        <in-parameters>
+            <parameter name="hostLabel" required="true">
+                <description>The computer the CLI runs on (its hostname), shown to the person before they approve.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Errors, such as too many starts from this address.</description><parameter name="error"/></parameter>
+            <parameter name="deviceCode" type="String">
+                <description>Secret the CLI polls with; only its hash is stored. Never show it to the person.</description></parameter>
+            <parameter name="userCode" type="String">
+                <description>The code the person approves, XXXX-XXXX.</description></parameter>
+            <parameter name="verificationUrl" type="String">
+                <description>The Darpan app page that approves this sign-in: app base URL + verificationPath.</description></parameter>
+            <parameter name="verificationPath" type="String">
+                <description>/cli-login?code=USER-CODE, for a CLI that knows its own app URL.</description></parameter>
+            <parameter name="expiresInSeconds" type="Integer"><description>Seconds until the codes expire: 600.</description></parameter>
+            <parameter name="intervalSeconds" type="Integer"><description>Seconds the CLI waits between polls: 3.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="nowDate" from="ec.user.nowTimestamp"/>
+            <set field="requestIp" from="darpan.facade.auth.CliAuthSupport.requestAddress(ec)"/>
+            <if condition="darpan.facade.auth.CliAuthSupport.overStartLimit(ec, requestIp, nowDate)">
+                <return error="true" message="Too many sign-in requests from this address. Wait a minute and try again."/>
+            </if>
+
+            <!-- Housekeeping: a request a day past its expiry is of no use to anyone. -->
+            <entity-delete-by-condition entity-name="darpan.auth.CliDeviceCode">
+                <econdition field-name="expiresDate" operator="less" from="new java.sql.Timestamp(nowDate.time - 86_400_000L)"/>
+            </entity-delete-by-condition>
+
+            <set field="deviceCode" from="darpan.facade.auth.CliAuthSupport.newDeviceCode()"/>
+            <set field="userCode" from="darpan.facade.auth.CliAuthSupport.newUserCode(ec)"/>
+            <set field="expiresInSeconds" from="darpan.facade.auth.CliAuthSupport.DEVICE_CODE_LIFETIME_SECONDS" type="Integer"/>
+            <set field="intervalSeconds" from="darpan.facade.auth.CliAuthSupport.POLL_INTERVAL_SECONDS" type="Integer"/>
+            <entity-make-value entity-name="darpan.auth.CliDeviceCode" value-field="deviceRow"
+                    map="[deviceCodeHash: darpan.facade.auth.CliAuthSupport.hashDeviceCode(deviceCode), userCode: userCode,
+                          hostLabel: darpan.facade.auth.CliAuthSupport.normalizeHostLabel(hostLabel), statusId: 'PENDING',
+                          requestIp: requestIp, createdDate: nowDate,
+                          expiresDate: new java.sql.Timestamp(nowDate.time + expiresInSeconds * 1000L)]"/>
+            <entity-create value-field="deviceRow"/>
+
+            <set field="verificationPath" from="'/cli-login?code=' + userCode"/>
+            <set field="verificationUrl" from="darpan.facade.auth.CliAuthSupport.appBaseUrl(ec) + verificationPath"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="poll" noun="CliLogin" allow-remote="true" authenticate="anonymous-all">
+        <description>Ask whether a CLI sign-in was approved. The first poll after approval returns the login key and
+            claims the request; any later poll, and a poll after the 10 minutes, answers EXPIRED.</description>
+        <in-parameters>
+            <parameter name="deviceCode" required="true"><description>The device code start#CliLogin returned.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Errors.</description><parameter name="error"/></parameter>
+            <parameter name="status" type="String">
+                <description>PENDING (keep polling), APPROVED (authToken is set, this once), DENIED, or EXPIRED (expired,
+                    already claimed, or unknown).</description></parameter>
+            <parameter name="authToken" type="String">
+                <description>Set only on the APPROVED answer: the login key the CLI sends in the `login_key` header.</description></parameter>
+            <parameter name="authTokenHeaderName" type="String"><description>`login_key`, with authToken.</description></parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer">
+                <description>Key lifetime in seconds, the same as a sign-in in the app.</description></parameter>
+            <parameter name="username" type="String"><description>Who approved, with authToken.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="nowDate" from="ec.user.nowTimestamp"/>
+            <!-- Locked, so two polls racing on one approval cannot both claim it. -->
+            <entity-find-one entity-name="darpan.auth.CliDeviceCode" value-field="deviceRow" for-update="true">
+                <field-map field-name="deviceCodeHash" from="darpan.facade.auth.CliAuthSupport.hashDeviceCode(deviceCode)"/>
+            </entity-find-one>
+
+            <if condition="deviceRow == null || deviceRow.statusId == 'CLAIMED'">
+                <set field="status" value="EXPIRED"/>
+                <else-if condition="deviceRow.statusId == 'DENIED'"><set field="status" value="DENIED"/></else-if>
+                <else-if condition="!deviceRow.expiresDate?.after(nowDate)"><set field="status" value="EXPIRED"/></else-if>
+                <else-if condition="deviceRow.statusId != 'APPROVED'"><set field="status" value="PENDING"/></else-if>
+                <else>
+                    <entity-find-one entity-name="moqui.security.UserAccount" value-field="approver">
+                        <field-map field-name="userId" from="deviceRow.approvedByUserId"/></entity-find-one>
+                    <!-- The framework refuses a disabled account's key at every request; this also refuses to issue
+                         one to an account disabled between approval and this poll. -->
+                    <if condition="!darpan.facade.auth.CliAuthSupport.canSignIn(ec, approver)">
+                        <set field="deviceRow.statusId" value="DENIED"/>
+                        <entity-update value-field="deviceRow"/>
+                        <set field="status" value="DENIED"/>
+                        <else>
+                            <set field="issued" from="darpan.facade.auth.CliAuthSupport.issueLoginKey(ec, approver.userId, 'Darpan CLI on ' + (deviceRow.hostLabel ?: 'an unnamed computer'))"/>
+                            <entity-make-value entity-name="darpan.auth.CliSession" value-field="cliSession"
+                                    map="[loginKeyHash: issued.hash, userId: approver.userId, hostLabel: deviceRow.hostLabel, createdDate: nowDate]"/>
+                            <entity-create value-field="cliSession"/>
+                            <set field="deviceRow.statusId" value="CLAIMED"/>
+                            <set field="deviceRow.issuedLoginKeyHash" from="issued.hash"/>
+                            <entity-update value-field="deviceRow"/>
+
+                            <set field="status" value="APPROVED"/>
+                            <set field="authToken" from="issued.rawKey"/>
+                            <set field="authTokenHeaderName" value="login_key"/>
+                            <set field="authTokenExpiresInSeconds" from="issued.expiresInSeconds" type="Integer"/>
+                            <set field="username" from="approver.username"/>
+                        </else>
+                    </if>
+                </else>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="CliLoginRequest" allow-remote="true">
+        <description>What a CLI sign-in asks for, so the person can check the computer before approving.</description>
+        <in-parameters>
+            <parameter name="userCode" required="true"><description>The user code from the CLI or its link.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Errors.</description><parameter name="error"/></parameter>
+            <parameter name="hostLabel" type="String"><description>The computer the CLI says it runs on.</description></parameter>
+            <parameter name="status" type="String">
+                <description>PENDING (waiting for approval), APPROVED, DENIED, or EXPIRED (expired or unknown code).</description></parameter>
+            <parameter name="expiresDate" type="Timestamp"><description>When the request expires.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="nowDate" from="ec.user.nowTimestamp"/>
+            <entity-find entity-name="darpan.auth.CliDeviceCode" list="deviceRows" limit="1">
+                <econdition field-name="userCode" from="darpan.facade.auth.CliAuthSupport.normalizeUserCode(userCode)"/>
+            </entity-find>
+            <set field="deviceRow" from="deviceRows ? deviceRows[0] : null"/>
+            <if condition="deviceRow == null">
+                <set field="status" value="EXPIRED"/>
+                <else>
+                    <set field="hostLabel" from="deviceRow.hostLabel"/>
+                    <set field="expiresDate" from="deviceRow.expiresDate"/>
+                    <if condition="deviceRow.statusId == 'CLAIMED' || deviceRow.statusId == 'APPROVED'">
+                        <set field="status" value="APPROVED"/>
+                        <else-if condition="deviceRow.statusId == 'DENIED'"><set field="status" value="DENIED"/></else-if>
+                        <else-if condition="!deviceRow.expiresDate?.after(nowDate)"><set field="status" value="EXPIRED"/></else-if>
+                        <else><set field="status" value="PENDING"/></else>
+                    </if>
+                </else>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="approve" noun="CliLogin" allow-remote="true">
+        <description>Approve a waiting CLI sign-in as the signed-in person: the CLI's next poll gets a login key for
+            them. Refused from a CLI session, so a CLI cannot sign in another CLI.</description>
+        <in-parameters>
+            <parameter name="userCode" required="true"><description>The user code shown by the CLI.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the sign-in was approved.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused: expired, already answered, or a CLI session.</description><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="darpan.facade.auth.CliAuthSupport.isCliSession(ec)">
+                <return error="true" message="Approve CLI sign-ins in the Darpan app, not from the CLI."/></if>
+            <entity-find entity-name="darpan.auth.CliDeviceCode" list="deviceRows" limit="1" for-update="true">
+                <econdition field-name="userCode" from="darpan.facade.auth.CliAuthSupport.normalizeUserCode(userCode)"/>
+            </entity-find>
+            <set field="deviceRow" from="deviceRows ? deviceRows[0] : null"/>
+            <if condition="deviceRow == null || deviceRow.statusId != 'PENDING' || !deviceRow.expiresDate?.after(ec.user.nowTimestamp)">
+                <return error="true" message="This sign-in request has expired or was already answered. Run darpan login again."/></if>
+            <set field="deviceRow.statusId" value="APPROVED"/>
+            <set field="deviceRow.approvedByUserId" from="ec.user.userId"/>
+            <entity-update value-field="deviceRow"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="deny" noun="CliLogin" allow-remote="true">
+        <description>Deny a waiting CLI sign-in: the CLI's next poll answers DENIED and no key is issued. Refused from a
+            CLI session.</description>
+        <in-parameters>
+            <parameter name="userCode" required="true"><description>The user code shown by the CLI.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the sign-in was denied.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused: expired, already answered, or a CLI session.</description><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="darpan.facade.auth.CliAuthSupport.isCliSession(ec)">
+                <return error="true" message="Answer CLI sign-ins in the Darpan app, not from the CLI."/></if>
+            <entity-find entity-name="darpan.auth.CliDeviceCode" list="deviceRows" limit="1" for-update="true">
+                <econdition field-name="userCode" from="darpan.facade.auth.CliAuthSupport.normalizeUserCode(userCode)"/>
+            </entity-find>
+            <set field="deviceRow" from="deviceRows ? deviceRows[0] : null"/>
+            <if condition="deviceRow == null || deviceRow.statusId != 'PENDING' || !deviceRow.expiresDate?.after(ec.user.nowTimestamp)">
+                <return error="true" message="This sign-in request has expired or was already answered."/></if>
+            <set field="deviceRow.statusId" value="DENIED"/>
+            <entity-update value-field="deviceRow"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="CliSessions" allow-remote="true">
+        <description>The signed-in person's own CLI sessions that still work (not revoked, not expired).</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Errors.</description><parameter name="error"/></parameter>
+            <parameter name="cliSessions" type="List">
+                <description>Newest first.</description>
+                <parameter name="cliSessionId" type="String"><description>Identifies the session to revoke#CliSession; not a credential.</description></parameter>
+                <parameter name="hostLabel" type="String"><description>The computer it was signed in on.</description></parameter>
+                <parameter name="createdDate" type="Timestamp"><description>When it was signed in.</description></parameter>
+                <parameter name="expiresDate" type="Timestamp"><description>When its key stops working.</description></parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.auth.CliSessionAndKey" list="sessionRows">
+                <econdition field-name="userId" from="ec.user.userId"/>
+                <econdition field-name="revokedDate" operator="is-null"/>
+                <econdition field-name="expiresDate" operator="greater" from="ec.user.nowTimestamp"/>
+                <order-by field-name="-createdDate"/>
+            </entity-find>
+            <set field="cliSessions" from="sessionRows.collect { [cliSessionId: darpan.facade.auth.CliAuthSupport.cliSessionId(it.loginKeyHash),
+                    hostLabel: it.hostLabel, createdDate: it.createdDate, expiresDate: it.expiresDate] }"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="revoke" noun="CliSession" allow-remote="true">
+        <description>End one of the signed-in person's own CLI sessions: its key stops working at once.</description>
+        <in-parameters>
+            <parameter name="cliSessionId" required="true"><description>From list#CliSessions.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the session was revoked.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Errors, such as a session that is not yours or already ended.</description><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <!-- Hex only: the id goes into a LIKE, so a % or _ must never reach it. -->
+            <if condition="!(cliSessionId ==~ /[0-9a-fA-F]{12}/)">
+                <return error="true" message="That CLI session was not found."/></if>
+            <entity-find entity-name="darpan.auth.CliSession" list="sessionRows" limit="2" for-update="true">
+                <econdition field-name="userId" from="ec.user.userId"/>
+                <econdition field-name="revokedDate" operator="is-null"/>
+                <econdition field-name="loginKeyHash" operator="like" from="cliSessionId.toLowerCase() + '%'"/>
+            </entity-find>
+            <if condition="sessionRows.size() != 1">
+                <return error="true" message="That CLI session was not found."/></if>
+            <set field="sessionRow" from="sessionRows[0]"/>
+            <!-- A second back: UserFacadeImpl.loginUserKey refuses a key only once now is AFTER thruDate. -->
+            <set field="endedDate" from="new java.sql.Timestamp(ec.user.nowTimestamp.time - 1000L)"/>
+            <set field="sessionRow.revokedDate" from="endedDate"/>
+            <entity-update value-field="sessionRow"/>
+            <entity-find-one entity-name="moqui.security.UserLoginKey" value-field="loginKeyRow" for-update="true">
+                <field-map field-name="loginKey" from="sessionRow.loginKeyHash"/></entity-find-one>
+            <if condition="loginKeyRow != null">
+                <set field="loginKeyRow.thruDate" from="endedDate"/>
+                <entity-update value-field="loginKeyRow"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="logout" noun="CliSession" allow-remote="true">
+        <description>Sign the calling CLI out: revokes the CLI session whose key this request carries.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the CLI session was revoked.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Errors, such as a request that is not a CLI session.</description><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="requestKeyHashes" from="darpan.facade.auth.CliAuthSupport.requestLoginKeyHashes(ec)"/>
+            <if condition="!requestKeyHashes">
+                <return error="true" message="This request is not signed in with a CLI key."/></if>
+            <entity-find entity-name="darpan.auth.CliSession" list="sessionRows" for-update="true">
+                <econdition field-name="userId" from="ec.user.userId"/>
+                <econdition field-name="revokedDate" operator="is-null"/>
+                <econdition field-name="loginKeyHash" operator="in" from="requestKeyHashes"/>
+            </entity-find>
+            <if condition="!sessionRows">
+                <return error="true" message="This request is not signed in with a CLI key."/></if>
+            <set field="endedDate" from="new java.sql.Timestamp(ec.user.nowTimestamp.time - 1000L)"/>
+            <iterate list="sessionRows" entry="sessionRow">
+                <set field="sessionRow.revokedDate" from="endedDate"/>
+                <entity-update value-field="sessionRow"/>
+                <entity-find-one entity-name="moqui.security.UserLoginKey" value-field="loginKeyRow" for-update="true">
+                    <field-map field-name="loginKey" from="sessionRow.loginKeyHash"/></entity-find-one>
+                <if condition="loginKeyRow != null">
+                    <set field="loginKeyRow.thruDate" from="endedDate"/>
+                    <entity-update value-field="loginKeyRow"/>
+                </if>
+            </iterate>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

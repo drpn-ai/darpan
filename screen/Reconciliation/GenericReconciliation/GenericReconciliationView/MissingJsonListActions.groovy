@@ -248,6 +248,7 @@ def trySparkSearch = {
                     .master(sparkMasterCfg)
                     .config("spark.sql.shuffle.partitions", "8")
                     .config("spark.sql.files.maxPartitionBytes", "134217728")
+                    .config("spark.ui.enabled", "false") // embedded use: no unauthenticated UI port; the UI's jakarta.servlet is the container's
                     .getOrCreate()
             stopSpark = true
         }

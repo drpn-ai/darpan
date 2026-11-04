@@ -156,7 +156,7 @@ class BrainChangeTicketSmokeTests {
         assertTrue(gated.hasError as boolean)
         assertTrue((gated.errors as List).contains(AdminAccessSupport.SUPER_ADMIN_REQUIRED_MESSAGE), "${gated.errors}")
         assertEquals("RECEIVED", status(id))
-        assertNotNull(onThread(USERNAME, "${ADMIN}.list#BrainChangeTickets", [:], false).authzDenied)
+        assertNotNull(onThread(USERNAME, "${ADMIN}.list#AllBrainChangeTickets", [:], false).authzDenied)
     }
 
     @Test
@@ -167,11 +167,11 @@ class BrainChangeTicketSmokeTests {
         String b = create(CONV_OTHER, "DISPLAY", "Display in tenant B.").ticketId
         actAs(MINE)
 
-        Map all = onThread(SUPER_USERNAME, "${ADMIN}.list#BrainChangeTickets", [:], false)
+        Map all = onThread(SUPER_USERNAME, "${ADMIN}.list#AllBrainChangeTickets", [:], false)
         assertNull(all.authzDenied)
         assertFalse(all.hasError as boolean, "${all.errors}")
         assertEquals([a, b] as Set, (all.result.tickets as List<Map>)*.ticketId as Set)
-        Map one = onThread(SUPER_USERNAME, "${ADMIN}.list#BrainChangeTickets", [tenantUserGroupId: OTHER], false)
+        Map one = onThread(SUPER_USERNAME, "${ADMIN}.list#AllBrainChangeTickets", [tenantUserGroupId: OTHER], false)
         assertEquals([b], (one.result.tickets as List<Map>)*.ticketId)
         assertEquals(OTHER, (one.result.tickets as List<Map>)[0].companyUserGroupId)
 
@@ -188,7 +188,7 @@ class BrainChangeTicketSmokeTests {
         assertEquals("v2.2.0", row.shippedVersion)
         assertEquals("Works as designed.", asSystem { ec.entity.find(TICKET).condition("ticketId", b).useCache(false).one() }.statusReason)
         assertTrue(update("NOPE", [status: "ACCEPTED"]).hasError as boolean)
-        assertEquals([a], (onThread(SUPER_USERNAME, "${ADMIN}.list#BrainChangeTickets", [status: "SHIPPED"], false).result.tickets as List<Map>)*.ticketId)
+        assertEquals([a], (onThread(SUPER_USERNAME, "${ADMIN}.list#AllBrainChangeTickets", [status: "SHIPPED"], false).result.tickets as List<Map>)*.ticketId)
         // the tenant sees the status its ticket reached
         assertEquals("SHIPPED", (call(FACADE, "list#BrainChangeTickets", [:]).tickets as List<Map>)[0].status)
     }

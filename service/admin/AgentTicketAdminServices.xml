@@ -7,8 +7,9 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="list" noun="BrainChangeTickets" allow-remote="true" authenticate="true" authz-action="view">
-        <description>Tickets across tenants, newest first; one tenant or one status when named.</description>
+    <service verb="list" noun="AllBrainChangeTickets" allow-remote="true" authenticate="true" authz-action="view">
+        <description>Tickets across tenants, newest first; one tenant or one status when named. Named apart from the tenant's own
+            facade.AgentChangeFacadeServices.list#BrainChangeTickets, whose schema name it would otherwise collide with in the API contract.</description>
         <in-parameters>
             <parameter name="tenantUserGroupId"><description>Only this tenant's tickets.</description></parameter>
             <parameter name="status"><description>Only tickets in this status.</description></parameter>

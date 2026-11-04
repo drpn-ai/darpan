@@ -12,6 +12,8 @@ import groovy.transform.ToString
 class Finding {
     static final String ORDER_LINE = "orderLine"
     static final String RETURN = "return"
+    /** DAR-BE-192: an R7 order (a HotWax order with no NetSuite sales order). */
+    static final String ORDER = "order"
 
     String key
     String kind

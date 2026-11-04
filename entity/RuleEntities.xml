@@ -105,7 +105,7 @@
         </field>
         <field name="conclusionBrain" type="text-short">
             <description>DAR-BE-151. Blank: the scope is concluded by its conclusion tree only (every scope before the brain).
-                ORDER_LINE or RETURN: the conclusion brain (checked-in DRL, darpan/conclusion/brain) concludes its findings
+                ORDER_LINE, RETURN or ORDER (DAR-BE-192, an order-grain run): the conclusion brain (checked-in DRL, darpan/conclusion/brain) concludes its findings
                 first, as findings of that kind, and the tree concludes the ones the brain leaves unexplained. Nullable with
                 no default, so adding the column changes no live scope.</description>
         </field>

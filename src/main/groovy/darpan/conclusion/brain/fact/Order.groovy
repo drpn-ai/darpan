@@ -14,4 +14,7 @@ class Order {
     BigDecimal total
     String netsuiteOrderId
     boolean paymentsComplete
+    /** DAR-BE-192: its name (EXC-#GOR..., WTY-#GOR...: a replacement) and HotWax status, when the finding's record carries them. */
+    String name
+    String statusId
 }

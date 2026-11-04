@@ -105,6 +105,13 @@ class RunConclusionStepTests {
     void aBrainScopesKindIsReadFromItsConclusionBrainValue() {
         org.junit.jupiter.api.Assertions.assertEquals("orderLine", RunConclusionStep.brainKind("ORDER_LINE"))
         org.junit.jupiter.api.Assertions.assertEquals("return", RunConclusionStep.brainKind("RETURN"))
+        // DAR-BE-192: an order-grain run (gorjana R7) and the default read for a replacement's return.
+        org.junit.jupiter.api.Assertions.assertEquals("order", RunConclusionStep.brainKind("ORDER"))
+        Map replacement = RunConclusionStep.questionLookup("replacementReturn", [], "gorjana_oms")
+        org.junit.jupiter.api.Assertions.assertEquals(["OMS_RETURNS_GQL", "gorjana_oms", "replacementOrderId"],
+                [replacement.systemEnumId, replacement.sourceConfigId, replacement.keyField])
+        org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.questionLookup("returnRma", [], "gorjana_oms"),
+                "NetSuite is read only through the scope's own lookups")
         org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.brainKind(null))
         org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.brainKind("SOMETHING_ELSE"))
     }

@@ -27,7 +27,9 @@ class BrainAskPlannerTests {
     @Test
     void theQuestionsRankCeilingComesFromThePack() {
         // DAR-BE-186: the product question unlocks up to "Sold on a retired SKU" (66).
-        assertEquals(RANKS + [productNetsuiteId: 66], BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])))
+        // DAR-BE-192: a replacement's return can unlock up to "waits on its own return" (56), its RMA and memo up to 55.
+        assertEquals(RANKS + [productNetsuiteId: 66, replacementReturn: 56, returnRma: 55, returnMemo: 55],
+                BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])))
     }
 
     @Test

@@ -9,6 +9,7 @@ import darpan.conclusion.brain.fact.Order
 import darpan.conclusion.brain.fact.Product
 import darpan.conclusion.brain.fact.Payment
 import darpan.conclusion.brain.fact.Return
+import darpan.conclusion.brain.fact.ReplacementReturn
 import darpan.conclusion.brain.fact.Ask
 import darpan.conclusion.brain.fact.Answered
 import darpan.conclusion.brain.fact.Cause
@@ -53,6 +54,43 @@ declare SoldOnRetiredSku
     liveSku : String
 end
 
+// DAR-BE-192: a replacement (an exchange or warranty replacement) HotWax holds until its return has a linked credit memo.
+declare ReplacementWaitsOnItsReturn
+    @label("Its return is still open in HotWax") @value("{ret.returnId} {ret.statusId} since {ret.entered}")
+    order : Order @key
+    ret : ReplacementReturn
+end
+
+declare ReturnRmaClosedNoMemo
+    @label("Its return's RMA is closed in NetSuite, with no credit memo") @value("{ret.returnId}: {ret.rmaTranId} {ret.rmaStatus}")
+    order : Order @key
+    ret : ReplacementReturn
+end
+
+declare ReturnRmaNoMemo
+    @label("Its return has an RMA in NetSuite and no credit memo") @value("{ret.returnId}: {ret.rmaTranId}")
+    order : Order @key
+    ret : ReplacementReturn
+end
+
+declare ReturnNotInNetsuite
+    @label("Its return has no RMA in NetSuite") @value("{ret.returnId}")
+    order : Order @key
+    ret : ReplacementReturn
+end
+
+declare LostClaimNoMemo
+    @label("Its lost-warranty claim has no credit memo in NetSuite") @value("{ret.returnId}")
+    order : Order @key
+    ret : ReplacementReturn
+end
+
+declare PaymentsNotTheTotal
+    @label("Its payments do not settle its total") @value("{settled} of {order.total}")
+    order : Order @key
+    settled : BigDecimal
+end
+
 // ---- each fact read once
 
 rule "R1 sees the order not in NetSuite: no sales order line"
@@ -69,6 +107,14 @@ when
     Finding( kind == "return", bucket == "MISSING_FROM_FILE_2", $r : ret, ret != null )
     Return( this == $r, $o : order )
     Order( this == $o, netsuiteOrderId == null )
+then
+    insertLogical( new OrderNotInNetsuite( $o ) );
+end
+
+rule "R7 sees the order not in NetSuite: no sales order"
+    @reads("Finding") @produces("OrderNotInNetsuite")
+when
+    Finding( kind == "order", bucket == "MISSING_FROM_FILE_2", $o : order, order != null )
 then
     insertLogical( new OrderNotInNetsuite( $o ) );
 end
@@ -111,6 +157,40 @@ then
     insertLogical( new Ask( "productNetsuiteId", $p, $o ) );
 end
 
+// DAR-BE-192: a replacement's name says it is one (EXC- an exchange, WTY- a warranty replacement); its return is found from it.
+rule "Ask for the return a replacement was made for, when the replacement never reached NetSuite"
+    @reads("OrderNotInNetsuite, Order, Answered") @asks("replacementReturn")
+    @mayEnable("CONC_REPLACEMENT_WAITS_OWN_RETURN,CONC_RETURN_RMA_CLOSED_NO_MEMO,CONC_RETURN_RMA_NO_MEMO,CONC_RETURN_NO_RMA,CONC_LOST_CLAIM_NO_MEMO")
+when
+    OrderNotInNetsuite( $o : order )
+    Order( this == $o, name != null, name matches "(?i)(EXC|WTY)-.+" )
+    not Answered( question == "replacementReturn", subject == $o )
+then
+    insertLogical( new Ask( "replacementReturn", $o ) );
+end
+
+rule "Ask NetSuite for the RMA of a replacement's completed return"
+    @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @asks("returnRma")
+    @mayEnable("CONC_RETURN_RMA_CLOSED_NO_MEMO,CONC_RETURN_RMA_NO_MEMO,CONC_RETURN_NO_RMA")
+when
+    OrderNotInNetsuite( $o : order )
+    $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED" )
+    not Answered( question == "returnRma", subject == $r )
+then
+    insertLogical( new Ask( "returnRma", $r, $o ) );
+end
+
+rule "Ask NetSuite for the credit memo of a replacement's completed return"
+    @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @asks("returnMemo")
+    @mayEnable("CONC_RETURN_RMA_CLOSED_NO_MEMO,CONC_RETURN_RMA_NO_MEMO,CONC_RETURN_NO_RMA,CONC_LOST_CLAIM_NO_MEMO")
+when
+    OrderNotInNetsuite( $o : order )
+    $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED" )
+    not Answered( question == "returnMemo", subject == $r )
+then
+    insertLogical( new Ask( "returnMemo", $r, $o ) );
+end
+
 // ---- pieces
 
 rule "An item's product has no NetSuite id in HotWax"
@@ -131,6 +211,77 @@ when
     Product( this == $p, sku != null, sku matches "(?i).+-OLD" )
 then
     insertLogical( new SoldOnRetiredSku( $p, $p.getSku().replaceAll( "(?i)-OLD$", "" ) ) );
+end
+
+// DAR-BE-192 pieces: what a held replacement's return lacks. HotWax sends the replacement once its return has a linked memo.
+rule "A replacement's own return is still open"
+    @reads("OrderNotInNetsuite, ReplacementReturn") @produces("ReplacementWaitsOnItsReturn")
+when
+    OrderNotInNetsuite( $o : order )
+    $r : ReplacementReturn( replacement == $o, statusId != "RETURN_COMPLETED" )
+then
+    insertLogical( new ReplacementWaitsOnItsReturn( $o, $r ) );
+end
+
+// gorjana M197605 / M215547 / M217621 (2026-11-04): NetSuite refuses to make a memo from a closed RMA ("invalid reference").
+rule "A replacement's completed return has a closed RMA and no credit memo"
+    @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @produces("ReturnRmaClosedNoMemo")
+when
+    OrderNotInNetsuite( $o : order )
+    $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED", rmaTranId != null, rmaStatus != null,
+                            rmaStatus matches "(?i).*closed.*", memoTranId == null )
+    Answered( question == "returnRma", subject == $r )
+    Answered( question == "returnMemo", subject == $r )
+then
+    insertLogical( new ReturnRmaClosedNoMemo( $o, $r ) );
+end
+
+rule "A replacement's completed return has an RMA and no credit memo"
+    @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @produces("ReturnRmaNoMemo")
+when
+    OrderNotInNetsuite( $o : order )
+    $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED", rmaTranId != null, memoTranId == null,
+                            rmaStatus == null || rmaStatus not matches "(?i).*closed.*" )
+    Answered( question == "returnRma", subject == $r )
+    Answered( question == "returnMemo", subject == $r )
+then
+    insertLogical( new ReturnRmaNoMemo( $o, $r ) );
+end
+
+// A lost-warranty claim reaches NetSuite as a credit memo only, never an RMA (Aditi, F-104607).
+rule "A replacement's completed return has no RMA and no credit memo"
+    @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @produces("ReturnNotInNetsuite")
+when
+    OrderNotInNetsuite( $o : order )
+    $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED", rmaTranId == null, memoTranId == null,
+                            channel == null || channel != "AFTSHP_HG_LOSS" )
+    Answered( question == "returnRma", subject == $r )
+    Answered( question == "returnMemo", subject == $r )
+then
+    insertLogical( new ReturnNotInNetsuite( $o, $r ) );
+end
+
+rule "A replacement's lost-warranty claim has no credit memo"
+    @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @produces("LostClaimNoMemo")
+when
+    OrderNotInNetsuite( $o : order )
+    $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED", channel == "AFTSHP_HG_LOSS", memoTranId == null )
+    Answered( question == "returnMemo", subject == $r )
+then
+    insertLogical( new LostClaimNoMemo( $o, $r ) );
+end
+
+// gorjana EXC-#GOR191697343-1 (958.50 against 288.19 of credit), EXC-#GOR192290196-1 (65.00, nothing paying it).
+rule "A replacement's payments do not settle its total"
+    @reads("OrderNotInNetsuite, Order, Payment") @produces("PaymentsNotTheTotal")
+when
+    OrderNotInNetsuite( $o : order )
+    Order( this == $o, paymentsComplete == true, total != null, name != null, name matches "(?i)(EXC|WTY)-.+" )
+    not Payment( order == $o, state == "SETTLED", amount == null )
+    $settled : List() from collect( Payment( order == $o, state == "SETTLED" ) )
+then
+    BigDecimal paid = Payment.sum( $settled );
+    if (paid.subtract( $o.getTotal() ).abs().compareTo( new BigDecimal( "0.01" ) ) >= 0) { insertLogical( new PaymentsNotTheTotal( $o, paid ) ); }
 end
 
 rule "Every tender taken was given back, and nothing else was"
@@ -187,6 +338,61 @@ then
     insertLogical( Cause.fix( $o, "CONC_PRODUCT_NOT_IN_NETSUITE", 65, $n, $q ) );
 end
 
+// DAR-BE-192 causes, about the replacement order: what its return lacks, most specific first.
+rule "Order cause · a replacement waits on its own return"
+    @reads("OrderNotInNetsuite, ReplacementWaitsOnItsReturn") @concludes("CONC_REPLACEMENT_WAITS_OWN_RETURN") @rank(56)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $w : ReplacementWaitsOnItsReturn( order == $o )
+then
+    insertLogical( Cause.fix( $o, "CONC_REPLACEMENT_WAITS_OWN_RETURN", 56, $n, $w ) );
+end
+
+rule "Order cause · a replacement's return RMA is closed, no memo"
+    @reads("OrderNotInNetsuite, ReturnRmaClosedNoMemo") @concludes("CONC_RETURN_RMA_CLOSED_NO_MEMO") @rank(55)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $c : ReturnRmaClosedNoMemo( order == $o )
+then
+    insertLogical( Cause.fix( $o, "CONC_RETURN_RMA_CLOSED_NO_MEMO", 55, $n, $c ) );
+end
+
+rule "Order cause · a replacement's return has an RMA, no memo"
+    @reads("OrderNotInNetsuite, ReturnRmaNoMemo") @concludes("CONC_RETURN_RMA_NO_MEMO") @rank(54)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $m : ReturnRmaNoMemo( order == $o )
+then
+    insertLogical( Cause.fix( $o, "CONC_RETURN_RMA_NO_MEMO", 54, $n, $m ) );
+end
+
+rule "Order cause · a replacement's return is not in NetSuite"
+    @reads("OrderNotInNetsuite, ReturnNotInNetsuite") @concludes("CONC_RETURN_NO_RMA") @rank(53)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $m : ReturnNotInNetsuite( order == $o )
+then
+    insertLogical( Cause.fix( $o, "CONC_RETURN_NO_RMA", 53, $n, $m ) );
+end
+
+rule "Order cause · a replacement's lost-warranty claim has no memo"
+    @reads("OrderNotInNetsuite, LostClaimNoMemo") @concludes("CONC_LOST_CLAIM_NO_MEMO") @rank(52)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $m : LostClaimNoMemo( order == $o )
+then
+    insertLogical( Cause.fix( $o, "CONC_LOST_CLAIM_NO_MEMO", 52, $n, $m ) );
+end
+
+rule "Order cause · a replacement is not paid for"
+    @reads("OrderNotInNetsuite, PaymentsNotTheTotal") @concludes("CONC_REPLACEMENT_NOT_PAID") @rank(51)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $p : PaymentsNotTheTotal( order == $o )
+then
+    insertLogical( Cause.fix( $o, "CONC_REPLACEMENT_NOT_PAID", 51, $n, $p ) );
+end
+
 // ---- one rule picks every subject's best cause
 
 rule "The best cause about a subject"
@@ -215,6 +421,18 @@ rule "R2 · its order's cause"
 when
     $f : Finding( kind == "return", bucket == "MISSING_FROM_FILE_2", $r : ret, ret != null )
     Return( this == $r, $o : order )
+    BestCause( subject == $o, $c : cause )
+then
+    insert( Conclusion.of( $f, $c ) );
+end
+
+// DAR-BE-192: R7 (gorjana "Every order HotWax approves reaches NetSuite within a day"): an approved order takes its cause.
+rule "R7 · the order's cause, when HotWax approved it and NetSuite has no sales order"
+    @reads("Finding, Order, OrderNotInNetsuite, BestCause") @states("R7")
+when
+    $f : Finding( kind == "order", bucket == "MISSING_FROM_FILE_2", $o : order, order != null )
+    Order( this == $o, statusId == "ORDER_APPROVED" )
+    OrderNotInNetsuite( order == $o )
     BestCause( subject == $o, $c : cause )
 then
     insert( Conclusion.of( $f, $c ) );

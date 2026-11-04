@@ -6,6 +6,7 @@ import darpan.conclusion.brain.fact.Item
 import darpan.conclusion.brain.fact.Order
 import darpan.conclusion.brain.fact.Payment
 import darpan.conclusion.brain.fact.Product
+import darpan.conclusion.brain.fact.ReplacementReturn
 import darpan.conclusion.brain.fact.Return
 
 import static darpan.common.ValueSupport.normalize
@@ -22,6 +23,11 @@ class BrainFactAdapter {
     static final String ORDER_PAYMENTS = "orderPayments"
     /** DAR-BE-186: is an item's product known to NetSuite (its NETSUITE_PRODUCT_ID in HotWax)? Asked by product id. */
     static final String PRODUCT_NETSUITE_ID = "productNetsuiteId"
+    /** DAR-BE-192: the return a replacement order was made for (HotWax), asked by the replacement's order id. */
+    static final String REPLACEMENT_RETURN = "replacementReturn"
+    /** DAR-BE-192: that return's NetSuite RMA and credit memo, asked by return id. */
+    static final String RETURN_RMA = "returnRma"
+    static final String RETURN_MEMO = "returnMemo"
 
     /**
      * The record fields facts() reads, per RuleSetCompareScope.conclusionBrain and side. The extract must keep them, or a
@@ -30,7 +36,9 @@ class BrainFactAdapter {
     static List<String> recordFieldsFor(Object conclusionBrain, String fileSide) {
         if (fileSide != "FILE_1") return []
         switch (conclusionBrain?.toString()?.trim()) {
-            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal", "productId", "sku"]
+            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName"]
+            // DAR-BE-192: an R7 order, its name (a replacement's EXC- / WTY-) and its HotWax status.
+            case "ORDER": return ["orderId", "orderName", "grandTotal", "statusId"]
             case "RETURN": return ["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"]
             default: return []
         }
@@ -41,29 +49,32 @@ class BrainFactAdapter {
      * order and product, so a second finding reuses them. productAnswers: productNetsuiteId answers by product id.
      */
     static List<Object> facts(String kind, Map finding, Map<String, Map> answersByOrderId, Map<String, ?> world = null,
-                              Map<String, Map> productAnswers = null) {
+                              Map<String, Map> productAnswers = null, Map<String, Map<String, Map>> moreAnswers = null) {
         Map sides = (Map) (finding?.sides ?: [:])
         Map record = (Map) (((Map) (sides.FILE_1 ?: [:])).record ?: [:])
         List<Object> facts = []
         Map<String, Object> orders = world != null ? (Map<String, Object>) world : [:]
-        Closure<Order> orderFor = { String orderId, Object total, String netsuiteOrderId ->
+        Closure<Order> orderFor = { String orderId, Object total, String netsuiteOrderId, String name = null, String statusId = null ->
             if (!orderId) return null
             Order order = (Order) orders.get(orderId)
             if (order != null) {
                 if (order.netsuiteOrderId == null) order.netsuiteOrderId = netsuiteOrderId
                 if (order.total == null) order.total = number(total)
+                if (order.name == null) order.name = name
+                if (order.statusId == null) order.statusId = statusId
             } else {
-                order = new Order(orderId: orderId, total: number(total), netsuiteOrderId: netsuiteOrderId)
+                order = new Order(orderId: orderId, total: number(total), netsuiteOrderId: netsuiteOrderId, name: name, statusId: statusId)
                 orders.put(orderId, order)
                 facts.add(order)
                 addAnswer(facts, order, answersByOrderId)
+                addReplacementReturn(facts, order, moreAnswers)
             }
             return order
         }
 
         Finding f = new Finding(key: normalize(finding?.key), kind: kind, bucket: normalize(finding?.bucket))
         if (kind == Finding.ORDER_LINE) {
-            f.order = orderFor(normalize(record.omsOrderId), record.orderGrandTotal, null)
+            f.order = orderFor(normalize(record.omsOrderId), record.orderGrandTotal, null, normalize(record.orderName))
             f.netsuiteHasOrderLine = ((Map) (sides.FILE_2 ?: [:])).firstFieldPresence != "ABSENT"
             String productId = normalize(record.productId)
             if (f.order != null && productId) {
@@ -83,6 +94,9 @@ class BrainFactAdapter {
                     facts.add(item)
                 }
             }
+        } else if (kind == Finding.ORDER) {
+            // DAR-BE-192: an R7 order: HotWax approved it and NetSuite has no sales order for it (MISSING_FROM_FILE_2).
+            f.order = orderFor(normalize(record.orderId), record.grandTotal, null, normalize(record.orderName), normalize(record.statusId))
         } else if (kind == Finding.RETURN) {
             Order order = orderFor(normalize(record.orderId), record.orderGrandTotal, normalize(record.orderNetsuiteId))
             if (order != null) {
@@ -93,6 +107,43 @@ class BrainFactAdapter {
         }
         facts.add(0, f)
         return facts
+    }
+
+    /**
+     * DAR-BE-192: an answered replacement carries the return it was made for (or none: asked, nothing found), and that return
+     * what NetSuite answered for it: its RMA and its credit memo (none: asked, NetSuite has none).
+     */
+    private static void addReplacementReturn(List<Object> facts, Order order, Map<String, Map<String, Map>> more) {
+        Map<String, Map> byOrder = more?.get(REPLACEMENT_RETURN)
+        if (byOrder == null || !byOrder.containsKey(order.orderId)) return
+        facts.add(new Answered(REPLACEMENT_RETURN, order))
+        Map a = byOrder.get(order.orderId)
+        String returnId = normalize(a?.returnId)
+        if (!returnId) return
+        ReplacementReturn r = new ReplacementReturn(replacement: order, returnId: returnId, statusId: normalize(a.statusId),
+                channel: normalize(a.returnChannelEnumId), credit: number(a.returnCredit), entered: day(a.entryDate))
+        Map<String, Map> rmas = more.get(RETURN_RMA)
+        if (rmas != null && rmas.containsKey(returnId)) {
+            Map x = rmas.get(returnId)
+            r.rmaTranId = normalize(x?.tranId)
+            r.rmaStatus = normalize(x?.status)
+            facts.add(new Answered(RETURN_RMA, r))
+        }
+        Map<String, Map> memos = more.get(RETURN_MEMO)
+        if (memos != null && memos.containsKey(returnId)) {
+            Map x = memos.get(returnId)
+            r.memoTranId = normalize(x?.tranId)
+            r.memoAmount = number(x?.amount)
+            facts.add(new Answered(RETURN_MEMO, r))
+        }
+        facts.add(r)
+    }
+
+    /** Epoch millis (or text) as YYYY-MM-DD in UTC; null when it is neither. */
+    private static String day(Object v) {
+        if (v instanceof Number) return java.time.Instant.ofEpochMilli(((Number) v).longValue()).toString().substring(0, 10)
+        String t = normalize(v)
+        return t && t ==~ /\d{4}-\d{2}-\d{2}.*/ ? t.substring(0, 10) : (t ==~ /\d{10,}/ ? day(t as long) : null)
     }
 
     /** DAR-BE-186: an answered product carries its NETSUITE_PRODUCT_ID, or none (asked, nothing found or no id). */

@@ -685,9 +685,14 @@ class ReconciliationSavedRunSupport {
         }
         keepFields.addAll(ruleKeepFields)
         // DAR-BE-097: the fields this side's conclusion conditions read. Projected away, a condition sees a blank: a
-        // NOT_BLANK / IN never fires and a BLANK fires on every record.
+        // NOT_BLANK / IN never fires and a BLANK fires on every record. DAR-BE-192: not a brain row's: its guard is never
+        // compiled into the tree and names a field no record has (an extract that checks its fields refused it, gorjana R7).
+        Set<String> brainRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
+                .condition("compareScopeId", compareScopeId).condition("engine", "BRAIN").useCache(false).list()
+                .collect { String.valueOf(it.sequenceNum) } as Set<String>
         TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionCondition")
                 .condition("compareScopeId", compareScopeId).condition("subject", fileSide).useCache(false).list().each { Object row ->
+            if (brainRows.contains(String.valueOf(row.sequenceNum))) return
             String fieldName = topLevelRecordField(normalize(row.fieldExpression))
             if (fieldName) keepFields.add(fieldName)
         }

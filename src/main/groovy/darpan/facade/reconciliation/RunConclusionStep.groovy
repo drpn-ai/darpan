@@ -79,7 +79,7 @@ class RunConclusionStep {
                     fetchQuestion: { String question, List<String> ids ->
                         Map lookup = questionLookup(question, lookups,
                                 darpan.common.ValueSupport.readOptionalString(args.get("file1Source"), "sourceConfigId"))
-                        if (lookup == null) throw new IllegalStateException("the scope has no HotWax source to ask ${question} of")
+                        if (lookup == null) throw new IllegalStateException("the scope has no lookup to ask ${question} of")
                         int before = lookupWarnings.size()
                         Map found = fetchLookup(ec, lookup, ids, tenantId, lookupWarnings)
                         // A failed lookup must not be remembered as "nothing found".
@@ -166,6 +166,8 @@ class RunConclusionStep {
         switch (normalize(conclusionBrain)) {
             case "ORDER_LINE": return "orderLine"
             case "RETURN": return "return"
+            // DAR-BE-192: an order-grain run (gorjana R7: approved orders against NetSuite sales orders).
+            case "ORDER": return "order"
             default: return null
         }
     }

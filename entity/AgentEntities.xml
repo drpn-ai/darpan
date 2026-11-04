@@ -56,9 +56,10 @@
         <field name="role" type="text-short"><description>ROUTER, INVESTIGATOR or AUTHOR.</description></field>
         <field name="model" type="text-short"/>
         <field name="requestCount" type="number-integer"/>
-        <field name="inputTokens" type="number-integer"/>
+        <field name="inputTokens" type="number-integer"><description>Uncached input.</description></field>
         <field name="outputTokens" type="number-integer"/>
         <field name="cacheReadTokens" type="number-integer"/>
+        <field name="cacheWriteTokens" type="number-integer"><description>Input written to the prompt cache (billed 1.25 x input).</description></field>
         <field name="costMicros" type="number-integer"/>
         <field name="stopReason" type="text-short"/>
         <field name="outcome" type="text-short"/>

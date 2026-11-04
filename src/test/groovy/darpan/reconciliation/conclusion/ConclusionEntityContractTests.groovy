@@ -73,6 +73,17 @@ class ConclusionEntityContractTests {
         assertTrue(data.contains('enumId="UNEXPLAINED"'))
     }
 
+    /** DAR-BE-192: a statement link lists its codes in one 255-character column, so a shared code is short. */
+    @Test
+    void sharedConclusionCodesAreShort() {
+        Set<String> older = ["CONC_PARTIAL_PAYMENT_GIVEN_BACK", "CONC_RETIRED_SKU", "CONC_PRODUCT_NOT_IN_NETSUITE"] as Set
+        List<String> codes = (read("data/ConclusionCatalogSeedData.xml") =~ /enumId="([A-Z0-9_]+)" enumTypeId="DarpanConclusion"/)
+                .collect { ((List) it)[1] as String }
+        assertTrue(codes.size() >= 7, "${codes}")
+        List<String> long_ = codes.findAll { !older.contains(it) && it.length() > 12 }
+        assertTrue(long_.isEmpty(), "shared conclusion codes are 12 characters at most: ${long_}")
+    }
+
     @Test
     void aRuleCanNameItsParentAndAConditionItsQuantifier() {
         String xml = read("entity/RuleEntities.xml")

@@ -160,7 +160,7 @@ end
 // DAR-BE-192: a replacement's name says it is one (EXC- an exchange, WTY- a warranty replacement); its return is found from it.
 rule "Ask for the return a replacement was made for, when the replacement never reached NetSuite"
     @reads("OrderNotInNetsuite, Order, Answered") @asks("replacementReturn")
-    @mayEnable("CONC_REPLACEMENT_WAITS_OWN_RETURN,CONC_RETURN_RMA_CLOSED_NO_MEMO,CONC_RETURN_RMA_NO_MEMO,CONC_RETURN_NO_RMA,CONC_LOST_CLAIM_NO_MEMO")
+    @mayEnable("RET_OPEN,RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO")
 when
     OrderNotInNetsuite( $o : order )
     Order( this == $o, name != null, name matches "(?i)(EXC|WTY)-.+" )
@@ -171,7 +171,7 @@ end
 
 rule "Ask NetSuite for the RMA of a replacement's completed return"
     @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @asks("returnRma")
-    @mayEnable("CONC_RETURN_RMA_CLOSED_NO_MEMO,CONC_RETURN_RMA_NO_MEMO,CONC_RETURN_NO_RMA")
+    @mayEnable("RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA")
 when
     OrderNotInNetsuite( $o : order )
     $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED" )
@@ -182,7 +182,7 @@ end
 
 rule "Ask NetSuite for the credit memo of a replacement's completed return"
     @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @asks("returnMemo")
-    @mayEnable("CONC_RETURN_RMA_CLOSED_NO_MEMO,CONC_RETURN_RMA_NO_MEMO,CONC_RETURN_NO_RMA,CONC_LOST_CLAIM_NO_MEMO")
+    @mayEnable("RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO")
 when
     OrderNotInNetsuite( $o : order )
     $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED" )
@@ -340,57 +340,57 @@ end
 
 // DAR-BE-192 causes, about the replacement order: what its return lacks, most specific first.
 rule "Order cause · a replacement waits on its own return"
-    @reads("OrderNotInNetsuite, ReplacementWaitsOnItsReturn") @concludes("CONC_REPLACEMENT_WAITS_OWN_RETURN") @rank(56)
+    @reads("OrderNotInNetsuite, ReplacementWaitsOnItsReturn") @concludes("RET_OPEN") @rank(56)
 when
     $n : OrderNotInNetsuite( $o : order )
     $w : ReplacementWaitsOnItsReturn( order == $o )
 then
-    insertLogical( Cause.fix( $o, "CONC_REPLACEMENT_WAITS_OWN_RETURN", 56, $n, $w ) );
+    insertLogical( Cause.fix( $o, "RET_OPEN", 56, $n, $w ) );
 end
 
 rule "Order cause · a replacement's return RMA is closed, no memo"
-    @reads("OrderNotInNetsuite, ReturnRmaClosedNoMemo") @concludes("CONC_RETURN_RMA_CLOSED_NO_MEMO") @rank(55)
+    @reads("OrderNotInNetsuite, ReturnRmaClosedNoMemo") @concludes("RMA_CLOSED") @rank(55)
 when
     $n : OrderNotInNetsuite( $o : order )
     $c : ReturnRmaClosedNoMemo( order == $o )
 then
-    insertLogical( Cause.fix( $o, "CONC_RETURN_RMA_CLOSED_NO_MEMO", 55, $n, $c ) );
+    insertLogical( Cause.fix( $o, "RMA_CLOSED", 55, $n, $c ) );
 end
 
 rule "Order cause · a replacement's return has an RMA, no memo"
-    @reads("OrderNotInNetsuite, ReturnRmaNoMemo") @concludes("CONC_RETURN_RMA_NO_MEMO") @rank(54)
+    @reads("OrderNotInNetsuite, ReturnRmaNoMemo") @concludes("RMA_NO_MEMO") @rank(54)
 when
     $n : OrderNotInNetsuite( $o : order )
     $m : ReturnRmaNoMemo( order == $o )
 then
-    insertLogical( Cause.fix( $o, "CONC_RETURN_RMA_NO_MEMO", 54, $n, $m ) );
+    insertLogical( Cause.fix( $o, "RMA_NO_MEMO", 54, $n, $m ) );
 end
 
 rule "Order cause · a replacement's return is not in NetSuite"
-    @reads("OrderNotInNetsuite, ReturnNotInNetsuite") @concludes("CONC_RETURN_NO_RMA") @rank(53)
+    @reads("OrderNotInNetsuite, ReturnNotInNetsuite") @concludes("RET_NO_RMA") @rank(53)
 when
     $n : OrderNotInNetsuite( $o : order )
     $m : ReturnNotInNetsuite( order == $o )
 then
-    insertLogical( Cause.fix( $o, "CONC_RETURN_NO_RMA", 53, $n, $m ) );
+    insertLogical( Cause.fix( $o, "RET_NO_RMA", 53, $n, $m ) );
 end
 
 rule "Order cause · a replacement's lost-warranty claim has no memo"
-    @reads("OrderNotInNetsuite, LostClaimNoMemo") @concludes("CONC_LOST_CLAIM_NO_MEMO") @rank(52)
+    @reads("OrderNotInNetsuite, LostClaimNoMemo") @concludes("LOST_NO_MEMO") @rank(52)
 when
     $n : OrderNotInNetsuite( $o : order )
     $m : LostClaimNoMemo( order == $o )
 then
-    insertLogical( Cause.fix( $o, "CONC_LOST_CLAIM_NO_MEMO", 52, $n, $m ) );
+    insertLogical( Cause.fix( $o, "LOST_NO_MEMO", 52, $n, $m ) );
 end
 
 rule "Order cause · a replacement is not paid for"
-    @reads("OrderNotInNetsuite, PaymentsNotTheTotal") @concludes("CONC_REPLACEMENT_NOT_PAID") @rank(51)
+    @reads("OrderNotInNetsuite, PaymentsNotTheTotal") @concludes("REPL_UNPAID") @rank(51)
 when
     $n : OrderNotInNetsuite( $o : order )
     $p : PaymentsNotTheTotal( order == $o )
 then
-    insertLogical( Cause.fix( $o, "CONC_REPLACEMENT_NOT_PAID", 51, $n, $p ) );
+    insertLogical( Cause.fix( $o, "REPL_UNPAID", 51, $n, $p ) );
 end
 
 // ---- one rule picks every subject's best cause

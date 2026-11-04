@@ -82,7 +82,7 @@ class HeldByReturnPackTests {
     void aReplacementWaitsOnItsOwnOpenReturn() {
         Map fired = fire("order", [r7("M1201553", "EXC-#GOR197307497-1", 297)], [M1201553: credit(297)],
                 more([M1201553: ret("M258769", "RETURN_REQUESTED")]))
-        assertEquals(["CONC_REPLACEMENT_WAITS_OWN_RETURN"], codes(fired))
+        assertEquals(["RET_OPEN"], codes(fired))
         Cause c = ((List<Conclusion>) fired.conclusions)[0].cause
         assertEquals(56, c.rank)
         assertFalse(c.expected)
@@ -96,7 +96,7 @@ class HeldByReturnPackTests {
         Map fired = fire("orderLine", [r1("M832311", "EXC-#GOR192290196-1", 65)], [M832311: [paymentPreferences: [], paymentPreferenceSlotsFull: false]],
                 more([M832311: ret("M197605", "RETURN_COMPLETED")], [M197605: [tranId: "RMA288700", status: "Return Authorization : Closed"]],
                         [M197605: null]))
-        assertEquals(["CONC_RETURN_RMA_CLOSED_NO_MEMO"], codes(fired), "R1's line takes its order's cause")
+        assertEquals(["RMA_CLOSED"], codes(fired), "R1's line takes its order's cause")
     }
 
     @Test
@@ -104,17 +104,17 @@ class HeldByReturnPackTests {
         Map rmaNoMemo = fire("order", [r7("M1167220", "WTY-#GOR196553714-1", 275)], [M1167220: credit(275)],
                 more([M1167220: ret("M244082", "RETURN_COMPLETED", "AFTSHP_OL_WTY")],
                         [M244082: [tranId: "RMA338431", status: "Return Authorization : Pending Refund"]], [M244082: null]))
-        assertEquals(["CONC_RETURN_RMA_NO_MEMO"], codes(rmaNoMemo))
+        assertEquals(["RMA_NO_MEMO"], codes(rmaNoMemo))
         Map noRma = fire("order", [r7("M962204", "EXC-#GOR194140392-1", 517.28)], [M962204: credit(517.28)],
                 more([M962204: ret("M224321", "RETURN_COMPLETED")], [M224321: null], [M224321: null]))
-        assertEquals(["CONC_RETURN_NO_RMA"], codes(noRma))
+        assertEquals(["RET_NO_RMA"], codes(noRma))
     }
 
     @Test
     void aLostWarrantyClaimWantsOnlyItsMemo() {
         Map noMemo = fire("order", [r7("M1141364", "WTY-#GOR193061307-1", 40)], [M1141364: credit(40)],
                 more([M1141364: ret("M258529", "RETURN_COMPLETED", "AFTSHP_HG_LOSS")], [M258529: null], [M258529: null]))
-        assertEquals(["CONC_LOST_CLAIM_NO_MEMO"], codes(noMemo), "a lost claim never gets an RMA, so no RMA is not its cause")
+        assertEquals(["LOST_NO_MEMO"], codes(noMemo), "a lost claim never gets an RMA, so no RMA is not its cause")
         Map memo = fire("order", [r7("M1141364", "WTY-#GOR193061307-1", 40)], [M1141364: credit(40)],
                 more([M1141364: ret("M258529", "RETURN_COMPLETED", "AFTSHP_HG_LOSS")], [M258529: null], [M258529: [tranId: "CM7676185", amount: 40]]))
         assertEquals([], codes(memo))
@@ -125,7 +125,7 @@ class HeldByReturnPackTests {
         Map fired = fire("order", [r7("M1199671", "EXC-#GOR191697343-1", 958.5)], [M1199671: credit(288.19)],
                 more([M1199671: ret("M267891", "RETURN_COMPLETED")], [M267891: [tranId: "RMA365629", status: "Return Authorization : Pending Receipt"]],
                         [M267891: [tranId: "CM1", amount: 288.19]]))
-        assertEquals(["CONC_REPLACEMENT_NOT_PAID"], codes(fired))
+        assertEquals(["REPL_UNPAID"], codes(fired))
         assertEquals("288.19 of 958.5", BrainConclude.fill("{settled} of {order.total}",
                 ((List<Conclusion>) fired.conclusions)[0].cause.because.find { it.getClass().simpleName == "PaymentsNotTheTotal" }))
     }
@@ -160,7 +160,7 @@ class HeldByReturnPackTests {
                 }])
         assertEquals(["orderPayments:M1167220", "replacementReturn:M1167220", "returnMemo:M244082", "returnRma:M244082"], calls.sort())
         assertTrue(calls.indexOf("replacementReturn:M1167220") >= 0)
-        assertEquals("CONC_RETURN_RMA_NO_MEMO", ((Map) ((Map) out.byKey).get("M1167220")).code)
+        assertEquals("RMA_NO_MEMO", ((Map) ((Map) out.byKey).get("M1167220")).code)
         assertEquals([], out.warnings)
     }
 }

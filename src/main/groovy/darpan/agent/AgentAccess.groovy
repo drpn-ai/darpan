@@ -261,10 +261,15 @@ class AgentAccess {
         return micros == null ? null : new BigDecimal(micros).divide(new BigDecimal(1_000_000), 4, RoundingMode.HALF_UP).toPlainString()
     }
 
+    /** A member of the tenant, or a super admin (who enters every tenant without a membership row). */
     private static boolean isMember(def ec, String tenantId, String userId) {
-        return ec.entity.find(darpan.facade.common.TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
-                .condition("tenantUserGroupId", tenantId).condition("userId", userId).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
-                .useCache(false).count() > 0
+        Timestamp now = ec.user.nowTimestamp
+        if (ec.entity.find(darpan.facade.common.TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
+                .condition("tenantUserGroupId", tenantId).condition("userId", userId).conditionDate("fromDate", "thruDate", now)
+                .useCache(false).count() > 0) return true
+        return ec.entity.find("moqui.security.UserGroupMember").condition("userId", userId)
+                .condition("userGroupId", EntityCondition.IN, darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS)
+                .conditionDate("fromDate", "thruDate", now).useCache(false).count() > 0
     }
 
     /** The grant, unless missing or revoked (both an error). */

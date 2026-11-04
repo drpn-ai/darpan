@@ -178,6 +178,15 @@ class AgentAccessAdminSmokeTests {
     }
 
     @Test
+    void "a Darpan admin can be granted in a tenant they reach only as super admin"() {
+        // A super admin enters every tenant without a membership row (TenantAccessSupport.listAvailableTenants); the spec has
+        // admins need a grant too, so they must be grantable.
+        Map g = adminOk("create#AgentAccessGrant", [userId: SUPER_ID, tenantUserGroupId: ALPHA, days: 1]).grant
+        assertEquals([SUPER_ID, ALPHA, AgentAccess.LIVE], [g.userId, g.tenantUserGroupId, g.state])
+        assertTrue(admin("create#AgentAccessGrant", [userId: OUTSIDER, tenantUserGroupId: ALPHA]).hasError as boolean, "a plain non-member is still refused")
+    }
+
+    @Test
     void "days sets the window, and days 0, a zero or negative limit or days with thruDate are refused"() {
         Map g = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant
         long window = (g.thruDate as Timestamp).time - (g.fromDate as Timestamp).time

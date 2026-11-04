@@ -60,6 +60,8 @@
         <field name="outputTokens" type="number-integer"/>
         <field name="cacheReadTokens" type="number-integer"/>
         <field name="cacheWriteTokens" type="number-integer"><description>Input written to the prompt cache (billed 1.25 x input).</description></field>
+        <field name="userId" type="id"><description>DAR-BE-194. The person the turn ran for.</description></field>
+        <field name="grantId" type="id"><description>DAR-BE-194. The AgentAccessGrant it spent against; its spend is the sum of these rows.</description></field>
         <field name="costMicros" type="number-integer"/>
         <field name="stopReason" type="text-short"/>
         <field name="outcome" type="text-short"/>
@@ -70,6 +72,42 @@
         </relationship>
         <index name="AGENT_TURN_CONV_IDX"><index-field name="conversationId"/></index>
         <index name="AGENT_TURN_TENANT"><index-field name="companyUserGroupId"/></index>
+        <index name="AGENT_TURN_GRANT"><index-field name="grantId"/></index>
+    </entity>
+
+    <entity entity-name="AgentAccessGrant" package="darpan.agent" cache="never">
+        <description>DAR-BE-194. A Darpan admin's grant of AI access to one user in one tenant, for a window and a dollar limit.
+            At most one grant per user and tenant is not REVOKED. Only admin.AgentAccessAdminServices write it.</description>
+        <field name="grantId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="fromDate" type="date-time" not-null="true"/>
+        <field name="thruDate" type="date-time"><description>Empty: no end date.</description></field>
+        <field name="costCapMicros" type="number-integer"><description>The limit over the whole window, in micro-dollars; empty: no per-user limit.</description></field>
+        <field name="statusId" type="text-short"><description>ACTIVE, PAUSED or REVOKED.</description></field>
+        <field name="pauseReason" type="text-short"><description>COST_LIMIT or ADMIN.</description></field>
+        <field name="pausedDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+        <index name="AGENT_GRANT_TENANT_USER"><index-field name="companyUserGroupId"/><index-field name="userId"/></index>
+    </entity>
+
+    <entity entity-name="AgentAccessGrantEvent" package="darpan.agent" cache="never">
+        <description>DAR-BE-194. Every change to a grant: who (SYSTEM for the automatic pause), when, and the grant before and after.</description>
+        <field name="eventId" type="id" is-pk="true"/>
+        <field name="grantId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="userId" type="id"><description>The grant's user.</description></field>
+        <field name="action" type="text-short"><description>GRANT, CHANGE, PAUSE, UNPAUSE, REVOKE or AUTO_PAUSE.</description></field>
+        <field name="byUserId" type="id"/>
+        <field name="eventDate" type="date-time"/>
+        <field name="beforeJson" type="text-intermediate"/>
+        <field name="afterJson" type="text-intermediate"/>
+        <relationship type="one" related="darpan.agent.AgentAccessGrant" fk-name="AGENT_GRANT_EVT_GRANT">
+            <key-map field-name="grantId"/>
+        </relationship>
+        <index name="AGENT_GRANT_EVT_GRANT_IDX"><index-field name="grantId"/></index>
     </entity>
 
     <entity entity-name="AgentMessage" package="darpan.agent" cache="never">

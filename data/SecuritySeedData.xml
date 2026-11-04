@@ -392,6 +392,15 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.agent.AgentMessage"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-194 — AI access grants and their change log. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AGENT_ACCESS_GRANT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.AgentAccessGrant"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AGENT_ACCESS_GRANT_EVENT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.agent.AgentAccessGrantEvent"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUDIT_CHANGE_PROPOSAL"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.agent.AuditChangeProposal"

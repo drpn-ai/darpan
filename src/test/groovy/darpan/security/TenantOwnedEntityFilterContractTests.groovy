@@ -104,7 +104,9 @@ class TenantOwnedEntityFilterContractTests {
                                                           "DARPAN_SCOPE_AGENT_TURN": "DAR-BE-159 agent entities; the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_AGENT_MESSAGE": "DAR-BE-159 agent entities; the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_AUDIT_CHANGE_PROPOSAL": "DAR-BE-159 agent entities; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_BRAIN_CHANGE_TICKET": "DAR-BE-159 agent entities; the next release cut generates its pack row"].asImmutable()
+                                                          "DARPAN_SCOPE_BRAIN_CHANGE_TICKET": "DAR-BE-159 agent entities; the next release cut generates its pack row",
+                                                          "DARPAN_SCOPE_AGENT_ACCESS_GRANT": "DAR-BE-194 AI access grants; the next release cut generates its pack row",
+                                                          "DARPAN_SCOPE_AGENT_ACCESS_GRANT_EVENT": "DAR-BE-194 AI access grants; the next release cut generates its pack row"].asImmutable()
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS).asImmutable()

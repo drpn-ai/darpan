@@ -28,7 +28,8 @@ class AgentEntityTenantScopeSmokeTests {
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
     private static final List<String> ENTITIES = ["darpan.agent.AgentConversation", "darpan.agent.AgentTurn",
-            "darpan.agent.AgentMessage", "darpan.agent.AuditChangeProposal", "darpan.agent.BrainChangeTicket"]
+            "darpan.agent.AgentMessage", "darpan.agent.AuditChangeProposal", "darpan.agent.BrainChangeTicket",
+            "darpan.agent.AgentAccessGrant", "darpan.agent.AgentAccessGrantEvent"]
 
     private ExecutionContext ec
 
@@ -59,19 +60,26 @@ class AgentEntityTenantScopeSmokeTests {
         ec.entity.makeValue("darpan.agent.AgentConversation").setAll([conversationId: "AGC_A", companyUserGroupId: ALPHA,
                 userId: EDITOR_ID, createdDate: now]).create()
         ec.entity.makeValue("darpan.agent.AgentTurn").setAll([turnId: "AGT_A", conversationId: "AGC_A", companyUserGroupId: ALPHA,
-                role: "ROUTER", startedDate: now]).create()
+                role: "ROUTER", startedDate: now, userId: EDITOR_ID, grantId: "AAG_A"]).create()
         ec.entity.makeValue("darpan.agent.AgentMessage").setAll([messageId: "AGM_A", conversationId: "AGC_A", turnId: "AGT_A",
                 companyUserGroupId: ALPHA, sequenceNum: 1, kind: "USER", contentJson: "{}"]).create()
         ec.entity.makeValue("darpan.agent.AuditChangeProposal").setAll([proposalId: "ACP_A", companyUserGroupId: ALPHA,
                 conversationId: "AGC_A", kind: "FIX_TEXT", status: "DRAFT", provenanceStatus: "PASS"]).create()
         ec.entity.makeValue("darpan.agent.BrainChangeTicket").setAll([ticketId: "BCT_A", companyUserGroupId: ALPHA,
                 conversationId: "AGC_A", category: "NEW_CHECK", status: "RECEIVED", createdDate: now]).create()
+        // DAR-BE-194: a Darpan admin's grant of AI access to one user in one tenant, and its change log.
+        ec.entity.makeValue("darpan.agent.AgentAccessGrant").setAll([grantId: "AAG_A", userId: EDITOR_ID, companyUserGroupId: ALPHA,
+                fromDate: now, costCapMicros: 5_000_000L, statusId: "ACTIVE"]).create()
+        ec.entity.makeValue("darpan.agent.AgentAccessGrantEvent").setAll([eventId: "AAE_A", grantId: "AAG_A", companyUserGroupId: ALPHA,
+                userId: EDITOR_ID, action: "GRANT", byUserId: "ADMIN", eventDate: now, afterJson: "{}"]).create()
 
         actAs(ALPHA)
         underFacadeGrant {
             ENTITIES.each { String name ->
                 assertEquals(1, ec.entity.find(name).useCache(false).list().size(), "tenant A sees its own ${name}")
             }
+            def turn = ec.entity.find("darpan.agent.AgentTurn").useCache(false).list()[0]
+            assertEquals([EDITOR_ID, "AAG_A"], [turn.userId, turn.grantId], "a turn names its user and grant")
         }
         actAs(BETA)
         underFacadeGrant {

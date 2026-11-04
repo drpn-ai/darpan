@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-194. Darpan admins (super admins) grant users AI access per tenant, for a window and a dollar limit, pause,
+  unpause and revoke it, and read every user's AI spend. admin.* and therefore inside the DARPAN_ADMIN_API fence (the
+  pattern admin\..* already covers this file); each service checks super admin again first. The logic and its rules are
+  darpan.agent.AgentAccess; spend is the agent's own ledger (AgentTurn.costMicros).
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="list" noun="AgentAccessGrants" allow-remote="true" authenticate="true">
+        <description>Grants across tenants with their spend and state, by tenant, user or status.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId"/>
+            <parameter name="userId"/>
+            <parameter name="statusId"/>
+            <parameter name="includeRevoked" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="grants" type="List"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grants" from="darpan.agent.AgentAccess.adminList(ec, tenantUserGroupId, userId, statusId, includeRevoked)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="AgentAccessGrant" allow-remote="true" authenticate="true">
+        <description>Grants a member of the tenant AI access for a window and a limit; the user's earlier grant there is revoked.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="tenantUserGroupId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"><description>Default now.</description></parameter>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="days" type="Integer"><description>The window ends this many days (each 24 hours) from the start, or from now when changing a grant.</description></parameter>
+            <parameter name="costCapUsd" type="BigDecimal"><description>The limit over the whole window, in dollars; more than 0.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.agent.AgentAccess.adminCreate(ec, userId, tenantUserGroupId, fromDate, thruDate, days, costCapUsd)"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AgentAccessGrant" allow-remote="true" authenticate="true">
+        <description>Changes a grant's end or limit; a grant that is then at its limit pauses.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="days" type="Integer"><description>The window ends this many days (each 24 hours) from the start, or from now when changing a grant.</description></parameter>
+            <parameter name="costCapUsd" type="BigDecimal"><description>The limit over the whole window, in dollars; more than 0.</description></parameter>
+            <parameter name="clearThruDate" type="Boolean" default="false"/>
+            <parameter name="clearCostCap" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.agent.AgentAccess.adminUpdate(ec, grantId, thruDate, days, costCapUsd, clearThruDate, clearCostCap)"/>
+        </actions>
+    </service>
+
+    <service verb="pause" noun="AgentAccessGrant" allow-remote="true" authenticate="true">
+        <description>Pauses an active grant.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.agent.AgentAccess.adminPause(ec, grantId)"/>
+        </actions>
+    </service>
+
+    <service verb="unpause" noun="AgentAccessGrant" allow-remote="true" authenticate="true">
+        <description>Lifts a pause, optionally with a higher limit or a later end; refused while spend is at or over the limit.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+            <parameter name="costCapUsd" type="BigDecimal"><description>The limit over the whole window, in dollars; more than 0.</description></parameter>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="days" type="Integer"><description>The window ends this many days (each 24 hours) from the start, or from now when changing a grant.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.agent.AgentAccess.adminUnpause(ec, grantId, costCapUsd, thruDate, days)"/>
+        </actions>
+    </service>
+
+    <service verb="revoke" noun="AgentAccessGrant" allow-remote="true" authenticate="true">
+        <description>Revokes a grant; the user has no AI access in that tenant until granted again.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.agent.AgentAccess.adminRevoke(ec, grantId)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AgentUsage" allow-remote="true" authenticate="true">
+        <description>AI spend for a user, a tenant or both over the last days: totals, by day, by role and model, and the grants.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="tenantUserGroupId"/>
+            <parameter name="days" type="Integer" default="30"/>
+        </in-parameters>
+        <out-parameters><parameter name="totalMicros" type="Long"/><parameter name="totalUsd"/><parameter name="requests" type="Long"/><parameter name="byDay" type="List"/><parameter name="byRoleModel" type="List"/><parameter name="grants" type="List"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="usage" from="darpan.agent.AgentAccess.adminUsage(ec, userId, tenantUserGroupId, days)"/>
+            <if condition="usage == null"><return/></if>
+            <script>context.putAll(usage)</script>
+        </actions>
+    </service>
+</services>

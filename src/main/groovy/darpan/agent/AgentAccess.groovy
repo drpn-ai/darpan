@@ -41,15 +41,19 @@ class AgentAccess {
         if (g == null) return [state: NOT_GRANTED, grantId: null, fromDate: null, thruDate: null, capMicros: null, spentMicros: 0L, pauseReason: null]
         long spent = spentMicros(ec, g.grantId as String)
         Long cap = g.costCapMicros as Long
-        Timestamp now = ec.user.nowTimestamp
         boolean overLimit = cap != null && spent >= cap
-        String state
-        if ((g.fromDate as Timestamp).after(now)) state = NOT_GRANTED
-        else if (g.thruDate != null && !(g.thruDate as Timestamp).after(now)) state = EXPIRED
-        else if (g.statusId == STATUS_PAUSED || overLimit) state = PAUSED
-        else state = LIVE
         String reason = g.statusId == STATUS_PAUSED ? (g.pauseReason as String) : (overLimit ? REASON_COST_LIMIT : null)
-        return [state: state, grantId: g.grantId, fromDate: g.fromDate, thruDate: g.thruDate, capMicros: cap, spentMicros: spent, pauseReason: reason]
+        return [state: stateOf(g, spent, ec.user.nowTimestamp), grantId: g.grantId, fromDate: g.fromDate, thruDate: g.thruDate, capMicros: cap,
+                spentMicros: spent, pauseReason: reason]
+    }
+
+    /** One grant's state now: REVOKED, NOT_GRANTED (window not started), EXPIRED, PAUSED (or at its limit) or LIVE. */
+    static String stateOf(def g, long spent, Timestamp now) {
+        if (g.statusId == STATUS_REVOKED) return STATUS_REVOKED
+        if ((g.fromDate as Timestamp).after(now)) return NOT_GRANTED
+        if (g.thruDate != null && !(g.thruDate as Timestamp).after(now)) return EXPIRED
+        if (g.statusId == STATUS_PAUSED || (g.costCapMicros != null && spent >= (g.costCapMicros as long))) return PAUSED
+        return LIVE
     }
 
     /** What a grant has spent, in micro-dollars: its turns' costMicros. */
@@ -104,5 +108,207 @@ class AgentAccess {
         return TenantScopedFinder.findGlobalUnscoped(ec, GRANT, WHY).condition("companyUserGroupId", tenantId).condition("userId", userId)
                 .condition("statusId", EntityCondition.NOT_EQUAL, STATUS_REVOKED).orderBy(["-fromDate", "-grantId"])
                 .useCache(false).list().find()
+    }
+
+    // ---------------------------------------------------------------- Darpan admin (admin.AgentAccessAdminServices)
+    // Each service checks super admin first; these add errors to ec.message and answer null when they refuse.
+
+    private static final long DAY_MS = 86_400_000L
+
+    /** A grant as the admin app and CLI show it, with its spend and its state now. */
+    static Map grantView(def ec, def g) {
+        long spent = spentMicros(ec, g.grantId as String)
+        def account = ec.entity.find("moqui.security.UserAccount").condition("userId", g.userId).useCache(true).one()
+        return [grantId: g.grantId, userId: g.userId, username: account?.username, tenantUserGroupId: g.companyUserGroupId,
+                fromDate: g.fromDate, thruDate: g.thruDate, statusId: g.statusId, pauseReason: g.pauseReason, pausedDate: g.pausedDate,
+                capMicros: g.costCapMicros, spentMicros: spent, costCapUsd: dollars(g.costCapMicros as Long), spentUsd: dollars(spent),
+                state: stateOf(g, spent, ec.user.nowTimestamp)]
+    }
+
+    static List<Map> adminList(def ec, String tenantId, String userId, String statusId, Boolean includeRevoked) {
+        def find = TenantScopedFinder.findGlobalUnscoped(ec, GRANT, "admin: Darpan staff list grants across tenants")
+        if (tenantId) find.condition("companyUserGroupId", tenantId)
+        if (userId) find.condition("userId", userId)
+        if (statusId) find.condition("statusId", statusId)
+        else if (!includeRevoked) find.condition("statusId", EntityCondition.NOT_EQUAL, STATUS_REVOKED)
+        return find.orderBy(["companyUserGroupId", "userId", "-fromDate"]).useCache(false).list().collect { grantView(ec, it) }
+    }
+
+    /** A new grant for a member of the tenant; the user's grant there that is not revoked is revoked first. */
+    static Map adminCreate(def ec, String userId, String tenantId, Timestamp fromDate, Timestamp thruDate, Integer days, BigDecimal costCapUsd) {
+        Timestamp now = ec.user.nowTimestamp
+        if (!isMember(ec, tenantId, userId)) { ec.message.addError("User ${userId} is not a member of tenant ${tenantId}.".toString()); return null }
+        Timestamp from = fromDate ?: now
+        Map end = windowEnd(ec, from, thruDate, days, false)
+        Long cap = capOf(ec, costCapUsd)
+        if (end == null || ec.message.hasError()) return null
+        def existing = currentGrant(ec, tenantId, userId)
+        if (existing != null) {
+            Map before = snapshot(existing)
+            existing.setAll([statusId: STATUS_REVOKED, lastChangedByUserId: ec.user.userId, lastChangedDate: now])
+            existing.update()
+            recordEvent(ec, existing, "REVOKE", before)
+        }
+        def g = ec.entity.makeValue(GRANT).setAll([userId: userId, companyUserGroupId: tenantId, fromDate: from, thruDate: end.thruDate,
+                costCapMicros: cap, statusId: STATUS_ACTIVE, createdByUserId: ec.user.userId, lastChangedByUserId: ec.user.userId, lastChangedDate: now])
+        g.setSequencedIdPrimary()
+        g.create()
+        recordEvent(ec, g, "GRANT", null)
+        return grantView(ec, g)
+    }
+
+    /** A new end (days from now, thruDate, or none) or limit for a grant that is not revoked; at its limit it pauses. */
+    static Map adminUpdate(def ec, String grantId, Timestamp thruDate, Integer days, BigDecimal costCapUsd, Boolean clearThruDate, Boolean clearCostCap) {
+        def g = openGrant(ec, grantId)
+        if (g == null) return null
+        if (thruDate == null && days == null && costCapUsd == null && !clearThruDate && !clearCostCap) {
+            ec.message.addError("Give a new end (days, thruDate or clearThruDate) or a new limit (costCapUsd or clearCostCap).")
+            return null
+        }
+        Map change = changes(ec, g, thruDate, days, costCapUsd, clearThruDate, clearCostCap)
+        if (change == null) return null
+        Map before = snapshot(g)
+        g.setAll(change + [lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp])
+        g.update()
+        recordEvent(ec, g, "CHANGE", before)
+        if (g.statusId == STATUS_ACTIVE) pauseIfOverLimit(ec, grantId)
+        return grantView(ec, openGrant(ec, grantId))
+    }
+
+    static Map adminPause(def ec, String grantId) {
+        def g = openGrant(ec, grantId)
+        if (g == null) return null
+        if (g.statusId != STATUS_ACTIVE) { ec.message.addError("Grant ${grantId} is not active.".toString()); return null }
+        Map before = snapshot(g)
+        Timestamp now = ec.user.nowTimestamp
+        g.setAll([statusId: STATUS_PAUSED, pauseReason: REASON_ADMIN, pausedDate: now, lastChangedByUserId: ec.user.userId, lastChangedDate: now])
+        g.update()
+        recordEvent(ec, g, "PAUSE", before)
+        return grantView(ec, g)
+    }
+
+    /** Lifts a pause, optionally with a new limit or end; refused while spend would still be at or over the limit. */
+    static Map adminUnpause(def ec, String grantId, BigDecimal costCapUsd, Timestamp thruDate, Integer days) {
+        def g = openGrant(ec, grantId)
+        if (g == null) return null
+        if (g.statusId != STATUS_PAUSED) { ec.message.addError("Grant ${grantId} is not paused.".toString()); return null }
+        Map change = changes(ec, g, thruDate, days, costCapUsd, false, false)
+        if (change == null) return null
+        Long cap = (change.containsKey("costCapMicros") ? change.costCapMicros : g.costCapMicros) as Long
+        long spent = spentMicros(ec, grantId)
+        if (cap != null && spent >= cap) {
+            ec.message.addError("Grant ${grantId} has spent \$${dollars(spent)} of its \$${dollars(cap)} limit; give a higher limit to unpause it.".toString())
+            return null
+        }
+        Timestamp thru = (change.containsKey("thruDate") ? change.thruDate : g.thruDate) as Timestamp
+        if (thru != null && !thru.after(ec.user.nowTimestamp)) {
+            ec.message.addError("Grant ${grantId} has ended; give days or a later thruDate to unpause it.".toString())
+            return null
+        }
+        Map before = snapshot(g)
+        g.setAll(change + [statusId: STATUS_ACTIVE, pauseReason: null, pausedDate: null, lastChangedByUserId: ec.user.userId,
+                           lastChangedDate: ec.user.nowTimestamp])
+        g.update()
+        recordEvent(ec, g, "UNPAUSE", before)
+        return grantView(ec, g)
+    }
+
+    static Map adminRevoke(def ec, String grantId) {
+        def g = openGrant(ec, grantId)
+        if (g == null) return null
+        Map before = snapshot(g)
+        g.setAll([statusId: STATUS_REVOKED, lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp])
+        g.update()
+        recordEvent(ec, g, "REVOKE", before)
+        return grantView(ec, g)
+    }
+
+    /**
+     * AI spend over the last days (1 to 366) for a user, a tenant, or both, from AgentTurn: totals, by UTC day (oldest
+     * first), by role and model (dearest first), and the grants whose window reaches into the range.
+     */
+    static Map adminUsage(def ec, String userId, String tenantId, Integer days) {
+        int d = days == null ? 30 : days
+        if (d < 1 || d > 366) { ec.message.addError("days is 1 to 366."); return null }
+        Timestamp since = new Timestamp(ec.user.nowTimestamp.time - d * DAY_MS)
+        def find = TenantScopedFinder.findGlobalUnscoped(ec, TURN, "admin: Darpan staff read AI usage across tenants")
+                .condition("startedDate", EntityCondition.GREATER_THAN_EQUAL_TO, since)
+        if (userId) find.condition("userId", userId)
+        if (tenantId) find.condition("companyUserGroupId", tenantId)
+        List rows = find.useCache(false).list()
+        Closure<Long> n = { Object v -> (v ?: 0L) as long }
+        Map<String, Map> byDay = new TreeMap<>()
+        Map<String, Map> byRoleModel = [:]
+        rows.each { r ->
+            String day = (r.startedDate as Timestamp).toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
+            Map dd = byDay.computeIfAbsent(day) { [date: day, costMicros: 0L, requests: 0L] }
+            dd.costMicros = (dd.costMicros as long) + n(r.costMicros)
+            dd.requests = (dd.requests as long) + n(r.requestCount)
+            Map rm = byRoleModel.computeIfAbsent("${r.role}|${r.model}".toString()) {
+                [role: r.role, model: r.model, turns: 0, requests: 0L, inputTokens: 0L, outputTokens: 0L, cacheReadTokens: 0L, cacheWriteTokens: 0L, costMicros: 0L]
+            }
+            rm.turns = (rm.turns as int) + 1
+            ["requestCount": "requests", "inputTokens": "inputTokens", "outputTokens": "outputTokens", "cacheReadTokens": "cacheReadTokens",
+             "cacheWriteTokens": "cacheWriteTokens", "costMicros": "costMicros"].each { String from, String to -> rm[to] = (rm[to] as long) + n(r.get(from)) }
+        }
+        List<Map> grants = adminList(ec, tenantId, userId, null, true).findAll { Map g -> g.thruDate == null || !(g.thruDate as Timestamp).before(since) }
+        return [totalMicros: rows.sum(0L) { n(it.costMicros) }, requests: rows.sum(0L) { n(it.requestCount) }, totalUsd: dollars(rows.sum(0L) { n(it.costMicros) } as long),
+                byDay: new ArrayList(byDay.values()), byRoleModel: byRoleModel.values().sort { -(it.costMicros as long) }, grants: grants]
+    }
+
+    /** Micro-dollars as a dollar string with 4 decimals; null for null. */
+    static String dollars(Long micros) {
+        return micros == null ? null : new BigDecimal(micros).divide(new BigDecimal(1_000_000), 4, RoundingMode.HALF_UP).toPlainString()
+    }
+
+    private static boolean isMember(def ec, String tenantId, String userId) {
+        return ec.entity.find(darpan.facade.common.TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
+                .condition("tenantUserGroupId", tenantId).condition("userId", userId).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .useCache(false).count() > 0
+    }
+
+    /** The grant, unless missing or revoked (both an error). */
+    private static def openGrant(def ec, String grantId) {
+        def g = grantId ? TenantScopedFinder.findGlobalUnscoped(ec, GRANT, "admin: one grant by id").condition("grantId", grantId).useCache(false).one() : null
+        if (g == null) { ec.message.addError("Grant ${grantId} was not found.".toString()); return null }
+        if (g.statusId == STATUS_REVOKED) { ec.message.addError("Grant ${grantId} is revoked; grant access again instead.".toString()); return null }
+        return g
+    }
+
+    /** The end of a window: thruDate, or days (each 24 hours) from start; null with an error when refused. */
+    private static Map windowEnd(def ec, Timestamp start, Timestamp thruDate, Integer days, boolean clear) {
+        if (clear) return [thruDate: null]
+        if (days != null && thruDate != null) { ec.message.addError("Give days or thruDate, not both."); return null }
+        Timestamp now = ec.user.nowTimestamp
+        if (days != null) {
+            if (days < 1) { ec.message.addError("days must be at least 1."); return null }
+            return [thruDate: new Timestamp(start.time + days * DAY_MS)]
+        }
+        if (thruDate != null && (!thruDate.after(start) || !thruDate.after(now))) {
+            ec.message.addError("thruDate must be after the start and in the future."); return null
+        }
+        return [thruDate: thruDate]
+    }
+
+    private static Long capOf(def ec, BigDecimal usd) {
+        if (usd == null) return null
+        try { return microsOf(usd) } catch (IllegalArgumentException e) { ec.message.addError(e.message); return null }
+    }
+
+    /** The fields an update or unpause changes; days count from now (an extension), not from the grant's start. */
+    private static Map changes(def ec, def g, Timestamp thruDate, Integer days, BigDecimal costCapUsd, Boolean clearThruDate, Boolean clearCostCap) {
+        Map out = [:]
+        if (thruDate != null || days != null || clearThruDate) {
+            Map end = windowEnd(ec, ec.user.nowTimestamp, thruDate, days, clearThruDate as boolean)
+            if (end == null) return null
+            out.thruDate = end.thruDate
+        }
+        if (clearCostCap) out.costCapMicros = null
+        else if (costCapUsd != null) {
+            Long cap = capOf(ec, costCapUsd)
+            if (cap == null) return null
+            out.costCapMicros = cap
+        }
+        return out
     }
 }

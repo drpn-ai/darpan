@@ -1,3 +1,12 @@
+admin.AgentAccessAdminServices.create#AgentAccessGrant
+admin.AgentAccessAdminServices.get#AgentUsage
+admin.AgentAccessAdminServices.list#AgentAccessGrants
+admin.AgentAccessAdminServices.pause#AgentAccessGrant
+admin.AgentAccessAdminServices.revoke#AgentAccessGrant
+admin.AgentAccessAdminServices.unpause#AgentAccessGrant
+admin.AgentAccessAdminServices.update#AgentAccessGrant
+admin.AgentTicketAdminServices.list#AllBrainChangeTickets
+admin.AgentTicketAdminServices.update#BrainChangeTicket
 admin.KnowledgeAdminServices.get#KnowledgeEntry
 admin.KnowledgeAdminServices.get#KnowledgeForReview
 admin.KnowledgeAdminServices.get#KnowledgeIdentifiers
@@ -34,6 +43,11 @@ admin.UserAdminServices.get#UserDetail
 admin.UserAdminServices.get#UserList
 admin.UserAdminServices.reset#Password
 admin.UserAdminServices.update#UserAccount
+facade.AgentChangeFacadeServices.apply#AuditChange
+facade.AgentChangeFacadeServices.list#BrainChangeTickets
+facade.AgentChangeFacadeServices.plan#AuditChange
+facade.AgentChangeFacadeServices.reject#AuditChange
+facade.AgentChangeFacadeServices.revert#AuditChange
 facade.AgentFacadeServices.list#AgentQueryLogs
 facade.AuditFacadeServices.add#AuditStatement
 facade.AuditFacadeServices.create#Audit

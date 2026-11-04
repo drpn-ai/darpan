@@ -116,6 +116,26 @@ class CliMethodAllowlist {
     ] as LinkedHashSet<String>).asImmutable()
 
     static final Set<String> EXCLUDED = ([
+            // DAR-BE-159 / DAR-BE-194: the embedded agent's staff tickets and the per-user AI access grants are admin app only.
+            "admin.AgentAccessAdminServices.create#AgentAccessGrant",
+            "admin.AgentAccessAdminServices.get#AgentUsage",
+            "admin.AgentAccessAdminServices.list#AgentAccessGrants",
+            "admin.AgentAccessAdminServices.pause#AgentAccessGrant",
+            "admin.AgentAccessAdminServices.revoke#AgentAccessGrant",
+            "admin.AgentAccessAdminServices.unpause#AgentAccessGrant",
+            "admin.AgentAccessAdminServices.update#AgentAccessGrant",
+            "admin.AgentTicketAdminServices.list#AllBrainChangeTickets",
+            "admin.AgentTicketAdminServices.update#BrainChangeTicket",
+
+            // DAR-BE-159: the embedded agent's change pipeline. A person plans, applies, rejects or reverts an agent proposal in the
+            // app (Rule of Two); none is a CLI action. list#BrainChangeTickets writes nothing but is left out until the agent panel
+            // (Plan 2) settles what a tenant sees of its tickets; Aditi may move it to ALLOWED.
+            "facade.AgentChangeFacadeServices.apply#AuditChange",
+            "facade.AgentChangeFacadeServices.list#BrainChangeTickets",
+            "facade.AgentChangeFacadeServices.plan#AuditChange",
+            "facade.AgentChangeFacadeServices.reject#AuditChange",
+            "facade.AgentChangeFacadeServices.revert#AuditChange",
+
             "admin.KnowledgeAdminServices.get#KnowledgeEntry",
             "admin.KnowledgeAdminServices.get#KnowledgeForReview",
             "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers",

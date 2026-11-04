@@ -24,6 +24,33 @@
                             "schema": {
                                 "oneOf": [
                                     {
+                                        "$ref": "#/components/schemas/CreateAgentAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAgentUsageRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListAgentAccessGrantsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/PauseAgentAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RevokeAgentAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UnpauseAgentAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAgentAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListAllBrainChangeTicketsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateBrainChangeTicketRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetKnowledgeEntryRequest"
                                     },
                                     {
@@ -130,6 +157,21 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/UpdateUserAccountRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ApplyAuditChangeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListBrainChangeTicketsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/PlanAuditChangeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RejectAuditChangeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RevertAuditChangeRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/ListAgentQueryLogsRequest"
@@ -660,6 +702,15 @@
                                 "discriminator": {
                                     "propertyName": "method",
                                     "mapping": {
+                                        "admin.AgentAccessAdminServices.create#AgentAccessGrant": "#/components/schemas/CreateAgentAccessGrantRequest",
+                                        "admin.AgentAccessAdminServices.get#AgentUsage": "#/components/schemas/GetAgentUsageRequest",
+                                        "admin.AgentAccessAdminServices.list#AgentAccessGrants": "#/components/schemas/ListAgentAccessGrantsRequest",
+                                        "admin.AgentAccessAdminServices.pause#AgentAccessGrant": "#/components/schemas/PauseAgentAccessGrantRequest",
+                                        "admin.AgentAccessAdminServices.revoke#AgentAccessGrant": "#/components/schemas/RevokeAgentAccessGrantRequest",
+                                        "admin.AgentAccessAdminServices.unpause#AgentAccessGrant": "#/components/schemas/UnpauseAgentAccessGrantRequest",
+                                        "admin.AgentAccessAdminServices.update#AgentAccessGrant": "#/components/schemas/UpdateAgentAccessGrantRequest",
+                                        "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "#/components/schemas/ListAllBrainChangeTicketsRequest",
+                                        "admin.AgentTicketAdminServices.update#BrainChangeTicket": "#/components/schemas/UpdateBrainChangeTicketRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "#/components/schemas/GetKnowledgeEntryRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "#/components/schemas/GetKnowledgeForReviewRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "#/components/schemas/GetKnowledgeIdentifiersRequest",
@@ -696,6 +747,11 @@
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
+                                        "facade.AgentChangeFacadeServices.apply#AuditChange": "#/components/schemas/ApplyAuditChangeRequest",
+                                        "facade.AgentChangeFacadeServices.list#BrainChangeTickets": "#/components/schemas/ListBrainChangeTicketsRequest",
+                                        "facade.AgentChangeFacadeServices.plan#AuditChange": "#/components/schemas/PlanAuditChangeRequest",
+                                        "facade.AgentChangeFacadeServices.reject#AuditChange": "#/components/schemas/RejectAuditChangeRequest",
+                                        "facade.AgentChangeFacadeServices.revert#AuditChange": "#/components/schemas/RevertAuditChangeRequest",
                                         "facade.AgentFacadeServices.list#AgentQueryLogs": "#/components/schemas/ListAgentQueryLogsRequest",
                                         "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
                                         "facade.AuditFacadeServices.create#Audit": "#/components/schemas/CreateAuditRequest",
@@ -888,6 +944,33 @@
                                             "$ref": "#/components/schemas/JsonRpcErrorResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/CreateAgentAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAgentUsageResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListAgentAccessGrantsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PauseAgentAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RevokeAgentAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UnpauseAgentAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAgentAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListAllBrainChangeTicketsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateBrainChangeTicketResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetKnowledgeEntryResponse"
                                         },
                                         {
@@ -994,6 +1077,21 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateUserAccountResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ApplyAuditChangeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListBrainChangeTicketsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PlanAuditChangeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RejectAuditChangeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RevertAuditChangeResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListAgentQueryLogsResponse"
@@ -1589,6 +1687,853 @@
                 "required": [
                     "jsonrpc",
                     "error"
+                ]
+            },
+            "CreateAgentAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string"
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string"
+                    },
+                    "fromDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. Default now."
+                    },
+                    "thruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "The window ends this many days (each 24 hours) from the start, or from now when changing a grant."
+                    },
+                    "costCapUsd": {
+                        "type": "number",
+                        "description": "The limit over the whole window, in dollars; more than 0."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "tenantUserGroupId"
+                ],
+                "description": "Grants a member of the tenant AI access for a window and a limit; the user's earlier grant there is revoked."
+            },
+            "CreateAgentAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "CreateAgentAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentAccessAdminServices.create#AgentAccessGrant",
+                "x-darpan-method": "admin.AgentAccessAdminServices.create#AgentAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentAccessAdminServices.create#AgentAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateAgentAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateAgentAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentAccessAdminServices.create#AgentAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateAgentAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAgentUsageParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string"
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string"
+                    },
+                    "days": {
+                        "type": "integer"
+                    }
+                },
+                "description": "AI spend for a user, a tenant or both over the last days: totals, by day, by role and model, and the grants."
+            },
+            "GetAgentUsageResult": {
+                "type": "object",
+                "properties": {
+                    "totalMicros": {
+                        "type": "integer"
+                    },
+                    "totalUsd": {
+                        "type": "string"
+                    },
+                    "requests": {
+                        "type": "integer"
+                    },
+                    "byDay": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "byRoleModel": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "grants": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "GetAgentUsageRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentAccessAdminServices.get#AgentUsage",
+                "x-darpan-method": "admin.AgentAccessAdminServices.get#AgentUsage",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentAccessAdminServices.get#AgentUsage"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAgentUsageParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAgentUsageResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentAccessAdminServices.get#AgentUsage. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAgentUsageResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListAgentAccessGrantsParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string"
+                    },
+                    "userId": {
+                        "type": "string"
+                    },
+                    "statusId": {
+                        "type": "string"
+                    },
+                    "includeRevoked": {
+                        "type": "boolean"
+                    }
+                },
+                "description": "Grants across tenants with their spend and state, by tenant, user or status."
+            },
+            "ListAgentAccessGrantsResult": {
+                "type": "object",
+                "properties": {
+                    "grants": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "ListAgentAccessGrantsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentAccessAdminServices.list#AgentAccessGrants",
+                "x-darpan-method": "admin.AgentAccessAdminServices.list#AgentAccessGrants",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentAccessAdminServices.list#AgentAccessGrants"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListAgentAccessGrantsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListAgentAccessGrantsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentAccessAdminServices.list#AgentAccessGrants. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListAgentAccessGrantsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "PauseAgentAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Pauses an active grant."
+            },
+            "PauseAgentAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "PauseAgentAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentAccessAdminServices.pause#AgentAccessGrant",
+                "x-darpan-method": "admin.AgentAccessAdminServices.pause#AgentAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentAccessAdminServices.pause#AgentAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PauseAgentAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PauseAgentAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentAccessAdminServices.pause#AgentAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PauseAgentAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RevokeAgentAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Revokes a grant; the user has no AI access in that tenant until granted again."
+            },
+            "RevokeAgentAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "RevokeAgentAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentAccessAdminServices.revoke#AgentAccessGrant",
+                "x-darpan-method": "admin.AgentAccessAdminServices.revoke#AgentAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentAccessAdminServices.revoke#AgentAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RevokeAgentAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RevokeAgentAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentAccessAdminServices.revoke#AgentAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RevokeAgentAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UnpauseAgentAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    },
+                    "costCapUsd": {
+                        "type": "number",
+                        "description": "The limit over the whole window, in dollars; more than 0."
+                    },
+                    "thruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "The window ends this many days (each 24 hours) from the start, or from now when changing a grant."
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Lifts a pause, optionally with a higher limit or a later end; refused while spend is at or over the limit."
+            },
+            "UnpauseAgentAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UnpauseAgentAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentAccessAdminServices.unpause#AgentAccessGrant",
+                "x-darpan-method": "admin.AgentAccessAdminServices.unpause#AgentAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentAccessAdminServices.unpause#AgentAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UnpauseAgentAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UnpauseAgentAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentAccessAdminServices.unpause#AgentAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UnpauseAgentAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAgentAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    },
+                    "thruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "The window ends this many days (each 24 hours) from the start, or from now when changing a grant."
+                    },
+                    "costCapUsd": {
+                        "type": "number",
+                        "description": "The limit over the whole window, in dollars; more than 0."
+                    },
+                    "clearThruDate": {
+                        "type": "boolean"
+                    },
+                    "clearCostCap": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Changes a grant's end or limit; a grant that is then at its limit pauses."
+            },
+            "UpdateAgentAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateAgentAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentAccessAdminServices.update#AgentAccessGrant",
+                "x-darpan-method": "admin.AgentAccessAdminServices.update#AgentAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentAccessAdminServices.update#AgentAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAgentAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAgentAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentAccessAdminServices.update#AgentAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAgentAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListAllBrainChangeTicketsParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Only this tenant's tickets."
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Only tickets in this status."
+                    }
+                },
+                "description": "Tickets across tenants, newest first; one tenant or one status when named. Named apart from the tenant's own\n            facade.AgentChangeFacadeServices.list#BrainChangeTickets, whose schema name it would otherwise collide with in the API contract."
+            },
+            "ListAllBrainChangeTicketsResult": {
+                "type": "object",
+                "properties": {
+                    "tickets": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "ListAllBrainChangeTicketsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentTicketAdminServices.list#AllBrainChangeTickets",
+                "x-darpan-method": "admin.AgentTicketAdminServices.list#AllBrainChangeTickets",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentTicketAdminServices.list#AllBrainChangeTickets"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListAllBrainChangeTicketsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListAllBrainChangeTicketsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentTicketAdminServices.list#AllBrainChangeTickets. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListAllBrainChangeTicketsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateBrainChangeTicketParams": {
+                "type": "object",
+                "properties": {
+                    "ticketId": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "statusReason": {
+                        "type": "string"
+                    },
+                    "shippedVersion": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "ticketId",
+                    "status"
+                ],
+                "description": "Moves a ticket to RECEIVED, ACCEPTED, DECLINED or SHIPPED. DECLINED needs statusReason; SHIPPED needs shippedVersion."
+            },
+            "UpdateBrainChangeTicketResult": {
+                "type": "object",
+                "properties": {
+                    
+                }
+            },
+            "UpdateBrainChangeTicketRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentTicketAdminServices.update#BrainChangeTicket",
+                "x-darpan-method": "admin.AgentTicketAdminServices.update#BrainChangeTicket",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentTicketAdminServices.update#BrainChangeTicket"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateBrainChangeTicketParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateBrainChangeTicketResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentTicketAdminServices.update#BrainChangeTicket. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateBrainChangeTicketResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
                 ]
             },
             "GetKnowledgeEntryParams": {
@@ -5230,6 +6175,444 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateUserAccountResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ApplyAuditChangeParams": {
+                "type": "object",
+                "properties": {
+                    "proposalId": {
+                        "type": "string"
+                    },
+                    "planHash": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "proposalId",
+                    "planHash"
+                ],
+                "description": "A person applies a planned proposal. Refused without write access, for a BLOCKED proposal, and (an\n            exclusion) when an automation's filters differ from its run's (AUTOMATION_DRIFT). When the config changed since\n            the plan the proposal turns STALE and nothing is written."
+            },
+            "ApplyAuditChangeResult": {
+                "type": "object",
+                "properties": {
+                    "appliedVersionId": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "statusMessage": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ApplyAuditChangeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.apply#AuditChange",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.apply#AuditChange",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.apply#AuditChange"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ApplyAuditChangeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ApplyAuditChangeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.apply#AuditChange. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ApplyAuditChangeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListBrainChangeTicketsParams": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Only tickets in this status."
+                    }
+                },
+                "description": "The active tenant's tickets, newest first."
+            },
+            "ListBrainChangeTicketsResult": {
+                "type": "object",
+                "properties": {
+                    "tickets": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "ListBrainChangeTicketsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.list#BrainChangeTickets",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.list#BrainChangeTickets",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.list#BrainChangeTickets"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListBrainChangeTicketsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListBrainChangeTicketsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.list#BrainChangeTickets. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListBrainChangeTicketsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "PlanAuditChangeParams": {
+                "type": "object",
+                "properties": {
+                    "proposalId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "proposalId"
+                ],
+                "description": "Plans an open proposal again against the current config: the change is checked by its real save, which\n            is rolled back, and planHash covers the change and the config it was planned against. Ends PLANNED, or INVALID\n            with the save's refusal."
+            },
+            "PlanAuditChangeResult": {
+                "type": "object",
+                "properties": {
+                    "planHash": {
+                        "type": "string"
+                    },
+                    "before": {
+                        "type": "object"
+                    },
+                    "after": {
+                        "type": "object"
+                    },
+                    "backtest": {
+                        "type": "object"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "statusMessage": {
+                        "type": "string"
+                    }
+                }
+            },
+            "PlanAuditChangeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.plan#AuditChange",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.plan#AuditChange",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.plan#AuditChange"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PlanAuditChangeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PlanAuditChangeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.plan#AuditChange. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PlanAuditChangeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RejectAuditChangeParams": {
+                "type": "object",
+                "properties": {
+                    "proposalId": {
+                        "type": "string"
+                    },
+                    "reason": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "proposalId"
+                ],
+                "description": "A person declines an open proposal; it can no longer be applied."
+            },
+            "RejectAuditChangeResult": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string"
+                    }
+                }
+            },
+            "RejectAuditChangeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.reject#AuditChange",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.reject#AuditChange",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.reject#AuditChange"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RejectAuditChangeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RejectAuditChangeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.reject#AuditChange. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RejectAuditChangeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RevertAuditChangeParams": {
+                "type": "object",
+                "properties": {
+                    "proposalId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "proposalId"
+                ],
+                "description": "A new planned proposal that puts back what an applied proposal changed, applied through apply#AuditChange\n            with its own planHash."
+            },
+            "RevertAuditChangeResult": {
+                "type": "object",
+                "properties": {
+                    "newProposalId": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "statusMessage": {
+                        "type": "string"
+                    },
+                    "planHash": {
+                        "type": "string"
+                    }
+                }
+            },
+            "RevertAuditChangeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentChangeFacadeServices.revert#AuditChange",
+                "x-darpan-method": "facade.AgentChangeFacadeServices.revert#AuditChange",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentChangeFacadeServices.revert#AuditChange"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RevertAuditChangeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RevertAuditChangeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentChangeFacadeServices.revert#AuditChange. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RevertAuditChangeResult"
                     }
                 },
                 "required": [
@@ -28625,6 +30008,15 @@
         }
     },
     "x-darpan-methods": {
+        "admin.AgentAccessAdminServices.create#AgentAccessGrant": "CreateAgentAccessGrant",
+        "admin.AgentAccessAdminServices.get#AgentUsage": "GetAgentUsage",
+        "admin.AgentAccessAdminServices.list#AgentAccessGrants": "ListAgentAccessGrants",
+        "admin.AgentAccessAdminServices.pause#AgentAccessGrant": "PauseAgentAccessGrant",
+        "admin.AgentAccessAdminServices.revoke#AgentAccessGrant": "RevokeAgentAccessGrant",
+        "admin.AgentAccessAdminServices.unpause#AgentAccessGrant": "UnpauseAgentAccessGrant",
+        "admin.AgentAccessAdminServices.update#AgentAccessGrant": "UpdateAgentAccessGrant",
+        "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "ListAllBrainChangeTickets",
+        "admin.AgentTicketAdminServices.update#BrainChangeTicket": "UpdateBrainChangeTicket",
         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "GetKnowledgeEntry",
         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "GetKnowledgeForReview",
         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "GetKnowledgeIdentifiers",
@@ -28661,6 +30053,11 @@
         "admin.UserAdminServices.get#UserList": "GetUserList",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
+        "facade.AgentChangeFacadeServices.apply#AuditChange": "ApplyAuditChange",
+        "facade.AgentChangeFacadeServices.list#BrainChangeTickets": "ListBrainChangeTickets",
+        "facade.AgentChangeFacadeServices.plan#AuditChange": "PlanAuditChange",
+        "facade.AgentChangeFacadeServices.reject#AuditChange": "RejectAuditChange",
+        "facade.AgentChangeFacadeServices.revert#AuditChange": "RevertAuditChange",
         "facade.AgentFacadeServices.list#AgentQueryLogs": "ListAgentQueryLogs",
         "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
         "facade.AuditFacadeServices.create#Audit": "CreateAudit",

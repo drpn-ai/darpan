@@ -171,6 +171,37 @@ class CliAuthSupportTests {
     }
 
     @Test
+    @DisplayName("DAR-BE-195: revalidate refuses a CLI session whose user is not a Darpan admin")
+    void revalidateNonAdminIsRefused() {
+        def entity = new EntityStub()
+        entity.rows["moqui.security.UserGroupMember"][0].userGroupId = "DARPAN_USER"
+        def session = new SessionStub(attributes: [(CliAuthSupport.CLI_SESSION_MARK_ATTRIBUTE): "hash:${CLI_KEY}".toString()])
+        def stubEc = ec(new RequestStub(session: session), [:], entity)
+        assertEquals(CliAuthSupport.CLI_ACCESS_REFUSED, CliAuthSupport.revalidateCliWebSession(stubEc))
+        assertTrue(session.invalidated)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-195: an ended or not-yet-started admin membership does not open the CLI; ADMIN does")
+    void cliAccessFollowsTheMembershipDates() {
+        long now = System.currentTimeMillis()
+        def entity = new EntityStub()
+        def stubEc = ec(new RequestStub(), [:], entity)
+        Map member = entity.rows["moqui.security.UserGroupMember"][0]
+        assertTrue(CliAuthSupport.cliAccessAllowed(stubEc, "CLI_USER"))
+        member.thruDate = new Timestamp(now - 1000L)
+        assertFalse(CliAuthSupport.cliAccessAllowed(stubEc, "CLI_USER"), "an ended membership")
+        member.thruDate = null
+        member.fromDate = new Timestamp(now + 86_400_000L)
+        assertFalse(CliAuthSupport.cliAccessAllowed(stubEc, "CLI_USER"), "a membership that starts tomorrow")
+        member.fromDate = null
+        member.userGroupId = "ADMIN"
+        assertTrue(CliAuthSupport.cliAccessAllowed(stubEc, "CLI_USER"), "the ADMIN group counts as a Darpan admin")
+        assertFalse(CliAuthSupport.cliAccessAllowed(stubEc, "SOMEONE_ELSE"))
+        assertFalse(CliAuthSupport.cliAccessAllowed(stubEc, null))
+    }
+
+    @Test
     @DisplayName("revalidate: a session with no mark is left alone")
     void revalidateUnmarkedSessionPasses() {
         def session = new SessionStub()
@@ -207,6 +238,8 @@ class CliAuthSupportTests {
                 "moqui.security.UserLoginKey": [[loginKey: "hash:${CLI_KEY}".toString(), userId: "CLI_USER",
                                                  thruDate: new Timestamp(System.currentTimeMillis() + 86_400_000L)]],
                 "moqui.security.UserAccount" : [[userId: "CLI_USER", username: "cli.user", disabled: "N"]],
+                "moqui.security.UserGroupMember": [[userId: "CLI_USER", userGroupId: "DARPAN_ADMIN",
+                                                    fromDate: new Timestamp(System.currentTimeMillis() - 86_400_000L), thruDate: null]],
         ]
         FinderStub find(String entityName) { lookups++; new FinderStub(rows: rows[entityName] ?: []) }
     }
@@ -220,6 +253,7 @@ class CliAuthSupportTests {
         private List<Map> matches() { rows.findAll { Map row -> conditions.every { k, v -> row[k]?.toString() == v?.toString() } } }
         long count() { matches().size() }
         Map one() { matches() ? matches()[0] : null }
+        List<Map> list() { matches() }
     }
 
     static class RequestStub {

@@ -31,6 +31,8 @@ class CliLoginSmokeTests {
     private static final String APPROVER_USERNAME = "cli.approver"
     private static final String OTHER_ID = "CLI_OTHER"
     private static final String OTHER_USERNAME = "cli.other"
+    private static final String PLAIN_ID = "CLI_PLAIN"
+    private static final String PLAIN_USERNAME = "cli.plain"
     private static final String HOST = "aditi-mbp"
     private static final String USER_CODE_PATTERN = /^[BCDFGHJKLMNPQRSTVWXZ23456789]{4}-[BCDFGHJKLMNPQRSTVWXZ23456789]{4}$/
 
@@ -51,6 +53,11 @@ class CliLoginSmokeTests {
         ec.entity.find("darpan.auth.CliSession").disableAuthz().deleteAll()
         upsertAccount(APPROVER_ID, APPROVER_USERNAME)
         upsertAccount(OTHER_ID, OTHER_USERNAME)
+        upsertAccount(PLAIN_ID, PLAIN_USERNAME)
+        // DAR-BE-195: until per-user CLI grants exist, only Darpan admins may approve a CLI sign-in.
+        darpanAdmin(APPROVER_ID, true)
+        darpanAdmin(OTHER_ID, true)
+        darpanAdmin(PLAIN_ID, false)
     }
 
     @AfterEach
@@ -254,6 +261,29 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("DAR-BE-195: someone the CLI is not turned on for cannot approve a CLI sign-in")
+    void aNonAdminCannotApprove() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+        Map approved = signedIn(PLAIN_USERNAME, "approve#CliLogin", [userCode: started.userCode])
+        assertEquals([CliAuthSupport.CLI_ACCESS_REFUSED], approved.errors)
+        assertEquals("PENDING", deviceRow(started.userCode as String).statusId)
+        assertNull(deviceRow(started.userCode as String).approvedByUserId)
+        assertEquals("PENDING", anon("poll#CliLogin", [deviceCode: started.deviceCode]).out.status)
+        assertEquals(0, ec.entity.find("moqui.security.UserLoginKey").condition("userId", PLAIN_ID).disableAuthz().count())
+    }
+
+    @Test
+    @DisplayName("DAR-BE-195: an ended Darpan admin membership closes the CLI to that user")
+    void anEndedAdminMembershipClosesTheCli() {
+        assertTrue(CliAuthSupport.cliAccessAllowed(ec, APPROVER_ID))
+        ec.entity.find("moqui.security.UserGroupMember").condition("userId", APPROVER_ID).disableAuthz()
+                .updateAll([thruDate: new Timestamp(System.currentTimeMillis() - 1000L)])
+        assertFalse(CliAuthSupport.cliAccessAllowed(ec, APPROVER_ID))
+        Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+        assertEquals([CliAuthSupport.CLI_ACCESS_REFUSED], signedIn(APPROVER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+    }
+
+    @Test
     @DisplayName("the eleventh start in a minute from one address is refused")
     void theEleventhStartInAMinuteFromOneAddressIsRefused() {
         (1..10).each { int i ->
@@ -324,6 +354,16 @@ class CliLoginSmokeTests {
                 disabledDateTime: null, requirePasswordChange: "N", currentPassword: null, passwordSalt: null,
                 hasLoggedOut: "N", successiveFailedLogins: 0]).createOrUpdate()
         ec.entity.find("moqui.security.UserLoginKey").condition("userId", userId).disableAuthz().deleteAll()
+    }
+
+    private void darpanAdmin(String userId, boolean admin) {
+        ec.entity.find("moqui.security.UserGroupMember").condition("userId", userId).disableAuthz().deleteAll()
+        if (admin) {
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_ADMIN",
+                    description: "Darpan admin"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_ADMIN", userId: userId,
+                    fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
+        }
     }
 
     private static String sha256(String value) {

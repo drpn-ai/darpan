@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.moqui.entity.EntityCondition
@@ -134,6 +135,27 @@ class CliAuthSupport {
         if (PasswordResetSupport.lockedOut(ec, account)) return false
         Timestamp terminateDate = (Timestamp) account.terminateDate
         return terminateDate == null || terminateDate.time > System.currentTimeMillis()
+    }
+
+    // ---- who may use the CLI (DAR-BE-195) ----
+
+    static final String CLI_ACCESS_REFUSED = "The Darpan CLI is not turned on for this account. A Darpan admin turns it on."
+
+    /**
+     * Whether this user may use the CLI. Until per-user CLI grants exist (DAR-BE-195), only Darpan admins
+     * (ADMIN or DARPAN_ADMIN, membership in force now) may: approve a CLI sign-in, or keep using a CLI key.
+     */
+    static boolean cliAccessAllowed(def ec, String userId) {
+        if (!normalize(userId)) return false
+        long now = System.currentTimeMillis()
+        List members = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserGroupMember",
+                        "self-scoped auth: is this CLI user a Darpan admin (pre-auth path, no active tenant)")
+                .condition("userId", userId).useCache(false).list()
+        return members.any { def member ->
+            member.userGroupId in TenantAccessSupport.DARPAN_ADMIN_GROUP_IDS &&
+                    (member.fromDate == null || ((Timestamp) member.fromDate).time <= now) &&
+                    (member.thruDate == null || ((Timestamp) member.thruDate).time > now)
+        }
     }
 
     /**
@@ -281,6 +303,7 @@ class CliAuthSupport {
                         "self-scoped auth: re-check that a CLI session's account can still sign in")
                 .condition("userId", cliSession.userId).useCache(false).one()
         if (!canSignIn(ec, account)) return "This account can no longer sign in."
+        if (!cliAccessAllowed(ec, (String) cliSession.userId)) return CLI_ACCESS_REFUSED
         return null
     }
 

@@ -177,11 +177,14 @@
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the sign-in was approved.</description></parameter>
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><description>Why it was refused: expired, already answered, or a CLI session.</description><parameter name="error"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused: expired, already answered, a CLI session, or the CLI is not turned on for this account.</description><parameter name="error"/></parameter>
         </out-parameters>
         <actions>
             <if condition="darpan.facade.auth.CliAuthSupport.isCliSession(ec)">
                 <return error="true" message="Approve CLI sign-ins in the Darpan app, not from the CLI."/></if>
+            <!-- DAR-BE-195: only someone the CLI is turned on for may approve (Darpan admins until per-user grants exist). -->
+            <if condition="!darpan.facade.auth.CliAuthSupport.cliAccessAllowed(ec, ec.user.userId)">
+                <return error="true" message="${darpan.facade.auth.CliAuthSupport.CLI_ACCESS_REFUSED}"/></if>
             <entity-find entity-name="darpan.auth.CliDeviceCode" list="deviceRows" limit="1" for-update="true">
                 <econdition field-name="userCode" from="darpan.facade.auth.CliAuthSupport.normalizeUserCode(userCode)"/>
             </entity-find>

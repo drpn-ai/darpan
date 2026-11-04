@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 Release-scoped upgrade data for Darpan 2.1.5 (compare range v2.1.4..HEAD).
-14 darpan-seed records, extracted verbatim from runtime/component/darpan/data/*.xml.
+20 darpan-seed records, extracted verbatim from runtime/component/darpan/data/*.xml.
 ORDERING NOTE: parent before child, not the generator's alphabetical order. The Enumeration names the
 SourceSystemConnector's systemEnumId, and the connector is the parent of its SourceSystemConnectorField rows.
 No tenant config here: a tenant's audits, runs, queries and conclusion codes live in its config pack
@@ -24,4 +24,11 @@ No tenant config here: a tenant's audits, runs, queries and conclusion codes liv
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].sellable" label="Sellable" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="10" description="Y for a sellable product; N for a discontinued, virtual or non-selling product kept only because it carries a NetSuite id no sellable product holds."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].sharedWith" label="Shares its NetSuite ID with" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="9" description="The other sellable HotWax products carrying the same NetSuite id, comma-separated."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].transactionIds" label="Transaction ids" fieldType="String" sequenceNum="11" description="DAR-BE-153: comma-joined ids of every SUCCESS transaction on the order, any kind (authorization, capture, sale, void, refund). Each HotWax OPP manualRefNum must be among them (paymentRefNums all in transactionIds); extra Shopify ids are fine."/>
+    <!-- DAR-BE-192: shared codes the brain concludes (ConclusionCatalogSeedData.xml is type seed: an existing database gets them only here) -->
+    <moqui.basic.Enumeration enumId="CONC_REPLACEMENT_WAITS_OWN_RETURN" enumTypeId="DarpanConclusion" enumCode="CONC_REPLACEMENT_WAITS_OWN_RETURN" description="Waits on its own return"/>
+    <moqui.basic.Enumeration enumId="CONC_RETURN_RMA_CLOSED_NO_MEMO" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_RMA_CLOSED_NO_MEMO" description="Return's RMA closed, no credit memo"/>
+    <moqui.basic.Enumeration enumId="CONC_RETURN_RMA_NO_MEMO" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_RMA_NO_MEMO" description="Return has an RMA, no credit memo"/>
+    <moqui.basic.Enumeration enumId="CONC_RETURN_NO_RMA" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_NO_RMA" description="Return not in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_LOST_CLAIM_NO_MEMO" enumTypeId="DarpanConclusion" enumCode="CONC_LOST_CLAIM_NO_MEMO" description="Lost-warranty claim, no credit memo"/>
+    <moqui.basic.Enumeration enumId="CONC_REPLACEMENT_NOT_PAID" enumTypeId="DarpanConclusion" enumCode="CONC_REPLACEMENT_NOT_PAID" description="Replacement not paid for"/>
 </entity-facade-xml>

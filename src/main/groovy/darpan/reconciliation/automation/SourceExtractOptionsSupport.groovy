@@ -22,6 +22,15 @@ class SourceExtractOptionsSupport {
 
     static final List<String> OPTION_TYPES = ["boolean", "text"].asImmutable()
 
+    /**
+     * DAR-BE-192. Options the core reads on any side, whatever its connector declares (not offered by the run builder: a
+     * config bundle sets them). readByOtherSideKeys reads the side by the keys the other side's records carry instead of by
+     * the window; a source whose extract cannot read by key is refused, in words, when the run starts.
+     */
+    static final List<Map<String, Object>> CORE_OPTIONS = [
+            [name: AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS, label: "Read only what the other side names", type: "boolean"] as Map<String, Object>,
+    ].asImmutable()
+
     /** What a connector map (SourceSystemConnectorSupport) declares; [] when nothing or unreadable. */
     static List<Map<String, Object>> declaredOptions(Map<String, Object> connector) {
         Object raw = parse(connector?.get("extractOptionsJson"))
@@ -46,14 +55,15 @@ class SourceExtractOptionsSupport {
         }
         if (raw == null) return null
         if (!(raw instanceof Map)) throw new IllegalArgumentException("${sideLabel}'s options must be a set of named values.")
-        Map<String, Map<String, Object>> declared = declaredOptions(connector).collectEntries { [(it.name): it] }
+        Map<String, Map<String, Object>> declared = (declaredOptions(connector) + CORE_OPTIONS).collectEntries { [(it.name): it] }
         Map<String, Object> kept = new TreeMap<>()
         ((Map) raw).each { Object k, Object v ->
             String name = normalize(k)
             Map<String, Object> option = declared[name]
             if (option == null) {
                 throw new IllegalArgumentException("${sideLabel} has no option '${name}'" +
-                        (declared ? "; it takes ${declared.keySet().join(', ')}." : "; its source takes no options."))
+                        // Only the connector's own: the core's options are not offered in the run builder either.
+                        (connectorNames(connector) ? "; it takes ${connectorNames(connector).join(', ')}." : "; its source takes no options."))
             }
             if (option.type == "boolean") {
                 if (!(v instanceof Boolean) && !(v?.toString() in ["true", "false"])) {
@@ -102,7 +112,7 @@ class SourceExtractOptionsSupport {
             return [:]
         }
         if (!(raw instanceof Map)) return [:]
-        Set<String> names = declaredOptions(connector)*.name as Set<String>
+        Set<String> names = (declaredOptions(connector) + CORE_OPTIONS)*.name as Set<String>
         return ((Map<String, Object>) raw).findAll { k, v -> names.contains(k as String) && v != null } as Map<String, Object>
     }
 
@@ -119,6 +129,10 @@ class SourceExtractOptionsSupport {
     static Map<String, Object> mergeUnder(Map<String, Object> params, Map<String, Object> options) {
         options?.each { String k, Object v -> if (!params.containsKey(k)) params[k] = v }
         return params
+    }
+
+    private static List<String> connectorNames(Map<String, Object> connector) {
+        return declaredOptions(connector)*.name as List<String>
     }
 
     private static Object parse(Object value) {

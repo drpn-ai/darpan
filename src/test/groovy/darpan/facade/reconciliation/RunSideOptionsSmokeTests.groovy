@@ -99,7 +99,8 @@ class RunSideOptionsSmokeTests {
     void theSourceOptionRowsCarryWhatTheConnectorDeclares() {
         List<Map<String, Object>> connectors = AutomationFacadeSupport.connectorRowsForConfigEntity(ec, "darpan.hotwax.HotWaxOmsRestSourceConfig")
         Map<String, Object> returns = connectors.find { it.systemEnumId == "OMS_RETURNS_GQL" }
-        assertEquals(["includeReturnsWithoutShopifyRef", "onlyCancelledReturns"],
+        // DAR-BE-192: withReturnCredit, the credit HotWax gave each return.
+        assertEquals(["includeReturnsWithoutShopifyRef", "onlyCancelledReturns", "withReturnCredit"],
                 darpan.reconciliation.automation.SourceExtractOptionsSupport.declaredOptions(returns)*.name)
     }
 

@@ -188,7 +188,8 @@ class RunExtractSupport {
                                                 Map<String, Object> artifactContext,
                                                 Map<String, Object> apiWindow,
                                                 Map<String, Object> progressContext,
-                                                Closure serviceCaller) {
+                                                Closure serviceCaller,
+                                                Map<String, Object> byKeys = null) {
         String sourceConfigType = normalize(source?.sourceConfigType)
         Map<String, Object> connector = resolveExtractConnector(ec, source)
         String extractServiceName = connector == null ? null : normalize(connector.extractServiceName)
@@ -235,6 +236,16 @@ class RunExtractSupport {
         // the config id, window or filters; only names the connector declares.
         SourceExtractOptionsSupport.mergeUnder(extractParams,
                 SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)))
+        // DAR-BE-192: readByOtherSideKeys is the run's choice, not the extract's; byKeys carries the other side's keys.
+        extractParams.remove(darpan.reconciliation.automation.AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS)
+        if (byKeys != null) {
+            if (!ec.service.getServiceDefinition(extractServiceName)?.inParameterNameList?.contains("lookupKeys")) {
+                ec.message.addError("${label} is read by the other side's keys, and its source cannot read by key.")
+                return [:]
+            }
+            extractParams.lookupKeys = byKeys.lookupKeys
+            extractParams.lookupKeyField = byKeys.lookupKeyField
+        }
 
         Map extraction = (serviceCaller.call(extractServiceName, extractParams) ?: [:]) as Map
         ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }

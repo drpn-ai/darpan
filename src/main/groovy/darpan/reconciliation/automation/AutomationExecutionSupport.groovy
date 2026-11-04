@@ -303,6 +303,64 @@ class AutomationExecutionSupport {
         Thread t = new Thread(r, "automation-side2-extract"); t.daemon = true; t
     } as java.util.concurrent.ThreadFactory)
 
+    /** DAR-BE-192: the run option that has a side read by the other side's keys instead of by the window. */
+    static final String READ_BY_OTHER_SIDE_KEYS = "readByOtherSideKeys"
+
+    /**
+     * DAR-BE-192. A side whose run options set readByOtherSideKeys (an option a connector declares only when its extract
+     * reads by key) is read by the keys the other side's records carry, never by the window: a record made long after its
+     * twin still pairs (gorjana: a NetSuite credit memo made weeks after its HotWax return was entered). Either side may
+     * carry it; when side 1 does, side 2 is read first.
+     */
+    static boolean readsByOtherSideKeys(def source) {
+        Object parameters = parseJsonMap(readField(source, "safeMetadataJson"))?.parameters
+        return parameters instanceof Map && ((Map) parameters).get(READ_BY_OTHER_SIDE_KEYS) == true
+    }
+
+    /**
+     * DAR-BE-192. `source` read by the keys of the side already read (otherResult, otherSide): every key that side's first
+     * key field holds, once, AuditRecheckSupport.MAX_KEYS a read, the later reads appended to the first one's file. No keys
+     * (the other side is empty): nothing is read, and the run is judged as having no data on that side.
+     */
+    protected static Map<String, Object> readByOtherSideKeys(def ec, def automation, Map<String, Object> otherResult, String otherSide,
+                                                            def source, Map<String, Object> window, Map<String, Object> windowParams,
+                                                            Closure extract) {
+        String scopeId = normalize(readField(automation, "compareScopeId"))
+        String side = normalize(readField(source, "fileSide"))
+        String otherKey = AuditRecheckSupport.firstKeyField(ec, scopeId, otherSide)
+        String ownKey = AuditRecheckSupport.firstKeyField(ec, scopeId, side)
+        if (!otherKey || !ownKey) throw new IllegalStateException("${side} is read by ${otherSide}'s keys, and a side has no plain key field")
+        File otherFile = RunVerificationSupport.resolveLocationFile(ec, normalize(otherResult?.fileLocation))
+        return readByKeysOf(otherFile, otherKey, ownKey) { List<String> batch ->
+            Map<String, Object> read = normalizeSourceResult(extract.call(ec, automation, source, window,
+                    new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: batch] as Map<String, Object>), source)
+            File f = RunVerificationSupport.resolveLocationFile(ec, normalize(read.fileLocation))
+            if (f == null) throw new IllegalStateException("${side}'s read by ${otherSide}'s keys wrote no file")
+            return [result: read, file: f]
+        }
+    }
+
+    /**
+     * DAR-BE-192. The keys otherFile's otherKey holds, each once in record order, read by readBatch(keys) -> [result, file]
+     * AuditRecheckSupport.MAX_KEYS at a time; every later batch's records are appended to the first batch's file (by ownKey)
+     * and counted on its result. [:] when otherFile holds no keys.
+     */
+    static Map<String, Object> readByKeysOf(File otherFile, String otherKey, String ownKey, Closure readBatch) {
+        Set<String> keys = new LinkedHashSet<String>()
+        if (otherFile != null) darpan.reconciliation.conclusion.JsonRecordStream.forEachRecord(otherFile, "records") { Map r ->
+            String v = normalize(r.get(otherKey))
+            if (v) keys.add(v)
+        }
+        Map<String, Object> first = null
+        File target = null
+        (keys as List<String>).collate(AuditRecheckSupport.MAX_KEYS).each { List<String> batch ->
+            Map read = (Map) readBatch.call(batch)
+            if (first == null) { first = (Map<String, Object>) read.result; target = (File) read.file; return }
+            first.recordCount = ((first.recordCount ?: 0) as int) + AuditRecheckSupport.append(target, (File) read.file, ownKey, [] as Set<String>)
+        }
+        return first ?: [:]
+    }
+
     /**
      * Side 2's extract on its own thread and ExecutionContext: the same user, the run's system tenant, and the same
      * extractor (whose service call relaxes authz at its one audited seam). Null, so the caller reads side 2 after side 1,
@@ -522,12 +580,23 @@ class AutomationExecutionSupport {
                     if (oms1 != oms2) window.auditOtherSideStartDate = darpan.audit.AuditRecentReadSupport.otherSideStart(
                             (java.sql.Timestamp) recentRead, (java.sql.Timestamp) window.childWindowStartDate)
                 }
-                Future<Map<String, Object>> parallelSide2 = evaluateMode || replayFrom ? null :
+                // DAR-BE-192: a side read by the other side's keys waits for them. Side 1 can be that side (it holds the
+                // expected value of a money check), and then side 2 is read first.
+                boolean side1ByKeys = !evaluateMode && file2Source != null && readsByOtherSideKeys(file1Source)
+                boolean side2ByKeys = !evaluateMode && !side1ByKeys && file2Source != null && readsByOtherSideKeys(file2Source)
+                Future<Map<String, Object>> parallelSide2 = evaluateMode || replayFrom || side2ByKeys ? null :
                         startParallelSourceExtract(ec, automation, file2Source, window, windowParams)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
                 // A failure or a cancel before side 2 is joined cancels side 2's read too (DAR-BE-124).
                 try {
-                    file1Result = normalizeSourceResult(extract.call(ec, automation, file1Source, window, windowParams), file1Source)
+                    if (side1ByKeys) {
+                        file2Result = normalizeSourceResult(parallelSide2 != null ? joinParallelSourceExtract(parallelSide2) :
+                                extract.call(ec, automation, file2Source, window, windowParams), file2Source)
+                        parallelSide2 = null
+                    }
+                    file1Result = normalizeSourceResult(side1ByKeys ?
+                            readByOtherSideKeys(ec, automation, file2Result, FILE_SIDE_2, file1Source, window, windowParams, extract) :
+                            extract.call(ec, automation, file1Source, window, windowParams), file1Source)
                     RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
                     openStep = null
                     stampExtract(ec, execution, "file1", file1Result)
@@ -548,7 +617,9 @@ class AutomationExecutionSupport {
                 }
                 if (!evaluateMode) {
                     openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
-                    file2Result = normalizeSourceResult(parallelSide2 != null ? joinParallelSourceExtract(parallelSide2) :
+                    if (!side1ByKeys) file2Result = normalizeSourceResult(side2ByKeys ?
+                            readByOtherSideKeys(ec, automation, file1Result, FILE_SIDE_1, file2Source, window, windowParams, extract) :
+                            parallelSide2 != null ? joinParallelSourceExtract(parallelSide2) :
                             extract.call(ec, automation, file2Source, window, windowParams), file2Source)
                     RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
                     openStep = null
@@ -2015,6 +2086,7 @@ class AutomationExecutionSupport {
 
         Map<String, Object> serviceParams = [:]
         if (metadata.parameters instanceof Map) serviceParams.putAll((Map<String, Object>) metadata.parameters)
+        serviceParams.remove(READ_BY_OTHER_SIDE_KEYS)   // DAR-BE-192: the run's own choice, not the extract's
         serviceParams.automationId = normalize(readField(automation, "automationId"))
         // Every extract service declares this ("Automation execution id used to choose the default
         // data-manager output folder"); it is what keeps one run's extract file off another run's path.

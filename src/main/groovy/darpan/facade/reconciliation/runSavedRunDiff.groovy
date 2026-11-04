@@ -337,12 +337,31 @@ def resolveTenantApiWindow = {
 // service name, config parameter name, window parameter names, and preserveWindowInstants —
 // the same resolver the automation path uses, so connector dispatch lives in one place and
 // onboarding a new source needs no edit here.
-def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null ->
+def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null, Map byKeys = null ->
     // DAR-BE-163: a side the failed run already read comes back as it landed, with no call to the source system.
     Map<String, Object> replayed = retryPlan ? RunRetrySupport.replayedSide(ec, retryPlan, source, fileSide) : null
     if (replayed != null) return replayed
     RunExtractSupport.extractApiSource(ec, source, fileSide, sourceLabel(source, fileSide), artifactContext,
-            (tenantApiWindow ?: resolveTenantApiWindow()), progressContext, runInternalService)
+            (tenantApiWindow ?: resolveTenantApiWindow()), progressContext, runInternalService, byKeys)
+}
+// DAR-BE-192: a side read by the other side's keys (its run option readByOtherSideKeys), as the automation path reads it.
+def readsByOtherSideKeys = { Object source ->
+    def stored = darpan.reconciliation.automation.SourceExtractOptionsSupport.storedOn(source)
+    Object options = stored ? new groovy.json.JsonSlurper().parseText(stored.toString()) : null
+    return options instanceof Map && ((Map) options).get(darpan.reconciliation.automation.AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS) == true
+}
+// The keys the side already read holds, for the other side's read. An empty list: that side holds none.
+def otherSideKeys = { Map otherResult, String compareScopeId, String otherSide, String ownSide ->
+    String otherKey = darpan.audit.AuditRecheckSupport.firstKeyField(ec, compareScopeId, otherSide)
+    String ownKey = darpan.audit.AuditRecheckSupport.firstKeyField(ec, compareScopeId, ownSide)
+    if (!otherKey || !ownKey) { ec.message.addError("${ownSide} is read by ${otherSide}'s keys, and a side has no plain key field."); return [:] }
+    File f = RunVerificationSupport.resolveLocationFile(ec, otherResult?.fileLocation as String)
+    Set<String> keys = new LinkedHashSet<String>()
+    if (f != null) darpan.reconciliation.conclusion.JsonRecordStream.forEachRecord(f, "records") { Map r ->
+        String v = r.get(otherKey)?.toString()?.trim()
+        if (v) keys.add(v)
+    }
+    return [lookupKeys: keys as List<String>, lookupKeyField: ownKey]
 }
 def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, String file2Label, Map artifactContext ->
     Map output = ReconciliationServices.writeDiffDatasetOutput(
@@ -818,9 +837,17 @@ try {
                             RunObservability.checkpointCancel(ec, obsRunId)
                             obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE1) : null
                             obsStage = RunObservability.STAGE_EXTRACT_FILE1
-                            file1Result = file1UsesApiSource ?
+                            // DAR-BE-192: side 1 read by side 2's keys: side 2 is read first.
+                            boolean file1ByKeys = file1UsesApiSource && file2UsesApiSource && readsByOtherSideKeys(file1Source)
+                            boolean file2ByKeys = !file1ByKeys && file1UsesApiSource && file2UsesApiSource && readsByOtherSideKeys(file2Source)
+                            Map file2Early = file1ByKeys ? extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext,
+                                    [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE2]) : null
+                            Map file1ByKeysOf = file1ByKeys && !ec.message.hasError() ? otherSideKeys(file2Early, savedRun.compareScopeId as String,
+                                    ReconciliationSavedRunSupport.FILE_SIDE_2, ReconciliationSavedRunSupport.FILE_SIDE_1) : null
+                            file1Result = ec.message.hasError() ? [:] : file1ByKeysOf != null && !file1ByKeysOf.lookupKeys ? [recordCount: 0] :
+                                    file1UsesApiSource ?
                                     extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext,
-                                            [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE1]) :
+                                            [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE1], file1ByKeysOf) :
                                     stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
@@ -829,10 +856,13 @@ try {
                                 obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE2) : null
                                 obsStage = RunObservability.STAGE_EXTRACT_FILE2
                             }
-                            file2Result = !ec.message.hasError() && file2UsesApiSource ?
+                            Map file2ByKeysOf = file2ByKeys && !ec.message.hasError() ? otherSideKeys(file1Result, savedRun.compareScopeId as String,
+                                    ReconciliationSavedRunSupport.FILE_SIDE_1, ReconciliationSavedRunSupport.FILE_SIDE_2) : null
+                            file2Result = file2Early != null ? file2Early : !ec.message.hasError() && file2UsesApiSource ?
+                                    (file2ByKeysOf != null && !file2ByKeysOf.lookupKeys ? [recordCount: 0] :
                                     extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext,
                                             [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE2,
-                                             expectedRecordCount: file1Result.recordCount]) :
+                                             expectedRecordCount: file1Result.recordCount], file2ByKeysOf)) :
                                     !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])

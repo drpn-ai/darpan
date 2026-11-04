@@ -213,6 +213,55 @@ class RunConclusionAuthoringSmokeTests {
         assertEquals([], ((Map) cleared.savedConclusions).lookups, "an empty list clears them")
     }
 
+    // DAR-BE-198 (prod gorjana R1, 2026-11-04): a rule's outcome (HIDE, DAR-BE-157; EXPECTED, DAR-BE-196), engine (BRAIN,
+    // DAR-BE-151) and suggested filter are not in the editor's nodes, so saving a tree dropped them; and a save naming only
+    // lookups cleared the whole tree. Now: the tree reads them back, a node that does not name one keeps its rule's, and
+    // lookups alone leave the tree as it is.
+    @Test
+    @Order(7)
+    void aSaveKeepsWhatTheEditorDoesNotSendAndLookupsAloneKeepTheTree() {
+        Map within = [key: "a", conclusion: "CONC_TCON_OPEN", bucket: "RULE", fix: "Nothing yet.", conditions: [
+                [subject: "FILE_1", field: "statusId", operator: "IN", values: ["RETURN_COMPLETED"], checkLabel: "Completed"]]]
+        Map brain = [key: "b", conclusion: "CONC_TCON_PENDING", fix: "Close the RMA.", conditions: [
+                [subject: "FILE_1", field: "concludedByTheBrainOnly", operator: "NOT_BLANK", checkLabel: "Concluded by the conclusion brain only"]]]
+        Map first = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: [within, brain], lookups: []])
+        assertFalse(first.hadError as boolean, first.errorText as String)
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCON_RS_SCOPE").condition("sequenceNum", 10)
+                    .useCache(false).one().set("outcome", "EXPECTED").set("suggestedFilterJson", '{"fileSide":"FILE_1"}').update()
+            ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCON_RS_SCOPE").condition("sequenceNum", 20)
+                    .useCache(false).one().set("engine", "BRAIN").update()
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Closure<List<Map>> tree = { -> ((Map) facade("get#RunConclusions", [savedRunId: "TCON_RS"]).conclusions).conclusions as List<Map> }
+        Closure<List<String>> kept = { -> tree().collect { "${it.key} ${it.conclusion} ${it.outcome} ${it.engine} ${it.suggestedFilterJson}".toString() } }
+        List<String> stored = ['10 CONC_TCON_OPEN EXPECTED null {"fileSide":"FILE_1"}', '20 CONC_TCON_PENDING null BRAIN null']
+        assertEquals(stored, kept(), "the tree reads them back")
+
+        // The editor's save: the nodes as it builds them, without outcome, engine or suggested filter.
+        List<Map> edited = tree().collect { it.subMap(["key", "parent", "conclusion", "bucket", "question", "fix", "conditions"]) }
+        Map resaved = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: edited])
+        assertFalse(resaved.hadError as boolean, resaved.errorText as String)
+        assertEquals(stored, kept(), "a node that does not name them keeps its rule's")
+
+        Map items = [name: "items", subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_ORDER_ITEMS_GQL",
+                     sourceConfigId: "steve_madden_prodhw", keyField: "omsOrderId", many: true]
+        Map lookupsOnly = facade("save#RunConclusions", [savedRunId: "TCON_RS", lookups: [items]])
+        assertFalse(lookupsOnly.hadError as boolean, lookupsOnly.errorText as String)
+        assertEquals(stored, kept(), "lookups alone leave the tree")
+        assertEquals([items], ((Map) facade("get#RunConclusions", [savedRunId: "TCON_RS"]).conclusions).lookups)
+
+        Map cleared = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: edited.collect { it + [outcome: "", engine: ""] }])
+        assertFalse(cleared.hadError as boolean, cleared.errorText as String)
+        assertEquals(['10 CONC_TCON_OPEN null null {"fileSide":"FILE_1"}', '20 CONC_TCON_PENDING null null null'], kept(),
+                "a node that names one sets it")
+        Map refused = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: edited.collect { it + [outcome: "MAYBE"] }])
+        assertTrue(refused.hadError as boolean)
+        assertTrue((refused.errorText as String).contains("HIDE or EXPECTED"), refused.errorText as String)
+    }
+
     private def row(String entity, String id) {
         return ec.entity.find(entity).condition("enumId", id).disableAuthz().useCache(false).one()
     }

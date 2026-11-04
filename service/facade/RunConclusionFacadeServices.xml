@@ -24,11 +24,13 @@
     </service>
 
     <service verb="save" noun="RunConclusions" allow-remote="true" authenticate="true">
-        <description>Replaces a run's conclusion tree: [{key, parent, conclusion, bucket, question, conditions: [{subject,
-            presence, keyScope, quantifier, field, operator, values, checkLabel}]}]. All or nothing; an empty list clears it.</description>
+        <description>Replaces a run's conclusion tree: [{key, parent, conclusion, bucket, question, outcome, engine,
+            suggestedFilterJson, conditions: [{subject, presence, keyScope, quantifier, field, operator, values, checkLabel}]}].
+            All or nothing; an empty list clears it, absent keeps it (DAR-BE-198: lookups can be set alone). A node that does not
+            name outcome (HIDE, EXPECTED), engine (BRAIN) or suggestedFilterJson keeps its rule's: same key, same conclusion.</description>
         <in-parameters>
             <parameter name="savedRunId" required="true"/>
-            <parameter name="conclusions" type="List"/>
+            <parameter name="conclusions" type="List"><description>The tree; absent keeps it.</description></parameter>
             <parameter name="lookups" type="List"><description>DAR-BE-174. The run's lookups, replaced when given (an empty
                 list clears them, absent keeps them): [{name, subject FILE_1|FILE_2, idField, systemEnumId, sourceConfigId,
                 keyField, many (every record under the key, as a list), parameters}]. A condition reads one as

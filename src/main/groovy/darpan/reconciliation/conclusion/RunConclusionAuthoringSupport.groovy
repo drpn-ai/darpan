@@ -42,6 +42,8 @@ class RunConclusionAuthoringSupport {
             [key        : "${r.sequenceNum}".toString(), parent: r.parentSequenceNum != null ? "${r.parentSequenceNum}".toString() : null,
              conclusion : r.conclusionEnumId, label: labelOf(ec, r.conclusionEnumId as String), bucket: r.appliesToBucket,
              question   : r.questionText, fix: r.fixActionTemplate,
+             // DAR-BE-198: read back so a save can keep them (the editor does not send them).
+             outcome    : r.outcome ?: null, engine: r.engine ?: null, suggestedFilterJson: r.suggestedFilterJson ?: null,
              conditions : conditions.findAll { it.sequenceNum == r.sequenceNum }.collect { c ->
                  [subject : c.subject, presence: c.presence ?: "ANY", keyScope: c.keyScope ?: "FULL", quantifier: c.quantifier ?: "ALL",
                   field   : c.fieldExpression, operator: c.operator,
@@ -73,11 +75,24 @@ class RunConclusionAuthoringSupport {
         if (scope == null) return null
         String lookupsJson = lookups == null ? null : lookupsJsonOf(ec, lookups)
         if (ec.message.hasError()) return null
+        // DAR-BE-198 (prod gorjana R1): conclusions absent keeps the tree, so lookups can be set alone; before, an absent list
+        // read as empty and cleared every rule. An empty list still clears it.
+        if (submitted == null) {
+            if (lookups != null) {
+                scope.set("conclusionLookupsJson", lookupsJson)
+                scope.update()
+            }
+            return get(ec, savedRunId)
+        }
+        // DAR-BE-198: what a node does not name (outcome, engine, suggested filter) it keeps from the rule it was read as: same
+        // key (the rule's sequenceNum, as get reads it) and same conclusion.
+        Map<String, Object> priorByKey = TenantScopedFinder.findTenantScoped(ec, RULE).condition("compareScopeId", scope.compareScopeId)
+                .useCache(false).list().collectEntries { [("${it.sequenceNum}".toString()): it] }
         // DAR-BE-168: an older scope has no scopeMode (COMPARE); `?.` would hand conditionsOf a null boolean.
         boolean evaluate = "EVALUATE".equalsIgnoreCase(scope.scopeMode as String)
         Map<String, Integer> seqByKey = [:], depthByKey = [:]
         List<Map<String, Object>> nodes = []
-        ((submitted ?: []) as List).eachWithIndex { Object o, int i ->
+        ((submitted as List)).eachWithIndex { Object o, int i ->
             if (ec.message.hasError()) return
             if (!(o instanceof Map)) { ec.message.addError("Conclusion ${i + 1} is not readable."); return }
             Map n = (Map) o
@@ -100,11 +115,21 @@ class RunConclusionAuthoringSupport {
             if (fix && fix.length() > 1000) { ec.message.addError("'${label}' has a fix longer than 1000 characters."); return }
             List<Map<String, Object>> conditions = conditionsOf(ec, label, n.conditions, evaluate)
             if (conditions == null) return
+            def prior = priorByKey[key]
+            if (prior != null && prior.conclusionEnumId != conclusion) prior = null
+            String outcome = n.containsKey("outcome") ? normalize(n.outcome)?.toUpperCase() : (prior?.outcome as String)
+            if (outcome && !(outcome in [RunConclusionSupport.OUTCOME_HIDE, RunConclusionSupport.OUTCOME_EXPECTED])) {
+                ec.message.addError("'${label}' has outcome '${outcome}'; it is HIDE or EXPECTED, or blank."); return
+            }
+            String engine = n.containsKey("engine") ? normalize(n.engine)?.toUpperCase() : (prior?.engine as String)
+            if (engine && engine != "BRAIN") { ec.message.addError("'${label}' has engine '${engine}'; it is BRAIN, or blank."); return }
+            String suggestedFilterJson = n.containsKey("suggestedFilterJson") ? normalize(n.suggestedFilterJson) : (prior?.suggestedFilterJson as String)
             int seq = (nodes.size() + 1) * 10
             seqByKey[key] = seq
             depthByKey[key] = depth
             nodes << [sequenceNum: seq, parentSequenceNum: parent ? seqByKey[parent] : null, conclusionEnumId: conclusion,
-                      appliesToBucket: bucket, questionText: question, fixActionTemplate: fix, conditions: conditions] as Map<String, Object>
+                      appliesToBucket: bucket, questionText: question, fixActionTemplate: fix, outcome: outcome ?: null,
+                      engine: engine ?: null, suggestedFilterJson: suggestedFilterJson ?: null, conditions: conditions] as Map<String, Object>
         }
         if (ec.message.hasError()) return null
 
@@ -121,7 +146,8 @@ class RunConclusionAuthoringSupport {
             ec.entity.makeValue(RULE).setAll([compareScopeId: compareScopeId, sequenceNum: node.sequenceNum,
                     parentSequenceNum: node.parentSequenceNum, conclusionEnumId: node.conclusionEnumId,
                     appliesToBucket: node.appliesToBucket, questionText: node.questionText,
-                    fixActionTemplate: node.fixActionTemplate, companyUserGroupId: tenantId,
+                    fixActionTemplate: node.fixActionTemplate, outcome: node.outcome, engine: node.engine,
+                    suggestedFilterJson: node.suggestedFilterJson, companyUserGroupId: tenantId,
                     createdDate: now, lastUpdatedDate: now]).create()
             ((List<Map>) node.conditions).eachWithIndex { Map c, int j ->
                 ec.entity.makeValue(CONDITION).setAll(c + [compareScopeId: compareScopeId, sequenceNum: node.sequenceNum,

@@ -23142,7 +23142,8 @@
                         "type": "array",
                         "items": {
                             
-                        }
+                        },
+                        "description": "The tree; absent keeps it."
                     },
                     "lookups": {
                         "type": "array",
@@ -23155,7 +23156,7 @@
                 "required": [
                     "savedRunId"
                 ],
-                "description": "Replaces a run's conclusion tree: [{key, parent, conclusion, bucket, question, conditions: [{subject,\n            presence, keyScope, quantifier, field, operator, values, checkLabel}]}]. All or nothing; an empty list clears it."
+                "description": "Replaces a run's conclusion tree: [{key, parent, conclusion, bucket, question, outcome, engine,\n            suggestedFilterJson, conditions: [{subject, presence, keyScope, quantifier, field, operator, values, checkLabel}]}].\n            All or nothing; an empty list clears it, absent keeps it (DAR-BE-198: lookups can be set alone). A node that does not\n            name outcome (HIDE, EXPECTED), engine (BRAIN) or suggestedFilterJson keeps its rule's: same key, same conclusion."
             },
             "SaveRunConclusionsResult": {
                 "type": "object",

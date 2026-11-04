@@ -56,8 +56,6 @@ class CliMethodAllowlistTests {
             // these anonymously, so the fence never needs them)
             "facade.CliAuthFacadeServices.start#CliLogin",
             "facade.CliAuthFacadeServices.poll#CliLogin",
-            // it can send now
-            "facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
     ].asImmutable()
 
     /** Verbs an allowed method may have: reads and run starters. */

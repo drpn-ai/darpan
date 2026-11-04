@@ -153,6 +153,8 @@ class RpcMethodFenceTests {
         assertNull(RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO, SAVED_RUNS]))
         assertNull(RpcMethodFence.cliRejection("/rpc/json", []))
         assertNull(RpcMethodFence.cliRejection("/rpc/json/", ["facade.TenantScriptFacadeServices.save#TenantScript"]))
+        // Aditi 2026-11-04: any script deployment can be done via the CLI, send-now included
+        assertNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantScriptFacadeServices.run#TenantScriptDeployment"]))
     }
 
     @Test
@@ -161,7 +163,7 @@ class RpcMethodFenceTests {
                 RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO, SAVE_ACTIVE_TENANT, SAVED_RUNS]))
         assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["admin.TenantAdminServices.get#TenantList"]))
         assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["gql.QueryServices.get#Sdl"]))
-        assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantScriptFacadeServices.run#TenantScriptDeployment"]))
+        assertNotNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantConfigFacadeServices.restore#TenantConfigVersion"]))
         // through enforce, where the batch comes from the parsed body as the dispatcher reads it
         ExecutionContext cli = stubEc(true, "/rpc/json", [_requestBodyJsonList: [[method: SESSION_INFO], [method: SAVE_ACTIVE_TENANT]]])
         ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException) { RpcMethodFence.enforce(cli) }

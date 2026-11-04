@@ -7,8 +7,8 @@ package darpan.facade.common
  * the server, so the key used directly (curl) gets no more than the CLI does.
  *
  * <p>ALLOWED: every facade get#/list#/search# that writes nothing and returns no credential, the run starters,
- * preview#NsSuiteQlSourceQuery and test#SourceConnection, the Scripts page's services except the send-now
- * run#TenantScriptDeployment, and the CLI's own logout (its start/poll sign-in runs anonymously). EXCLUDED: everything else in
+ * preview#NsSuiteQlSourceQuery and test#SourceConnection, every Scripts page service (deployments too, send-now
+ * included: Aditi 2026-11-04), and the CLI's own logout (its start/poll sign-in runs anonymously). EXCLUDED: everything else in
  * docs/api-contract/methods.txt, with a note on each getter left out. CliMethodAllowlistTests fails when a published
  * method is in neither list, so a new service is placed here in the change that adds it.
  *
@@ -109,6 +109,8 @@ class CliMethodAllowlist {
             "facade.TenantScriptFacadeServices.list#TenantScriptDeployments",
             "facade.TenantScriptFacadeServices.list#TenantScripts",
             "facade.TenantScriptFacadeServices.run#TenantScript",
+            // send=true posts to the deployment's chat space now (Aditi 2026-11-04: any script deployment via the CLI)
+            "facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
             "facade.TenantScriptFacadeServices.save#TenantScript",
             "facade.TenantScriptFacadeServices.save#TenantScriptDeployment",
     ] as LinkedHashSet<String>).asImmutable()
@@ -276,7 +278,5 @@ class CliMethodAllowlist {
             "facade.TenantConfigFacadeServices.preview#TenantConfigRestore",
             "facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
             "facade.TenantConfigFacadeServices.snapshot#TenantConfig",
-
-            "facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
     ] as LinkedHashSet<String>).asImmutable()
 }

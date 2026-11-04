@@ -114,6 +114,16 @@ class RuleDiffSupport {
         return text == "Y" || text == "TRUE"
     }
 
+    /**
+     * DAR-BE-192. An equality that tolerates a difference below `tolerance`: violated when both are numbers at least that far
+     * apart, or, when either is not a number, when they are not equal (a missing amount is still a finding).
+     */
+    static boolean differsByAtLeast(Object file1Value, Object file2Value, String tolerance) {
+        BigDecimal a = toBigDecimal(file1Value), b = toBigDecimal(file2Value)
+        if (a == null || b == null) return violatesOperator(file1Value, file2Value, "=")
+        return (a - b).abs() >= new BigDecimal(tolerance)
+    }
+
     static boolean violatesOperator(Object file1Value, Object file2Value, String operator) {
         return !matchesOperator(file1Value, file2Value, operator)
     }

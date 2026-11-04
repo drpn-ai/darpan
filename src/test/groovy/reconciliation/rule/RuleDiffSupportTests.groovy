@@ -106,4 +106,16 @@ class RuleDiffSupportTests {
             assertEquals(fires, RuleDiffSupport.violatesOperator(pair[1], pair[0], "contains all"), "contains all ${pair.reverse()}")
         }
     }
+
+    /** DAR-BE-192 (gorjana R9: memo/credit cents under 1.00 ignored). */
+    @Test
+    void anEqualityWithAToleranceFlagsOnlyADifferenceAtLeastThatLarge() {
+        assertFalse(RuleDiffSupport.differsByAtLeast(new BigDecimal("62.06"), new BigDecimal("62.20"), "1.00"))
+        assertFalse(RuleDiffSupport.differsByAtLeast(new BigDecimal("259.10"), new BigDecimal("260.09"), "1.00"))
+        assertTrue(RuleDiffSupport.differsByAtLeast(new BigDecimal("259.10"), new BigDecimal("260.10"), "1.00"), "exactly 1.00 is a finding")
+        assertTrue(RuleDiffSupport.differsByAtLeast(new BigDecimal("105.61"), new BigDecimal("98"), "1.00"))
+        assertTrue(RuleDiffSupport.differsByAtLeast(new BigDecimal("75.48"), BigDecimal.ZERO, "1.00"))
+        assertTrue(RuleDiffSupport.differsByAtLeast(new BigDecimal("75.48"), null, "1.00"), "a missing amount is still a finding")
+        assertFalse(RuleDiffSupport.differsByAtLeast(null, null, "1.00"))
+    }
 }

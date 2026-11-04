@@ -72,4 +72,22 @@ class FieldComparisonRuleLogicGeneratorTests {
         // (it is inert data) — and critically there is no live Runtime reference in code position.
         assertNull(RuleLogicValidator.firstViolation(generated))
     }
+
+    /** DAR-BE-192: a tolerance on an equality compiles to differsByAtLeast and says so in the label; anything else is unchanged. */
+    @Test
+    void anEqualityMayTolerateADifferenceBelowAnAmount() {
+        String base = '{"type":"FIELD_COMPARISON","file1FieldPath":"$.records[*].returnCredit","file2FieldPath":"$.records[*].amount","operator":"=",' +
+                '"preActions":[{"fieldSide":"file1","action":"STRING_TO_NUMBER"},{"fieldSide":"file2","action":"STRING_TO_NUMBER"}]'
+        String drl = FieldComparisonRuleLogicGenerator.generate(base + ',"tolerance":"1.00"}', '$.records[*].returnId', '$.records[*].returnId', null, "WARN", 0)
+        assertTrue(drl.contains('reconciliation.rule.RuleDiffSupport.differsByAtLeast('), drl)
+        assertTrue(drl.contains('"1.00")'), drl)
+        assertTrue(drl.contains('returnCredit = amount (differences under 1.00 ignored)'), drl)
+        assertNull(RuleLogicValidator.firstViolation(drl), "the validator takes it")
+        String plain = FieldComparisonRuleLogicGenerator.generate(base + '}', '$.records[*].returnId', '$.records[*].returnId', null, "WARN", 0)
+        assertEquals(plain, FieldComparisonRuleLogicGenerator.generate(base + ',"tolerance":"1e9"}', '$.records[*].returnId', '$.records[*].returnId', null, "WARN", 0))
+        assertEquals(plain, FieldComparisonRuleLogicGenerator.generate(base + ',"tolerance":"-1"}', '$.records[*].returnId', '$.records[*].returnId', null, "WARN", 0))
+        assertEquals(plain, FieldComparisonRuleLogicGenerator.generate(base + ',"tolerance":"0"}', '$.records[*].returnId', '$.records[*].returnId', null, "WARN", 0))
+        String ordered = FieldComparisonRuleLogicGenerator.generate(base.replace('"operator":"="', '"operator":">"') + ',"tolerance":"1.00"}', '$.records[*].returnId', '$.records[*].returnId', null, "WARN", 0)
+        assertTrue(!ordered.contains("differsByAtLeast"), "only an equality takes a tolerance")
+    }
 }

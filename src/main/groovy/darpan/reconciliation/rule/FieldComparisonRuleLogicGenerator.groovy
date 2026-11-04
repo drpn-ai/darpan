@@ -50,8 +50,14 @@ class FieldComparisonRuleLogicGenerator {
         String file2Raw = buildDrlMapAccess('$m.get("file2")', file2Path)
         String file1ValueExpression = buildPreActionValueExpression(file1Raw, preActionNamesForSide(preActions, "file1"))
         String file2ValueExpression = buildPreActionValueExpression(file2Raw, preActionNamesForSide(preActions, "file2"))
-        String violationExpression = buildViolationExpression(file1ValueExpression, file2ValueExpression, operator, !preActions.isEmpty())
-        String fieldLabel = "${formatFieldKey(file1FieldPath)} ${operator} ${formatFieldKey(file2FieldPath)}"
+        // DAR-BE-192: an equality may tolerate a difference below an amount (gorjana R9 ignores memo/credit cents under 1.00).
+        // Server-only: the UI never sends it, so UI parity is unchanged when it is absent.
+        String tolerance = operator in ["=", "=="] ? normalizeTolerance(expr.tolerance) : null
+        String violationExpression = tolerance ?
+                "reconciliation.rule.RuleDiffSupport.differsByAtLeast(${file1ValueExpression}, ${file2ValueExpression}, \"${tolerance}\")" :
+                buildViolationExpression(file1ValueExpression, file2ValueExpression, operator, !preActions.isEmpty())
+        String fieldLabel = "${formatFieldKey(file1FieldPath)} ${operator} ${formatFieldKey(file2FieldPath)}" +
+                (tolerance ? " (differences under ${tolerance} ignored)" : "")
         String sev = normalize(severity) ?: "WARN"
 
         return 'rule "' + escapeDrlString(ruleName) + '"\n' +
@@ -82,6 +88,13 @@ class FieldComparisonRuleLogicGenerator {
         } catch (Exception ignored) {
             return null
         }
+    }
+
+    /** DAR-BE-192. A tolerance is a plain non-negative decimal (at most 9 digits, 6 after the point), else none. */
+    static String normalizeTolerance(Object raw) {
+        String t = normalize(raw?.toString())
+        if (!t || !(t ==~ /\d{1,9}(\.\d{1,6})?/)) return null
+        return new BigDecimal(t).signum() > 0 ? t : null
     }
 
     private static String normalizeRuleOperator(String operator) {

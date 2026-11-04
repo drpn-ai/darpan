@@ -151,7 +151,11 @@ class ConfigTransferSmokeTests {
         Map link = (check.links as List<Map>)[0]
         assertEquals("STATEMENT:XFER_AUDIT_R4", link.refs.statementId)
         assertEquals(["RULE:XFER_RULE_B"], link.listRefs.ruleIds)
-        assertEquals(["CONC:CONC_XFER_OWN", "UNEXPLAINED"], link.listRefs.conclusionCodes, "a code that is no enum stays literal")
+        assertFalse((link.listRefs as Map).containsKey("conclusionCodes") || (link.fields as Map).containsKey("conclusionCodes"),
+                "DAR-BE-196: a link carries no code list")
+        Map expectedRule = ((run.children.RuleSetCompareScope as List<Map>)[0].children.RuleSetConclusionRule as List<Map>)
+                .find { it.refs.conclusionEnumId == "CONC:CONC_XFER_SEED" }
+        assertEquals("EXPECTED", expectedRule.fields.outcome, "an expected cause travels on its run's rule")
         assertEquals("RUN:XFER_RS", check.refs.savedRunId)
         assertFalse((check.fields as Map).containsKey("automationId"), "automations stay behind")
 
@@ -571,10 +575,12 @@ class ConfigTransferSmokeTests {
         (sourcesOf(run)[1].fields as Map).sourceConfigId = "XFER_OTHER_NS"
         (bundle.connections as List<Map>)[0].fields.password = "planted"
         (bundle.audits as List<Map>)[0].refs.periodEnumId = "AUDIT:XFER_AUDIT"
+        // DAR-BE-196: an older bundle's link code list no longer travels.
+        (((bundle.checks as List<Map>)[0].links as List<Map>)[0].listRefs as Map).conclusionCodes = ["CONC:CONC_XFER_OWN"]
         Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"])
         List<Map> refused = (preview.result.plan.blocking as List<Map>).findAll { it.code == "FIELD_NOT_ALLOWED" }
         assertEquals(["RuleSet.ruleSetId", "AuditCheck.companyUserGroupId", "RuleSetCompareSource.sourceConfigId",
-                      "NsAuthConfig.password", "Audit.periodEnumId"].sort(),
+                      "NsAuthConfig.password", "Audit.periodEnumId", "AuditStatementCheck.conclusionCodes"].sort(),
                 refused.collect { (it.message as String).find(/[A-Za-z]+\.[A-Za-z]+(?= is not)/) }.sort(), "${refused}")
 
         Map before = rowCounts(DST)
@@ -1471,7 +1477,7 @@ class ConfigTransferSmokeTests {
         create("darpan.rule.RuleSetConclusionRule", [compareScopeId: "XFER_CS", sequenceNum: 10L, conclusionEnumId: "CONC_XFER_OWN",
                 appliesToBucket: "FINDING", suggestedFilterJson: '{"fileSide":"FILE_1"}', companyUserGroupId: SRC])
         create("darpan.rule.RuleSetConclusionRule", [compareScopeId: "XFER_CS", sequenceNum: 20L, parentSequenceNum: 10L,
-                conclusionEnumId: "CONC_XFER_SEED", companyUserGroupId: SRC])
+                conclusionEnumId: "CONC_XFER_SEED", outcome: "EXPECTED", companyUserGroupId: SRC])
         create("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "XFER_CS", sequenceNum: 10L, conditionSeq: 1L,
                 subject: "FILE_1", fieldExpression: "status", operator: "IN", conditionValues: "A", checkLabel: "Status A",
                 companyUserGroupId: SRC])
@@ -1490,7 +1496,7 @@ class ConfigTransferSmokeTests {
         create("darpan.audit.AuditCheck", [checkId: "XFER_CHK2", companyUserGroupId: SRC, checkCode: "memos-open",
                 label: "Memos left open", savedRunId: "XFER_RS"])
         create("darpan.audit.AuditStatementCheck", [statementId: "XFER_AUDIT_R4", checkId: "XFER_CHK1", companyUserGroupId: SRC,
-                sequenceNum: 1L, diffTypes: "FIELD_MISMATCH", ruleIds: "XFER_RULE_B", conclusionCodes: "CONC_XFER_OWN,UNEXPLAINED"])
+                sequenceNum: 1L, diffTypes: "FIELD_MISMATCH", ruleIds: "XFER_RULE_B"])
         create("darpan.audit.AuditStatementCheck", [statementId: "XFER_AUDIT_R8", checkId: "XFER_CHK2", companyUserGroupId: SRC,
                 sequenceNum: 1L, diffTypes: "FINDING"])
     }

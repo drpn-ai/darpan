@@ -31,7 +31,7 @@ import static darpan.reconciliation.automation.AutomationRuntimeSupport.truncate
  * date. "On the 14th it reconciles 1-14."
  *
  * Findings: each row of the run's diff document is matched to the statements the check tests, through the
- * statement-to-check link's diffTypes and conclusionCodes (configuration, not code). Examined records are the keys
+ * statement-to-check link's diffTypes and ruleIds, less the rows whose cause is expected (configuration, not code). Examined records are the keys
  * both sides held (file1/file2KeysOutLocation), so a record found on either side may close its finding.
  *
  * Tenant: the scheduler runs as _NA_ with no active tenant, so every read here carries an explicit
@@ -339,10 +339,11 @@ class AuditAutomationSupport {
 
     /**
      * The check's findings in one diff document: a row breaks a statement when its type is in the link's diffTypes
-     * (blank: any), its conclusion code is in the link's conclusionCodes (blank: any) and the rule that raised it is in
-     * the link's ruleIds (blank: any; DAR-BE-095). One finding per statement and record; the row's record lives on the
-     * side(s) its type names. `explained` gets recordKey -> {conclusionEnumId, diagnosisText, headline} for each row of a
-     * linked diff type that reached a conclusion the statement does not count (DAR-BE-118), kept on the closed finding.
+     * (blank: any), the rule that raised it is in the link's ruleIds (blank: any; DAR-BE-095) and its cause is not
+     * expected (DAR-BE-196: the run marks conclusion.expected; Unexplained always counts). One finding per statement and
+     * record; the row's record lives on the side(s) its type names. `explained` gets recordKey -> {conclusionEnumId,
+     * diagnosisText, headline} for each row of a linked diff type whose cause is expected (DAR-BE-118), kept on the closed
+     * finding.
      */
     static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source,
                                   Map<String, Map> explained) {
@@ -368,19 +369,18 @@ class AuditAutomationSupport {
                        conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
+            boolean expected = raw.conclusion instanceof Map && ((Map) raw.conclusion).expected == true &&
+                    code != ConclusionTreeSupport.UNEXPLAINED
             String ruleId = normalize(raw.ruleId)
             links.each { Map link ->
                 // Qualified: from a closure nested in a closure, Groovy resolves a bare static call through the outer
                 // closure's metaclass and fails with "argument type mismatch".
-                if (code && code != ConclusionTreeSupport.UNEXPLAINED && row.id &&
-                        AuditAutomationSupport.matches(link.diffTypes as String, type) &&
-                        !AuditAutomationSupport.matches(link.conclusionCodes as String, code)) {
+                if (expected && row.id && AuditAutomationSupport.matches(link.diffTypes as String, type)) {
                     explained.putIfAbsent(row.id as String, [conclusionEnumId: AuditAutomationSupport.conclusionEnumId(ec, code),
                             diagnosisText: row.conclusionLabel,
                             headline: AuditAutomationSupport.headline(check, row, AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source))])
                 }
-                if (!AuditAutomationSupport.matches(link.diffTypes as String, type) ||
-                        !AuditAutomationSupport.matches(link.conclusionCodes as String, code) ||
+                if (expected || !AuditAutomationSupport.matches(link.diffTypes as String, type) ||
                         !AuditAutomationSupport.matches(link.ruleIds as String, ruleId)) return
                 String statementCode = codeById[link.statementId as String]
                 String recordKey = row.id as String

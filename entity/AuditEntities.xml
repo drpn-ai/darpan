@@ -197,8 +197,9 @@
                 e.g. MISSING_IN_FILE_2 or FINDING. Blank: every row.</description>
         </field>
         <field name="conclusionCodes" type="text-medium">
-            <description>DAR-BE-092. Narrows the rows to these conclusion codes (comma-separated). Blank: any conclusion,
-                or none.</description>
+            <description>RETIRED (DAR-BE-196): no longer read or written. The causes a statement leaves out are the run's
+                expected ones (RuleSetConclusionRule.outcome EXPECTED); migration STATEMENT_LINK_EXPECTED moved each list
+                there and cleared it. Delete the field with that migration.</description>
         </field>
         <field name="ruleIds" type="text-medium">
             <description>DAR-BE-095. Narrows the rows to those these rules raised (comma-separated rule ids, the

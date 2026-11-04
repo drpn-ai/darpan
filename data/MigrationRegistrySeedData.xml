@@ -56,4 +56,11 @@
                 clean-run Chat line reads the day count from the first message (DAR-BE-144).
                 Idempotent — a fold reads only slots past the stored cursor."/>
 
+    <darpan.migration.DarpanMigration migrationId="STATEMENT_LINK_EXPECTED" componentName="darpan"
+            serviceName="audit.AuditLedgerServices.migrate#StatementLinkExpected"
+            sequenceNum="80" supportsDryRun="Y" enabled="Y"
+            description="Move each audit statement link's list of counted causes onto its run: the causes it left out
+                become expected (rule outcome EXPECTED) and the list is cleared; Unexplained then counts on every
+                statement (DAR-BE-196). Idempotent; a run whose links disagree is reported and left untouched."/>
+
 </entity-facade-xml>

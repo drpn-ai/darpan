@@ -2,6 +2,8 @@ package darpan.audit
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.conclusion.RunConclusionSupport
+import org.moqui.entity.EntityCondition
 
 import static darpan.common.ValueSupport.normalize
 
@@ -78,8 +80,9 @@ class AuditCheckAuthoringSupport {
 
     /**
      * Creates or updates the check named by check.id (check.create: true refuses an id already in use) and replaces its
-     * links to this audit's statements. statements:
-     * [{id: statementCode, diffTypes: [..], conclusionCodes: [..], ruleIds: [..]}], at least one.
+     * links to this audit's statements. statements: [{id: statementCode, diffTypes: [..], ruleIds: [..]}], at least one.
+     * DAR-BE-196: check.expectedCodes (when given) are the run's causes that are expected: its conclusion rules for them
+     * get outcome EXPECTED and its other rules lose it (a HIDE rule stays hidden). No statement counts an expected cause.
      */
     static Map<String, Object> saveCheck(def ec, String auditCode, Map check, List statementLinks) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot change an audit.")) return null
@@ -109,6 +112,11 @@ class AuditCheckAuthoringSupport {
             else run = [ruleIds: TenantScopedFinder.findTenantScoped(ec, "darpan.rule.Rule").condition("ruleSetId", savedRunId)
                     .useCache(false).list()*.ruleId.collect { it as String } as Set<String>]
         }
+        List conclusionRules = run == null ? [] : conclusionRulesOf(ec, savedRunId)
+        List<String> expectedCodes = check.containsKey("expectedCodes") ? listOf(check.expectedCodes) : null
+        if (expectedCodes && run == null) ec.message.addError("Choose the run before naming its expected causes.")
+        Set<String> runCodes = conclusionRules*.conclusionEnumId.findAll { it }.collect { it as String } as Set<String>
+        expectedCodes?.findAll { run != null && !runCodes.contains(it) }?.each { ec.message.addError("'${it}' is not a cause run '${savedRunId}' concludes.") }
         String fixWhere = normalize(check.fixWhereEnumId)
         if (fixWhere && !(fixWhere in FIX_WHERE)) ec.message.addError("Fix where must be one of ${FIX_WHERE.join(', ')}.")
         Integer graceDays = null
@@ -132,10 +140,8 @@ class AuditCheckAuthoringSupport {
             List<String> ruleIds = listOf(l.ruleIds)
             if (ruleIds && run == null) ec.message.addError("Choose the run before naming its rules.")
             ruleIds.findAll { run != null && !(it in (Set) run.ruleIds) }.each { ec.message.addError("Rule '${it}' is not in run '${savedRunId}'.") }
-            List<String> conclusionCodes = listOf(l.conclusionCodes)
-            conclusionCodes.findAll { !(it ==~ /[A-Z0-9_]{1,60}/) }.each { ec.message.addError("'${it}' is not a conclusion code.") }
             links << [statementId: statement.statementId, diffTypes: diffTypes.join(",") ?: null,
-                      conclusionCodes: conclusionCodes.join(",") ?: null, ruleIds: ruleIds.join(",") ?: null] as Map<String, Object>
+                      ruleIds: ruleIds.join(",") ?: null] as Map<String, Object>
         }
         if (!links) ec.message.addError("Link the check to at least one statement.")
         if (links*.statementId.unique().size() != links.size()) ec.message.addError("Each statement is linked once.")
@@ -167,6 +173,12 @@ class AuditCheckAuthoringSupport {
             ec.entity.makeValue("darpan.audit.AuditStatementCheck").setAll(l + [checkId: checkId, companyUserGroupId: tenantId,
                     sequenceNum: nextSequence(ec, l.statementId as String, checkId)]).create()
         }
+        if (expectedCodes != null) {
+            conclusionRules.findAll { (it.outcome as String) != RunConclusionSupport.OUTCOME_HIDE }.each { rule ->
+                String want = (rule.conclusionEnumId as String) in expectedCodes ? RunConclusionSupport.OUTCOME_EXPECTED : null
+                if ((rule.outcome as String) != want) { rule.set("outcome", want); rule.update() }
+            }
+        }
         return describe(ec, row, statements)
     }
 
@@ -176,11 +188,13 @@ class AuditCheckAuthoringSupport {
                 .condition("checkId", check.checkId).orderBy("sequenceNum").useCache(false).list()
                 .findAll { codeById.containsKey(it.statementId as String) }
                 .collect { [id: codeById[it.statementId as String], diffTypes: listOf(it.diffTypes),
-                            conclusionCodes: listOf(it.conclusionCodes), ruleIds: listOf(it.ruleIds)] as Map<String, Object> }
+                            ruleIds: listOf(it.ruleIds)] as Map<String, Object> }
         Map<String, Object> out = [id: check.checkCode, savedRunId: check.savedRunId, automationId: check.automationId,
                                    fixWhereEnumId: check.fixWhereEnumId, graceDays: check.graceDays,
                                    amountCurrencyUomId: check.amountCurrencyUomId] as Map<String, Object>
         TEXT_FIELDS.each { String f -> out[f] = check.get(f) }
+        out.expectedCodes = check.savedRunId ? conclusionRulesOf(ec, check.savedRunId as String)
+                .findAll { (it.outcome as String) == RunConclusionSupport.OUTCOME_EXPECTED }*.conclusionEnumId.collect { it as String }.unique() : []
         out.statements = links
         return out
     }
@@ -212,14 +226,26 @@ class AuditCheckAuthoringSupport {
                 .useCache(false).list().find() : null
     }
 
+    /** The run's causes, each with whether it is expected (DAR-BE-196); a hidden cause is not offered. */
     private static List<Map<String, Object>> conclusionsOf(def ec, String compareScopeId) {
-        List<String> ids = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
+        List rules = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
                 .condition("compareScopeId", compareScopeId).orderBy("sequenceNum").useCache(false).list()
-                *.conclusionEnumId.findAll { it }.collect { it as String }.unique()
+                .findAll { it.conclusionEnumId && (it.outcome as String) != RunConclusionSupport.OUTCOME_HIDE }
+        List<String> ids = rules*.conclusionEnumId.collect { it as String }.unique()
         return ids.collect { String id ->
             def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", id).useCache(true).one()
-            [code: (e?.enumCode ?: id) as String, label: (e?.description ?: id) as String] as Map<String, Object>
+            [code: (e?.enumCode ?: id) as String, label: (e?.description ?: id) as String,
+             expected: rules.any { (it.conclusionEnumId as String) == id && (it.outcome as String) == RunConclusionSupport.OUTCOME_EXPECTED }] as Map<String, Object>
         }
+    }
+
+    /** DAR-BE-196: the conclusion rules of a run's compare scopes, the rows an expected cause is written on. */
+    private static List conclusionRulesOf(def ec, String savedRunId) {
+        List<String> scopeIds = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope").condition("ruleSetId", savedRunId)
+                .useCache(false).list()*.compareScopeId.collect { it as String }
+        if (!scopeIds) return []
+        return TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
+                .condition("compareScopeId", EntityCondition.IN, scopeIds).orderBy("sequenceNum").useCache(false).list()
     }
 
     private static int nextSequence(def ec, String statementId, String checkId) {

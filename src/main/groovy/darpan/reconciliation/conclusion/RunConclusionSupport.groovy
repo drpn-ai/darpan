@@ -57,6 +57,8 @@ class RunConclusionSupport {
     }
 
     static final String OUTCOME_HIDE = "HIDE"
+    /** DAR-BE-196: the rows this rule concludes are expected: no statement counts them, they close with this cause. */
+    static final String OUTCOME_EXPECTED = "EXPECTED"
 
     /**
      * DAR-BE-157. Takes hidden rows off a run's counts, wherever they are kept: a row missing from FILE_2 is one only in
@@ -132,6 +134,8 @@ class RunConclusionSupport {
         // no longer uses); they leave the result, and the summary says how many and why.
         Set<String> hiddenCodes = rules.findAll { it.get("outcome")?.toString() == OUTCOME_HIDE }
                 .collect { it.get("conclusionEnumId")?.toString() }.findAll { it } as Set<String>
+        Set<String> expectedCodes = rules.findAll { it.get("outcome")?.toString() == OUTCOME_EXPECTED }
+                .collect { it.get("conclusionEnumId")?.toString() }.findAll { it } as Set<String>
         Map<String, Integer> hidden = new LinkedHashMap<>()
         Map<String, Integer> hiddenByBucket = new LinkedHashMap<>()
 
@@ -201,8 +205,11 @@ class RunConclusionSupport {
                 systems.add(evidenceFor(side, evidenceSide(side, sides, index, otherSideKeyFields), (Map) (spec.evidence ?: [:]),
                         side == "FILE_1" ? file1Label : file2Label))
             }
+            // DAR-BE-196: expected by its rule's outcome, or by the brain cause's own flag.
+            boolean expected = expectedCodes.contains(code) || ((List<Map>) (conclusion.path ?: [])).any { it?.expected == true }
             return row + otherSideIds(slurper, row, sides) + firstKeyRecords(row, index) + [conclusion: [code    : code,
                                        label   : conclusion.label,
+                                       expected: expected,
                                        systems : systems,
                                        checks  : conclusion.checks,
                                        question: conclusion.question,

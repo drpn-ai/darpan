@@ -342,7 +342,9 @@
         <field name="outcome" type="text-short">
             <description>DAR-BE-157. Blank: the rows this rule concludes are shown with its cause. HIDE: they are not differences
                 anyone needs to see (e.g. an item NetSuite no longer uses); they leave the result, and the result's summary
-                (conclusions.hidden) and counts say how many were hidden and why.</description>
+                (conclusions.hidden) and counts say how many were hidden and why. EXPECTED (DAR-BE-196): the cause is expected
+                (within its grace, credited, recorded late): the rows stay in the result, no audit statement counts them, and a
+                finding they reach closes with this cause as its reason.</description>
         </field>
         <field name="fixActionTemplate" type="text-intermediate">
             <description>DAR-BE-120. What to do when this is the cause, shown as the finding's fix in place of the check's.

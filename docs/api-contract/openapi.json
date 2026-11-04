@@ -6671,7 +6671,7 @@
                         "items": {
                             
                         },
-                        "description": "[{id: statement code, diffTypes, conclusionCodes,\n                ruleIds}], at least one (refused in words when empty)."
+                        "description": "[{id: statement code, diffTypes, ruleIds}], at least one\n                (refused in words when empty). DAR-BE-196: no statement counts a cause the run marks expected; check.expectedCodes\n                (when given) sets which of the run's causes those are."
                     }
                 },
                 "required": [
@@ -9175,7 +9175,7 @@
                         "items": {
                             "type": "string"
                         },
-                        "description": "Why it was refused: expired, already answered, or a CLI session."
+                        "description": "Why it was refused: expired, already answered, a CLI session, or the CLI is not turned on for this account."
                     }
                 }
             },

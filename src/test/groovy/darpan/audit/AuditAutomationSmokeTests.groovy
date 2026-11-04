@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * A hand-written diff document and key files stand in for the Spark compare, which RuleSetCompareScopeServiceSmokeTests
  * covers (both sides' keys out).
  *
- * The check tests R4 (rows missing in NetSuite) and R8 (rows missing in the OMS with conclusion CONC_X only).
+ * The check tests R4 (rows missing in NetSuite) and R8 (rows missing in the OMS); a row whose cause is expected breaks neither.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuditAutomationSmokeTests {
@@ -82,7 +82,7 @@ class AuditAutomationSmokeTests {
         insert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TAUTO_R4", companyUserGroupId: TENANT,
                 sequenceNum: 1L, diffTypes: "MISSING_IN_FILE_2"])
         insert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TAUTO_R8", companyUserGroupId: TENANT,
-                sequenceNum: 2L, diffTypes: "MISSING_IN_FILE_1", conclusionCodes: "CONC_X"])
+                sequenceNum: 2L, diffTypes: "MISSING_IN_FILE_1"])
         dir = File.createTempDir("audit-automation-", "")
     }
 
@@ -198,13 +198,13 @@ class AuditAutomationSmokeTests {
 
     @Test
     void aWindowWritesHealthThenFindingsThenClosings() {
-        // Oct 7: A1 is missing in NetSuite (R4); B1 is missing in the OMS with CONC_X (R8); B2 has another conclusion.
+        // Oct 7: A1 is missing in NetSuite (R4); B1 is missing in the OMS with CONC_X (R8); B2's cause is expected (DAR-BE-196).
         Map day1 = window("2026-10-07", ["A1", "B1", "B2"], ["B1", "B2", "C1"])
         AuditAutomationSupport.recordWindow(ec, automation, checks(), day1, omsSource, nsSource,
                 [recordCount: 3, fileLocation: "x"], [recordCount: 3, fileLocation: "y"],
                 [diffLocation: diff("d1", [row("MISSING_IN_FILE_2", "A1", "missing in NetSuite"),
                                            withChecks(row("MISSING_IN_FILE_1", "B1", "missing in HotWax", "CONC_X")),
-                                           row("MISSING_IN_FILE_1", "B2", "missing in HotWax", "CONC_OTHER")])], null)
+                                           row("MISSING_IN_FILE_1", "B2", "missing in HotWax", "CONC_OTHER", true)])], null)
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         Map run = checkRun("2026-10-07")
         assertEquals(["AUDCS_RAN", "2026-10", Date.valueOf("2026-10-01"), Date.valueOf("2026-10-07")],
@@ -218,7 +218,7 @@ class AuditAutomationSmokeTests {
         Map b1 = finding("B1")
         assertEquals(["TAUTO_R8", "CONC_X"], [b1.statementId, b1.conclusionEnumId])
         assertEquals([["NETSUITE", "creditMemo", "B1"]], records(b1.findingId as String).collect { [it.systemEnumId, it.recordType, it.recordId] })
-        assertEquals(0L, count("B2"), "a conclusion the link does not name breaks nothing")
+        assertEquals(0L, count("B2"), "an expected cause breaks nothing")
         // The conclusion's checks are the finding's evidence, each with the value it read (R4: the memo's unapplied amount).
         assertEquals([["The credit memo is open", "Y", "Credit Memo : Open"], ["More than \$5 unapplied", "Y", "6.19"]],
                 ec.entity.find("darpan.audit.AuditFindingCondition").condition("findingId", b1.findingId).orderBy("sequenceNum")
@@ -520,10 +520,10 @@ class AuditAutomationSmokeTests {
     }
 
     /** A row as the diff document on disk carries it (diffType / primaryId / message), not the compare's in-memory shape. */
-    private static Map row(String type, String id, String note, String conclusion = null) {
+    private static Map row(String type, String id, String note, String conclusion = null, boolean expected = false) {
         Map r = [diffType: type, compareScopeId: "S", objectType: "ORDER", primaryId: id, presentIn: "x", missingIn: "y",
                  data: "{}", message: note]
-        if (conclusion) r.conclusion = [code: conclusion, label: conclusion]
+        if (conclusion) r.conclusion = [code: conclusion, label: conclusion, expected: expected]
         return r
     }
 

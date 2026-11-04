@@ -427,6 +427,22 @@ class RunConclusionSupportTests {
         assertEquals([MISSING_FROM_FILE_2: 1], out.hiddenByBucket)
     }
 
+    // DAR-BE-196: an EXPECTED rule keeps its rows (unlike HIDE) and marks each conclusion expected, which no audit statement
+    // counts; any other cause, and Unexplained, is not expected.
+    @Test
+    void anExpectedRuleKeepsItsRowsAndMarksThemExpected() {
+        List rules = [BACKORDER_RULES[0], NEVER_REACHED_RULES[0] + [outcome: "EXPECTED"]]
+        File nsExtract = extract("ns-expected.json", [])
+        sidecar(nsExtract, [[orderId: "O1", orderLineId: "1", quantityBackordered: "2"]])
+        File doc = writeDiffDocument([missingRow("O1${SEP}1", FILE1, FILE2), missingRow("O2${SEP}1", FILE1, FILE2)],
+                [totalDifferences: 2, onlyInFile1Count: 2, onlyInFile2Count: 0])
+        RunConclusionSupport.concludeRun(args(doc, rules, nsExtract))
+        Map d = (Map) new JsonSlurper().parse(doc)
+        assertEquals(["O1${SEP}1".toString(), "O2${SEP}1".toString()], d.differences*.primaryId, "an expected row stays in the result")
+        assertEquals([false, true], d.differences.collect { ((Map) it.conclusion).expected })
+        assertEquals("CONC_NEVER_REACHED_NS", ((Map) ((Map) d.differences[1]).conclusion).code)
+    }
+
     // DAR-BE-157: a HotWax product sharing a NetSuite id is keyed DUPLICATE:22139:M100880, which NetSuite never has; its
     // evidence names the field holding NetSuite's key, so the NetSuite panel shows item 22139 instead of "Not found".
     @Test

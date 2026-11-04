@@ -97,7 +97,7 @@ class AuditCheckAuthoringSmokeTests {
         assertFalse(runs*.savedRunId.contains("TCHK_RS_OTHER"), "another tenant's run is not offered")
         Map rs1 = (Map) runs.find { it.savedRunId == "TCHK_RS1" }
         assertEquals(["TCHK_RULE_A"], rs1.rules*.ruleId)
-        assertEquals([[code: "CONC_TCHK_OPEN", label: "Memo left open"]], rs1.conclusions)
+        assertEquals([[code: "CONC_TCHK_OPEN", label: "Memo left open", expected: false]], rs1.conclusions)
         assertEquals("return", rs1.recordType, "the run's object, as a record type")
         assertEquals([[side: "FILE_1", system: "NETSUITE", key: "tranId"]], rs1.sides, "each side's root system and key")
         assertEquals([null, []], runs.find { it.savedRunId == "TCHK_RS_BARE" }.subMap(["recordType", "sides"]).values() as List)
@@ -111,19 +111,33 @@ class AuditCheckAuthoringSmokeTests {
         Map out = facade("save#AuditCheck", [audit: "month-close-t",
                 check: [id: "credit-memos-left-open", label: "Credit memos left open", savedRunId: "TCHK_RS1",
                         file1RecordType: "creditMemo", graceDays: "1", fixOwner: "HotWax Support", fixWhereEnumId: "NETSUITE",
-                        headlineTemplate: "Credit memo {id} is open"],
-                statements: [[id: "R4", diffTypes: ["FINDING"], conclusionCodes: ["CONC_TCHK_OPEN"]],
+                        headlineTemplate: "Credit memo {id} is open", expectedCodes: ["CONC_TCHK_OPEN"]],
+                statements: [[id: "R4", diffTypes: ["FINDING"]],
                              [id: "R7", diffTypes: ["FIELD_MISMATCH"], ruleIds: ["TCHK_RULE_A"]]]])
         assertFalse(out.hadError as boolean, out.errorText as String)
         Map saved = (Map) out.savedCheck
         assertEquals("credit-memos-left-open", saved.id)
-        assertEquals([[id: "R4", diffTypes: ["FINDING"], conclusionCodes: ["CONC_TCHK_OPEN"], ruleIds: []],
-                      [id: "R7", diffTypes: ["FIELD_MISMATCH"], conclusionCodes: [], ruleIds: ["TCHK_RULE_A"]]], saved.statements)
+        assertEquals([[id: "R4", diffTypes: ["FINDING"], ruleIds: []],
+                      [id: "R7", diffTypes: ["FIELD_MISMATCH"], ruleIds: ["TCHK_RULE_A"]]], saved.statements)
+        assertEquals(["CONC_TCHK_OPEN"], saved.expectedCodes, "DAR-BE-196: an expected cause is the run's, not the link's")
         def row = checkRow("credit-memos-left-open")
         assertEquals(MINE, row.companyUserGroupId)
         assertEquals(1L, row.graceDays as Long)
         assertEquals("FINDING", link(row.checkId, "${MINE}_R4").diffTypes)
-        assertEquals("CONC_TCHK_OPEN", link(row.checkId, "${MINE}_R4").conclusionCodes)
+        assertEquals(null, link(row.checkId, "${MINE}_R4").conclusionCodes)
+        assertEquals("EXPECTED", ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCHK_RS1_SCOPE")
+                .condition("sequenceNum", 10L).disableAuthz().one().outcome)
+        assertTrue(((List) (((Map) facade("get#AuditCheckOptions", [audit: "month-close-t"]).options).runs as List<Map>)
+                .find { it.savedRunId == "TCHK_RS1" }.conclusions).every { it.expected == true })
+        // Saving without expectedCodes (an older editor) leaves the run's causes as they are; an empty list clears them.
+        assertFalse(facade("save#AuditCheck", [audit: "month-close-t", check: [id: "credit-memos-left-open", label: "Credit memos left open",
+                savedRunId: "TCHK_RS1"], statements: [[id: "R4", diffTypes: ["FINDING"]]]]).hadError as boolean)
+        assertEquals(["CONC_TCHK_OPEN"], ((Map) facade("save#AuditCheck", [audit: "month-close-t", check: [id: "credit-memos-left-open",
+                label: "Credit memos left open", savedRunId: "TCHK_RS1", expectedCodes: ["CONC_TCHK_OPEN"]],
+                statements: [[id: "R4", diffTypes: ["FINDING"]]]]).savedCheck).expectedCodes)
+        assertTrue(facade("save#AuditCheck", [audit: "month-close-t", check: [id: "credit-memos-left-open", label: "Credit memos left open",
+                savedRunId: "TCHK_RS1", expectedCodes: ["CONC_NOT_IN_RUN"]], statements: [[id: "R4", diffTypes: ["FINDING"]]]]).hadError as boolean,
+                "a cause the run never concludes is refused")
 
         assertTrue((facade("get#AuditCheckOptions", [audit: "month-close-t"]).options as Map).checks*.id.contains("credit-memos-left-open"))
     }

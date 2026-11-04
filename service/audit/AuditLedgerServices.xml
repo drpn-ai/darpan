@@ -459,4 +459,31 @@
             <entity-create value-field="event"/>
         </actions>
     </service>
+
+    <!-- DAR-BE-196: registered migration STATEMENT_LINK_EXPECTED (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="StatementLinkExpected" authenticate="false" allow-remote="false">
+        <description>One-time: each statement link's list of the causes that break its statement moves onto its check's run.
+            Every conclusion rule whose cause the list left out gets outcome EXPECTED (a HIDE rule stays hidden), then the
+            list is cleared; Unexplained, never a rule, now counts on every statement. A run two links read with different
+            lists is reported and left untouched. Idempotent: a second run changes nothing. Not remote: the migration
+            supervisor runs it, with authz disabled.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+            <parameter name="linksCleared" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="darpan.audit.StatementLinkExpectedMigration.run(ec, dryRun as boolean)"/>
+            <set field="rowsUpdated" from="out.rowsUpdated"/>
+            <set field="linksCleared" from="out.linksCleared"/>
+            <set field="messages" from="out.messages"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
 </services>

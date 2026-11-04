@@ -475,8 +475,9 @@
         <in-parameters>
             <parameter name="audit" required="true"/>
             <parameter name="check" type="Map" required="true"/>
-            <parameter name="statements" type="List"><description>[{id: statement code, diffTypes, conclusionCodes,
-                ruleIds}], at least one (refused in words when empty).</description></parameter>
+            <parameter name="statements" type="List"><description>[{id: statement code, diffTypes, ruleIds}], at least one
+                (refused in words when empty). DAR-BE-196: no statement counts a cause the run marks expected; check.expectedCodes
+                (when given) sets which of the run's causes those are.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>

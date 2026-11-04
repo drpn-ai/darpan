@@ -125,8 +125,9 @@ class TransferSpecs {
             [kind: CHECK, entityName: "darpan.audit.AuditCheck", pkField: "checkId", naturalKey: "checkCode",
              refFields: [savedRunId: RUN], dropFields: ["automationId"], heldRefs: [automationId: AUTOMATION],
              // A check's links to statements: only those of the audits in the bundle travel; links to other audits stay.
+             // DAR-BE-196: conclusionCodes no longer travels (expected causes are the run's rules); a bundle carrying it is refused.
              links: [entityName: "darpan.audit.AuditStatementCheck", parentFields: ["checkId"], refFields: [statementId: STATEMENT],
-                     textListRefs: [ruleIds: RULE, conclusionCodes: CONC]]],
+                     textListRefs: [ruleIds: RULE], dropFields: ["conclusionCodes"]]],
             // DAR-BE-160. The morning audit runs an automation's own copy of its run's sources and exclusion filters, so a
             // version holds them. When it last and next fires and whether it is on are operational: they stay the
             // target's, and changing them is no config change. A source's config id travels as a ref inside

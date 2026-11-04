@@ -7,17 +7,20 @@
          is redacted (AgentRedaction). Another tenant's finding reads as not found. -->
 
     <service verb="get" noun="AgentFinding" authz-action="view" allow-remote="false" authenticate="true">
-        <description>One finding of the active tenant (darpan.audit.finding/v1) with every record's customer data redacted.</description>
+        <description>One finding of the active tenant (darpan.audit.finding/v1) with every record's customer data redacted, and the
+            run its check reads with the system on each side (run.sides.FILE_1/FILE_2), so an exclusion can name its side.</description>
         <in-parameters>
             <parameter name="findingId" required="true"><description>The finding's id, e.g. F-20761.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="finding" type="Map"/>
+            <parameter name="run" type="Map"><description>[savedRunId, sides: [FILE_1: [system, endpoint], FILE_2: ...]]; empty when the check has no run.</description></parameter>
         </out-parameters>
         <actions>
             <service-call name="facade.AuditFacadeServices.get#AuditFinding" in-map="[findingId:findingId]" out-map="found"/>
             <if condition="ec.message.hasError() || !found?.finding"><return error="true"/></if>
             <set field="finding" from="darpan.agent.AgentRedaction.agentFindingView(found.finding)"/>
+            <set field="run" from="darpan.agent.AgentReadSupport.findingRun(ec, findingId)"/>
         </actions>
     </service>
 

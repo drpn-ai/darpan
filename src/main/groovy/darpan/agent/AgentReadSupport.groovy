@@ -1,5 +1,7 @@
 package darpan.agent
 
+import darpan.audit.AuditAutomationSupport
+import darpan.audit.AuditReportAssembler
 import darpan.audit.AuditReportGraph
 import darpan.conclusion.brain.BrainConclude
 import darpan.conclusion.brain.BrainEngine
@@ -7,6 +9,7 @@ import darpan.datasource.DataDefinedExtract
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.knowledge.KnowledgeSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ConclusionCatalogSupport
@@ -153,4 +156,32 @@ class AgentReadSupport {
     }
 
     private static String text(Object v) { v?.toString()?.replaceAll(/^"|"$/, "")?.trim() }
+
+    /**
+     * The run a finding's check reads and the system on each side: [savedRunId, sides: [FILE_1: [system, endpoint], ...]],
+     * system as the finding's records name it (AuditReportAssembler.systemKey: NetSuite, Shopify, OMS), endpoint the side's
+     * systemEnumId. An exclusion names its side as FILE_1 or FILE_2, and the finding's records name only systems, so this is
+     * what lets the agent pick the side. Null when the finding or its check is not the active tenant's, or the check has
+     * no run that resolves.
+     */
+    static Map findingRun(def ec, String findingId) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        if (!tenantId || !findingId) return null
+        def finding = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY)
+        if (finding?.checkId == null) return null
+        def check = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditCheck", "checkId", finding.checkId, tenantId, WHY)
+        return check?.savedRunId ? runSides(ec, check.savedRunId as String) : null
+    }
+
+    /** The active tenant's run and the system on each of its sides (see {@link #findingRun}); null when it does not resolve. */
+    static Map runSides(def ec, String savedRunId) {
+        Map resolved = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId)
+        if (resolved.error || resolved.savedRun == null) return null
+        Map sides = new TreeMap()
+        ((Map) resolved.sourceBySide).each { Object side, Object source ->
+            String endpoint = source?.get("systemEnumId") as String
+            sides[side as String] = [system: AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(endpoint)), endpoint: endpoint]
+        }
+        return [savedRunId: savedRunId, sides: sides]
+    }
 }

@@ -175,6 +175,29 @@ class AuditChangeApplySmokeTests {
         ec.message.clearAll()
     }
 
+    // ------------------------------------------------------------------ the run a finding sits on
+
+    @Test
+    void "a finding's run names the system on each side, so an exclusion can name FILE_1 or FILE_2"() {
+        // The first paid eval (2026-11-04): the agent saw only system names and asked the person which side to exclude on.
+        asSystem {
+            upsert("darpan.audit.AuditFinding", [findingId: "F-TAC-SIDES", companyUserGroupId: MINE, statementId: "${MINE}_R1".toString(),
+                    checkId: "TAC_CHK", recordKey: "M1", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "Memo M1 is open",
+                    firstFoundDate: java.sql.Date.valueOf("2026-10-08"), lastSeenDate: java.sql.Date.valueOf("2026-10-08")])
+        }
+        Map netsuite = [system: "NetSuite", endpoint: "NETSUITE_SUITEQL"]
+        assertEquals([savedRunId: runId, sides: [FILE_1: netsuite]], darpan.agent.AgentReadSupport.findingRun(ec, "F-TAC-SIDES"))
+        assertEquals([FILE_1: netsuite, FILE_2: netsuite], darpan.agent.AgentReadSupport.runSides(ec, run2Id).sides)
+        assertNull(darpan.agent.AgentReadSupport.runSides(ec, "NO_SUCH_RUN"))
+        Map read = ec.service.sync().name("facade.AgentReadFacadeServices.get#AgentFinding").parameters([findingId: "F-TAC-SIDES"]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals([savedRunId: runId, sides: [FILE_1: netsuite]], read.run, "get_finding carries the run beside the finding")
+        actAs(OTHER)
+        assertNull(darpan.agent.AgentReadSupport.findingRun(ec, "F-TAC-SIDES"), "another tenant's finding has no run to read")
+        assertNull(darpan.agent.AgentReadSupport.runSides(ec, runId), "nor another tenant's run")
+        ec.message.clearAll()
+    }
+
     // ------------------------------------------------------------------ plan
 
     @Test

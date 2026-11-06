@@ -340,7 +340,7 @@ class AuditAutomationSupport {
     /**
      * The check's findings in one diff document: a row breaks a statement when its type is in the link's diffTypes
      * (blank: any), the rule that raised it is in the link's ruleIds (blank: any; DAR-BE-095) and its cause is not
-     * expected (DAR-BE-196: the run marks conclusion.expected; Unexplained always counts). One finding per statement and
+     * expected (DAR-BE-196: the run marks conclusion.expected; Unexplained counts unless its run marked it, DAR-BE-198). One finding per statement and
      * record; the row's record lives on the side(s) its type names. `explained` gets recordKey -> {conclusionEnumId,
      * diagnosisText, headline} for each row of a linked diff type whose cause is expected (DAR-BE-118), kept on the closed
      * finding.
@@ -369,8 +369,9 @@ class AuditAutomationSupport {
                        conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
+            // DAR-BE-196: Unexplained counts. DAR-BE-198 (b): unless its run marked it expected (unexplainedExpected).
             boolean expected = raw.conclusion instanceof Map && ((Map) raw.conclusion).expected == true &&
-                    code != ConclusionTreeSupport.UNEXPLAINED
+                    (code != ConclusionTreeSupport.UNEXPLAINED || ((Map) raw.conclusion).unexplainedExpected == true)
             String ruleId = normalize(raw.ruleId)
             links.each { Map link ->
                 // Qualified: from a closure nested in a closure, Groovy resolves a bare static call through the outer

@@ -97,7 +97,9 @@ class AuditCheckAuthoringSmokeTests {
         assertFalse(runs*.savedRunId.contains("TCHK_RS_OTHER"), "another tenant's run is not offered")
         Map rs1 = (Map) runs.find { it.savedRunId == "TCHK_RS1" }
         assertEquals(["TCHK_RULE_A"], rs1.rules*.ruleId)
-        assertEquals([[code: "CONC_TCHK_OPEN", label: "Memo left open", expected: false]], rs1.conclusions)
+        // DAR-BE-198 (b): Unexplained is offered last, so the editor can make it expected too.
+        assertEquals([[code: "CONC_TCHK_OPEN", label: "Memo left open", expected: false],
+                      [code: "UNEXPLAINED", label: "Unexplained", expected: false]], rs1.conclusions)
         assertEquals("return", rs1.recordType, "the run's object, as a record type")
         assertEquals([[side: "FILE_1", system: "NETSUITE", key: "tranId"]], rs1.sides, "each side's root system and key")
         assertEquals([null, []], runs.find { it.savedRunId == "TCHK_RS_BARE" }.subMap(["recordType", "sides"]).values() as List)
@@ -128,7 +130,7 @@ class AuditCheckAuthoringSmokeTests {
         assertEquals("EXPECTED", ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCHK_RS1_SCOPE")
                 .condition("sequenceNum", 10L).disableAuthz().one().outcome)
         assertTrue(((List) (((Map) facade("get#AuditCheckOptions", [audit: "month-close-t"]).options).runs as List<Map>)
-                .find { it.savedRunId == "TCHK_RS1" }.conclusions).every { it.expected == true })
+                .find { it.savedRunId == "TCHK_RS1" }.conclusions).findAll { it.code != "UNEXPLAINED" }.every { it.expected == true })
         // Saving without expectedCodes (an older editor) leaves the run's causes as they are; an empty list clears them.
         assertFalse(facade("save#AuditCheck", [audit: "month-close-t", check: [id: "credit-memos-left-open", label: "Credit memos left open",
                 savedRunId: "TCHK_RS1"], statements: [[id: "R4", diffTypes: ["FINDING"]]]]).hadError as boolean)
@@ -191,6 +193,31 @@ class AuditCheckAuthoringSmokeTests {
                 savedRunId: "TCHK_RS2"], statements: [[id: "R4"]]])
         assertFalse(moved.hadError as boolean, moved.errorText as String)
         assertNull(checkRow("credit-memos-left-open").automationId, "a new run needs a new automation")
+    }
+
+    // DAR-BE-198 (b), gorjana R6: an HG credit memo that is not the tax-counted-twice case is not a finding. Unexplained is
+    // picked like any expected cause; it is the run's (its scope), not a rule's, and an empty list counts it again.
+    @Test
+    @Order(5)
+    void unexplainedCanBeAnExpectedCauseOfTheRun() {
+        Closure<Map> save = { List codes -> facade("save#AuditCheck", [audit: "month-close-t", check: [id: "credit-memos-unexplained",
+                label: "Credit memos, unexplained", savedRunId: "TCHK_RS1", expectedCodes: codes], statements: [[id: "R4", diffTypes: ["FINDING"]]]]) }
+        Closure<String> scopeSays = { -> ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", "TCHK_RS1_SCOPE")
+                .disableAuthz().useCache(false).one().unexplainedOutcome as String }
+        Closure<String> ruleSays = { -> ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCHK_RS1_SCOPE")
+                .condition("sequenceNum", 10L).disableAuthz().useCache(false).one().outcome as String }
+        Map saved = save(["UNEXPLAINED"])
+        assertFalse(saved.hadError as boolean, saved.errorText as String)
+        assertEquals(["UNEXPLAINED"], ((Map) saved.savedCheck).expectedCodes)
+        assertEquals("EXPECTED", scopeSays())
+        assertEquals(null, ruleSays(), "the run's named cause is no longer expected")
+        Map unexplained = (Map) ((((Map) facade("get#AuditCheckOptions", [audit: "month-close-t"]).options).runs as List<Map>)
+                .find { it.savedRunId == "TCHK_RS1" }.conclusions as List<Map>).find { it.code == "UNEXPLAINED" }
+        assertEquals(true, unexplained.expected)
+        assertEquals(["CONC_TCHK_OPEN", "UNEXPLAINED"], ((Map) save(["CONC_TCHK_OPEN", "UNEXPLAINED"]).savedCheck).expectedCodes)
+        assertEquals("EXPECTED", ruleSays())
+        assertEquals([], ((Map) save([]).savedCheck).expectedCodes)
+        assertEquals(null, scopeSays(), "an empty list counts Unexplained again")
     }
 
     private Map facade(String verbNoun, Map params = [:]) {

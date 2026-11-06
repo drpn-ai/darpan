@@ -2,6 +2,7 @@ package darpan.audit
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.conclusion.ConclusionTreeSupport
 import darpan.reconciliation.conclusion.RunConclusionSupport
 import org.moqui.entity.EntityCondition
 
@@ -116,7 +117,10 @@ class AuditCheckAuthoringSupport {
         List<String> expectedCodes = check.containsKey("expectedCodes") ? listOf(check.expectedCodes) : null
         if (expectedCodes && run == null) ec.message.addError("Choose the run before naming its expected causes.")
         Set<String> runCodes = conclusionRules*.conclusionEnumId.findAll { it }.collect { it as String } as Set<String>
-        expectedCodes?.findAll { run != null && !runCodes.contains(it) }?.each { ec.message.addError("'${it}' is not a cause run '${savedRunId}' concludes.") }
+        // DAR-BE-198 (b): Unexplained is every run's cause (no rule concludes it), so it is always one to name.
+        expectedCodes?.findAll { run != null && it != ConclusionTreeSupport.UNEXPLAINED && !runCodes.contains(it) }?.each {
+            ec.message.addError("'${it}' is not a cause run '${savedRunId}' concludes.")
+        }
         String fixWhere = normalize(check.fixWhereEnumId)
         if (fixWhere && !(fixWhere in FIX_WHERE)) ec.message.addError("Fix where must be one of ${FIX_WHERE.join(', ')}.")
         Integer graceDays = null
@@ -178,6 +182,11 @@ class AuditCheckAuthoringSupport {
                 String want = (rule.conclusionEnumId as String) in expectedCodes ? RunConclusionSupport.OUTCOME_EXPECTED : null
                 if ((rule.outcome as String) != want) { rule.set("outcome", want); rule.update() }
             }
+            // DAR-BE-198 (b): Unexplained is expected on the run's scope, not on a rule.
+            String unexplained = ConclusionTreeSupport.UNEXPLAINED in expectedCodes ? RunConclusionSupport.OUTCOME_EXPECTED : null
+            scopesOf(ec, savedRunId).each { scope ->
+                if ((scope.unexplainedOutcome as String) != unexplained) { scope.set("unexplainedOutcome", unexplained); scope.update() }
+            }
         }
         return describe(ec, row, statements)
     }
@@ -195,6 +204,9 @@ class AuditCheckAuthoringSupport {
         TEXT_FIELDS.each { String f -> out[f] = check.get(f) }
         out.expectedCodes = check.savedRunId ? conclusionRulesOf(ec, check.savedRunId as String)
                 .findAll { (it.outcome as String) == RunConclusionSupport.OUTCOME_EXPECTED }*.conclusionEnumId.collect { it as String }.unique() : []
+        if (check.savedRunId && scopesOf(ec, check.savedRunId as String).any { (it.unexplainedOutcome as String) == RunConclusionSupport.OUTCOME_EXPECTED }) {
+            out.expectedCodes = (out.expectedCodes as List) + [ConclusionTreeSupport.UNEXPLAINED]
+        }
         out.statements = links
         return out
     }
@@ -231,12 +243,24 @@ class AuditCheckAuthoringSupport {
         List rules = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
                 .condition("compareScopeId", compareScopeId).orderBy("sequenceNum").useCache(false).list()
                 .findAll { it.conclusionEnumId && (it.outcome as String) != RunConclusionSupport.OUTCOME_HIDE }
-        List<String> ids = rules*.conclusionEnumId.collect { it as String }.unique()
-        return ids.collect { String id ->
+        List<String> ids = rules*.conclusionEnumId.collect { it as String }.unique().findAll { it != ConclusionTreeSupport.UNEXPLAINED }
+        List<Map<String, Object>> out = ids.collect { String id ->
             def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", id).useCache(true).one()
             [code: (e?.enumCode ?: id) as String, label: (e?.description ?: id) as String,
              expected: rules.any { (it.conclusionEnumId as String) == id && (it.outcome as String) == RunConclusionSupport.OUTCOME_EXPECTED }] as Map<String, Object>
         }
+        // DAR-BE-198 (b): every run can leave a row Unexplained; it is offered last, expected when the run's scope says so.
+        def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope").condition("compareScopeId", compareScopeId)
+                .useCache(false).list().find()
+        out << ([code: ConclusionTreeSupport.UNEXPLAINED, label: ConclusionTreeSupport.UNEXPLAINED_LABEL,
+                 expected: (scope?.unexplainedOutcome as String) == RunConclusionSupport.OUTCOME_EXPECTED] as Map<String, Object>)
+        return out
+    }
+
+    /** DAR-BE-198 (b): a run's compare scopes, where its Unexplained outcome is kept. */
+    private static List scopesOf(def ec, String savedRunId) {
+        return savedRunId ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope").condition("ruleSetId", savedRunId)
+                .useCache(false).list() : []
     }
 
     /** DAR-BE-196: the conclusion rules of a run's compare scopes, the rows an expected cause is written on. */

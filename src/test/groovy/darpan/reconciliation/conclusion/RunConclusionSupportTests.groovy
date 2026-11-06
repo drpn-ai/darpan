@@ -443,6 +443,28 @@ class RunConclusionSupportTests {
         assertEquals("CONC_NEVER_REACHED_NS", ((Map) ((Map) d.differences[1]).conclusion).code)
     }
 
+    // DAR-BE-198 (b): a run whose Unexplained is expected (gorjana R6: an HG credit memo that is not the tax-counted-twice
+    // case is not a finding) marks those rows expected, with the marker the audit reads; a named cause is unchanged, and a
+    // run that does not say so keeps Unexplained counted (DAR-BE-196).
+    @Test
+    void aRunCanMarkItsUnexplainedRowsExpected() {
+        List rules = [BACKORDER_RULES[0]]
+        File nsExtract = extract("ns-unexplained.json", [])
+        sidecar(nsExtract, [[orderId: "O1", orderLineId: "1", quantityBackordered: "2"]])
+        Closure<File> doc = { -> writeDiffDocument([missingRow("O1${SEP}1", FILE1, FILE2), missingRow("O2${SEP}1", FILE1, FILE2)],
+                [totalDifferences: 2, onlyInFile1Count: 2, onlyInFile2Count: 0]) }
+        File marked = doc()
+        RunConclusionSupport.concludeRun(args(marked, rules, nsExtract) + [unexplainedExpected: true])
+        List<Map> conclusions = ((Map) new JsonSlurper().parse(marked)).differences.collect { (Map) it.conclusion }
+        assertEquals(["CONC_NS_BACKORDERED", "UNEXPLAINED"], conclusions*.code)
+        assertEquals([false, true], conclusions*.expected)
+        assertEquals([null, true], conclusions*.unexplainedExpected)
+        File plain = doc()
+        RunConclusionSupport.concludeRun(args(plain, rules, nsExtract))
+        List<Map> counted = ((Map) new JsonSlurper().parse(plain)).differences.collect { (Map) it.conclusion }
+        assertEquals([false, false], counted*.expected, "a run that does not say so still counts Unexplained")
+    }
+
     // DAR-BE-157: a HotWax product sharing a NetSuite id is keyed DUPLICATE:22139:M100880, which NetSuite never has; its
     // evidence names the field holding NetSuite's key, so the NetSuite panel shows item 22139 instead of "Not found".
     @Test

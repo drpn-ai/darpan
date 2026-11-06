@@ -109,6 +109,13 @@
                 first, as findings of that kind, and the tree concludes the ones the brain leaves unexplained. Nullable with
                 no default, so adding the column changes no live scope.</description>
         </field>
+        <field name="unexplainedOutcome" type="text-short">
+            <description>DAR-BE-198 (b). Blank: a row no conclusion rule explains is Unexplained and every statement counts it
+                (DAR-BE-196). EXPECTED: the run's Unexplained rows are expected, like a rule's EXPECTED outcome; no statement
+                counts them (gorjana R6: an HG credit memo that is not the tax-counted-twice case is not a finding). Set by
+                picking Unexplained among a check's expected causes (save#AuditCheck expectedCodes). Nullable with no default,
+                so adding the column changes no live scope.</description>
+        </field>
         <field name="conclusionLookupsJson" type="text-long">
             <description>DAR-BE-118. Records in another system a conclusion rule may read, looked up only for the
                 findings that reach such a rule: a JSON list of {name, subject (FILE_1|FILE_2), idField, systemEnumId,

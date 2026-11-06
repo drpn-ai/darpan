@@ -199,17 +199,22 @@ class AuditAutomationSmokeTests {
     @Test
     void aWindowWritesHealthThenFindingsThenClosings() {
         // Oct 7: A1 is missing in NetSuite (R4); B1 is missing in the OMS with CONC_X (R8); B2's cause is expected (DAR-BE-196).
-        Map day1 = window("2026-10-07", ["A1", "B1", "B2"], ["B1", "B2", "C1"])
+        // DAR-BE-198 (b): B3 is Unexplained and claims expected without its run saying so, so it counts (DAR-BE-196); B4's run
+        // marks its Unexplained expected (gorjana R6), so it breaks nothing.
+        Map day1 = window("2026-10-07", ["A1", "B1", "B2", "B3", "B4"], ["B1", "B2", "B3", "B4", "C1"])
+        Map b3 = row("MISSING_IN_FILE_1", "B3", "missing in HotWax", "UNEXPLAINED", true)
+        Map b4 = row("MISSING_IN_FILE_1", "B4", "missing in HotWax", "UNEXPLAINED", true)
+        ((Map) b4.conclusion).unexplainedExpected = true
         AuditAutomationSupport.recordWindow(ec, automation, checks(), day1, omsSource, nsSource,
-                [recordCount: 3, fileLocation: "x"], [recordCount: 3, fileLocation: "y"],
+                [recordCount: 5, fileLocation: "x"], [recordCount: 5, fileLocation: "y"],
                 [diffLocation: diff("d1", [row("MISSING_IN_FILE_2", "A1", "missing in NetSuite"),
                                            withChecks(row("MISSING_IN_FILE_1", "B1", "missing in HotWax", "CONC_X")),
-                                           row("MISSING_IN_FILE_1", "B2", "missing in HotWax", "CONC_OTHER", true)])], null)
+                                           row("MISSING_IN_FILE_1", "B2", "missing in HotWax", "CONC_OTHER", true), b3, b4])], null)
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         Map run = checkRun("2026-10-07")
         assertEquals(["AUDCS_RAN", "2026-10", Date.valueOf("2026-10-01"), Date.valueOf("2026-10-07")],
                 [run.statusEnumId, run.period, run.windowFromDate, run.windowThruDate])
-        assertEquals([["OMS", "OMS_RETURNS_GQL", "AUDSR_COMPLETE", 3L], ["NETSUITE", "NETSUITE_SUITEQL", "AUDSR_COMPLETE", 3L]],
+        assertEquals([["OMS", "OMS_RETURNS_GQL", "AUDSR_COMPLETE", 5L], ["NETSUITE", "NETSUITE_SUITEQL", "AUDSR_COMPLETE", 5L]],
                 reads(run.checkRunId as String).collect { [it.systemEnumId, it.endpointEnumId, it.statusEnumId, it.recordCount as Long] })
         Map a1 = finding("A1")
         assertEquals(["TAUTO_R4", "Return A1: missing in NetSuite", "2026-10"], [a1.statementId, a1.headline, a1.period])
@@ -219,6 +224,8 @@ class AuditAutomationSmokeTests {
         assertEquals(["TAUTO_R8", "CONC_X"], [b1.statementId, b1.conclusionEnumId])
         assertEquals([["NETSUITE", "creditMemo", "B1"]], records(b1.findingId as String).collect { [it.systemEnumId, it.recordType, it.recordId] })
         assertEquals(0L, count("B2"), "an expected cause breaks nothing")
+        assertEquals(1L, count("B3"), "Unexplained counts unless its run says it is expected")
+        assertEquals(0L, count("B4"), "a run whose Unexplained is expected breaks nothing with it")
         // The conclusion's checks are the finding's evidence, each with the value it read (R4: the memo's unapplied amount).
         assertEquals([["The credit memo is open", "Y", "Credit Memo : Open"], ["More than \$5 unapplied", "Y", "6.19"]],
                 ec.entity.find("darpan.audit.AuditFindingCondition").condition("findingId", b1.findingId).orderBy("sequenceNum")

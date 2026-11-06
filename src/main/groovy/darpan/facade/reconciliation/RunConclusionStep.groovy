@@ -88,6 +88,8 @@ class RunConclusionStep {
                     }] : null
             Map result = RunConclusionSupport.concludeRun([
                     brain      : brain,
+                    // DAR-BE-198 (b): the run says its Unexplained rows are expected (gorjana R6).
+                    unexplainedExpected: normalize(scope?.unexplainedOutcome) == RunConclusionSupport.OUTCOME_EXPECTED,
                     lookups    : lookups,
                     fetchLookup: { Map lookup, List<String> ids ->
                         fetchLookup(ec, lookup, ids, normalize(scope?.companyUserGroupId), lookupWarnings)

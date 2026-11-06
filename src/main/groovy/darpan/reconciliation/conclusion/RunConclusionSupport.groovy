@@ -84,6 +84,8 @@ class RunConclusionSupport {
         String file1Label = (String) args.file1Label
         String file2Label = (String) args.file2Label
         boolean singleSided = args.singleSided == true
+        // DAR-BE-198 (b): the run's Unexplained rows are expected (RuleSetCompareScope.unexplainedOutcome EXPECTED).
+        boolean unexplainedExpected = args.unexplainedExpected == true
         Map sideSpecs = [FILE_1: (Map) args.file1, FILE_2: singleSided ? null : (Map) args.file2]
 
         // DAR-BE-157: a side's evidence may name the field holding the OTHER side's key (a HotWax product's NetSuite id), so
@@ -205,15 +207,19 @@ class RunConclusionSupport {
                 systems.add(evidenceFor(side, evidenceSide(side, sides, index, otherSideKeyFields), (Map) (spec.evidence ?: [:]),
                         side == "FILE_1" ? file1Label : file2Label))
             }
-            // DAR-BE-196: expected by its rule's outcome, or by the brain cause's own flag.
-            boolean expected = expectedCodes.contains(code) || ((List<Map>) (conclusion.path ?: [])).any { it?.expected == true }
-            return row + otherSideIds(slurper, row, sides) + firstKeyRecords(row, index) + [conclusion: [code    : code,
-                                       label   : conclusion.label,
-                                       expected: expected,
-                                       systems : systems,
-                                       checks  : conclusion.checks,
-                                       question: conclusion.question,
-                                       path    : conclusion.path]]
+            // DAR-BE-196: expected by its rule's outcome, or by the brain cause's own flag. DAR-BE-198 (b): or Unexplained, when
+            // the run says its Unexplained is expected; the marker is what lets an audit not count it.
+            boolean byRun = unexplainedExpected && code == ConclusionTreeSupport.UNEXPLAINED
+            boolean expected = byRun || expectedCodes.contains(code) || ((List<Map>) (conclusion.path ?: [])).any { it?.expected == true }
+            Map concluded = [code    : code,
+                             label   : conclusion.label,
+                             expected: expected,
+                             systems : systems,
+                             checks  : conclusion.checks,
+                             question: conclusion.question,
+                             path    : conclusion.path]
+            if (byRun) concluded.unexplainedExpected = true
+            return row + otherSideIds(slurper, row, sides) + firstKeyRecords(row, index) + [conclusion: concluded]
         }, { Map summary ->
             Map shownSummary = new LinkedHashMap(summary)
             applyHidden(shownSummary, hiddenByBucket, "totalDifferences")

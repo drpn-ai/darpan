@@ -25,6 +25,8 @@ No tenant config here: a tenant's audits, runs, queries and conclusion codes liv
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_PRODUCTS_GQL" fieldPath="$.records[*].sharedWith" label="Shares its NetSuite ID with" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="9" description="The other sellable HotWax products carrying the same NetSuite id, comma-separated."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].transactionIds" label="Transaction ids" fieldType="String" sequenceNum="11" description="DAR-BE-153: comma-joined ids of every SUCCESS transaction on the order, any kind (authorization, capture, sale, void, refund). Each HotWax OPP manualRefNum must be among them (paymentRefNums all in transactionIds); extra Shopify ids are fine."/>
     <!-- DAR-BE-192: shared codes the brain concludes (ConclusionCatalogSeedData.xml is type seed: an existing database gets them only here) -->
+    <!-- DAR-BE-151: an exchange waits on its original order (same reason: seed does not reach an existing database) -->
+    <moqui.basic.Enumeration enumId="ORIG_OPEN" enumTypeId="DarpanConclusion" enumCode="ORIG_OPEN" description="Waits on its original order"/>
     <moqui.basic.Enumeration enumId="RET_OPEN" enumTypeId="DarpanConclusion" enumCode="RET_OPEN" description="Waits on its own return"/>
     <moqui.basic.Enumeration enumId="RMA_CLOSED" enumTypeId="DarpanConclusion" enumCode="RMA_CLOSED" description="Return's RMA closed, no credit memo"/>
     <moqui.basic.Enumeration enumId="RMA_NO_MEMO" enumTypeId="DarpanConclusion" enumCode="RMA_NO_MEMO" description="Return has an RMA, no credit memo"/>

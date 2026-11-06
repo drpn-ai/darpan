@@ -28,6 +28,8 @@ class BrainFactAdapter {
     /** DAR-BE-192: that return's NetSuite RMA and credit memo, asked by return id. */
     static final String RETURN_RMA = "returnRma"
     static final String RETURN_MEMO = "returnMemo"
+    /** DAR-BE-151 (Aditi 2026-11-06): an exchange's original order's NetSuite sales order, asked by its HotWax order id. */
+    static final String ORIGINAL_IN_NETSUITE = "originalInNetsuite"
 
     /**
      * The record fields facts() reads, per RuleSetCompareScope.conclusionBrain and side. The extract must keep them, or a
@@ -67,7 +69,7 @@ class BrainFactAdapter {
                 orders.put(orderId, order)
                 facts.add(order)
                 addAnswer(facts, order, answersByOrderId)
-                addReplacementReturn(facts, order, moreAnswers)
+                addReplacementReturn(facts, order, moreAnswers, orders)
             }
             return order
         }
@@ -113,7 +115,8 @@ class BrainFactAdapter {
      * DAR-BE-192: an answered replacement carries the return it was made for (or none: asked, nothing found), and that return
      * what NetSuite answered for it: its RMA and its credit memo (none: asked, NetSuite has none).
      */
-    private static void addReplacementReturn(List<Object> facts, Order order, Map<String, Map<String, Map>> more) {
+    private static void addReplacementReturn(List<Object> facts, Order order, Map<String, Map<String, Map>> more,
+                                             Map<String, Object> orders) {
         Map<String, Map> byOrder = more?.get(REPLACEMENT_RETURN)
         if (byOrder == null || !byOrder.containsKey(order.orderId)) return
         facts.add(new Answered(REPLACEMENT_RETURN, order))
@@ -122,6 +125,7 @@ class BrainFactAdapter {
         if (!returnId) return
         ReplacementReturn r = new ReplacementReturn(replacement: order, returnId: returnId, statusId: normalize(a.statusId),
                 channel: normalize(a.returnChannelEnumId), credit: number(a.returnCredit), entered: day(a.entryDate))
+        r.original = originalOf(facts, normalize(a.orderId), order, more, orders)
         Map<String, Map> rmas = more.get(RETURN_RMA)
         if (rmas != null && rmas.containsKey(returnId)) {
             Map x = rmas.get(returnId)
@@ -137,6 +141,30 @@ class BrainFactAdapter {
             facts.add(new Answered(RETURN_MEMO, r))
         }
         facts.add(r)
+    }
+
+    /**
+     * DAR-BE-151: the order a replacement's return was raised against (one Order per id in the world, so an original that
+     * is itself a finding is the same fact) and, once asked, its NetSuite sales order (none: asked, NetSuite has none).
+     */
+    private static Order originalOf(List<Object> facts, String originalId, Order replacement, Map<String, Map<String, Map>> more,
+                                    Map<String, Object> orders) {
+        if (!originalId || originalId == replacement.orderId) return null
+        Order original = (Order) orders.get(originalId)
+        if (original == null) {
+            original = new Order(orderId: originalId)
+            orders.put(originalId, original)
+            facts.add(original)
+        }
+        Map<String, Map> answers = more?.get(ORIGINAL_IN_NETSUITE)
+        if (answers != null && answers.containsKey(originalId) && !facts.any { it instanceof Answered &&
+                ((Answered) it).question == ORIGINAL_IN_NETSUITE && ((Answered) it).subject == original }) {
+            Map so = answers.get(originalId)
+            original.netsuiteTranId = normalize(so?.tranId)
+            original.netsuiteStatus = normalize(so?.status)
+            facts.add(new Answered(ORIGINAL_IN_NETSUITE, original))
+        }
+        return original
     }
 
     /** Epoch millis (or text) as YYYY-MM-DD in UTC; null when it is neither. */

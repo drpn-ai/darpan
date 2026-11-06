@@ -32,8 +32,9 @@ class BrainConclude {
         // DAR-BE-186: productNetsuiteId answers, by product id.
         Map<String, Map> productAnswers = [:]
         // DAR-BE-192: replacementReturn (by order id), returnRma and returnMemo (by return id).
+        // DAR-BE-151: originalInNetsuite (an exchange's original, by its HotWax order id).
         Map<String, Map<String, Map>> more = [(BrainQuestions.REPLACEMENT_RETURN): [:], (BrainQuestions.RETURN_RMA): [:],
-                                              (BrainQuestions.RETURN_MEMO): [:]] as Map<String, Map<String, Map>>
+                                              (BrainQuestions.RETURN_MEMO): [:], (BrainQuestions.ORIGINAL_IN_NETSUITE): [:]] as Map<String, Map<String, Map>>
         List<String> warnings = []
 
         List<Map> round = batches.collect { fire(engine, kind, it, answers, productAnswers, more) }

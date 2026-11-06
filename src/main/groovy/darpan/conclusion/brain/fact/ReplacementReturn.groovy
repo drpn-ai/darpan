@@ -15,6 +15,9 @@ import groovy.transform.ToString
 @ToString(includes = ["returnId", "statusId"], includePackage = false)
 class ReplacementReturn {
     Order replacement
+    /** DAR-BE-151 (Aditi 2026-11-06): the order the return was raised against, the replacement's original; null when the
+     *  return names none. An exchange HotWax holds until this ships. */
+    Order original
     String returnId
     String statusId
     String channel

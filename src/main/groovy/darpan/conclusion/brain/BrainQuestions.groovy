@@ -13,6 +13,7 @@ class BrainQuestions {
     static final String REPLACEMENT_RETURN = BrainFactAdapter.REPLACEMENT_RETURN
     static final String RETURN_RMA = BrainFactAdapter.RETURN_RMA
     static final String RETURN_MEMO = BrainFactAdapter.RETURN_MEMO
+    static final String ORIGINAL_IN_NETSUITE = BrainFactAdapter.ORIGINAL_IN_NETSUITE
 
     static Map<String, Integer> mayEnableRanks(BrainEngine engine) {
         Map<String, Map<String, Object>> meta = engine.ruleMetadata()
@@ -43,7 +44,7 @@ class BrainQuestions {
                     sourceConfigId: hotwaxSourceConfigId, keyField: "productId", parameters: [:]]
         }
         // DAR-BE-192: the return a replacement was made for, by the replacement's order id (the returns read's replacement key).
-        // returnRma / returnMemo have no default: NetSuite is read through the scope's own lookups of those names.
+        // returnRma / returnMemo / originalInNetsuite have no default: NetSuite is read through the scope's own lookups of those names.
         if (question == REPLACEMENT_RETURN) {
             return [name: REPLACEMENT_RETURN, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_RETURNS_GQL",
                     sourceConfigId: hotwaxSourceConfigId, keyField: "replacementOrderId", parameters: [:]]

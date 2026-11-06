@@ -15,6 +15,9 @@
             enumCode="CONC_PRODUCT_NOT_IN_NETSUITE" description="Product not in NetSuite"/>
     <!-- Codes are short (12 characters at most): a statement link lists its codes in one 255-character column
          (AuditStatementCheck.conclusionCodes; gorjana R1's 16 codes overflowed it, 2026-11-04). -->
+    <!-- DAR-BE-151 (Aditi 2026-11-06): an exchange HotWax holds until its original order ships, unfulfilled in NetSuite. -->
+    <moqui.basic.Enumeration enumId="ORIG_OPEN" enumTypeId="DarpanConclusion"
+            enumCode="ORIG_OPEN" description="Waits on its original order"/>
     <!-- DAR-BE-192: why HotWax holds a replacement (exchange or warranty) back from NetSuite: its return's credit-memo gate. -->
     <moqui.basic.Enumeration enumId="RET_OPEN" enumTypeId="DarpanConclusion"
             enumCode="RET_OPEN" description="Waits on its own return"/>

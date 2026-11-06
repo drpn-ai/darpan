@@ -85,6 +85,13 @@ declare LostClaimNoMemo
     ret : ReplacementReturn
 end
 
+// DAR-BE-151 (Aditi 2026-11-06, R1; 2026-10-28, R2 F-100189): HotWax holds an exchange until its original order ships.
+declare ExchangeWaitsOnOriginal
+    @label("Its original order is not fulfilled in NetSuite") @value("{original.orderId}: {original.netsuiteTranId} {original.netsuiteStatus}")
+    order : Order @key
+    original : Order
+end
+
 declare PaymentsNotTheTotal
     @label("Its payments do not settle its total") @value("{settled} of {order.total}")
     order : Order @key
@@ -160,7 +167,7 @@ end
 // DAR-BE-192: a replacement's name says it is one (EXC- an exchange, WTY- a warranty replacement); its return is found from it.
 rule "Ask for the return a replacement was made for, when the replacement never reached NetSuite"
     @reads("OrderNotInNetsuite, Order, Answered") @asks("replacementReturn")
-    @mayEnable("RET_OPEN,RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO")
+    @mayEnable("RET_OPEN,RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO,ORIG_OPEN")
 when
     OrderNotInNetsuite( $o : order )
     Order( this == $o, name != null, name matches "(?i)(EXC|WTY)-.+" )
@@ -191,7 +198,36 @@ then
     insertLogical( new Ask( "returnMemo", $r, $o ) );
 end
 
+// DAR-BE-151 (Aditi 2026-11-06: "when an exchange order is not in NS... check the parent order in the unfulfilled in NS
+// list"): only for an exchange (EXC-) NetSuite does not have, once its return has named the original.
+rule "Ask NetSuite for an exchange's original order, when the exchange never reached NetSuite"
+    @reads("OrderNotInNetsuite, Order, ReplacementReturn, Answered") @asks("originalInNetsuite") @mayEnable("ORIG_OPEN")
+when
+    OrderNotInNetsuite( $o : order )
+    Order( this == $o, name != null, name matches "(?i)EXC-.+" )
+    ReplacementReturn( replacement == $o, $orig : original, original != null )
+    not Answered( question == "originalInNetsuite", subject == $orig )
+then
+    insertLogical( new Ask( "originalInNetsuite", $orig, $o ) );
+end
+
 // ---- pieces
+
+// Unfulfilled in NetSuite: Pending Approval, Pending Fulfillment, Partially Fulfilled or Pending Billing/Partially Fulfilled
+// (gorjana 2026-11-06: M1191688 SO7352829 Pending Fulfillment, 2 lines backordered). Billed, Pending Billing (all shipped),
+// Closed and Cancelled are not; an original NetSuite has no sales order for is not in the unfulfilled list either.
+rule "An exchange waits on its original order, which NetSuite has not fulfilled"
+    @reads("OrderNotInNetsuite, Order, ReplacementReturn, Answered") @produces("ExchangeWaitsOnOriginal")
+when
+    OrderNotInNetsuite( $o : order )
+    Order( this == $o, name != null, name matches "(?i)EXC-.+" )
+    ReplacementReturn( replacement == $o, $orig : original, original != null )
+    Answered( question == "originalInNetsuite", subject == $orig )
+    Order( this == $orig, netsuiteTranId != null, netsuiteStatus != null,
+           netsuiteStatus matches "(?i).*(pending approval|pending fulfillment|partially fulfilled).*" )
+then
+    insertLogical( new ExchangeWaitsOnOriginal( $o, $orig ) );
+end
 
 rule "An item's product has no NetSuite id in HotWax"
     @reads("Product, Answered") @produces("ProductNotInNetsuite")
@@ -339,6 +375,16 @@ then
 end
 
 // DAR-BE-192 causes, about the replacement order: what its return lacks, most specific first.
+// More specific than what the replacement's return lacks: the original has to ship first (rank 58 over 56-51).
+rule "Order cause · an exchange waits on its original order"
+    @reads("OrderNotInNetsuite, ExchangeWaitsOnOriginal") @concludes("ORIG_OPEN") @rank(58)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $w : ExchangeWaitsOnOriginal( order == $o )
+then
+    insertLogical( Cause.fix( $o, "ORIG_OPEN", 58, $n, $w ) );
+end
+
 rule "Order cause · a replacement waits on its own return"
     @reads("OrderNotInNetsuite, ReplacementWaitsOnItsReturn") @concludes("RET_OPEN") @rank(56)
 when

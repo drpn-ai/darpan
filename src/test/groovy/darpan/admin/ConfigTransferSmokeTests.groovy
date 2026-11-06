@@ -153,6 +153,10 @@ class ConfigTransferSmokeTests {
         assertEquals(["RULE:XFER_RULE_B"], link.listRefs.ruleIds)
         assertFalse((link.listRefs as Map).containsKey("conclusionCodes") || (link.fields as Map).containsKey("conclusionCodes"),
                 "DAR-BE-196: a link carries no code list")
+        Map exportedAudit = (bundle.audits as List<Map>)[0]
+        assertEquals("Month close", (exportedAudit.fields as Map).auditName, "the audit's own fields travel: ${exportedAudit}")
+        assertFalse(["scheduleTime", "scheduleTimeZone", "scheduleActive"].any { (exportedAudit.fields as Map).containsKey(it) },
+                "DAR-BE-199: the audit's schedule is the instance's own: ${exportedAudit.fields}")
         Map expectedRule = ((run.children.RuleSetCompareScope as List<Map>)[0].children.RuleSetConclusionRule as List<Map>)
                 .find { it.refs.conclusionEnumId == "CONC:CONC_XFER_SEED" }
         assertEquals("EXPECTED", expectedRule.fields.outcome, "an expected cause travels on its run's rule")
@@ -1483,7 +1487,8 @@ class ConfigTransferSmokeTests {
                 companyUserGroupId: SRC])
 
         create("darpan.audit.Audit", [auditId: "XFER_AUDIT", companyUserGroupId: SRC, auditCode: "month-close",
-                auditName: "Month close", periodEnumId: "AUDP_MONTH"])
+                auditName: "Month close", periodEnumId: "AUDP_MONTH", scheduleTime: "01:30", scheduleTimeZone: "America/Los_Angeles",
+                scheduleActive: "Y"])
         create("darpan.audit.AuditStatement", [statementId: "XFER_AUDIT_R4", companyUserGroupId: SRC, auditId: "XFER_AUDIT",
                 statementCode: "R4", categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM", statementText: "Returns have memos",
                 isActive: "Y", sequenceNum: 1L])

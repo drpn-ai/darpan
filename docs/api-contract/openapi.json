@@ -6230,7 +6230,7 @@
                 "required": [
                     "audit"
                 ],
-                "description": "An audit's settings: its name, the daily schedule its checks run on, and each statement with its\n            checks and the run each check reads."
+                "description": "An audit's settings: its name, its daily schedule (the audit's own, DAR-BE-199: every check runs on\n            it), and each statement with its checks and the run each check reads."
             },
             "GetAuditSettingsResult": {
                 "type": "object",
@@ -6252,7 +6252,7 @@
                     },
                     "settings": {
                         "type": "object",
-                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}]}"
+                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,\n                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}]}"
                     }
                 }
             },
@@ -6784,13 +6784,13 @@
                     },
                     "schedule": {
                         "type": "object",
-                        "description": "{active, time HH:mm, timeZone}; absent keeps it."
+                        "description": "{active, time HH:mm, timeZone}; absent keeps it, a field left out\n                keeps its value."
                     }
                 },
                 "required": [
                     "audit"
                 ],
-                "description": "Changes an audit's name, statements (text, on/off) and the daily schedule of every check it runs. A check\n            whose run has no automation gets one (paused) when the schedule is saved. Answers the settings as saved."
+                "description": "Changes an audit's name, statements (text, on/off) and its daily schedule, which is the audit's own and\n            is written to the automation of every check it runs (DAR-BE-199). A check whose run has no automation gets one,\n            on that schedule, when the schedule is saved. Answers the settings as saved."
             },
             "SaveAuditSettingsResult": {
                 "type": "object",
@@ -15472,7 +15472,7 @@
                 "required": [
                     "automationId"
                 ],
-                "description": "Get one tenant-scoped automation with editable source rows and dashboard summary fields."
+                "description": "Get one tenant-scoped automation with editable source rows and dashboard summary fields. An automation an\n            audit's checks run through names it (audit: {code, name}, DAR-BE-199) and cannot be paused or resumed by itself."
             },
             "GetAutomationResult": {
                 "type": "object",
@@ -18652,7 +18652,7 @@
                 "required": [
                     "automationId"
                 ],
-                "description": "Pause one tenant-scoped automation by setting isActive to N."
+                "description": "Pause one tenant-scoped automation by setting isActive to N. Refused for an automation an audit's\n            checks run through (DAR-BE-199): it runs on the audit's schedule, set in the audit's settings."
             },
             "PauseAutomationResult": {
                 "type": "object",
@@ -19154,7 +19154,7 @@
                 "required": [
                     "automationId"
                 ],
-                "description": "Resume one tenant-scoped automation by setting isActive to Y."
+                "description": "Resume one tenant-scoped automation by setting isActive to Y. Refused for an automation an audit's\n            checks run through (DAR-BE-199): it runs on the audit's schedule, set in the audit's settings."
             },
             "ResumeAutomationResult": {
                 "type": "object",
@@ -20413,7 +20413,7 @@
                     "automationName",
                     "inputModeEnumId"
                 ],
-                "description": "Create or update a tenant-scoped automation against either an existing saved run or a newly-created saved run payload."
+                "description": "Create or update a tenant-scoped automation against either an existing saved run or a newly-created saved run payload.\n            An audit's automation keeps the audit's schedule: a change to its scheduleExpr, windowTimeZone or isActive is\n            refused (DAR-BE-199)."
             },
             "SaveAutomationResult": {
                 "type": "object",

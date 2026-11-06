@@ -31,6 +31,17 @@
             <description>AuditPeriod: the period a run's checked day is reported under (report.period), day, month or
                 quarter.</description>
         </field>
+        <field name="scheduleTime" type="text-short">
+            <description>DAR-BE-199. HH:mm the audit runs every check each day, in scheduleTimeZone. The audit owns its
+                schedule: every check's automation carries a copy (AuditSettingsSupport.applySchedule) and none is set,
+                paused or resumed on its own. Blank: 06:00 (AuditSettingsSupport.DEFAULT_TIME).</description>
+        </field>
+        <field name="scheduleTimeZone" type="text-short">
+            <description>DAR-BE-199. IANA zone of scheduleTime and of each check's day window. Blank: the tenant's zone.</description>
+        </field>
+        <field name="scheduleActive" type="text-indicator">
+            <description>DAR-BE-199. Y: the audit runs every morning. N or blank: paused (a new audit starts paused).</description>
+        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUD_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>

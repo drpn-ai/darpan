@@ -460,6 +460,33 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-199: registered migration AUDIT_SCHEDULE_OWNED (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="AuditScheduleOwned" authenticate="false" allow-remote="false">
+        <description>One-time: every audit that has automations and no schedule of its own is stamped with one
+            (Audit.scheduleTime, scheduleTimeZone, scheduleActive): the time and zone most of its running automations
+            share, on when any runs. No automation is rewritten; one off the stamped schedule is named, and saving the
+            audit's settings puts it on. Idempotent: a stamped audit is skipped. Not remote: the migration supervisor runs
+            it, with authz disabled.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+            <parameter name="auditsOffSchedule" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="darpan.audit.AuditScheduleOwnedMigration.run(ec, dryRun as boolean)"/>
+            <set field="rowsUpdated" from="out.rowsUpdated"/>
+            <set field="auditsOffSchedule" from="out.auditsOffSchedule"/>
+            <set field="messages" from="out.messages"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
     <!-- DAR-BE-196: registered migration STATEMENT_LINK_EXPECTED (data/MigrationRegistrySeedData.xml). -->
     <service verb="migrate" noun="StatementLinkExpected" authenticate="false" allow-remote="false">
         <description>One-time: each statement link's list of the causes that break its statement moves onto its check's run.

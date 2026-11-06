@@ -18,17 +18,19 @@ import static darpan.common.ValueSupport.normalize
 /**
  * DAR-UI-063. An audit run's settings and its play button, from the audit's page.
  *
- * Settings: the audit's name, one daily schedule for every check it runs, and each statement's text and on/off. A check
- * runs through an automation (DAR-BE-092, AuditAutomationSupport.checksFor), so the schedule IS the schedule of those
- * automations, written to each one. Play runs every check over the days a person picks, through the same automations,
- * submitted to the background (run#AutomationNow is synchronous and a dozen checks would outlast the gateway), where
- * RunAdmission starts them as the instance and the tenant's share allow (DAR-BE-143); a check past that waits, queued.
+ * Settings: the audit's name, one daily schedule for every check it runs, and each statement's text and on/off. The
+ * schedule is the audit's own (DAR-BE-199, Audit.scheduleTime/scheduleTimeZone/scheduleActive; Aditi 2026-11-04 "audits
+ * should run everything on the audit schedule"). A check runs through an automation (DAR-BE-092,
+ * AuditAutomationSupport.checksFor), which carries a copy of that schedule for the scheduler and is never set, paused or
+ * resumed on its own (ownScheduleRefusal). Play runs every check over the days a person picks, through the same
+ * automations, submitted to the background (run#AutomationNow is synchronous and a dozen checks would outlast the
+ * gateway), where RunAdmission starts them as the instance and the tenant's share allow (DAR-BE-143); a check past that
+ * waits, queued.
  *
  * A check whose run has no automation gets one the first time either is asked for: one per run (a run several checks
- * share serves them all), its sources copied from the run's compare scope (each naming the config it reads), paused at
- * 06:00 in the tenant's zone. It is
- * written directly rather than through save#Automation, which requires two sources and so cannot make one for a check
- * that reads one system (an EVALUATE scope, e.g. RAILS R1).
+ * share serves them all), its sources copied from the run's compare scope (each naming the config it reads), on the
+ * audit's schedule. It is written directly rather than through save#Automation, which requires two sources and so cannot
+ * make one for a check that reads one system (an EVALUATE scope, e.g. RAILS R1).
  *
  * Every read and write is pinned to the tenant with an explicit companyUserGroupId condition.
  */
@@ -50,15 +52,15 @@ class AuditSettingsSupport {
         List<Map> checks = checksByStatement.values().flatten().unique { it.checkId } as List<Map>
         List<Map> automations = automationsOf(ec, tenantId, checks)
         Map<String, String> runNames = runNames(ec, tenantId, checks*.savedRunId.findAll { it }.unique() as List<String>)
-        List<String> times = automations.collect { timeOf(it.scheduleExpr as String) }.unique()
-        List<String> zones = automations.collect { it.windowTimeZone as String }.unique()
+        Map schedule = scheduleOf(ec, audit)
         ZoneId zone = ZoneId.of(tenantZone(ec))
         return [audit     : [id: audit.auditCode, name: audit.auditName, period: periods[audit.periodEnumId as String]],
                 playableFrom: playableFrom(ec, tenantId, audit, LocalDate.now(zone), zone),
-                schedule  : [active          : automations.any { it.isActive == "Y" },
-                             time            : times.size() == 1 && times[0] ? times[0] : DEFAULT_TIME,
-                             timeZone        : zones.size() == 1 && zones[0] ? zones[0] : tenantZone(ec),
-                             mixed           : times.size() > 1 || zones.size() > 1 || automations.collect { it.isActive }.unique().size() > 1,
+                schedule  : [active          : schedule.active,
+                             time            : schedule.time,
+                             timeZone        : schedule.timeZone,
+                             // An automation off the audit's schedule (made before DAR-BE-199): saving puts it back on.
+                             mixed           : automations.any { offSchedule(it, schedule) },
                              automations     : automations.size(),
                              checksWithoutRun: checks.count { !it.automationId } as int],
                 statements: statements.collect { Map st ->
@@ -81,8 +83,9 @@ class AuditSettingsSupport {
             if (!ours.contains(change.id as String)) ec.message.addError("Statement ${change.id} is not part of audit ${audit.auditCode}.")
             else if (change.containsKey("text") && !normalize(change.text)) ec.message.addError("Statement ${change.id} needs its text.")
         }
-        String time = schedule ? normalize(schedule.time) ?: DEFAULT_TIME : null
-        String zone = schedule ? normalize(schedule.timeZone) ?: tenantZone(ec) : null
+        Map current = scheduleOf(ec, audit)
+        String time = schedule ? normalize(schedule.time) ?: current.time : null
+        String zone = schedule ? normalize(schedule.timeZone) ?: current.timeZone : null
         if (time && !(time ==~ /([01]\d|2[0-3]):[0-5]\d/)) ec.message.addError("The time must be HH:mm, got ${time}.")
         if (zone) {
             try { ZoneId.of(zone) } catch (Exception ignored) { ec.message.addError("${zone} is not a time zone.") }
@@ -101,18 +104,68 @@ class AuditSettingsSupport {
             row.update()
         }
         if (schedule) {
-            ensureAutomations(ec, tenantId, audit)
-            String cron = cronOf(time)
-            List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten() as List<Map>
-            automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>).each { automation ->
-                automation.set("scheduleExpr", cron)
-                automation.set("windowTimeZone", zone)
-                automation.set("isActive", schedule.active in [true, "true", "Y"] ? "Y" : "N")
-                automation.set("nextScheduledFireTime", AutomationExecutionSupport.resolveNextScheduledFireTime(automation, now, now))
-                automation.set("lastUpdatedDate", now)
-                automation.update()
-            }
+            Map stamp = [scheduleTime: time, scheduleTimeZone: zone, scheduleActive: schedule.active in [true, "true", "Y"] ? "Y" : "N"]
+            def row = rows(ec, "darpan.audit.Audit", tenantId).condition("auditId", audit.auditId).list().find()
+            row.setAll(stamp); row.update()
+            Map stamped = audit + stamp
+            ensureAutomations(ec, tenantId, stamped)   // a new check's automation is made on the schedule just saved
+            applySchedule(ec, tenantId, stamped, now)
         }
+    }
+
+    /** DAR-BE-199. The audit's own schedule: {time HH:mm, timeZone, active}, defaults for an audit never scheduled. */
+    static Map scheduleOf(def ec, Map audit) {
+        return [time    : normalize(audit.scheduleTime) ?: DEFAULT_TIME,
+                timeZone: normalize(audit.scheduleTimeZone) ?: tenantZone(ec),
+                active  : audit.scheduleActive == "Y"]
+    }
+
+    /** True when the automation does not run at the audit's time, in its zone, on or off as the audit is. */
+    static boolean offSchedule(Map automation, Map schedule) {
+        return timeOf(automation.scheduleExpr as String) != schedule.time || automation.windowTimeZone != schedule.timeZone ||
+                (automation.isActive == "Y") != schedule.active
+    }
+
+    /** Writes the audit's schedule onto every automation its checks run through. */
+    static void applySchedule(def ec, String tenantId, Map audit, Timestamp now) {
+        Map schedule = scheduleOf(ec, audit)
+        List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten() as List<Map>
+        automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>).each { automation ->
+            setSchedule(automation, schedule, now)
+            automation.set("lastUpdatedDate", now)
+            automation.update()
+        }
+    }
+
+    private static void setSchedule(def automation, Map schedule, Timestamp now) {
+        automation.set("scheduleExpr", cronOf(schedule.time as String))
+        automation.set("windowTimeZone", schedule.timeZone)
+        automation.set("isActive", schedule.active ? "Y" : "N")
+        automation.set("nextScheduledFireTime", AutomationExecutionSupport.resolveNextScheduledFireTime(automation, now, now))
+    }
+
+    /**
+     * DAR-BE-199. The audit whose checks run through this automation ({auditCode, auditName}), or null. A check that is no
+     * longer on any of an audit's statements does not count: its automation is free again.
+     */
+    static Map auditOfAutomation(def ec, String tenantId, String automationId) {
+        if (!tenantId || !normalize(automationId)) return null
+        List checkIds = rows(ec, "darpan.audit.AuditCheck", tenantId).condition("automationId", normalize(automationId)).list()*.checkId
+        if (!checkIds) return null
+        List statementIds = rows(ec, "darpan.audit.AuditStatementCheck", tenantId)
+                .condition("checkId", EntityCondition.IN, checkIds).list()*.statementId.unique()
+        List auditIds = statementIds ? rows(ec, "darpan.audit.AuditStatement", tenantId)
+                .condition("statementId", EntityCondition.IN, statementIds).list()*.auditId.unique() : []
+        def audit = auditIds ? rows(ec, "darpan.audit.Audit", tenantId).condition("auditId", EntityCondition.IN, auditIds)
+                .orderBy("auditCode").list().find() : null
+        return audit ? [auditCode: audit.auditCode, auditName: audit.auditName] : null
+    }
+
+    /** Why this automation cannot be scheduled, paused or resumed by itself, or null when it can. */
+    static String ownScheduleRefusal(def ec, def automation) {
+        Map audit = auditOfAutomation(ec, automation?.companyUserGroupId as String, automation?.automationId as String)
+        return audit ? ("Automation ${automation.automationId} runs audit ${audit.auditName}'s checks, so it runs on the " +
+                "audit's schedule: change it in the audit's settings.").toString() : null
     }
 
     /**
@@ -294,9 +347,9 @@ class AuditSettingsSupport {
                 companyUserGroupId: tenantId, createdByUserId: userId,
                 inputModeEnumId : AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
                 savedRunId      : ruleSetId, savedRunType: "ruleset", ruleSetId: ruleSetId, compareScopeId: scope.compareScopeId,
-                scheduleExpr    : cronOf(DEFAULT_TIME), windowTimeZone: tenantZone(ec),
                 relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
-                isActive        : "N", isArchived: "N", createdDate: now, lastUpdatedDate: now])
+                isArchived      : "N", createdDate: now, lastUpdatedDate: now])
+        setSchedule(automation, scheduleOf(ec, audit), now)   // DAR-BE-199: a new check runs when the audit runs
         automation.create()
         sources.each { source ->
             // The config this side reads (a NetSuite query, an OMS or Shopify config), under the connector's own parameter:
@@ -361,6 +414,13 @@ class AuditSettingsSupport {
                 .condition("checkId", EntityCondition.IN, links*.checkId.unique()).list().collectEntries { [(it.checkId): it.getMap()] } : [:]
         links.each { Map l -> if (checks[l.checkId as String]) out[l.statementId as String] << checks[l.checkId as String] }
         return out
+    }
+
+    /** Every automation the audit's checks run through, on any of its statements (the settings page's count). */
+    static List<Map> automationsOfAudit(def ec, String tenantId, Map audit) {
+        List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit)).values().flatten()
+                .unique { it.checkId } as List<Map>
+        return automationsOf(ec, tenantId, checks)
     }
 
     private static List<Map> automationsOf(def ec, String tenantId, List<Map> checks) {

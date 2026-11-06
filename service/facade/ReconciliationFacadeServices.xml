@@ -2713,7 +2713,8 @@
     </service>
 
     <service verb="get" noun="Automation" authz-action="view" allow-remote="true" authenticate="true">
-        <description>Get one tenant-scoped automation with editable source rows and dashboard summary fields.</description>
+        <description>Get one tenant-scoped automation with editable source rows and dashboard summary fields. An automation an
+            audit's checks run through names it (audit: {code, name}, DAR-BE-199) and cannot be paused or resumed by itself.</description>
         <in-parameters>
             <parameter name="automationId" required="true"/>
         </in-parameters>
@@ -2752,7 +2753,9 @@
     </service>
 
     <service verb="save" noun="Automation" allow-remote="true" authenticate="true">
-        <description>Create or update a tenant-scoped automation against either an existing saved run or a newly-created saved run payload.</description>
+        <description>Create or update a tenant-scoped automation against either an existing saved run or a newly-created saved run payload.
+            An audit's automation keeps the audit's schedule: a change to its scheduleExpr, windowTimeZone or isActive is
+            refused (DAR-BE-199).</description>
         <in-parameters>
             <parameter name="automationId"/>
             <parameter name="automationName" required="true"/>
@@ -2874,6 +2877,12 @@
                 <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
                     <message error="true">Automation '${automationIdValue}' was not found.</message>
                 </if>
+            </if>
+            <!-- DAR-BE-199: an audit's automation keeps the audit's schedule; everything else about it can still be saved. -->
+            <if condition="!ec.message.hasError() &amp;&amp; automationRecord != null">
+                <set field="scheduleChanged" from="scheduleExprValue != ((automationRecord.scheduleExpr)?.toString()?.trim()) || ((windowTimeZone)?.toString()?.trim() ?: 'UTC') != ((automationRecord.windowTimeZone)?.toString()?.trim() ?: 'UTC') || ((isActive == null || isActive) ? 'Y' : 'N') != (automationRecord.isActive ?: 'Y')"/>
+                <set field="ownScheduleRefusal" from="scheduleChanged ? darpan.audit.AuditSettingsSupport.ownScheduleRefusal(ec, automationRecord) : null"/>
+                <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
@@ -3425,7 +3434,8 @@
     </service>
 
     <service verb="pause" noun="Automation" allow-remote="true" authenticate="true">
-        <description>Pause one tenant-scoped automation by setting isActive to N.</description>
+        <description>Pause one tenant-scoped automation by setting isActive to N. Refused for an automation an audit's
+            checks run through (DAR-BE-199): it runs on the audit's schedule, set in the audit's settings.</description>
         <in-parameters>
             <parameter name="automationId" required="true"/>
         </in-parameters>
@@ -3448,6 +3458,11 @@
                 <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
                     <message error="true">Automation '${automationIdValue}' was not found.</message>
                 </if>
+            </if>
+            <!-- DAR-BE-199: an audit's automation runs on the audit's schedule; it is not paused or resumed by itself. -->
+            <if condition="!ec.message.hasError()">
+                <set field="ownScheduleRefusal" from="darpan.audit.AuditSettingsSupport.ownScheduleRefusal(ec, automationRecord)"/>
+                <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreSetInactive" from="automationRecord.set('isActive', 'N')"/>
@@ -3467,7 +3482,8 @@
     </service>
 
     <service verb="resume" noun="Automation" allow-remote="true" authenticate="true">
-        <description>Resume one tenant-scoped automation by setting isActive to Y.</description>
+        <description>Resume one tenant-scoped automation by setting isActive to Y. Refused for an automation an audit's
+            checks run through (DAR-BE-199): it runs on the audit's schedule, set in the audit's settings.</description>
         <in-parameters>
             <parameter name="automationId" required="true"/>
         </in-parameters>
@@ -3490,6 +3506,11 @@
                 <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
                     <message error="true">Automation '${automationIdValue}' was not found.</message>
                 </if>
+            </if>
+            <!-- DAR-BE-199: an audit's automation runs on the audit's schedule; it is not paused or resumed by itself. -->
+            <if condition="!ec.message.hasError()">
+                <set field="ownScheduleRefusal" from="darpan.audit.AuditSettingsSupport.ownScheduleRefusal(ec, automationRecord)"/>
+                <if condition="ownScheduleRefusal"><message error="true">${ownScheduleRefusal}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreSetActive" from="automationRecord.set('isActive', 'Y')"/>

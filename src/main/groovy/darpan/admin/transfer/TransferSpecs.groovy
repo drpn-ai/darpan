@@ -117,7 +117,9 @@ class TransferSpecs {
             // ownerReconciliationId names a lifecycle, which stays behind like automations do.
             [kind: RUN, entityName: "darpan.rule.RuleSet", pkField: "ruleSetId", mintPrefix: "RS_", naturalKey: "ruleSetName",
              dropFields: ["ownerReconciliationId"], children: [RULE_CHILD, SCOPE_CHILD]],
-            [kind: AUDIT, entityName: "darpan.audit.Audit", pkField: "auditId", naturalKey: "auditCode"],
+            // DAR-BE-199. The schedule is the instance's own, like the automations that carry it: it never travels.
+            [kind: AUDIT, entityName: "darpan.audit.Audit", pkField: "auditId", naturalKey: "auditCode",
+             dropFields: ["scheduleTime", "scheduleTimeZone", "scheduleActive"]],
             [kind: STATEMENT, entityName: "darpan.audit.AuditStatement", pkField: "statementId", naturalKey: "statementCode",
              refFields: [auditId: AUDIT]],
             // DAR-BE-188. automationId is no value; it travels as a ref (heldRefs) only in a transfer that carries automations,

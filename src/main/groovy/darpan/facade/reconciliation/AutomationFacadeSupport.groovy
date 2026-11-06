@@ -124,6 +124,8 @@ class AutomationFacadeSupport {
         String inputModeEnumId = readString(automation, "inputModeEnumId")
         String isActive = readString(automation, "isActive") ?: "Y"
         Map<String, Object> chatSpaceSummary = resolveChatSpaceSummary(ec, automation)
+        // DAR-BE-199: an audit's automation runs on the audit's schedule, never paused or resumed by itself.
+        Map audit = darpan.audit.AuditSettingsSupport.auditOfAutomation(ec, readString(automation, "companyUserGroupId"), automationId)
         Map<String, Object> row = [
                 automationId          : automationId,
                 automationName        : readString(automation, "automationName"),
@@ -159,7 +161,8 @@ class AutomationFacadeSupport {
                 chatSpaceActive       : chatSpaceSummary.chatSpaceActive,
                 lastExecution         : executionRows ? buildExecutionRow(ec, executionRows.first()) : null,
                 executionCount        : executionRows.size(),
-                permissions           : buildPermissions(ec, isActive),
+                audit                 : audit ? [code: audit.auditCode, name: audit.auditName] : null,
+                permissions           : buildPermissions(ec, isActive, audit != null),
                 createdDate           : readField(automation, "createdDate"),
                 lastUpdatedDate       : readField(automation, "lastUpdatedDate"),
         ].findAll { it.value != null } as Map<String, Object>
@@ -174,7 +177,7 @@ class AutomationFacadeSupport {
         return row
     }
 
-    protected static Map<String, Object> buildPermissions(def ec, String isActive) {
+    protected static Map<String, Object> buildPermissions(def ec, String isActive, boolean audits = false) {
         boolean canEdit = TenantAccessSupport.hasActiveTenantWriteAccess(ec)
         boolean canRun = TenantAccessSupport.hasActiveTenantRunAccess(ec)
         boolean active = (isActive ?: "Y") != "N"
@@ -182,8 +185,8 @@ class AutomationFacadeSupport {
                 canViewHistory: true,
                 canEdit       : canEdit,
                 canDelete     : canEdit,
-                canPause      : canEdit && active,
-                canResume     : canEdit && !active,
+                canPause      : canEdit && active && !audits,
+                canResume     : canEdit && !active && !audits,
                 canRunNow     : canRun,
         ]
     }

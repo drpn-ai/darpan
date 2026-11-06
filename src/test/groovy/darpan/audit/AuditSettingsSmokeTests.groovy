@@ -412,6 +412,70 @@ class AuditSettingsSmokeTests {
         assertEquals("Automation execution TSET_REPLAY_OTHER was not found.", refused.message)
     }
 
+    // DAR-BE-199 (Aditi 2026-11-04, "audits should run everything on the audit schedule"): the schedule is the audit's.
+    // A check added later is made on it (gorjana R7-R9 were made at 06:00 and resumed alone, so the audit ran twice a
+    // morning); its automation cannot be paused or resumed by itself; an automation off the schedule shows as mixed
+    // until a save puts it back; a save that names no time keeps the audit's.
+    @Test
+    @Order(14)
+    void aChecksAutomationRunsOnTheAuditsScheduleAndNeverOnItsOwn() {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.Audit", [auditId: "${MINE}_OS".toString(), companyUserGroupId: MINE, auditCode: "own-schedule",
+                    auditName: "Own schedule", periodEnumId: "AUDP_MONTH", scheduleTime: "05:15", scheduleTimeZone: "America/Chicago",
+                    scheduleActive: "Y"])
+            insert("darpan.audit.AuditStatement", [statementId: "${MINE}_OS_R1".toString(), companyUserGroupId: MINE,
+                    auditId: "${MINE}_OS".toString(), statementCode: "R1", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM",
+                    sequenceNum: 1L, statementText: "Every order is in NetSuite."])
+            insert("darpan.audit.AuditCheck", [checkId: "TSET_OS", companyUserGroupId: MINE, checkCode: "added-later",
+                    label: "added-later", savedRunId: "TSET_RS1", graceDays: 1L])
+            insert("darpan.audit.AuditStatementCheck", [checkId: "TSET_OS", statementId: "${MINE}_OS_R1".toString(),
+                    companyUserGroupId: MINE, sequenceNum: 1L])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        AuditSettingsSupport.ensureAutomations(ec, MINE, AuditSettingsSupport.auditOf(ec, MINE, "own-schedule"))
+        String made = checkRow("TSET_OS").automationId as String
+        def automation = row("darpan.reconciliation.ReconciliationAutomation", "automationId", made)
+        assertEquals(["0 15 5 * * ?", "America/Chicago", "Y"], ["scheduleExpr", "windowTimeZone", "isActive"].collect { automation.get(it) },
+                "a check added later runs when its audit runs, not at 06:00 paused")
+        assertNotNull(automation.nextScheduledFireTime)
+        assertEquals([active: true, time: "05:15", timeZone: "America/Chicago", mixed: false, automations: 1, checksWithoutRun: 0],
+                (facade("get#AuditSettings", [audit: "own-schedule"]).settings as Map).schedule)
+
+        Map paused = call("facade.ReconciliationFacadeServices.pause#Automation", [automationId: made])
+        assertTrue(paused.hadError as boolean)
+        assertTrue((paused.errorText as String).contains("runs audit Own schedule's checks"), paused.errorText as String)
+        assertTrue(call("facade.ReconciliationFacadeServices.resume#Automation", [automationId: made]).hadError as boolean)
+        assertEquals("Y", row("darpan.reconciliation.ReconciliationAutomation", "automationId", made).isActive, "still running")
+        Map got = call("facade.ReconciliationFacadeServices.get#Automation", [automationId: made])
+        assertEquals([code: "own-schedule", name: "Own schedule"], got.automation.audit)
+        assertEquals([false, false], [got.automation.permissions.canPause, got.automation.permissions.canResume])
+
+        boolean was = ec.artifactExecution.disableAuthz()
+        try {
+            automation = row("darpan.reconciliation.ReconciliationAutomation", "automationId", made)
+            automation.set("scheduleExpr", "0 0 6 * * ?"); automation.update()
+        } finally {
+            if (!was) ec.artifactExecution.enableAuthz()
+        }
+        assertTrue((facade("get#AuditSettings", [audit: "own-schedule"]).settings as Map).schedule.mixed as boolean, "off the audit's time")
+
+        Map saved = facade("save#AuditSettings", [audit: "own-schedule", schedule: [active: false]])
+        assertFalse(saved.hadError as boolean, saved.errorText as String)
+        assertEquals([active: false, time: "05:15", timeZone: "America/Chicago", mixed: false, automations: 1, checksWithoutRun: 0],
+                (saved.settings as Map).schedule, "a save with no time keeps the audit's and puts every check back on it")
+        assertEquals(["0 15 5 * * ?", "N"], ["scheduleExpr", "isActive"].collect { row("darpan.reconciliation.ReconciliationAutomation", "automationId", made).get(it) })
+        assertEquals(["05:15", "America/Chicago", "N"], ["scheduleTime", "scheduleTimeZone", "scheduleActive"].collect { row("darpan.audit.Audit", "auditId", "${MINE}_OS".toString()).get(it) })
+    }
+
+    private Map call(String service, Map params) {
+        Map out = ec.service.sync().name(service).parameters(params).call() ?: [:]
+        Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]
+        ec.message.clearErrors()
+        return result
+    }
+
     private Map facade(String verbNoun, Map params = [:]) {
         Map out = ec.service.sync().name("${FACADE}.${verbNoun}").parameters(params).call() ?: [:]
         Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]

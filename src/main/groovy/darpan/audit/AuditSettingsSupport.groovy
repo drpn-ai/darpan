@@ -40,9 +40,12 @@ class AuditSettingsSupport {
     private static final String WHY = "audit settings, active tenant: explicit companyUserGroupId condition applied"
 
     /** The audit by its code in this tenant, or null. */
+    /** The tenant's audit by its code, or by its id when no audit has that code (an agent holds the id it was given). */
     static Map auditOf(def ec, String tenantId, String auditCode) {
-        if (!tenantId || !normalize(auditCode)) return null
-        return rows(ec, "darpan.audit.Audit", tenantId).condition("auditCode", normalize(auditCode)).list().find()?.getMap()
+        String key = normalize(auditCode)
+        if (!tenantId || !key) return null
+        return (rows(ec, "darpan.audit.Audit", tenantId).condition("auditCode", key).list().find() ?:
+                rows(ec, "darpan.audit.Audit", tenantId).condition("auditId", key).list().find())?.getMap()
     }
 
     static Map settings(def ec, String tenantId, Map audit) {

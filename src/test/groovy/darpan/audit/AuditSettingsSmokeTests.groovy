@@ -185,6 +185,12 @@ class AuditSettingsSmokeTests {
             assertTrue((out.errorText as String).contains("was not found"), "${svc}: ${out.errorText}")
         }
         assertEquals("Other only", row("darpan.audit.Audit", "auditId", "${OTHER}_ONLY").auditName, "the other tenant's audit is untouched")
+        // By id too (the agent holds the id it was given): the other tenant's id is not found, the tenant's own resolves.
+        Map foreignId = facade("get#AuditSettings", [audit: "${OTHER}_ONLY".toString()])
+        assertTrue(foreignId.hadError as boolean, "another tenant's audit id")
+        Map ownId = facade("get#AuditSettings", [audit: "${MINE}_SH".toString()])
+        assertFalse(ownId.hadError as boolean, ownId.errorText as String)
+        assertEquals("system-health", ownId.settings.audit.id)
     }
 
     // DAR-UI-078 (Aditi: "is it possible to create these audits from UI.. if not we need to be able to").

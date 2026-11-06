@@ -262,6 +262,28 @@ class RunConclusionAuthoringSmokeTests {
         assertTrue((refused.errorText as String).contains("HIDE or EXPECTED"), refused.errorText as String)
     }
 
+    // DAR-BE-198 (b), gorjana R6: whether a run's Unexplained rows count is set on the run alone (EXPECTED / COUNTS), with
+    // nothing else of the run touched; absent keeps it.
+    @Test
+    @Order(8)
+    void aRunsUnexplainedOutcomeIsSetAloneAndAbsentKeepsIt() {
+        Closure<Map> read = { -> (Map) facade("get#RunConclusions", [savedRunId: "TCON_RS"]).conclusions }
+        Map before = read()
+        Map set = facade("save#RunConclusions", [savedRunId: "TCON_RS", unexplainedOutcome: "EXPECTED"])
+        assertFalse(set.hadError as boolean, set.errorText as String)
+        Map after = read()
+        assertEquals("EXPECTED", after.unexplainedOutcome)
+        assertEquals(before.conclusions, after.conclusions, "the tree is untouched")
+        assertEquals(before.lookups, after.lookups, "the lookups are untouched")
+        assertFalse(facade("save#RunConclusions", [savedRunId: "TCON_RS", lookups: before.lookups]).hadError as boolean)
+        assertEquals("EXPECTED", read().unexplainedOutcome, "absent keeps it")
+        assertFalse(facade("save#RunConclusions", [savedRunId: "TCON_RS", unexplainedOutcome: "COUNTS"]).hadError as boolean)
+        assertEquals(null, read().unexplainedOutcome, "COUNTS counts Unexplained again")
+        Map refused = facade("save#RunConclusions", [savedRunId: "TCON_RS", unexplainedOutcome: "MAYBE"])
+        assertTrue(refused.hadError as boolean)
+        assertTrue((refused.errorText as String).contains("EXPECTED or COUNTS"), refused.errorText as String)
+    }
+
     private def row(String entity, String id) {
         return ec.entity.find(entity).condition("enumId", id).disableAuthz().useCache(false).one()
     }

@@ -58,6 +58,8 @@ class RunConclusionAuthoringSupport {
             ec.message.addMessage("This run's lookups cannot be read: ${e.message}".toString(), "warning")
         }
         return [savedRunId: savedRunId, scopeMode: (scope.scopeMode ?: "COMPARE") as String, conclusions: nodes, lookups: lookups,
+                // DAR-BE-198 (b): EXPECTED when the run's Unexplained rows are expected; null when they count.
+                unexplainedOutcome: (scope.unexplainedOutcome ?: null) as String,
                 catalog   : ConclusionCatalogSupport.catalog(ec),
                 buckets   : BUCKETS, operators: OPERATORS, presence: PRESENCE, keyScopes: KEY_SCOPES, quantifiers: QUANTIFIERS] as Map<String, Object>
     }
@@ -69,7 +71,7 @@ class RunConclusionAuthoringSupport {
      * ([{name, subject, idField, systemEnumId, sourceConfigId, keyField, many?, parameters?}], see ConclusionLookupSupport;
      * an empty list clears them); absent keeps them.
      */
-    static Map<String, Object> save(def ec, String savedRunId, List submitted, List lookups = null) {
+    static Map<String, Object> save(def ec, String savedRunId, List submitted, List lookups = null, String unexplainedOutcome = null) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return null
         def scope = scopeFor(ec, savedRunId)
         if (scope == null) return null
@@ -77,6 +79,16 @@ class RunConclusionAuthoringSupport {
         if (ec.message.hasError()) return null
         // DAR-BE-198 (prod gorjana R1): conclusions absent keeps the tree, so lookups can be set alone; before, an absent list
         // read as empty and cleared every rule. An empty list still clears it.
+        // DAR-BE-198 (b): EXPECTED (the run's Unexplained rows are expected) or COUNTS (they count); absent keeps it.
+        String unexplained = normalize(unexplainedOutcome)?.toUpperCase()
+        if (unexplained && !(unexplained in [RunConclusionSupport.OUTCOME_EXPECTED, "COUNTS"])) {
+            ec.message.addError("Unexplained is EXPECTED or COUNTS, not '${unexplained}'.")
+            return null
+        }
+        if (unexplained) {
+            scope.set("unexplainedOutcome", unexplained == "COUNTS" ? null : unexplained)
+            scope.update()
+        }
         if (submitted == null) {
             if (lookups != null) {
                 scope.set("conclusionLookupsJson", lookupsJson)

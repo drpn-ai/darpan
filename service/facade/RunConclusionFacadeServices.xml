@@ -31,6 +31,8 @@
         <in-parameters>
             <parameter name="savedRunId" required="true"/>
             <parameter name="conclusions" type="List"><description>The tree; absent keeps it.</description></parameter>
+            <parameter name="unexplainedOutcome"><description>DAR-BE-198 (b). EXPECTED: the run's Unexplained rows are expected
+                (no statement counts them); COUNTS: they count, as by default. Absent keeps it; nothing else of the run changes.</description></parameter>
             <parameter name="lookups" type="List"><description>DAR-BE-174. The run's lookups, replaced when given (an empty
                 list clears them, absent keeps them): [{name, subject FILE_1|FILE_2, idField, systemEnumId, sourceConfigId,
                 keyField, many (every record under the key, as a list), parameters}]. A condition reads one as
@@ -44,7 +46,7 @@
             <parameter name="savedConclusions" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="savedConclusions" from="darpan.reconciliation.conclusion.RunConclusionAuthoringSupport.save(ec, savedRunId, conclusions, lookups)"/>
+            <set field="savedConclusions" from="darpan.reconciliation.conclusion.RunConclusionAuthoringSupport.save(ec, savedRunId, conclusions, lookups, unexplainedOutcome)"/>
             <if condition="ec.message.hasError()"><return error="true"/></if>
             <set field="ok" from="true"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

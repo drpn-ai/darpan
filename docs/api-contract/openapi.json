@@ -23145,6 +23145,10 @@
                         },
                         "description": "The tree; absent keeps it."
                     },
+                    "unexplainedOutcome": {
+                        "type": "string",
+                        "description": "DAR-BE-198 (b). EXPECTED: the run's Unexplained rows are expected\n                (no statement counts them); COUNTS: they count, as by default. Absent keeps it; nothing else of the run changes."
+                    },
                     "lookups": {
                         "type": "array",
                         "items": {

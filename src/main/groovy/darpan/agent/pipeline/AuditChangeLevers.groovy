@@ -13,9 +13,10 @@ import java.util.regex.Pattern
 import static darpan.common.ValueSupport.normalize
 
 /**
- * DAR-BE-159. The four levers an agent proposal may move, each through the save a person already uses:
- * EXCLUSION_FILTER (save#RuleSetRun, then sync#Automation), STATEMENT_NARROWING (save#AuditCheck), FIX_TEXT and
- * CONCLUSION_ROWS (save#RunConclusions).
+ * DAR-BE-159. The five levers an agent proposal may move, each through the save a person already uses:
+ * EXCLUSION_FILTER (save#RuleSetRun, then sync#Automation), STATEMENT_NARROWING and EXPECTED_CAUSES (save#AuditCheck),
+ * FIX_TEXT and CONCLUSION_ROWS (save#RunConclusions). EXPECTED_CAUSES is the check's run's expected causes (DAR-BE-196: a
+ * cause no statement counts is expected on its run, so it reaches every check on that run).
  *
  * <p>{@link #current} reads the lever as a plain state map of the active tenant (only config fields, no stamps, so two
  * reads of an unchanged config are equal); {@link #merge} applies a proposal's R18 `after` to it; {@link #save} builds
@@ -25,10 +26,11 @@ import static darpan.common.ValueSupport.normalize
  */
 class AuditChangeLevers {
 
-    static final List<String> KINDS = ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "FIX_TEXT", "CONCLUSION_ROWS"].asImmutable()
+    static final List<String> KINDS = ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "EXPECTED_CAUSES", "FIX_TEXT", "CONCLUSION_ROWS"].asImmutable()
     static final Map<String, List<String>> TARGET_KEYS = [
             EXCLUSION_FILTER   : ["savedRunId", "fileSide"],
             STATEMENT_NARROWING: ["auditId", "checkCode", "statementCode"],
+            EXPECTED_CAUSES    : ["auditId", "checkCode"],
             FIX_TEXT           : ["savedRunId", "conclusionCode"],
             CONCLUSION_ROWS    : ["savedRunId"]].asImmutable()
     static final List<String> SIDES = ["FILE_1", "FILE_2"].asImmutable()
@@ -36,7 +38,8 @@ class AuditChangeLevers {
             "sourceConfigId", "sourceConfigType", "fileTypeEnumId", "schemaFileName", "recordRootExpression"].asImmutable()
     static final List<String> CHECK_TEXT_FIELDS = ["label", "file1RecordType", "file2RecordType", "matchedBy", "fixOwner",
             "expectedSource", "actualSource", "headlineTemplate", "fixActionTemplate", "passesWhenTemplate"].asImmutable()
-    static final List<String> NARROWING_KEYS = ["diffTypes", "conclusionCodes", "ruleIds"].asImmutable()
+    // DAR-BE-196: a link no longer lists causes (AuditStatementCheck.conclusionCodes is retired); a cause is expected on its run.
+    static final List<String> NARROWING_KEYS = ["diffTypes", "ruleIds"].asImmutable()
     static final List<String> NODE_KEYS = ["key", "parent", "conclusion", "bucket", "question", "fix", "conditions"].asImmutable()
     static final List<String> CONDITION_KEYS = ["subject", "presence", "keyScope", "quantifier", "field", "operator", "values",
             "checkLabel"].asImmutable()
@@ -65,7 +68,8 @@ class AuditChangeLevers {
         TARGET_KEYS[kind].each { String k -> t[k] = target.get(k) }
         switch (kind) {
             case "EXCLUSION_FILTER": return runState(ec, t)
-            case "STATEMENT_NARROWING": return checkState(ec, t)
+            case "STATEMENT_NARROWING":
+            case "EXPECTED_CAUSES": return checkState(ec, kind, t)
             default: return treeState(ec, kind, t)
         }
     }
@@ -103,7 +107,11 @@ class AuditChangeLevers {
                 filters: filters]
     }
 
-    private static Map checkState(def ec, Map target) {
+    /**
+     * The check, all its links in the audit and, for EXPECTED_CAUSES, the run's expected causes (check.expectedCodes, as
+     * save#AuditCheck describes them) and the other checks on the same run (otherChecks), which the change reaches too.
+     */
+    private static Map checkState(def ec, String kind, Map target) {
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         def audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", target.auditId, tenantId, WHY)
         if (audit == null && tenantId) {
@@ -120,13 +128,30 @@ class AuditChangeLevers {
         List<Map> links = ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", tenantId)
                 .condition("checkId", check.checkId).orderBy(["sequenceNum", "statementId"]).useCache(false).list()
                 .findAll { codeById.containsKey(it.statementId as String) }
-                .collect { [id: codeById[it.statementId as String], diffTypes: csv(it.diffTypes), conclusionCodes: csv(it.conclusionCodes),
-                            ruleIds: csv(it.ruleIds)] as Map }
+                .collect { [id: codeById[it.statementId as String], diffTypes: csv(it.diffTypes), ruleIds: csv(it.ruleIds)] as Map }
                 .sort { Map a, Map b -> (a.id as String) <=> (b.id as String) }
         Map c = [id: check.checkCode, savedRunId: check.savedRunId, fixWhereEnumId: check.fixWhereEnumId,
                  graceDays: check.graceDays == null ? null : check.graceDays.toString(), amountCurrencyUomId: check.amountCurrencyUomId]
         CHECK_TEXT_FIELDS.each { String f -> c[f] = check.get(f) }
-        return [kind: "STATEMENT_NARROWING", target: target, audit: audit.auditCode, check: c, statements: links]
+        Map state = [kind: kind, target: target, audit: audit.auditCode, check: c, statements: links]
+        if (kind == "EXPECTED_CAUSES") {
+            if (!check.savedRunId) { ec.message.addError("Check '${target.checkCode}' has no run, so it has no causes.".toString()); return null }
+            c.expectedCodes = expectedCodesOf(ec, check.savedRunId as String)
+            state.otherChecks = ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", tenantId)
+                    .condition("savedRunId", check.savedRunId).useCache(false).list()
+                    .findAll { it.checkId != check.checkId }*.checkCode.collect { it as String }.sort()
+        }
+        return state
+    }
+
+    /** The run's causes marked EXPECTED (its conclusion rules' outcome), sorted, each once. */
+    private static List<String> expectedCodesOf(def ec, String savedRunId) {
+        def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope").condition("ruleSetId", savedRunId)
+                .useCache(false).list().find()
+        if (scope == null) return []
+        return TenantScopedFinder.findTenantScoped(ec, RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scope.compareScopeId)
+                .useCache(false).list().findAll { normalize(it.outcome) == "EXPECTED" }*.conclusionEnumId
+                .collect { it as String }.unique().sort()
     }
 
     private static Map treeState(def ec, String kind, Map target) {
@@ -158,6 +183,9 @@ class AuditChangeLevers {
      * whose operator is not EXCLUDE_IN (an INCLUDE_IN or INCLUDE_PREFIX scope); the rest of the message names the operator.
      */
     static final String EXISTING_FILTER_OPERATOR_PREFIX = "EXISTING_FILTER_OPERATOR: "
+
+    /** The INVALID statusMessage when every proposed cause is already expected on the run. */
+    static final String NO_CHANGE_EXPECTED_MESSAGE = "NO_CHANGE: every cause is already expected on this check's run; nothing would change."
 
     /** R51: the INVALID statusMessage when every proposed value is already excluded on the field. */
     static final String NO_CHANGE_MESSAGE = "NO_CHANGE: every value is already excluded on this field; nothing would change."
@@ -228,6 +256,14 @@ class AuditChangeLevers {
                 if (link == null) throw new IllegalArgumentException("Statement ${target.statementCode} is not linked to check ${target.checkCode}.".toString())
                 NARROWING_KEYS.each { String k -> if (after.get(k) != null) link[k] = ((List) after.get(k)).collect { it as String } }
                 break
+            case "EXPECTED_CAUSES":
+                // Added to the run's expected causes, none twice; a cause is never taken out (a revert restores the set).
+                Map check = (Map) state.check
+                List<String> was = ((List) (check.expectedCodes ?: [])).collect { it as String }
+                List<String> added = ((List) after.expectedCodes).collect { it as String }.unique().findAll { !(it in was) }
+                if (!added) throw new IllegalArgumentException(NO_CHANGE_EXPECTED_MESSAGE)
+                check.expectedCodes = (was + added).sort()
+                break
             case "FIX_TEXT":
                 onlyNode((List<Map>) state.conclusions, target.conclusionCode as String).fix = after.fixActionTemplate as String
                 break
@@ -277,6 +313,7 @@ class AuditChangeLevers {
                 Map was = ((List<Map>) ((Map) state.filters)[target.fileSide]).find { it.fieldExpression == field }
                 return [fieldExpression: field, entry: copy(was)]
             case "STATEMENT_NARROWING": return [link: copy(((List<Map>) state.statements).find { it.id == target.statementCode })]
+            case "EXPECTED_CAUSES": return [expectedCodes: copy(((Map) state.check).expectedCodes ?: [])]
             case "FIX_TEXT": return [fix: onlyNode((List<Map>) state.conclusions, target.conclusionCode as String).fix]
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
@@ -311,6 +348,9 @@ class AuditChangeLevers {
                 Map link = ((List<Map>) state.statements).find { it.id == target.statementCode }
                 if (link == null) throw new IllegalArgumentException("Statement ${target.statementCode} is no longer linked to check ${target.checkCode}.".toString())
                 NARROWING_KEYS.each { String k -> link[k] = (((Map) lever.link)?.get(k) ?: []).collect { it as String } }
+                break
+            case "EXPECTED_CAUSES":
+                ((Map) state.check).expectedCodes = ((List) (lever.expectedCodes ?: [])).collect { it as String }
                 break
             case "FIX_TEXT":
                 onlyNode((List<Map>) state.conclusions, target.conclusionCode as String).fix = lever.fix as String
@@ -360,10 +400,13 @@ class AuditChangeLevers {
                 }
                 break
             case "STATEMENT_NARROWING":
+            case "EXPECTED_CAUSES":
                 Map c = (Map) state.check
                 Map check = [id: c.id, savedRunId: c.savedRunId, fixWhereEnumId: c.fixWhereEnumId, graceDays: c.graceDays,
                              amountCurrencyUomId: c.amountCurrencyUomId]
                 CHECK_TEXT_FIELDS.each { String f -> check[f] = c.get(f) }
+                // Named only by EXPECTED_CAUSES: left out, save#AuditCheck keeps the run's expected causes as they are.
+                if (kind == "EXPECTED_CAUSES") check.expectedCodes = ((List) (c.expectedCodes ?: [])).collect { it as String }
                 List links = ((List<Map>) state.statements).collect { Map l -> pick(l, ["id"] + NARROWING_KEYS) }
                 ec.service.sync().name("facade.AuditFacadeServices.save#AuditCheck").parameters([audit: state.audit, check: check,
                         statements: links]).call()

@@ -2,6 +2,7 @@ package darpan.agent.pipeline
 
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.AfterAll
@@ -126,11 +127,11 @@ class AuditChangeBacktestSmokeTests {
             }
             upsert("darpan.audit.AuditCheck", [checkId: CHECK, companyUserGroupId: MINE, checkCode: "credits-open-tbt",
                     label: "Open credit memos", savedRunId: runId, automationId: AUTO, graceDays: 1L, headlineTemplate: "Memo {tranId} is open"])
-            // R1 counts every row; R2 only the rows concluded "the store kept the item".
+            // R1 and R2 count every row whose cause is not expected (DAR-BE-196: a cause is expected on its run, not on a link).
             upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R1", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R2", companyUserGroupId: MINE,
-                    sequenceNum: 1L, diffTypes: "FINDING", conclusionCodes: "CONC_TBT_B"])
+                    sequenceNum: 1L, diffTypes: "FINDING"])
             // The two-sided check: R3 counts a memo with no application row on file 1's side missing; R4 a mismatch or a
             // memo with no application.
             upsert("darpan.audit.AuditCheck", [checkId: CHECK2, companyUserGroupId: MINE, checkCode: "memos-applied-tbt",
@@ -181,10 +182,13 @@ class AuditChangeBacktestSmokeTests {
             finding("F-TBT7", "TBT_R1", "CM-2", "AUDFS_OPEN", "CONC_TBT_B", "2026-10")
             finding("F-TBT21", "TBT_R4", "CM-1", "AUDFS_OPEN", null, "2026-11", CHECK2)
             finding("F-TBT22", "TBT_R4", "CM-4", "AUDFS_OPEN", null, "2026-11", CHECK2)
-            ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R3")
-                    .one().set("conclusionCodes", null).update()
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R4")
-                    .one().setAll([diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_2", conclusionCodes: null]).update()
+                    .one().setAll([diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_2"]).update()
+            // No cause starts expected on either run; run2 starts with no tree.
+            ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).useCache(false).list()
+                    .each { if (it.outcome != null) { it.set("outcome", null); it.update() } }
+            ec.entity.find("darpan.rule.RuleSetConclusionCondition").condition("compareScopeId", scope2Id).deleteAll()
+            ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scope2Id).deleteAll()
         }
         ec.message.clearAll()
     }
@@ -245,27 +249,8 @@ class AuditChangeBacktestSmokeTests {
     }
 
     @Test
-    void "statement narrowing closes findings outside the new conclusion codes"() {
+    void "a narrowing changes only diff types or rules, which findings do not record"() {
         Map target = [auditId: "${MINE}_TBT".toString(), checkCode: "credits-open-tbt", statementCode: "R1"]
-        Map merged = AuditChangeLevers.merge("STATEMENT_NARROWING", AuditChangeLevers.current(ec, "STATEMENT_NARROWING", target),
-                [conclusionCodes: ["CONC_TBT_A"]])
-        Map before = snapshot()
-
-        Map out = AuditChangeBacktest.run(ec, MINE, "STATEMENT_NARROWING", target, merged)
-
-        assertEquals(true, out.supported, out.toString())
-        assertNull(out.basisExecutionId, "the findings ledger alone")
-        assertEquals(["F-TBT2", "F-TBT4", "F-TBT7"], out.closed, "R1's open findings concluded other than CONC_TBT_A, any period")
-        assertEquals([], out.opened)
-        assertEquals(1, out.unchanged, "R1's CM-1 stays")
-        assertEquals(["CLOSES_ONLY"], out.limits)
-        assertEquals(before, snapshot())
-
-        Map r2 = [auditId: "${MINE}_TBT".toString(), checkCode: "credits-open-tbt", statementCode: "R2"]
-        Map wider = AuditChangeBacktest.run(ec, MINE, "STATEMENT_NARROWING", r2, AuditChangeLevers.merge("STATEMENT_NARROWING",
-                AuditChangeLevers.current(ec, "STATEMENT_NARROWING", r2), [conclusionCodes: ["CONC_TBT_B", "CONC_TBT_A"]]))
-        assertEquals(["CLOSES_ONLY", "WIDENING_NOT_COMPUTED"], wider.limits, "adding a code lets findings in")
-
         Map byType = AuditChangeBacktest.run(ec, MINE, "STATEMENT_NARROWING", target, AuditChangeLevers.merge("STATEMENT_NARROWING",
                 AuditChangeLevers.current(ec, "STATEMENT_NARROWING", target), [diffTypes: ["MISSING_IN_FILE_2"]]))
         assertEquals(false, byType.supported, "a finding does not record its diff type")
@@ -273,9 +258,46 @@ class AuditChangeBacktestSmokeTests {
     }
 
     @Test
+    void "expected causes close that cause's open findings on every check of the run, from the findings alone"() {
+        asSystem {
+            upsert("darpan.audit.AuditCheck", [checkId: "TBT_CHK_TWO", companyUserGroupId: MINE, checkCode: "credits-open-tbt-two",
+                    label: "Open credit memos again", savedRunId: runId])
+            upsert("darpan.audit.AuditStatementCheck", [checkId: "TBT_CHK_TWO", statementId: "TBT_R3", companyUserGroupId: MINE,
+                    sequenceNum: 2L, diffTypes: "FINDING"])
+            finding("F-TBT31", "TBT_R3", "CM-9", "AUDFS_OPEN", "CONC_TBT_B", "2026-11", "TBT_CHK_TWO")
+        }
+        try {
+            Map target = [auditId: "${MINE}_TBT".toString(), checkCode: "credits-open-tbt"]
+            Map merged = AuditChangeLevers.merge("EXPECTED_CAUSES", AuditChangeLevers.current(ec, "EXPECTED_CAUSES", target),
+                    [expectedCodes: ["CONC_TBT_B"]])
+            Map before = snapshot()
+
+            Map out = AuditChangeBacktest.run(ec, MINE, "EXPECTED_CAUSES", target, merged)
+
+            assertEquals(true, out.supported, out.toString())
+            assertNull(out.basisExecutionId, "the findings ledger alone")
+            assertEquals(["F-TBT2", "F-TBT3", "F-TBT31", "F-TBT4", "F-TBT5", "F-TBT7"], out.closed,
+                    "every open CONC_TBT_B finding of both checks on the run, any period; not the fixed one")
+            assertEquals([], out.opened)
+            assertEquals(1, out.unchanged, "CM-1 (CONC_TBT_A) stays")
+            assertEquals(["CLOSES_ONLY"], out.limits)
+            assertEquals(before, snapshot())
+        } finally {
+            asSystem {
+                ec.entity.find(FINDING).condition("findingId", "F-TBT31").deleteAll()
+                ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", "TBT_CHK_TWO").deleteAll()
+                ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TBT_CHK_TWO").deleteAll()
+            }
+        }
+    }
+
+    @Test
     void "conclusion rows backtest reports a changed conclusion"() {
         Map target = [savedRunId: runId]
-        // "Left open" now means Closed: CM-1 (Open) falls to "the store kept the item", CM-2 (Closed) leaves it.
+        // "Left open" is expected on the run; it now means Closed: CM-1 (Open) falls to "the store kept the item", which
+        // counts, and CM-2 (Closed) becomes "left open", which no statement counts.
+        asSystem { ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).condition("conclusionEnumId", "CONC_TBT_A")
+                .useCache(false).list().each { it.set("outcome", "EXPECTED"); it.update() } }
         Map merged = AuditChangeLevers.merge("CONCLUSION_ROWS", AuditChangeLevers.current(ec, "CONCLUSION_ROWS", target),
                 [rows: [[conclusionCode: "CONC_TBT_A", conditions: [[fieldExpression: "status", operator: "IN", checkValue: "Closed"]]]]])
         Map before = snapshot()
@@ -285,9 +307,9 @@ class AuditChangeBacktestSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertEquals(true, out.supported, out.toString())
         assertEquals("TBT_EXEC1", out.basisExecutionId)
-        assertEquals(["F-TBT3"], out.closed, "R2 no longer counts CM-2; R1 counts any conclusion, so F-TBT2 stays")
-        assertEquals(["CM-1"], out.opened, "R2 would newly count CM-1")
-        assertEquals(5, out.unchanged)
+        assertEquals(["F-TBT2", "F-TBT3"], out.closed, "CM-2's cause is now expected, so neither statement counts it; October's stays")
+        assertEquals(["CM-1"], out.opened, "R2 would newly count CM-1 (R1 already has F-TBT1); the candidate keeps the saved EXPECTED, as the save does")
+        assertEquals(4, out.unchanged)
         assertEquals(["LATEST_WINDOW_ONLY"], out.limits)
         assertEquals(before, snapshot())
     }
@@ -317,13 +339,10 @@ class AuditChangeBacktestSmokeTests {
         assertEquals(["LATEST_WINDOW_ONLY"], out.limits)
         assertEquals(before, snapshot())
 
-        asSystem {
-            ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R3")
-                    .one().set("conclusionCodes", "CONC_TBT_A").update()
-        }
+        expectOnRun2("CONC_TBT_A")
         Map undecided = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, merged)
         assertEquals(true, undecided.supported, "closings still hold")
-        assertEquals("OPENED_NOT_COMPUTED", undecided.reason, "R3 also asks for a conclusion the new row has not reached")
+        assertEquals("OPENED_NOT_COMPUTED", undecided.reason, "the run has an expected cause, and the new row's cause is not computed")
         assertEquals(["F-TBT21", "F-TBT22"], undecided.closed)
         assertEquals([], undecided.opened)
         assertTrue("OPENED_NOT_COMPUTED" in undecided.limits)
@@ -331,11 +350,12 @@ class AuditChangeBacktestSmokeTests {
 
     @Test
     void "an undecided link never lists the finding the new missing row may keep"() {
-        // R4 now also counts a memo whose application stands alone, but only for one conclusion.
+        // R4 now also counts a memo whose application stands alone, unless its cause is the run's expected one.
         asSystem {
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", CHECK2).condition("statementId", "TBT_R4")
-                    .one().setAll([diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_1", conclusionCodes: "CONC_TBT_A"]).update()
+                    .one().setAll([diffTypes: "FIELD_MISMATCH,MISSING_IN_FILE_1"]).update()
         }
+        expectOnRun2("CONC_TBT_A")
         Map target = [savedRunId: run2Id, fileSide: "FILE_1"]
         Map out = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
                 AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].tranId', filterValues: ["CM-1", "CM-4"]]))
@@ -343,7 +363,7 @@ class AuditChangeBacktestSmokeTests {
         assertEquals(["F-TBT22"], out.closed, "F-TBT21 (CM-1, whose application the other side holds) may stay open under R4")
         assertEquals("OPENED_NOT_COMPUTED", out.reason)
         assertTrue("OPENED_NOT_COMPUTED" in out.limits)
-        assertEquals(["CM-1"], out.opened, "R3 still counts it with any conclusion")
+        assertEquals([], out.opened, "the run's expected cause is run-wide, so R3 cannot tell whether the new row counts either")
     }
 
     @Test
@@ -477,6 +497,15 @@ class AuditChangeBacktestSmokeTests {
     }
 
     /** Every row and file the backtest must leave alone. */
+    /** Run2 gets a one-rule tree whose cause is EXPECTED (reset() removes it). */
+    private void expectOnRun2(String code) {
+        ec.service.sync().name("facade.RunConclusionFacadeServices.save#RunConclusions").parameters([savedRunId: run2Id,
+                conclusions: [[key: "1", conclusion: code, outcome: "EXPECTED",
+                               conditions: [[field: "status", operator: "IN", values: ["Open"], checkLabel: "Memo is open"]]]]]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        ec.message.clearAll()
+    }
+
     private Map snapshot() {
         Map rows = asSystem {
             [findings  : ec.entity.find(FINDING).condition("companyUserGroupId", MINE).orderBy("findingId").useCache(false).list()

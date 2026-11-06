@@ -13,6 +13,7 @@ import darpan.reconciliation.conclusion.ConclusionCatalogSupport
 import darpan.reconciliation.conclusion.ConclusionKeySupport
 import darpan.reconciliation.conclusion.JsonRecordStream
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
+import darpan.reconciliation.conclusion.ConclusionTreeSupport
 import darpan.reconciliation.conclusion.RunConclusionSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonSlurper
@@ -46,16 +47,18 @@ import static darpan.common.ValueSupport.normalize
  *   The side's candidate filters run in memory over the basis extract; an open finding whose recordKey they now drop
  *   closes, unless the record still raises it. Two-sided runs: a dropped record the other side's landed extract holds
  *   becomes "missing" on the dropped side (MISSING_IN_FILE_1 when FILE_1 drops it), so a link counting that diff type
- *   with any conclusion reports it (opened, or kept); a link that also narrows by conclusion cannot be decided
- *   (OPENED_NOT_COMPUTED), and an open finding on it for that record is left out of closed (it may stay). A rule on a
+ *   reports it (opened, or kept), unless the run marks a cause expected (or its brain may): the new row's cause is not
+ *   computed, so it cannot be decided (OPENED_NOT_COMPUTED), and an open finding for that record is left out of closed. A rule on a
  *   data-defined field no landed record carries is refused (FIELD_NOT_IN_LANDED_RECORDS). EVALUATE runs: CLOSES_ONLY.</li>
- *   <li>STATEMENT_NARROWING: from AuditFinding rows alone (CLOSES_ONLY); the target statement's open findings whose
- *   conclusion is outside the new codes close. A finding does not record its diff type or rule, so a change to those is
+ *   <li>STATEMENT_NARROWING: a link names diff types and rules only (DAR-BE-196), and a finding records neither, so it is
  *   refused (DIFF_TYPE_NOT_ON_FINDINGS).</li>
+ *   <li>EXPECTED_CAUSES: from AuditFinding rows alone (CLOSES_ONLY); every open finding of a check on the run whose cause
+ *   is newly expected closes, any period (no statement counts an expected cause).</li>
  *   <li>FIX_TEXT: display only.</li>
  *   <li>CONCLUSION_ROWS: the run's conclude path (RunConclusionSupport.concludeEach) over the basis result rows twice,
  *   saved rows then candidate rows (built by the save's own RunConclusionAuthoringSupport.toRows); a record whose
- *   conclusion changes closes where a statement stops counting it and opens where one starts.</li>
+ *   conclusion changes closes where a statement stops counting it and opens where one starts. The candidate keeps each
+ *   rule's saved outcome as save#RunConclusions does (DAR-BE-198), and a row whose cause is expected counts nowhere.</li>
  * </ul>
  */
 class AuditChangeBacktest {
@@ -77,7 +80,8 @@ class AuditChangeBacktest {
         try {
             switch (kind) {
                 case "EXCLUSION_FILTER": return exclusion(ec, tenantId, target, merged, current)
-                case "STATEMENT_NARROWING": return narrowing(ec, tenantId, target, merged)
+                case "STATEMENT_NARROWING": return unsupported("DIFF_TYPE_NOT_ON_FINDINGS")
+                case "EXPECTED_CAUSES": return expectedCauses(ec, tenantId, merged, current ?: AuditChangeLevers.current(ec, kind, target))
                 case "FIX_TEXT": return result(true, "DISPLAY_ONLY", null, [], [], 0, [])
                 case "CONCLUSION_ROWS": return conclusionRows(ec, tenantId, target, merged)
                 default: return unsupported("UNKNOWN_KIND")
@@ -116,6 +120,10 @@ class AuditChangeBacktest {
         Map key = RunConclusionStep.keySpecFor(ec, scope.compareScopeId as String, side)
         if (!key.keyReliable) return unsupported("KEY_NOT_REBUILDABLE")
         Map otherKey = evaluate ? null : RunConclusionStep.keySpecFor(ec, scope.compareScopeId as String, other)
+        // A newly missing row's cause is not computed here: where the run marks a cause expected (or its brain may), the row
+        // may be one no statement counts.
+        boolean causesMayBeExpected = RunConclusionStep.brainKind(scope.conclusionBrain) ||
+                RunConclusionStep.scopeRules(ec, scope.compareScopeId as String).any { it.outcome == RunConclusionSupport.OUTCOME_EXPECTED }
 
         List<Map> bases = bases(ec, tenantId, savedRunId, evaluate ? [side] : [side, other])
         if (!bases) return unsupported("NO_LANDED_EXTRACT")
@@ -164,7 +172,7 @@ class AuditChangeBacktest {
                     if (!AuditAutomationSupport.matches(link.diffTypes as String, newType) ||
                             !AuditAutomationSupport.matches(link.ruleIds as String, null)) return
                     String id = findingId(link.checkId, link.statementId, k)
-                    if (!otherKnown || normalize(link.conclusionCodes)) { undecided = true; maybeKept.add(id); return }
+                    if (!otherKnown || causesMayBeExpected) { undecided = true; maybeKept.add(id); return }
                     reportedAfter.add(id)
                 }
             }
@@ -217,38 +225,19 @@ class AuditChangeBacktest {
         return step == null ? null : (((step.fields ?: []) as List).collect { it.toString() } as Set<String>)
     }
 
-    // ---------------------------------------------------------------- STATEMENT_NARROWING
+    // ---------------------------------------------------------------- EXPECTED_CAUSES
 
-    private static Map narrowing(def ec, String tenantId, Map target, Map merged) {
-        Map newLink = ((List<Map>) (merged.statements ?: [])).find { it.id == target.statementCode }
-        Map check = (Map) merged.check
-        def checkRow = check ? ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", tenantId)
-                .condition("checkCode", check.id).useCache(false).list().find() : null
-        def audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", target.auditId, tenantId, WHY) ?:
-                ec.entity.find("darpan.audit.Audit").condition("companyUserGroupId", tenantId).condition("auditCode", merged.audit)
-                        .useCache(false).list().find()
-        def statement = audit ? ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId)
-                .condition("auditId", audit.auditId).condition("statementCode", target.statementCode).useCache(false).list().find() : null
-        if (newLink == null || checkRow == null || statement == null) return unsupported("NO_STATEMENT")
-        def oldLink = ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", tenantId)
-                .condition("checkId", checkRow.checkId).condition("statementId", statement.statementId).useCache(false).list().find()
-        if (oldLink == null) return unsupported("NO_STATEMENT")
-        // What a finding records is its conclusion; its diff type and rule are not kept, so only the codes are backtested.
-        if (csvSet(oldLink.diffTypes) != listSet(newLink.diffTypes) || csvSet(oldLink.ruleIds) != listSet(newLink.ruleIds)) {
-            return unsupported("DIFF_TYPE_NOT_ON_FINDINGS")
-        }
-        Set<String> before = csvSet(oldLink.conclusionCodes)
-        Set<String> codes = listSet(newLink.conclusionCodes)
-        List<String> limits = [CLOSES_ONLY]
-        // Blank counts any conclusion: dropping the list, or adding a code to a non-blank one, lets findings in.
-        if (before && (!codes || !before.containsAll(codes))) limits << WIDENING_NOT_COMPUTED
-        List open = openFindings(ec, tenantId, [checkRow.checkId as String], statement.statementId as String)
+    private static Map expectedCauses(def ec, String tenantId, Map merged, Map current) {
+        String savedRunId = ((Map) merged.check)?.savedRunId as String
+        if (!savedRunId || current == null) return unsupported("NO_RUN")
+        Set<String> added = listSet(((Map) merged.check).expectedCodes) - listSet(((Map) current.check).expectedCodes)
+        List open = openFindings(ec, tenantId, checkIdsOf(ec, tenantId, savedRunId), null)
         Map<String, String> codeOfEnum = [:]
-        List<String> closed = codes ? open.findAll { f ->
+        List<String> closed = open.findAll { f ->
             String enumId = normalize(f.conclusionEnumId)
-            !(enumId && (codes.contains(enumId) || codes.contains(enumCode(ec, enumId, codeOfEnum))))
-        }*.findingId.collect { it as String }.sort() : []
-        return result(true, null, null, closed, [], open.size() - closed.size(), limits)
+            enumId && (added.contains(enumId) || added.contains(enumCode(ec, enumId, codeOfEnum)))
+        }*.findingId.collect { it as String }.sort()
+        return result(true, null, null, closed, [], open.size() - closed.size(), [CLOSES_ONLY])
     }
 
     // ---------------------------------------------------------------- CONCLUSION_ROWS
@@ -265,7 +254,7 @@ class AuditChangeBacktest {
         // A hidden row left the result document, so its new conclusion cannot be seen (and R29 refuses the change).
         if (saved.any { it.outcome == RunConclusionSupport.OUTCOME_HIDE }) return unsupported("HIDDEN_ROWS")
         boolean evaluate = "EVALUATE".equalsIgnoreCase(scope.scopeMode as String)
-        List<Map> candidate = candidateRules(ec, (List<Map>) (merged.conclusions ?: []), evaluate)
+        List<Map> candidate = candidateRules(ec, compareScopeId, (List<Map>) (merged.conclusions ?: []), evaluate)
         if (candidate == null) return unsupported("INVALID_TREE")
 
         List<String> sides = evaluate ? [ExtractReplaySupport.SIDE_1] : [ExtractReplaySupport.SIDE_1, ExtractReplaySupport.SIDE_2]
@@ -282,11 +271,17 @@ class AuditChangeBacktest {
             changedByBasis[basis.executionId as String] = changed
             Map args = conclusionArgs(ec, compareScopeId, basis, evaluate)
             List<String> savedCodes = []
-            RunConclusionSupport.concludeEach(args + [rules: saved]) { Map row, Map conclusion -> savedCodes << (conclusion.code as String) }
+            List<Boolean> savedExpected = []
+            RunConclusionSupport.concludeEach(args + [rules: saved]) { Map row, Map conclusion ->
+                savedCodes << (conclusion.code as String)
+                savedExpected << expectedOf(saved, conclusion)
+            }
             int i = 0
             RunConclusionSupport.concludeEach(args + [rules: candidate]) { Map row, Map conclusion ->
+                boolean beforeExpected = savedExpected[i]
                 String before = savedCodes[i++]
                 String after = conclusion.code as String
+                boolean afterExpected = expectedOf(candidate, conclusion)
                 String recordKey = (row.primaryId ?: row.id) as String
                 if (!recordKey) return
                 if (before != after) changed.add(recordKey)
@@ -294,8 +289,8 @@ class AuditChangeBacktest {
                 String ruleId = normalize(row.ruleId)
                 links.each { Map link ->
                     String id = findingId(link.checkId, link.statementId, recordKey)
-                    if (counts(link, type, before, ruleId)) savedReported.add(id)
-                    if (counts(link, type, after, ruleId)) candidateReported.add(id)
+                    if (counts(link, type, beforeExpected, ruleId)) savedReported.add(id)
+                    if (counts(link, type, afterExpected, ruleId)) candidateReported.add(id)
                 }
             }
         }
@@ -314,9 +309,14 @@ class AuditChangeBacktest {
         return result(true, null, basisId(bases), closedIds as List<String>, opened, open.size() - closedIds.size(), [LATEST_WINDOW_ONLY])
     }
 
-    /** The candidate tree as save#RunConclusions stores it (its own toRows), then as the conclude step compiles it; null if refused. */
-    private static List<Map> candidateRules(def ec, List<Map> nodes, boolean evaluate) {
-        Map converted = RunConclusionAuthoringSupport.toRows(nodes, evaluate) { String conclusion ->
+    /**
+     * The candidate tree as save#RunConclusions stores it (its own toRows, with the saved rules as priors, so a node that
+     * names no outcome keeps its rule's as the save keeps it, DAR-BE-198), then as the conclude step compiles it; null if refused.
+     */
+    private static List<Map> candidateRules(def ec, String compareScopeId, List<Map> nodes, boolean evaluate) {
+        Map<String, Object> priorByKey = TenantScopedFinder.findTenantScoped(ec, RunConclusionAuthoringSupport.RULE)
+                .condition("compareScopeId", compareScopeId).useCache(false).list().collectEntries { [("${it.sequenceNum}".toString()): it] }
+        Map converted = RunConclusionAuthoringSupport.toRows(nodes, evaluate, priorByKey) { String conclusion ->
             def e = ConclusionCatalogSupport.visibleConclusion(ec, conclusion)
             e == null ? null : ((e.description ?: conclusion) as String)
         }
@@ -343,11 +343,18 @@ class AuditChangeBacktest {
                 file1: spec(ExtractReplaySupport.SIDE_1), file2: singleSided ? null : spec(ExtractReplaySupport.SIDE_2)]
     }
 
-    /** As AuditAutomationSupport.findingsFrom decides it: the row's type, conclusion and rule are each one the link counts. */
-    private static boolean counts(Map link, String type, String code, String ruleId) {
-        return AuditAutomationSupport.matches(link.diffTypes as String, type) &&
-                AuditAutomationSupport.matches(link.conclusionCodes as String, code) &&
+    /** As AuditAutomationSupport.findingsFrom decides it (DAR-BE-196): a type and rule the link counts, and a cause not expected. */
+    private static boolean counts(Map link, String type, boolean expected, String ruleId) {
+        return !expected && AuditAutomationSupport.matches(link.diffTypes as String, type) &&
                 AuditAutomationSupport.matches(link.ruleIds as String, ruleId)
+    }
+
+    /** As the run writes conclusion.expected: an EXPECTED rule of the cause, or an expected step on its path; never Unexplained. */
+    private static boolean expectedOf(List<Map> rules, Map conclusion) {
+        String code = conclusion.code as String
+        if (!code || code == ConclusionTreeSupport.UNEXPLAINED) return false
+        return rules.any { it.conclusionEnumId == code && it.outcome == RunConclusionSupport.OUTCOME_EXPECTED } ||
+                ((List<Map>) (conclusion.path ?: [])).any { it?.expected == true }
     }
 
     // ---------------------------------------------------------------- shared reads
@@ -469,10 +476,6 @@ class AuditChangeBacktest {
         return SourceFilterSupport.splitValues(values).collect { it.toUpperCase(Locale.ROOT) } as Set<String>
     }
 
-    private static Set<String> csvSet(Object v) {
-        String s = normalize(v)
-        return (s ? s.split(",").collect { it.trim() }.findAll { it } : []) as Set<String>
-    }
 
     private static Set<String> listSet(Object v) {
         return (((v ?: []) as List).collect { normalize(it) }.findAll { it }) as Set<String>

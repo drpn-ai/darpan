@@ -84,13 +84,20 @@ class AgentProvenance {
                 strList(after, "filterValues", true, "after")
                 break
             case "STATEMENT_NARROWING":
-                keys(after, ["diffTypes", "conclusionCodes", "ruleIds"], "after")
-                ["diffTypes", "conclusionCodes", "ruleIds"].each { String k ->
+                // DAR-BE-196: a link no longer lists causes; an expected cause is EXPECTED_CAUSES on the run.
+                keys(after, ["diffTypes", "ruleIds"], "after")
+                ["diffTypes", "ruleIds"].each { String k ->
                     strList(after, k, false, "after")
                     if (after.get(k) != null) ((List) after.get(k)).each { Object e -> canonical((String) e, "after.${k} entry".toString(), true) }
                 }
-                if (["diffTypes", "conclusionCodes", "ruleIds"].every { String k -> !(after.get(k) instanceof List) || ((List) after.get(k)).isEmpty() })
-                    throw new IllegalArgumentException("after needs at least one non-empty list of diffTypes, conclusionCodes, ruleIds")
+                if (["diffTypes", "ruleIds"].every { String k -> !(after.get(k) instanceof List) || ((List) after.get(k)).isEmpty() })
+                    throw new IllegalArgumentException("after needs at least one non-empty list of diffTypes, ruleIds")
+                break
+            case "EXPECTED_CAUSES":
+                keys(after, ["expectedCodes"], "after")
+                strList(after, "expectedCodes", true, "after")
+                if (((List) after.get("expectedCodes")).isEmpty()) throw new IllegalArgumentException("after.expectedCodes must name at least one cause")
+                ((List) after.get("expectedCodes")).each { Object e -> canonical((String) e, "after.expectedCodes entry", true) }
                 break
             case "FIX_TEXT":
                 keys(after, ["fixActionTemplate"], "after")

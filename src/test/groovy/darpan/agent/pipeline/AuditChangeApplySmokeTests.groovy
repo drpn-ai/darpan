@@ -2,6 +2,7 @@ package darpan.agent.pipeline
 
 import darpan.agent.AgentCallMarker
 import darpan.facade.common.TenantAccessSupport
+import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
@@ -159,7 +160,7 @@ class AuditChangeApplySmokeTests {
             upsert("darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R1".toString(), companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R2".toString(), companyUserGroupId: MINE,
-                    sequenceNum: 1L, diffTypes: "FINDING", conclusionCodes: "CONC_TAC_B"])
+                    sequenceNum: 1L, diffTypes: "FINDING"])
         }
         Map tree = ec.service.sync().name("facade.RunConclusionFacadeServices.save#RunConclusions").parameters([savedRunId: runId,
                 conclusions: [
@@ -169,6 +170,8 @@ class AuditChangeApplySmokeTests {
                          conditions: [[field: "memoOrigin", operator: "NOT_BLANK", checkLabel: "Has an origin"]]]]]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         assertNotNull(tree)
+        // DAR-BE-198: the save keeps a rule's outcome, so an EXPECTED a test set would outlive it; every test starts with none.
+        asSystem { ruleRows().each { if (it.outcome != null) { it.set("outcome", null); it.update() } } }
         // Each automation starts exactly in sync with its run, as Sync leaves it.
         [AUTO, AUTO2].each { sync(it) }
         assertEquals(filterRows(), automationFilterRows())
@@ -342,7 +345,7 @@ class AuditChangeApplySmokeTests {
     @Test
     void "statement narrowing keeps graceDays"() {
         Map target = [auditId: "${MINE}_MC".toString(), checkCode: "credits-open", statementCode: "R1"]
-        Map p = propose("STATEMENT_NARROWING", target, [conclusionCodes: ["CONC_TAC_A"]])
+        Map p = propose("STATEMENT_NARROWING", target, [diffTypes: ["FIELD_MISMATCH"]])
         assertEquals("PLANNED", p.status, p.statusMessage as String)
         Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
         Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
@@ -350,12 +353,74 @@ class AuditChangeApplySmokeTests {
         def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
         assertEquals(1L, check.graceDays as Long, "graceDays is resent, not nulled")
         assertEquals("Memo {tranId} is open", check.headlineTemplate)
-        assertEquals("CONC_TAC_A", link("R1").conclusionCodes)
-        assertEquals("FINDING", link("R1").diffTypes)
-        assertEquals("CONC_TAC_B", link("R2").conclusionCodes, "the other statement's link is untouched")
+        assertEquals("FIELD_MISMATCH", link("R1").diffTypes)
+        assertEquals("FINDING", link("R2").diffTypes, "the other statement's link is untouched")
+    }
 
-        Map unknown = propose("STATEMENT_NARROWING", target, [conclusionCodes: ["CONC_NOT_A_CODE"]])
-        assertEquals("INVALID", unknown.status, "a code outside the tenant's catalog")
+    @Test
+    void "a narrowing by conclusion code is refused: since DAR-BE-196 a cause is expected on its run, not left off a link"() {
+        Map target = [auditId: "${MINE}_MC".toString(), checkCode: "credits-open", statementCode: "R1"]
+        Map p = propose("STATEMENT_NARROWING", target, [conclusionCodes: ["CONC_TAC_A"]])
+        assertTrue(p.hadError as boolean, "unknown key 'conclusionCodes'")
+        assertEquals(0L, asSystem { ec.entity.find(PROPOSAL).count() })
+    }
+
+    @Test
+    void "expected causes mark the run's rules EXPECTED through the check's own save"() {
+        Map p = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_B"]])
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
+        assertEquals([], plan.before.check.expectedCodes)
+        assertEquals(["CONC_TAC_B"], plan.after.check.expectedCodes)
+        long versions = versionCount()
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("APPLIED", out.status)
+        assertEquals([CONC_TAC_A: null, CONC_TAC_B: "EXPECTED"], ruleOutcomes())
+        def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
+        assertEquals(1L, check.graceDays as Long, "the check is resent whole")
+        assertEquals(["FINDING", "FINDING"], [link("R1").diffTypes, link("R2").diffTypes], "the links are resent unchanged")
+        assertEquals(versions + 2, versionCount(), "two AGENT_APPLY versions")
+    }
+
+    @Test
+    void "expected causes add to the run's set, and an unchanged set or a cause the run does not conclude is INVALID"() {
+        asSystem { ruleRows().find { it.conclusionEnumId == "CONC_TAC_A" }.set("outcome", "EXPECTED").update() }
+        Map p = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_B"]])
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        assertEquals(["CONC_TAC_A", "CONC_TAC_B"], call("plan#AuditChange", [proposalId: p.proposalId]).after.check.expectedCodes)
+
+        Map same = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_A"]])
+        assertEquals("INVALID", same.status)
+        assertEquals(AuditChangeLevers.NO_CHANGE_EXPECTED_MESSAGE, same.statusMessage)
+
+        Map foreign = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_C"]])
+        assertEquals("INVALID", foreign.status, "the run never concludes CONC_TAC_C")
+    }
+
+    @Test
+    void "reverting expected causes restores the run's exact earlier set"() {
+        asSystem { ruleRows().find { it.conclusionEnumId == "CONC_TAC_A" }.set("outcome", "EXPECTED").update() }
+        Map p = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_B"]])
+        applied(p)
+        assertEquals([CONC_TAC_A: "EXPECTED", CONC_TAC_B: "EXPECTED"], ruleOutcomes())
+        revertApplied(p.proposalId)
+        assertEquals([CONC_TAC_A: "EXPECTED", CONC_TAC_B: null], ruleOutcomes(), "only the proposal's own cause is taken back")
+    }
+
+    @Test
+    void "an expected-causes plan names the other checks on its run, which it also changes"() {
+        asSystem {
+            upsert("darpan.audit.AuditCheck", [checkId: "TAC_CHK2", companyUserGroupId: MINE, checkCode: "credits-open-two",
+                    label: "Open credit memos again", savedRunId: runId])
+        }
+        try {
+            Map p = propose("EXPECTED_CAUSES", expectedTarget(), [expectedCodes: ["CONC_TAC_B"]])
+            assertEquals("PLANNED", p.status, p.statusMessage as String)
+            assertEquals(["credits-open-two"], call("plan#AuditChange", [proposalId: p.proposalId]).after.otherChecks)
+        } finally {
+            asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK2").deleteAll() }
+        }
     }
 
     @Test
@@ -905,10 +970,10 @@ class AuditChangeApplySmokeTests {
     @Test
     void "an unchanged narrowing or tree change still reverts"() {
         Map target = [auditId: "${MINE}_MC".toString(), checkCode: "credits-open", statementCode: "R1"]
-        Map n = propose("STATEMENT_NARROWING", target, [conclusionCodes: ["CONC_TAC_A"]])
+        Map n = propose("STATEMENT_NARROWING", target, [diffTypes: ["FIELD_MISMATCH"]])
         applied(n)
         revertApplied(n.proposalId)
-        assertNull(link("R1").conclusionCodes, "the narrowing is gone")
+        assertEquals("FINDING", link("R1").diffTypes, "the narrowing is gone")
 
         Map rows = propose("CONCLUSION_ROWS", [savedRunId: runId], [rows: [
                 [conclusionCode: "CONC_TAC_B", fixActionTemplate: "Ask the store again"],
@@ -1049,6 +1114,22 @@ class AuditChangeApplySmokeTests {
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", "TAC_CHK")
                     .condition("statementId", "${MINE}_${statementCode}".toString()).useCache(false).list().find()
         }
+    }
+
+    private Map expectedTarget() {
+        return [auditId: "${MINE}_MC".toString(), checkCode: "credits-open"]
+    }
+
+    /** The run's conclusion rules (RuleSetConclusionRule), read as system. */
+    private List ruleRows() {
+        return asSystem {
+            ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).orderBy("sequenceNum").useCache(false).list()
+        }
+    }
+
+    /** {conclusionEnumId: outcome} of the run's rules. */
+    private Map ruleOutcomes() {
+        return ruleRows().collectEntries { [(it.conclusionEnumId as String): it.outcome as String] }
     }
 
     private List<Map> tree() {

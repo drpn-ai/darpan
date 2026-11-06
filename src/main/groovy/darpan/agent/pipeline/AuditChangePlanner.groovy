@@ -4,7 +4,6 @@ import darpan.agent.AgentCallMarker
 import darpan.config.TenantConfigVersionSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
-import darpan.reconciliation.conclusion.ConclusionCatalogSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
@@ -130,12 +129,6 @@ class AuditChangePlanner {
             return invalid(ec, row)
         }
         if (unsafeTree(ec, row)) return unsafe(row)
-        if (kind == "STATEMENT_NARROWING" && !row.revertOfProposalId) {
-            Set<String> catalog = ConclusionCatalogSupport.catalog(ec)*.id.collect { it as String } as Set<String>
-            ((parse(row.afterJson).conclusionCodes ?: []) as List).findAll { !(it in catalog) }
-                    .each { ec.message.addError("'${it}' is not one of this tenant's conclusion codes.".toString()) }
-            if (ec.message.hasError()) return invalid(ec, row)
-        }
         String refused = validateBySave(ec, kind, merged)
         if (refused) {
             ec.message.addError(refused)
@@ -298,6 +291,7 @@ class AuditChangePlanner {
         switch (kind) {
             case "EXCLUSION_FILTER": return "the run's exclusion filter"
             case "STATEMENT_NARROWING": return "the statement's link to the check"
+            case "EXPECTED_CAUSES": return "the run's expected causes"
             case "FIX_TEXT": return "the conclusion's fix text"
             default: return "the run's conclusion rows"
         }

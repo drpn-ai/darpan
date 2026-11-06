@@ -122,7 +122,7 @@ class AuditChangeBacktest {
         Map otherKey = evaluate ? null : RunConclusionStep.keySpecFor(ec, scope.compareScopeId as String, other)
         // A newly missing row's cause is not computed here: where the run marks a cause expected (or its brain may), the row
         // may be one no statement counts.
-        boolean causesMayBeExpected = RunConclusionStep.brainKind(scope.conclusionBrain) ||
+        boolean causesMayBeExpected = RunConclusionStep.brainKind(scope.conclusionBrain) || unexplainedExpected(scope) ||
                 RunConclusionStep.scopeRules(ec, scope.compareScopeId as String).any { it.outcome == RunConclusionSupport.OUTCOME_EXPECTED }
 
         List<Map> bases = bases(ec, tenantId, savedRunId, evaluate ? [side] : [side, other])
@@ -272,16 +272,17 @@ class AuditChangeBacktest {
             Map args = conclusionArgs(ec, compareScopeId, basis, evaluate)
             List<String> savedCodes = []
             List<Boolean> savedExpected = []
+            boolean unexplained = unexplainedExpected(scope)
             RunConclusionSupport.concludeEach(args + [rules: saved]) { Map row, Map conclusion ->
                 savedCodes << (conclusion.code as String)
-                savedExpected << expectedOf(saved, conclusion)
+                savedExpected << expectedOf(saved, conclusion, unexplained)
             }
             int i = 0
             RunConclusionSupport.concludeEach(args + [rules: candidate]) { Map row, Map conclusion ->
                 boolean beforeExpected = savedExpected[i]
                 String before = savedCodes[i++]
                 String after = conclusion.code as String
-                boolean afterExpected = expectedOf(candidate, conclusion)
+                boolean afterExpected = expectedOf(candidate, conclusion, unexplained)
                 String recordKey = (row.primaryId ?: row.id) as String
                 if (!recordKey) return
                 if (before != after) changed.add(recordKey)
@@ -349,15 +350,24 @@ class AuditChangeBacktest {
                 AuditAutomationSupport.matches(link.ruleIds as String, ruleId)
     }
 
-    /** As the run writes conclusion.expected: an EXPECTED rule of the cause, or an expected step on its path; never Unexplained. */
-    private static boolean expectedOf(List<Map> rules, Map conclusion) {
+    /**
+     * As the run writes conclusion.expected: an EXPECTED rule of the cause, or an expected step on its path; Unexplained only
+     * when the run says its Unexplained rows are expected (DAR-BE-198 b, set on the run, not by a tree edit).
+     */
+    private static boolean expectedOf(List<Map> rules, Map conclusion, boolean unexplainedExpected) {
         String code = conclusion.code as String
-        if (!code || code == ConclusionTreeSupport.UNEXPLAINED) return false
+        if (!code) return false
+        if (code == ConclusionTreeSupport.UNEXPLAINED) return unexplainedExpected
         return rules.any { it.conclusionEnumId == code && it.outcome == RunConclusionSupport.OUTCOME_EXPECTED } ||
                 ((List<Map>) (conclusion.path ?: [])).any { it?.expected == true }
     }
 
     // ---------------------------------------------------------------- shared reads
+
+    /** DAR-BE-198 (b): the run marks its Unexplained rows expected. */
+    private static boolean unexplainedExpected(def scope) {
+        return normalize(scope?.unexplainedOutcome) == RunConclusionSupport.OUTCOME_EXPECTED
+    }
 
     /**
      * Per automation of the run: its latest succeeded execution whose named files are all still on disk.

@@ -109,8 +109,6 @@ class RunConclusionSupport {
         String file1Label = (String) args.file1Label
         String file2Label = (String) args.file2Label
         boolean singleSided = args.singleSided == true
-        // DAR-BE-198 (b): the run's Unexplained rows are expected (RuleSetCompareScope.unexplainedOutcome EXPECTED).
-        boolean unexplainedExpected = args.unexplainedExpected == true
         Map sideSpecs = [FILE_1: (Map) args.file1, FILE_2: singleSided ? null : (Map) args.file2]
         // DAR-BE-157: a side's evidence may name the field holding the OTHER side's key (a HotWax product's NetSuite id), so
         // a row keyed apart from it (DUPLICATE:22139:M100880) still shows the record the other side has. Evidence only.
@@ -177,6 +175,8 @@ class RunConclusionSupport {
         String file1Label = (String) args.file1Label
         String file2Label = (String) args.file2Label
         Map prepared = evidenceOf(args)
+        // DAR-BE-198 (b): the run's Unexplained rows are expected (RuleSetCompareScope.unexplainedOutcome EXPECTED).
+        boolean unexplainedExpected = args.unexplainedExpected == true
         Map sideSpecs = (Map) prepared.sideSpecs
         Map<String, String> otherSideKeyFields = (Map<String, String>) prepared.otherSideKeyFields
         Map<String, Map> index = (Map<String, Map>) prepared.index

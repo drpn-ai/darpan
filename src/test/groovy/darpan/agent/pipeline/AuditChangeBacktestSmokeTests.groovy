@@ -188,6 +188,7 @@ class AuditChangeBacktestSmokeTests {
             ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scopeId).useCache(false).list()
                     .each { if (it.outcome != null) { it.set("outcome", null); it.update() } }
             ec.entity.find("darpan.rule.RuleSetConclusionCondition").condition("compareScopeId", scope2Id).deleteAll()
+            ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", scope2Id).one().set("unexplainedOutcome", null).update()
             ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scope2Id).deleteAll()
         }
         ec.message.clearAll()
@@ -346,6 +347,16 @@ class AuditChangeBacktestSmokeTests {
         assertEquals(["F-TBT21", "F-TBT22"], undecided.closed)
         assertEquals([], undecided.opened)
         assertTrue("OPENED_NOT_COMPUTED" in undecided.limits)
+
+        // DAR-BE-198 (b): a run that marks only its Unexplained rows expected leaves the new row undecided as well.
+        asSystem {
+            ec.entity.find("darpan.rule.RuleSetConclusionCondition").condition("compareScopeId", scope2Id).deleteAll()
+            ec.entity.find(RunConclusionAuthoringSupport.RULE).condition("compareScopeId", scope2Id).deleteAll()
+            ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", scope2Id).one().set("unexplainedOutcome", "EXPECTED").update()
+        }
+        Map byRun = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, merged)
+        assertEquals("OPENED_NOT_COMPUTED", byRun.reason, byRun.toString())
+        assertEquals([], byRun.opened)
     }
 
     @Test

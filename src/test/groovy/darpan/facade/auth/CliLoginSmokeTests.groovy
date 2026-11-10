@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -54,7 +55,9 @@ class CliLoginSmokeTests {
         upsertAccount(APPROVER_ID, APPROVER_USERNAME)
         upsertAccount(OTHER_ID, OTHER_USERNAME)
         upsertAccount(PLAIN_ID, PLAIN_USERNAME)
-        // DAR-BE-195: until per-user CLI grants exist, only Darpan admins may approve a CLI sign-in.
+        // DAR-BE-195: a Darpan admin needs no CLI grant; PLAIN has none unless a test gives one.
+        ec.entity.find(CliAccess.GRANT).disableAuthz().deleteAll()
+        ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("userId", PLAIN_ID).disableAuthz().deleteAll()
         darpanAdmin(APPROVER_ID, true)
         darpanAdmin(OTHER_ID, true)
         darpanAdmin(PLAIN_ID, false)
@@ -284,6 +287,53 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("DAR-BE-195: a CLI grant lets a non-admin approve; the key lives by the longest role where the CLI is on")
+    void aGrantedViewerGetsASevenDayKeyAndATenantAdminThirty() {
+        role(PLAIN_ID, T1, "DARPAN_COMPANY_VIEW_ONLY")
+        cliGrant(PLAIN_ID, T1)
+        assertEquals(7 * 86_400, signInFor(PLAIN_USERNAME).authTokenExpiresInSeconds)
+        def key = ec.entity.find("moqui.security.UserLoginKey").condition("userId", PLAIN_ID).disableAuthz().list()[0]
+        long life = ((Timestamp) key.thruDate).time - ((Timestamp) key.fromDate).time
+        assertEquals(7L * 86_400_000L, life, "the stored key ends with it")
+        role(PLAIN_ID, T2, "DARPAN_TENANT_ADMIN")
+        assertEquals(7 * 86_400, signInFor(PLAIN_USERNAME).authTokenExpiresInSeconds, "admin in T2, but the CLI is not on there")
+        cliGrant(PLAIN_ID, T2)
+        assertEquals(30 * 86_400, signInFor(PLAIN_USERNAME).authTokenExpiresInSeconds)
+        assertEquals(30 * 86_400, signInFor(APPROVER_USERNAME).authTokenExpiresInSeconds, "a Darpan admin, no grant")
+    }
+
+    @Test
+    @DisplayName("DAR-BE-195: a grant revoked between approval and poll denies the poll; no key is issued")
+    void aGrantRevokedBeforeThePollDeniesIt() {
+        role(PLAIN_ID, T1, "DARPAN_COMPANY_EDITOR")
+        cliGrant(PLAIN_ID, T1)
+        Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+        assertEquals([], signedIn(PLAIN_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        ec.entity.find(CliAccess.GRANT).condition("userId", PLAIN_ID).disableAuthz().updateAll([statusId: "REVOKED"])
+        assertEquals("DENIED", anon("poll#CliLogin", [deviceCode: started.deviceCode]).out.status)
+        assertEquals(0, ec.entity.find("moqui.security.UserLoginKey").condition("userId", PLAIN_ID).disableAuthz().count())
+    }
+
+    @Test
+    @DisplayName("DAR-BE-195: each call is held to the role in its own tenant, header or not; a Darpan admin passes")
+    void eachCallIsHeldToTheRoleInItsTenant() {
+        role(PLAIN_ID, T1, "DARPAN_TENANT_ADMIN")
+        role(PLAIN_ID, T2, "DARPAN_COMPANY_VIEW_ONLY")
+        cliGrant(PLAIN_ID, T1)
+        cliGrant(PLAIN_ID, T2)
+        Map eightDaysOld = [userId: PLAIN_ID, createdDate: new Timestamp(System.currentTimeMillis() - 8L * 86_400_000L)]
+        assertTrue(ec.user.internalLoginUser(PLAIN_USERNAME))
+        assertNull(TenantAccessSupport.withRequestedTenant(T1) { CliAuthSupport.tenantCallProblem(ec, eightDaysOld) })
+        String refused = TenantAccessSupport.withRequestedTenant(T2) { CliAuthSupport.tenantCallProblem(ec, eightDaysOld) }
+        assertEquals("This CLI sign-in is older than 7 days, the limit for your role in T2 Co. Run darpan login to sign in again.", refused)
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, T2)
+        assertEquals(refused, CliAuthSupport.tenantCallProblem(ec, eightDaysOld), "no header: the preferred tenant is checked")
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(APPROVER_USERNAME))
+        assertNull(CliAuthSupport.tenantCallProblem(ec, [userId: APPROVER_ID, createdDate: eightDaysOld.createdDate]))
+    }
+
+    @Test
     @DisplayName("the eleventh start in a minute from one address is refused")
     void theEleventhStartInAMinuteFromOneAddressIsRefused() {
         (1..10).each { int i ->
@@ -364,6 +414,39 @@ class CliLoginSmokeTests {
             ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_ADMIN", userId: userId,
                     fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
         }
+    }
+
+    private static final String T1 = "CLI_T1"
+    private static final String T2 = "CLI_T2"
+
+    /** A role in a tenant (DAR-BE-195); tenant and permission groups made here, no seed loaded. */
+    private void role(String userId, String tenant, String group) {
+        if (ec.entity.find("moqui.basic.Enumeration").condition("enumId", TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID).disableAuthz().count() == 0) {
+            ec.entity.makeValue("moqui.basic.EnumerationType").setAll([enumTypeId: "UserGroupType", description: "User group type"]).createOrUpdate()
+            ec.entity.makeValue("moqui.basic.Enumeration").setAll([enumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID, enumTypeId: "UserGroupType",
+                    description: "Darpan company"]).create()
+        }
+        ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: tenant, description: "${tenant.replace('CLI_', '')} Co".toString(),
+                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
+        ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: group, description: group]).createOrUpdate()
+        ec.entity.makeValue(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).setAll([tenantUserGroupId: tenant, userId: userId,
+                permissionUserGroupId: group, fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
+        ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: tenant, userId: userId,
+                fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).createOrUpdate()
+    }
+
+    private void cliGrant(String userId, String tenant) {
+        ec.entity.makeValue(CliAccess.GRANT).setAll([grantId: "G_${userId}_${tenant}".toString(), userId: userId, companyUserGroupId: tenant,
+                fromDate: new Timestamp(System.currentTimeMillis() - 60_000L), statusId: "ACTIVE"]).create()
+    }
+
+    /** A whole sign-in: start, approve as username, poll; the poll's answer. */
+    private Map signInFor(String username) {
+        Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+        assertEquals([], signedIn(username, "approve#CliLogin", [userCode: started.userCode]).errors)
+        Map polled = anon("poll#CliLogin", [deviceCode: started.deviceCode]).out
+        assertEquals("APPROVED", polled.status)
+        return polled
     }
 
     private static String sha256(String value) {

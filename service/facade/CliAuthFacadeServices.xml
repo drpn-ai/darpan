@@ -98,8 +98,8 @@
                     <entity-find-one entity-name="moqui.security.UserAccount" value-field="approver">
                         <field-map field-name="userId" from="deviceRow.approvedByUserId"/></entity-find-one>
                     <!-- The framework refuses a disabled account's key at every request; this also refuses to issue
-                         one to an account disabled between approval and this poll. -->
-                    <if condition="!darpan.facade.auth.CliAuthSupport.canSignIn(ec, approver)">
+                         one to an account disabled, or whose CLI access ended (DAR-BE-195), between approval and this poll. -->
+                    <if condition="!darpan.facade.auth.CliAuthSupport.canSignIn(ec, approver) || !darpan.facade.auth.CliAuthSupport.cliAccessAllowed(ec, approver.userId)">
                         <set field="deviceRow.statusId" value="DENIED"/>
                         <entity-update value-field="deviceRow"/>
                         <set field="status" value="DENIED"/>

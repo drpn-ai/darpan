@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.facade.common.RpcMethodFence
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.notification.TenantNotificationSupport
@@ -142,33 +143,30 @@ class CliAuthSupport {
     static final String CLI_ACCESS_REFUSED = "The Darpan CLI is not turned on for this account. A Darpan admin turns it on."
 
     /**
-     * Whether this user may use the CLI. Until per-user CLI grants exist (DAR-BE-195), only Darpan admins
-     * (ADMIN or DARPAN_ADMIN, membership in force now) may: approve a CLI sign-in, or keep using a CLI key.
+     * Whether this user may use the CLI (approve a sign-in, keep using a key): a Darpan admin, or a live CLI grant in a
+     * tenant they still belong to (DAR-BE-195, darpan.facade.auth.CliAccess).
      */
     static boolean cliAccessAllowed(def ec, String userId) {
-        if (!normalize(userId)) return false
-        long now = System.currentTimeMillis()
-        List members = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserGroupMember",
-                        "self-scoped auth: is this CLI user a Darpan admin (pre-auth path, no active tenant)")
-                .condition("userId", userId).useCache(false).list()
-        return members.any { def member ->
-            member.userGroupId in TenantAccessSupport.DARPAN_ADMIN_GROUP_IDS &&
-                    (member.fromDate == null || ((Timestamp) member.fromDate).time <= now) &&
-                    (member.thruDate == null || ((Timestamp) member.thruDate).time > now)
-        }
+        return normalize(userId) != null && CliAccess.cliAllowed(ec, normalize(userId))
     }
 
+    /** RPC methods about the caller's own sign-in, held to the key's own expiry only, not to a tenant (DAR-BE-195). */
+    static final Set<String> TENANT_FREE_METHODS = (["facade.CliAuthFacadeServices.logout#CliSession",
+                                                     "facade.AuthFacadeServices.get#SessionInfo"] as LinkedHashSet<String>).asImmutable()
+
     /**
-     * A Moqui login key for userId, as UserFacadeImpl.getLoginKey issues one for the signed-in user: 40 random
-     * characters, stored hashed in moqui.security.UserLoginKey, expiring after the framework's login-key hours
-     * (the same lifetime as a sign-in in the app), and the user's already-expired keys cleared out.
+     * A Moqui login key for the Darpan CLI, as UserFacadeImpl.getLoginKey issues one: 40 random characters, stored
+     * hashed in moqui.security.UserLoginKey, and the user's already-expired keys cleared out. It lives as long as the
+     * user's longest CLI sign-in lifetime (CliAccess.keyLifetimeDays: 30 days for an admin, 7 otherwise; DAR-BE-195),
+     * read for userId, the approver: poll#CliLogin runs anonymous.
      * Returns [rawKey, hash, thruDate, expiresInSeconds]; rawKey exists nowhere else.
      */
     static Map<String, Object> issueLoginKey(def ec, String userId, String description = null) {
         if (!userId) throw new IllegalArgumentException("issueLoginKey needs a userId")
+        int expiresInSeconds = CliAccess.keyLifetimeDays(ec, userId) * 86_400
+        if (expiresInSeconds <= 0) throw new IllegalStateException(CLI_ACCESS_REFUSED)
         String rawKey = StringUtilities.getRandomString(40)
         String hash = AuthSessionSupport.hashLoginKey(ec, rawKey)
-        int expiresInSeconds = AuthSessionSupport.resolveCookieMaxAgeSeconds(ec)
         Timestamp fromDate = ec.user.nowTimestamp
         Timestamp thruDate = new Timestamp(fromDate.time + expiresInSeconds * 1000L)
         ec.entity.makeValue("moqui.security.UserLoginKey")
@@ -282,15 +280,33 @@ class CliAuthSupport {
         isCliSession(ec)
         String cliKeyHash = sessionMark(request)
         if (!cliKeyHash) return null
-        String reason = cliSessionProblem(ec, cliKeyHash)
-        if (reason) endWebSession(ec, request)
-        return reason
-    }
-
-    private static String cliSessionProblem(def ec, String cliKeyHash) {
         def cliSession = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.auth.CliSession",
                         "self-scoped auth: re-check a CLI key's web session (pre-auth path, no active tenant)")
                 .condition("loginKeyHash", cliKeyHash).useCache(false).one()
+        String reason = cliSessionProblem(ec, cliKeyHash, cliSession)
+        if (reason) {
+            endWebSession(ec, request)
+            return reason
+        }
+        // DAR-BE-195: refuses this call only; the same sign-in may still be good in another tenant.
+        return tenantCallProblem(ec, cliSession)
+    }
+
+    /**
+     * Null, or why this call may not run in its tenant (the X-Darpan-Tenant header, else the user's preferred tenant, so
+     * leaving the header off is no way round it): no live CLI grant there, or the sign-in is older than the user's role
+     * there allows. Darpan admins pass: 30 days everywhere is their key's own lifetime. Calls about the caller's own
+     * sign-in (TENANT_FREE_METHODS) pass too.
+     */
+    static String tenantCallProblem(def ec, def cliSession) {
+        String userId = cliSession.userId as String
+        if (CliAccess.isDarpanAdmin(ec, userId)) return null
+        List<String> methods = RpcMethodFence.requestedMethods(ec.web?.requestParameters as Map).findAll { it }
+        if (methods && methods.every { it in TENANT_FREE_METHODS }) return null
+        return CliAccess.tenantProblem(ec, userId, TenantAccessSupport.currentActiveTenantUserGroupId(ec), (Timestamp) cliSession.createdDate)
+    }
+
+    private static String cliSessionProblem(def ec, String cliKeyHash, def cliSession) {
         if (cliSession == null || cliSession.revokedDate != null) return "This CLI session was signed out. Run darpan login to sign in again."
         def loginKey = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
                         "self-scoped auth: re-check a CLI key's expiry for its web session")

@@ -53,19 +53,23 @@ class CliAccess {
 
     static boolean isDarpanAdmin(def ec, String userId) {
         if (!userId) return false
-        Timestamp now = new Timestamp(System.currentTimeMillis())
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserGroupMember", WHY)
-                .condition("userId", userId).condition("userGroupId", EntityCondition.IN, DARPAN_ADMIN_GROUP_IDS)
-                .conditionDate("fromDate", "thruDate", now).useCache(false).count() > 0
+                .condition("userId", userId).useCache(false).list()
+                .any { it.userGroupId in DARPAN_ADMIN_GROUP_IDS && inForce(it) }
     }
 
     /** The user's permission groups in the tenant, in force now. */
     static List<String> tenantGroups(def ec, String userId, String tenantId) {
         if (!userId || !tenantId) return []
-        Timestamp now = new Timestamp(System.currentTimeMillis())
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, WHY)
-                .condition("userId", userId).condition("tenantUserGroupId", tenantId).conditionDate("fromDate", "thruDate", now)
-                .useCache(false).list().collect { it.permissionUserGroupId as String }.unique()
+                .condition("userId", userId).condition("tenantUserGroupId", tenantId).useCache(false).list()
+                .findAll { inForce(it) }.collect { it.permissionUserGroupId as String }.unique()
+    }
+
+    /** A membership row whose fromDate/thruDate cover now (filtered here, not in the query: the same shape as the stopgap). */
+    private static boolean inForce(def row) {
+        long now = System.currentTimeMillis()
+        return (row.fromDate == null || ((Timestamp) row.fromDate).time <= now) && (row.thruDate == null || ((Timestamp) row.thruDate).time > now)
     }
 
     /** Days a CLI sign-in lasts for this user in this tenant: 30 for a Darpan admin, else the longest of their roles there; 0 for none. */

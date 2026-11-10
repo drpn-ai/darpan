@@ -32,7 +32,9 @@
                     <order-by field-name="sequenceNum,description,enumId"/>
                 </entity-find>
                 <set field="rawOptions" from="(enumList ?: []).collect { item -> [enumId: item.enumId, enumCode: item.enumCode, description: item.description, sequenceNum: item.sequenceNum, label: darpan.facade.common.FacadeSupport.enumLabel(item)] }"/>
-                <set field="options" from="darpan.facade.settings.SettingsFacadeSupport.deduplicateEnumOptions(enumTypeIdSafe, rawOptions)"/>
+                <!-- DAR-BE-052 / Aditi 2026-11-10: the system list offers only what can be read, as the run pickers do: an
+                     endpoint whose connector is gone (the retired OMS REST ones) is not offered. -->
+                <set field="options" from="enumTypeIdSafe == darpan.facade.settings.SettingsFacadeSupport.DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID ? darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, enumTypeIdSafe) : darpan.facade.settings.SettingsFacadeSupport.deduplicateEnumOptions(enumTypeIdSafe, rawOptions)"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

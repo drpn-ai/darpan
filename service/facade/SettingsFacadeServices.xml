@@ -554,19 +554,18 @@
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for SFTP settings.')"/>
             </if>
-            <!-- DAR-BE-080: the stored password or key is reused only while the server is the same; a moved host or port
-                 with no new secret would send it to whoever runs the new server. -->
-            <if condition="!ec.message.hasError() &amp;&amp; existingServer &amp;&amp; !passwordValue &amp;&amp; !privateKeyValue &amp;&amp; (existingServer.password || existingServer.privateKey)">
-                <set field="movedFields" from="darpan.facade.common.SecretCarryOver.changedFields(existingServer, [host: hostValue, port: portValue], ['host', 'port'])"/>
-                <if condition="movedFields">
-                    <message error="true">${darpan.facade.common.SecretCarryOver.refusal(movedFields, 'password or key')}</message>
-                </if>
+            <!-- DAR-BE-080: a stored password or key is reused only while the server is the same. When the host or port
+                 moved, NO stored secret is carried over (not even the other kind than the one sent), so a moved server
+                 never receives a stored password; with nothing sent, the save is refused. -->
+            <set field="movedFields" from="existingServer &amp;&amp; (existingServer.password || existingServer.privateKey) ? darpan.facade.common.SecretCarryOver.changedFields(existingServer, [host: hostValue, port: portValue], ['host', 'port']) : []"/>
+            <if condition="!ec.message.hasError() &amp;&amp; movedFields &amp;&amp; !passwordValue &amp;&amp; !privateKeyValue">
+                <message error="true">${darpan.facade.common.SecretCarryOver.refusal(movedFields, 'password or key')}</message>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; !sftpServerIdValue">
                 <set field="sftpServerIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.SftpServer', 'sftpServerId')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="serverMap" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, companyUserGroupId: existingServer?.companyUserGroupId, createdByUserId: existingServer?.createdByUserId, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, password: passwordValue ?: existingServer?.password, privateKey: privateKeyValue ?: existingServer?.privateKey]"/>
+                <set field="serverMap" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, companyUserGroupId: existingServer?.companyUserGroupId, createdByUserId: existingServer?.createdByUserId, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, password: passwordValue ?: (movedFields ? null : existingServer?.password), privateKey: privateKeyValue ?: (movedFields ? null : existingServer?.privateKey)]"/>
                 <if condition="existingServer == null || !existingServer.companyUserGroupId">
                     <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(serverMap, ec)"/>
                 </if>

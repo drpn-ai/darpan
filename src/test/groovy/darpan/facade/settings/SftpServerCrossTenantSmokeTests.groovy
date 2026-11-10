@@ -143,6 +143,17 @@ class SftpServerCrossTenantSmokeTests {
         assertEquals(["krewe2.sftp.test", "new-secret"], findRow("MOVE_SFTP").with { [it.host, it.password] })
     }
 
+    /** Review of DAR-BE-080: a new key sent with a moved server must not carry the stored password along. */
+    @Test
+    void aNewKeyDoesNotCarryTheStoredPasswordToAMovedServer() {
+        ownServer("MIX_SFTP")
+        withProductionAuthz {
+            callService(SAVE_SERVICE, [sftpServerId: "MIX_SFTP", host: "attacker.sftp.test", port: 22, username: "krewe-user", privateKey: "KEY-DECOY"])
+        }
+        def row = findRow("MIX_SFTP")
+        assertFalse(row.host == "attacker.sftp.test" && row.password == "krewe-secret", "the stored password went along to the moved server")
+    }
+
     private void ownServer(String id) {
         insert("darpan.reconciliation.SftpServer", [sftpServerId: id, companyUserGroupId: KREWE, createdByUserId: EDITOR_ID,
                 scopeEnumId: "DARPAN_SFTP_TENANT", host: "krewe.sftp.test", port: 22, username: "krewe-user", password: "krewe-secret"])

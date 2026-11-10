@@ -133,4 +133,19 @@ class RunConclusionStepTests {
         org.junit.jupiter.api.Assertions.assertNull(RunConclusionStep.questionLookup("orderPayments", [], null))
     }
 
+
+    // DAR-BE-151 (prod gorjana 2026-11-06: R1 and R7 asked 0 questions — "the scope has no lookup to ask orderPayments of"):
+    // a scheduled or audit run hands the brain its ReconciliationAutomationSource row, which keeps the HotWax connection in
+    // safeMetadataJson.parameters under the connector's own name and has no sourceConfigId column. The same shape made
+    // verification inert on 2026-08-27; the brain's default questions now read it the same way.
+    @Test
+    void aBrainQuestionFindsTheHotwaxConnectionOnAnAutomationSource() {
+        Map connector = [configParameterName: "omsRestSourceConfigId"]
+        Map automationSource = [systemEnumId: "OMS_ORDER_ITEMS_GQL", safeMetadataJson: '{"parameters":{"omsRestSourceConfigId":"100002"}}']
+        assertEquals("100002", RunConclusionStep.hotwaxSourceConfigId(automationSource, connector))
+        assertEquals("100002", RunConclusionStep.questionLookup("orderPayments", [],
+                RunConclusionStep.hotwaxSourceConfigId(automationSource, connector)).sourceConfigId)
+        assertEquals("cfg9", RunConclusionStep.hotwaxSourceConfigId([sourceConfigId: "cfg9"], connector), "a run's own source keeps its column")
+        assertNull(RunConclusionStep.hotwaxSourceConfigId([safeMetadataJson: "{}"], connector))
+    }
 }

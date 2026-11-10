@@ -38,7 +38,8 @@ class BrainFactAdapter {
     static List<String> recordFieldsFor(Object conclusionBrain, String fileSide) {
         if (fileSide != "FILE_1") return []
         switch (conclusionBrain?.toString()?.trim()) {
-            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName"]
+            // omsOrderName: the name the order-items read (OMS_ORDER_ITEMS_GQL, gorjana R1) gives the order.
+            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName", "omsOrderName"]
             // DAR-BE-192: an R7 order, its name (a replacement's EXC- / WTY-) and its HotWax status.
             case "ORDER": return ["orderId", "orderName", "grandTotal", "statusId"]
             case "RETURN": return ["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"]
@@ -76,7 +77,8 @@ class BrainFactAdapter {
 
         Finding f = new Finding(key: normalize(finding?.key), kind: kind, bucket: normalize(finding?.bucket))
         if (kind == Finding.ORDER_LINE) {
-            f.order = orderFor(normalize(record.omsOrderId), record.orderGrandTotal, null, normalize(record.orderName))
+            f.order = orderFor(normalize(record.omsOrderId), record.orderGrandTotal, null,
+                    normalize(record.orderName) ?: normalize(record.omsOrderName))
             f.netsuiteHasOrderLine = ((Map) (sides.FILE_2 ?: [:])).firstFieldPresence != "ABSENT"
             String productId = normalize(record.productId)
             if (f.order != null && productId) {

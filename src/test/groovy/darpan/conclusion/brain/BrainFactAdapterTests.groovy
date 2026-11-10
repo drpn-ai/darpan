@@ -116,7 +116,7 @@ class BrainFactAdapterTests {
     void theRecordFieldsTheBrainReadsAreNamedPerKindAndSide() {
         assertEquals(["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"], BrainFactAdapter.recordFieldsFor("RETURN", "FILE_1"))
         // DAR-BE-186: an R1 line keeps its product and SKU, for the productNetsuiteId question.
-        assertEquals(["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName"], BrainFactAdapter.recordFieldsFor("ORDER_LINE", "FILE_1"))
+        assertEquals(["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName", "omsOrderName"], BrainFactAdapter.recordFieldsFor("ORDER_LINE", "FILE_1"))
         assertEquals(["orderId", "orderName", "grandTotal", "statusId"], BrainFactAdapter.recordFieldsFor("ORDER", "FILE_1"))
         assertEquals([], BrainFactAdapter.recordFieldsFor("RETURN", "FILE_2"))
         assertEquals([], BrainFactAdapter.recordFieldsFor(null, "FILE_1"))

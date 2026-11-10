@@ -68,8 +68,8 @@ class RunConclusionStep {
             Map brain = kind ? [kind: kind, tenantId: tenantId,
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
                     fetchQuestion: { String question, List<String> ids ->
-                        Map lookup = questionLookup(question, lookups,
-                                darpan.common.ValueSupport.readOptionalString(args.get("file1Source"), "sourceConfigId"))
+                        Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
+                                RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
                         if (lookup == null) throw new IllegalStateException("the scope has no lookup to ask ${question} of")
                         int before = lookupWarnings.size()
                         Map found = fetchLookup(ec, lookup, ids, tenantId, lookupWarnings)
@@ -174,6 +174,16 @@ class RunConclusionStep {
     }
 
     /** DAR-BE-151: the lookup a brain question is answered through: the scope's own of that name, else its default. */
+    /**
+     * DAR-BE-151: the HotWax connection a brain's default question reads, from the run's FILE_1 source. A scheduled or
+     * audit run passes its ReconciliationAutomationSource row, which keeps the id in safeMetadataJson.parameters under the
+     * connector's own name (omsRestSourceConfigId) and has no sourceConfigId column; reading only that column left every
+     * default question unasked on prod (gorjana R1/R7, 2026-11-06), as it once left verification inert (2026-08-27).
+     */
+    static String hotwaxSourceConfigId(Object file1Source, Map<String, Object> connector) {
+        return RunVerificationSupport.resolveSourceConfigId(file1Source, connector)
+    }
+
     static Map questionLookup(String question, List<Map> lookups, String hotwaxSourceConfigId) {
         return (lookups ?: []).find { it.name == darpan.conclusion.brain.BrainQuestions.lookupNameFor(question) } ?:
                 darpan.conclusion.brain.BrainQuestions.defaultLookup(question, hotwaxSourceConfigId)

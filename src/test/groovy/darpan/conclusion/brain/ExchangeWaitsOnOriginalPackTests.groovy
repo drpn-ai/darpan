@@ -119,6 +119,15 @@ class ExchangeWaitsOnOriginalPackTests {
                 .findAll { it.question == "originalInNetsuite" })
     }
 
+    // Prod gorjana R1 (OMS_ORDER_ITEMS_GQL) names the order omsOrderName, not orderName: an exchange line must still be known.
+    @Test
+    void anR1LineNamedByOmsOrderNameIsStillAnExchange() {
+        Map line = r1("M1223508", null)
+        ((Map) ((Map) ((Map) line.sides).FILE_1).record).omsOrderName = "EXC-#GOR197410604-1"
+        Map fired = fire("orderLine", [line], chain("M1223508", "M270001", "M1191688", [M1191688: so("SO7352829", "Pending Fulfillment")]))
+        assertEquals(["ORIG_OPEN"], codes(fired))
+    }
+
     @Test
     void theQuestionIsWorthAskingOverTheReturnCauses() {
         assertEquals(58, BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])).get("originalInNetsuite"))

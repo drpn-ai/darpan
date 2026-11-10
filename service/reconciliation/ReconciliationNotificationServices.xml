@@ -29,7 +29,7 @@
                  this parameter a run with zero missing records and N value mismatches reported
                  "Differences: 0" and read as a clean sync. -->
             <parameter name="ruleDifferenceCount"/>
-            <!-- DAR-BE-155: rule differences per field label (RuleDiffSupport.fieldTally); the voice says what differs. -->
+            <!-- DAR-BE-155/210: rule differences per rule, labelled by its ruleName or field (RuleDiffSupport.fieldTally); the voice says what differs. -->
             <parameter name="ruleDifferenceFields" type="List"/>
             <!-- Audit 2026-06-11 #5: surface rule failures / processing warnings so a silently broken
                  ruleset does not produce a normal "completed" alert. -->

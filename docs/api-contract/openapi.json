@@ -16534,6 +16534,10 @@
                                 "ruleText": {
                                     "type": "string"
                                 },
+                                "ruleName": {
+                                    "type": "string",
+                                    "description": "DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup."
+                                },
                                 "ruleLogic": {
                                     "type": "string"
                                 },
@@ -16755,6 +16759,10 @@
                                         },
                                         "ruleText": {
                                             "type": "string"
+                                        },
+                                        "ruleName": {
+                                            "type": "string",
+                                            "description": "DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup."
                                         },
                                         "ruleLogic": {
                                             "type": "string"
@@ -20961,6 +20969,10 @@
                                             "ruleText": {
                                                 "type": "string"
                                             },
+                                            "ruleName": {
+                                                "type": "string",
+                                                "description": "DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup."
+                                            },
                                             "ruleLogic": {
                                                 "type": "string"
                                             },
@@ -24528,6 +24540,10 @@
                                 "ruleText": {
                                     "type": "string"
                                 },
+                                "ruleName": {
+                                    "type": "string",
+                                    "description": "DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup."
+                                },
                                 "ruleLogic": {
                                     "type": "string"
                                 },
@@ -24750,6 +24766,10 @@
                                         },
                                         "ruleText": {
                                             "type": "string"
+                                        },
+                                        "ruleName": {
+                                            "type": "string",
+                                            "description": "DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup."
                                         },
                                         "ruleLogic": {
                                             "type": "string"

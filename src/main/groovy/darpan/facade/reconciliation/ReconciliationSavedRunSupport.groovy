@@ -153,6 +153,7 @@ class ReconciliationSavedRunSupport {
             Map rule = (Map) rawRule
             String ruleId = normalize(rule.ruleId)
             String ruleText = normalize(rule.ruleText)
+            String ruleName = normalize(rule.ruleName)
             String ruleLogic = normalize(rule.ruleLogic)
             String ruleType = normalize(rule.ruleType)
             String expression = normalize(rule.expression)
@@ -165,6 +166,7 @@ class ReconciliationSavedRunSupport {
             normalized.add([
                     ruleId     : ruleId,
                     ruleText   : ruleText,
+                    ruleName   : ruleName,
                     ruleLogic  : ruleLogic,
                     ruleType   : ruleType,
                     expression : expression,
@@ -848,6 +850,7 @@ class ReconciliationSavedRunSupport {
                     ruleId        : normalize(rule.ruleId),
                     sequenceNum   : rule.sequenceNum,
                     ruleText      : normalize(rule.ruleText),
+                    ruleName      : normalize(rule.ruleName),
                     ruleLogic     : normalize(rule.ruleLogic),
                     ruleType      : normalize(rule.ruleType),
                     expression    : normalize(rule.expression),

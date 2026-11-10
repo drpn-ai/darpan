@@ -64,6 +64,10 @@
         <field name="ruleSetId" type="id" not-null="true"/>
         <field name="sequenceNum" type="number-integer"/>
         <field name="ruleText" type="text-medium"/>
+        <field name="ruleName" type="text-short">
+            <description>DAR-BE-210. Optional display name ("Fulfillment Sync") the run notification gives this rule's
+                mismatches; ruleText stays the formula. Trimmed, at most 60 characters, no chat markup (&lt; &gt; | * ~ `).</description>
+        </field>
         <field name="ruleLogic" type="text-long"/>
         <field name="enabled" type="text-indicator"/>
         <field name="ruleType" type="text-short"/>

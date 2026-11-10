@@ -174,6 +174,11 @@
                  is RuleLogicValidator below (and server-side FIELD_COMPARISON regeneration), not HTML
                  filtering; no UI surface renders these through v-html. -->
             <parameter name="ruleText" allow-html="any"/>
+            <!-- DAR-BE-210: allow-html="any" so a name holding < or > reaches the markup check below and is
+                 refused with its own message; nothing here renders it as HTML. -->
+            <parameter name="ruleName" allow-html="any"><description>Optional display name the run notification gives this
+                rule's mismatches ("Fulfillment Sync"). Trimmed, at most 60 characters, no chat markup (&lt; &gt; | * ~ `).
+                Blank clears it.</description></parameter>
             <parameter name="ruleLogic" allow-html="any"/>
             <parameter name="ruleType"/>
             <parameter name="expression" allow-html="any"/>
@@ -211,6 +216,7 @@
 
             <if condition="!ec.message.hasError()">
                 <set field="ruleTextValue" from="((ruleText)?.toString()?.trim())"/>
+                <set field="ruleNameValue" from="((ruleName)?.toString()?.replaceAll('\\s+', ' ')?.trim()) ?: null"/>
                 <set field="ruleLogicValue" from="((ruleLogic)?.toString()?.trim())"/>
                 <set field="ruleTypeValue" from="((ruleType)?.toString()?.trim())"/>
                 <set field="expressionValue" from="((expression)?.toString()?.trim())"/>
@@ -224,6 +230,13 @@
 
                 <if condition="!ruleLogicValue &amp;&amp; !ruleTextValue">
                     <message error="true">Either ruleLogic or ruleText is required</message>
+                </if>
+                <!-- DAR-BE-210: the name goes into a chat message, so chat link and format characters are refused. -->
+                <if condition="ruleNameValue &amp;&amp; ruleNameValue.length() &gt; 60">
+                    <message error="true">Rule name holds at most 60 characters.</message>
+                </if>
+                <if condition="ruleNameValue &amp;&amp; ruleNameValue.find('[&lt;&gt;|*~`]') != null">
+                    <message error="true">Rule name cannot hold &lt; &gt; | * ~ or `.</message>
                 </if>
                 <!-- Audit 2026-06-11 #1/#6: ruleLogic flows verbatim into compiled+executed DRL. Gate
                      the untrusted save boundary so a client bypassing the UI cannot submit arbitrary
@@ -263,7 +276,7 @@
                 <set field="ruleId" from="requestedRuleIdValue"/>
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
                 <!-- companyUserGroupId: denormalized tenant stamp from the parent RuleSet (defense-in-depth). -->
-                <set field="ruleValue" from="[ruleId: ruleId, ruleSetId: ruleSetId, companyUserGroupId: existingRuleSet.companyUserGroupId, sequenceNum: sequenceNum, ruleText: ruleTextValue, ruleLogic: ruleLogicValue, ruleType: ruleTypeValue, expression: expressionValue, severity: severityValue, enabled: enabledValue, createdDate: existingRule?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
+                <set field="ruleValue" from="[ruleId: ruleId, ruleSetId: ruleSetId, companyUserGroupId: existingRuleSet.companyUserGroupId, sequenceNum: sequenceNum, ruleText: ruleTextValue, ruleName: ruleNameValue, ruleLogic: ruleLogicValue, ruleType: ruleTypeValue, expression: expressionValue, severity: severityValue, enabled: enabledValue, createdDate: existingRule?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
                 <if condition="created">
                     <service-call name="create#darpan.rule.Rule" in-map="ruleValue" out-map="createdRule"/>
                     <set field="ruleId" from="createdRule.ruleId"/>

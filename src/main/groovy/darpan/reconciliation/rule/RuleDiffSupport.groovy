@@ -248,14 +248,60 @@ class RuleDiffSupport {
      * DAR-BE-155: rule differences per field label, busiest first, for the run notification:
      * [field, count, file1Value, file2Value, sameValues]. The values are kept only when every difference on that
      * field holds the same pair (a status Y against N), so the message can say what differs without guessing.
+     *
+     * DAR-BE-210: one row per RULE. A difference naming a rule (its ruleId) groups with that rule's other differences;
+     * one naming only a field groups by field as before; one naming neither is left out (the voice counts it as
+     * "Other"). {@code rules} are the run's Rule rows: a difference's ruleId is the DRL rule name, which is the Rule's
+     * ruleId, or the name its stored ruleLogic declares (a FIELD_COMPARISON rule saved before it had an id is
+     * "FIELD_COMPARISON_1"). Each row adds ruleId, ruleName (the rule's display name, when set) and label: the name,
+     * else the group's field (the formula), else the rule's ruleText, else its id.
      */
-    static List<Map> fieldTally(List<Map> diffRows) {
-        Map<String, List<Map>> byField = (diffRows ?: []).findAll { normalize(it?.field) }.groupBy { normalize(it.field) }
-        return byField.collect { String field, List<Map> rows ->
+    static List<Map> fieldTally(List<Map> diffRows, List rules = null) {
+        Map<String, Object> ruleByKey = ruleLookup(rules)
+        Map<String, List<Map>> groups = new LinkedHashMap<>()
+        Map<String, Object> groupRule = [:]
+        (diffRows ?: []).each { Map row ->
+            String ruleId = normalize(row?.ruleId)
+            String field = normalize(row?.field)
+            if (!ruleId && !field) return
+            Object rule = ruleId ? ruleByKey.get(ruleId) : null
+            String key = ruleId ? "R:${normalize(rule?.ruleId) ?: ruleId}".toString() : "F:${field}".toString()
+            groups.computeIfAbsent(key) { [] }.add(row)
+            if (rule != null) groupRule.put(key, rule)
+        }
+        return groups.collect { String key, List<Map> rows ->
+            Object rule = groupRule.get(key)
             Set pairs = rows.collect { [stringify(it.file1Value), stringify(it.file2Value)] } as Set
             List pair = pairs.size() == 1 ? (List) pairs.first() : [null, null]
-            [field: field, count: rows.size(), file1Value: pair[0], file2Value: pair[1], sameValues: pairs.size() == 1]
+            Map<String, Integer> fieldCounts = rows.findAll { normalize(it.field) }.countBy { normalize(it.field) }
+            String field = fieldCounts ? fieldCounts.max { it.value }.key : null
+            String ruleId = key.startsWith("R:") ? key.substring(2) : null
+            String ruleName = normalize(rule?.ruleName)
+            String label = ruleName ?: field ?: normalize(rule?.ruleText) ?: ruleId
+            [field: field, label: label, ruleId: ruleId, ruleName: ruleName, count: rows.size(), file1Value: pair[0],
+             file2Value: pair[1], sameValues: pairs.size() == 1]
         }.sort { -((int) it.count) }
+    }
+
+    private static final java.util.regex.Pattern DRL_RULE_NAME = ~/(?m)^\s*rule\s+"((?:[^"\\]|\\.)*)"/
+
+    /** ruleId and every DRL rule name a Rule's ruleLogic declares, each to its Rule row. */
+    private static Map<String, Object> ruleLookup(List rules) {
+        Map<String, Object> byKey = [:]
+        (rules ?: []).each { Object rule ->
+            if (rule == null) return
+            String ruleId = normalize(rule.ruleId)
+            String logic = normalize(rule.ruleLogic)
+            if (logic) {
+                java.util.regex.Matcher m = DRL_RULE_NAME.matcher(logic)
+                while (m.find()) {
+                    String drlName = normalize(m.group(1)?.replace('\\"', '"')?.replace('\\\\', '\\'))
+                    if (drlName && !byKey.containsKey(drlName)) byKey.put(drlName, rule)
+                }
+            }
+            if (ruleId) byKey.put(ruleId, rule)
+        }
+        return byKey
     }
 
     static List<Map> ensureGeneratedDiffList(Map fact) {

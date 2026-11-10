@@ -47,6 +47,7 @@
                 <parameter name="ruleId"/>
                 <parameter name="sequenceNum" type="Integer"/>
                 <parameter name="ruleText"/>
+                <parameter name="ruleName"><description>DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup.</description></parameter>
                 <parameter name="ruleLogic"/>
                 <parameter name="ruleType"/>
                 <parameter name="expression"/>
@@ -116,6 +117,7 @@
                     <parameter name="ruleId"/>
                     <parameter name="sequenceNum" type="Integer"/>
                     <parameter name="ruleText"/>
+                    <parameter name="ruleName"><description>DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup.</description></parameter>
                     <parameter name="ruleLogic"/>
                     <parameter name="ruleType"/>
                     <parameter name="expression"/>
@@ -493,7 +495,7 @@
                 <iterate list="ruleEntries" entry="ruleEntry">
                     <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"
                             disable-authz="true"
-                            in-map="[ruleSetId: ruleSetIdValue, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"/>
+                            in-map="[ruleSetId: ruleSetIdValue, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleName: ruleEntry.ruleName, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"/>
                 </iterate>
                 <service-call name="reconciliation.ReconciliationRuleEngineServices.compile#RuleSet"
                         disable-authz="true"
@@ -770,6 +772,7 @@
                 <parameter name="ruleId"/>
                 <parameter name="sequenceNum" type="Integer"/>
                 <parameter name="ruleText"/>
+                <parameter name="ruleName"><description>DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup.</description></parameter>
                 <parameter name="ruleLogic"/>
                 <parameter name="ruleType"/>
                 <parameter name="expression"/>
@@ -839,6 +842,7 @@
                     <parameter name="ruleId"/>
                     <parameter name="sequenceNum" type="Integer"/>
                     <parameter name="ruleText"/>
+                    <parameter name="ruleName"><description>DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup.</description></parameter>
                     <parameter name="ruleLogic"/>
                     <parameter name="ruleType"/>
                     <parameter name="expression"/>
@@ -1293,7 +1297,7 @@
                     <iterate list="ruleEntries" entry="ruleEntry">
                         <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"
                                 disable-authz="true"
-                                in-map="[ruleSetId: savedRunIdValue, ruleId: ruleEntry.ruleId, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"
+                                in-map="[ruleSetId: savedRunIdValue, ruleId: ruleEntry.ruleId, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleName: ruleEntry.ruleName, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"
                                 out-map="savedRule"/>
                         <set field="ignoreSavedRuleId" from="savedRuleIds.add(savedRule.ruleId)"/>
                     </iterate>
@@ -1389,6 +1393,7 @@
                     <parameter name="ruleId"/>
                     <parameter name="sequenceNum" type="Integer"/>
                     <parameter name="ruleText"/>
+                    <parameter name="ruleName"><description>DAR-BE-210. Optional display name for the run notification; at most 60 characters, no chat markup.</description></parameter>
                     <parameter name="ruleLogic"/>
                     <parameter name="ruleType"/>
                     <parameter name="expression"/>

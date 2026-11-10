@@ -357,6 +357,13 @@ class ConfigTransferSmokeTests {
         assertNotNull((back.runs as List<Map>)[0].children.RuleSetCompareScope[0].fields.conclusionLookupsJson)
         assertEquals(["R4", "R8"], back.statements*.fields*.statementCode)
         assertEquals("FIELD_MISMATCH", (check.links as List<Map>)[0].fields.diffTypes)
+        // DAR-BE-210: a rule's display name travels with it, and lands on the target's rule.
+        Map backRun = (back.runs as List<Map>).find { it.fields.ruleSetName == "Returns vs memos" }
+        assertEquals(["Status Sync", null], (backRun.children.Rule as List<Map>)*.fields*.ruleName)
+        String targetRunId = ec.entity.find("darpan.rule.RuleSet").condition([companyUserGroupId: DST, ruleSetName: "Returns vs memos"])
+                .disableAuthz().useCache(false).one().ruleSetId
+        assertEquals(["Status Sync"], ec.entity.find("darpan.rule.Rule").condition("ruleSetId", targetRunId).disableAuthz()
+                .useCache(false).list()*.ruleName.findAll { it })
     }
 
     @Test
@@ -1474,7 +1481,7 @@ class ConfigTransferSmokeTests {
         create("darpan.rule.RuleSet", [ruleSetId: "XFER_RS", ruleSetName: "Returns vs memos", description: "OMS returns vs memos",
                 version: "1.0", companyUserGroupId: SRC, isActive: "Y", isArchived: "N"])
         create("darpan.rule.Rule", [ruleId: "XFER_RULE_A", ruleSetId: "XFER_RS", sequenceNum: 10L, ruleText: "status equals 'A'",
-                enabled: "Y", ruleType: "FIELD_COMPARISON", companyUserGroupId: SRC])
+                ruleName: "Status Sync", enabled: "Y", ruleType: "FIELD_COMPARISON", companyUserGroupId: SRC])
         create("darpan.rule.Rule", [ruleId: "XFER_RULE_B", ruleSetId: "XFER_RS", sequenceNum: 20L, ruleText: "amount greater than 0",
                 enabled: "Y", ruleType: "FIELD_COMPARISON", severity: "WARN", companyUserGroupId: SRC])
         create("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS", ruleSetId: "XFER_RS", objectType: "RETURN",

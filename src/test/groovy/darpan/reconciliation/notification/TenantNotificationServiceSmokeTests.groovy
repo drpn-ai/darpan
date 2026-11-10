@@ -96,7 +96,7 @@ class TenantNotificationServiceSmokeTests {
 
         String text = result.payload.text as String
         assertTrue(text.contains("On isCompleted = isFulfilled, HotWax has Y and Shopify has N."), text)
-        assertTrue(text.contains("Mismatches: 1 (isCompleted = isFulfilled)"), text)
+        assertTrue(text.contains("isCompleted = isFulfilled Mismatch: 1"), text)
         assertFalse(text.contains("amount"), text)
     }
 

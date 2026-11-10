@@ -422,7 +422,7 @@
             <parameter name="missingInFile2Count" type="Long"/>
             <parameter name="missingObjectDifferenceCount" type="Long"/>
             <parameter name="ruleDifferenceCount" type="Long"/>
-            <parameter name="ruleDifferenceFields" type="List"><description>DAR-BE-155. Rule differences per field label, busiest first: [field, count, file1Value, file2Value, sameValues] (RuleDiffSupport.fieldTally), so the run notification can say what differs.</description></parameter>
+            <parameter name="ruleDifferenceFields" type="List"><description>DAR-BE-155. Rule differences per rule (DAR-BE-210; per field label when a difference names no rule), busiest first: [field, label, ruleId, ruleName, count, file1Value, file2Value, sameValues] (RuleDiffSupport.fieldTally), so the run notification can say what differs.</description></parameter>
             <parameter name="duplicateDifferenceCount" type="Long"/>
             <parameter name="differenceCount" type="Long"/>
             <parameter name="matchedPairCount" type="Long"/>
@@ -512,7 +512,9 @@
                 <set field="missingObjectDifferenceCount" from="missingObjectDifferenceCountValue"/>
                 <set field="duplicateDifferenceCount" from="duplicateDifferenceCountValue"/>
                 <set field="ruleDifferenceCount" from="ruleDifferenceCountValue"/>
-                <set field="ruleDifferenceFields" from="reconciliation.rule.RuleDiffSupport.fieldTally(ruleDiffRows)"/>
+                <!-- DAR-BE-210: one row per rule, named by the rule's ruleName when set. activeRuleList is this run's
+                     own read of its rule set's enabled rules (the only rules that can emit a difference); no second read. -->
+                <set field="ruleDifferenceFields" from="reconciliation.rule.RuleDiffSupport.fieldTally(ruleDiffRows, activeRuleList)"/>
                 <set field="differenceCount" from="differenceCountValue"/>
                 <set field="matchedPairCount" from="baseResult.matchedPairCount"/>
                 <set field="ruleCount" from="activeRuleCount"/>

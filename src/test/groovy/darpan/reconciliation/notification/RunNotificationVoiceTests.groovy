@@ -426,7 +426,7 @@ class RunNotificationVoiceTests {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
                 [mismatchFields: [tally("isCompleted = isFulfilled", 1, "Y", "N")]])
         assertEquals("On isCompleted = isFulfilled, HotWax has Y and Shopify has N.", lines[1], lines.join("\n"))
-        assertTrue(lines.contains("Mismatches: 1 (isCompleted = isFulfilled)"), lines.join("\n"))
+        assertTrue(lines.contains("isCompleted = isFulfilled Mismatch: 1"), lines.join("\n"))
     }
 
     @Test
@@ -449,8 +449,8 @@ class RunNotificationVoiceTests {
                 [mismatchFields: [tally("grand_total = total_amount", 7), tally("isCompleted = isFulfilled", 3, "Y", "N"),
                                   tally("c = d", 1), tally("a = b", 1)]])
         assertEquals("Most are on grand_total = total_amount, where the values differ from record to record.", lines[1], lines.join("\n"))
-        assertTrue(lines.contains("Mismatches: 12 (grand_total = total_amount: 7, isCompleted = isFulfilled: 3, c = d: 1, +1 more)"),
-                lines.join("\n"))
+        assertEquals(["grand_total = total_amount Mismatch: 7", "isCompleted = isFulfilled Mismatch: 3", "c = d Mismatch: 1",
+                      "a = b Mismatch: 1"], lines.findAll { it.contains(" Mismatch: ") }, lines.join("\n"))
     }
 
     @Test
@@ -484,6 +484,74 @@ class RunNotificationVoiceTests {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
                 [mismatchFields: [tally("grand_total = total_amount", 1, "89.89", "-90.32")]])
         assertEquals("On grand_total = total_amount, HotWax has 89.89 and Shopify has -90.32.", lines[1], lines.join("\n"))
+    }
+
+    // DAR-BE-210: Dolls Kill result 100832 read "Mismatches: 14 (isFulfilled = isCompleted)". A rule with a name is
+    // called by it, and every rule gets its own row.
+    private static Map ruleTally(String ruleName, String field, int count, String file1Value = null, String file2Value = null) {
+        return tally(field, count, file1Value, file2Value) + [label: ruleName ?: field, ruleName: ruleName]
+    }
+
+    @Test
+    void namedRuleIsCalledByItsNameInTheDetailsDiagnosisAndHeadline() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 14) +
+                [mismatchFields: [ruleTally("Fulfillment Sync", "isFulfilled = isCompleted", 14)]])
+        String text = lines.join("\n")
+        assertTrue(lines[0].contains("all Fulfillment Sync mismatches"), text)
+        assertEquals("On Fulfillment Sync, the values differ from record to record.", lines[1], text)
+        assertTrue(lines.contains("Fulfillment Sync Mismatch: 14"), text)
+        assertFalse(text.contains("Mismatches: 14"), text)
+        assertFalse(text.contains("isFulfilled = isCompleted"), text)
+        assertTrue(lines.contains("Missing from Shopify: 0") && lines.contains("Missing from HotWax: 0"), text)
+    }
+
+    @Test
+    void eachRuleIsItsOwnRowBusiestFirst() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 17) +
+                [mismatchFields: [ruleTally("Transaction Sync", "amount = amount", 3), ruleTally("Fulfillment Sync", "isFulfilled = isCompleted", 14)]])
+        assertEquals(["Fulfillment Sync Mismatch: 14", "Transaction Sync Mismatch: 3"],
+                lines.findAll { it.contains(" Mismatch: ") }, lines.join("\n"))
+        assertEquals("Most are on Fulfillment Sync, where the values differ from record to record.", lines[1], lines.join("\n"))
+        assertTrue(lines[0].contains("all value mismatches"), lines[0])
+    }
+
+    @Test
+    void unnamedRuleKeepsItsFormulaAsTheLabel() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 14) +
+                [mismatchFields: [ruleTally(null, "isFulfilled = isCompleted", 14)]])
+        assertTrue(lines.contains("isFulfilled = isCompleted Mismatch: 14"), lines.join("\n"))
+        assertEquals("On isFulfilled = isCompleted, the values differ from record to record.", lines[1], lines.join("\n"))
+        assertTrue(lines[0].contains("all value mismatches"), lines[0])
+    }
+
+    @Test
+    void chatMarkupIsStrippedFromARuleName() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 2) +
+                [mismatchFields: [ruleTally("<https://evil.example|*Fulfillment*> ~Sync~ `x`", "a = b", 2)]])
+        String text = lines.join("\n")
+        assertTrue(lines.contains("https://evil.exampleFulfillment Sync x Mismatch: 2"), text)
+        assertFalse(text.contains("<https"), text)
+        assertFalse(text.contains("|"), text)
+    }
+
+    @Test
+    void mismatchesNoRuleClaimedReadAsOtherAndRulesPastTheCapFold() {
+        List<Map> rules = (1..10).collect { int i -> ruleTally("Rule ${i}".toString(), "f${i} = g${i}".toString(), 20 - i) }
+        int ruled = (int) rules.sum { it.count }
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, ruled + 4) + [mismatchFields: rules])
+        List<String> rows = lines.findAll { it.contains(" Mismatch: ") }
+        assertEquals(RunNotificationVoice.MAX_RULE_LINES, rows.size(), lines.join("\n"))
+        assertEquals("Rule 1 Mismatch: 19", rows.first())
+        assertTrue(lines.contains("+2 more rules: 21 mismatches"), lines.join("\n"))
+        assertTrue(lines.contains("Other mismatches: 4"), lines.join("\n"))
+    }
+
+    @Test
+    void noOtherLineWhenEveryMismatchHasARule() {
+        List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 3) +
+                [mismatchFields: [ruleTally("Transaction Sync", "a = b", 3)]])
+        assertFalse(lines.join("\n").contains("Other mismatches"), lines.join("\n"))
     }
 
     @Test

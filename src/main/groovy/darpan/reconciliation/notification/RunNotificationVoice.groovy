@@ -841,7 +841,7 @@ class RunNotificationVoice {
 
         if (bucket == BUCKET_CLEAN) return renderClean(runName, safeModel)
 
-        lines << headlineFor(bucket, runName, total, missingFromFile2, mismatches, file1Label, file2Label)
+        lines << headlineFor(bucket, runName, total, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields)
         lines << ((bucket == BUCKET_VALUE_DRIFT && mismatchFields) ?
                 valueDriftFact(mismatchFields, file1Label, file2Label) : diagnosisFor(bucket, mismatches))
         lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label, mismatchFields))
@@ -888,8 +888,13 @@ class RunNotificationVoice {
      * (DAR-BE-121) — at zero it names nothing and is just noise under a missing-records headline.
      * Single-asterisk bold — Google Chat renders `*Details*`; `**Details**` shows the asterisks.
      *
-     * DAR-BE-155: the mismatch line names the fields that drifted (busiest three, then "+N more"), so the
-     * reader is not left to guess from a diagnosis line that cannot know which field moved.
+     * DAR-BE-155: the mismatch line names the fields that drifted, so the reader is not left to guess from a
+     * diagnosis line that cannot know which field moved.
+     *
+     * DAR-BE-210: one line per rule, "<label> Mismatch: <count>", busiest first: the label is the rule's name when it
+     * has one ("Fulfillment Sync Mismatch: 14"), else its formula. Past MAX_RULE_LINES the rest fold into one
+     * "+N more rules" line; mismatches no rule claimed read "Other mismatches". A run that sent no per-rule tally
+     * keeps the single "Mismatches: N" line.
      */
     private static List<String> detailsBlock(int missingFromFile1, int missingFromFile2,
                                              int mismatches, String file1Label, String file2Label,
@@ -901,26 +906,42 @@ class RunNotificationVoice {
                 "Missing from ${file2Label}: ${missingFromFile2}".toString(),
                 "Missing from ${file1Label}: ${missingFromFile1}".toString(),
         ]
-        if (mismatches > 0) lines.add("Mismatches: ${mismatches}${mismatchFieldsSuffix(mismatchFields)}".toString())
+        if (mismatches > 0) lines.addAll(mismatchLines(mismatches, mismatchFields))
         return lines
     }
 
-    private static String mismatchFieldsSuffix(List<Map> fields) {
-        if (!fields) return ""
-        if (fields.size() == 1) return " (${fields.first().field})".toString()
-        List<String> named = fields.take(3).collect { "${it.field}: ${it.count}".toString() }
-        if (fields.size() > 3) named.add("+${fields.size() - 3} more".toString())
-        return " (${named.join(', ')})".toString()
+    static final int MAX_RULE_LINES = 8
+
+    private static List<String> mismatchLines(int mismatches, List<Map> rules) {
+        if (!rules) return ["Mismatches: ${mismatches}".toString()]
+        List<String> lines = rules.take(MAX_RULE_LINES).collect { "${it.label} Mismatch: ${it.count}".toString() }
+        List<Map> rest = rules.drop(MAX_RULE_LINES)
+        if (rest) {
+            int restCount = (int) rest.sum { it.count }
+            lines.add("+${rest.size()} more rule${rest.size() == 1 ? '' : 's'}: ${restCount} mismatch${restCount == 1 ? '' : 'es'}".toString())
+        }
+        int other = mismatches - (int) rules.sum { it.count }
+        if (other > 0) lines.add("Other mismatches: ${other}".toString())
+        return lines
     }
 
     /** RuleDiffSupport.fieldTally rows the run sent, busiest first; empty when the run did not say. */
     private static List<Map> mismatchTallies(Object raw) {
         if (!(raw instanceof List)) return []
-        return ((List) raw).findAll { it instanceof Map && ((Map) it).field?.toString()?.trim() && toCount(((Map) it).count) > 0 }
-                // Chat link and format syntax is stripped from the rule's label (security review on bb64b03).
-                .collect { Map it -> [field: it.field.toString().replaceAll(/[<>|*~`]/, "").trim(), count: toCount(it.count), file1Value: it.file1Value,
-                                      file2Value: it.file2Value, sameValues: it.sameValues == true] }
+        return ((List) raw).findAll { it instanceof Map && toCount(((Map) it).count) > 0 }
+                .collect { Map it ->
+                    // Chat link and format syntax is stripped from the rule's label, its name included (security review on bb64b03).
+                    String name = clean(it.ruleName)
+                    String label = clean(it.label) ?: clean(it.field)
+                    [label: name ?: label, named: name != null, count: toCount(it.count), file1Value: it.file1Value,
+                     file2Value: it.file2Value, sameValues: it.sameValues == true]
+                }
+                .findAll { it.label }
                 .sort { -((int) it.count) }
+    }
+
+    private static String clean(Object label) {
+        return label?.toString()?.replaceAll(/[<>|*~`]/, "")?.replaceAll(/\s+/, " ")?.trim() ?: null
     }
 
     /**
@@ -939,11 +960,11 @@ class RunNotificationVoice {
         String unnamed = top.sameValues ? "${file1Label} and ${file2Label} hold different values".toString() :
                 "the values differ from record to record"
         if (fields.size() == 1) {
-            if (!values) return "On ${top.field}, ${unnamed}.".toString()
-            return "On ${top.field}, ${values}${((int) top.count) > 1 ? ' every time' : ''}.".toString()
+            if (!values) return "On ${top.label}, ${unnamed}.".toString()
+            return "On ${top.label}, ${values}${((int) top.count) > 1 ? ' every time' : ''}.".toString()
         }
         int total = (int) fields.sum { it.count }
-        String lead = ((int) top.count) * 2 > total ? "Most are on ${top.field}" : "The largest share is on ${top.field}"
+        String lead = ((int) top.count) * 2 > total ? "Most are on ${top.label}" : "The largest share is on ${top.label}"
         return values ? "${lead}: ${values}.".toString() : "${lead}, where ${unnamed}.".toString()
     }
 
@@ -975,7 +996,7 @@ class RunNotificationVoice {
      * than describing the second and mis-describing the first.
      */
     private static String headlineFor(String bucket, String runName, int total, int missingFromFile2,
-                                      int mismatches, String file1Label, String file2Label) {
+                                      int mismatches, String file1Label, String file2Label, List<Map> mismatchRules = []) {
         String shape
         if (bucket == BUCKET_ONE_SIDED) {
             // missingFromFile2 > 0 means file 1 held them, so file 2's system is the one short.
@@ -983,7 +1004,9 @@ class RunNotificationVoice {
         } else if (bucket == BUCKET_EVEN_SPLIT) {
             shape = "near-evenly split"
         } else if (bucket == BUCKET_VALUE_DRIFT) {
-            shape = "all value mismatches"
+            // DAR-BE-210: one named rule holding every mismatch is named ("all Fulfillment Sync mismatches").
+            Map only = mismatchRules?.size() == 1 ? mismatchRules.first() : null
+            shape = only?.named && toCount(only.count) == mismatches ? "all ${only.label} mismatches".toString() : "all value mismatches"
         } else {
             shape = mismatches > 0 ? "missing and mismatched" : "missing on both sides"
         }

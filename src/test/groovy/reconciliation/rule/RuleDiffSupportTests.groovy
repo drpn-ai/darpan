@@ -21,9 +21,49 @@ class RuleDiffSupportTests {
                 [diffType: "BUSINESS_RULE_DIFF", message: "no field"],
         ])
         assertEquals([
-                [field: "grand_total = total_amount", count: 3, file1Value: null, file2Value: null, sameValues: false],
-                [field: "isCompleted = isFulfilled", count: 2, file1Value: "Y", file2Value: "N", sameValues: true],
+                [field: "grand_total = total_amount", label: "grand_total = total_amount", ruleId: null, ruleName: null, count: 3,
+                 file1Value: null, file2Value: null, sameValues: false],
+                [field: "isCompleted = isFulfilled", label: "isCompleted = isFulfilled", ruleId: null, ruleName: null, count: 2,
+                 file1Value: "Y", file2Value: "N", sameValues: true],
         ], tally)
+    }
+
+    @Test
+    void fieldTallyGivesEachRuleItsOwnRowNamedByItsRuleName() {
+        // DAR-BE-210: a difference's ruleId is its DRL rule name: the Rule's id, or the name its stored ruleLogic
+        // declares (FIELD_COMPARISON_1 when the rule was saved before it had an id).
+        List rules = [
+                [ruleId: "100500", ruleName: "Fulfillment Sync", ruleText: "isFulfilled = isCompleted",
+                 ruleLogic: 'rule "FIELD_COMPARISON_1"\nwhen\n    $m : Map()\nthen\nend'],
+                [ruleId: "100501", ruleName: null, ruleText: "amount = amount", ruleLogic: 'rule "100501"\nwhen\nthen\nend'],
+                [ruleId: "100502", ruleName: "Transaction Sync", ruleText: "status = status", ruleLogic: null],
+        ]
+        List<Map> tally = RuleDiffSupport.fieldTally([
+                [ruleId: "FIELD_COMPARISON_1", field: "isFulfilled = isCompleted", file1Value: "Y", file2Value: "N"],
+                [ruleId: "FIELD_COMPARISON_1", field: "isFulfilled = isCompleted", file1Value: "Y", file2Value: "N"],
+                [ruleId: "FIELD_COMPARISON_1", field: "isFulfilled = isCompleted", file1Value: "Y", file2Value: "N"],
+                [ruleId: "100501", field: "amount = amount", file1Value: "1", file2Value: "2"],
+                [ruleId: "100502", field: "status = status", file1Value: "A", file2Value: "B"],
+                [ruleId: "100502", field: "status = status", file1Value: "C", file2Value: "D"],
+                [diffType: "BUSINESS_RULE_DIFF", message: "names no rule and no field"],
+        ], rules)
+        assertEquals(["Fulfillment Sync", "Transaction Sync", "amount = amount"], tally*.label)
+        assertEquals(["100500", "100502", "100501"], tally*.ruleId)
+        assertEquals([3, 2, 1], tally*.count)
+        assertEquals(["Fulfillment Sync", "Transaction Sync", null], tally*.ruleName)
+        assertEquals([true, false, true], tally*.sameValues)
+        assertEquals("Y", tally[0].file1Value)
+    }
+
+    @Test
+    void fieldTallySplitsTwoRulesThatShareAFieldLabel() {
+        List<Map> tally = RuleDiffSupport.fieldTally([
+                [ruleId: "R1", field: "a = b", file1Value: "1", file2Value: "2"],
+                [ruleId: "R2", field: "a = b", file1Value: "1", file2Value: "2"],
+                [ruleId: "R2", field: "a = b", file1Value: "1", file2Value: "2"],
+        ], [[ruleId: "R1", ruleName: "First"], [ruleId: "R2"]])
+        assertEquals(["a = b", "First"], tally*.label)
+        assertEquals([2, 1], tally*.count)
     }
 
     @Test

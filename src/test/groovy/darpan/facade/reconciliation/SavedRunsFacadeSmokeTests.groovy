@@ -1742,6 +1742,50 @@ end'''
         assertEquals(expression, ruleRows[0].expression)
     }
 
+    /** DAR-BE-210: a rule's display name (the run notification calls its mismatches by it) saves, reads back and renames. */
+    @Test
+    void ruleNameRoundTripsThroughCreateSaveAndListAndRefusesChatMarkup() {
+        String expression = '{"type":"FIELD_COMPARISON","file1FieldPath":"isFulfilled","file2FieldPath":"isCompleted","operator":"="}'
+        Map runParams = [runName: "Rule Name Round Trip", file1SystemEnumId: "OMS", file1FileTypeEnumId: "DftCsv",
+                         file1PrimaryIdExpression: "order_id", file2SystemEnumId: "SHOPIFY", file2FileTypeEnumId: "DftCsv",
+                         file2PrimaryIdExpression: "order_id"]
+        Closure<Map> rule = { Map extra -> [sequenceNum: 10, ruleText: "isFulfilled = isCompleted", ruleType: "FIELD_COMPARISON",
+                                            expression: expression, enabled: "Y", severity: "WARN"] + extra }
+
+        Map<String, Object> created = ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters(runParams + [rules: [rule([ruleName: "  Fulfillment   Sync "])]]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String savedRunId = created.savedRun.savedRunId as String
+        ruleSetRunFixturesToCleanUp.add([ruleSetId: savedRunId, compareScopeId: created.savedRun.compareScopeId as String])
+        List createdRules = (List) created.savedRun.rules
+        assertEquals("Fulfillment Sync", createdRules[0].ruleName, "trimmed, inner runs of space folded")
+        assertEquals("isFulfilled = isCompleted", createdRules[0].ruleText, "the formula is untouched")
+        String ruleId = createdRules[0].ruleId as String
+
+        Map<String, Object> renamed = ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(runParams + [savedRunId: savedRunId, rules: [rule([ruleId: ruleId, ruleName: "Order Fulfillment"])]])
+                .disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals("Order Fulfillment", ((List) renamed.savedRun.rules)[0].ruleName)
+        assertEquals(ruleId, ((List) renamed.savedRun.rules)[0].ruleId)
+        assertEquals("Order Fulfillment", findSavedRunRow(savedRunId).rules[0].ruleName, "list#SavedRuns carries it")
+
+        ["<b>Sync</b>", "Fulfillment | Sync", "*Sync*", "~Sync~", "`Sync`", "N" * 61].each { String bad ->
+            ec.message.clearErrors()
+            ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                    .parameters(runParams + [savedRunId: savedRunId, rules: [rule([ruleId: ruleId, ruleName: bad])]]).disableAuthz().call()
+            assertTrue(ec.message.hasError(), "accepted rule name ${bad}")
+        }
+        ec.message.clearErrors()
+        assertEquals("Order Fulfillment", ec.entity.find("darpan.rule.Rule").condition("ruleId", ruleId).disableAuthz()
+                .useCache(false).one().ruleName, "a refused name leaves the saved one")
+
+        Map<String, Object> cleared = ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(runParams + [savedRunId: savedRunId, rules: [rule([ruleId: ruleId, ruleName: "  "])]]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertNull(((List) cleared.savedRun.rules)[0].ruleName, "a blank name clears it")
+    }
+
     @Test
     void createRuleSetRunRegeneratesFieldComparisonRuleLogicAndIgnoresMaliciousClientRuleLogic() {
         // Audit 2026-06-11 #1 durable fix (end-to-end): a client sends a benign FIELD_COMPARISON

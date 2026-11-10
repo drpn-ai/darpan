@@ -480,6 +480,21 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
+    void aRetiredGraceDaysIsDroppedOnImportNotRefused() {
+        // DAR-BE-206: bundles and config versions made before a check's graceDays was retired still carry it.
+        Map bundle = copy(exportSource())
+        Map check = (bundle.checks as List<Map>).find { it.ref == "CHECK:XFER_CHK1" }
+        assertFalse((check.fields as Map).containsKey("graceDays"), "the export no longer writes it")
+        check.fields.graceDays = "2"
+        Map first = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertNoErrors(first)
+        Map again = importInto(DST, bundle, [(AUTH_REF): first.result.idMap[AUTH_REF]]).result.plan as Map
+        assertEquals([], again.blocking)
+        assertEquals("UNCHANGED", (again.lines as List<Map>).find { it.ref == "CHECK:XFER_CHK1" }.action,
+                "dropped before the diff too, so a re-preview converges")
+    }
+
+    @Test
     void systemMessageRemoteBlocks() {
         Map bundle = copy(exportSource())
         Map run = (bundle.runs as List<Map>)[0]
@@ -1496,7 +1511,7 @@ class ConfigTransferSmokeTests {
                 statementCode: "R8", categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_DERIVED", statementText: "Memos close",
                 isActive: "Y", sequenceNum: 2L])
         create("darpan.audit.AuditCheck", [checkId: "XFER_CHK1", companyUserGroupId: SRC, checkCode: "returns-vs-memos",
-                label: "Returns vs memos", savedRunId: "XFER_RS", graceDays: 2L, otherSideDateField: "trandate",
+                label: "Returns vs memos", savedRunId: "XFER_RS", otherSideDateField: "trandate",
                 fixWhereEnumId: "NETSUITE", headlineTemplate: "Return {id} has no memo"])
         create("darpan.audit.AuditCheck", [checkId: "XFER_CHK2", companyUserGroupId: SRC, checkCode: "memos-open",
                 label: "Memos left open", savedRunId: "XFER_RS"])

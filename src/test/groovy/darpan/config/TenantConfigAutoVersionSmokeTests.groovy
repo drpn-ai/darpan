@@ -51,7 +51,7 @@ class TenantConfigAutoVersionSmokeTests {
                     statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                     statementText: "Every invoice carries the Etail id.", isActive: "Y"])
             upsert("darpan.audit.AuditCheck", [checkId: "${MINE}_INV".toString(), companyUserGroupId: MINE,
-                    checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id", graceDays: 1L])
+                    checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_INV".toString(), statementId: R2_ID,
                     companyUserGroupId: MINE, sequenceNum: 1L])
             upsert("darpan.reconciliation.NsSuiteQlSourceQuery", [nsSuiteQlSourceQueryId: "TCA_QUERY", companyUserGroupId: MINE,

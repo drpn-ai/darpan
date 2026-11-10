@@ -124,7 +124,7 @@ class AuditCheckAuthoringSmokeTests {
         assertEquals(["CONC_TCHK_OPEN"], saved.expectedCodes, "DAR-BE-196: an expected cause is the run's, not the link's")
         def row = checkRow("credit-memos-left-open")
         assertEquals(MINE, row.companyUserGroupId)
-        assertEquals(1L, row.graceDays as Long)
+        assertFalse(saved.containsKey("graceDays"), "DAR-BE-206: an old caller's graceDays is ignored, not refused")
         assertEquals("FINDING", link(row.checkId, "${MINE}_R4").diffTypes)
         assertEquals(null, link(row.checkId, "${MINE}_R4").conclusionCodes)
         assertEquals("EXPECTED", ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", "TCHK_RS1_SCOPE")
@@ -156,7 +156,6 @@ class AuditCheckAuthoringSmokeTests {
                 [check: base + [id: "Bad Code"], statements: [[id: "R4"]], says: "lower-case words"],
                 [check: base + [fixWhereEnumId: "OMS_RETURNS"], statements: [[id: "R4"]], says: "Fix where"],
                 [check: base, statements: [], says: "at least one statement"],
-                [check: base + [graceDays: "999"], statements: [[id: "R4"]], says: "Grace days"],
         ].each { Map c ->
             Map out = facade("save#AuditCheck", [audit: "month-close-t", check: c.check, statements: c.statements])
             assertTrue(out.hadError as boolean, "should refuse: ${c.says}")

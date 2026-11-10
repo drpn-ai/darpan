@@ -33,11 +33,11 @@ class AuditGraphQlSmokeTests {
         schema
         report { date period running tenant { id name timeZone } audit { id name period } window { from thru } }
         health { complete summary notCovered sources { system read records readAt reason affects } checks { ran partial notRun } }
-        summary { open pending newToday fixedToday oldestOpen { id statement firstFound ageDays }
-                  byCategory { category open pending newToday fixedToday } }
-        categories { id label counts { open pending newToday fixedToday }
-          statements { id text weight status reason findingsOmitted counts { open pending }
-            checks { id label status reason matchedBy graceDays compared { system count } }
+        summary { open newToday fixedToday oldestOpen { id statement firstFound ageDays }
+                  byCategory { category open newToday fixedToday } }
+        categories { id label counts { open newToday fixedToday }
+          statements { id text weight status reason findingsOmitted counts { open }
+            checks { id label status reason matchedBy compared { system count } }
             findings { id headline state firstFound ageDays next records { system recordType id internalId status }
                        difference { amount currency } } } } } }"""
 
@@ -63,7 +63,7 @@ class AuditGraphQlSmokeTests {
                     statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                     statementText: "Every invoice and credit memo carries the Shopify order id (the Etail id)."])
             insert("darpan.audit.AuditCheck", [checkId: "${id}_INV".toString(), companyUserGroupId: id, checkCode: "invoices-without-etail-id",
-                    label: "NetSuite invoices with no Etail id", graceDays: 1L])
+                    label: "NetSuite invoices with no Etail id"])
             insert("darpan.audit.AuditStatementCheck", [checkId: "${id}_INV".toString(), statementId: "${id}_R2".toString(),
                     companyUserGroupId: id, sequenceNum: 1L])
         }
@@ -74,7 +74,7 @@ class AuditGraphQlSmokeTests {
                 statementCode: "R8", categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM", sequenceNum: 8L,
                 statementText: "Every return has its credit memo."])
         insert("darpan.audit.AuditCheck", [checkId: "${A}_RET".toString(), companyUserGroupId: A, checkCode: "returns-vs-credit-memos",
-                label: "OMS returns against NetSuite credit memos", graceDays: 0L])
+                label: "OMS returns against NetSuite credit memos"])
         insert("darpan.audit.AuditStatementCheck", [checkId: "${A}_RET".toString(), statementId: "${A}_R8".toString(),
                 companyUserGroupId: A, sequenceNum: 1L])
         Map base = [companyUserGroupId: A, checkId: "${A}_RET".toString(), reportDate: Date.valueOf("2026-10-09")]
@@ -141,7 +141,7 @@ class AuditGraphQlSmokeTests {
         assertEquals(["invoices-without-etail-id"], (r2.checks as List<Map>)*.id)
         assertEquals([[system: "NetSuite", count: 3311]], r2.checks[0].compared)
         Map finding = (r2.findings as List<Map>)[0]
-        assertEquals([findingA, "Invoice INV-A1 has no Etail id", "pending"], [finding.id, finding.headline, finding.state])
+        assertEquals([findingA, "Invoice INV-A1 has no Etail id", "open"], [finding.id, finding.headline, finding.state])
         assertEquals([[system: "NetSuite", recordType: "invoice", id: "INV-A1", internalId: "51000940", status: null]], finding.records)
         assertTrue(doc.health.notCovered instanceof List)
     }
@@ -178,7 +178,7 @@ class AuditGraphQlSmokeTests {
             fix { darpanChanges verify { by passesWhen } } history { event by { type id } } status { closedBy { type } } } access { mode } } }""")
         assertEquals([], out.errors, "errors")
         Map f = (Map) out.data.auditFinding.finding
-        assertEquals([findingA, "R2", "orders", "pending"], [f.id, f.statement.id, f.category.id, f.status.state])
+        assertEquals([findingA, "R2", "orders", "open"], [f.id, f.statement.id, f.category.id, f.status.state])
         assertEquals([[system: "NetSuite", recordType: "invoice", id: "INV-A1", internalId: "51000940"]], f.records)
         assertEquals(["found"], (f.history as List<Map>)*.event)
         assertEquals("read-only", out.data.auditFinding.access.mode)
@@ -262,7 +262,7 @@ class AuditGraphQlSmokeTests {
         assertEquals(["Invoice INV-A1 has no Etail id", "Return M258615 has no credit memo", "Return M258616 has no credit memo"],
                 list*.headline, "oldest first, then by id")
         Map first = list[0]
-        assertEquals([findingA, "R2", "orders", "2026-10", "pending", "2026-10-08", "2026-10-08", "darpan findings show ${findingA}".toString()],
+        assertEquals([findingA, "R2", "orders", "2026-10", "open", "2026-10-08", "2026-10-08", "darpan findings show ${findingA}".toString()],
                 [first.id, first.statement, first.category, first.period, first.state, first.firstFound, first.lastSeen, first.next])
         assertEquals([[system: "NetSuite", recordType: "invoice", id: "INV-A1", internalId: "51000940", status: null]], first.records)
         assertEquals([system: "OMS", recordType: "return", id: "M258615", internalId: null, status: "Completed"], list[1].records[0],
@@ -278,8 +278,7 @@ class AuditGraphQlSmokeTests {
         assertEquals(["Invoice INV-A1 has no Etail id"], heads("statement:R2"))
         assertEquals(3, heads("statement:R2,R8").size(), "comma is in")
         assertEquals(2, heads("category:returns").size())
-        assertEquals(["Invoice INV-A1 has no Etail id"], heads("state:pending"), "R8's grace is 0: open")
-        assertEquals(2, heads("state:open").size())
+        assertEquals(3, heads("state:open").size())
         assertEquals(2, heads("firstFound:>=2026-10-09").size())
         assertEquals(1, heads("firstFound:<2026-10-09").size())
         assertEquals(3, heads("period:2026-10").size())

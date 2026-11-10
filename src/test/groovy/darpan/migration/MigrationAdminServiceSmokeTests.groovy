@@ -158,14 +158,14 @@ class MigrationAdminServiceSmokeTests {
                 .name("admin.MigrationAdminServices.get#MigrationStatus")
                 .parameters([:]).disableAuthz().call()
         assertTrue(before.ok as Boolean)
-        assertEquals(7, (before.migrations as List).size())
+        assertEquals(10, (before.migrations as List).size())
         (before.migrations as List<Map<String, Object>>).each { assertEquals("PENDING", it.status) }
 
         Map<String, Object> run = ec.service.sync()
                 .name("admin.MigrationAdminServices.run#PendingMigrations")
                 .parameters([:]).disableAuthz().call()
         assertTrue(run.ok as Boolean, "run reported failure: ${run.results}")
-        assertEquals(7, run.appliedCount)
+        assertEquals(10, run.appliedCount)
 
         Map<String, Object> after = ec.service.sync()
                 .name("admin.MigrationAdminServices.get#MigrationStatus")
@@ -195,7 +195,7 @@ class MigrationAdminServiceSmokeTests {
         Map<String, Object> run = ec.service.sync()
                 .name("admin.MigrationAdminServices.run#PendingMigrations")
                 .parameters([:]).disableAuthz().call()
-        assertEquals(6, run.appliedCount, "parking one migration must not strand the other six")
+        assertEquals(9, run.appliedCount, "parking one migration must not strand the other nine")
 
         Map<String, Object> row = (ec.service.sync()
                 .name("admin.MigrationAdminServices.get#MigrationStatus")

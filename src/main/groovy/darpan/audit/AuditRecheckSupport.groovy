@@ -195,7 +195,7 @@ class AuditRecheckSupport {
     private static List<Map> openFindings(def ec, String tenantId, List checkIds, String period) {
         return TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditFinding")
                 .condition("companyUserGroupId", tenantId).condition("checkId", EntityCondition.IN, checkIds)
-                .condition("period", period).condition("stateEnumId", EntityCondition.IN, ["AUDFS_OPEN", "AUDFS_PENDING"])
+                .condition("period", period).condition("stateEnumId", "AUDFS_OPEN")
                 .selectFields(["recordKey", "firstFoundDate"]).useCache(false).list()
                 .collect { [recordKey: it.recordKey as String, firstFoundDate: it.firstFoundDate] }
     }

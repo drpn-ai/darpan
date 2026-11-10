@@ -70,4 +70,10 @@
                 through (DAR-BE-199): the time most running checks share. No automation is rewritten; one off the
                 audit's schedule is named and put on it by saving the audit's settings. Idempotent."/>
 
+    <darpan.migration.DarpanMigration migrationId="AUDIT_FINDINGS_NO_PENDING" componentName="darpan"
+            serviceName="audit.AuditLedgerServices.migrate#AuditFindingsNoPending"
+            sequenceNum="110" supportsDryRun="Y" enabled="Y"
+            description="Open every audit finding still pending: a finding is only open or fixed, and a grace is an
+                expected conclusion rule, not a state (DAR-BE-206). Every tenant; dates and history kept. Idempotent."/>
+
 </entity-facade-xml>

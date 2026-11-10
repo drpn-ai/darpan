@@ -31,7 +31,6 @@ class AuditCheckAuthoringSupport {
     static final List<String> FIX_WHERE = ["OMS", "NETSUITE", "SHOPIFY"].asImmutable()
     static final String CODE_PATTERN = /[a-z0-9]+(-[a-z0-9]+)*/
     static final int MAX_TEMPLATE = 500
-    static final int MAX_GRACE_DAYS = 60
 
     private static final List<String> TEXT_FIELDS = ["label", "file1RecordType", "file2RecordType", "matchedBy", "fixOwner",
                                                      "expectedSource", "actualSource", "headlineTemplate",
@@ -123,12 +122,7 @@ class AuditCheckAuthoringSupport {
         }
         String fixWhere = normalize(check.fixWhereEnumId)
         if (fixWhere && !(fixWhere in FIX_WHERE)) ec.message.addError("Fix where must be one of ${FIX_WHERE.join(', ')}.")
-        Integer graceDays = null
-        if (normalize(check.graceDays) != null) {
-            String g = normalize(check.graceDays)
-            if (!(g ==~ /\d{1,3}/) || (g as int) > MAX_GRACE_DAYS) ec.message.addError("Grace days is a whole number from 0 to ${MAX_GRACE_DAYS}.")
-            else graceDays = g as int
-        }
+        // DAR-BE-206: a check has no grace days (a grace is an expected conclusion rule); an old caller's graceDays is ignored.
         String currency = normalize(check.amountCurrencyUomId)
         if (currency && !(currency ==~ /[A-Z]{3}/)) ec.message.addError("Currency is a three-letter code, e.g. USD.")
 
@@ -161,12 +155,12 @@ class AuditCheckAuthoringSupport {
             row = ec.entity.makeValue("darpan.audit.AuditCheck")
             row.setSequencedIdPrimary()
             row.setAll([companyUserGroupId: tenantId, checkCode: code])
-            row.setAll(values + [savedRunId: savedRunId, fixWhereEnumId: fixWhere, graceDays: graceDays, amountCurrencyUomId: currency])
+            row.setAll(values + [savedRunId: savedRunId, fixWhereEnumId: fixWhere, amountCurrencyUomId: currency])
             row.create()
         } else {
             // A changed run makes the automation stale: clear it, and the audit's play / settings make one for the new run.
             if ((row.savedRunId as String) != savedRunId) row.set("automationId", null)
-            row.setAll(values + [savedRunId: savedRunId, fixWhereEnumId: fixWhere, graceDays: graceDays, amountCurrencyUomId: currency])
+            row.setAll(values + [savedRunId: savedRunId, fixWhereEnumId: fixWhere, amountCurrencyUomId: currency])
             row.update()
         }
         String checkId = row.checkId as String
@@ -199,7 +193,7 @@ class AuditCheckAuthoringSupport {
                 .collect { [id: codeById[it.statementId as String], diffTypes: listOf(it.diffTypes),
                             ruleIds: listOf(it.ruleIds)] as Map<String, Object> }
         Map<String, Object> out = [id: check.checkCode, savedRunId: check.savedRunId, automationId: check.automationId,
-                                   fixWhereEnumId: check.fixWhereEnumId, graceDays: check.graceDays,
+                                   fixWhereEnumId: check.fixWhereEnumId,
                                    amountCurrencyUomId: check.amountCurrencyUomId] as Map<String, Object>
         TEXT_FIELDS.each { String f -> out[f] = check.get(f) }
         out.expectedCodes = check.savedRunId ? conclusionRulesOf(ec, check.savedRunId as String)

@@ -134,7 +134,7 @@ class AgentRedaction {
         Map f = document.get("finding") instanceof Map ? (Map) document.get("finding") : document
         Map redacted = redactFindingRecords(f)
         Closure<Map> pick = { Object m, List<String> keys -> m instanceof Map ? keys.findAll { ((Map) m).containsKey(it) }.collectEntries { [(it): ((Map) m).get(it)] } : null }
-        Map status = pick(f.get("status"), ["state", "firstFound", "lastSeen", "lastChecked", "ageDays", "timesSeen", "pendingUntil", "closedAt"])
+        Map status = pick(f.get("status"), ["state", "firstFound", "lastSeen", "lastChecked", "ageDays", "timesSeen", "closedAt"])
         Map evidence = f.get("evidence") instanceof Map ? (Map) f.get("evidence") : [:]
         Map diagnosis = f.get("diagnosis") instanceof Map ? (Map) f.get("diagnosis") : [:]
         Map fix = f.get("fix") instanceof Map ? (Map) f.get("fix") : [:]

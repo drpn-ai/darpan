@@ -18,10 +18,11 @@
 
     <service verb="record" noun="CheckFindings" authenticate="false" allow-remote="false">
         <description>Writes one check's reported findings for one morning. A record seen for the first time becomes
-            a new finding (event found). A known open or pending finding seen on a later morning is stillOpen, and a
-            fixed one reported again is reopened with its first-found day kept. A second call on the same morning
-            refreshes the evidence and writes no event, so a rerun never double-counts. State is pending while the
-            finding is younger than the check's graceDays, open after. Records and evidence checks are replaced, so
+            a new finding (event found), open from its first morning: a finding is only open or fixed (DAR-BE-206; a
+            grace is an expected conclusion rule, not a state). A known open finding seen on a later morning is
+            stillOpen, and a fixed one reported again is reopened with its first-found day kept. A second call on the
+            same morning refreshes the evidence and writes no event, so a rerun never double-counts. Records and
+            evidence checks are replaced, so
             they always show the latest read. Each record's systemEnumId is stored as its ROOT system, never the
             endpoint. Every finding is validated before anything is written.</description>
         <in-parameters>
@@ -53,7 +54,6 @@
             <if condition="runWindow.error">
                 <return error="true" message="Audit check ${checkId}: ${runWindow.error}"/></if>
             <set field="period" from="runWindow.period"/>
-            <set field="graceDays" from="(tenantCheck.check.graceDays ?: 0) as int"/>
             <set field="statementIdByCode" from="tenantCheck.statementIdByCode"/>
             <set field="findings" from="findings ?: []"/>
 
@@ -123,9 +123,7 @@
                     </else>
                 </if>
 
-                <!-- Grace age: days from first found to this morning, against the check's graceDays. -->
-                <set field="ageDays" from="reportDate.toLocalDate().toEpochDay() - finding.firstFoundDate.toLocalDate().toEpochDay()"/>
-                <set field="finding.stateEnumId" from="ageDays &lt; graceDays ? 'AUDFS_PENDING' : 'AUDFS_OPEN'"/>
+                <set field="finding.stateEnumId" value="AUDFS_OPEN"/>
                 <set field="finding.headline" from="f.headline"/>
                 <set field="finding.ruleText" from="f.ruleText"/>
                 <set field="finding.expectedAmount" from="f.expectedAmount != null ? new BigDecimal(f.expectedAmount.toString()) : null"/>
@@ -181,7 +179,7 @@
     </service>
 
     <service verb="close" noun="ResolvedFindings" authenticate="false" allow-remote="false">
-        <description>Marks fixed every open or pending finding of one check whose record the check looked at this
+        <description>Marks fixed every open finding of one check whose record the check looked at this
             morning (examinedRecordKeys) and did not report (lastSeenDate before reportDate). Runs only when the check
             ran over complete reads: a partial or not-run check closes NOTHING, because a record missing from a
             partial read is not evidence that it was fixed. In v1 only a scheduled check closes a finding.</description>
@@ -230,7 +228,7 @@
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="checkId"/>
                 <econdition field-name="period"/>
-                <econdition field-name="stateEnumId" operator="in" from="['AUDFS_OPEN', 'AUDFS_PENDING']"/>
+                <econdition field-name="stateEnumId" value="AUDFS_OPEN"/>
                 <econdition field-name="lastSeenDate" operator="less" from="reportDate" ignore="reportedRecordKeys != null"/>
             </entity-find>
             <iterate list="candidates" entry="finding">
@@ -509,6 +507,41 @@
             <set field="rowsUpdated" from="out.rowsUpdated"/>
             <set field="linksCleared" from="out.linksCleared"/>
             <set field="messages" from="out.messages"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
+    <!-- DAR-BE-206: registered migration AUDIT_FINDINGS_NO_PENDING (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="AuditFindingsNoPending" authenticate="false" allow-remote="false">
+        <description>One-time: a finding is only open or fixed, so every stored finding still pending (the retired
+            check-level grace) becomes open. Its dates, history and evidence are kept; no event is written, as none was
+            when a grace ran out. Every tenant at once: a state is not tenant data, and the supervisor runs this with
+            authz disabled, so the find is by state alone. Idempotent: a second run finds nothing. Not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.audit.AuditFinding" list="pendingList" for-update="true">
+                <econdition field-name="stateEnumId" value="AUDFS_PENDING"/>
+                <order-by field-name="companyUserGroupId"/>
+            </entity-find>
+            <set field="rowsUpdated" from="pendingList.size()" type="Integer"/>
+            <if condition="!dryRun">
+                <iterate list="pendingList" entry="finding">
+                    <set field="finding.stateEnumId" value="AUDFS_OPEN"/>
+                    <entity-update value-field="finding"/>
+                </iterate>
+            </if>
+            <set field="perTenant" from="pendingList*.companyUserGroupId.countBy { it }"/>
+            <set field="messages" from="[(dryRun ? 'Would open' : 'Opened') + ' ' + rowsUpdated + ' pending finding(s)' +
+                    (perTenant ? ': ' + perTenant.collect { k, v -> k + ' ' + v }.join(', ') : '') + '.']"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="errors" from="ec.message.errors ?: []"/>
         </actions>

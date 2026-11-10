@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * One scenario is written once, through the ledger's own writers, and every report test reads it:
  *   2026-10-07  returns check ran over complete reads; finds M258615 (R4) and RX-1 (R8). Invoice check did not run.
  *   2026-10-08  returns check ran; M258615 again (now open), RX-1 looked at and gone (fixed). Invoice check ran and
- *               found INV-552310 (R2, pending).
+ *               found INV-552310 (R2, open on its first morning).
  *   2026-10-09  returns check ran over a PARTIAL NetSuite read; M258615 again; nothing closes. Invoice check did not run.
  * R5 and R12 have no check. All of that is GORJANA's "Month close" audit. Her second audit, "Daily ops" (period day),
  * has statement D1 and a check that never runs, with one finding: the month-close report must see none of it.
@@ -57,7 +57,6 @@ class AuditReportAssemblerSmokeTests {
     private ExecutionContext ec
     private String m258615
     private String rx1
-    private String inv552310
     private String kreweFinding
     private String opsFinding
 
@@ -85,12 +84,12 @@ class AuditReportAssemblerSmokeTests {
         statement(GORJANA, MONTH_CLOSE, "TREP_R8", "R8", "AUDC_RETURNS", "AUDSW_DERIVED", 8, "Every return reaches NetSuite.")
         statement(GORJANA, MONTH_CLOSE, "TREP_R12", "R12", "AUDC_EXCHANGES_WARRANTY", "AUDSW_DERIVED", 12, "A warranty replacement is paid by that claim's own credit.")
         insert("darpan.audit.AuditCheck", [checkId: RET, companyUserGroupId: GORJANA, checkCode: "returns-vs-credit-memos",
-                label: "OMS returns against NetSuite credit memos", graceDays: 1L, matchedBy: "return id (custbody_hc_return_id)",
+                label: "OMS returns against NetSuite credit memos", matchedBy: "return id (custbody_hc_return_id)",
                 fixOwner: "HotWax Support", fixWhereEnumId: "NETSUITE",
                 fixActionTemplate: "Correct credit memo {creditMemo} so its total is {expectedAmount} and nothing remains open.",
                 passesWhenTemplate: "Memo total is {expectedAmount} and amount remaining is 0.00."])
         insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, checkCode: "invoices-without-etail-id",
-                label: "NetSuite invoices and memos with no Etail id", graceDays: 1L])
+                label: "NetSuite invoices and memos with no Etail id"])
         link(GORJANA, RET, "TREP_R4", 1)
         link(GORJANA, RET, "TREP_R8", 2)
         link(GORJANA, INV, "TREP_R2", 1)
@@ -139,7 +138,7 @@ class AuditReportAssemblerSmokeTests {
         record(RET, "2026-10-08", "06:12:40", [memo])
         close(RET, "2026-10-08", "06:12:40", run.checkStatusEnumId as String, ["M258615", "RX-1"])
         run = checkRun(GORJANA, INV, "2026-10-08", "06:05:00", [read("NETSUITE_SUITEQL", "AUDSR_COMPLETE", 2210, "06:04:30")])
-        inv552310 = (record(INV, "2026-10-08", "06:05:00", [invoice]).findingIds as List)[0]
+        record(INV, "2026-10-08", "06:05:00", [invoice])
         close(INV, "2026-10-08", "06:05:00", run.checkStatusEnumId as String, ["INV-552310"])
         // 2026-10-09: a partial NetSuite read
         run = checkRun(GORJANA, RET, "2026-10-09", "06:11:00", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE", 400, "06:03:00"),
@@ -189,9 +188,9 @@ class AuditReportAssemblerSmokeTests {
         Map r4 = doc.categories.refundsAndCredits.statements.R4
         assertEquals([id: "R4", text: R4_TEXT, weight: "derived", status: "ran", reason: null], r4.subMap(["id", "text", "weight", "status", "reason"]))
         assertEquals([[id: "returns-vs-credit-memos", label: "OMS returns against NetSuite credit memos", status: "ran", reason: null,
-                       matchedBy: "return id (custbody_hc_return_id)", graceDays: 1, compared: [OMS: 412, NetSuite: 409],
+                       matchedBy: "return id (custbody_hc_return_id)", compared: [OMS: 412, NetSuite: 409],
                        window: [from: "2026-10-01", thru: "2026-10-08"]]], r4.checks)
-        assertEquals([open: 1, pending: 0, newToday: 0, fixedToday: 0], r4.counts)
+        assertEquals([open: 1, newToday: 0, fixedToday: 0], r4.counts)
         Map brief = (r4.findings as List)[0]
         assertEquals([id: m258615, headline: "Credit memo is 0.01 less than the refund for return M258615", state: "open",
                       firstFound: "2026-10-07", ageDays: 1, difference: [amount: "-0.01", currency: "USD"],
@@ -203,14 +202,15 @@ class AuditReportAssemblerSmokeTests {
                 "records by ROOT system and type, every value an array")
 
         Map r2 = doc.categories.orders.statements.R2
-        assertEquals([open: 0, pending: 1, newToday: 1, fixedToday: 0], r2.counts)
-        assertEquals(["pending", null, [NetSuite: 2210]], [r2.findings[0].state, r2.findings[0].difference, r2.checks[0].compared])
+        assertEquals([open: 1, newToday: 1, fixedToday: 0], r2.counts, "open on the morning it is first found")
+        assertEquals(["open", null, [NetSuite: 2210]], [r2.findings[0].state, r2.findings[0].difference, r2.checks[0].compared])
 
         Map r8 = doc.categories.returns.statements.R8
-        assertEquals([open: 0, pending: 0, newToday: 0, fixedToday: 1], r8.counts)
+        assertEquals([open: 0, newToday: 0, fixedToday: 1], r8.counts)
         assertEquals([[rx1, "fixed"]], (r8.findings as List).collect { [it.id, it.state] }, "fixed today stays on the list that day")
 
-        assertEquals([open: 1, pending: 1, newToday: 1, fixedToday: 1], doc.summary.subMap(["open", "pending", "newToday", "fixedToday"]))
+        assertEquals([open: 2, newToday: 1, fixedToday: 1], doc.summary.subMap(["open", "newToday", "fixedToday"]))
+        assertFalse((doc.summary as Map).containsKey("pending"), "there is no pending count")
         assertEquals([id: m258615, statement: "R4", firstFound: "2026-10-07", ageDays: 1], doc.summary.oldestOpen)
 
         assertEquals(true, doc.health.complete)
@@ -228,7 +228,7 @@ class AuditReportAssemblerSmokeTests {
             assertEquals(["R5", "R12"], doc.health.notCovered, day)
             Map r5 = doc.categories.refundsAndCredits.statements.R5
             assertEquals([status: "notRun", reason: "No check is configured for this statement yet.", checks: [],
-                          counts: [open: 0, pending: 0, newToday: 0, fixedToday: 0], findings: [], findingsOmitted: 0],
+                          counts: [open: 0, newToday: 0, fixedToday: 0], findings: [], findingsOmitted: 0],
                     r5.subMap(["status", "reason", "checks", "counts", "findings", "findingsOmitted"]), day)
             assertNotNull(doc.categories.exchangesAndWarranty.statements.R12, "R12 present on ${day}")
         }
@@ -238,16 +238,17 @@ class AuditReportAssemblerSmokeTests {
     void aPastMorningReadsEachFindingsStateFromItsHistory() {
         Map doc = report(GORJANA, "2026-10-07")
         Map r4 = doc.categories.refundsAndCredits.statements.R4
-        assertEquals([open: 0, pending: 1, newToday: 1, fixedToday: 0], r4.counts, "stored state is open; on 10-07 it was pending")
+        assertEquals([open: 1, newToday: 1, fixedToday: 0], r4.counts)
         Map r8 = doc.categories.returns.statements.R8
-        assertEquals([[rx1, "pending"]], (r8.findings as List).collect { [it.id, it.state] }, "stored state is fixed; on 10-07 it was pending")
+        assertEquals([[rx1, "open"]], (r8.findings as List).collect { [it.id, it.state] }, "stored state is fixed; on 10-07 it was open")
         Map r2 = doc.categories.orders.statements.R2
         assertEquals([], r2.findings, "INV-552310 was first found on 10-08")
         assertEquals(["notRun", "The check did not run on the morning of 2026-10-07."], [r2.status, r2.reason])
         assertEquals(false, doc.health.complete)
         assertEquals([ran: 1, partial: 0, notRun: 1], doc.health.checks)
         assertEquals("Not complete: check invoices-without-etail-id did not run. R5 and R12 have no check yet.", doc.health.summary)
-        assertNull(doc.summary.oldestOpen, "nothing was open yet")
+        assertEquals([id: m258615, statement: "R4", firstFound: "2026-10-07", ageDays: 0], doc.summary.oldestOpen,
+                "open on the morning it was found")
     }
 
     @Test
@@ -263,17 +264,17 @@ class AuditReportAssemblerSmokeTests {
 
         Map r4 = doc.categories.refundsAndCredits.statements.R4
         assertEquals(["partial", "The NetSuite read was partial: page ceiling reached."], [r4.status, r4.reason])
-        assertEquals([open: 1, pending: 0, newToday: 0, fixedToday: 0], r4.counts)
+        assertEquals([open: 1, newToday: 0, fixedToday: 0], r4.counts)
         assertEquals([OMS: 400, NetSuite: 300], r4.checks[0].compared)
 
         Map r2 = doc.categories.orders.statements.R2
         assertEquals("notRun", r2.status)
         assertNull(r2.checks[0].compared, "compared is null when the check did not run")
-        assertEquals([open: 0, pending: 1, newToday: 0, fixedToday: 0], r2.counts, "counts are kept on a morning the check did not run")
+        assertEquals([open: 1, newToday: 0, fixedToday: 0], r2.counts, "counts are kept on a morning the check did not run")
         assertEquals(2, doc.summary.oldestOpen.ageDays)
 
         Map r8 = doc.categories.returns.statements.R8
-        assertEquals([[], [open: 0, pending: 0, newToday: 0, fixedToday: 0]], [r8.findings, r8.counts],
+        assertEquals([[], [open: 0, newToday: 0, fixedToday: 0]], [r8.findings, r8.counts],
                 "RX-1 was fixed on 10-08, so it is off the 10-09 list")
         assertEquals(0, doc.summary.fixedToday)
     }
@@ -282,10 +283,10 @@ class AuditReportAssemblerSmokeTests {
     void countsAddUpAtEveryLevel() {
         ["2026-10-07", "2026-10-08", "2026-10-09"].each { String day ->
             Map doc = report(GORJANA, day)
-            List<String> keys = ["open", "pending", "newToday", "fixedToday"]
+            List<String> keys = ["open", "newToday", "fixedToday"]
             (doc.categories as Map).each { String code, Map cat ->
                 (cat.statements as Map).each { String id, Map st ->
-                    assertEquals((st.counts.open + st.counts.pending + st.counts.fixedToday) as int,
+                    assertEquals((st.counts.open + st.counts.fixedToday) as int,
                             ((st.findings as List).size() + (st.findingsOmitted as int)) as int, "${day} ${id} findings vs counts")
                 }
                 keys.each { String k -> assertEquals(cat.counts[k], (cat.statements as Map).values().sum(0) { it.counts[k] }, "${day} ${code}.${k}") }
@@ -325,7 +326,7 @@ class AuditReportAssemblerSmokeTests {
                 ((order.lines as List<Map>)*.cause).unique())
         // DAR-UI-075: a line by its number, not its "/01" suffix.
         assertEquals("Order M1168785: line 1 backordered in NetSuite, holding 2 more lines", order.headline)
-        assertEquals([open: 2, pending: 0, newToday: 2, fixedToday: 0], r1.counts, "counted by order, not by line")
+        assertEquals([open: 2, newToday: 2, fixedToday: 0], r1.counts, "counted by order, not by line")
         assertEquals(["M1167646", [ids[3]], "Order M1167646: line 1 is completed in HotWax and not billed in NetSuite"],
                 [findings[1].id, (findings[1].lines as List<Map>)*.id, findings[1].headline])
         // A finding that only mentions an order (a memo naming its Shopify order) is not about an order line: no order.
@@ -345,7 +346,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals("2026-10", f.period)
         assertEquals([id: "R4", text: R4_TEXT, weight: "derived"], f.statement)
         assertEquals([state: "open", firstFound: "2026-10-07", lastSeen: "2026-10-09", lastChecked: "2026-10-09T06:11:00-07:00",
-                      ageDays: 2, timesSeen: 3, pendingUntil: null, closedAt: null, closedBy: null], f.status)
+                      ageDays: 2, timesSeen: 3, closedAt: null, closedBy: null], f.status)
         assertEquals([amount: "160.23", currency: "USD", source: "Shopify refund transactions"], f.evidence.expected)
         assertEquals([amount: "-0.01", currency: "USD"], f.evidence.difference)
         assertEquals([label: "Memo total equals the refund", passed: false, value: "160.22 vs 160.23"], f.evidence.checks[1])
@@ -402,15 +403,9 @@ class AuditReportAssemblerSmokeTests {
     @Test
     void aFixedFindingSaysWhenAndByWhat() {
         Map s = finding(GORJANA, rx1).finding.status
-        assertEquals(["fixed", "2026-10-08T06:12:40-07:00", 1, null], [s.state, s.closedAt, s.ageDays, s.pendingUntil])
+        assertEquals(["fixed", "2026-10-08T06:12:40-07:00", 1], [s.state, s.closedAt, s.ageDays])
         assertEquals([type: "check", id: "returns-vs-credit-memos", label: "scheduled check, 2026-10-08T06:12-07:00"], s.closedBy)
         assertEquals(["found", "fixed"], (finding(GORJANA, rx1).finding.history as List)*.event)
-    }
-
-    @Test
-    void aPendingFindingSaysWhenItCountsAsOpen() {
-        Map s = finding(GORJANA, inv552310).finding.status
-        assertEquals(["pending", "2026-10-09"], [s.state, s.pendingUntil])
     }
 
     @Test
@@ -499,7 +494,7 @@ class AuditReportAssemblerSmokeTests {
 
         Map november = report(GORJANA, MONTH_CLOSE, "2026-11-03", null)
         assertEquals("2026-11", november.report.period)
-        assertEquals([open: 0, pending: 0, newToday: 0, fixedToday: 0], november.categories.refundsAndCredits.statements.R4.counts,
+        assertEquals([open: 0, newToday: 0, fixedToday: 0], november.categories.refundsAndCredits.statements.R4.counts,
                 "October's findings are October's report's, not November's")
         assertEquals("The check did not run on the morning of 2026-11-03.", november.categories.refundsAndCredits.statements.R4.checks[0].reason)
 

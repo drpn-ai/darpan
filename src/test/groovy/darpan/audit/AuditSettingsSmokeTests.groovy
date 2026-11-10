@@ -356,7 +356,7 @@ class AuditSettingsSmokeTests {
                     auditId: "${MINE}_FP".toString(), statementCode: "R1", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM",
                     sequenceNum: 1L, statementText: "Every Shopify order is in HotWax."])
             insert("darpan.audit.AuditCheck", [checkId: "TSET_FIRST", companyUserGroupId: MINE, checkCode: "first-play-sync",
-                    label: "first-play-sync", savedRunId: "TSET_RS2", graceDays: 1L])
+                    label: "first-play-sync", savedRunId: "TSET_RS2"])
             insert("darpan.audit.AuditStatementCheck", [checkId: "TSET_FIRST", statementId: "${MINE}_FP_R1".toString(),
                     companyUserGroupId: MINE, sequenceNum: 1L])
         } finally {
@@ -434,7 +434,7 @@ class AuditSettingsSmokeTests {
                     auditId: "${MINE}_OS".toString(), statementCode: "R1", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM",
                     sequenceNum: 1L, statementText: "Every order is in NetSuite."])
             insert("darpan.audit.AuditCheck", [checkId: "TSET_OS", companyUserGroupId: MINE, checkCode: "added-later",
-                    label: "added-later", savedRunId: "TSET_RS1", graceDays: 1L])
+                    label: "added-later", savedRunId: "TSET_RS1"])
             insert("darpan.audit.AuditStatementCheck", [checkId: "TSET_OS", statementId: "${MINE}_OS_R1".toString(),
                     companyUserGroupId: MINE, sequenceNum: 1L])
         } finally {
@@ -509,7 +509,7 @@ class AuditSettingsSmokeTests {
 
     private void check(String checkId, String code, String ruleSetId, String statementCode) {
         insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: MINE, checkCode: code, label: code,
-                savedRunId: ruleSetId, graceDays: 1L])
+                savedRunId: ruleSetId])
         insert("darpan.audit.AuditStatementCheck", [checkId: checkId, statementId: "${MINE}_${statementCode}".toString(),
                 companyUserGroupId: MINE, sequenceNum: 1L])
     }

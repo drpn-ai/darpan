@@ -23,8 +23,6 @@
     <moqui.basic.EnumerationType enumTypeId="AuditFindingState" description="Audit finding state"/>
     <moqui.basic.Enumeration enumId="AUDFS_OPEN" enumTypeId="AuditFindingState" enumCode="open"
             description="Open" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="AUDFS_PENDING" enumTypeId="AuditFindingState" enumCode="pending"
-            description="Pending: inside the check's grace age" sequenceNum="2"/>
     <moqui.basic.Enumeration enumId="AUDFS_FIXED" enumTypeId="AuditFindingState" enumCode="fixed"
             description="Fixed" sequenceNum="3"/>
 

@@ -54,7 +54,7 @@ class TenantConfigVersionSmokeTests {
                         statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                         statementText: STATEMENT_TEXT])
                 upsert("darpan.audit.AuditCheck", [checkId: "${t}_INV".toString(), companyUserGroupId: t,
-                        checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id", graceDays: 1L])
+                        checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id"])
                 upsert("darpan.audit.AuditStatementCheck", [checkId: "${t}_INV".toString(), statementId: "${t}_R2".toString(),
                         companyUserGroupId: t, sequenceNum: 1L])
             }

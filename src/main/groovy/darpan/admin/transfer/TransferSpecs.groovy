@@ -124,8 +124,11 @@ class TransferSpecs {
              refFields: [auditId: AUDIT]],
             // DAR-BE-188. automationId is no value; it travels as a ref (heldRefs) only in a transfer that carries automations,
             // and only when the bundle holds the automation the check runs under. A version leaves it out, as before.
+            // DAR-BE-206. graceDays is retired (a grace is an expected conclusion rule): a bundle or version made before
+            // still carries it, and the import drops it (retiredFields) instead of refusing it as UNKNOWN_FIELD.
             [kind: CHECK, entityName: "darpan.audit.AuditCheck", pkField: "checkId", naturalKey: "checkCode",
              refFields: [savedRunId: RUN], dropFields: ["automationId"], heldRefs: [automationId: AUTOMATION],
+             retiredFields: ["graceDays"],
              // A check's links to statements: only those of the audits in the bundle travel; links to other audits stay.
              // DAR-BE-196: conclusionCodes no longer travels (expected causes are the run's rules); a bundle carrying it is refused.
              links: [entityName: "darpan.audit.AuditStatementCheck", parentFields: ["checkId"], refFields: [statementId: STATEMENT],

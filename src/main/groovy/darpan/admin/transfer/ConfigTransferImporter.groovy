@@ -181,6 +181,7 @@ class ConfigTransferImporter {
         // DAR-BE-160. A config version restores into the tenant it came from: every id in it is that tenant's own, so
         // records match by id (a renamed run is renamed back, not copied) and one deleted since comes back under its id.
         ctx.sameTenant = ownVersion && text(bundle.source?.tenantUserGroupId) == tenantId
+        dropRetiredFields(ctx)
         knowledgeGate(ctx)
         checkShape(ctx)
         checkRefs(ctx)
@@ -329,6 +330,28 @@ class ConfigTransferImporter {
     }
 
     // ---------------------------------------------------------------- shape gates
+
+    /**
+     * DAR-BE-206. A column this instance has retired (a kind's retiredFields) is dropped from every record still carrying
+     * it, so a bundle or config version exported before the retirement imports as before. Only those: a column this
+     * instance never had still blocks as UNKNOWN_FIELD. The plan hash still covers the bundle as sent.
+     */
+    private static void dropRetiredFields(Map ctx) {
+        KINDS.findAll { it.retiredFields }.each { Map kindSpec ->
+            String list = BUNDLE_LISTS[kindSpec.kind as String]
+            Set<String> retired = (kindSpec.retiredFields as List<String>) as Set<String>
+            List carried = (((Map) ctx.bundle).get(list) ?: []) as List
+            Closure<Boolean> carries = { Object rec -> rec instanceof Map && rec.fields instanceof Map && ((Map) rec.fields).keySet().any { it in retired } }
+            if (!carried.any(carries)) return
+            ctx.bundle = new LinkedHashMap((Map) ctx.bundle)
+            ((Map) ctx.bundle).put(list, carried.collect { Object rec ->
+                if (!carries(rec)) return rec
+                Map copy = new LinkedHashMap((Map) rec)
+                copy.fields = ((Map) ((Map) rec).fields).findAll { k, v -> !(k in retired) }
+                return copy
+            })
+        }
+    }
 
     /** Kinds this instance lacks, columns its entities do not declare, and instance-local endpoints all block. */
     private static void checkShape(Map ctx) {

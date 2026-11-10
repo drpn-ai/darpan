@@ -126,7 +126,7 @@ class AuditChangeBacktestSmokeTests {
                         sequenceNum: (i + 1) as Long, statementText: "${code} text".toString(), isActive: "Y"])
             }
             upsert("darpan.audit.AuditCheck", [checkId: CHECK, companyUserGroupId: MINE, checkCode: "credits-open-tbt",
-                    label: "Open credit memos", savedRunId: runId, automationId: AUTO, graceDays: 1L, headlineTemplate: "Memo {tranId} is open"])
+                    label: "Open credit memos", savedRunId: runId, automationId: AUTO, headlineTemplate: "Memo {tranId} is open"])
             // R1 and R2 count every row whose cause is not expected (DAR-BE-196: a cause is expected on its run, not on a link).
             upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TBT_R1", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
@@ -135,7 +135,7 @@ class AuditChangeBacktestSmokeTests {
             // The two-sided check: R3 counts a memo with no application row on file 1's side missing; R4 a mismatch or a
             // memo with no application.
             upsert("darpan.audit.AuditCheck", [checkId: CHECK2, companyUserGroupId: MINE, checkCode: "memos-applied-tbt",
-                    label: "Memos applied", savedRunId: run2Id, automationId: AUTO2, graceDays: 1L, headlineTemplate: "Memo {tranId}"])
+                    label: "Memos applied", savedRunId: run2Id, automationId: AUTO2, headlineTemplate: "Memo {tranId}"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R3", companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "MISSING_IN_FILE_1"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: CHECK2, statementId: "TBT_R4", companyUserGroupId: MINE,
@@ -175,7 +175,7 @@ class AuditChangeBacktestSmokeTests {
             finding("F-TBT1", "TBT_R1", "CM-1", "AUDFS_OPEN", "CONC_TBT_A")
             finding("F-TBT2", "TBT_R1", "CM-2", "AUDFS_OPEN", "CONC_TBT_B")
             finding("F-TBT3", "TBT_R2", "CM-2", "AUDFS_OPEN", "CONC_TBT_B")
-            finding("F-TBT4", "TBT_R1", "CM-3", "AUDFS_PENDING", "CONC_TBT_B")
+            finding("F-TBT4", "TBT_R1", "CM-3", "AUDFS_OPEN", "CONC_TBT_B")
             finding("F-TBT5", "TBT_R2", "CM-3", "AUDFS_OPEN", "CONC_TBT_B")
             finding("F-TBT6", "TBT_R1", "CM-2", "AUDFS_FIXED", "CONC_TBT_B", "2026-09")
             // Open, but in the period before the basis window: no basis of this month may close it.
@@ -214,7 +214,7 @@ class AuditChangeBacktestSmokeTests {
 
         Map voided = AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
                 AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].status', filterValues: ["voided"]]))
-        assertEquals(["F-TBT4", "F-TBT5"], voided.closed, "values match without case, as the extract's own filter does; a pending finding closes too")
+        assertEquals(["F-TBT4", "F-TBT5"], voided.closed, "values match without case, as the extract's own filter does")
         assertEquals(before, snapshot())
 
         // R51: an agent exclusion never loosens (merge refuses another operator), but a revert's restored state may.

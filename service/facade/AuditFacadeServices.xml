@@ -122,13 +122,14 @@
     </service>
     <!-- DAR-UI-075. The findings as the report lists them, one per order, past its 50: the board's "more", filters, export. -->
     <service verb="get" noun="AuditFindingsByOrder" authz-action="view" allow-remote="true" authenticate="true">
-        <description>Every open and pending finding of one audit and period, one per order (an order's lines under it, the
+        <description>Every open finding of one audit and period, one per order (an order's lines under it, the
             line holding it up named), each with its statement and category. State is as of today.</description>
         <in-parameters>
             <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
             <parameter name="statement"><description>The statement's code, e.g. R1; blank is every statement.</description></parameter>
             <parameter name="period"><description>The report's period, e.g. 2026-10; blank is every period.</description></parameter>
-            <parameter name="state"><description>open or pending; blank is both.</description></parameter>
+            <parameter name="state"><description>Kept for callers that send it: a finding is only ever open or fixed, and this
+                lists the open ones whatever the value (DAR-BE-206).</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -141,7 +142,7 @@
             <set field="auditId" from="tenantId ? darpan.audit.AuditReportGraph.auditIdFor(ec, tenantId, audit) : null"/>
             <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
             <set field="findings" from="darpan.audit.AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, statement ?: null,
-                    period ?: null, state in ['open', 'pending'] ? [state] : null)"/>
+                    period ?: null)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

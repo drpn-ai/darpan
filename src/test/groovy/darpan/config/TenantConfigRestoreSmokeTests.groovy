@@ -74,9 +74,9 @@ class TenantConfigRestoreSmokeTests {
                     statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                     statementText: R2_TEXT, isActive: "Y"])
             upsert("darpan.audit.AuditCheck", [checkId: "${MINE}_INV".toString(), companyUserGroupId: MINE,
-                    checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id", graceDays: 1L])
+                    checkCode: "invoices-without-etail-id", label: "Invoices with no Etail id"])
             upsert("darpan.audit.AuditCheck", [checkId: "${MINE}_EXTRA".toString(), companyUserGroupId: MINE,
-                    checkCode: "credit-memos-open", label: "Open credit memos", graceDays: 1L])
+                    checkCode: "credit-memos-open", label: "Open credit memos"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_INV".toString(), statementId: R2_ID,
                     companyUserGroupId: MINE, sequenceNum: 1L])
             setPermission(TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)

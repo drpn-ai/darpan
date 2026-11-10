@@ -50,7 +50,7 @@ class AuditFacadeSmokeTests {
                         statementCode: "R2", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L,
                         statementText: "Every invoice carries the Etail id."])
                 insert("darpan.audit.AuditCheck", [checkId: "${t}_INV".toString(), companyUserGroupId: t, checkCode: "invoices-without-etail-id",
-                        label: "Invoices with no Etail id", graceDays: 1L])
+                        label: "Invoices with no Etail id"])
                 insert("darpan.audit.AuditStatementCheck", [checkId: "${t}_INV".toString(), statementId: "${t}_R2".toString(),
                         companyUserGroupId: t, sequenceNum: 1L])
             }
@@ -207,9 +207,8 @@ class AuditFacadeSmokeTests {
         assertEquals([["R7", "orders"], ["R7", "orders"]], units.collect { [it.statement, it.category] })
         assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10"]).findings as List<Map>)*.id,
                 "the whole audit: every statement's units")
-        // No grace on this check: every line is open, so both units are open and none pending.
-        assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "open"]).findings as List<Map>)*.id)
-        assertEquals([], call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "pending"]).findings)
+        // DAR-BE-206: a finding is only open or fixed. A caller still sending state (the board's old "pending") gets the open ones.
+        assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "pending"]).findings as List<Map>)*.id)
         Map other = call("get#AuditFindingsByOrder", [audit: "other-only", period: "2026-10"])
         assertTrue((other.errorText as String).contains("Audit other-only was not found"), other.errorText as String)
     }

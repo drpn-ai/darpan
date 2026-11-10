@@ -211,7 +211,7 @@ class AgentProvenanceTests {
     void "plain prose with placeholders has no identifiers"() {
         assertEquals([] as Set, fixIds("Close warranty {warranty} ({channel}) in HotWax: return {return} already exchanged {sku}. Then exchange {exchange} syncs to NetSuite."))
         assertEquals([] as Set, fixIds("don't re-import, check the warranty's status"))
-        assertEquals([] as Set, fixIds("Close it within {graceDays} days"))
+        assertEquals([] as Set, fixIds("Close it within {days} days"))
     }
 
     @Test

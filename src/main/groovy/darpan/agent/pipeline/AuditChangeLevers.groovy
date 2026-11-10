@@ -131,7 +131,7 @@ class AuditChangeLevers {
                 .collect { [id: codeById[it.statementId as String], diffTypes: csv(it.diffTypes), ruleIds: csv(it.ruleIds)] as Map }
                 .sort { Map a, Map b -> (a.id as String) <=> (b.id as String) }
         Map c = [id: check.checkCode, savedRunId: check.savedRunId, fixWhereEnumId: check.fixWhereEnumId,
-                 graceDays: check.graceDays == null ? null : check.graceDays.toString(), amountCurrencyUomId: check.amountCurrencyUomId]
+                 amountCurrencyUomId: check.amountCurrencyUomId]
         CHECK_TEXT_FIELDS.each { String f -> c[f] = check.get(f) }
         Map state = [kind: kind, target: target, audit: audit.auditCode, check: c, statements: links]
         if (kind == "EXPECTED_CAUSES") {
@@ -402,7 +402,7 @@ class AuditChangeLevers {
             case "STATEMENT_NARROWING":
             case "EXPECTED_CAUSES":
                 Map c = (Map) state.check
-                Map check = [id: c.id, savedRunId: c.savedRunId, fixWhereEnumId: c.fixWhereEnumId, graceDays: c.graceDays,
+                Map check = [id: c.id, savedRunId: c.savedRunId, fixWhereEnumId: c.fixWhereEnumId,
                              amountCurrencyUomId: c.amountCurrencyUomId]
                 CHECK_TEXT_FIELDS.each { String f -> check[f] = c.get(f) }
                 // Named only by EXPECTED_CAUSES: left out, save#AuditCheck keeps the run's expected causes as they are.

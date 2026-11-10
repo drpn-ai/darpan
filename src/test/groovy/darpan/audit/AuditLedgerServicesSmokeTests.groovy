@@ -27,8 +27,8 @@ class AuditLedgerServicesSmokeTests {
     private static final String SVC = "audit.AuditLedgerServices"
     private static final String GORJANA = "GORJANA"
     private static final String KREWE = "KREWE"
-    private static final String CHECK = "TLED_CHECK"        // graceDays 1, tests R4 and R9
-    private static final String CHECK_NO_GRACE = "TLED_CHECK0"
+    private static final String CHECK = "TLED_CHECK"        // tests R4 and R9
+    private static final String CHECK_R4 = "TLED_CHECK0"
     private static final String KREWE_CHECK = "TLED_CHECK_K"
 
     private ExecutionContext ec
@@ -57,10 +57,10 @@ class AuditLedgerServicesSmokeTests {
         insert("darpan.audit.AuditStatement", [statementId: "TLED_K_R4", companyUserGroupId: KREWE, auditId: "TLED_K_AUDIT",
                 statementCode: "R4", categoryEnumId: "AUDC_REFUNDS_CREDITS", weightEnumId: "AUDSW_FIRM", statementText: "krewe R4"])
         insert("darpan.audit.AuditCheck", [checkId: CHECK, companyUserGroupId: GORJANA, checkCode: "returns-vs-credit-memos",
-                label: "OMS returns against NetSuite credit memos", graceDays: 1L])
-        insert("darpan.audit.AuditCheck", [checkId: CHECK_NO_GRACE, companyUserGroupId: GORJANA, checkCode: "no-grace", label: "no grace"])
+                label: "OMS returns against NetSuite credit memos"])
+        insert("darpan.audit.AuditCheck", [checkId: CHECK_R4, companyUserGroupId: GORJANA, checkCode: "r4-only", label: "R4 only"])
         insert("darpan.audit.AuditCheck", [checkId: KREWE_CHECK, companyUserGroupId: KREWE, checkCode: "krewe", label: "krewe"])
-        [[CHECK, "TLED_R4"], [CHECK, "TLED_R9"], [CHECK_NO_GRACE, "TLED_R4"]].each { List<String> link ->
+        [[CHECK, "TLED_R4"], [CHECK, "TLED_R9"], [CHECK_R4, "TLED_R4"]].each { List<String> link ->
             insert("darpan.audit.AuditStatementCheck", [checkId: link[0], statementId: link[1], companyUserGroupId: GORJANA])
         }
         insert("darpan.audit.AuditStatementCheck", [checkId: KREWE_CHECK, statementId: "TLED_K_R4", companyUserGroupId: KREWE])
@@ -83,14 +83,14 @@ class AuditLedgerServicesSmokeTests {
         String id = (day1.findingIds as List)[0]
         assertTrue(id.startsWith("F-"), "the stored id is the JSON id: ${id}")
         Map f = row(id)
-        assertEquals("AUDFS_PENDING", f.stateEnumId, "inside the one-day grace age on the morning it is found")
+        assertEquals("AUDFS_OPEN", f.stateEnumId, "open the morning it is found: there is no pending state")
         assertEquals(Date.valueOf("2026-10-07"), f.firstFoundDate)
         assertEquals(1L, f.timesSeen as Long)
 
         Map day2 = record(CHECK, "2026-10-08", [finding("R4", "LIFE-1")])
         assertEquals([1, 0], [day2.stillOpenCount, day2.foundCount])
         f = row(id)
-        assertEquals("AUDFS_OPEN", f.stateEnumId, "past the grace age")
+        assertEquals("AUDFS_OPEN", f.stateEnumId)
         assertEquals([Date.valueOf("2026-10-08"), 2L], [f.lastSeenDate, f.timesSeen as Long])
 
         record(CHECK, "2026-10-09", [])
@@ -125,21 +125,37 @@ class AuditLedgerServicesSmokeTests {
             assertEquals(0, out.closedCount, status)
             assertTrue((out.skippedReason as String)?.contains(status), "says why nothing closed: ${out.skippedReason}")
         }
-        assertEquals("AUDFS_PENDING", row(id).stateEnumId)
+        assertEquals("AUDFS_OPEN", row(id).stateEnumId)
         assertEquals(["AUDFE_FOUND"], events(id)*.eventTypeEnumId)
     }
 
     @Test
     void aRecordTheCheckDidNotLookAtStaysOpen() {
-        String id = (record(CHECK_NO_GRACE, "2026-10-07", [finding("R4", "UNSEEN-1")]).findingIds as List)[0]
-        assertEquals(0, close(CHECK_NO_GRACE, "2026-10-08", "AUDCS_RAN", ["SOMETHING-ELSE"]).closedCount)
+        String id = (record(CHECK_R4, "2026-10-07", [finding("R4", "UNSEEN-1")]).findingIds as List)[0]
+        assertEquals(0, close(CHECK_R4, "2026-10-08", "AUDCS_RAN", ["SOMETHING-ELSE"]).closedCount)
         assertEquals("AUDFS_OPEN", row(id).stateEnumId)
     }
 
     @Test
-    void withNoGraceAgeAFindingIsOpenTheMorningItIsFound() {
-        String id = (record(CHECK_NO_GRACE, "2026-10-07", [finding("R4", "NOGRACE-1")]).findingIds as List)[0]
-        assertEquals("AUDFS_OPEN", row(id).stateEnumId)
+    void aFindingStillPendingFromTheRetiredGraceIsOpenedOnceForEveryTenant() {
+        // DAR-BE-206, migration AUDIT_FINDINGS_NO_PENDING. Rows written under the old check-level grace, in two tenants;
+        // an installation that had them still has the AUDFS_PENDING enumeration (seed loads never delete).
+        insert("moqui.basic.Enumeration", [enumId: "AUDFS_PENDING", enumTypeId: "AuditFindingState", enumCode: "pending", description: "Pending"])
+        String gorjana = (record(CHECK, "2026-10-07", [finding("R4", "MIG-1")]).findingIds as List)[0]
+        String krewe = (ec.service.sync().name("${SVC}.record#CheckFindings").parameters([companyUserGroupId: KREWE, checkId: KREWE_CHECK,
+                reportDate: Date.valueOf("2026-10-07"), findings: [finding("R4", "MIG-K1")]]).call().findingIds as List)[0]
+        [gorjana, krewe].each { ec.entity.find("darpan.audit.AuditFinding").condition("findingId", it).one().set("stateEnumId", "AUDFS_PENDING").update() }
+
+        Map dry = migrate(true)
+        assertEquals(2, dry.rowsUpdated, "${dry.messages}")
+        assertEquals(["AUDFS_PENDING", "AUDFS_PENDING"], [row(gorjana).stateEnumId, row(krewe).stateEnumId], "a dry run writes nothing")
+
+        Map done = migrate(false)
+        assertEquals(2, done.rowsUpdated, "${done.messages}")
+        assertEquals(["AUDFS_OPEN", "AUDFS_OPEN"], [row(gorjana).stateEnumId, row(krewe).stateEnumId])
+        assertEquals([Date.valueOf("2026-10-07"), ["AUDFE_FOUND"]], [row(gorjana).firstFoundDate, events(gorjana)*.eventTypeEnumId],
+                "dates and history are kept; no event is written")
+        assertEquals(0, migrate(false).rowsUpdated, "a second run changes nothing")
     }
 
     @Test
@@ -283,6 +299,13 @@ class AuditLedgerServicesSmokeTests {
                 reportDate: Date.valueOf(day), checkStamp: Timestamp.valueOf("${day} 06:12:00"), checkStatusEnumId: status,
                 examinedRecordKeys: examined]).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
+        return out
+    }
+
+    private Map migrate(boolean dryRun) {
+        Map out = ec.service.sync().name("${SVC}.migrate#AuditFindingsNoPending").parameters([dryRun: dryRun]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertTrue(out.ok as boolean)
         return out
     }
 

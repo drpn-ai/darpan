@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * data/test/AuditMorningsFixtureData.xml, DAR-BE-160), run by a real audit automation through the real executor, Spark
  * evaluate, conclusion step and ledger, on two mornings. Only the NetSuite read is stubbed, with a fixture per morning.
  *
- *   14 Oct  INV9000002 (no Etail id) and INV9000003 (blank Etail id) are found; pending (grace 1 day)
+ *   14 Oct  INV9000002 (no Etail id) and INV9000003 (blank Etail id) are found: open on their first morning
  *   15 Oct  INV9000002 now carries its Etail id: fixed. INV9000003 still has none: open
  *
  * R2's check reads ONE system, so this is also the scheduled path's single-sided (EVALUATE) run.
@@ -92,8 +92,9 @@ class AuditMorningsSmokeTests {
         Map<String, Map> first = findingsByRecord()
         assertEquals(["INV9000002", "INV9000003"] as Set, first.keySet(), "the two invoices with no Etail id")
         first.values().each { Map f ->
-            assertEquals(["MORNINGS_R2", "AUDFS_PENDING", Date.valueOf("2026-10-14")], [f.statementId, f.stateEnumId, f.firstFoundDate],
-                    "${f.recordKey}: inside the one-day grace")
+            // DAR-BE-206: what bit was a new check showing long-stuck records as pending on its first morning.
+            assertEquals(["MORNINGS_R2", "AUDFS_OPEN", Date.valueOf("2026-10-14")], [f.statementId, f.stateEnumId, f.firstFoundDate],
+                    "${f.recordKey}: open the morning it is first found")
         }
         assertEquals("Invoice INV9000002 has no Etail id", first.INV9000002.headline)
         // DAR-UI-080: the finding keeps both records of its pair, the HotWax order beside the NetSuite invoice.
@@ -109,7 +110,7 @@ class AuditMorningsSmokeTests {
         Map<String, Map> second = findingsByRecord()
         assertEquals(["INV9000002", "INV9000003"] as Set, second.keySet(), "a fixed finding stays on the ledger")
         assertEquals("AUDFS_FIXED", second.INV9000002.stateEnumId, "seen with its Etail id, so it closes")
-        assertEquals("AUDFS_OPEN", second.INV9000003.stateEnumId, "a day old against a one-day grace")
+        assertEquals("AUDFS_OPEN", second.INV9000003.stateEnumId, "still reported, still open")
         assertEquals(Date.valueOf("2026-10-14"), second.INV9000003.firstFoundDate, "first found does not move")
         assertEquals(["AUDFE_FOUND", "AUDFE_FIXED"], events(second.INV9000002.findingId))
         assertEquals(["AUDFE_FOUND", "AUDFE_STILL_OPEN"], events(second.INV9000003.findingId))

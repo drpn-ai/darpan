@@ -40,7 +40,6 @@ class AuditReportAssembler {
     static final Map<String, String> SYSTEM_KEYS = [OMS: "OMS", NETSUITE: "NetSuite", SHOPIFY: "Shopify"].asImmutable()
 
     static final String OPEN = "AUDFS_OPEN"
-    static final String PENDING = "AUDFS_PENDING"
     static final String FIXED = "AUDFS_FIXED"
     static final String RAN = "AUDCS_RAN"
     static final String PARTIAL = "AUDCS_PARTIAL"
@@ -125,7 +124,7 @@ class AuditReportAssembler {
         }
 
         // The ledger as of the end of the report date.
-        List<Map> ledger = findingsAsOf(ec, tenantId, statementIds, period, day, zone, checksById)
+        List<Map> ledger = findingsAsOf(ec, tenantId, statementIds, period, day, zone)
         Map<String, List<Map>> ledgerByStatement = ledger.groupBy { it.row.statementId as String }
 
         Map<String, Map> statementJsonById = [:]
@@ -141,7 +140,6 @@ class AuditReportAssembler {
                  status   : codes[status],
                  reason   : status == RAN ? null : checkReason[checkId],
                  matchedBy: check.matchedBy ?: null,
-                 graceDays: (check.graceDays ?: 0) as int,
                  compared : status == NOT_RUN || run == null ? null : compared(readsByRun[run.checkRunId as String]),
                  // DAR-UI-063. The days this morning's run read: the period to date, or the days a person played.
                  window   : run == null ? null : [from: isoDate(run.windowFromDate as Date), thru: isoDate(run.windowThruDate as Date)]]
@@ -279,11 +277,11 @@ class AuditReportAssembler {
     /**
      * Every finding that existed by the end of {@code day}, with its state on that day. Today's state is the stored
      * one; a past day's state comes from the last history event on or before it (contract: "History for a past
-     * date"), with pending vs open decided by the age at that sighting, as record#CheckFindings decided it.
+     * date"): open after a found, still-open or reopened event, fixed after a fixed one.
      * Fixed findings are kept only when they became fixed on {@code day}.
      */
     private static List<Map> findingsAsOf(def ec, String tenantId, Set<String> statementIds, String period, LocalDate day,
-                                          ZoneId zone, Map<String, Map> checksById) {
+                                          ZoneId zone) {
         if (!statementIds) return []
         Date dayDate = Date.valueOf(day)
         // A day of margin on the closed stamp; the events decide.
@@ -294,7 +292,7 @@ class AuditReportAssembler {
                 .condition("period", period)
                 .condition("firstFoundDate", EntityCondition.LESS_THAN_EQUAL_TO, dayDate)
                 .condition(cf.makeCondition([
-                        cf.makeCondition("stateEnumId", EntityCondition.IN, [OPEN, PENDING]),
+                        cf.makeCondition("stateEnumId", EntityCondition.EQUALS, OPEN),
                         cf.makeCondition("closedStamp", EntityCondition.GREATER_THAN_EQUAL_TO, closedFloor)],
                         EntityCondition.OR))
                 .list()*.getMap()
@@ -311,11 +309,7 @@ class AuditReportAssembler {
             String state
             if (!later) state = row.stateEnumId
             else if (!upToDay) return
-            else if (upToDay.last().eventTypeEnumId == "AUDFE_FIXED") state = FIXED
-            else {
-                int grace = (checksById[row.checkId as String]?.graceDays ?: 0) as int
-                state = days(row.firstFoundDate as Date, (upToDay.last().eventDate as Date).toLocalDate()) < grace ? PENDING : OPEN
-            }
+            else state = upToDay.last().eventTypeEnumId == "AUDFE_FIXED" ? FIXED : OPEN
             if (state == FIXED) {
                 Map fixedEvent = upToDay.findAll { it.eventTypeEnumId == "AUDFE_FIXED" }.with { it ? it.last() : null }
                 if (fixedEvent == null || (fixedEvent.eventDate as Date).toLocalDate() != day) return
@@ -327,13 +321,12 @@ class AuditReportAssembler {
 
     private static Map countsOf(List<Map> entries, LocalDate day) {
         return [open      : entries.count { it.state == OPEN } as int,
-                pending   : entries.count { it.state == PENDING } as int,
                 newToday  : entries.count { it.state != FIXED && (it.row.firstFoundDate as Date).toLocalDate() == day } as int,
                 fixedToday: entries.count { it.state == FIXED } as int]
     }
 
     private static Map sumCounts(List<Map> counts) {
-        Map<String, Integer> sum = [open: 0, pending: 0, newToday: 0, fixedToday: 0]
+        Map<String, Integer> sum = [open: 0, newToday: 0, fixedToday: 0]
         counts.each { Map c -> sum.keySet().each { String k -> sum[k] = sum[k] + (c[k] as int) } }
         return sum
     }
@@ -355,7 +348,7 @@ class AuditReportAssembler {
 
     /**
      * Ledger entries as the report lists them: the lines of one order together as one unit (its earliest line's row, so
-     * oldest-first and newToday hold; its worst state: open, else pending, else fixed), one line or many; a finding that
+     * oldest-first and newToday hold; its worst state: open, else fixed), one line or many; a finding that
      * is not an order line a unit of its own. Units keep the order of their earliest line.
      */
     static List<Map> orderUnits(List<Map> entries, Map<String, Map> recordsByFinding) {
@@ -371,7 +364,7 @@ class AuditReportAssembler {
         return keys.collect { Object key ->
             if (!(key instanceof String)) return [row: ((Map) key).row, state: ((Map) key).state, entries: [(Map) key]]
             List<Map> lines = byOrder[key]
-            String state = lines.any { it.state == OPEN } ? OPEN : lines.any { it.state == PENDING } ? PENDING : FIXED
+            String state = lines.any { it.state == OPEN } ? OPEN : FIXED
             return [row: lines[0].row, state: state, entries: lines, order: key]
         }
     }
@@ -493,13 +486,11 @@ class AuditReportAssembler {
 
     /**
      * The tenant's findings for one audit and period, one statement or every one in catalog order, as the report lists
-     * them: one per order, each with its statement and category. State is as of today, narrowed to `states` (open,
-     * pending; empty is both). The board's "N more", filters and export read these.
+     * them: one per order, each with its statement and category. Only open findings, as of today. The board's "N more",
+     * filters and export read these.
      */
-    static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period,
-                                     List<String> states) {
+    static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period) {
         Map<String, String> codes = enumCodes(ec)
-        List<String> stateIds = codes.findAll { k, v -> k.startsWith("AUDFS_") && v in (states ?: ["open", "pending"]) }*.key as List<String>
         List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.getMap()
                 .findAll { (it.isActive ?: "Y") != "N" && (!statementCode || it.statementCode == statementCode) }
                 .sort(false) { Map a, Map b ->
@@ -509,7 +500,7 @@ class AuditReportAssembler {
         LocalDate today = LocalDate.now((loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId)
         return statements.collectMany { Map st ->
             def find = tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("statementId", st.statementId)
-                    .condition("stateEnumId", EntityCondition.IN, stateIds ?: ["__NONE__"])
+                    .condition("stateEnumId", OPEN)
             if (period) find.condition("period", period)
             List<Map> entries = sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })
             Map<String, Map> records = recordsFor(ec, tenantId, entries*.row*.findingId as List<String>)
@@ -757,7 +748,6 @@ class AuditReportAssembler {
         LocalDate ageTo = state == FIXED ?
                 ((lastFixed?.eventDate as Date)?.toLocalDate() ?: (f.closedStamp as Timestamp)?.toInstant()?.atZone(zone)?.toLocalDate()) :
                 (f.lastSeenDate as Date).toLocalDate()
-        int graceDays = (check.graceDays ?: 0) as int
         Map<String, String> checkCodes = [(check.checkId as String): check.checkCode as String]
 
         String currency = f.currencyUomId
@@ -784,7 +774,6 @@ class AuditReportAssembler {
                                 lastChecked : isoDateTime(lastChecked, zone),
                                 ageDays     : ageTo == null ? 0 : days(firstFound, ageTo),
                                 timesSeen   : (f.timesSeen ?: 0) as int,
-                                pendingUntil: state == PENDING ? firstFound.toLocalDate().plusDays(graceDays).toString() : null,
                                 closedAt    : state == FIXED ? isoDateTime(f.closedStamp as Timestamp, zone) : null,
                                 closedBy    : state == FIXED ? actor(f.closedByTypeEnumId as String, f.closedById as String,
                                         f.closedStamp as Timestamp, zone, checkCodes, codes) : null],

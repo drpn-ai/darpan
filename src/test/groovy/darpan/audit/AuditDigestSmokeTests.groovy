@@ -66,7 +66,7 @@ class AuditDigestSmokeTests {
         insert("darpan.audit.AuditStatement", [statementId: "TDG_R2", companyUserGroupId: GORJANA, auditId: AUDIT, statementCode: "R2",
                 categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 2L, statementText: "Every invoice carries the Etail id."])
         insert("darpan.audit.AuditCheck", [checkId: CHECK, companyUserGroupId: GORJANA, checkCode: "invoices-without-etail-id",
-                label: "Invoices with no Etail id", graceDays: 0L])
+                label: "Invoices with no Etail id"])
         insert("darpan.audit.AuditStatementCheck", [checkId: CHECK, statementId: "TDG_R2", companyUserGroupId: GORJANA, sequenceNum: 1L])
 
         Map run = call("${LEDGER}.record#CheckRun", [companyUserGroupId: GORJANA, checkId: CHECK, reportDate: Date.valueOf("2026-10-21"),
@@ -112,7 +112,7 @@ class AuditDigestSmokeTests {
         assertEquals(HOOK, posts[0].ref)
         String text = posts[0].text
         assertTrue(text.startsWith("Month close · 2026-10 · Wed 21 Oct\n"), text)
-        assertTrue(text.contains("Open 1 · Pending 0 · New today 1 · Fixed today 0"), text)
+        assertTrue(text.contains("Open 1 · New today 1 · Fixed today 0"), text)
         assertTrue(text.contains(" · R2 · 0 days · Invoice INV-1 has no Etail id"), text)
 
         assertEquals("SENT_TODAY", outcome(send("2026-10-21", "07:20"), "TDG_DAILY").reason, "once a day")
@@ -142,7 +142,7 @@ class AuditDigestSmokeTests {
         assertEquals("NOT_TODAY", outcome(send("2026-10-21", "09:00"), "TDG_WEEKLY").reason, "the 21st is a Wednesday")
         assertEquals(true, outcome(send("2026-10-22", "09:00"), "TDG_WEEKLY").sent)
         assertTrue(posts[0].text.startsWith("Month close · 2026-10 · week to Thu 22 Oct\n"), posts[0].text)
-        assertTrue(posts[0].text.contains("Open 1 (0 a week ago) · Pending 0 (0 a week ago)"), posts[0].text)
+        assertTrue(posts[0].text.contains("Open 1 (0 a week ago)"), posts[0].text)
     }
 
     @Test

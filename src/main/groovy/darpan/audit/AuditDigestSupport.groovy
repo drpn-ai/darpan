@@ -45,7 +45,7 @@ class AuditDigestSupport {
 
     /**
      * The digest text. weekAgo is the report of seven mornings before, for a weekly summary; null for a daily one.
-     * fullList lists every open and pending finding the report carries, as far as one message holds.
+     * fullList lists every open finding the report carries, as far as one message holds.
      */
     static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl) {
         Map head = (report?.report ?: [:]) as Map
@@ -64,33 +64,28 @@ class AuditDigestSupport {
 
         if (weekly) {
             Map before = (weekAgo?.summary ?: [:]) as Map
-            lines.add("Open ${count(summary.open)} (${count(before.open)} a week ago) · " +
-                    "Pending ${count(summary.pending)} (${count(before.pending)} a week ago)")
+            lines.add("Open ${count(summary.open)} (${count(before.open)} a week ago)")
         } else {
-            lines.add("Open ${count(summary.open)} · Pending ${count(summary.pending)} · " +
+            lines.add("Open ${count(summary.open)} · " +
                     "New today ${count(summary.newToday)} · Fixed today ${count(summary.fixedToday)}")
         }
         ((report?.categories ?: [:]) as Map).each { String id, Object raw ->
             Map category = raw as Map
             Map counts = (category.counts ?: [:]) as Map
-            List<String> parts = []
-            if (count(counts.open)) parts.add("open ${count(counts.open)}")
-            if (count(counts.pending)) parts.add("pending ${count(counts.pending)}")
-            if (parts) lines.add("${category.label ?: id}: ${parts.join(', ')}")
+            if (count(counts.open)) lines.add("${category.label ?: id}: open ${count(counts.open)}")
         }
 
         List<Map> open = findings(report, "open")
-        List<Map> pending = fullList ? findings(report, "pending") : []
-        if (!open && !pending) {
+        if (!open) {
             lines.add("")
-            lines.add(count(summary.pending) ? "Nothing open." : "Nothing open or pending.")
+            lines.add("Nothing open.")
         }
         List<String> tail = reportUrl ? ["", "Report: ${reportUrl}".toString()] : []
         int omitted = fullList ? omittedCount(report) : 0
         List<List> groups = fullList ?
-                [["Open", open], ["Pending", pending]] :
+                [["Open", open]] :
                 [["Oldest open", open.take(OLDEST_SHOWN)]]
-        int left = fullList ? open.size() + pending.size() + omitted : 0
+        int left = fullList ? open.size() + omitted : 0
         boolean full = false
         for (List group : groups) {
             List<Map> rows = group[1] as List<Map>

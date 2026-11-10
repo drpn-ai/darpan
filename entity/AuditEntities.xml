@@ -132,9 +132,6 @@
         <field name="file2RecordType" type="text-short">
             <description>DAR-BE-092. The contract record type of a FILE_2 record, e.g. creditMemo.</description>
         </field>
-        <field name="graceDays" type="number-integer">
-            <description>Days a new finding stays pending before it counts as open. Blank means 0.</description>
-        </field>
         <field name="otherSideDateField" type="text-short">
             <description>DAR-BE-116. On a check comparing HotWax OMS with another system: the date field on the OTHER
                 system's record (e.g. tranDate on a NetSuite RMA, createdAt on a Shopify order) that says whether a record
@@ -250,8 +247,9 @@
                 report.</description>
         </field>
         <field name="stateEnumId" type="id" not-null="true">
-            <description>AuditFindingState: AUDFS_PENDING inside the check's grace age, AUDFS_OPEN after it, AUDFS_FIXED
-                once a complete check looked at the record and no longer reported it.</description>
+            <description>AuditFindingState: AUDFS_OPEN from the morning a check first reports it, AUDFS_FIXED once a
+                complete check looked at the record and no longer reported it. There is no pending state (DAR-BE-206): a
+                grace is an expected conclusion rule.</description>
         </field>
         <field name="headline" type="text-intermediate" not-null="true"/>
         <field name="firstFoundDate" type="date" not-null="true">
@@ -545,7 +543,7 @@
             <description>Weekly only: ISO day, 1 Monday to 7 Sunday.</description>
         </field>
         <field name="fullList" type="text-indicator">
-            <description>Y lists every open and pending finding, as far as one message holds, for the days before a
+            <description>Y lists every open finding, as far as one message holds, for the days before a
                 close; otherwise only the oldest open ones.</description>
         </field>
         <field name="isActive" type="text-indicator"/>

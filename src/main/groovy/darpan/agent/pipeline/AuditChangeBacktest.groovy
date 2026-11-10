@@ -31,8 +31,8 @@ import static darpan.common.ValueSupport.normalize
  * extract and result document, or the findings ledger itself): no system is read live and nothing is written, no
  * finding, execution, ledger row, pending mark or file.
  *
- * <p>Result: [supported, reason, basisExecutionId, closed, opened, unchanged, limits]. Open means not fixed (AUDFS_OPEN or
- * AUDFS_PENDING). {@code closed}: findingIds of open findings the change would stop reporting; {@code opened}: recordKeys
+ * <p>Result: [supported, reason, basisExecutionId, closed, opened, unchanged, limits]. Open means AUDFS_OPEN (a finding is
+ * only open or fixed). {@code closed}: findingIds of open findings the change would stop reporting; {@code opened}: recordKeys
  * it would newly report; {@code unchanged}: open findings in scope that stay. {@code limits} says what the numbers do not
  * cover: CLOSES_ONLY (the kind can only close), LATEST_WINDOW_ONLY (the basis is each automation's latest landed window),
  * OPENED_NOT_COMPUTED (some newly unmatched records may open findings that cannot be decided from landed data; reason says
@@ -63,7 +63,6 @@ import static darpan.common.ValueSupport.normalize
  */
 class AuditChangeBacktest {
 
-    static final List<String> OPEN_STATES = ["AUDFS_OPEN", "AUDFS_PENDING"].asImmutable()
     static final String CLOSES_ONLY = "CLOSES_ONLY"
     static final String LATEST_WINDOW_ONLY = "LATEST_WINDOW_ONLY"
     static final String OPENED_NOT_COMPUTED = "OPENED_NOT_COMPUTED"
@@ -451,7 +450,7 @@ class AuditChangeBacktest {
     private static List openFindings(def ec, String tenantId, List<String> checkIds, String statementId) {
         if (!checkIds) return []
         def find = ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
-                .condition("checkId", EntityCondition.IN, checkIds).condition("stateEnumId", EntityCondition.IN, OPEN_STATES)
+                .condition("checkId", EntityCondition.IN, checkIds).condition("stateEnumId", "AUDFS_OPEN")
         if (statementId) find.condition("statementId", statementId)
         return find.orderBy("findingId").useCache(false).list()
     }

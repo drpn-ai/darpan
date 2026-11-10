@@ -136,7 +136,7 @@ class AuditChangeApplySmokeTests {
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
-    /** One filter on the run and the same on its automation; a check linked to R1 and R2 (graceDays 1); a two-cause tree. */
+    /** One filter on the run and the same on its automation; a check linked to R1 and R2; a two-cause tree. */
     @BeforeEach
     void reset() {
         actAs(MINE)
@@ -156,7 +156,7 @@ class AuditChangeApplySmokeTests {
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL"])
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", MINE).deleteAll()
             upsert("darpan.audit.AuditCheck", [checkId: "TAC_CHK", companyUserGroupId: MINE, checkCode: "credits-open",
-                    label: "Open credit memos", savedRunId: runId, graceDays: 1L, headlineTemplate: "Memo {tranId} is open"])
+                    label: "Open credit memos", savedRunId: runId, headlineTemplate: "Memo {tranId} is open"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R1".toString(), companyUserGroupId: MINE,
                     sequenceNum: 1L, diffTypes: "FINDING"])
             upsert("darpan.audit.AuditStatementCheck", [checkId: "TAC_CHK", statementId: "${MINE}_R2".toString(), companyUserGroupId: MINE,
@@ -343,7 +343,7 @@ class AuditChangeApplySmokeTests {
     // ------------------------------------------------------------------ other levers
 
     @Test
-    void "statement narrowing keeps graceDays"() {
+    void "statement narrowing resends the check whole"() {
         Map target = [auditId: "${MINE}_MC".toString(), checkCode: "credits-open", statementCode: "R1"]
         Map p = propose("STATEMENT_NARROWING", target, [diffTypes: ["FIELD_MISMATCH"]])
         assertEquals("PLANNED", p.status, p.statusMessage as String)
@@ -351,8 +351,7 @@ class AuditChangeApplySmokeTests {
         Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
         assertFalse(out.hadError as boolean, out.errorText as String)
         def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
-        assertEquals(1L, check.graceDays as Long, "graceDays is resent, not nulled")
-        assertEquals("Memo {tranId} is open", check.headlineTemplate)
+        assertEquals("Memo {tranId} is open", check.headlineTemplate, "resent, not nulled")
         assertEquals("FIELD_MISMATCH", link("R1").diffTypes)
         assertEquals("FINDING", link("R2").diffTypes, "the other statement's link is untouched")
     }
@@ -378,7 +377,7 @@ class AuditChangeApplySmokeTests {
         assertEquals("APPLIED", out.status)
         assertEquals([CONC_TAC_A: null, CONC_TAC_B: "EXPECTED"], ruleOutcomes())
         def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAC_CHK").useCache(false).one() }
-        assertEquals(1L, check.graceDays as Long, "the check is resent whole")
+        assertEquals("Memo {tranId} is open", check.headlineTemplate, "the check is resent whole")
         assertEquals(["FINDING", "FINDING"], [link("R1").diffTypes, link("R2").diffTypes], "the links are resent unchanged")
         assertEquals(versions + 2, versionCount(), "two AGENT_APPLY versions")
     }

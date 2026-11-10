@@ -7905,13 +7905,13 @@
                     },
                     "state": {
                         "type": "string",
-                        "description": "open or pending; blank is both."
+                        "description": "Kept for callers that send it: a finding is only ever open or fixed, and this\n                lists the open ones whatever the value (DAR-BE-206)."
                     }
                 },
                 "required": [
                     "audit"
                 ],
-                "description": "Every open and pending finding of one audit and period, one per order (an order's lines under it, the\n            line holding it up named), each with its statement and category. State is as of today."
+                "description": "Every open finding of one audit and period, one per order (an order's lines under it, the\n            line holding it up named), each with its statement and category. State is as of today."
             },
             "GetAuditFindingsByOrderResult": {
                 "type": "object",

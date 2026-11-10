@@ -130,16 +130,17 @@ class DiffDetailClassifier {
         return "Rule ${fallbackIndex}".toString()
     }
 
-    static String resolveRuleRowDetail(Map record, String fallbackRuleId) {
+    static String resolveRuleRowDetail(Map record, String fallbackRuleId, String file1Label = null, String file2Label = null) {
         return normalizeText(record.get('ruleLabel')) ?:
                 normalizeText(record.get('ruleName')) ?:
                         normalizeText(record.get('ruleDescription')) ?:
-                                normalizeText(record.get('field')) ?:
+                                // DAR-BE-155: a field rule reads both ways, each key beside its system.
+                                reconciliation.rule.RuleDiffSupport.twoWayLabel(normalizeText(record.get('field')), file1Label, file2Label) ?:
                                         normalizeText(record.get('message')) ?:
                                                 humanizeRuleIdentifier(fallbackRuleId)
     }
 
-    static Map resolveRuleDescriptor(Map record, String bucket, int rowIndex) {
+    static Map resolveRuleDescriptor(Map record, String bucket, int rowIndex, String file1Label = null, String file2Label = null) {
         if (bucket != 'rule') {
             return [ruleFilterKey: BASE_RULE_FILTER_KEY, ruleId: BASE_RULE_FILTER_KEY, ruleLabel: 'Base comparison']
         }
@@ -148,7 +149,7 @@ class DiffDetailClassifier {
                         resolveDiffType(record) ?:
                                 "rule-${rowIndex + 1}".toString()
         String ruleFilterKey = normalizeToken(ruleId) ?: "rule_${rowIndex + 1}".toString()
-        return [ruleFilterKey: ruleFilterKey, ruleId: ruleId, ruleLabel: resolveRuleRowDetail(record, ruleId)]
+        return [ruleFilterKey: ruleFilterKey, ruleId: ruleId, ruleLabel: resolveRuleRowDetail(record, ruleId, file1Label, file2Label)]
     }
 
     /** Mirror of normalizeDiffDetailRows() per-row mapping (minus presentational detailValue, kept in the UI). */
@@ -157,7 +158,7 @@ class DiffDetailClassifier {
         Map recordWithParsedData = new LinkedHashMap(record)
         recordWithParsedData.put('data', parsedData)
         String bucket = resolveDiffBucket(record, file1Label, file2Label)
-        Map ruleDescriptor = resolveRuleDescriptor(record, bucket, index)
+        Map ruleDescriptor = resolveRuleDescriptor(record, bucket, index, file1Label, file2Label)
         String recordId = resolveDiffRecordId(recordWithParsedData, index)
         return [
                 rowKey       : "${bucket}-${recordId}-${index}".toString(),

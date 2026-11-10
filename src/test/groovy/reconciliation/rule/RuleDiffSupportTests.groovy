@@ -158,4 +158,13 @@ class RuleDiffSupportTests {
         assertTrue(RuleDiffSupport.differsByAtLeast(new BigDecimal("75.48"), null, "1.00"), "a missing amount is still a finding")
         assertFalse(RuleDiffSupport.differsByAtLeast(null, null, "1.00"))
     }
+
+    @Test
+    void twoWayLabelPutsEachSystemBesideItsField() {
+        assertEquals("HotWax isCompleted = Shopify isFulfilled", RuleDiffSupport.twoWayLabel("isCompleted = isFulfilled", "HotWax", "Shopify"))
+        assertEquals("HotWax returnId required by Shopify id", RuleDiffSupport.twoWayLabel("returnId required by id", "HotWax", "Shopify"))
+        assertEquals("NetSuite total >= HotWax grandTotal", RuleDiffSupport.twoWayLabel("total >= grandTotal", "NetSuite", "HotWax"))
+        assertEquals("SKU mismatch", RuleDiffSupport.twoWayLabel("SKU mismatch", "HotWax", "Shopify"))
+        assertEquals("a = b", RuleDiffSupport.twoWayLabel("a = b", null, "Shopify"))
+    }
 }

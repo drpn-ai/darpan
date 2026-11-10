@@ -817,7 +817,7 @@ class RunNotificationVoice {
         int missingFromFile2 = toCount(safeModel.get("missingFromFile2Count"))
         int mismatches = toCount(safeModel.get("mismatchCount"))
         int total = toCount(safeModel.get("totalCount"))
-        List<Map> mismatchFields = mismatchTallies(safeModel.get("mismatchFields"))
+        List<Map> mismatchFields = mismatchTallies(safeModel.get("mismatchFields"), safeModel.get("file1SystemLabel"), safeModel.get("file2SystemLabel"))
 
         List<String> lines = []
 
@@ -926,13 +926,14 @@ class RunNotificationVoice {
     }
 
     /** RuleDiffSupport.fieldTally rows the run sent, busiest first; empty when the run did not say. */
-    private static List<Map> mismatchTallies(Object raw) {
+    private static List<Map> mismatchTallies(Object raw, Object system1 = null, Object system2 = null) {
         if (!(raw instanceof List)) return []
         return ((List) raw).findAll { it instanceof Map && toCount(((Map) it).count) > 0 }
                 .collect { Map it ->
                     // Chat link and format syntax is stripped from the rule's label, its name included (security review on bb64b03).
                     String name = clean(it.ruleName)
-                    String label = clean(it.label) ?: clean(it.field)
+                    // DAR-BE-155: a rule with no typed name reads both ways, each key beside its system.
+                    String label = clean(reconciliation.rule.RuleDiffSupport.twoWayLabel(clean(it.label) ?: clean(it.field), system1?.toString(), system2?.toString()))
                     [label: name ?: label, named: name != null, count: toCount(it.count), file1Value: it.file1Value,
                      file2Value: it.file2Value, sameValues: it.sameValues == true]
                 }

@@ -102,6 +102,14 @@ class DiffDetailClassifierTests {
     }
 
     @Test
+    void fieldRuleLabelNamesBothSystems() {
+        // DAR-BE-155: a field rule reads both ways, each side with its system.
+        Map row = DiffDetailClassifier.classifyRow(
+                [diffType: "FIELD_MISMATCH", ruleId: "100160", field: "isCompleted = isFulfilled"], 0, "HotWax", "Shopify")
+        assertEquals("HotWax isCompleted = Shopify isFulfilled", row.ruleLabel)
+    }
+
+    @Test
     void ruleOptionLabelDerivation() {
         assertEquals("Rule 2", DiffDetailClassifier.resolveRuleOptionLabel("rule_2", 5))
         assertEquals("Rule 4", DiffDetailClassifier.resolveRuleOptionLabel("step-04", 9))

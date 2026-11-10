@@ -256,6 +256,25 @@ class RuleDiffSupport {
      * "FIELD_COMPARISON_1"). Each row adds ruleId, ruleName (the rule's display name, when set) and label: the name,
      * else the group's field (the formula), else the rule's ruleText, else its id.
      */
+    // The operators a field rule's label carries (FieldComparisonRuleLogicGenerator: "<file1 key> <op> <file2 key>").
+    private static final java.util.regex.Pattern FIELD_RULE_LABEL =
+            ~/^(\S+) (=|==|!=|>=|<=|>|<|requires|required by|all in|contains all) (\S+)$/
+
+    /**
+     * DAR-BE-155: a field rule with no typed name reads both ways, each key beside its system ("isCompleted = isFulfilled"
+     * from HotWax and Shopify reads "HotWax isCompleted = Shopify isFulfilled"). Any other label, or a missing system,
+     * is kept as it is.
+     */
+    static String twoWayLabel(String label, String file1Label, String file2Label) {
+        String text = normalize(label)
+        String system1 = normalize(file1Label)
+        String system2 = normalize(file2Label)
+        if (!text || !system1 || !system2) return text
+        def matcher = FIELD_RULE_LABEL.matcher(text)
+        return matcher.matches() ?
+                "${system1} ${matcher.group(1)} ${matcher.group(2)} ${system2} ${matcher.group(3)}".toString() : text
+    }
+
     static List<Map> fieldTally(List<Map> diffRows, List rules = null) {
         Map<String, Object> ruleByKey = ruleLookup(rules)
         Map<String, List<Map>> groups = new LinkedHashMap<>()

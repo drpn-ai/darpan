@@ -191,6 +191,32 @@ test {
     jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
 }
 
+// DAR-OPS-013: --tests is applied inside each forked JVM, so under forkEvery = 1 `test --tests X` would still start a
+// JVM for every scanned class (~280) to run one. Command-line options reach the task only after this script runs, so
+// once the graph is ready the --tests patterns become class-file includes and only the named classes are scanned.
+// A pattern that names no class (darpan.facade.*) leaves the scan whole, since narrowing on the other patterns alone
+// would drop it. The filter still decides which tests run.
+gradle.taskGraph.whenReady { graph ->
+    Test focused = tasks.named('test', Test).get()
+    if (!graph.hasTask(focused)) return
+    Set<String> patterns = focused.filter.commandLineIncludePatterns
+    if (!patterns) return
+    List<String> classTokens = patterns.collect { String p ->
+        p.tokenize('.').reverse().find { String s -> s != '*' && (Character.isUpperCase(s.charAt(0)) || s.startsWith('*')) }
+    }
+    if (classTokens.contains(null) || classTokens.any { it.contains('$') }) return
+    // A token that matches no class leaves nothing to scan: the task goes NO-SOURCE, skips its actions and Gradle's own
+    // "No tests found" check, and a mistyped run passes green. So each token is checked against the test source names here.
+    List<String> testNames = []
+    file('src/test').eachFileRecurse { File f -> if (f.name ==~ /.*\.(groovy|java)/) testNames << f.name.replaceFirst(/\.[^.]+$/, '') }
+    List<String> unmatched = classTokens.findAll { String c ->
+        String rx = c.split(/\*/, -1).collect { java.util.regex.Pattern.quote(it) }.join('.*')
+        !testNames.any { it ==~ rx }
+    }
+    if (unmatched) throw new GradleException("No test class matches --tests ${unmatched} (checked by name against src/test)")
+    focused.include(classTokens.collectMany { String c -> ["**/${c}.class".toString(), "**/${c}\$*.class".toString()] })
+}
+
 // Fast inner-loop pool: the test classes that never boot Moqui. Because they touch no
 // process-global state they need no per-class fork, so this costs a handful of JVM starts
 // instead of one per class.

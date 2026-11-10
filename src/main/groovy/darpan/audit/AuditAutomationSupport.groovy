@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.DiffDocumentStreamSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
@@ -354,6 +355,9 @@ class AuditAutomationSupport {
                 .condition("statementId", EntityCondition.IN, links*.statementId).list()
                 .findAll { (it.isActive ?: "Y") != "N" }
         links = links.findAll { link -> statementRows.any { it.statementId == link.statementId } }
+        // DAR-BE-208: a link names its rules by entity id; a row names the rule by its DRL name.
+        Map<String, Set<String>> ruleNames = links.any { normalize(it.ruleIds) } ? ruleNamesById(ec, tenantId, check.savedRunId) : [:]
+        links = links.collect { Map link -> link + [ruleIds: AuditAutomationSupport.ruleIdsWithNames(link.ruleIds as String, ruleNames)] }
         Map<String, String> codeById = statementRows.collectEntries { [(it.statementId): it.statementCode] }
         Map<String, Map> byKey = new LinkedHashMap<>()
         DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
@@ -442,6 +446,48 @@ class AuditAutomationSupport {
         try { amount = new BigDecimal(text) } catch (NumberFormatException ignored) { return null }
         if (Math.abs(amount.scale()) > 10 || amount.precision() - amount.scale() > 20) return null
         return amount
+    }
+
+    /**
+     * DAR-BE-208. A run's rules by entity id, each with the names its rows can carry: the id itself (RuleEngineSupport names a
+     * parsed rule by its ruleId) and every `rule "..."` header in its ruleLogic (a raw block keeps its own, e.g.
+     * FIELD_COMPARISON_2: FieldComparisonRuleLogicGenerator's name for a rule saved before it had an id, copied as-is by a
+     * config transfer). RuleDiffSupport reports kcontext.getRule().getName(), so without this every rule-linked check
+     * (Dolls Kill R3/R4, gorjana R4/R5) recorded nothing. Gated on the run (RuleSet) being the tenant's, by explicit tenant as the
+     * rest of findingsFrom reads (a play runs with no active tenant); its rules are then read by ruleSetId, since not every
+     * Rule row carries its tenant yet (migration RULE_TENANT_STAMPS).
+     */
+    static Map<String, Set<String>> ruleNamesById(def ec, String tenantId, Object savedRunId) {
+        String runId = normalize(savedRunId)
+        if (!runId || !tenantId) return [:]
+        if (!tenantRows(ec, DarpanEntityConstants.RULE_SET, tenantId).condition("ruleSetId", runId).list()) return [:]
+        Map<String, Set<String>> out = [:]
+        (TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.Rule",
+                "DAR-BE-208 audit hook: a run's rules by ruleSetId, after its RuleSet was read with an explicit companyUserGroupId")
+                .condition("ruleSetId", runId).useCache(false)
+                .list() ?: []).each { rule ->
+            String id = normalize(rule.ruleId)
+            if (!id) return
+            Set<String> names = new LinkedHashSet<String>([id])
+            names.addAll(drlRuleNames(rule.ruleLogic as String))
+            out.put(id, names)
+        }
+        return out
+    }
+
+    /** DAR-BE-208. The names of the `rule "..."` headers in a DRL block, unescaped. */
+    static List<String> drlRuleNames(String ruleLogic) {
+        if (!ruleLogic) return []
+        return (ruleLogic =~ /(?m)^\s*rule\s+"((?:[^"\\]|\\.)*)"/).collect { List m ->
+            (m[1] as String).replaceAll(/\\(.)/, '$1')
+        }.findAll { it } as List<String>
+    }
+
+    /** DAR-BE-208. A link's ruleIds with each id's DRL names added; blank stays blank (any rule). */
+    static String ruleIdsWithNames(String ruleIds, Map<String, Set<String>> namesById) {
+        List<String> ids = (ruleIds ?: "").split(",")*.trim().findAll { it }
+        if (!ids) return ruleIds
+        return ids.collectMany { String id -> (namesById?.get(id) ?: [id]) as List }.unique().join(",")
     }
 
     static boolean matches(String allowed, String value) {

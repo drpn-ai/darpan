@@ -371,6 +371,45 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aLinkToARuleByItsIdTakesTheRowsTheRuleRaisesUnderItsDrlName() {
+        // DAR-BE-208 (Dolls Kill RS_100008, 2026-11-10: 20 rows, 0 findings). The links name the rules by entity id; a
+        // rule saved before it had an id keeps the generator's `rule "FIELD_COMPARISON_n"` header, and its rows carry
+        // that name. Each link takes only its own rule's rows.
+        insert("darpan.rule.RuleSet", [ruleSetId: "TAUTO_RS_SHOP", ruleSetName: "Shopify vs HotWax", companyUserGroupId: TENANT])
+        insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_PAID", ruleSetId: "TAUTO_RS_SHOP", sequenceNum: 10L, enabled: "Y",
+                ruleLogic: 'rule "FIELD_COMPARISON_1"\nwhen\n    $m : Map()\nthen\nend'])
+        insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_FULFILLED", ruleSetId: "TAUTO_RS_SHOP", sequenceNum: 20L, enabled: "Y",
+                ruleLogic: 'rule "FIELD_COMPARISON_2"\nwhen\n    $m : Map()\nthen\nend'])
+        // Another tenant's run of the same id-less names must lend none of them.
+        insert("moqui.security.UserGroup", [userGroupId: "TAUTO_OTHER_TENANT", description: "Another tenant"])
+        insert("darpan.rule.RuleSet", [ruleSetId: "TAUTO_RS_OTHER", ruleSetName: "Other", companyUserGroupId: "TAUTO_OTHER_TENANT"])
+        insert("darpan.rule.Rule", [ruleId: "TAUTO_RULE_OTHER", ruleSetId: "TAUTO_RS_OTHER", sequenceNum: 10L, enabled: "Y",
+                ruleLogic: 'rule "FIELD_COMPARISON_2"\nwhen\n    $m : Map()\nthen\nend'])
+        statement("TAUTO_R3", AUDIT, "R3")
+        statement("TAUTO_R4F", AUDIT, "R4F")
+        insert("darpan.audit.AuditCheck", [checkId: "TAUTO_SHOP", companyUserGroupId: TENANT, checkCode: "shopify-vs-hotwax",
+                label: "shopify vs hotwax", savedRunId: "TAUTO_RS_SHOP", file1RecordType: "order"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_SHOP", statementId: "TAUTO_R3", companyUserGroupId: TENANT,
+                sequenceNum: 1L, diffTypes: "FIELD_MISMATCH", ruleIds: "TAUTO_RULE_PAID"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_SHOP", statementId: "TAUTO_R4F", companyUserGroupId: TENANT,
+                sequenceNum: 2L, diffTypes: "FIELD_MISMATCH", ruleIds: "TAUTO_RULE_FULFILLED"])
+        Map unfulfilled = row("FIELD_MISMATCH", "7458485076225", "isFulfilled required by isCompleted") + [ruleId: "FIELD_COMPARISON_2"]
+        Map byId = row("FIELD_MISMATCH", "7458299445505", "a parsed rule names itself by its id") + [ruleId: "TAUTO_RULE_FULFILLED"]
+        Map stranger = row("FIELD_MISMATCH", "7460141957377", "no rule of this run") + [ruleId: "FIELD_COMPARISON_9"]
+        Map check = [checkId: "TAUTO_SHOP", savedRunId: "TAUTO_RS_SHOP", file1RecordType: "order"]
+        List<Map> found = AuditAutomationSupport.findingsFrom(ec, TENANT, check,
+                new File(diff("shop", [unfulfilled, byId, stranger])), omsSource, omsSource, [:])
+        assertEquals([["R4F", "7458485076225"], ["R4F", "7458299445505"]], found.collect { [it.statementCode, it.recordKey] })
+
+        // The run is read only as this tenant's: pointed at another tenant's run, the DRL name reaches nothing.
+        assertEquals([:], AuditAutomationSupport.ruleNamesById(ec, TENANT, "TAUTO_RS_OTHER"))
+        assertEquals(["TAUTO_RULE_OTHER"], AuditAutomationSupport.ruleNamesById(ec, "TAUTO_OTHER_TENANT", "TAUTO_RS_OTHER").keySet() as List)
+        assertEquals(['FIELD_COMPARISON_1', 'say "hi"'],
+                AuditAutomationSupport.drlRuleNames('rule "FIELD_COMPARISON_1"\nend\n  rule "say \\"hi\\""\nend'))
+        assertEquals("any", AuditAutomationSupport.ruleIdsWithNames(null, [:]) ?: "any", "a blank ruleIds still takes every rule")
+    }
+
+    @Test
     void aRecordIsNamedByTheIdAPersonSearchesByAndOnlyOnTheSidesTheCheckNames() {
         // DAR-BE-095: the compare's key is the memo's internal id; the memo is CM7650999 to a person. The replacement
         // order's own id is not on the row, so a check that names no FILE_2 record type lists the memo alone.

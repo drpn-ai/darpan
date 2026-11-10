@@ -126,6 +126,13 @@ class CliMethodAllowlist {
             "admin.AgentAccessAdminServices.update#AgentAccessGrant",
             "admin.AgentTicketAdminServices.list#AllBrainChangeTickets",
             "admin.AgentTicketAdminServices.update#BrainChangeTicket",
+            // DAR-BE-195: a CLI session never manages CLI access.
+            "admin.CliAccessAdminServices.create#CliAccessGrant",
+            "admin.CliAccessAdminServices.list#CliAccessGrants",
+            "admin.CliAccessAdminServices.pause#CliAccessGrant",
+            "admin.CliAccessAdminServices.revoke#CliAccessGrant",
+            "admin.CliAccessAdminServices.unpause#CliAccessGrant",
+            "admin.CliAccessAdminServices.update#CliAccessGrant",
 
             // DAR-BE-159: the embedded agent's change pipeline. A person plans, applies, rejects or reverts an agent proposal in the
             // app (Rule of Two); none is a CLI action. list#BrainChangeTickets writes nothing but is left out until the agent panel

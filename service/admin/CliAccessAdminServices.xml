@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-195. Darpan admins (super admins) turn the Darpan CLI on for one user in one tenant, with an optional end, and
+  pause, unpause and revoke it. admin.* and therefore inside the DARPAN_ADMIN_API fence; each service checks super admin
+  again first. A CLI session never calls these (CliMethodAllowlist.EXCLUDED). The rules are darpan.facade.auth.CliAccess.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="list" noun="CliAccessGrants" allow-remote="true" authenticate="true">
+        <description>CLI grants across tenants with their state and the sign-in lifetime they give, by tenant, user or status.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId"/>
+            <parameter name="userId"/>
+            <parameter name="statusId"/>
+            <parameter name="includeRevoked" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="grants" type="List"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grants" from="darpan.facade.auth.CliAccess.adminList(ec, tenantUserGroupId, userId, statusId, includeRevoked)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="CliAccessGrant" allow-remote="true" authenticate="true">
+        <description>Turns the CLI on for a member of the tenant, with an optional end; the user's earlier grant there is revoked.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="tenantUserGroupId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"><description>Default now.</description></parameter>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="days" type="Integer"><description>The grant ends this many days (each 24 hours) from the start, or from now when changing a grant. Neither days nor thruDate: no end.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.facade.auth.CliAccess.adminCreate(ec, userId, tenantUserGroupId, fromDate, thruDate, days)"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="CliAccessGrant" allow-remote="true" authenticate="true">
+        <description>Changes a CLI grant's end.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="days" type="Integer"><description>The grant ends this many days (each 24 hours) from the start, or from now when changing a grant. Neither days nor thruDate: no end.</description></parameter>
+            <parameter name="clearThruDate" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.facade.auth.CliAccess.adminUpdate(ec, grantId, thruDate, days, clearThruDate)"/>
+        </actions>
+    </service>
+
+    <service verb="pause" noun="CliAccessGrant" allow-remote="true" authenticate="true">
+        <description>Pauses an active CLI grant; the user's CLI stops in that tenant on their next call.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.facade.auth.CliAccess.adminPause(ec, grantId)"/>
+        </actions>
+    </service>
+
+    <service verb="unpause" noun="CliAccessGrant" allow-remote="true" authenticate="true">
+        <description>Lifts a pause, optionally with a later end; refused when the grant has ended.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="days" type="Integer"><description>The grant ends this many days (each 24 hours) from the start, or from now when changing a grant. Neither days nor thruDate: no end.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.facade.auth.CliAccess.adminUnpause(ec, grantId, thruDate, days)"/>
+        </actions>
+    </service>
+
+    <service verb="revoke" noun="CliAccessGrant" allow-remote="true" authenticate="true">
+        <description>Revokes a CLI grant; the user has no CLI in that tenant until granted again.</description>
+        <in-parameters>
+            <parameter name="grantId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="grant" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="grant" from="darpan.facade.auth.CliAccess.adminRevoke(ec, grantId)"/>
+        </actions>
+    </service>
+</services>

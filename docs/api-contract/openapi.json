@@ -51,6 +51,24 @@
                                         "$ref": "#/components/schemas/UpdateBrainChangeTicketRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/CreateCliAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListCliAccessGrantsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/PauseCliAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RevokeCliAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UnpauseCliAccessGrantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateCliAccessGrantRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetKnowledgeEntryRequest"
                                     },
                                     {
@@ -711,6 +729,12 @@
                                         "admin.AgentAccessAdminServices.update#AgentAccessGrant": "#/components/schemas/UpdateAgentAccessGrantRequest",
                                         "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "#/components/schemas/ListAllBrainChangeTicketsRequest",
                                         "admin.AgentTicketAdminServices.update#BrainChangeTicket": "#/components/schemas/UpdateBrainChangeTicketRequest",
+                                        "admin.CliAccessAdminServices.create#CliAccessGrant": "#/components/schemas/CreateCliAccessGrantRequest",
+                                        "admin.CliAccessAdminServices.list#CliAccessGrants": "#/components/schemas/ListCliAccessGrantsRequest",
+                                        "admin.CliAccessAdminServices.pause#CliAccessGrant": "#/components/schemas/PauseCliAccessGrantRequest",
+                                        "admin.CliAccessAdminServices.revoke#CliAccessGrant": "#/components/schemas/RevokeCliAccessGrantRequest",
+                                        "admin.CliAccessAdminServices.unpause#CliAccessGrant": "#/components/schemas/UnpauseCliAccessGrantRequest",
+                                        "admin.CliAccessAdminServices.update#CliAccessGrant": "#/components/schemas/UpdateCliAccessGrantRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "#/components/schemas/GetKnowledgeEntryRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "#/components/schemas/GetKnowledgeForReviewRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "#/components/schemas/GetKnowledgeIdentifiersRequest",
@@ -969,6 +993,24 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateBrainChangeTicketResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/CreateCliAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListCliAccessGrantsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PauseCliAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RevokeCliAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UnpauseCliAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateCliAccessGrantResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetKnowledgeEntryResponse"
@@ -2527,6 +2569,558 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateBrainChangeTicketResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "CreateCliAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string"
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string"
+                    },
+                    "fromDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. Default now."
+                    },
+                    "thruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "The grant ends this many days (each 24 hours) from the start, or from now when changing a grant. Neither days nor thruDate: no end."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "tenantUserGroupId"
+                ],
+                "description": "Turns the CLI on for a member of the tenant, with an optional end; the user's earlier grant there is revoked."
+            },
+            "CreateCliAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "CreateCliAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.CliAccessAdminServices.create#CliAccessGrant",
+                "x-darpan-method": "admin.CliAccessAdminServices.create#CliAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.CliAccessAdminServices.create#CliAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateCliAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateCliAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.CliAccessAdminServices.create#CliAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateCliAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListCliAccessGrantsParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string"
+                    },
+                    "userId": {
+                        "type": "string"
+                    },
+                    "statusId": {
+                        "type": "string"
+                    },
+                    "includeRevoked": {
+                        "type": "boolean"
+                    }
+                },
+                "description": "CLI grants across tenants with their state and the sign-in lifetime they give, by tenant, user or status."
+            },
+            "ListCliAccessGrantsResult": {
+                "type": "object",
+                "properties": {
+                    "grants": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "ListCliAccessGrantsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.CliAccessAdminServices.list#CliAccessGrants",
+                "x-darpan-method": "admin.CliAccessAdminServices.list#CliAccessGrants",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.CliAccessAdminServices.list#CliAccessGrants"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListCliAccessGrantsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListCliAccessGrantsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.CliAccessAdminServices.list#CliAccessGrants. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListCliAccessGrantsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "PauseCliAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Pauses an active CLI grant; the user's CLI stops in that tenant on their next call."
+            },
+            "PauseCliAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "PauseCliAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.CliAccessAdminServices.pause#CliAccessGrant",
+                "x-darpan-method": "admin.CliAccessAdminServices.pause#CliAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.CliAccessAdminServices.pause#CliAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PauseCliAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PauseCliAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.CliAccessAdminServices.pause#CliAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PauseCliAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RevokeCliAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Revokes a CLI grant; the user has no CLI in that tenant until granted again."
+            },
+            "RevokeCliAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "RevokeCliAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.CliAccessAdminServices.revoke#CliAccessGrant",
+                "x-darpan-method": "admin.CliAccessAdminServices.revoke#CliAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.CliAccessAdminServices.revoke#CliAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RevokeCliAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RevokeCliAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.CliAccessAdminServices.revoke#CliAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RevokeCliAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UnpauseCliAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    },
+                    "thruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "The grant ends this many days (each 24 hours) from the start, or from now when changing a grant. Neither days nor thruDate: no end."
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Lifts a pause, optionally with a later end; refused when the grant has ended."
+            },
+            "UnpauseCliAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UnpauseCliAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.CliAccessAdminServices.unpause#CliAccessGrant",
+                "x-darpan-method": "admin.CliAccessAdminServices.unpause#CliAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.CliAccessAdminServices.unpause#CliAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UnpauseCliAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UnpauseCliAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.CliAccessAdminServices.unpause#CliAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UnpauseCliAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateCliAccessGrantParams": {
+                "type": "object",
+                "properties": {
+                    "grantId": {
+                        "type": "string"
+                    },
+                    "thruDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "The grant ends this many days (each 24 hours) from the start, or from now when changing a grant. Neither days nor thruDate: no end."
+                    },
+                    "clearThruDate": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "grantId"
+                ],
+                "description": "Changes a CLI grant's end."
+            },
+            "UpdateCliAccessGrantResult": {
+                "type": "object",
+                "properties": {
+                    "grant": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateCliAccessGrantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.CliAccessAdminServices.update#CliAccessGrant",
+                "x-darpan-method": "admin.CliAccessAdminServices.update#CliAccessGrant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.CliAccessAdminServices.update#CliAccessGrant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateCliAccessGrantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateCliAccessGrantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.CliAccessAdminServices.update#CliAccessGrant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateCliAccessGrantResult"
                     }
                 },
                 "required": [
@@ -30015,6 +30609,12 @@
         "admin.AgentAccessAdminServices.update#AgentAccessGrant": "UpdateAgentAccessGrant",
         "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "ListAllBrainChangeTickets",
         "admin.AgentTicketAdminServices.update#BrainChangeTicket": "UpdateBrainChangeTicket",
+        "admin.CliAccessAdminServices.create#CliAccessGrant": "CreateCliAccessGrant",
+        "admin.CliAccessAdminServices.list#CliAccessGrants": "ListCliAccessGrants",
+        "admin.CliAccessAdminServices.pause#CliAccessGrant": "PauseCliAccessGrant",
+        "admin.CliAccessAdminServices.revoke#CliAccessGrant": "RevokeCliAccessGrant",
+        "admin.CliAccessAdminServices.unpause#CliAccessGrant": "UnpauseCliAccessGrant",
+        "admin.CliAccessAdminServices.update#CliAccessGrant": "UpdateCliAccessGrant",
         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "GetKnowledgeEntry",
         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "GetKnowledgeForReview",
         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "GetKnowledgeIdentifiers",

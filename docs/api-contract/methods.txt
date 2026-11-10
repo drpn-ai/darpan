@@ -7,6 +7,12 @@ admin.AgentAccessAdminServices.unpause#AgentAccessGrant
 admin.AgentAccessAdminServices.update#AgentAccessGrant
 admin.AgentTicketAdminServices.list#AllBrainChangeTickets
 admin.AgentTicketAdminServices.update#BrainChangeTicket
+admin.CliAccessAdminServices.create#CliAccessGrant
+admin.CliAccessAdminServices.list#CliAccessGrants
+admin.CliAccessAdminServices.pause#CliAccessGrant
+admin.CliAccessAdminServices.revoke#CliAccessGrant
+admin.CliAccessAdminServices.unpause#CliAccessGrant
+admin.CliAccessAdminServices.update#CliAccessGrant
 admin.KnowledgeAdminServices.get#KnowledgeEntry
 admin.KnowledgeAdminServices.get#KnowledgeForReview
 admin.KnowledgeAdminServices.get#KnowledgeIdentifiers

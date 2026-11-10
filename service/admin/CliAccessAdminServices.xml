@@ -90,4 +90,51 @@
             <set field="grant" from="darpan.facade.auth.CliAccess.adminRevoke(ec, grantId)"/>
         </actions>
     </service>
+
+    <!-- DAR-BE-209: users ask for the CLI from the app; a Darpan admin approves (making the grant) or declines. -->
+    <service verb="list" noun="CliAccessRequests" allow-remote="true" authenticate="true">
+        <description>CLI access requests across tenants, newest first; PENDING unless a status is given.</description>
+        <in-parameters>
+            <parameter name="statusId"><description>PENDING (default), APPROVED or DECLINED.</description></parameter>
+            <parameter name="userId"/>
+            <parameter name="tenantUserGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="requests" type="List"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="requests" from="darpan.facade.auth.CliAccessRequests.adminList(ec, statusId, userId, tenantUserGroupId)"/>
+        </actions>
+    </service>
+
+    <service verb="approve" noun="CliAccessRequest" allow-remote="true" authenticate="true">
+        <description>Turns the CLI on as asked (a grant with the given end) and marks the request approved. Refused when the request is not pending or the user is no longer a member.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="days" type="Integer"><description>The grant ends this many days (each 24 hours) from now. Neither days nor thruDate: no end.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="request" type="Map"/>
+            <parameter name="grant" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="approved" from="darpan.facade.auth.CliAccessRequests.adminApprove(ec, requestId, thruDate, days)"/>
+            <set field="request" from="approved?.request"/>
+            <set field="grant" from="approved?.grant"/>
+        </actions>
+    </service>
+
+    <service verb="decline" noun="CliAccessRequest" allow-remote="true" authenticate="true">
+        <description>Declines a pending request; the note, when given, is shown to the user, who may ask again.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="decisionNote"><description>Shown to the user (optional, at most 500 characters).</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="request" type="Map"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="request" from="darpan.facade.auth.CliAccessRequests.adminDecline(ec, requestId, decisionNote)"/>
+        </actions>
+    </service>
 </services>

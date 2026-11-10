@@ -25,7 +25,8 @@ import static org.junit.jupiter.api.Assertions.*
 class CliAccessAdminSmokeTests {
     private static final String SVC = "admin.CliAccessAdminServices"
     private static final List<String> SERVICES = ["list#CliAccessGrants", "create#CliAccessGrant", "update#CliAccessGrant",
-            "pause#CliAccessGrant", "unpause#CliAccessGrant", "revoke#CliAccessGrant"]
+            "pause#CliAccessGrant", "unpause#CliAccessGrant", "revoke#CliAccessGrant",
+            "list#CliAccessRequests", "approve#CliAccessRequest", "decline#CliAccessRequest"]
     private static final String ALPHA = "CAA_ALPHA"
     private static final String TADMIN = "CAA_TADMIN"
     private static final String EDITOR = "CAA_EDITOR"
@@ -71,7 +72,7 @@ class CliAccessAdminSmokeTests {
     void "a tenant admin, editor or viewer is refused by the fence and by the service on every CLI grant service"() {
         String id = adminOk("create#CliAccessGrant", [userId: VIEWER, tenantUserGroupId: ALPHA]).grant.grantId
         Map before = grantRow(id)
-        Map params = [grantId: id, userId: EDITOR, tenantUserGroupId: ALPHA, days: 30]
+        Map params = [grantId: id, requestId: 'NONE', userId: EDITOR, tenantUserGroupId: ALPHA, days: 30]
         [TADMIN, EDITOR, VIEWER].each { String who ->
             SERVICES.each { String s ->
                 Map fenced = onThread(who.toLowerCase(), "${SVC}.${s}".toString(), params, false)

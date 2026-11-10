@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-209. The signed-in user's CLI access in their active tenant, and their request for it. Web only: a CLI session
+  never calls these (CliMethodAllowlist.EXCLUDED). A Darpan admin answers requests in admin.CliAccessAdminServices.
+  The rules are darpan.facade.auth.CliAccessRequests.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="MyCliAccess" allow-remote="true">
+        <description>The signed-in person's CLI state in the active tenant (LIVE, PAUSED, ENDED, NOT_GRANTED or DARPAN_ADMIN), the grant's end, how long a CLI sign-in lasts there, and their latest request.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Errors.</description><parameter name="error"/></parameter>
+            <parameter name="access" type="Map"><description>tenantUserGroupId, tenantLabel, state, thruDate, lifetimeDays, request (requestId, statusId, reason, requestedDate, decidedDate, decisionNote) or null. Null with no active tenant.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="access" from="darpan.facade.auth.CliAccessRequests.myAccess(ec)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="request" noun="CliAccess" allow-remote="true">
+        <description>Asks a Darpan admin to turn the CLI on for the signed-in person in the active tenant. Asking again while a request is open updates its reason. Refused for a Darpan admin or when the CLI is already on there.</description>
+        <in-parameters>
+            <parameter name="reason"><description>What it is for (optional, at most 500 characters).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the request was filed.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="request" type="Map"><description>requestId, statusId, reason, requestedDate.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="request" from="darpan.facade.auth.CliAccessRequests.request(ec, reason)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

@@ -7,8 +7,11 @@ admin.AgentAccessAdminServices.unpause#AgentAccessGrant
 admin.AgentAccessAdminServices.update#AgentAccessGrant
 admin.AgentTicketAdminServices.list#AllBrainChangeTickets
 admin.AgentTicketAdminServices.update#BrainChangeTicket
+admin.CliAccessAdminServices.approve#CliAccessRequest
 admin.CliAccessAdminServices.create#CliAccessGrant
+admin.CliAccessAdminServices.decline#CliAccessRequest
 admin.CliAccessAdminServices.list#CliAccessGrants
+admin.CliAccessAdminServices.list#CliAccessRequests
 admin.CliAccessAdminServices.pause#CliAccessGrant
 admin.CliAccessAdminServices.revoke#CliAccessGrant
 admin.CliAccessAdminServices.unpause#CliAccessGrant
@@ -84,6 +87,8 @@ facade.AuthFacadeServices.save#RecoveryEmail
 facade.AuthFacadeServices.save#UserSettings
 facade.AuthFacadeServices.verify#OwnPassword
 facade.AuthFacadeServices.verify#PasswordResetCode
+facade.CliAccessFacadeServices.get#MyCliAccess
+facade.CliAccessFacadeServices.request#CliAccess
 facade.CliAuthFacadeServices.approve#CliLogin
 facade.CliAuthFacadeServices.deny#CliLogin
 facade.CliAuthFacadeServices.get#CliLoginRequest

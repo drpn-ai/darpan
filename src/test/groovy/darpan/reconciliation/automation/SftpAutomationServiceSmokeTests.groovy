@@ -160,6 +160,22 @@ class SftpAutomationServiceSmokeTests {
         pinnedKeys(null)
     }
 
+    /** Review of DAR-BE-082: when another run saved a key between this run's read and its save, the two must agree. */
+    @Test
+    void aKeySavedMeanwhileByAnotherRunMustMatch() {
+        pinnedKeys(null)
+        def client = new FakeSftpClient("shopify.test", "u", 22, sftpEnvironment) {
+            @Override void connect() {
+                super.connect()
+                pinnedKeys("SHA256:saved-by-another-run")   // another run pins a different key while this one connects
+            }
+        }
+        IllegalStateException refused = assertThrows(IllegalStateException) { SftpAutomationSupport.connectPinned(ec, client, serverRow("SHOPIFY_TEST_SFTP")) }
+        assertTrue(refused.message.contains("presented a different key"), refused.message)
+        assertEquals("SHA256:saved-by-another-run", serverRow("SHOPIFY_TEST_SFTP").hostKeyFingerprint, "the first saved key stands")
+        pinnedKeys(null)
+    }
+
     private void pinnedKeys(String fingerprint) {
         boolean was = ec.artifactExecution.disableAuthz()
         try {
@@ -438,7 +454,7 @@ class SftpAutomationServiceSmokeTests {
         }
     }
 
-    private static final class FakeSftpClient {
+    private static class FakeSftpClient {
         private final String host
         private final int port
         private final FakeSftpEnvironment environment

@@ -76,7 +76,21 @@ class SftpAutomationSupport {
         client.connect()
         String seen = client.hasProperty("seenHostKey") ? client.seenHostKey : null
         if (saved || !seen || row == null) return
-        row.setAll([hostKeyFingerprint: seen, hostKeyPinnedDate: ec.user.nowTimestamp]).update()
+        // Save only while no key is saved, under a row lock: another run may have saved one since the read above (two
+        // runs connecting at once). If it did, this connection's key must equal it, or it fails closed (review).
+        def locked = darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
+                "DAR-BE-082: save the key of the server this run just connected to, if none was saved meanwhile")
+                .condition("sftpServerId", serverId).forUpdate(true).useCache(false).one()
+        if (locked == null) return
+        String now = locked.hostKeyFingerprint ?: null
+        if (now) {
+            if (now != seen) {
+                try { client.close() } catch (Exception ignored) {}
+                throw new IllegalStateException(DarpanSftpClient.mismatchMessage((String) server?.host, ((server?.port ?: 22) as int), now, seen))
+            }
+            return
+        }
+        locked.setAll([hostKeyFingerprint: seen, hostKeyPinnedDate: ec.user.nowTimestamp]).update()
         logger.info("SFTP server {} key saved on first use: {}", serverId, seen)
     }
 

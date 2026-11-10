@@ -13,7 +13,7 @@
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><description>Errors.</description><parameter name="error"/></parameter>
-            <parameter name="access" type="Map"><description>tenantUserGroupId, tenantLabel, state, thruDate, lifetimeDays, request (requestId, statusId, reason, requestedDate, decidedDate, decisionNote) or null. Null with no active tenant.</description></parameter>
+            <parameter name="access" type="Map"><description>tenantUserGroupId, tenantLabel, state, thruDate, lifetimeDays, canUseCli (the CLI is on in some tenant: what approve#CliLogin checks), request (requestId, statusId, reason, requestedDate, decidedDate, decisionNote) or null. Null with no active tenant.</description></parameter>
         </out-parameters>
         <actions>
             <set field="access" from="darpan.facade.auth.CliAccessRequests.myAccess(ec)"/>

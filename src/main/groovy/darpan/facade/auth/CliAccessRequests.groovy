@@ -25,7 +25,7 @@ class CliAccessRequests {
 
     // ---------------------------------------------------------------- the signed-in user (active tenant)
 
-    /** The user's CLI state in the active tenant, the sign-in lifetime there, and their latest request; null with no tenant. */
+    /** The user's CLI state in the active tenant, the sign-in lifetime there, whether the CLI is on anywhere, and their latest request; null with no tenant. */
     static Map myAccess(def ec) {
         String userId = TenantAccessSupport.currentUserId(ec)
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
@@ -37,6 +37,9 @@ class CliAccessRequests {
                 .orderBy(["-requestedDate", "-requestId"]).useCache(false).list().find()
         return [tenantUserGroupId: tenantId, tenantLabel: CliAccess.tenantLabel(ec, tenantId), state: state,
                 thruDate: grant?.thruDate, lifetimeDays: CliAccess.lifetimeDays(ec, userId, tenantId),
+                // approve#CliLogin's own rule (a live grant in any tenant, or a Darpan admin): the Approve CLI page uses it to
+                // tell a refusal for want of access from an expired code, whatever tenant is active.
+                canUseCli: admin || CliAccess.cliAllowed(ec, userId),
                 request: latest == null ? null : view(ec, latest)]
     }
 

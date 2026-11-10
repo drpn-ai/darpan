@@ -90,12 +90,12 @@
         <field name="requestId" type="id" is-pk="true"/>
         <field name="userId" type="id" not-null="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
-        <field name="reason" type="text-medium"><description>What the user wants it for (optional).</description></field>
+        <field name="reason" type="text-intermediate"><description>What the user wants it for (optional, at most 500 characters).</description></field>
         <field name="statusId" type="text-short"><description>PENDING, APPROVED or DECLINED.</description></field>
         <field name="requestedDate" type="date-time"/>
         <field name="decidedByUserId" type="id"/>
         <field name="decidedDate" type="date-time"/>
-        <field name="decisionNote" type="text-medium"><description>Shown to the user on a decline (optional).</description></field>
+        <field name="decisionNote" type="text-intermediate"><description>Shown to the user on a decline (optional, at most 500 characters).</description></field>
         <field name="grantId" type="id"><description>The grant an approval made.</description></field>
         <index name="CLI_REQUEST_TENANT_USER"><index-field name="companyUserGroupId"/><index-field name="userId"/></index>
         <index name="CLI_REQUEST_STATUS"><index-field name="statusId"/></index>

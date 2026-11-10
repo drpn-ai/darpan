@@ -137,6 +137,28 @@ class CliAccessRequestSmokeTests {
         assertEquals([again.requestId], asUser(STAFF, T1) { CliAccessRequests.adminList(it, null, VIEWER, null) }.result*.requestId)
     }
 
+    @Test
+    void aLongReasonAndNoteAreKeptWhole() {
+        String reason = "r" * 400, note = "n" * 400
+        Map filed = asUser(VIEWER, T1) { CliAccessRequests.request(it, reason) }
+        assertNotNull(filed.result, "a 400-character reason is accepted: ${filed.errors}")
+        String id = filed.result.requestId as String
+        assertEquals(400, (row(id).reason as String).length())
+        assertNotNull(asUser(STAFF, T1) { CliAccessRequests.adminDecline(it, id, note) }.result)
+        assertEquals(400, (row(id).decisionNote as String).length())
+        assertNull(asUser(VIEWER, T1) { CliAccessRequests.request(it, "r" * 501) }.result, "over 500 is refused")
+    }
+
+    /** Review I2: approve#CliLogin is allowed with a live grant in any tenant, so the Approve CLI page needs that, not the active tenant's state. */
+    @Test
+    void canUseCliFollowsAnyTenantNotTheActiveOne() {
+        assertFalse(asUser(VIEWER, T1) { CliAccessRequests.myAccess(it) }.result.canUseCli as boolean)
+        approve(asUser(VIEWER, T2) { CliAccessRequests.request(it, null) }.result.requestId as String, 7)
+        Map inT1 = asUser(VIEWER, T1) { CliAccessRequests.myAccess(it) }.result as Map
+        assertEquals([CliAccess.NOT_GRANTED, true], [inT1.state, inT1.canUseCli])
+        assertTrue(asUser(STAFF, T1) { CliAccessRequests.myAccess(it) }.result.canUseCli as boolean)
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private Map approve(String requestId, Integer days) {

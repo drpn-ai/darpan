@@ -96,7 +96,8 @@ class TenantOwnedEntityFilterContractTests {
      * Filter rows added since the last release cut. No pack carries them yet: the next cut generates its pack from
      * the previous tag, and data/upgrade-data.xml is not hand-edited between cuts. Remove an entry once a pack ships it.
      */
-    static final Map<String, String> PENDING_NEXT_PACK = ["DARPAN_SCOPE_KNOWLEDGE_ENTRY": "DAR-BE-161 knowledge entries; the next release cut generates its pack row",
+    static final Map<String, String> PENDING_NEXT_PACK = ["DARPAN_SCOPE_CLI_ACCESS_REQUEST": "DAR-BE-209 CLI access requests; the next release cut generates its pack row",
+                                                          "DARPAN_SCOPE_KNOWLEDGE_ENTRY": "DAR-BE-161 knowledge entries; the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_TENANT_SCRIPT": "DAR-BE-164 tenant scripts; the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_TENANT_SCRIPT_DEPLOY": "DAR-BE-167 script deployments; the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_AGENT_QUERY_LOG": "DAR-CLI-003 agent query log; the next release cut generates its pack row",

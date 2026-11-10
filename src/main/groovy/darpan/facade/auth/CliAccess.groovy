@@ -130,7 +130,7 @@ class CliAccess {
         return LIVE
     }
 
-    private static String tenantLabel(def ec, String tenantId) {
+    static String tenantLabel(def ec, String tenantId) {
         def group = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserGroup", WHY)
                 .condition("userGroupId", tenantId).useCache(true).one()
         return (group?.description as String) ?: tenantId
@@ -251,7 +251,7 @@ class CliAccess {
     }
 
     /** A member of the tenant, or a super admin (who enters every tenant without a membership row). */
-    private static boolean isMember(def ec, String tenantId, String userId) {
+    static boolean isMember(def ec, String tenantId, String userId) {
         Timestamp now = ec.user.nowTimestamp
         if (ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
                 .condition("tenantUserGroupId", tenantId).condition("userId", userId).conditionDate("fromDate", "thruDate", now)

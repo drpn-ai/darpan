@@ -84,6 +84,23 @@
         <index name="CLI_GRANT_EVENT_GRANT"><index-field name="grantId"/></index>
     </entity>
 
+    <entity entity-name="CliAccessRequest" package="darpan.auth" cache="never">
+        <description>DAR-BE-209. A user's request, from the app, for the CLI in one tenant. At most one PENDING per user and
+            tenant; a Darpan admin approves it (making a CliAccessGrant) or declines it with an optional note the user sees.</description>
+        <field name="requestId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="reason" type="text-medium"><description>What the user wants it for (optional).</description></field>
+        <field name="statusId" type="text-short"><description>PENDING, APPROVED or DECLINED.</description></field>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decisionNote" type="text-medium"><description>Shown to the user on a decline (optional).</description></field>
+        <field name="grantId" type="id"><description>The grant an approval made.</description></field>
+        <index name="CLI_REQUEST_TENANT_USER"><index-field name="companyUserGroupId"/><index-field name="userId"/></index>
+        <index name="CLI_REQUEST_STATUS"><index-field name="statusId"/></index>
+    </entity>
+
     <view-entity entity-name="CliSessionAndKey" package="darpan.auth">
         <description>A CLI session with its login key's expiry; a session whose key the framework has purged drops out.</description>
         <member-entity entity-alias="CLS" entity-name="darpan.auth.CliSession"/>

@@ -8337,7 +8337,7 @@
                     },
                     "progress": {
                         "type": "object",
-                        "description": "{checks: configured checks, activeChecks, active: [{run,\n                checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,\n                usualDurationMs, health: healthy | slow | stuck, healthReason}]}"
+                        "description": "{checks: configured checks, activeChecks, active: [{run,\n                checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,\n                usualDurationMs (a past successful run over a window as long; absent when none), health: healthy | slow |\n                stuck, healthReason, steps: [{stage, status: running | done | failed, records (so far while running),\n                startedDate, completedDate, system (extract steps: the system that side reads)}] in run order\n                (DAR-BE-173)}]}"
                     }
                 }
             },

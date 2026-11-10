@@ -57,19 +57,37 @@ class RunHealth {
         return verdict("healthy", null)
     }
 
+    /** How many recent successes are searched for one over a window of the same length. */
+    static final int USUAL_LOOKBACK = 30
+
     /**
-     * How long the same saved run took the last time it succeeded on this tenant; null without history. The finder is
-     * the caller's tenant-scoped one (an explicit companyUserGroupId condition is added here as well).
+     * How long the same saved run took the last time it succeeded on this tenant over a window about as long as this
+     * run's (within a tenth: a 30-day month for a 31-day one, never a day for a week); null without such a run.
+     * DAR-BE-173: a month's read is not "usually <1m" because the daily run of the same saved run takes 42 seconds.
+     * Without this run's window, the last success of any length. The finder is the caller's tenant-scoped one (an
+     * explicit companyUserGroupId condition is added here as well).
      */
-    static Long usualDurationMs(def find, String tenantId, String savedRunId) {
+    static Long usualDurationMs(def find, String tenantId, String savedRunId, Object windowStart = null, Object windowEnd = null) {
         if (!savedRunId) return null
+        Long span = windowDays(windowStart, windowEnd)
         def last = (find.condition("companyUserGroupId", tenantId)
                 .condition("savedRunId", savedRunId)
                 .condition("statusEnumId", RunObservability.STATUS_SUCCESS)
-                .orderBy("-completedDate").limit(1).useCache(false).list() ?: [])[0]
+                .orderBy("-completedDate").limit(span == null ? 1 : USUAL_LOOKBACK).useCache(false).list() ?: [])
+                .find { span == null || aboutAsLong(span, windowDays(it.get("windowStartDate"), it.get("windowEndDate"))) }
         Timestamp started = last?.get("startedDate") as Timestamp
         Timestamp completed = last?.get("completedDate") as Timestamp
         return (started && completed) ? completed.time - started.time : null
+    }
+
+    /** Whole days a window covers (rounded, so a zone change inside it does not split one length into two); null when open. */
+    static Long windowDays(Object start, Object end) {
+        if (!(start instanceof Timestamp) || !(end instanceof Timestamp)) return null
+        return Math.round((((Timestamp) end).time - ((Timestamp) start).time) / (double) (24 * MINUTE_MS * 60))
+    }
+
+    private static boolean aboutAsLong(Long a, Long b) {
+        return b != null && Math.abs(a - b) <= Math.max(a, b) / 10.0d
     }
 
     /** "45m", "2h 5m". */

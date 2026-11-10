@@ -144,4 +144,48 @@ class LiveOperationsRulesTests {
         ])
         assertEquals(["C_OLD", "C_NEW", "W_OLD", "W_NONE"], sorted*.code)
     }
+
+    // ---- usual duration (DAR-BE-173) ----
+
+    /** Successes of one saved run, newest first, as the finder answers them: a 1-day run, then a 31-day one. */
+    private static final List<Map> SUCCESSES = [
+            [windowStartDate: ts("2026-10-30T04:00:00Z"), windowEndDate: ts("2026-10-31T04:00:00Z"),
+             startedDate: ts("2026-10-31T09:00:00Z"), completedDate: ts("2026-10-31T09:00:42Z")],
+            [windowStartDate: ts("2026-09-01T04:00:00Z"), windowEndDate: ts("2026-10-01T04:00:00Z"),
+             startedDate: ts("2026-10-01T10:00:00Z"), completedDate: ts("2026-10-01T10:15:00Z")],
+    ]
+
+    private static Object finder(List<Map> rows) {
+        Object find = new Expando()
+        find.condition = { String f, Object v -> find }
+        find.orderBy = { Object o -> find }
+        find.limit = { Integer n -> find.limited = n; find }
+        find.useCache = { Boolean b -> find }
+        find.list = { -> rows.take((find.limited ?: rows.size()) as int) }
+        return find
+    }
+
+    @Test
+    void aMonthsReadIsJudgedAgainstAPastMonthsReadNotTheDailyRun() {
+        Long usual = RunHealth.usualDurationMs(finder(SUCCESSES), "STEVE_MADDEN", "RS_PROD_ORDERS",
+                ts("2026-10-01T04:00:00Z"), ts("2026-11-01T04:00:00Z"))
+        assertEquals(15 * 60_000L, usual, "the 30-day September read, not the 42-second daily run")
+    }
+
+    @Test
+    void aDayIsNotAboutAsLongAsTwo() {
+        assertEquals(null, RunHealth.usualDurationMs(finder(SUCCESSES.take(1)), "STEVE_MADDEN", "RS_PROD_ORDERS",
+                ts("2026-10-29T04:00:00Z"), ts("2026-10-31T04:00:00Z")))
+    }
+
+    @Test
+    void noRunOverAWindowAsLongMeansNoUsual() {
+        assertEquals(null, RunHealth.usualDurationMs(finder(SUCCESSES), "STEVE_MADDEN", "RS_PROD_ORDERS",
+                ts("2026-10-01T04:00:00Z"), ts("2026-10-08T04:00:00Z")))
+    }
+
+    @Test
+    void withoutItsWindowARunIsJudgedAgainstTheLastSuccess() {
+        assertEquals(42_000L, RunHealth.usualDurationMs(finder(SUCCESSES), "STEVE_MADDEN", "RS_PROD_ORDERS"))
+    }
 }

@@ -257,6 +257,15 @@ class AuditSettingsSmokeTests {
         // Another tenant's row naming one of these automations must not count: every read carries the tenant condition.
         insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_PROG_X3", automationId: open,
                 companyUserGroupId: OTHER, statusEnumId: "AUT_STAT_RUNNING", retryCount: 0L])
+        // DAR-BE-173: the run's steps with their counts so far; both sides read at once.
+        [[id: "TSET_PROG_S0", stage: "RESOLVE", seq: 1L, status: "AUT_STAT_SUCCESS", count: null, tenant: MINE],
+         [id: "TSET_PROG_S1", stage: "EXTRACT_FILE1", seq: 2L, status: "AUT_STAT_RUNNING", count: 48210L, tenant: MINE],
+         [id: "TSET_PROG_S2", stage: "EXTRACT_FILE2", seq: 3L, status: "AUT_STAT_RUNNING", count: 61002L, tenant: MINE],
+         [id: "TSET_PROG_S9", stage: "COMPARE", seq: 5L, status: "AUT_STAT_RUNNING", count: null, tenant: OTHER]].each { Map s ->
+            insert("darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: s.id, reconciliationRunResultId: "TSET_PROG_RR",
+                    companyUserGroupId: s.tenant, stageCode: s.stage, stageSequence: s.seq, statusEnumId: s.status, recordCount: s.count,
+                    startedDate: new java.sql.Timestamp(now - 3 * 60_000L)])
+        }
 
         Map progress = facade("get#AuditProgress", [audit: "system-health"]).progress as Map
         assertEquals(3, progress.checks)
@@ -267,6 +276,12 @@ class AuditSettingsSmokeTests {
         assertEquals("TSET_RS2 run", running.run)
         assertEquals(["EXTRACT_FILE2", 40L, "healthy", 1], [running.stage, running.progressPercent as Long, running.health, running.attempt])
         assertTrue((running.elapsedMs as Long) >= 3 * 60_000L, "elapsed from the run's start: ${running.elapsedMs}")
+        List<Map> steps = running.steps as List<Map>
+        assertEquals([["RESOLVE", "done", null], ["EXTRACT_FILE1", "running", 48210L], ["EXTRACT_FILE2", "running", 61002L]],
+                steps.collect { [it.stage, it.status, it.records as Long] }, "in run order, another tenant's step left out")
+        assertEquals(null, steps[0].system, "only an extract names its system")
+        assertNotNull(steps[1].system, "side 1's system: ${steps}")
+        assertNotEquals(steps[1].system, steps[2].system, "each side names its own system: ${steps}")
         Map queued = progress.active[1] as Map
         assertEquals([["open-in-netsuite"], 2, null], [queued.checks, queued.attempt, queued.health], "a retry waits; no health yet")
 

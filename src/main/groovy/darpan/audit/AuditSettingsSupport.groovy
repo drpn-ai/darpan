@@ -2,6 +2,8 @@ package darpan.audit
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.RunHealth
+import darpan.facade.reconciliation.RunObservability
+import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
@@ -237,7 +239,8 @@ class AuditSettingsSupport {
      * report reads every check as "not run" until then.
      *
      * Answers {checks: configured checks, activeChecks, active: [{run, checks: [codes], state: running | queued,
-     * attempt, stage, progressPercent, elapsedMs, usualDurationMs, health, healthReason, retryAt}]}.
+     * attempt, stage, progressPercent, elapsedMs, usualDurationMs, health, healthReason, retryAt, steps}]}; steps as
+     * steps() below.
      */
     static Map progress(def ec, String tenantId, Map audit, Timestamp now) {
         List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
@@ -267,10 +270,11 @@ class AuditSettingsSupport {
                 if (run) {
                     Timestamp started = (run.startedDate ?: execution.startedDate) as Timestamp
                     Long usual = RunHealth.usualDurationMs(rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId),
-                            tenantId, run.savedRunId as String)
+                            tenantId, run.savedRunId as String, run.windowStartDate, run.windowEndDate)
                     Map health = RunHealth.of(run + [startedDate: started, usualDurationMs: usual], now)
                     entry += [elapsedMs: started ? now.time - started.time : null, usualDurationMs: usual,
-                              health: health.health, healthReason: health.reason]
+                              health: health.health, healthReason: health.reason,
+                              steps: steps(ec, tenantId, run.reconciliationRunResultId as String, automationId)]
                 }
                 active << entry
             }
@@ -438,6 +442,36 @@ class AuditSettingsSupport {
                 .unique { it.checkId } as List<Map>
         return automationsOf(ec, tenantId, checks)
     }
+
+    /**
+     * DAR-BE-173. A running run's steps in run order, for the audit page to say what it is doing: [{stage, status: running
+     * | done | failed (any other status lower-cased), records (so far, while running: the extract's page heartbeat), startedDate, completedDate,
+     * system (an extract's system, from the automation's source on that side)}]. Both extracts run at once when the
+     * sides are read in parallel, each with its own count.
+     */
+    static List<Map> steps(def ec, String tenantId, String runResultId, String automationId) {
+        if (!runResultId) return []
+        Map<String, String> systemBySide = rows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
+                .condition("automationId", automationId).list().collectEntries { source ->
+            [(source.fileSide as String): ReconciliationServices.resolveEnumLabel(ec, source.systemEnumId as String, source.systemEnumId as String)]
+        }
+        Map<String, String> sideOfStage = [(RunObservability.STAGE_EXTRACT_FILE1): "FILE_1", (RunObservability.STAGE_EXTRACT_FILE2): "FILE_2"]
+        return rows(ec, "darpan.reconciliation.ReconciliationRunStep", tenantId)
+                .condition("reconciliationRunResultId", runResultId).orderBy(["stageSequence", "startedDate"]).list().collect { step ->
+            String stage = step.stageCode as String
+            Map out = [stage        : stage,
+                       status       : STEP_STATUS[step.statusEnumId as String] ?: (step.statusEnumId as String)?.toLowerCase(),
+                       records      : step.recordCount,
+                       startedDate  : step.startedDate,
+                       completedDate: step.completedDate]
+            String side = sideOfStage[stage]
+            if (side) out.system = systemBySide[side]
+            return out
+        }
+    }
+
+    private static final Map<String, String> STEP_STATUS = [(RunObservability.STATUS_RUNNING): "running",
+            (RunObservability.STATUS_SUCCESS): "done", (RunObservability.STATUS_FAILED): "failed"].asImmutable()
 
     private static List<Map> automationsOf(def ec, String tenantId, List<Map> checks) {
         return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>)*.getMap()

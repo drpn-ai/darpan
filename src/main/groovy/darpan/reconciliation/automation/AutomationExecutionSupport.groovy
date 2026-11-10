@@ -379,9 +379,13 @@ class AutomationExecutionSupport {
      * extractor (whose service call relaxes authz at its one audited seam). Null, so the caller reads side 2 after side 1,
      * when switched off (as the test tasks do).
      */
+    static boolean parallelSourceExtractsOn() {
+        return !"false".equalsIgnoreCase(System.getProperty(PARALLEL_SOURCE_EXTRACTS_PROPERTY) ?: "true")
+    }
+
     protected static Future<Map<String, Object>> startParallelSourceExtract(def ec, def automation, def source,
                                                                          Map<String, Object> window, Map windowParams) {
-        if ("false".equalsIgnoreCase(System.getProperty(PARALLEL_SOURCE_EXTRACTS_PROPERTY) ?: "true")) return null
+        if (!parallelSourceExtractsOn()) return null
         def factory = ec.factory
         String username = normalize(ec.user?.username)
         // DAR-BE-133: a scheduled run has no user, only the anonymous login its anonymous-all service gave it, which is
@@ -597,8 +601,15 @@ class AutomationExecutionSupport {
                 // expected value of a money check), and then side 2 is read first.
                 boolean side1ByKeys = !evaluateMode && file2Source != null && readsByOtherSideKeys(file1Source)
                 boolean side2ByKeys = !evaluateMode && !side1ByKeys && file2Source != null && readsByOtherSideKeys(file2Source)
-                Future<Map<String, Object>> parallelSide2 = evaluateMode || replayFrom || side2ByKeys ? null :
-                        startParallelSourceExtract(ec, automation, file2Source, window, windowParams)
+                // DAR-BE-173: side 2 read in parallel gets its own RUNNING step from the moment its read starts, so its
+                // page heartbeats (heartbeatStageProgress finds the RUNNING step of its stage) land and both sides show a
+                // live count. Begun before side 1's step, which stays the run's current stage as before. A side read by
+                // the other side's keys is never read in parallel (DAR-BE-192).
+                boolean side2InParallel = !evaluateMode && !replayFrom && !side2ByKeys && parallelSourceExtractsOn()
+                Object parallelStep2 = side2InParallel ?
+                        RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2) : null
+                Future<Map<String, Object>> parallelSide2 = side2InParallel ?
+                        startParallelSourceExtract(ec, automation, file2Source, window, windowParams) : null
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
                 // A failure or a cancel before side 2 is joined cancels side 2's read too (DAR-BE-124).
                 try {
@@ -626,10 +637,12 @@ class AutomationExecutionSupport {
                     RunObservability.checkpointCancel(ec, mintedRunResultId)
                 } catch (Throwable beforeJoin) {
                     parallelSide2?.cancel(true)
+                    RunObservability.endStep(ec, parallelStep2, RunObservability.STATUS_FAILED,
+                            [errorMessage: "Stopped: the other side's read did not finish"])
                     throw beforeJoin
                 }
                 if (!evaluateMode) {
-                    openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
+                    openStep = parallelStep2 ?: RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
                     if (!side1ByKeys) file2Result = normalizeSourceResult(side2ByKeys ?
                             readByOtherSideKeys(ec, automation, file1Result, FILE_SIDE_1, file2Source, window, windowParams, extract) :
                             parallelSide2 != null ? joinParallelSourceExtract(parallelSide2) :

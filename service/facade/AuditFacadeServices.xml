@@ -224,7 +224,10 @@
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="progress" type="Map"><description>{checks: configured checks, activeChecks, active: [{run,
                 checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,
-                usualDurationMs, health: healthy | slow | stuck, healthReason}]}</description></parameter>
+                usualDurationMs (a past successful run over a window as long; absent when none), health: healthy | slow |
+                stuck, healthReason, steps: [{stage, status: running | done | failed, records (so far while running),
+                startedDate, completedDate, system (extract steps: the system that side reads)}] in run order
+                (DAR-BE-173)}]}</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>

@@ -97,9 +97,12 @@ class AdminLiveOperationsSupport {
             Map execution = executionByRunId[runId]
             String automationId = execution?.automationId
             String auditName = automationId ? auditNames[automationId] : null
-            String usualKey = "${tenantId}|${savedRunId}".toString()
+            // DAR-BE-173: "usual" is per window length, so a month's read is not judged against the daily run.
+            Object windowStart = row.get("windowStartDate")
+            Object windowEnd = row.get("windowEndDate")
+            String usualKey = "${tenantId}|${savedRunId}|${RunHealth.windowDays(windowStart, windowEnd)}".toString()
             if (!usualBySavedRun.containsKey(usualKey)) usualBySavedRun[usualKey] = RunHealth.usualDurationMs(
-                    ec.entity.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT), tenantId, savedRunId)
+                    ec.entity.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT), tenantId, savedRunId, windowStart, windowEnd)
 
             Map<String, Object> run = [
                     runResultId          : runId,

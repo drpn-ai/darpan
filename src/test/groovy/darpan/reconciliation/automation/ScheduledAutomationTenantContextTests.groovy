@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -391,6 +392,59 @@ class ScheduledAutomationTenantContextTests {
         assertNull(side2Refusal.get(), "Side 2's authenticate=\"true\" call was refused: ${side2Refusal.get()}")
         assertEquals(1, result.executedCount, "Result: ${result}")
         assertEquals(0, result.failedCount, "Result: ${result}")
+    }
+
+    /**
+     * DAR-BE-173, sm-darpan 2026-10-31 (run 101021): side 2 was read in parallel but its EXTRACT_FILE2 step began only
+     * after side 1 ended (12.8 minutes later), so the page heartbeats of side 2's read found no RUNNING step and the
+     * audit page showed no count for it. Side 2's step now runs from the moment its read starts.
+     */
+    @Test
+    void sideTwoReadInParallelHeartbeatsOntoItsOwnRunningStep() {
+        AtomicReference<Map> side2StepMidRead = new AtomicReference<Map>()
+        AtomicReference<Object> runResultId = new AtomicReference<Object>()
+        AutomationExecutionSupport.setSourceExtractor { def sourceEc, def ignoredAutomation, def source,
+                Map<String, Object> ignoredWindow, Map<String, Object> params ->
+            String fileSide = source.get("fileSide")
+            if (fileSide == AutomationExecutionSupport.FILE_SIDE_2) {
+                runResultId.set(params.reconciliationRunResultId)
+                RunObservability.heartbeatStageProgress(sourceEc, params.reconciliationRunResultId, RunObservability.STAGE_EXTRACT_FILE2, 42, null)
+                def step = sourceEc.entity.find("darpan.reconciliation.ReconciliationRunStep")
+                        .condition("reconciliationRunResultId", params.reconciliationRunResultId)
+                        .condition("stageCode", RunObservability.STAGE_EXTRACT_FILE2).disableAuthz().useCache(false).list().find()
+                side2StepMidRead.set(step == null ? [:] : [status: step.statusEnumId, records: step.recordCount])
+            }
+            return [dataAvailable : true,
+                    fileLocation  : fileSide == AutomationExecutionSupport.FILE_SIDE_1 ?
+                            "component://darpan/data/test/test-orders-1.json" : "component://darpan/data/test/test-orders-2.json",
+                    fileName      : "${fileSide}.json".toString(), fileTypeEnumId: "DftJson", recordCount: 3]
+        }
+        String property = AutomationExecutionSupport.PARALLEL_SOURCE_EXTRACTS_PROPERTY
+        String before = System.getProperty(property)
+        System.setProperty(property, "true")
+        Map<String, Object> result
+        try {
+            result = (Map<String, Object>) onSchedulerThread { ExecutionContext jobEc ->
+                return callExecuteAutomation(jobEc, [
+                        automationId     : AUTOMATION_ID,
+                        scheduledFireTime: Timestamp.valueOf("2026-05-11 10:00:00"),
+                        sparkMaster      : "local[1]",
+                        sparkAppName     : "ScheduledAutomationTenantContextTests",
+                ])
+            }
+        } finally {
+            if (before == null) System.clearProperty(property) else System.setProperty(property, before)
+        }
+
+        assertEquals(1, result.executedCount, "Result: ${result}")
+        assertEquals([status: RunObservability.STATUS_RUNNING, records: 42L], side2StepMidRead.get()?.collectEntries { k, v ->
+            [(k): v instanceof Number ? ((Number) v).longValue() : v] }, "side 2's step while it reads")
+        List steps = ec.entity.find("darpan.reconciliation.ReconciliationRunStep")
+                .condition("reconciliationRunResultId", runResultId.get())
+                .condition("stageCode", RunObservability.STAGE_EXTRACT_FILE2).disableAuthz().useCache(false).list()
+        assertEquals(1, steps.size(), "one step for side 2's read")
+        assertEquals(RunObservability.STATUS_SUCCESS, steps[0].statusEnumId)
+        assertEquals(3L, (steps[0].recordCount as Number)?.longValue(), "the finished read's count")
     }
 
     private void stubSourceExtractorWithData() {

@@ -11,4 +11,11 @@
             emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${digestSubject}"
             fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
             bodyScreenLocation="component://darpan/screen/email/AuditDigest.xml"/>
+    <!-- DAR-BE-207 — the update after each audit run: the whole run by email, an HTML body and a plain-text part built
+         by darpan.audit.AuditRunMessage and passed in (runHtml, runText), one CSV per rule with open findings attached.
+         Loaded on an existing database through data/upgrade-data.xml. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_AUDIT_RUN" description="Darpan audit run update"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${runSubject}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/AuditRun.xml"/>
 </entity-facade-xml>

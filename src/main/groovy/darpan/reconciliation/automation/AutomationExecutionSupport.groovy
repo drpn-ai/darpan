@@ -245,9 +245,22 @@ class AutomationExecutionSupport {
             String automationId = requireNormalized(input.automationId, "automationId is required")
             def automation = loadAutomation(ec, automationId)
             return TenantAccessSupport.withSystemTenant(resolveSystemTenantId(ec, automation)) {
-                return executeAutomationForTenant(ec, input, automation)
+                Map<String, Object> result = null
+                try {
+                    result = executeAutomationForTenant(ec, input, automation)
+                    return result
+                } finally {
+                    // DAR-BE-207: after every ledger write of this execution, success or failure, an audit's run update
+                    // is asked for; it goes out only once the whole audit is idle.
+                    darpan.audit.AuditRunUpdateSupport.afterExecution(ec, automation, input, result)
+                }
             }
         }
+    }
+
+    /** DAR-BE-207: the RunAdmission label of an automation's execution, so an audit can ask whether one is still queued. */
+    static String admissionLabel(String automationId) {
+        return "automation ${automationId}".toString()
     }
 
     /**
@@ -907,7 +920,10 @@ class AutomationExecutionSupport {
         }
 
         Map statusCounts = executionResults.countBy { it.statusEnumId }
-        return [
+        // DAR-BE-207: the morning and period the audit's run update reports (a play's last window).
+        Map<String, Object> auditRun = audit && windows ?
+                [auditId: audit.auditId, auditReportDate: windows.last().auditReportDate, auditPeriod: windows.last().auditPeriod] : [:]
+        return auditRun + [
                 automationId          : automationId,
                 scheduledFireTime     : scheduledFireTime,
                 executedCount         : statusCounts[STATUS_SUCCEEDED] ?: 0,
@@ -2528,7 +2544,7 @@ class AutomationExecutionSupport {
         def factory = moquiFactoryOf(ec)
         if (factory != null) {
             Map<String, Object> params = new HashMap<String, Object>(executeParams ?: [:])
-            Map admitted = runAdmission.submit(tenantId, "automation ${automationId}".toString(), { ->
+            Map admitted = runAdmission.submit(tenantId, admissionLabel(automationId), { ->
                 new org.moqui.impl.service.ServiceCallAsyncImpl.AsyncServiceInfo(factory, null,
                         "reconciliation.ReconciliationAutomationServices.execute#Automation", params).runInternal()
             } as Runnable)

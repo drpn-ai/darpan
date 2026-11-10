@@ -65,6 +65,8 @@ class RunAdmission {
     /** Waiting runs per tenant, tenants in the order they first waited. */
     private final LinkedHashMap<String, ArrayDeque<Waiting>> waiting = new LinkedHashMap<>()
     private final Map<String, Integer> runningByTenant = [:]
+    /** DAR-BE-207: runs started and not yet released, by label, so an audit can tell a run it has not seen start yet. */
+    private final Map<String, Integer> runningByLabel = [:]
     private int running = 0
     private String lastStarted = null
 
@@ -128,6 +130,16 @@ class RunAdmission {
                 holdAtHeapPercent: holdAtHeapPercent, maxWaitingPerTenant: maxWaitingPerTenant, heldForMemory: running > 0 && heapAtOrAbove(), byTenant: byTenant]
     }
 
+    /**
+     * DAR-BE-207. Whether a run with this label waits for a slot or holds one. A run admitted here writes its execution
+     * row only once it starts and resolves its windows, so the rows alone cannot tell an audit that is idle from one whose
+     * next automation is still queued.
+     */
+    synchronized boolean busy(String label) {
+        if (!label) return false
+        return (runningByLabel[label] ?: 0) > 0 || waiting.values().any { ArrayDeque<Waiting> lane -> lane.any { it.label == label } }
+    }
+
     private Waiting nextEligible() {
         List<String> tenants = new ArrayList<String>(waiting.keySet())
         if (!tenants) return null
@@ -145,12 +157,13 @@ class RunAdmission {
         if (lane.isEmpty()) waiting.remove(entry.tenantId)
         running++
         runningByTenant[entry.tenantId] = (runningByTenant[entry.tenantId] ?: 0) + 1
+        runningByLabel[entry.label] = (runningByLabel[entry.label] ?: 0) + 1
         lastStarted = entry.tenantId
         try {
             executor.execute({ -> runThenRelease(entry) } as Runnable)
             entry.started = true
         } catch (Throwable refused) {
-            release(entry.tenantId)
+            release(entry)
             entry.error = "Could not start ${entry.label}: ${refused.message ?: refused.toString()}".toString()
             logger.error(entry.error)
         }
@@ -163,17 +176,20 @@ class RunAdmission {
             logger.error("Automation execution {} ended with an error: {}", entry.label, t.message ?: t.toString())
         } finally {
             synchronized (this) {
-                release(entry.tenantId)
+                release(entry)
                 drain()
             }
         }
     }
 
-    private void release(String tenantId) {
+    private void release(Waiting entry) {
         running = Math.max(0, running - 1)
-        int left = (runningByTenant[tenantId] ?: 1) - 1
-        if (left > 0) runningByTenant[tenantId] = left
-        else runningByTenant.remove(tenantId)
+        int left = (runningByTenant[entry.tenantId] ?: 1) - 1
+        if (left > 0) runningByTenant[entry.tenantId] = left
+        else runningByTenant.remove(entry.tenantId)
+        int labelLeft = (runningByLabel[entry.label] ?: 1) - 1
+        if (labelLeft > 0) runningByLabel[entry.label] = labelLeft
+        else runningByLabel.remove(entry.label)
     }
 
     /** Memory holds new starts only while something is running; with nothing running one start is always allowed. */

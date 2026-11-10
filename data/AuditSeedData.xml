@@ -72,6 +72,9 @@
             description="Daily digest" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="AUDDK_WEEKLY" enumTypeId="AuditDigestKind" enumCode="weekly"
             description="Weekly summary" sequenceNum="2"/>
+    <!-- DAR-BE-207. Sent once each audit run ends (every automation of the audit idle), not at a send time. -->
+    <moqui.basic.Enumeration enumId="AUDDK_RUN" enumTypeId="AuditDigestKind" enumCode="run"
+            description="After each audit run" sequenceNum="3"/>
     <!-- DAR-BE-102. Audit digests: each is due once a day at its own time in its tenant's zone; a 15-minute scan
          sends it within a quarter hour of that time. -->
     <moqui.service.job.ServiceJob jobName="send_AuditDigests_15m"

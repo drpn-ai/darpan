@@ -855,7 +855,7 @@ class AuditReportAssembler {
      * the cause has none of its own and the check's fix stands. Read at report time, so a cause's fix, once written,
      * shows on every finding it explains.
      */
-    private static String causeFixOf(def ec, String tenantId, Map check, String conclusionEnumId, List<Map> evidenceChecks,
+    static String causeFixOf(def ec, String tenantId, Map check, String conclusionEnumId, List<Map> evidenceChecks,
                                      Map<String, String> values) {
         if (!conclusionEnumId || !check.savedRunId) return null
         List scopeIds = tenantRows(ec, "darpan.rule.RuleSetCompareScope", tenantId).condition("ruleSetId", check.savedRunId)

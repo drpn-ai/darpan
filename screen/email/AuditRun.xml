@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-207 email body: the run update as darpan.audit.AuditRunMessage built it, every value already escaped there.
+     send#EmailTemplate renders this screen twice: html for the body, text for the plain-text alternative. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <widgets>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${runHtml}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${runText}]]></text>
+        </render-mode>
+    </widgets>
+</screen>

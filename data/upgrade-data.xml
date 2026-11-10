@@ -1,13 +1,53 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 Release-scoped upgrade data for Darpan 2.1.5 (compare range v2.1.4..HEAD).
-20 darpan-seed records, extracted verbatim from runtime/component/darpan/data/*.xml.
+57 darpan-seed records, extracted verbatim from runtime/component/darpan/data/*.xml.
 ORDERING NOTE: parent before child, not the generator's alphabetical order. The Enumeration names the
 SourceSystemConnector's systemEnumId, and the connector is the parent of its SourceSystemConnectorField rows.
 No tenant config here: a tenant's audits, runs, queries and conclusion codes live in its config pack
 (drpn-ai/darpan-config-<client>) and move by the admin app's /transfer (DAR-BE-160).
 -->
 <entity-facade-xml type="darpan-seed">
+    <!-- DAR-BE-207: the audit vocabulary restated whole (AuditSeedData.xml), as it gains AuditDigestKind run; types
+         ahead of their members. Restating unchanged rows is harmless: the load is an upsert. -->
+    <moqui.basic.EnumerationType enumTypeId="AuditCategory" description="Audit statement category"/>
+    <moqui.basic.Enumeration enumId="AUDC_ORDERS" enumTypeId="AuditCategory" enumCode="orders" description="Orders" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDC_REFUNDS_CREDITS" enumTypeId="AuditCategory" enumCode="refundsAndCredits" description="Refunds and credits" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDC_RETURNS" enumTypeId="AuditCategory" enumCode="returns" description="Returns" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUDC_EXCHANGES_WARRANTY" enumTypeId="AuditCategory" enumCode="exchangesAndWarranty" description="Exchanges and warranty" sequenceNum="4"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditStatementWeight" description="Audit statement weight"/>
+    <moqui.basic.Enumeration enumId="AUDSW_FIRM" enumTypeId="AuditStatementWeight" enumCode="firm" description="Firm: stated by the tenant" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDSW_DERIVED" enumTypeId="AuditStatementWeight" enumCode="derived" description="Derived: awaiting the tenant's confirmation" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditFindingState" description="Audit finding state"/>
+    <moqui.basic.Enumeration enumId="AUDFS_OPEN" enumTypeId="AuditFindingState" enumCode="open" description="Open" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDFS_FIXED" enumTypeId="AuditFindingState" enumCode="fixed" description="Fixed" sequenceNum="3"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditCheckStatus" description="Audit check status"/>
+    <moqui.basic.Enumeration enumId="AUDCS_RAN" enumTypeId="AuditCheckStatus" enumCode="ran" description="Ran over complete reads" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDCS_PARTIAL" enumTypeId="AuditCheckStatus" enumCode="partial" description="Partial: a read was partial or failed, nothing closed" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDCS_NOT_RUN" enumTypeId="AuditCheckStatus" enumCode="notRun" description="Not run" sequenceNum="3"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditSourceRead" description="Audit source read status"/>
+    <moqui.basic.Enumeration enumId="AUDSR_COMPLETE" enumTypeId="AuditSourceRead" enumCode="complete" description="Complete" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDSR_PARTIAL" enumTypeId="AuditSourceRead" enumCode="partial" description="Partial" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDSR_FAILED" enumTypeId="AuditSourceRead" enumCode="failed" description="Failed" sequenceNum="3"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditFindingEvent" description="Audit finding history event"/>
+    <moqui.basic.Enumeration enumId="AUDFE_FOUND" enumTypeId="AuditFindingEvent" enumCode="found" description="Found" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDFE_STILL_OPEN" enumTypeId="AuditFindingEvent" enumCode="stillOpen" description="Still open" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDFE_FIXED" enumTypeId="AuditFindingEvent" enumCode="fixed" description="Fixed" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUDFE_REOPENED" enumTypeId="AuditFindingEvent" enumCode="reopened" description="Reopened" sequenceNum="4"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditActorType" description="Audit event actor type"/>
+    <moqui.basic.Enumeration enumId="AUDAT_CHECK" enumTypeId="AuditActorType" enumCode="check" description="Scheduled check" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDAT_USER" enumTypeId="AuditActorType" enumCode="user" description="Darpan user" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditPeriod" description="Audit reporting period"/>
+    <moqui.basic.Enumeration enumId="AUDP_DAY" enumTypeId="AuditPeriod" enumCode="day" description="Day" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDP_MONTH" enumTypeId="AuditPeriod" enumCode="month" description="Month" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDP_QUARTER" enumTypeId="AuditPeriod" enumCode="quarter" description="Quarter" sequenceNum="3"/>
+    <moqui.basic.EnumerationType enumTypeId="AuditDigestKind" description="Audit digest kind"/>
+    <moqui.basic.Enumeration enumId="AUDDK_DAILY" enumTypeId="AuditDigestKind" enumCode="daily" description="Daily digest" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDDK_WEEKLY" enumTypeId="AuditDigestKind" enumCode="weekly" description="Weekly summary" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDDK_RUN" enumTypeId="AuditDigestKind" enumCode="run" description="After each audit run" sequenceNum="3"/>
+    <!-- DAR-BE-207: the run update's email (AuditDigestEmailSeedData.xml) -->
+    <moqui.basic.email.EmailServer emailServerId="SYSTEM"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_AUDIT_RUN" description="Darpan audit run update" emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${runSubject}" fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan" bodyScreenLocation="component://darpan/screen/email/AuditRun.xml"/>
     <!-- DAR-BE-157: HotWax products endpoint (DarpanSystemSourceSeedData.xml, SourceSystemConnectorSeedData.xml) -->
     <moqui.basic.Enumeration enumId="OMS_PRODUCTS_GQL" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_GQL_PRODUCTS" description="HotWax products" sequenceNum="16" parentEnumId="OMS"/>
     <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_PRODUCTS_GQL" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlProducts" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_GQL_PRODUCTS" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Products" sendUrlTemplate="{baseUrl}/rest/s1/graphql" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlProducts" systemAliases="OMS_PRODUCTS_GQL,HOTWAX_PRODUCTS" preserveWindowInstants="N" windowed="N" filterParameterName="sourceFilters" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>

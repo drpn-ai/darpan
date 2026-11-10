@@ -21,4 +21,31 @@
             <set field="outcomes" from="darpan.audit.AuditDigestSupport.sendDue(ec, nowStamp.toInstant())"/>
         </actions>
     </service>
+
+    <service verb="send" noun="AuditRunUpdate" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>DAR-BE-207. The update after an audit run, to each active run digest (kind AUDDK_RUN) of the audit:
+            by email with one CSV per rule with open findings, and a summary card in chat. Called in the background after
+            every execution of the audit's automations; sends only once the whole audit is idle (nothing running, queued
+            for a retry or waiting for a slot), each digest claimed for the run first so it goes out once. Internal only;
+            anonymous-all, the execute#Automation pattern, because it runs on a background thread with no user and every
+            read it makes carries the tenant explicitly.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="auditId" required="true"/>
+            <parameter name="reportDate" type="Date"><description>The run's morning; blank reads it off the audit's
+                latest check run.</description></parameter>
+            <parameter name="period"><description>The period the run recorded (a play's last window).</description></parameter>
+            <parameter name="finishedAutomationId"><description>The automation whose execution just ended; its own
+                RunAdmission slot does not count as busy.</description></parameter>
+            <parameter name="nowStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcomes" type="List"><description>Per run digest: auditDigestId, sent, and the reason when not
+                sent (RUN_NOT_DONE, ALREADY_SENT, NO_DESTINATION, NO_REPORT, DELIVERY_FAILED, FAILED).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="outcomes" from="darpan.audit.AuditRunUpdateSupport.send(ec, companyUserGroupId, auditId, reportDate,
+                    period, finishedAutomationId, nowStamp)"/>
+        </actions>
+    </service>
 </services>

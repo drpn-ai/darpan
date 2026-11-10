@@ -32,7 +32,8 @@ class AuditCatalogContractTests {
             AuditActorType      : ["check", "user"],
             AuditPeriod         : ["day", "month", "quarter"],
             // DAR-BE-102: not in the JSON (the digest is rendered from it), but it rides the same seed and upgrade pack.
-            AuditDigestKind     : ["daily", "weekly"],
+            // DAR-BE-207 adds run, the update after each audit run.
+            AuditDigestKind     : ["daily", "weekly", "run"],
     ].asImmutable()
 
 

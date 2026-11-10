@@ -533,11 +533,13 @@
                 space, addresses, or both (Aditi, 2026-10-22: "either email or chat alerts").</description>
         </field>
         <field name="kindEnumId" type="id" not-null="true">
-            <description>AuditDigestKind: daily (open, new and fixed today) or weekly (where things stand against a week
-                before).</description>
+            <description>AuditDigestKind: daily (open, new and fixed today), weekly (where things stand against a week
+                before), or run (DAR-BE-207: the full update once each audit run ends, by email with a CSV per rule and a
+                summary card in chat).</description>
         </field>
         <field name="sendTime" type="text-short" not-null="true">
-            <description>HH:mm in the tenant's zone, after the morning's checks, e.g. 07:00 for checks at 06:00.</description>
+            <description>HH:mm in the tenant's zone, after the morning's checks, e.g. 07:00 for checks at 06:00. Not read
+                for a run digest, which goes out when the run ends.</description>
         </field>
         <field name="dayOfWeek" type="number-integer">
             <description>Weekly only: ISO day, 1 Monday to 7 Sunday.</description>
@@ -549,6 +551,11 @@
         <field name="isActive" type="text-indicator"/>
         <field name="lastSentDate" type="date">
             <description>The tenant's day it last went out; at most one message a day, claimed before it is sent.</description>
+        </field>
+        <field name="lastRunClaim" type="text-medium">
+            <description>DAR-BE-207, run digests only: the run it last went out for (report day, period and the latest
+                execution end of the audit's automations), claimed by a conditional update before it is sent, so two
+                executions finishing together send it once.</description>
         </field>
         <relationship type="one" related="darpan.audit.Audit" fk-name="AUDDG_AUDIT">
             <key-map field-name="auditId"/>

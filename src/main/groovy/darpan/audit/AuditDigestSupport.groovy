@@ -142,7 +142,8 @@ class AuditDigestSupport {
 
     /**
      * Sends every active digest that is due at `now`: past its send time on the tenant's day, on its weekday when
-     * weekly, and not sent yet that day. Each is claimed before it is sent, so two job threads send it once.
+     * weekly, and not sent yet that day. Each is claimed before it is sent, so two job threads send it once. A run digest
+     * (DAR-BE-207) is not on a clock: AuditRunUpdateSupport sends it when the audit's run ends.
      * Returns what happened to each, for the job's result and the tests.
      */
     static List<Map> sendDue(def ec, Instant now) {
@@ -153,7 +154,8 @@ class AuditDigestSupport {
                 ec.entity.conditionFactory.makeCondition("isActive", EntityCondition.NOT_EQUAL, "N")], EntityCondition.OR)
         List rows = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.audit.AuditDigest",
                 "digest scan across tenants: each row's own tenant pins every read and write after it")
-                .condition(active).orderBy("auditDigestId").useCache(false).list()
+                .condition(active).condition("kindEnumId", EntityCondition.NOT_EQUAL, AuditRunUpdateSupport.RUN)
+                .orderBy("auditDigestId").useCache(false).list()
         for (def row : rows) {
             Map digest = row.getMap()
             try {
@@ -256,7 +258,7 @@ class AuditDigestSupport {
         return "${base}/audits/${URLEncoder.encode(code, 'UTF-8')}?date=${head.date}".toString()
     }
 
-    private static ZoneId tenantZone(def ec, String tenantId) {
+    static ZoneId tenantZone(def ec, String tenantId) {
         def setting = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.TenantSetting", WHY)
                 .condition("companyUserGroupId", tenantId).useCache(false).one()
         try { return setting?.timeZone ? ZoneId.of(setting.timeZone as String) : ZoneId.of("UTC") }

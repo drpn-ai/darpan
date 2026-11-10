@@ -127,7 +127,7 @@ class AutomationFacadeSmokeTests {
         // which had a hard-coded special case. That made one system read as its proper name and every
         // other as its machine code — visible side by side in this very assertion. DarpanSystemSource
         // now prefers the description for all of them.
-        assertEquals("API: HotWax orders and payments via OMS_REMOTE -> Shopify via SHOPIFY_REMOTE", automation.sourceSummary)
+        assertEquals("API: HotWax orders via OMS_REMOTE -> Shopify via SHOPIFY_REMOTE", automation.sourceSummary)
         assertEquals("PT1H", automation.scheduleSummary)
         assertEquals(true, ((Map) automation.permissions).canRunNow)
         assertEquals(2, ((List) automation.sources).size())
@@ -375,7 +375,7 @@ class AutomationFacadeSmokeTests {
             }
             assertNotNull(omsSourceOption)
             assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-            assertEquals("Orders and payments", omsSourceOption.label)
+            assertEquals("Orders", omsSourceOption.label)
             assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
             assertEquals("HOTWAX_OMS_GQL", omsSourceOption.sourceConfigType)
             assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
@@ -492,7 +492,7 @@ class AutomationFacadeSmokeTests {
         }
         assertNotNull(omsSourceOption)
         assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-        assertEquals("Orders and payments", omsSourceOption.label)
+        assertEquals("Orders", omsSourceOption.label)
         assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
         assertEquals("HOTWAX_OMS_GQL", omsSourceOption.sourceConfigType)
         assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
@@ -500,7 +500,7 @@ class AutomationFacadeSmokeTests {
         assertEquals("windowStart", omsSourceOption.dateFromParameterName)
         assertEquals("windowEnd", omsSourceOption.dateToParameterName)
         List<Map<String, Object>> primaryIdOptions = (List<Map<String, Object>>) omsSourceOption.primaryIdOptions
-        assertTrue(primaryIdOptions.any { it.fieldPath == "\$.records[*].orderId" && it.label == "Order ID" })
+        assertTrue(primaryIdOptions.any { it.fieldPath == "\$.records[*].orderId" && it.label == "HotWax order ID" })
         // FINAL-REVIEW CRITICAL 1b + IMPORTANT 3: the board's pill list is wider than primary-ID
         // selection, and the exclusion capability is registry-driven, not assumed.
         List<Map<String, Object>> omsFieldOptions = (List<Map<String, Object>>) omsSourceOption.fieldOptions
@@ -991,7 +991,7 @@ class AutomationFacadeSmokeTests {
         ])
         upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API"], [
                 systemMessageRemoteId: "HOTWAX_ORDERS_API",
-                description          : "Orders and payments",
+                description          : "Orders",
                 sendUrl              : "{baseUrl}/rest/s1/graphql",
                 sendServiceName      : "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders",
         ])

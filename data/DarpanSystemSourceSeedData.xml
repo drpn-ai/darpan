@@ -108,7 +108,7 @@
             enumId="OMS_GQL"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_GQL"
-            description="HotWax orders and payments"
+            description="HotWax orders"
             sequenceNum="14"
             parentEnumId="OMS"/>
 
@@ -146,7 +146,7 @@
             enumId="OMS_ORDER_ITEMS_GQL"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_GQL_ORDER_ITEMS"
-            description="HotWax order lines (NetSuite)"
+            description="HotWax order lines"
             sequenceNum="13"
             parentEnumId="OMS"/>
 

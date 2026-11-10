@@ -959,7 +959,7 @@ end'''
         Map<String, Object> file2Option = systemOptions.find { it.fileSide == "FILE_2" }
         assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
         assertEquals("HOTWAX_ORDERS_API", file1Option.systemMessageRemoteId)
-        assertEquals("Orders and payments", file1Option.systemMessageRemoteLabel)
+        assertEquals("Orders", file1Option.systemMessageRemoteLabel)
         assertEquals("KREWE_OMS", file1Option.sourceConfigId)
         assertEquals("HOTWAX_OMS_GQL", file1Option.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Option.idFieldExpression)

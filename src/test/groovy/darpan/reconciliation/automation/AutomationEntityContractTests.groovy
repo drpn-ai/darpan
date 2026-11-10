@@ -162,8 +162,9 @@ class AutomationEntityContractTests {
         // carry the row; the current seed above carries its GraphQL values.
         assertNotNull(nodes(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH), "moqui.service.message.SystemMessageRemote")
                 .find { attr(it, "systemMessageRemoteId") == "HOTWAX_ORDERS_API" }, "Missing HotWax orders SystemMessageRemote")
-        assertShopifyGraphqlOrdersRemote(parse("data/SystemMessageRemoteSeedData.xml"))
-        assertShopifyGraphqlOrdersRemote(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
+        assertShopifyGraphqlOrdersRemote(parse("data/SystemMessageRemoteSeedData.xml"), "Orders")
+        // A released pack is history: it keeps the label it shipped (relabelled 2026-11-10, darpan-seed reloads it).
+        assertShopifyGraphqlOrdersRemote(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH), "Admin GraphQL Orders")
     }
 
     @Test
@@ -331,12 +332,12 @@ class AutomationEntityContractTests {
         assertEquals("0 0/5 * * * ?", attr(job, "cronExpression"))
     }
 
-    private static void assertShopifyGraphqlOrdersRemote(def root) {
+    private static void assertShopifyGraphqlOrdersRemote(def root, String label) {
         def remote = nodes(root, "moqui.service.message.SystemMessageRemote").find {
             attr(it, "systemMessageRemoteId") == "SHOPIFY_REMOTE"
         }
         assertNotNull(remote, "Missing Shopify GraphQL orders SystemMessageRemote")
-        assertEquals("Admin GraphQL Orders", attr(remote, "description"))
+        assertEquals(label, attr(remote, "description"))
         assertEquals("https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json", attr(remote, "sendUrl"))
         assertEquals("facade.ShopifyFacadeServices.execute#ShopifyGraphql", attr(remote, "sendServiceName"))
     }
@@ -346,7 +347,7 @@ class AutomationEntityContractTests {
             attr(it, "systemMessageRemoteId") == "HOTWAX_ORDERS_API"
         }
         assertNotNull(remote, "Missing HotWax orders SystemMessageRemote")
-        assertEquals("Orders and payments", attr(remote, "description"))
+        assertEquals("Orders", attr(remote, "description"))
         assertEquals("{baseUrl}/rest/s1/graphql", attr(remote, "sendUrl"))
         assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders", attr(remote, "sendServiceName"))
     }

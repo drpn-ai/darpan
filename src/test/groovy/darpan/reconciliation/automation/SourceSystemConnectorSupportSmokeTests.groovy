@@ -55,7 +55,7 @@ class SourceSystemConnectorSupportSmokeTests {
         assertEquals("windowEnd", c.dateToParameterName)
         assertEquals("HOTWAX_OMS_GQL", c.expectedSourceConfigType)
         assertEquals("HOTWAX_ORDERS_API", c.remoteId)
-        assertEquals("Orders and payments", c.endpointLabel)
+        assertEquals("Orders", c.endpointLabel)
         // OMS does NOT preserve window instants (only Shopify does — AutomationExecutionSupport:634).
         assertFalse((boolean) c.preserveWindowInstants)
     }

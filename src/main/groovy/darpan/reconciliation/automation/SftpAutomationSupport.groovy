@@ -64,19 +64,20 @@ class SftpAutomationSupport {
      * SftpServer row, with the date); a saved key must match, or the client refuses before sending anything.
      */
     static void connectPinned(def ec, def client, def server) {
-        String saved = server?.hostKeyFingerprint ?: null
+        String serverId = server?.sftpServerId
+        // Read the saved key fresh, never from the row the caller loaded: a run connects to one server more than once
+        // (download, then the result upload), and a row read before the first connection saved the key would trust on
+        // first use again on the second (review of DAR-BE-082).
+        def row = serverId ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
+                "DAR-BE-082: the saved key of the server this run connects to (the run already holds that server)")
+                .condition("sftpServerId", serverId).useCache(false).one() : null
+        String saved = (row?.hostKeyFingerprint ?: server?.hostKeyFingerprint) ?: null
         if (client.respondsTo("expectedHostKey", String)) client.expectedHostKey(saved)
         client.connect()
         String seen = client.hasProperty("seenHostKey") ? client.seenHostKey : null
-        String serverId = server?.sftpServerId
-        if (saved || !seen || !serverId) return
-        def row = darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
-                "DAR-BE-082: save the key of the server this run just connected to (the run already holds that server)")
-                .condition("sftpServerId", serverId).useCache(false).one()
-        if (row != null && !row.hostKeyFingerprint) {
-            row.setAll([hostKeyFingerprint: seen, hostKeyPinnedDate: ec.user.nowTimestamp]).update()
-            logger.info("SFTP server {} key saved on first use: {}", serverId, seen)
-        }
+        if (saved || !seen || row == null) return
+        row.setAll([hostKeyFingerprint: seen, hostKeyPinnedDate: ec.user.nowTimestamp]).update()
+        logger.info("SFTP server {} key saved on first use: {}", serverId, seen)
     }
 
     static Object createClient(String host, String user, Integer port) {

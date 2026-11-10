@@ -144,6 +144,22 @@ class SftpAutomationServiceSmokeTests {
         pinnedKeys(null)
     }
 
+    /** Review of DAR-BE-082: a second connection in the same run, holding the server row read before the key was saved,
+     *  must still be held to the saved key (it used to trust on first use again). */
+    @Test
+    void aLaterConnectionInTheSameRunIsHeldToTheKeyJustSaved() {
+        pinnedKeys(null)
+        def staleServer = serverRow("SHOPIFY_TEST_SFTP")      // read before the first connection saves the key
+        def first = new FakeSftpClient("shopify.test", "u", 22, sftpEnvironment)
+        SftpAutomationSupport.connectPinned(ec, first, staleServer)
+        assertEquals("SHA256:fake-shopify.test-22", serverRow("SHOPIFY_TEST_SFTP").hostKeyFingerprint)
+
+        def swapped = new FakeSftpClient("evil.test", "u", 22, sftpEnvironment)   // presents another key
+        IllegalStateException refused = assertThrows(IllegalStateException) { SftpAutomationSupport.connectPinned(ec, swapped, staleServer) }
+        assertTrue(refused.message.contains("presented a different key"), refused.message)
+        pinnedKeys(null)
+    }
+
     private void pinnedKeys(String fingerprint) {
         boolean was = ec.artifactExecution.disableAuthz()
         try {

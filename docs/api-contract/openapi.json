@@ -26976,6 +26976,21 @@
                                 },
                                 "hasPrivateKey": {
                                     "type": "boolean"
+                                },
+                                "hostKeyFingerprint": {
+                                    "type": "string",
+                                    "description": "DAR-BE-082: the server's key saved on first connection (OpenSSH SHA256); empty until then."
+                                },
+                                "hostKeyPinnedDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                                 }
                             }
                         }
@@ -27678,6 +27693,10 @@
                     },
                     "remoteAttributes": {
                         "type": "boolean"
+                    },
+                    "resetHostKey": {
+                        "type": "boolean",
+                        "description": "DAR-BE-082: forget the saved server key, so the next connection saves the one it sees (after a planned server change)."
                     }
                 },
                 "required": [

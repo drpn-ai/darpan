@@ -123,6 +123,55 @@ class SftpAutomationServiceSmokeTests {
         assertTrue(uploadedDiff.contains("\"compareScopeDescription\":\"Smoke-test compare scope for product field mismatches.\""))
     }
 
+    /** DAR-BE-082: the first successful poll saves each server's key (trust on first use). */
+    @Test
+    void theFirstPollSavesEachServersKey() {
+        pinnedKeys(null)
+        runProductPoll()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals(["SHA256:fake-shopify.test-22", "SHA256:fake-oms.test-22"], ["SHOPIFY_TEST_SFTP", "OMS_TEST_SFTP"].collect { serverRow(it).hostKeyFingerprint })
+        assertNotNull(serverRow("SHOPIFY_TEST_SFTP").hostKeyPinnedDate)
+    }
+
+    /** DAR-BE-082: a server presenting another key than the saved one gets nothing, and the run says why. */
+    @Test
+    void aServerPresentingAnotherKeyIsRefused() {
+        pinnedKeys("SHA256:the-old-server")
+        runProductPoll()
+        assertTrue(ec.message.errors.any { it.contains("presented a different key") && it.contains("reset its saved key") }, ec.message.errorsString)
+        assertEquals("SHA256:the-old-server", serverRow("SHOPIFY_TEST_SFTP").hostKeyFingerprint, "the saved key is not replaced")
+        ec.message.clearErrors()
+        pinnedKeys(null)
+    }
+
+    private void pinnedKeys(String fingerprint) {
+        boolean was = ec.artifactExecution.disableAuthz()
+        try {
+            ["SHOPIFY_TEST_SFTP", "OMS_TEST_SFTP"].each {
+                ec.entity.find("darpan.reconciliation.SftpServer").condition("sftpServerId", it).useCache(false).one()
+                        .setAll([hostKeyFingerprint: fingerprint, hostKeyPinnedDate: null]).update()
+            }
+        } finally { if (!was) ec.artifactExecution.enableAuthz() }
+    }
+
+    private def serverRow(String id) {
+        boolean was = ec.artifactExecution.disableAuthz()
+        try { return ec.entity.find("darpan.reconciliation.SftpServer").condition("sftpServerId", id).useCache(false).one() }
+        finally { if (!was) ec.artifactExecution.enableAuthz() }
+    }
+
+    private void runProductPoll() {
+        sftpEnvironment.putFile("shopify.test", 22, "/incoming/products-1.json", readFixtureText("data/test/test-products-1.json"), 2000L)
+        sftpEnvironment.putFile("oms.test", 22, "/incoming/products-2.json", readFixtureText("data/test/test-products-2.json"), 1000L)
+        ec.service.sync().name("reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile")
+                .parameters([ruleSetId: "DARPAN_TEST_PRODUCT_COMPARE_RS", file1SftpServerId: "SHOPIFY_TEST_SFTP", file2SftpServerId: "OMS_TEST_SFTP",
+                             file1RemotePath: "/incoming", file2RemotePath: "/incoming",
+                             stageLocation: "runtime://tmp/reconciliation/automation/input/smoke-pin",
+                             outputLocation: "runtime://tmp/reconciliation/automation/output/smoke-pin",
+                             sparkAppName: "SftpAutomationServiceSmokeTests"])
+                .disableAuthz().call()
+    }
+
     @Test
     void sftpAutomationRetainsMappingBridgeForExistingJobs() {
         List<Map<String, Object>> companyMemberships = ec.entity.find("moqui.security.UserGroupAndMember")
@@ -285,6 +334,8 @@ class SftpAutomationServiceSmokeTests {
     }
 
     private static final class FakeSftpEnvironment {
+        String hostKey(String host, int port) { return "SHA256:fake-${host}-${port}".toString() }
+
         private final Map<String, Map<String, FakeSftpFile>> filesByServer = [:].withDefault { [:] }
 
         void putFile(String host, int port, String path, String text, long lastModified) {
@@ -388,7 +439,17 @@ class SftpAutomationServiceSmokeTests {
 
         FakeSftpClient preserveAttributes(boolean preserveAttributes) { return this }
 
-        void connect() { }
+        // DAR-BE-082: the fake server has a key; a saved key that differs is refused before anything is sent.
+        private String expectedHostKey
+        String seenHostKey
+        FakeSftpClient expectedHostKey(String fingerprint) { expectedHostKey = fingerprint ?: null; return this }
+
+        void connect() {
+            seenHostKey = environment.hostKey(host, port)
+            if (expectedHostKey && expectedHostKey != seenHostKey) {
+                throw new IllegalStateException(DarpanSftpClient.mismatchMessage(host, port, expectedHostKey, seenHostKey))
+            }
+        }
 
         List<Map<String, Object>> ls(String basePath) {
             return environment.list(host, port, basePath)

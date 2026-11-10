@@ -46,24 +46,11 @@ class SftpAutomationSupport {
     static final int DEFAULT_POLL_INTERVAL_MINUTES = 10
     static final int DEFAULT_POLL_TIMEOUT_MINUTES = 60
 
-    /**
-     * Fully-qualified class name of the moqui-sftp client, resolved at RUNTIME. Core deliberately
-     * has no compile-time link to moqui-sftp (ADR 0001 rule 1: plugins depend on core, never the
-     * reverse) — the component is a deploy-time plugin, present on the Moqui classloader when the
-     * moqui-sftp component is installed. Tests inject their own factory via setClientFactory.
-     */
-    static final String SFTP_CLIENT_CLASS_NAME = "org.moqui.sftp.SftpClient"
 
+    // DAR-BE-082: Darpan's own client (DarpanSftpClient), which checks the server's key before authenticating.
+    // moqui-sftp's SftpClient accepts any key and lacks privateKey(String) and mkdirs, which the poller calls.
     private static final Closure DEFAULT_CLIENT_FACTORY = { String host, String user, Integer port ->
-        Class<?> clientClass
-        try {
-            clientClass = Class.forName(SFTP_CLIENT_CLASS_NAME, true,
-                    Thread.currentThread().contextClassLoader ?: SftpAutomationSupport.classLoader)
-        } catch (ClassNotFoundException e) {
-            throw new IllegalStateException("SFTP transport unavailable: ${SFTP_CLIENT_CLASS_NAME} is not on the " +
-                    "classpath. Install the moqui-sftp component (runtime/component/moqui-sftp) to run SFTP automations.", e)
-        }
-        return clientClass.newInstance(host, user, (int) port)
+        return new DarpanSftpClient(host, user, (int) (port ?: 22))
     }
     private static final Closure DEFAULT_RETRY_SLEEPER = { long sleepMillis ->
         if (sleepMillis > 0L) Thread.sleep(sleepMillis)
@@ -71,6 +58,26 @@ class SftpAutomationSupport {
 
     private static Closure clientFactory = DEFAULT_CLIENT_FACTORY
     private static Closure retrySleeper = DEFAULT_RETRY_SLEEPER
+
+    /**
+     * DAR-BE-082. Connects holding the server to its saved key: none saved trusts the first key and saves it (on the
+     * SftpServer row, with the date); a saved key must match, or the client refuses before sending anything.
+     */
+    static void connectPinned(def ec, def client, def server) {
+        String saved = server?.hostKeyFingerprint ?: null
+        if (client.respondsTo("expectedHostKey", String)) client.expectedHostKey(saved)
+        client.connect()
+        String seen = client.hasProperty("seenHostKey") ? client.seenHostKey : null
+        String serverId = server?.sftpServerId
+        if (saved || !seen || !serverId) return
+        def row = darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.SftpServer",
+                "DAR-BE-082: save the key of the server this run just connected to (the run already holds that server)")
+                .condition("sftpServerId", serverId).useCache(false).one()
+        if (row != null && !row.hostKeyFingerprint) {
+            row.setAll([hostKeyFingerprint: seen, hostKeyPinnedDate: ec.user.nowTimestamp]).update()
+            logger.info("SFTP server {} key saved on first use: {}", serverId, seen)
+        }
+    }
 
     static Object createClient(String host, String user, Integer port) {
         return clientFactory.call(host, user, port)

@@ -930,6 +930,11 @@
         <field name="password" type="text-medium" encrypt="true"/>
         <field name="privateKey" type="text-long" encrypt="true"/>
         <field name="remoteAttributes" type="text-indicator" default="'Y'"/>
+        <field name="hostKeyFingerprint" type="text-medium">
+            <description>DAR-BE-082. The server's SSH key (OpenSSH SHA256 fingerprint), saved on the first successful connection;
+                later connections must present it. Cleared when the host or port changes, or reset in settings.</description>
+        </field>
+        <field name="hostKeyPinnedDate" type="date-time"/>
 
         <relationship type="one" title="Company" related="moqui.security.UserGroup">
             <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>

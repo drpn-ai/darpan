@@ -60,6 +60,9 @@ dependencies {
     }
     implementation 'com.networknt:json-schema-validator:1.5.5' // bumped from 1.0.87: 4-major behind + transitive CVEs
     implementation 'com.jayway.jsonpath:json-path:2.9.0'       // bumped from 2.8.0 for CVE-2023-51074 (stack-overflow DoS in Criteria.parse)
+    // DAR-BE-082: Darpan's own SFTP client checks the server's key before authenticating (moqui-sftp's accepts any key).
+    // Same version moqui-sftp ships (Apache-2.0).
+    implementation 'com.hierynomus:sshj:0.40.0'
     implementation 'org.apache.lucene:lucene-core:9.12.3' // DAR-BE-161: knowledge base keyword search (Apache-2.0, no runtime deps)
     // DAR-BE-164: tenant scripts (Apache-2.0, ASF). Its only runtime dependency is commons-logging, which the framework
     // already ships (1.3.5); excluded so this does not move the shipped version. Only darpan.script.* may reference it.

@@ -15,6 +15,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -152,6 +153,30 @@ class SftpServerCrossTenantSmokeTests {
         }
         def row = findRow("MIX_SFTP")
         assertFalse(row.host == "attacker.sftp.test" && row.password == "krewe-secret", "the stored password went along to the moved server")
+    }
+
+    /** DAR-BE-082: a moved server is another server, so its saved key goes; Reset key clears it on purpose; the list shows it. */
+    @Test
+    void theSavedKeyIsShownClearedOnAMoveAndResettable() {
+        ownServer("KEY_SFTP")
+        boolean was = ec.artifactExecution.disableAuthz()
+        try { findRow("KEY_SFTP").setAll([hostKeyFingerprint: "SHA256:saved", hostKeyPinnedDate: FROM_DATE]).update() }
+        finally { if (!was) ec.artifactExecution.enableAuthz() }
+
+        Map<String, Object> list = withProductionAuthz { callService("facade.SettingsFacadeServices.list#SftpServers", [pageIndex: 0, pageSize: 50, query: ""]) }
+        assertEquals("SHA256:saved", ((list.servers ?: []) as List<Map>).find { it.sftpServerId == "KEY_SFTP" }?.hostKeyFingerprint)
+
+        withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2"]) }
+        assertEquals("SHA256:saved", findRow("KEY_SFTP").hostKeyFingerprint, "same server keeps its key")
+
+        withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe.sftp.test", port: 22, username: "krewe-user2", resetHostKey: true]) }
+        assertNull(findRow("KEY_SFTP").hostKeyFingerprint, "reset clears it")
+
+        was = ec.artifactExecution.disableAuthz()
+        try { findRow("KEY_SFTP").setAll([hostKeyFingerprint: "SHA256:saved"]).update() }
+        finally { if (!was) ec.artifactExecution.enableAuthz() }
+        withProductionAuthz { callService(SAVE_SERVICE, [sftpServerId: "KEY_SFTP", host: "krewe3.sftp.test", port: 22, username: "krewe-user2", password: "new"]) }
+        assertNull(findRow("KEY_SFTP").hostKeyFingerprint, "a moved server is a new server")
     }
 
     private void ownServer(String id) {

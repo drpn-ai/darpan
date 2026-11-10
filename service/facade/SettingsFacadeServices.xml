@@ -457,6 +457,8 @@
                 <parameter name="remoteAttributes"/>
                 <parameter name="hasPassword" type="Boolean"/>
                 <parameter name="hasPrivateKey" type="Boolean"/>
+                <parameter name="hostKeyFingerprint"><description>DAR-BE-082: the server's key saved on first connection (OpenSSH SHA256); empty until then.</description></parameter>
+                <parameter name="hostKeyPinnedDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -467,7 +469,7 @@
             <set field="servers" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="sftpServerFinder" from="ec.entity.find('darpan.reconciliation.SftpServer').orderBy('description,sftpServerId').useCache(false)"/>
-            <set field="rows" from="(activeTenantUserGroupId ? sftpServerFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [sftpServerId: item.sftpServerId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), host: item.host, port: item.port, username: item.username, remoteAttributes: item.remoteAttributes ?: 'Y', hasPassword: item.password ? true : false, hasPrivateKey: item.privateKey ? true : false] }"/>
+            <set field="rows" from="(activeTenantUserGroupId ? sftpServerFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [sftpServerId: item.sftpServerId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), host: item.host, port: item.port, username: item.username, remoteAttributes: item.remoteAttributes ?: 'Y', hasPassword: item.password ? true : false, hasPrivateKey: item.privateKey ? true : false, hostKeyFingerprint: item.hostKeyFingerprint, hostKeyPinnedDate: item.hostKeyPinnedDate] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.sftpServerId, row.description, row.host, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -492,6 +494,7 @@
             <parameter name="password"/>
             <parameter name="privateKey" allow-html="true"/>
             <parameter name="remoteAttributes" type="Boolean" default-value="true"/>
+            <parameter name="resetHostKey" type="Boolean" default-value="false"><description>DAR-BE-082: forget the saved server key, so the next connection saves the one it sees (after a planned server change).</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -560,6 +563,8 @@
                  moved, NO stored secret is carried over (not even the other kind than the one sent), so a moved server
                  never receives a stored password; with nothing sent, the save is refused. -->
             <set field="movedFields" from="existingServer &amp;&amp; (existingServer.password || existingServer.privateKey) ? darpan.facade.common.SecretCarryOver.changedFields(existingServer, [host: hostValue, port: portValue], ['host', 'port']) : []"/>
+            <!-- DAR-BE-082: a moved host or port is another server, so its saved key goes too; Reset key clears it on purpose. -->
+            <set field="keepHostKey" from="existingServer &amp;&amp; !resetHostKey &amp;&amp; !darpan.facade.common.SecretCarryOver.changedFields(existingServer, [host: hostValue, port: portValue], ['host', 'port'])"/>
             <if condition="!ec.message.hasError() &amp;&amp; movedFields &amp;&amp; !passwordValue &amp;&amp; !privateKeyValue">
                 <message error="true">${darpan.facade.common.SecretCarryOver.refusal(movedFields, 'password or key')}</message>
             </if>
@@ -567,7 +572,7 @@
                 <set field="sftpServerIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.SftpServer', 'sftpServerId')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="serverMap" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, companyUserGroupId: existingServer?.companyUserGroupId, createdByUserId: existingServer?.createdByUserId, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, password: passwordValue ?: (movedFields ? null : existingServer?.password), privateKey: privateKeyValue ?: (movedFields ? null : existingServer?.privateKey)]"/>
+                <set field="serverMap" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, companyUserGroupId: existingServer?.companyUserGroupId, createdByUserId: existingServer?.createdByUserId, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, password: passwordValue ?: (movedFields ? null : existingServer?.password), privateKey: privateKeyValue ?: (movedFields ? null : existingServer?.privateKey), hostKeyFingerprint: keepHostKey ? existingServer?.hostKeyFingerprint : null, hostKeyPinnedDate: keepHostKey ? existingServer?.hostKeyPinnedDate : null]"/>
                 <if condition="existingServer == null || !existingServer.companyUserGroupId">
                     <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(serverMap, ec)"/>
                 </if>

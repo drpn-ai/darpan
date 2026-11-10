@@ -277,7 +277,7 @@ def prepareFile = { String label, String systemEnumId, String sftpServerId, Stri
     def selection
     def staged
     try {
-        sftpClient.connect()
+        SftpAutomationSupport.connectPinned(ec, sftpClient, server)
         selection = selectSftpCandidateFile(sftpClient, (String) sftpConfig.basePath, label, archiveSubdir)
         if (!selection.refPath) {
             String failMsg = "No file found at ${sftpConfig.basePath} matching criteria."
@@ -536,7 +536,7 @@ try {
             
             logMsg("Uploading result ${diffFileName} to SFTP Server 1 (${cleanHost}:${cleanPort}) at ${remoteResultDir} ...")
             try {
-                sftpClient.connect()
+                SftpAutomationSupport.connectPinned(ec, sftpClient, server)
                 try { sftpClient.mkdirs(remoteResultDir) } catch (Exception ignored) {}
                 String remoteResultPath = (remoteResultDir.endsWith("/") ? remoteResultDir + diffFileName : remoteResultDir + "/" + diffFileName)
                 

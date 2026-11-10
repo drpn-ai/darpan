@@ -1829,6 +1829,47 @@ end'''
         assertEquals("<=", ((List) createResult.savedRun.rules)[0].operator)
     }
 
+    /**
+     * DAR-BE-081. delete#SavedRun deleted every ReconciliationRunResult (and its steps) carrying the savedRunId,
+     * in every tenant: a saved-run id another tenant also used (a numeric import id, an old mapping id) wiped that
+     * tenant's run history. Only the deleting tenant's rows go.
+     */
+    @Test
+    void savedRunDeleteKeepsAnotherTenantsRunHistoryUnderTheSameId() {
+        Map<String, Object> created = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([runName: "BE-081 tenant scope", file1SystemEnumId: "OMS", file1FileTypeEnumId: "DftCsv", file1PrimaryIdExpression: "order_id",
+                             file2SystemEnumId: "SHOPIFY", file2FileTypeEnumId: "DftCsv", file2PrimaryIdExpression: "order_id",
+                             rules: [[sequenceNum: 10, ruleLogic: 'rule "BE081"\nwhen\n    $m : Map()\nthen\nend', enabled: "Y"]]])
+                .disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String savedRunId = created.savedRun.savedRunId as String
+        boolean was = ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: GORJANA, description: "Gorjana",
+                    groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
+            ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult").setAll([reconciliationRunResultId: "BE081_MINE", savedRunId: savedRunId,
+                    savedRunType: "ruleset", companyUserGroupId: KREWE]).create()
+            ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult").setAll([reconciliationRunResultId: "BE081_THEIRS", savedRunId: savedRunId,
+                    savedRunType: "ruleset", companyUserGroupId: GORJANA]).create()
+            ec.entity.makeValue("darpan.reconciliation.ReconciliationRunStep").setAll([reconciliationRunStepId: "BE081_THEIRS_STEP",
+                    reconciliationRunResultId: "BE081_THEIRS"]).create()
+        } finally { if (!was) ec.artifactExecution.enableAuthz() }
+
+        ec.service.sync().name("facade.ReconciliationFacadeServices.delete#SavedRun").parameters([savedRunId: savedRunId]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+
+        was = ec.artifactExecution.disableAuthz()
+        try {
+            def find = { String entity, String field, String id -> ec.entity.find(entity).condition(field, id).useCache(false).one() }
+            assertNull(find("darpan.reconciliation.ReconciliationRunResult", "reconciliationRunResultId", "BE081_MINE"), "the deleting tenant's run row goes")
+            assertNotNull(find("darpan.reconciliation.ReconciliationRunResult", "reconciliationRunResultId", "BE081_THEIRS"), "GORJANA's run row stays")
+            assertNotNull(find("darpan.reconciliation.ReconciliationRunStep", "reconciliationRunStepId", "BE081_THEIRS_STEP"), "and its steps")
+            ec.entity.find("darpan.reconciliation.ReconciliationRunStep").condition("reconciliationRunResultId", "BE081_THEIRS").deleteAll()
+            ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("reconciliationRunResultId", "BE081_THEIRS").deleteAll()
+        } finally { if (!was) ec.artifactExecution.enableAuthz() }
+    }
+
     @Test
     void savedRunDeleteRemovesRuleSetChildrenAndGeneratedOutputs() {
         String noopRule = '''rule "NOOP_DELETE_RULE"

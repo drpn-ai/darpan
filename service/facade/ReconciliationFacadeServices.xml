@@ -1591,9 +1591,18 @@
                         </if>
                     </if>
                 </iterate>
+                <!-- DAR-BE-081: only this run's tenant's history goes (plus rows saved before tenants existed). Another tenant's
+                     run under the same savedRunId (a numeric import id, an old mapping id) is never touched. -->
+                <set field="runOwnerTenantId" from="(ruleSetRun ?: mappingRun)?.companyUserGroupId"/>
+                <set field="runRowsCondition" from="ec.entity.conditionFactory.makeCondition([
+                        ec.entity.conditionFactory.makeCondition('savedRunId', org.moqui.entity.EntityCondition.EQUALS, savedRunIdValue),
+                        ec.entity.conditionFactory.makeCondition([
+                                ec.entity.conditionFactory.makeCondition('companyUserGroupId', org.moqui.entity.EntityCondition.EQUALS, runOwnerTenantId),
+                                ec.entity.conditionFactory.makeCondition('companyUserGroupId', org.moqui.entity.EntityCondition.EQUALS, null)],
+                                org.moqui.entity.EntityCondition.OR)])"/>
                 <!-- delete the observability step timeline first: ReconciliationRunStep rows hold an FK (RECSTEP_RUN) to the run rows deleted below -->
-                <set field="ignoreRunStepDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('savedRunId', savedRunIdValue).disableAuthz().useCache(false).list().each { runRow -> ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runRow.reconciliationRunResultId).disableAuthz().useCache(false).deleteAll() }"/>
-                <set field="ignoreRunResultDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('savedRunId', savedRunIdValue).disableAuthz().useCache(false).deleteAll()"/>
+                <set field="ignoreRunStepDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition(runRowsCondition).disableAuthz().useCache(false).list().each { runRow -> ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runRow.reconciliationRunResultId).disableAuthz().useCache(false).deleteAll() }"/>
+                <set field="ignoreRunResultDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition(runRowsCondition).disableAuthz().useCache(false).deleteAll()"/>
             </if>
 
             <if condition="!ec.message.hasError() &amp;&amp; ruleSetRun">

@@ -51,6 +51,39 @@
         <index name="CLISES_USER"><index-field name="userId"/></index>
     </entity>
 
+    <!-- DAR-BE-195. Per-user CLI access: a Darpan admin turns the CLI on for one user in one tenant. Unlike the two
+         entities above these belong to a tenant: DARPAN_ACTIVE_COMPANY_SCOPE filter rows in SecuritySeedData. -->
+
+    <entity entity-name="CliAccessGrant" package="darpan.auth" cache="never">
+        <description>A Darpan admin's grant of CLI access to one user in one tenant, with an optional end. At most one grant
+            per user and tenant is not REVOKED. Only admin.CliAccessAdminServices write it.</description>
+        <field name="grantId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="fromDate" type="date-time" not-null="true"/>
+        <field name="thruDate" type="date-time"><description>Empty: no end date.</description></field>
+        <field name="statusId" type="text-short"><description>ACTIVE, PAUSED or REVOKED.</description></field>
+        <field name="pausedDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+        <index name="CLI_GRANT_TENANT_USER"><index-field name="companyUserGroupId"/><index-field name="userId"/></index>
+    </entity>
+
+    <entity entity-name="CliAccessGrantEvent" package="darpan.auth" cache="never">
+        <description>Every change to a CLI grant: who, when, and the grant before and after.</description>
+        <field name="eventId" type="id" is-pk="true"/>
+        <field name="grantId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <field name="userId" type="id"><description>The grant's user.</description></field>
+        <field name="action" type="text-short"><description>GRANT, CHANGE, PAUSE, UNPAUSE or REVOKE.</description></field>
+        <field name="byUserId" type="id"/>
+        <field name="eventDate" type="date-time"/>
+        <field name="beforeJson" type="text-intermediate"/>
+        <field name="afterJson" type="text-intermediate"/>
+        <index name="CLI_GRANT_EVENT_GRANT"><index-field name="grantId"/></index>
+    </entity>
+
     <view-entity entity-name="CliSessionAndKey" package="darpan.auth">
         <description>A CLI session with its login key's expiry; a session whose key the framework has purged drops out.</description>
         <member-entity entity-alias="CLS" entity-name="darpan.auth.CliSession"/>

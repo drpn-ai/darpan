@@ -401,6 +401,15 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.agent.AgentAccessGrantEvent"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-195 — CLI access grants and their change log. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CLI_ACCESS_GRANT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.auth.CliAccessGrant"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CLI_ACCESS_GRANT_EVENT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.auth.CliAccessGrantEvent"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUDIT_CHANGE_PROPOSAL"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.agent.AuditChangeProposal"

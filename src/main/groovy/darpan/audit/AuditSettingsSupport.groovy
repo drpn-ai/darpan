@@ -96,7 +96,15 @@ class AuditSettingsSupport {
         if (zone) {
             try { ZoneId.of(zone) } catch (Exception ignored) { ec.message.addError("${zone} is not a time zone.") }
         }
-        if (runEmail != null) AuditRunUpdateSupport.runEmailErrors(ec, tenantId, runEmail).each { ec.message.addError(it) }
+        if (runEmail != null) {
+            // Who gets every run's findings and CSVs is a tenant admin's call (security review, 2026-11-10); the rest of the
+            // settings keep the edit access the service checks.
+            if (!TenantAccessSupport.isTenantAdmin(ec, tenantId)) {
+                ec.message.addError("Only a tenant admin can change who gets audit ${audit.auditCode}'s run email.".toString())
+            } else {
+                AuditRunUpdateSupport.runEmailErrors(ec, tenantId, runEmail).each { ec.message.addError(it) }
+            }
+        }
         if (ec.message.hasError()) return
 
         Timestamp now = ec.user.nowTimestamp

@@ -524,11 +524,11 @@
         <field name="auditDigestId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="auditId" type="id" not-null="true"/>
-        <field name="chatSpaceId" type="id">
+        <field name="chatSpaceId" type="id" enable-audit-log="true">
             <description>The tenant's chat space it posts to (TenantChatSpace); another tenant's space is never used.
                 Blank: email only.</description>
         </field>
-        <field name="emailAddresses" type="text-medium">
+        <field name="emailAddresses" type="text-medium" enable-audit-log="true">
             <description>Comma-separated addresses it is emailed to (template DARPAN_AUDIT_DIGEST). A digest needs a chat
                 space, addresses, or both (Aditi, 2026-10-22: "either email or chat alerts"). A run digest (DAR-BE-207) always
                 emails every current member of the tenant; these addresses are added to them (group mailboxes, people with no
@@ -550,7 +550,9 @@
             <description>Y lists every open finding, as far as one message holds, for the days before a
                 close; otherwise only the oldest open ones.</description>
         </field>
-        <field name="isActive" type="text-indicator"/>
+        <!-- DAR-BE-207: who changes a digest's recipients, chat space or on/off, and when, from what to what, is kept in
+             moqui.entity.EntityAuditLog (enable-audit-log on those three fields): a run digest mails every run's findings. -->
+        <field name="isActive" type="text-indicator" enable-audit-log="true"/>
         <field name="lastSentDate" type="date">
             <description>The tenant's day it last went out; at most one message a day, claimed before it is sent.</description>
         </field>

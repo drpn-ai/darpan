@@ -117,6 +117,11 @@ class AuditRunUpdateSmokeTests {
         member("TRU_NOMAIL", null, GORJANA, [:])
         insert("moqui.security.UserGroup", [userGroupId: "KREWE", description: "Krewe"])
         member("TRU_KREWE", "kim@krewe.example", "KREWE", [:])
+        // Darpan admins: one who is no member of GORJANA, and Ana, a member who is an admin as well.
+        ["ADMIN", "DARPAN_SUPER_ADMIN"].each { insert("moqui.security.UserGroup", [userGroupId: it, description: it]) }
+        member("TRU_ADM", "adm@drpn.example", "DARPAN_SUPER_ADMIN", [:])
+        insert("moqui.security.UserGroupMember", [userGroupId: "ADMIN", userId: "TRU_ANA",
+                fromDate: new Timestamp(System.currentTimeMillis() - 86400000)])
     }
 
     private void member(String userId, String email, String tenant, Map membership, String disabled = "N") {
@@ -159,8 +164,8 @@ class AuditRunUpdateSmokeTests {
 
         assertEquals(1, mails.size())
         Map mail = mails[0]
-        assertEquals("ana@gorjana.example,ben@gorjana.example,close@gorjana.example,ops@gorjana.example", mail.to,
-                "the members, and the digest's addresses as well")
+        assertEquals("adm@drpn.example,ana@gorjana.example,ben@gorjana.example,close@gorjana.example,ops@gorjana.example", mail.to,
+                "the members and admins, and the digest's addresses as well")
         assertTrue((mail.body.runSubject as String).startsWith("Gorjana Month close, "), mail.body.runSubject as String)
         assertTrue((mail.body.runSubject as String).endsWith(": 5 open findings"), mail.body.runSubject as String)
         List<Map> attachments = mail.attachments as List<Map>
@@ -247,7 +252,7 @@ class AuditRunUpdateSmokeTests {
         start.countDown()
         threads*.join(60000)
         assertEquals(1, mails.size(), "${outcomes}")
-        assertEquals("ana@gorjana.example,ben@gorjana.example", mails[0].to)
+        assertEquals("adm@drpn.example,ana@gorjana.example,ben@gorjana.example", mails[0].to)
         assertEquals([false, true], outcomes*.sent.sort())
         assertEquals("ALREADY_SENT", outcomes.find { !it.sent }.reason)
 
@@ -289,10 +294,12 @@ class AuditRunUpdateSmokeTests {
     void withNoDigestTheUpdateGoesToEveryCurrentMemberOnceAndAnInactiveDigestTurnsItOff() {
         assertEquals(["ana@gorjana.example", "ben@gorjana.example"], AuditRunUpdateSupport.tenantMemberEmails(ec, GORJANA),
                 "lowercased; disabled, ended, address-less and other tenants' people left out")
+        assertEquals(["adm@drpn.example", "ana@gorjana.example", "ben@gorjana.example"], AuditRunUpdateSupport.defaultRecipients(ec, GORJANA),
+                "a Darpan admin who is no member is added; Ana, member and admin, once")
         ec.entity.find("darpan.audit.AuditDigest").deleteAll()
         assertEquals([[auditDigestId: "RUN_${AUDIT}".toString(), sent: true, reason: null]], send(AUTO))
         assertEquals(1, mails.size())
-        assertEquals("ana@gorjana.example,ben@gorjana.example", mails[0].to)
+        assertEquals("adm@drpn.example,ana@gorjana.example,ben@gorjana.example", mails[0].to)
         assertEquals([], posts, "no digest, no chat space")
         assertEquals("Y", ec.entity.find("darpan.audit.AuditDigest").condition("auditDigestId", "RUN_${AUDIT}".toString()).one().isActive,
                 "a default digest now holds the run's claim")

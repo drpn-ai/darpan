@@ -196,8 +196,10 @@
                 day play can record today), schedule: {active, time HH:mm,
                 timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,
                 checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],
-                runEmail: {active, alsoSendTo: [address], members (how many current tenant members receive it), chatSpaceId
-                or null} (DAR-BE-207: the update emailed to every current member after each run, plus alsoSendTo)}</description></parameter>
+                runEmail: {active, alsoSendTo: [address], members (how many accounts receive it by default: current tenant
+                members and Darpan admins), admins (how many of those are Darpan admins), chatSpaceId or null, canEdit (the caller
+                is a tenant admin; others see it read-only)} (DAR-BE-207:
+                the update emailed after each run to the members and admins, plus alsoSendTo)}</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
@@ -386,7 +388,8 @@
             <parameter name="runEmail" type="Map"><description>DAR-BE-207. {active (false stops the run email for this audit),
                 alsoSendTo: [addresses sent to as well as the tenant's members], chatSpaceId (the tenant's chat space for a
                 summary card; blank for none)}; absent keeps it, a field left out keeps its value. Any address that is not one
-                refuses the save.</description></parameter>
+                refuses the save. Needs tenant admin rights for the active tenant (a Darpan admin has them): without them a
+                save carrying runEmail is refused whole. Every change is kept in EntityAuditLog.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -395,7 +398,7 @@
             <parameter name="settings" type="Map"><description>{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest
                 day play can record today), schedule: {active, time HH:mm,
                 timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,
-                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, chatSpaceId}}</description></parameter>
+                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}</description></parameter>
         </out-parameters>
         <actions>
             <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for audit changes.')"/>

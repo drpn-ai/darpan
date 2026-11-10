@@ -16,6 +16,7 @@ import org.junit.jupiter.api.TestMethodOrder
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
+import java.sql.Timestamp
 import java.util.concurrent.Executor
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -477,38 +478,69 @@ class AuditSettingsSmokeTests {
 
     @Test
     @Order(60)
-    void theRunEmailIsOnByDefaultAndTakesAddressesToSendToAsWell() {
-        int members = AuditRunUpdateSupport.tenantMemberEmails(ec, MINE).size()
-        assertEquals([active: true, alsoSendTo: [], members: members, chatSpaceId: null],
-                (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail, "DAR-BE-207: on, to the members")
+    void theRunEmailIsOnByDefaultAndOnlyATenantAdminChangesWhoGetsItWhichIsRecorded() {
+        int members = AuditRunUpdateSupport.defaultRecipients(ec, MINE).size()
+        int admins = AuditRunUpdateSupport.adminEmails(ec).size()
+        assertEquals([active: true, alsoSendTo: [], members: members, admins: admins, chatSpaceId: null, canEdit: false],
+                (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail, "DAR-BE-207: on, read-only to an editor")
 
-        Map bad = facade("save#AuditSettings", [audit: "system-health", runEmail: [alsoSendTo: ["ap@krewe.example", "not-an-address"]]])
-        assertTrue(bad.hadError as boolean)
-        assertTrue((bad.errorText as String).contains("Not an email address: not-an-address."), bad.errorText as String)
+        String name = (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).audit.name
+        Map editor = facade("save#AuditSettings", [audit: "system-health", name: "Not saved", runEmail: [alsoSendTo: ["me@elsewhere.example"]]])
+        assertTrue(editor.hadError as boolean)
+        assertTrue((editor.errorText as String).contains("Only a tenant admin can change who gets audit system-health's run email."),
+                editor.errorText as String)
+        assertEquals(name, (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).audit.name, "the whole save refused")
+        assertEquals(0L, ec.entity.find("darpan.audit.AuditDigest").condition("companyUserGroupId", MINE).disableAuthz().count())
+
         boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        Timestamp granted = new Timestamp(System.currentTimeMillis() - 1000)
         try {
+            insert("moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID, description: "Tenant admin"])
+            insert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: ec.user.userId,
+                    permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID, fromDate: granted])
             insert("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TSET_OTHER_SPACE", companyUserGroupId: OTHER,
                     spaceName: "Other", webhookUrl: "https://chat.googleapis.com/v1/spaces/X/messages?key=k&token=t", isActive: "Y"])
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
-        Map stranger = facade("save#AuditSettings", [audit: "system-health", runEmail: [chatSpaceId: "TSET_OTHER_SPACE"]])
-        assertTrue((stranger.errorText as String).contains("Chat space TSET_OTHER_SPACE was not found."), stranger.errorText as String)
-        assertEquals([], (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail.alsoSendTo, "nothing written")
+        try {
+            Map bad = facade("save#AuditSettings", [audit: "system-health", runEmail: [alsoSendTo: ["ap@krewe.example", "not-an-address"]]])
+            assertTrue((bad.errorText as String).contains("Not an email address: not-an-address."), bad.errorText as String)
+            Map stranger = facade("save#AuditSettings", [audit: "system-health", runEmail: [chatSpaceId: "TSET_OTHER_SPACE"]])
+            assertTrue((stranger.errorText as String).contains("Chat space TSET_OTHER_SPACE was not found."), stranger.errorText as String)
+            assertEquals([], (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail.alsoSendTo, "nothing written")
 
-        Map saved = facade("save#AuditSettings", [audit: "system-health",
-                runEmail: [active: false, alsoSendTo: ["Close@Krewe.example", "ap@krewe.example", "close@krewe.example"]]])
-        assertFalse(saved.hadError as boolean, saved.errorText as String)
-        assertEquals([active: false, alsoSendTo: ["close@krewe.example", "ap@krewe.example"], members: members, chatSpaceId: null],
-                (saved.settings as Map).runEmail)
-        Map row = ec.entity.find("darpan.audit.AuditDigest").condition("auditDigestId", "RUN_${MINE}_SH".toString()).disableAuthz().one()?.getMap()
-        assertEquals(["AUDDK_RUN", "N", "close@krewe.example, ap@krewe.example", MINE],
-                [row.kindEnumId, row.isActive, row.emailAddresses, row.companyUserGroupId])
+            Map saved = facade("save#AuditSettings", [audit: "system-health",
+                    runEmail: [active: false, alsoSendTo: ["Close@Krewe.example", "ap@krewe.example", "close@krewe.example"]]])
+            assertFalse(saved.hadError as boolean, saved.errorText as String)
+            assertEquals([active: false, alsoSendTo: ["close@krewe.example", "ap@krewe.example"], members: members, admins: admins,
+                          chatSpaceId: null, canEdit: true], (saved.settings as Map).runEmail)
+            String digestId = "RUN_${MINE}_SH".toString()
+            Map row = ec.entity.find("darpan.audit.AuditDigest").condition("auditDigestId", digestId).disableAuthz().one()?.getMap()
+            assertEquals(["AUDDK_RUN", "N", "close@krewe.example, ap@krewe.example", MINE],
+                    [row.kindEnumId, row.isActive, row.emailAddresses, row.companyUserGroupId])
 
-        facade("save#AuditSettings", [audit: "system-health", runEmail: [active: true]])
-        facade("save#AuditSettings", [audit: "system-health", name: "System health"])
-        assertEquals([active: true, alsoSendTo: ["close@krewe.example", "ap@krewe.example"], members: members, chatSpaceId: null],
-                (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail, "a field left out, or no runEmail, keeps it")
+            facade("save#AuditSettings", [audit: "system-health", runEmail: [active: true]])
+            facade("save#AuditSettings", [audit: "system-health", name: "System health"])
+            assertEquals([active: true, alsoSendTo: ["close@krewe.example", "ap@krewe.example"], members: members, admins: admins,
+                          chatSpaceId: null, canEdit: true],
+                    (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail, "a field left out, or no runEmail, keeps it")
+
+            // Recorded: who, when, and each field from what to what.
+            List<Map> trail = ec.entity.find("moqui.entity.EntityAuditLog").condition("changedEntityName", "darpan.audit.AuditDigest")
+                    .condition("pkPrimaryValue", digestId).orderBy("changedDate").disableAuthz().list()*.getMap()
+            assertTrue(trail.every { it.changedByUserId == ec.user.userId && it.changedDate != null }, "${trail}")
+            assertTrue(trail.any { it.changedFieldName == "emailAddresses" && it.newValueText == "close@krewe.example, ap@krewe.example" }, "${trail}")
+            assertTrue(trail.any { it.changedFieldName == "isActive" && it.oldValueText == "N" && it.newValueText == "Y" }, "${trail}")
+        } finally {
+            wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", MINE)
+                        .condition("permissionUserGroupId", TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID).deleteAll()
+            } finally {
+                if (!wasDisabled) ec.artifactExecution.enableAuthz()
+            }
+        }
     }
 
     private Map call(String service, Map params) {

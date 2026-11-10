@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.common.DarpanEntityConstants
+import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
@@ -18,7 +19,7 @@ import static darpan.common.ValueSupport.readField
 
 /**
  * DAR-BE-207. The update after each audit run: the whole run by email (a CSV per rule with open findings attached) to
- * every current member of the tenant, on for every audit by default (product owner, 2026-11-10). An AuditDigest of kind
+ * every current member of the tenant and every Darpan admin, on for every audit by default (product owner, 2026-11-10). An AuditDigest of kind
  * run tunes it for its audit: isActive N turns it off, emailAddresses are sent to as well as the members (never instead),
  * chatSpaceId adds a summary card in chat. An audit with no such row gets a default one on its first update, which holds the run's claim. Asked for after every execution of an audit's automation
  * (AutomationExecutionSupport.executeAutomation), it goes out once the whole audit is idle: no execution running or
@@ -198,7 +199,7 @@ class AuditRunUpdateSupport {
             if (destination == null) logger.warn("Audit run update {}: chat space {} cannot be used", digest.auditDigestId, chatSpaceId)
         }
         // Members always; a digest's addresses are added (group mailboxes, people with no Darpan account), never instead.
-        List<String> emails = (tenantMemberEmails(ec, tenantId) + extraEmails(digest)).unique().findAll { !mailed.contains(it) }
+        List<String> emails = (defaultRecipients(ec, tenantId) + extraEmails(digest)).unique().findAll { !mailed.contains(it) }
         if (destination == null && !emails) return [sent: false, reason: "NO_DESTINATION"]
         boolean delivered = false
         if (destination != null) {
@@ -309,14 +310,18 @@ class AuditRunUpdateSupport {
 
     /**
      * {active (true when the audit has no run digest), alsoSendTo [addresses added to the members], members (how many
-     * current members it reaches), chatSpaceId (null for none)}.
+     * accounts it reaches by default: current members and Darpan admins), admins (how many of those are Darpan admins),
+     * chatSpaceId (null for none), canEdit (the caller is a tenant admin)}.
      */
     static Map runEmailSettings(def ec, String tenantId, String auditId) {
         Map digest = settingsDigest(runDigests(ec, tenantId, auditId), auditId)
         return [active     : digest == null || active(digest),
                 alsoSendTo : AuditDigestSupport.emailsOf(digest?.emailAddresses)*.toLowerCase().unique(),
-                members    : tenantMemberEmails(ec, tenantId).size(),
-                chatSpaceId: normalize(digest?.chatSpaceId)]
+                members    : defaultRecipients(ec, tenantId).size(),
+                admins     : adminEmails(ec).size(),
+                chatSpaceId: normalize(digest?.chatSpaceId),
+                // Only a tenant admin (a Darpan admin is one for every tenant) may change it; others see it read-only.
+                canEdit    : TenantAccessSupport.isTenantAdmin(ec, tenantId)]
     }
 
     /** What is wrong with a runEmail change, in words: each address that is not one, a chat space not the tenant's. */
@@ -383,23 +388,38 @@ class AuditRunUpdateSupport {
     }
 
     /**
-     * Who the update goes to by default: every member of the tenant (UserGroupMember on its company group, as
-     * add#TenantMember writes it) whose membership is current and whose account is enabled and has an email address,
-     * lowercased, each once. A Darpan admin reaches every tenant through the admin groups, not a membership, so gets a
-     * tenant's update only when added to it as a member.
+     * Who the update goes to by default: every current member of the tenant (UserGroupMember on its company group, as
+     * add#TenantMember writes it) and every Darpan admin (product owner, 2026-11-10: "keep darpan admin in the email
+     * list"), each with an enabled account and an email address, lowercased, each once. Admins reach tenants through the
+     * admin groups, not memberships, so they are added by the rule behind isSuperAdmin: a current membership in
+     * TenantAccessSupport.SUPER_ADMIN_GROUP_IDS (ADMIN, DARPAN_SUPER_ADMIN).
      */
+    static List<String> defaultRecipients(def ec, String tenantId) {
+        return (tenantMemberEmails(ec, tenantId) + adminEmails(ec)).unique().sort()
+    }
+
+    /** The tenant's current members' addresses. */
     static List<String> tenantMemberEmails(def ec, String tenantId) {
+        return tenantId ? groupEmails(ec, [tenantId]) : []
+    }
+
+    /** The Darpan admins' addresses, by the rule behind isSuperAdmin. */
+    static List<String> adminEmails(def ec) {
+        return groupEmails(ec, TenantAccessSupport.SUPER_ADMIN_GROUP_IDS)
+    }
+
+    private static List<String> groupEmails(def ec, List<String> groupIds) {
         Timestamp now = new Timestamp(System.currentTimeMillis())
         def cf = ec.entity.conditionFactory
         List userIds = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroupMember",
-                "run-update recipients: the tenant's own members, keyed by its company group")
-                .condition("userGroupId", tenantId).condition("fromDate", EntityCondition.LESS_THAN_EQUAL_TO, now)
+                "run-update recipients: current members of the tenant's company group or the Darpan admin groups")
+                .condition("userGroupId", EntityCondition.IN, groupIds).condition("fromDate", EntityCondition.LESS_THAN_EQUAL_TO, now)
                 .condition(cf.makeCondition([cf.makeCondition("thruDate", EntityCondition.EQUALS, null),
                                              cf.makeCondition("thruDate", EntityCondition.GREATER_THAN, now)], EntityCondition.OR))
                 .useCache(false).list()*.userId.unique()
         if (!userIds) return []
         return TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
-                "run-update recipients: accounts of the tenant's current members")
+                "run-update recipients: accounts of those members")
                 .condition("userId", EntityCondition.IN, userIds).useCache(false).list()
                 .findAll { it.disabled != "Y" }
                 .collect { normalize(it.emailAddress)?.toLowerCase() }

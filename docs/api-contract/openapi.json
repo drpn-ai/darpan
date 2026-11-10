@@ -8234,7 +8234,7 @@
                     },
                     "settings": {
                         "type": "object",
-                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,\n                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],\n                runEmail: {active, alsoSendTo: [address], members (how many current tenant members receive it), chatSpaceId\n                or null} (DAR-BE-207: the update emailed to every current member after each run, plus alsoSendTo)}"
+                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,\n                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],\n                runEmail: {active, alsoSendTo: [address], members (how many accounts receive it by default: current tenant\n                members and Darpan admins), admins (how many of those are Darpan admins), chatSpaceId or null, canEdit (the caller\n                is a tenant admin; others see it read-only)} (DAR-BE-207:\n                the update emailed after each run to the members and admins, plus alsoSendTo)}"
                     }
                 }
             },
@@ -8770,7 +8770,7 @@
                     },
                     "runEmail": {
                         "type": "object",
-                        "description": "DAR-BE-207. {active (false stops the run email for this audit),\n                alsoSendTo: [addresses sent to as well as the tenant's members], chatSpaceId (the tenant's chat space for a\n                summary card; blank for none)}; absent keeps it, a field left out keeps its value. Any address that is not one\n                refuses the save."
+                        "description": "DAR-BE-207. {active (false stops the run email for this audit),\n                alsoSendTo: [addresses sent to as well as the tenant's members], chatSpaceId (the tenant's chat space for a\n                summary card; blank for none)}; absent keeps it, a field left out keeps its value. Any address that is not one\n                refuses the save. Needs tenant admin rights for the active tenant (a Darpan admin has them): without them a\n                save carrying runEmail is refused whole. Every change is kept in EntityAuditLog."
                     }
                 },
                 "required": [
@@ -8798,7 +8798,7 @@
                     },
                     "settings": {
                         "type": "object",
-                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, chatSpaceId}}"
+                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}"
                     }
                 }
             },

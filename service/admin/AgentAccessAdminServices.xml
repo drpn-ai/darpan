@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  DAR-BE-194. Darpan admins (super admins) grant users AI access per tenant, for a window and a dollar limit, pause,
+  DAR-BE-194. Darpan admins (super admins) grant users AI access per tenant, for a window and a required dollar limit, pause,
   unpause and revoke it, and read every user's AI spend. admin.* and therefore inside the DARPAN_ADMIN_API fence (the
   pattern admin\..* already covers this file); each service checks super admin again first. The logic and its rules are
   darpan.agent.AgentAccess; spend is the agent's own ledger (AgentTurn.costMicros).
@@ -31,7 +31,7 @@
             <parameter name="fromDate" type="Timestamp"><description>Default now.</description></parameter>
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="days" type="Integer"><description>The window ends this many days (each 24 hours) from the start, or from now when changing a grant.</description></parameter>
-            <parameter name="costCapUsd" type="BigDecimal"><description>The limit over the whole window, in dollars; more than 0.</description></parameter>
+            <parameter name="costCapUsd" type="BigDecimal" required="true"><description>The limit over the whole window, in dollars; more than 0. Required: the Darpan admin decides it when granting.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="grant" type="Map"/></out-parameters>
         <actions>
@@ -41,19 +41,18 @@
     </service>
 
     <service verb="update" noun="AgentAccessGrant" allow-remote="true" authenticate="true">
-        <description>Changes a grant's end or limit; a grant that is then at its limit pauses.</description>
+        <description>Changes a grant's end or limit (a limit can be changed, never removed); a grant that is then at its limit pauses.</description>
         <in-parameters>
             <parameter name="grantId" required="true"/>
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="days" type="Integer"><description>The window ends this many days (each 24 hours) from the start, or from now when changing a grant.</description></parameter>
             <parameter name="costCapUsd" type="BigDecimal"><description>The limit over the whole window, in dollars; more than 0.</description></parameter>
             <parameter name="clearThruDate" type="Boolean" default="false"/>
-            <parameter name="clearCostCap" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters><parameter name="grant" type="Map"/></out-parameters>
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <set field="grant" from="darpan.agent.AgentAccess.adminUpdate(ec, grantId, thruDate, days, costCapUsd, clearThruDate, clearCostCap)"/>
+            <set field="grant" from="darpan.agent.AgentAccess.adminUpdate(ec, grantId, thruDate, days, costCapUsd, clearThruDate)"/>
         </actions>
     </service>
 

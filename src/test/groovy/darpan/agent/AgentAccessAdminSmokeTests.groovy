@@ -141,7 +141,7 @@ class AgentAccessAdminSmokeTests {
 
     @Test
     void "a non-admin is refused by the fence and by the service on every grant service"() {
-        String id = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant.grantId
+        String id = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant.grantId
         Map before = grantRow(id)
         Map params = [grantId: id, userId: EDITOR, tenantUserGroupId: ALPHA, days: 30, costCapUsd: 100]
         [EDITOR_USERNAME, VIEWER_USERNAME].each { String who ->
@@ -158,7 +158,7 @@ class AgentAccessAdminSmokeTests {
 
     @Test
     void "create needs a member of the tenant and replaces the existing grant"() {
-        Map outsider = admin("create#AgentAccessGrant", [userId: OUTSIDER, tenantUserGroupId: ALPHA, days: 1])
+        Map outsider = admin("create#AgentAccessGrant", [costCapUsd: 5, userId: OUTSIDER, tenantUserGroupId: ALPHA, days: 1])
         assertTrue(outsider.hasError as boolean)
         assertTrue((outsider.errors as List).any { it.contains("not a member") }, "${outsider.errors}")
         assertEquals(0L, grantCount())
@@ -166,13 +166,13 @@ class AgentAccessAdminSmokeTests {
         Map first = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 1, costCapUsd: 5]).grant
         assertEquals([EDITOR, EDITOR_USERNAME, ALPHA, "ACTIVE", 5_000_000L, "5.0000", AgentAccess.LIVE],
                 [first.userId, first.username, first.tenantUserGroupId, first.statusId, first.capMicros, first.costCapUsd, first.state])
-        Map second = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 2]).grant
+        Map second = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: ALPHA, days: 2]).grant
         assertEquals("REVOKED", grantRow(first.grantId as String).statusId)
         assertEquals(second.grantId, AgentAccess.access(ec, ALPHA, EDITOR).grantId, "one live grant per user and tenant")
         assertEquals(["GRANT", "REVOKE"], events(first.grantId as String)*.action)
         assertEquals(["GRANT"], events(second.grantId as String)*.action)
         assertEquals(SUPER_ID, events(second.grantId as String)[0].byUserId)
-        Map beta = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: BETA]).grant
+        Map beta = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: BETA]).grant
         assertEquals("ACTIVE", grantRow(second.grantId as String).statusId, "a grant in another tenant leaves this one alone")
         assertNull(beta.thruDate, "no days and no thruDate: no end date")
     }
@@ -181,23 +181,39 @@ class AgentAccessAdminSmokeTests {
     void "a Darpan admin can be granted in a tenant they reach only as super admin"() {
         // A super admin enters every tenant without a membership row (TenantAccessSupport.listAvailableTenants); the spec has
         // admins need a grant too, so they must be grantable.
-        Map g = adminOk("create#AgentAccessGrant", [userId: SUPER_ID, tenantUserGroupId: ALPHA, days: 1]).grant
+        Map g = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: SUPER_ID, tenantUserGroupId: ALPHA, days: 1]).grant
         assertEquals([SUPER_ID, ALPHA, AgentAccess.LIVE], [g.userId, g.tenantUserGroupId, g.state])
-        assertTrue(admin("create#AgentAccessGrant", [userId: OUTSIDER, tenantUserGroupId: ALPHA]).hasError as boolean, "a plain non-member is still refused")
+        assertTrue(admin("create#AgentAccessGrant", [costCapUsd: 5, userId: OUTSIDER, tenantUserGroupId: ALPHA]).hasError as boolean, "a plain non-member is still refused")
     }
 
     @Test
     void "days sets the window, and days 0, a zero or negative limit or days with thruDate are refused"() {
-        Map g = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant
+        Map g = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant
         long window = (g.thruDate as Timestamp).time - (g.fromDate as Timestamp).time
         assertEquals(24L * 3_600_000L, window, "one day is 24 hours from the grant")
         [[days: 0], [costCapUsd: 0], [costCapUsd: -5], [days: 1, thruDate: new Timestamp(System.currentTimeMillis() + 86_400_000L)],
          [thruDate: new Timestamp(System.currentTimeMillis() - 1_000L)]].each { Map bad ->
-            Map r = admin("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: BETA] + bad)
+            Map r = admin("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: BETA] + bad)
             assertTrue(r.hasError as boolean, "refused: ${bad}")
         }
         assertEquals(1L, grantCount(), "none of the refused creates left a row")
         assertEquals(5_005_000L, adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: BETA, costCapUsd: new BigDecimal("5.005")]).grant.capMicros)
+    }
+
+    @Test
+    void "a grant is not made without a limit, and no change takes the limit away"() {
+        // Aditi 2026-11-10: the spend limit is decided when the Darpan admin grants access.
+        Map none = admin("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 1])
+        assertTrue(none.hasError as boolean, "no costCapUsd: refused")
+        Map tiny = admin("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, costCapUsd: new BigDecimal("0.0000001")])
+        assertTrue(tiny.hasError as boolean, "a limit that rounds to 0 micro-dollars is no limit: refused")
+        assertTrue((tiny.errors as List).any { it.contains("more than 0") }, "${tiny.errors}")
+        assertEquals(0L, grantCount())
+
+        String id = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, costCapUsd: 5]).grant.grantId
+        Map cleared = admin("update#AgentAccessGrant", [grantId: id, clearCostCap: true])
+        assertTrue(cleared.hasError as boolean, "clearCostCap is gone: nothing to change")
+        assertEquals(5_000_000L, grantRow(id).costCapMicros as long, "the limit stays")
     }
 
     @Test
@@ -216,7 +232,7 @@ class AgentAccessAdminSmokeTests {
 
     @Test
     void "pause, unpause and revoke each log one event with who and the before and after"() {
-        String id = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant.grantId
+        String id = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant.grantId
         assertEquals(["PAUSED", "ADMIN"], adminOk("pause#AgentAccessGrant", [grantId: id]).grant.with { [it.statusId, it.pauseReason] })
         assertEquals(AgentAccess.PAUSED, AgentAccess.access(ec, ALPHA, EDITOR).state)
         assertEquals("ACTIVE", adminOk("unpause#AgentAccessGrant", [grantId: id, days: 3]).grant.statusId)
@@ -234,7 +250,7 @@ class AgentAccessAdminSmokeTests {
 
     @Test
     void "usage sums the ledger by day and by role and model for a user and a tenant"() {
-        String id = adminOk("create#AgentAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA]).grant.grantId
+        String id = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: ALPHA]).grant.grantId
         Timestamp today = new Timestamp(System.currentTimeMillis())
         Timestamp yesterday = new Timestamp(System.currentTimeMillis() - 86_400_000L)
         turn("T1", id, ALPHA, EDITOR, "AUTHOR", "claude-opus-5-5", 40_000L, today)

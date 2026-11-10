@@ -91,10 +91,11 @@ class AgentAccess {
         e.create()
     }
 
-    /** Dollars as micro-dollars, rounded half-up; a limit must be more than zero. */
+    /** Dollars as micro-dollars, rounded half-up; a limit must be more than zero once rounded (a sub-micro limit is none). */
     static long microsOf(BigDecimal usd) {
-        if (usd == null || usd.signum() <= 0) throw new IllegalArgumentException("A limit must be more than 0 dollars.")
-        return usd.multiply(new BigDecimal(1_000_000)).setScale(0, RoundingMode.HALF_UP).longValueExact()
+        long micros = usd == null ? 0L : usd.multiply(new BigDecimal(1_000_000)).setScale(0, RoundingMode.HALF_UP).longValueExact()
+        if (micros <= 0L) throw new IllegalArgumentException("A limit must be more than 0 dollars.")
+        return micros
     }
 
     /** The grant's window, limit and status, as an event records them. */
@@ -134,7 +135,10 @@ class AgentAccess {
         return find.orderBy(["companyUserGroupId", "userId", "-fromDate"]).useCache(false).list().collect { grantView(ec, it) }
     }
 
-    /** A new grant for a member of the tenant; the user's grant there that is not revoked is revoked first. */
+    /**
+     * A new grant for a member of the tenant, always with a limit (Aditi 2026-11-10: the Darpan admin decides the spend limit
+     * when granting); the user's grant there that is not revoked is revoked first.
+     */
     static Map adminCreate(def ec, String userId, String tenantId, Timestamp fromDate, Timestamp thruDate, Integer days, BigDecimal costCapUsd) {
         Timestamp now = ec.user.nowTimestamp
         if (!isMember(ec, tenantId, userId)) { ec.message.addError("User ${userId} is not a member of tenant ${tenantId}.".toString()); return null }
@@ -157,15 +161,15 @@ class AgentAccess {
         return grantView(ec, g)
     }
 
-    /** A new end (days from now, thruDate, or none) or limit for a grant that is not revoked; at its limit it pauses. */
-    static Map adminUpdate(def ec, String grantId, Timestamp thruDate, Integer days, BigDecimal costCapUsd, Boolean clearThruDate, Boolean clearCostCap) {
+    /** A new end (days from now, thruDate, or none) or a new limit (never none) for a grant that is not revoked; at its limit it pauses. */
+    static Map adminUpdate(def ec, String grantId, Timestamp thruDate, Integer days, BigDecimal costCapUsd, Boolean clearThruDate) {
         def g = openGrant(ec, grantId)
         if (g == null) return null
-        if (thruDate == null && days == null && costCapUsd == null && !clearThruDate && !clearCostCap) {
-            ec.message.addError("Give a new end (days, thruDate or clearThruDate) or a new limit (costCapUsd or clearCostCap).")
+        if (thruDate == null && days == null && costCapUsd == null && !clearThruDate) {
+            ec.message.addError("Give a new end (days, thruDate or clearThruDate) or a new limit (costCapUsd).")
             return null
         }
-        Map change = changes(ec, g, thruDate, days, costCapUsd, clearThruDate, clearCostCap)
+        Map change = changes(ec, g, thruDate, days, costCapUsd, clearThruDate)
         if (change == null) return null
         Map before = snapshot(g)
         g.setAll(change + [lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp])
@@ -192,7 +196,7 @@ class AgentAccess {
         def g = openGrant(ec, grantId)
         if (g == null) return null
         if (g.statusId != STATUS_PAUSED) { ec.message.addError("Grant ${grantId} is not paused.".toString()); return null }
-        Map change = changes(ec, g, thruDate, days, costCapUsd, false, false)
+        Map change = changes(ec, g, thruDate, days, costCapUsd, false)
         if (change == null) return null
         Long cap = (change.containsKey("costCapMicros") ? change.costCapMicros : g.costCapMicros) as Long
         long spent = spentMicros(ec, grantId)
@@ -296,20 +300,18 @@ class AgentAccess {
     }
 
     private static Long capOf(def ec, BigDecimal usd) {
-        if (usd == null) return null
         try { return microsOf(usd) } catch (IllegalArgumentException e) { ec.message.addError(e.message); return null }
     }
 
     /** The fields an update or unpause changes; days count from now (an extension), not from the grant's start. */
-    private static Map changes(def ec, def g, Timestamp thruDate, Integer days, BigDecimal costCapUsd, Boolean clearThruDate, Boolean clearCostCap) {
+    private static Map changes(def ec, def g, Timestamp thruDate, Integer days, BigDecimal costCapUsd, Boolean clearThruDate) {
         Map out = [:]
         if (thruDate != null || days != null || clearThruDate) {
             Map end = windowEnd(ec, ec.user.nowTimestamp, thruDate, days, clearThruDate as boolean)
             if (end == null) return null
             out.thruDate = end.thruDate
         }
-        if (clearCostCap) out.costCapMicros = null
-        else if (costCapUsd != null) {
+        if (costCapUsd != null) {
             Long cap = capOf(ec, costCapUsd)
             if (cap == null) return null
             out.costCapMicros = cap

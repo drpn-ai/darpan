@@ -150,9 +150,9 @@ class CliAuthSupport {
         return normalize(userId) != null && CliAccess.cliAllowed(ec, normalize(userId))
     }
 
-    /** RPC methods about the caller's own sign-in, held to the key's own expiry only, not to a tenant (DAR-BE-195). */
-    static final Set<String> TENANT_FREE_METHODS = (["facade.CliAuthFacadeServices.logout#CliSession",
-                                                     "facade.AuthFacadeServices.get#SessionInfo"] as LinkedHashSet<String>).asImmutable()
+    /** The one RPC method held to the key's own expiry, not to a tenant: signing the caller's own CLI session out (DAR-BE-195). */
+    static final String OWN_SIGN_OUT_METHOD = "facade.CliAuthFacadeServices.logout#CliSession"
+    static final String CLI_KEY_NOT_SIGNED_IN = "A CLI call signs in with its login_key header. Run darpan login to sign in again."
 
     /**
      * A Moqui login key for the Darpan CLI, as UserFacadeImpl.getLoginKey issues one: 40 random characters, stored
@@ -295,15 +295,30 @@ class CliAuthSupport {
     /**
      * Null, or why this call may not run in its tenant (the X-Darpan-Tenant header, else the user's preferred tenant, so
      * leaving the header off is no way round it): no live CLI grant there, or the sign-in is older than the user's role
-     * there allows. Darpan admins pass: 30 days everywhere is their key's own lifetime. Calls about the caller's own
-     * sign-in (TENANT_FREE_METHODS) pass too.
+     * there allows. Darpan admins pass: 30 days everywhere is their key's own lifetime. Signing the session out
+     * (ownSignOutCall) passes too.
+     *
+     * The tenant is resolved for the signed-in user, so the request must be signed in as the key's own user: a CLI key
+     * carried only as the persistent-login cookie is not a login yet here (no user, so no tenant to check), and a key
+     * beside another user's web session would be checked against that user. Both are refused (review C2).
      */
     static String tenantCallProblem(def ec, def cliSession) {
         String userId = cliSession.userId as String
+        if (TenantAccessSupport.currentUserId(ec) != userId) return CLI_KEY_NOT_SIGNED_IN
         if (CliAccess.isDarpanAdmin(ec, userId)) return null
-        List<String> methods = RpcMethodFence.requestedMethods(ec.web?.requestParameters as Map).findAll { it }
-        if (methods && methods.every { it in TENANT_FREE_METHODS }) return null
+        def request = ec.web?.request
+        if (request != null && ownSignOutCall(RpcMethodFence.routedSegments(request), ec.web.requestParameters as Map)) return null
         return CliAccess.tenantProblem(ec, userId, TenantAccessSupport.currentActiveTenantUserGroupId(ec), (Timestamp) cliSession.createdDate)
+    }
+
+    /**
+     * True only for a JSON-RPC call (or batch) of logout#CliSession alone. The method is read only on the rpc/json route,
+     * as RpcMethodFence.enforce reads it: elsewhere (the GraphQL path) a method parameter means nothing (review C1).
+     */
+    static boolean ownSignOutCall(List<String> routedSegments, Map params) {
+        if (!RpcMethodFence.isJsonRpc(routedSegments)) return false
+        List<String> methods = RpcMethodFence.requestedMethods(params).findAll { it }
+        return !methods.isEmpty() && methods.every { it == OWN_SIGN_OUT_METHOD }
     }
 
     private static String cliSessionProblem(def ec, String cliKeyHash, def cliSession) {

@@ -202,6 +202,17 @@ class CliAuthSupportTests {
     }
 
     @Test
+    @DisplayName("DAR-BE-195 review C1/M1: only a JSON-RPC call to logout#CliSession alone skips the tenant check")
+    void onlyAJsonRpcLogoutSkipsTheTenantCheck() {
+        String logout = "facade.CliAuthFacadeServices.logout#CliSession"
+        assertTrue(CliAuthSupport.ownSignOutCall(["rpc", "json"], [method: logout]))
+        assertFalse(CliAuthSupport.ownSignOutCall(["rest", "s1", "graphql"], [method: logout]), "a method parameter on the GraphQL path")
+        assertFalse(CliAuthSupport.ownSignOutCall(["rpc", "json"], [method: "facade.AuthFacadeServices.get#SessionInfo"]), "session info names a tenant")
+        assertFalse(CliAuthSupport.ownSignOutCall(["rpc", "json"], [_requestBodyJsonList: [[method: logout], [method: "facade.X.list#Y"]]]), "a batch")
+        assertFalse(CliAuthSupport.ownSignOutCall(["rpc", "json"], [:]))
+    }
+
+    @Test
     @DisplayName("revalidate: a session with no mark is left alone")
     void revalidateUnmarkedSessionPasses() {
         def session = new SessionStub()

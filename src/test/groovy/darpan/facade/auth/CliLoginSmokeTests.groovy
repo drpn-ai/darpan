@@ -334,6 +334,20 @@ class CliLoginSmokeTests {
     }
 
     @Test
+    @DisplayName("DAR-BE-195 review C2: a CLI key the request is not signed in with (cookie, or another user's session) is refused")
+    void aCliKeyNotSignedInAsItsUserIsRefused() {
+        role(PLAIN_ID, T1, "DARPAN_COMPANY_VIEW_ONLY")
+        cliGrant(PLAIN_ID, T1)
+        Map session = [userId: PLAIN_ID, createdDate: new Timestamp(System.currentTimeMillis() - 60_000L)]
+        assertEquals(CliAuthSupport.CLI_KEY_NOT_SIGNED_IN, CliAuthSupport.tenantCallProblem(ec, session), "no user signed in yet")
+        assertTrue(ec.user.internalLoginUser(OTHER_USERNAME))
+        assertEquals(CliAuthSupport.CLI_KEY_NOT_SIGNED_IN, CliAuthSupport.tenantCallProblem(ec, session), "signed in as someone else")
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(PLAIN_USERNAME))
+        assertNull(CliAuthSupport.tenantCallProblem(ec, session))
+    }
+
+    @Test
     @DisplayName("the eleventh start in a minute from one address is refused")
     void theEleventhStartInAMinuteFromOneAddressIsRefused() {
         (1..10).each { int i ->

@@ -10,6 +10,7 @@ import darpan.conclusion.brain.fact.Product
 import darpan.conclusion.brain.fact.Payment
 import darpan.conclusion.brain.fact.Return
 import darpan.conclusion.brain.fact.ReplacementReturn
+import darpan.conclusion.brain.fact.ShopifyOrder
 import darpan.conclusion.brain.fact.Ask
 import darpan.conclusion.brain.fact.Answered
 import darpan.conclusion.brain.fact.Cause
@@ -98,6 +99,54 @@ declare PaymentsNotTheTotal
     settled : BigDecimal
 end
 
+// DAR-BE-204 (Dolls Kill, Aditi 2026-11-10: "start with shopify"): a Shopify order NetSuite has no sales order for,
+// concluded through its HotWax order. Every piece below needs the Shopify order, so no HotWax-keyed check changes.
+declare ShopifyOrderNotInHotwax
+    @label("HotWax has no order for this Shopify order") @value("{shopify.name}")
+    shopify : ShopifyOrder @key
+end
+
+declare HotwaxHasNetsuiteId
+    @label("HotWax holds a NetSuite id for it") @value("{order.netsuiteOrderId}")
+    order : Order @key
+end
+
+declare PaymentNeverMade
+    @label("Its payment failed and was never made (Shopify: expired)") @value("{shopify.name} {shopify.financialStatus}")
+    order : Order @key
+    shopify : ShopifyOrder
+end
+
+declare PosOrderUnpaid
+    @label("Rung up at a store with no payment recorded") @value("{order.total}")
+    order : Order @key
+end
+
+declare PaidWithNothingReceived
+    @label("Shopify marks it paid with no payment taken; HotWax has none") @value("{shopify.name} {shopify.total}")
+    order : Order @key
+    shopify : ShopifyOrder
+end
+
+declare LineRemovedAfterSale
+    @label("Shopify dropped a line after the sale; HotWax still counts it") @value("paid {settled}, Shopify now {shopify.currentTotal}, HotWax {order.total}")
+    order : Order @key
+    shopify : ShopifyOrder
+    settled : BigDecimal
+end
+
+declare ForeignCurrencyShortfall
+    @label("Paid from abroad: the converted payment is just under the total") @value("{settled} of {order.total}")
+    order : Order @key
+    settled : BigDecimal
+end
+
+declare ApprovedAndPaid
+    @label("Approved and paid; nothing Darpan reads holds it") @value("{settled} of {order.total}")
+    order : Order @key
+    settled : BigDecimal
+end
+
 // ---- each fact read once
 
 rule "R1 sees the order not in NetSuite: no sales order line"
@@ -126,6 +175,25 @@ then
     insertLogical( new OrderNotInNetsuite( $o ) );
 end
 
+// DAR-BE-204: NetSuite has no sales order by the Shopify order's name; HotWax answered with its order.
+rule "Shopify sees the order not in NetSuite: no sales order by its name"
+    @reads("Finding") @produces("OrderNotInNetsuite")
+when
+    Finding( kind == "shopifyOrder", bucket == "MISSING_FROM_FILE_2", $o : order, order != null )
+then
+    insertLogical( new OrderNotInNetsuite( $o ) );
+end
+
+rule "HotWax has no order for a Shopify order"
+    @reads("Finding, ShopifyOrder, Answered") @produces("ShopifyOrderNotInHotwax")
+when
+    Finding( kind == "shopifyOrder", bucket == "MISSING_FROM_FILE_2", $s : shopifyOrder, shopifyOrder != null )
+    Answered( question == "omsOrderByShopifyId", subject == $s )
+    ShopifyOrder( this == $s, order == null )
+then
+    insertLogical( new ShopifyOrderNotInHotwax( $s ) );
+end
+
 // Per amount, not per row: two gift cards swiped (100 + 81) are given back only by 181 back to that tender. A row of the
 // tender with no amount proves nothing.
 rule "A tender taken was given back in full"
@@ -150,6 +218,17 @@ when
     not Answered( question == "orderPayments", subject == $o )
 then
     insertLogical( new Ask( "orderPayments", $o ) );
+end
+
+// DAR-BE-204: every Shopify finding needs its HotWax order before any order cause can hold; one read by externalId.
+rule "Ask HotWax for the order of a Shopify order NetSuite does not have"
+    @reads("Finding, Answered") @asks("omsOrderByShopifyId")
+    @mayEnable("PAY_EXPIRED,NS_ID_NO_SO,NOT_IN_HC,POS_UNPAID,CONC_PARTIAL_PAYMENT_GIVEN_BACK,PAID_NO_TXN,LINE_REMOVED,FX_GAP,HELD_IN_HC")
+when
+    Finding( kind == "shopifyOrder", bucket == "MISSING_FROM_FILE_2", $s : shopifyOrder, shopifyOrder != null )
+    not Answered( question == "omsOrderByShopifyId", subject == $s )
+then
+    insertLogical( new Ask( "omsOrderByShopifyId", $s ) );
 end
 
 // DAR-BE-186: only for the items of an order NetSuite does not have; one read per 100 products, dropped when the order's
@@ -345,6 +424,174 @@ end
 
 // ---- causes: each about one subject, written once
 
+// ---- DAR-BE-204 pieces: a Shopify order's HotWax order (each needs the ShopifyOrder, so HotWax-keyed checks are untouched)
+
+rule "HotWax holds a NetSuite id for a Shopify order NetSuite has no sales order by name for"
+    @reads("OrderNotInNetsuite, ShopifyOrder, Order") @produces("HotwaxHasNetsuiteId")
+when
+    OrderNotInNetsuite( $o : order )
+    ShopifyOrder( order == $o )
+    Order( this == $o, netsuiteOrderId != null )
+then
+    insertLogical( new HotwaxHasNetsuiteId( $o ) );
+end
+
+rule "A Shopify order's payment failed and was never made"
+    @reads("OrderNotInNetsuite, ShopifyOrder") @produces("PaymentNeverMade")
+when
+    OrderNotInNetsuite( $o : order )
+    $s : ShopifyOrder( order == $o, financialStatus == "EXPIRED" )
+then
+    insertLogical( new PaymentNeverMade( $o, $s ) );
+end
+
+rule "A store sale with no payment recorded"
+    @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("PosOrderUnpaid")
+when
+    OrderNotInNetsuite( $o : order )
+    ShopifyOrder( order == $o )
+    Order( this == $o, paymentsComplete == true, shipMethod == "POS_COMPLETED" )
+    not Payment( order == $o )
+then
+    insertLogical( new PosOrderUnpaid( $o ) );
+end
+
+// Dolls Kill DK5053928 and 14 more (Shipped Suite claim replacements): items discounted 100%, a Global Shipping charge of
+// $8-$17 left; Shopify shows Paid with no payment transaction and HotWax has no payment, so HotWax's payment check holds it.
+rule "Shopify marks it paid with no payment taken, and HotWax has none"
+    @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("PaidWithNothingReceived")
+when
+    OrderNotInNetsuite( $o : order )
+    $s : ShopifyOrder( order == $o, financialStatus == "PAID", hasPaymentTransaction == "N", total != null, total.signum() > 0 )
+    Order( this == $o, paymentsComplete == true )
+    not Payment( order == $o, state == "SETTLED" )
+then
+    insertLogical( new PaidWithNothingReceived( $o, $s ) );
+end
+
+// Dolls Kill: Shopify removed the 360° Protection line after the sale; the customer paid the new total, HotWax still counts it.
+rule "Shopify dropped a line after the sale and the payment is its new total"
+    @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("LineRemovedAfterSale")
+when
+    OrderNotInNetsuite( $o : order )
+    $s : ShopifyOrder( order == $o, financialStatus == "PAID", total != null, currentTotal != null, currentTotal < total )
+    Order( this == $o, paymentsComplete == true, total != null )
+    not Payment( order == $o, state == "SETTLED", amount == null )
+    not Payment( order == $o, state == "REFUNDED" )
+    $settled : List( size > 0 ) from collect( Payment( order == $o, state == "SETTLED" ) )
+then
+    BigDecimal paid = Payment.sum( $settled );
+    BigDecimal cent = new BigDecimal( "0.01" );
+    if (paid.subtract( $s.getCurrentTotal() ).abs().compareTo( cent ) < 0 && $o.getTotal().subtract( paid ).compareTo( cent ) >= 0) {
+        insertLogical( new LineRemovedAfterSale( $o, $s, paid ) );
+    }
+end
+
+// Dolls Kill (Aditi 2026-11-10: "all these are currency conversion"): an order shipped abroad, paid 0.5-1.5% under its total.
+rule "An order shipped abroad is paid just under its total"
+    @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("ForeignCurrencyShortfall")
+when
+    OrderNotInNetsuite( $o : order )
+    ShopifyOrder( order == $o )
+    Order( this == $o, paymentsComplete == true, total != null, total.signum() > 0, shipMethod == "INTL_STANDARD" )
+    not Payment( order == $o, state == "SETTLED", amount == null )
+    not Payment( order == $o, state == "REFUNDED" )
+    $settled : List( size > 0 ) from collect( Payment( order == $o, state == "SETTLED" ) )
+then
+    BigDecimal paid = Payment.sum( $settled );
+    BigDecimal gap = $o.getTotal().subtract( paid );
+    if (gap.compareTo( new BigDecimal( "0.01" ) ) >= 0 && gap.compareTo( $o.getTotal().multiply( new BigDecimal( "0.02" ) ) ) <= 0) {
+        insertLogical( new ForeignCurrencyShortfall( $o, paid ) );
+    }
+end
+
+// Dolls Kill DK5051629, DK5072413, PD3627918: approved and paid, held by an open task in HotWax that no read carries.
+rule "Approved and paid, and still not in NetSuite"
+    @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("ApprovedAndPaid")
+when
+    OrderNotInNetsuite( $o : order )
+    ShopifyOrder( order == $o )
+    Order( this == $o, paymentsComplete == true, total != null, statusId == "ORDER_APPROVED" )
+    not Payment( order == $o, state == "SETTLED", amount == null )
+    $settled : List( size > 0 ) from collect( Payment( order == $o, state == "SETTLED" ) )
+then
+    BigDecimal paid = Payment.sum( $settled );
+    if (paid.compareTo( $o.getTotal().subtract( new BigDecimal( "0.01" ) ) ) >= 0) { insertLogical( new ApprovedAndPaid( $o, paid ) ); }
+end
+
+// ---- DAR-BE-204 causes (ranks unique in the pack)
+
+rule "Order cause · payment failed, never paid"
+    @reads("OrderNotInNetsuite, PaymentNeverMade") @concludes("PAY_EXPIRED") @rank(95)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $p : PaymentNeverMade( order == $o )
+then
+    insertLogical( Cause.expected( $o, "PAY_EXPIRED", 95, $n, $p ) );
+end
+
+rule "Order cause · HotWax holds a NetSuite id, NetSuite has no sales order by its name"
+    @reads("OrderNotInNetsuite, HotwaxHasNetsuiteId") @concludes("NS_ID_NO_SO") @rank(92)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $h : HotwaxHasNetsuiteId( order == $o )
+then
+    insertLogical( Cause.fix( $o, "NS_ID_NO_SO", 92, $n, $h ) );
+end
+
+rule "Shopify order cause · not in HotWax"
+    @reads("ShopifyOrderNotInHotwax") @concludes("NOT_IN_HC") @rank(90)
+when
+    $m : ShopifyOrderNotInHotwax( $s : shopify )
+then
+    insertLogical( Cause.fix( $s, "NOT_IN_HC", 90, $m ) );
+end
+
+rule "Order cause · store sale with no payment"
+    @reads("OrderNotInNetsuite, PosOrderUnpaid") @concludes("POS_UNPAID") @rank(85)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $p : PosOrderUnpaid( order == $o )
+then
+    insertLogical( Cause.fix( $o, "POS_UNPAID", 85, $n, $p ) );
+end
+
+rule "Order cause · marked paid in Shopify, nothing received"
+    @reads("OrderNotInNetsuite, PaidWithNothingReceived") @concludes("PAID_NO_TXN") @rank(78)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $p : PaidWithNothingReceived( order == $o )
+then
+    insertLogical( Cause.fix( $o, "PAID_NO_TXN", 78, $n, $p ) );
+end
+
+rule "Order cause · a line Shopify removed after the sale"
+    @reads("OrderNotInNetsuite, LineRemovedAfterSale") @concludes("LINE_REMOVED") @rank(72)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $l : LineRemovedAfterSale( order == $o )
+then
+    insertLogical( Cause.fix( $o, "LINE_REMOVED", 72, $n, $l ) );
+end
+
+rule "Order cause · currency conversion leaves the payment under the total"
+    @reads("OrderNotInNetsuite, ForeignCurrencyShortfall") @concludes("FX_GAP") @rank(71)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $g : ForeignCurrencyShortfall( order == $o )
+then
+    insertLogical( Cause.fix( $o, "FX_GAP", 71, $n, $g ) );
+end
+
+rule "Order cause · approved and paid, held in HotWax"
+    @reads("OrderNotInNetsuite, ApprovedAndPaid") @concludes("HELD_IN_HC") @rank(30)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $a : ApprovedAndPaid( order == $o )
+then
+    insertLogical( Cause.fix( $o, "HELD_IN_HC", 30, $n, $a ) );
+end
+
 rule "Order cause · partial payment given back"
     @reads("OrderNotInNetsuite, PartialPaymentGivenBack") @concludes("CONC_PARTIAL_PAYMENT_GIVEN_BACK") @rank(80)
 when
@@ -480,6 +727,27 @@ when
     Order( this == $o, statusId == "ORDER_APPROVED" )
     OrderNotInNetsuite( order == $o )
     BestCause( subject == $o, $c : cause )
+then
+    insert( Conclusion.of( $f, $c ) );
+end
+
+// DAR-BE-204: Dolls Kill "Every Shopify order is in NetSuite within a day": a Shopify order takes its HotWax order's cause,
+// or its own when HotWax has no order for it.
+rule "Shopify in NetSuite · the order's cause"
+    @reads("Finding, OrderNotInNetsuite, BestCause") @states("SHOPIFY_IN_NS")
+when
+    $f : Finding( kind == "shopifyOrder", bucket == "MISSING_FROM_FILE_2", $o : order, order != null )
+    OrderNotInNetsuite( order == $o )
+    BestCause( subject == $o, $c : cause )
+then
+    insert( Conclusion.of( $f, $c ) );
+end
+
+rule "Shopify in NetSuite · a Shopify order HotWax does not have"
+    @reads("Finding, BestCause") @states("SHOPIFY_IN_NS")
+when
+    $f : Finding( kind == "shopifyOrder", bucket == "MISSING_FROM_FILE_2", order == null, $s : shopifyOrder, shopifyOrder != null )
+    BestCause( subject == $s, $c : cause )
 then
     insert( Conclusion.of( $f, $c ) );
 end

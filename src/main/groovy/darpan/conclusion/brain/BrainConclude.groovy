@@ -40,7 +40,9 @@ class BrainConclude {
         // DAR-BE-192: replacementReturn (by order id), returnRma and returnMemo (by return id).
         // DAR-BE-151: originalInNetsuite (an exchange's original, by its HotWax order id).
         Map<String, Map<String, Map>> more = [(BrainQuestions.REPLACEMENT_RETURN): [:], (BrainQuestions.RETURN_RMA): [:],
-                                              (BrainQuestions.RETURN_MEMO): [:], (BrainQuestions.ORIGINAL_IN_NETSUITE): [:]] as Map<String, Map<String, Map>>
+                                              (BrainQuestions.RETURN_MEMO): [:], (BrainQuestions.ORIGINAL_IN_NETSUITE): [:],
+                                              // DAR-BE-204: a Shopify order's HotWax order, by Shopify id.
+                                              (BrainQuestions.OMS_ORDER_BY_SHOPIFY_ID): [:]] as Map<String, Map<String, Map>>
         List<String> warnings = []
 
         List<Map> round = batches.collect { fire(engine, kind, it, answers, productAnswers, more) }
@@ -125,9 +127,11 @@ class BrainConclude {
     private static boolean touches(String kind, List<Map> batch, Map<String, Map> answers, Map<String, Map> productAnswers,
                                    Map<String, Map<String, Map>> more) {
         Map<String, Map> byReplacement = more?.get(BrainQuestions.REPLACEMENT_RETURN) ?: [:]
+        Map<String, Map> byShopifyId = more?.get(BrainQuestions.OMS_ORDER_BY_SHOPIFY_ID) ?: [:]
         return batch.any { Map f ->
             String o = orderIdOf(kind, f)
-            answers.containsKey(o) || productAnswers.containsKey(productIdOf(kind, f)) || byReplacement.containsKey(o)
+            answers.containsKey(o) || productAnswers.containsKey(productIdOf(kind, f)) || byReplacement.containsKey(o) ||
+                    (kind == "shopifyOrder" && byShopifyId.containsKey(o))
         }
     }
 
@@ -140,7 +144,8 @@ class BrainConclude {
 
     private static String orderIdOf(String kind, Map finding) {
         Map record = (Map) (((Map) (((Map) (finding?.sides ?: [:])).FILE_1 ?: [:])).record ?: [:])
-        Object id = kind == "orderLine" ? record.omsOrderId : record.orderId
+        // DAR-BE-204: a Shopify order's world is keyed by its Shopify id until HotWax answers for it.
+        Object id = kind == "orderLine" ? record.omsOrderId : kind == "shopifyOrder" ? record.id : record.orderId
         return id?.toString()?.trim() ?: null
     }
 

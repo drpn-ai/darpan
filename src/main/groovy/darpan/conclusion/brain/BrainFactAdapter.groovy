@@ -8,6 +8,7 @@ import darpan.conclusion.brain.fact.Payment
 import darpan.conclusion.brain.fact.Product
 import darpan.conclusion.brain.fact.ReplacementReturn
 import darpan.conclusion.brain.fact.Return
+import darpan.conclusion.brain.fact.ShopifyOrder
 
 import static darpan.common.ValueSupport.normalize
 
@@ -30,6 +31,11 @@ class BrainFactAdapter {
     static final String RETURN_MEMO = "returnMemo"
     /** DAR-BE-151 (Aditi 2026-11-06): an exchange's original order's NetSuite sales order, asked by its HotWax order id. */
     static final String ORIGINAL_IN_NETSUITE = "originalInNetsuite"
+    /**
+     * DAR-BE-204: the HotWax order of a Shopify order, asked by its Shopify id (OMS_GQL by externalId, through the scope's
+     * lookup of this name: a Shopify-paired scope has no HotWax source to default to). Carries its payments too.
+     */
+    static final String OMS_ORDER_BY_SHOPIFY_ID = "omsOrderByShopifyId"
 
     /**
      * The record fields facts() reads, per RuleSetCompareScope.conclusionBrain and side. The extract must keep them, or a
@@ -43,6 +49,9 @@ class BrainFactAdapter {
             // DAR-BE-192: an R7 order, its name (a replacement's EXC- / WTY-) and its HotWax status.
             case "ORDER": return ["orderId", "orderName", "grandTotal", "statusId"]
             case "RETURN": return ["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"]
+            // DAR-BE-204: a Shopify order (the Shopify orders read keeps its amounts as {shopMoney: {amount}}).
+            case "SHOPIFY_ORDER": return ["id", "name", "displayFinancialStatus", "sourceName", "totalPriceSet",
+                                          "currentTotalPriceSet", "subtotalPriceSet", "hasPaymentTransaction"]
             default: return []
         }
     }
@@ -101,6 +110,37 @@ class BrainFactAdapter {
         } else if (kind == Finding.ORDER) {
             // DAR-BE-192: an R7 order: HotWax approved it and NetSuite has no sales order for it (MISSING_FROM_FILE_2).
             f.order = orderFor(normalize(record.orderId), record.grandTotal, null, normalize(record.orderName), normalize(record.statusId))
+        } else if (kind == Finding.SHOPIFY_ORDER) {
+            // DAR-BE-204: a Shopify order NetSuite has no sales order for. Its HotWax order (and that order's payments) comes
+            // from the omsOrderByShopifyId answer; until then the finding has only its Shopify side.
+            String shopifyId = normalize(record.id)
+            if (shopifyId) {
+                ShopifyOrder s = (ShopifyOrder) orders.get("shopify|" + shopifyId)
+                if (s == null) {
+                    s = new ShopifyOrder(shopifyId: shopifyId, name: normalize(record.name),
+                            financialStatus: normalize(record.displayFinancialStatus), sourceName: normalize(record.sourceName),
+                            total: shopMoney(record.totalPriceSet), currentTotal: shopMoney(record.currentTotalPriceSet),
+                            subtotal: shopMoney(record.subtotalPriceSet), hasPaymentTransaction: normalize(record.hasPaymentTransaction))
+                    orders.put("shopify|" + shopifyId, s)
+                    facts.add(s)
+                    Map<String, Map> byShopifyId = moreAnswers?.get(OMS_ORDER_BY_SHOPIFY_ID)
+                    if (byShopifyId != null && byShopifyId.containsKey(shopifyId)) {
+                        facts.add(new Answered(OMS_ORDER_BY_SHOPIFY_ID, s))
+                        Map hc = byShopifyId.get(shopifyId)
+                        String hcOrderId = hc == null ? null : normalize(hc.orderId)
+                        // Its payments come with it, once: not for an order already in the world or answered by orderPayments.
+                        boolean addPayments = hcOrderId && !orders.containsKey(hcOrderId) && !answersByOrderId?.containsKey(hcOrderId)
+                        s.order = hcOrderId ? orderFor(hcOrderId, hc.grandTotal, netsuiteOrderIdOf(hc.identifications),
+                                normalize(hc.orderName), normalize(hc.statusId)) : null
+                        if (s.order != null) {
+                            if (s.order.shipMethod == null) s.order.shipMethod = firstShipMethod(hc.shipGroups)
+                            if (addPayments) addAnswer(facts, s.order, [(hcOrderId): hc])
+                        }
+                    }
+                }
+                f.shopifyOrder = s
+                f.order = s.order
+            }
         } else if (kind == Finding.RETURN) {
             Order order = orderFor(normalize(record.orderId), record.orderGrandTotal, normalize(record.orderNetsuiteId))
             if (order != null) {
@@ -201,6 +241,26 @@ class BrainFactAdapter {
             facts.add(new Payment(order: order, tender: normalize(r?.paymentMethodTypeId),
                     state: state?.startsWith("PAYMENT_") ? state.substring(8) : state, amount: number(r?.maxAmount)?.stripTrailingZeros()))
         }
+    }
+
+    /** DAR-BE-204: a Shopify money set ({shopMoney: {amount}}) or a bare amount. */
+    static BigDecimal shopMoney(Object set) {
+        Object v = set instanceof Map ? (((Map) set).shopMoney instanceof Map ? ((Map) ((Map) set).shopMoney).amount : ((Map) set).amount) : set
+        return number(v)?.stripTrailingZeros()
+    }
+
+    /** DAR-BE-204: the NETSUITE_ORDER_ID among an OMS order's identifications. */
+    private static String netsuiteOrderIdOf(Object identifications) {
+        Object row = identifications instanceof List ? ((List) identifications).find { it instanceof Map &&
+                ((Map) it).orderIdentificationTypeId == "NETSUITE_ORDER_ID" } : null
+        return row ? normalize(((Map) row).idValue) : null
+    }
+
+    /** DAR-BE-204: the first ship group's shipment method (POS_COMPLETED, INTL_STANDARD, STANDARD, ...). */
+    private static String firstShipMethod(Object shipGroups) {
+        Object g = shipGroups instanceof List && !((List) shipGroups).isEmpty() ? ((List) shipGroups)[0] : null
+        if (g instanceof Map && ((Map) g).node instanceof Map) g = ((Map) g).node
+        return g instanceof Map ? normalize(((Map) g).shipmentMethodTypeId) : null
     }
 
     static BigDecimal number(Object value) {

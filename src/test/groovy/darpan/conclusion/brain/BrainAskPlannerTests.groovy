@@ -30,7 +30,9 @@ class BrainAskPlannerTests {
         // DAR-BE-192: a replacement's return can unlock up to "waits on its own return" (56), its RMA and memo up to 55.
         // DAR-BE-151: and, for an exchange, its original's NetSuite order "waits on its original order" (58), which the
         // return has to name first, so the return is worth asking up to 58 too.
-        assertEquals(RANKS + [productNetsuiteId: 66, replacementReturn: 58, returnRma: 55, returnMemo: 55, originalInNetsuite: 58],
+        // DAR-BE-204: a Shopify order's HotWax order can unlock up to "payment failed, never paid" (95): always worth asking.
+        assertEquals(RANKS + [productNetsuiteId: 66, replacementReturn: 58, returnRma: 55, returnMemo: 55, originalInNetsuite: 58,
+                              omsOrderByShopifyId: 95],
                 BrainQuestions.mayEnableRanks(BrainEngine.forPacks(["oms-netsuite"])))
     }
 

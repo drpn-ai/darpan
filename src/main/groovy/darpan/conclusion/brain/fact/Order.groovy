@@ -17,6 +17,8 @@ class Order {
     /** DAR-BE-192: its name (EXC-#GOR..., WTY-#GOR...: a replacement) and HotWax status, when the finding's record carries them. */
     String name
     String statusId
+    /** DAR-BE-204: its first ship group's shipment method (POS_COMPLETED: rung up at a store; INTL_STANDARD: shipped abroad). */
+    String shipMethod
     /** DAR-BE-151: its NetSuite sales order, as answered by originalInNetsuite (asked for an exchange's original);
      *  null after the answer means NetSuite has no sales order for it. */
     String netsuiteTranId

@@ -196,6 +196,8 @@ class RunConclusionStep {
             case "RETURN": return "return"
             // DAR-BE-192: an order-grain run (gorjana R7: approved orders against NetSuite sales orders).
             case "ORDER": return "order"
+            // DAR-BE-204: a Shopify-paired run (Dolls Kill: every Shopify order is in NetSuite), concluded through its HotWax order.
+            case "SHOPIFY_ORDER": return "shopifyOrder"
             default: return null
         }
     }

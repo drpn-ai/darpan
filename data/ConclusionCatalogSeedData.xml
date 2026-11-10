@@ -31,4 +31,21 @@
             enumCode="LOST_NO_MEMO" description="Lost-warranty claim, no credit memo"/>
     <moqui.basic.Enumeration enumId="REPL_UNPAID" enumTypeId="DarpanConclusion"
             enumCode="REPL_UNPAID" description="Replacement not paid for"/>
+    <!-- DAR-BE-204: why a Shopify order is not in NetSuite, concluded through its HotWax order (Dolls Kill). -->
+    <moqui.basic.Enumeration enumId="PAY_EXPIRED" enumTypeId="DarpanConclusion"
+            enumCode="PAY_EXPIRED" description="Payment failed, never paid"/>
+    <moqui.basic.Enumeration enumId="NS_ID_NO_SO" enumTypeId="DarpanConclusion"
+            enumCode="NS_ID_NO_SO" description="HotWax has a NetSuite id, NetSuite no order"/>
+    <moqui.basic.Enumeration enumId="NOT_IN_HC" enumTypeId="DarpanConclusion"
+            enumCode="NOT_IN_HC" description="Shopify order not in HotWax"/>
+    <moqui.basic.Enumeration enumId="POS_UNPAID" enumTypeId="DarpanConclusion"
+            enumCode="POS_UNPAID" description="Store sale with no payment"/>
+    <moqui.basic.Enumeration enumId="PAID_NO_TXN" enumTypeId="DarpanConclusion"
+            enumCode="PAID_NO_TXN" description="Marked paid in Shopify, nothing received"/>
+    <moqui.basic.Enumeration enumId="LINE_REMOVED" enumTypeId="DarpanConclusion"
+            enumCode="LINE_REMOVED" description="Line removed in Shopify after the sale"/>
+    <moqui.basic.Enumeration enumId="FX_GAP" enumTypeId="DarpanConclusion"
+            enumCode="FX_GAP" description="Currency conversion leaves the payment short"/>
+    <moqui.basic.Enumeration enumId="HELD_IN_HC" enumTypeId="DarpanConclusion"
+            enumCode="HELD_IN_HC" description="Approved and paid, held in HotWax"/>
 </entity-facade-xml>

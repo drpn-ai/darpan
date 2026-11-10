@@ -14,6 +14,7 @@ class BrainQuestions {
     static final String RETURN_RMA = BrainFactAdapter.RETURN_RMA
     static final String RETURN_MEMO = BrainFactAdapter.RETURN_MEMO
     static final String ORIGINAL_IN_NETSUITE = BrainFactAdapter.ORIGINAL_IN_NETSUITE
+    static final String OMS_ORDER_BY_SHOPIFY_ID = BrainFactAdapter.OMS_ORDER_BY_SHOPIFY_ID
 
     static Map<String, Integer> mayEnableRanks(BrainEngine engine) {
         Map<String, Map<String, Object>> meta = engine.ruleMetadata()

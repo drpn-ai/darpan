@@ -14,11 +14,14 @@ class Finding {
     static final String RETURN = "return"
     /** DAR-BE-192: an R7 order (a HotWax order with no NetSuite sales order). */
     static final String ORDER = "order"
+    /** DAR-BE-204: a Shopify order NetSuite has no sales order for, concluded through its HotWax order. */
+    static final String SHOPIFY_ORDER = "shopifyOrder"
 
     String key
     String kind
     String bucket
     Order order
     Return ret
+    ShopifyOrder shopifyOrder
     boolean netsuiteHasOrderLine
 }

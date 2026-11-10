@@ -5,6 +5,7 @@ import darpan.conclusion.brain.fact.Cause
 import darpan.conclusion.brain.fact.Order
 import darpan.conclusion.brain.fact.Product
 import darpan.conclusion.brain.fact.ReplacementReturn
+import darpan.conclusion.brain.fact.ShopifyOrder
 
 /**
  * DAR-BE-151 (design D6). The one place that sees every ask of a conclude pass. An ask is dropped when its subject's best
@@ -43,11 +44,12 @@ class BrainAskPlanner {
                 answered: answered, dropped: dropped, reused: reused]
     }
 
-    /** An order's id, a product's (DAR-BE-186), or a replacement's return's (DAR-BE-192). */
+    /** An order's id, a product's (DAR-BE-186), a replacement's return's (DAR-BE-192), or a Shopify order's (DAR-BE-204). */
     static String subjectId(Object subject) {
         if (subject instanceof Order) return ((Order) subject).orderId
         if (subject instanceof Product) return ((Product) subject).productId
         if (subject instanceof ReplacementReturn) return ((ReplacementReturn) subject).returnId
+        if (subject instanceof ShopifyOrder) return ((ShopifyOrder) subject).shopifyId
         return null
     }
 }

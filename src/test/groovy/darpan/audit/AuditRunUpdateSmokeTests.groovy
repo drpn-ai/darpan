@@ -107,6 +107,22 @@ class AuditRunUpdateSmokeTests {
                 findings: findings])
         call("${LEDGER}.close#ResolvedFindings", [companyUserGroupId: GORJANA, checkId: CHECK, reportDate: day, checkStamp: stamp,
                 checkStatusEnumId: run.checkStatusEnumId, examinedRecordKeys: findings*.recordKey])
+
+        // GORJANA's people: two current members with email (one written in capitals, one membership ending next week),
+        // a disabled account, a membership that ended, a member with no address, and a member of another tenant.
+        member("TRU_ANA", "Ana@Gorjana.example", GORJANA, [:])
+        member("TRU_BEN", "ben@gorjana.example", GORJANA, [thruDate: new Timestamp(System.currentTimeMillis() + 7L * 86400000)])
+        member("TRU_OFF", "off@gorjana.example", GORJANA, [:], "Y")
+        member("TRU_GONE", "gone@gorjana.example", GORJANA, [thruDate: new Timestamp(System.currentTimeMillis() - 86400000)])
+        member("TRU_NOMAIL", null, GORJANA, [:])
+        insert("moqui.security.UserGroup", [userGroupId: "KREWE", description: "Krewe"])
+        member("TRU_KREWE", "kim@krewe.example", "KREWE", [:])
+    }
+
+    private void member(String userId, String email, String tenant, Map membership, String disabled = "N") {
+        insert("moqui.security.UserAccount", [userId: userId, username: userId.toLowerCase(), emailAddress: email, disabled: disabled])
+        insert("moqui.security.UserGroupMember", [userGroupId: tenant, userId: userId,
+                fromDate: new Timestamp(System.currentTimeMillis() - 30L * 86400000)] + membership)
     }
 
     @AfterAll
@@ -143,7 +159,8 @@ class AuditRunUpdateSmokeTests {
 
         assertEquals(1, mails.size())
         Map mail = mails[0]
-        assertEquals("close@gorjana.example,ops@gorjana.example", mail.to)
+        assertEquals("ana@gorjana.example,ben@gorjana.example,close@gorjana.example,ops@gorjana.example", mail.to,
+                "the members, and the digest's addresses as well")
         assertTrue((mail.body.runSubject as String).startsWith("Gorjana Month close, "), mail.body.runSubject as String)
         assertTrue((mail.body.runSubject as String).endsWith(": 5 open findings"), mail.body.runSubject as String)
         List<Map> attachments = mail.attachments as List<Map>
@@ -209,7 +226,8 @@ class AuditRunUpdateSmokeTests {
     }
 
     @Test
-    void twoExecutionsFinishingTogetherSendOnce() {
+    void twoExecutionsFinishingTogetherSendOnceEvenWithNoDigestRowYet() {
+        ec.entity.find("darpan.audit.AuditDigest").deleteAll()
         CountDownLatch start = new CountDownLatch(1)
         List<Map> outcomes = Collections.synchronizedList([])
         List<Thread> threads = (1..2).collect {
@@ -229,6 +247,7 @@ class AuditRunUpdateSmokeTests {
         start.countDown()
         threads*.join(60000)
         assertEquals(1, mails.size(), "${outcomes}")
+        assertEquals("ana@gorjana.example,ben@gorjana.example", mails[0].to)
         assertEquals([false, true], outcomes*.sent.sort())
         assertEquals("ALREADY_SENT", outcomes.find { !it.sent }.reason)
 
@@ -256,10 +275,42 @@ class AuditRunUpdateSmokeTests {
             assertEquals(AUDIT, asked[1].auditId, "a failed execution still asks, its audit found from its checks")
             ec.entity.find("darpan.audit.AuditDigest").deleteAll()
             AuditRunUpdateSupport.afterExecution(ec, automation, [:], [auditId: AUDIT])
-            assertEquals(2, asked.size(), "no run digest, nothing asked")
+            assertEquals(3, asked.size(), "no run digest: on by default")
+            insert("darpan.audit.AuditDigest", [auditDigestId: "TRU_RUN", companyUserGroupId: GORJANA, auditId: AUDIT,
+                    kindEnumId: "AUDDK_RUN", sendTime: "00:00", isActive: "N"])
+            AuditRunUpdateSupport.afterExecution(ec, automation, [:], [auditId: AUDIT])
+            assertEquals(3, asked.size(), "turned off for this audit: nothing asked")
         } finally {
             AuditRunUpdateSupport.dispatch = realDispatch
         }
+    }
+
+    @Test
+    void withNoDigestTheUpdateGoesToEveryCurrentMemberOnceAndAnInactiveDigestTurnsItOff() {
+        assertEquals(["ana@gorjana.example", "ben@gorjana.example"], AuditRunUpdateSupport.tenantMemberEmails(ec, GORJANA),
+                "lowercased; disabled, ended, address-less and other tenants' people left out")
+        ec.entity.find("darpan.audit.AuditDigest").deleteAll()
+        assertEquals([[auditDigestId: "RUN_${AUDIT}".toString(), sent: true, reason: null]], send(AUTO))
+        assertEquals(1, mails.size())
+        assertEquals("ana@gorjana.example,ben@gorjana.example", mails[0].to)
+        assertEquals([], posts, "no digest, no chat space")
+        assertEquals("Y", ec.entity.find("darpan.audit.AuditDigest").condition("auditDigestId", "RUN_${AUDIT}".toString()).one().isActive,
+                "a default digest now holds the run's claim")
+        assertEquals("ALREADY_SENT", send(AUTO)[0].reason)
+
+        ec.entity.find("darpan.audit.AuditDigest").deleteAll()
+        insert("darpan.audit.AuditDigest", [auditDigestId: "TRU_RUN", companyUserGroupId: GORJANA, auditId: AUDIT, chatSpaceId: SPACE,
+                emailAddresses: "close@gorjana.example", kindEnumId: "AUDDK_RUN", sendTime: "00:00", isActive: "N"])
+        execution("AUT_STAT_SUCCESS", [completedDate: new Timestamp(System.currentTimeMillis() + 5000)])
+        assertEquals([], send(AUTO), "off for this audit")
+        assertEquals(1, mails.size())
+        assertEquals(1L, ec.entity.find("darpan.audit.AuditDigest").count(), "no default digest made beside it")
+    }
+
+    @Test
+    void aDigestAddressThatIsNotOneIsLeftOut() {
+        assertEquals(["close@gorjana.example", "ap@gorjana.example"],
+                AuditRunUpdateSupport.extraEmails([auditDigestId: "X", emailAddresses: "Close@Gorjana.example; not-an-address, ap@gorjana.example, close@gorjana.example"]))
     }
 
     @Test

@@ -71,15 +71,18 @@ class AuditSettingsSupport {
                      checks: checksByStatement[st.statementId as String].collect { Map c ->
                          [id: c.checkCode, label: c.label, savedRunId: c.savedRunId, runName: runNames[c.savedRunId as String]]
                      }]
-                }]
+                },
+                // DAR-BE-207: the update emailed after each run.
+                runEmail  : AuditRunUpdateSupport.runEmailSettings(ec, tenantId, audit.auditId as String)]
     }
 
     /**
      * Applies what changed. name: blank is ignored. statements: [{id, text, active}], each of this audit. schedule:
      * {active, time HH:mm, timeZone}, written to every automation the audit's checks run through (made first if missing).
+     * runEmail (DAR-BE-207): {active, alsoSendTo, chatSpaceId}, any left out unchanged; null changes nothing.
      * Errors go to ec.message; nothing is written when any input is wrong.
      */
-    static void save(def ec, String tenantId, Map audit, String name, List<Map> statementChanges, Map schedule) {
+    static void save(def ec, String tenantId, Map audit, String name, List<Map> statementChanges, Map schedule, Map runEmail = null) {
         List<Map> statements = statementsOf(ec, tenantId, audit)
         Set<String> ours = statements*.statementId as Set<String>
         (statementChanges ?: []).each { Map change ->
@@ -93,6 +96,7 @@ class AuditSettingsSupport {
         if (zone) {
             try { ZoneId.of(zone) } catch (Exception ignored) { ec.message.addError("${zone} is not a time zone.") }
         }
+        if (runEmail != null) AuditRunUpdateSupport.runEmailErrors(ec, tenantId, runEmail).each { ec.message.addError(it) }
         if (ec.message.hasError()) return
 
         Timestamp now = ec.user.nowTimestamp
@@ -114,6 +118,7 @@ class AuditSettingsSupport {
             ensureAutomations(ec, tenantId, stamped)   // a new check's automation is made on the schedule just saved
             applySchedule(ec, tenantId, stamped, now)
         }
+        if (runEmail != null) AuditRunUpdateSupport.saveRunEmail(ec, tenantId, audit.auditId as String, runEmail)
     }
 
     /** DAR-BE-199. The audit's own schedule: {time HH:mm, timeZone, active}, defaults for an audit never scheduled. */

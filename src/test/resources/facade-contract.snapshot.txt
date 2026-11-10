@@ -417,6 +417,7 @@ SERVICE save AuditSettings
   IN:
     audit : String [required]
     name : String
+    runEmail : Map
     schedule : Map
     statements : List
     statements.statement : Map
@@ -2844,6 +2845,7 @@ SERVICE save RunConclusions
     conclusions : List
     lookups : List
     savedRunId : String [required]
+    unexplainedOutcome : String
   OUT:
     errors : List
     errors.error : String

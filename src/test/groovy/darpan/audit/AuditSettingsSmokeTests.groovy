@@ -475,6 +475,42 @@ class AuditSettingsSmokeTests {
         assertEquals(["05:15", "America/Chicago", "N"], ["scheduleTime", "scheduleTimeZone", "scheduleActive"].collect { row("darpan.audit.Audit", "auditId", "${MINE}_OS".toString()).get(it) })
     }
 
+    @Test
+    @Order(60)
+    void theRunEmailIsOnByDefaultAndTakesAddressesToSendToAsWell() {
+        int members = AuditRunUpdateSupport.tenantMemberEmails(ec, MINE).size()
+        assertEquals([active: true, alsoSendTo: [], members: members, chatSpaceId: null],
+                (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail, "DAR-BE-207: on, to the members")
+
+        Map bad = facade("save#AuditSettings", [audit: "system-health", runEmail: [alsoSendTo: ["ap@krewe.example", "not-an-address"]]])
+        assertTrue(bad.hadError as boolean)
+        assertTrue((bad.errorText as String).contains("Not an email address: not-an-address."), bad.errorText as String)
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TSET_OTHER_SPACE", companyUserGroupId: OTHER,
+                    spaceName: "Other", webhookUrl: "https://chat.googleapis.com/v1/spaces/X/messages?key=k&token=t", isActive: "Y"])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Map stranger = facade("save#AuditSettings", [audit: "system-health", runEmail: [chatSpaceId: "TSET_OTHER_SPACE"]])
+        assertTrue((stranger.errorText as String).contains("Chat space TSET_OTHER_SPACE was not found."), stranger.errorText as String)
+        assertEquals([], (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail.alsoSendTo, "nothing written")
+
+        Map saved = facade("save#AuditSettings", [audit: "system-health",
+                runEmail: [active: false, alsoSendTo: ["Close@Krewe.example", "ap@krewe.example", "close@krewe.example"]]])
+        assertFalse(saved.hadError as boolean, saved.errorText as String)
+        assertEquals([active: false, alsoSendTo: ["close@krewe.example", "ap@krewe.example"], members: members, chatSpaceId: null],
+                (saved.settings as Map).runEmail)
+        Map row = ec.entity.find("darpan.audit.AuditDigest").condition("auditDigestId", "RUN_${MINE}_SH".toString()).disableAuthz().one()?.getMap()
+        assertEquals(["AUDDK_RUN", "N", "close@krewe.example, ap@krewe.example", MINE],
+                [row.kindEnumId, row.isActive, row.emailAddresses, row.companyUserGroupId])
+
+        facade("save#AuditSettings", [audit: "system-health", runEmail: [active: true]])
+        facade("save#AuditSettings", [audit: "system-health", name: "System health"])
+        assertEquals([active: true, alsoSendTo: ["close@krewe.example", "ap@krewe.example"], members: members, chatSpaceId: null],
+                (facade("get#AuditSettings", [audit: "system-health"]).settings as Map).runEmail, "a field left out, or no runEmail, keeps it")
+    }
+
     private Map call(String service, Map params) {
         Map out = ec.service.sync().name(service).parameters(params).call() ?: [:]
         Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]

@@ -195,7 +195,9 @@
             <parameter name="settings" type="Map"><description>{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest
                 day play can record today), schedule: {active, time HH:mm,
                 timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,
-                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}]}</description></parameter>
+                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],
+                runEmail: {active, alsoSendTo: [address], members (how many current tenant members receive it), chatSpaceId
+                or null} (DAR-BE-207: the update emailed to every current member after each run, plus alsoSendTo)}</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
@@ -381,6 +383,10 @@
                 <parameter name="statement" type="Map"/></parameter>
             <parameter name="schedule" type="Map"><description>{active, time HH:mm, timeZone}; absent keeps it, a field left out
                 keeps its value.</description></parameter>
+            <parameter name="runEmail" type="Map"><description>DAR-BE-207. {active (false stops the run email for this audit),
+                alsoSendTo: [addresses sent to as well as the tenant's members], chatSpaceId (the tenant's chat space for a
+                summary card; blank for none)}; absent keeps it, a field left out keeps its value. Any address that is not one
+                refuses the save.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -389,7 +395,7 @@
             <parameter name="settings" type="Map"><description>{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest
                 day play can record today), schedule: {active, time HH:mm,
                 timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,
-                savedRunId, runName}]}]}</description></parameter>
+                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, chatSpaceId}}</description></parameter>
         </out-parameters>
         <actions>
             <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for audit changes.')"/>
@@ -397,7 +403,7 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
             <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
-                <script>darpan.audit.AuditSettingsSupport.save(ec, tenantId, auditRow, name, statements as List, schedule as Map)</script>
+                <script>darpan.audit.AuditSettingsSupport.save(ec, tenantId, auditRow, name, statements as List, schedule as Map, runEmail as Map)</script>
                 <if condition="!ec.message.hasError()">
                     <set field="settings" from="darpan.audit.AuditSettingsSupport.settings(ec, tenantId, darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit))"/>
                 </if>

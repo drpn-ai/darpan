@@ -530,7 +530,9 @@
         </field>
         <field name="emailAddresses" type="text-medium">
             <description>Comma-separated addresses it is emailed to (template DARPAN_AUDIT_DIGEST). A digest needs a chat
-                space, addresses, or both (Aditi, 2026-10-22: "either email or chat alerts").</description>
+                space, addresses, or both (Aditi, 2026-10-22: "either email or chat alerts"). A run digest (DAR-BE-207) always
+                emails every current member of the tenant; these addresses are added to them (group mailboxes, people with no
+                Darpan account), never instead.</description>
         </field>
         <field name="kindEnumId" type="id" not-null="true">
             <description>AuditDigestKind: daily (open, new and fixed today), weekly (where things stand against a week

@@ -23,8 +23,10 @@
     </service>
 
     <service verb="send" noun="AuditRunUpdate" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
-        <description>DAR-BE-207. The update after an audit run, to each active run digest (kind AUDDK_RUN) of the audit:
-            by email with one CSV per rule with open findings, and a summary card in chat. Called in the background after
+        <description>DAR-BE-207. The update after an audit run, on for every audit: by email with one CSV per rule with open
+            findings to every current member of the tenant plus each run digest's (kind AUDDK_RUN) addresses, and a summary
+            card in a digest's chat space. An inactive run digest turns it off; an audit with none gets a default one, which
+            holds the run's claim. Called in the background after
             every execution of the audit's automations; sends only once the whole audit is idle (nothing running, queued
             for a retry or waiting for a slot), each digest claimed for the run first so it goes out once. Internal only;
             anonymous-all, the execute#Automation pattern, because it runs on a background thread with no user and every

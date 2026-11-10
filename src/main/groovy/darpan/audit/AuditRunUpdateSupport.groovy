@@ -17,8 +17,10 @@ import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
 
 /**
- * DAR-BE-207. The update after each audit run, for every AuditDigest of kind run: the whole run by email (a CSV per rule
- * with open findings attached) and a summary card in chat. Asked for after every execution of an audit's automation
+ * DAR-BE-207. The update after each audit run: the whole run by email (a CSV per rule with open findings attached) to
+ * every current member of the tenant, on for every audit by default (product owner, 2026-11-10). An AuditDigest of kind
+ * run tunes it for its audit: isActive N turns it off, emailAddresses are sent to as well as the members (never instead),
+ * chatSpaceId adds a summary card in chat. An audit with no such row gets a default one on its first update, which holds the run's claim. Asked for after every execution of an audit's automation
  * (AutomationExecutionSupport.executeAutomation), it goes out once the whole audit is idle: no execution running or
  * queued for a retry, and none of its automations waiting in or holding a RunAdmission slot. Each digest is claimed for
  * the run first, so executions finishing together send it once. Runs with no user: every read carries the tenant.
@@ -44,8 +46,8 @@ class AuditRunUpdateSupport {
     }
 
     /**
-     * After one execution of an automation, success or failure: when it runs an audit's checks and that audit has a run
-     * digest, the update is asked for in the background. A verify (one finding re-checked) is not a run. Never throws:
+     * After one execution of an automation, success or failure: when it runs an audit's checks and the audit's update is
+     * not turned off (every run digest inactive), the update is asked for in the background. A verify (one finding re-checked) is not a run. Never throws:
      * the execution's own outcome stands whatever happens here.
      */
     static void afterExecution(def ec, def automation, Map input, Map result) {
@@ -60,7 +62,9 @@ class AuditRunUpdateSupport {
                 if (!checks) return
                 auditId = AuditAutomationSupport.auditFor(ec, tenantId, checks)?.auditId as String
             }
-            if (!auditId || !runDigests(ec, tenantId, auditId)) return
+            if (!auditId) return
+            List<Map> digests = runDigests(ec, tenantId, auditId)
+            if (digests && !digests.any { active(it) }) return
             dispatch.call(ec, [companyUserGroupId  : tenantId, auditId: auditId, reportDate: result?.auditReportDate,
                                period              : result?.auditPeriod, finishedAutomationId: automationId])
         } catch (Throwable t) {
@@ -69,19 +73,22 @@ class AuditRunUpdateSupport {
     }
 
     /**
-     * Sends the run update to each active run digest of the audit, once the audit is idle. reportDate and period name the
+     * Sends the run update for each active run digest of the audit (a default one made when it has none), once the audit
+     * is idle; nothing when every run digest is inactive. reportDate and period name the
      * run (a play's last window); blank, they are read off the audit's latest check run. Answers per digest: auditDigestId,
      * sent, and the reason when not sent (RUN_NOT_DONE, ALREADY_SENT, NO_DESTINATION, NO_REPORT, DELIVERY_FAILED, FAILED).
      */
     static List<Map> send(def ec, String tenantId, String auditId, Date reportDate, String period, String finishedAutomationId,
                           Timestamp now) {
-        List<Map> digests = runDigests(ec, tenantId, auditId)
-        if (!digests) return []
+        List<Map> all = runDigests(ec, tenantId, auditId)
+        if (all && !all.any { active(it) }) return []
         Map audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, tenantId, WHY)?.getMap()
         if (audit == null) return []
         if (!idle(ec, tenantId, audit, finishedAutomationId, now)) {
-            return digests.collect { [auditDigestId: it.auditDigestId, sent: false, reason: "RUN_NOT_DONE"] }
+            return (all ?: [[auditDigestId: defaultDigestId(auditId)]]).findAll { active(it) }
+                    .collect { [auditDigestId: it.auditDigestId, sent: false, reason: "RUN_NOT_DONE"] }
         }
+        List<Map> digests = all ? all.findAll { active(it) } : ensureDefaultDigest(ec, tenantId, auditId)
         if (reportDate == null) {
             Map latest = latestCheckRun(ec, tenantId, audit)
             reportDate = (latest?.reportDate ?: Date.valueOf(LocalDate.now(AuditDigestSupport.tenantZone(ec, tenantId)))) as Date
@@ -102,9 +109,11 @@ class AuditRunUpdateSupport {
         } catch (Throwable t) {
             logger.warn("Audit run update for audit {} of tenant {}: not built: {}", auditId, tenantId, t.message)
         }
+        Set<String> mailed = new HashSet<>()
         claimed.each { Map digest ->
             try {
-                outcomes << [auditDigestId: digest.auditDigestId] + (built == null ? [sent: false, reason: "NO_REPORT"] : deliver(ec, tenantId, digest, built))
+                outcomes << [auditDigestId: digest.auditDigestId] + (built == null ? [sent: false, reason: "NO_REPORT"] :
+                        deliver(ec, tenantId, digest, built, mailed))
             } catch (Throwable t) {
                 logger.warn("Audit run update {} for tenant {} failed: {}", digest.auditDigestId, tenantId, t.message)
                 outcomes << [auditDigestId: digest.auditDigestId, sent: false, reason: "FAILED"]
@@ -178,7 +187,8 @@ class AuditRunUpdateSupport {
                 AuditReportAssembler.fillTemplate(check.fixActionTemplate as String, [:])
     }
 
-    private static Map deliver(def ec, String tenantId, Map digest, Map built) {
+    /** mailed: the addresses this run's update already went to, so two digests of one audit never mail one person twice. */
+    private static Map deliver(def ec, String tenantId, Map digest, Map built, Set<String> mailed) {
         String chatSpaceId = normalize(digest.chatSpaceId)
         Map destination = null
         if (chatSpaceId) {
@@ -187,7 +197,8 @@ class AuditRunUpdateSupport {
             destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
             if (destination == null) logger.warn("Audit run update {}: chat space {} cannot be used", digest.auditDigestId, chatSpaceId)
         }
-        List<String> emails = AuditDigestSupport.emailsOf(digest.emailAddresses)
+        // Members always; a digest's addresses are added (group mailboxes, people with no Darpan account), never instead.
+        List<String> emails = (tenantMemberEmails(ec, tenantId) + extraEmails(digest)).unique().findAll { !mailed.contains(it) }
         if (destination == null && !emails) return [sent: false, reason: "NO_DESTINATION"]
         boolean delivered = false
         if (destination != null) {
@@ -207,6 +218,7 @@ class AuditRunUpdateSupport {
                 ec.message.clearErrors()
             } else {
                 delivered = true
+                mailed.addAll(emails)
             }
         }
         return delivered ? [sent: true, reason: null] : [sent: false, reason: "DELIVERY_FAILED"]
@@ -271,13 +283,128 @@ class AuditRunUpdateSupport {
                 .orderBy("-runStamp").limit(1).list().find()?.getMap() : null
     }
 
-    /** The audit's active run digests. */
+    /** The audit's run digests, active or not. */
     static List<Map> runDigests(def ec, String tenantId, String auditId) {
-        def cf = ec.entity.conditionFactory
-        def active = cf.makeCondition([cf.makeCondition("isActive", EntityCondition.EQUALS, null),
-                                       cf.makeCondition("isActive", EntityCondition.NOT_EQUAL, "N")], EntityCondition.OR)
         return rows(ec, "darpan.audit.AuditDigest", tenantId).condition("auditId", auditId).condition("kindEnumId", RUN)
-                .condition(active).orderBy("auditDigestId").list()*.getMap()
+                .orderBy("auditDigestId").list()*.getMap()
+    }
+
+    private static boolean active(Map digest) { return digest.isActive != "N" }
+
+    /** The digest's own addresses, lowercased, each once; one that is not an address is dropped and logged. */
+    static List<String> extraEmails(Map digest) {
+        List<String> raw = (normalize(digest?.emailAddresses) ?: "").split(/[,;]/)*.trim().findAll { it } as List<String>
+        List<String> valid = AuditDigestSupport.emailsOf(raw.join(","))
+        List<String> dropped = raw.findAll { !valid.contains(it) }
+        if (dropped) logger.warn("Audit run update {}: not email addresses, left out: {}", digest.auditDigestId, dropped)
+        return valid*.toLowerCase().unique()
+    }
+
+    // ---- the audit settings' "run email" (facade get/save#AuditSettings) ------------------------------------------
+
+    /** The run digest the settings page edits: the audit's default one, else its first. */
+    private static Map settingsDigest(List<Map> digests, String auditId) {
+        return digests.find { it.auditDigestId == defaultDigestId(auditId) } ?: digests.find()
+    }
+
+    /**
+     * {active (true when the audit has no run digest), alsoSendTo [addresses added to the members], members (how many
+     * current members it reaches), chatSpaceId (null for none)}.
+     */
+    static Map runEmailSettings(def ec, String tenantId, String auditId) {
+        Map digest = settingsDigest(runDigests(ec, tenantId, auditId), auditId)
+        return [active     : digest == null || active(digest),
+                alsoSendTo : AuditDigestSupport.emailsOf(digest?.emailAddresses)*.toLowerCase().unique(),
+                members    : tenantMemberEmails(ec, tenantId).size(),
+                chatSpaceId: normalize(digest?.chatSpaceId)]
+    }
+
+    /** What is wrong with a runEmail change, in words: each address that is not one, a chat space not the tenant's. */
+    static List<String> runEmailErrors(def ec, String tenantId, Map runEmail) {
+        List<String> errors = []
+        if (runEmail.containsKey("alsoSendTo")) {
+            Object raw = runEmail.alsoSendTo
+            List<String> given = (raw instanceof Collection ? raw as List : (raw ? raw.toString().split(/[,;]/) as List : []))
+                    .collect { it?.toString()?.trim() }.findAll { it }
+            List<String> bad = given.findAll { !AuditDigestSupport.emailsOf(it) }
+            if (bad) errors << "Not an email address: ${bad.join(', ')}.".toString()
+        }
+        String space = runEmail.containsKey("chatSpaceId") ? normalize(runEmail.chatSpaceId) : null
+        if (space && TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE, "chatSpaceId", space,
+                tenantId, "audit run email settings: the chat space must be the tenant's own") == null) {
+            errors << "Chat space ${space} was not found.".toString()
+        }
+        return errors
+    }
+
+    /** Writes a validated runEmail change onto the audit's run digest, made (RUN_<auditId>) when it has none. */
+    static void saveRunEmail(def ec, String tenantId, String auditId, Map runEmail) {
+        Map current = settingsDigest(runDigests(ec, tenantId, auditId), auditId)
+        Map fields = [:]
+        if (runEmail.containsKey("active")) fields.isActive = runEmail.active in [false, "false", "N"] ? "N" : "Y"
+        if (runEmail.containsKey("alsoSendTo")) {
+            Object raw = runEmail.alsoSendTo
+            String joined = raw instanceof Collection ? (raw as List).collect { it?.toString() }.join(",") : (raw?.toString() ?: "")
+            fields.emailAddresses = AuditDigestSupport.emailsOf(joined)*.toLowerCase().unique().join(", ") ?: null
+        }
+        if (runEmail.containsKey("chatSpaceId")) fields.chatSpaceId = normalize(runEmail.chatSpaceId)
+        if (!fields) return
+        if (current != null) {
+            def row = rows(ec, "darpan.audit.AuditDigest", tenantId).condition("auditDigestId", current.auditDigestId).list().find()
+            row.setAll(fields); row.update()
+        } else {
+            String id = defaultDigestId(auditId)
+            if (id.length() > 40) id = ec.entity.sequencedIdPrimary("darpan.audit.AuditDigest", null, null)
+            ec.entity.makeValue("darpan.audit.AuditDigest").setAll([auditDigestId: id, companyUserGroupId: tenantId, auditId: auditId,
+                    kindEnumId: RUN, sendTime: "00:00", isActive: "Y"] + fields).create()
+        }
+    }
+
+    /** RUN_<auditId>: one per audit, so two first updates finishing together make one row. */
+    static String defaultDigestId(String auditId) { return "RUN_${auditId}".toString() }
+
+    /**
+     * The default run digest of an audit that has none: active, no addresses (the tenant's members), no chat space. It
+     * exists to hold the run's claim. Two first updates both try; the second's create fails on the key and it reads the
+     * first's row.
+     */
+    private static List<Map> ensureDefaultDigest(def ec, String tenantId, String auditId) {
+        String id = defaultDigestId(auditId)
+        if (id.length() > 40) id = ec.entity.sequencedIdPrimary("darpan.audit.AuditDigest", null, null)
+        try {
+            AutomationRuntimeSupport.runInNewTransaction(ec, "Could not make audit ${auditId}'s run update".toString()) { ->
+                ec.entity.makeValue("darpan.audit.AuditDigest").setAll([auditDigestId: id, companyUserGroupId: tenantId,
+                        auditId: auditId, kindEnumId: RUN, sendTime: "00:00", isActive: "Y"]).create()
+            }
+        } catch (Throwable ignored) {
+            ec.message.clearErrors()   // made by the other execution's update a moment ago
+        }
+        return runDigests(ec, tenantId, auditId).findAll { active(it) }
+    }
+
+    /**
+     * Who the update goes to by default: every member of the tenant (UserGroupMember on its company group, as
+     * add#TenantMember writes it) whose membership is current and whose account is enabled and has an email address,
+     * lowercased, each once. A Darpan admin reaches every tenant through the admin groups, not a membership, so gets a
+     * tenant's update only when added to it as a member.
+     */
+    static List<String> tenantMemberEmails(def ec, String tenantId) {
+        Timestamp now = new Timestamp(System.currentTimeMillis())
+        def cf = ec.entity.conditionFactory
+        List userIds = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroupMember",
+                "run-update recipients: the tenant's own members, keyed by its company group")
+                .condition("userGroupId", tenantId).condition("fromDate", EntityCondition.LESS_THAN_EQUAL_TO, now)
+                .condition(cf.makeCondition([cf.makeCondition("thruDate", EntityCondition.EQUALS, null),
+                                             cf.makeCondition("thruDate", EntityCondition.GREATER_THAN, now)], EntityCondition.OR))
+                .useCache(false).list()*.userId.unique()
+        if (!userIds) return []
+        return TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                "run-update recipients: accounts of the tenant's current members")
+                .condition("userId", EntityCondition.IN, userIds).useCache(false).list()
+                .findAll { it.disabled != "Y" }
+                .collect { normalize(it.emailAddress)?.toLowerCase() }
+                .findAll { it && AuditDigestSupport.emailsOf(it) }
+                .unique().sort()
     }
 
     private static def rows(def ec, String entityName, String tenantId) {

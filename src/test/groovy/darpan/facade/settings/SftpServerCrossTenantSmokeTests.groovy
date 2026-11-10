@@ -114,14 +114,38 @@ class SftpServerCrossTenantSmokeTests {
 
     @Test
     void editorCanStillUpdateOwnServerAndKeepStoredSecret() {
+        ownServer("KEEP_SFTP")
         Map<String, Object> out = withProductionAuthz {
-            callService(SAVE_SERVICE, [sftpServerId: "OWN_SFTP", host: "krewe2.sftp.test", port: 2222, username: "krewe-user"])
+            callService(SAVE_SERVICE, [sftpServerId: "KEEP_SFTP", host: "KREWE.sftp.test", port: 22, username: "krewe-user2"])
         }
         assertTrue(out.ok as Boolean, "own update failed: ${out.errors}")
-        def own = findRow("OWN_SFTP")
+        def own = findRow("KEEP_SFTP")
         assertEquals(KREWE, own.companyUserGroupId)
-        assertEquals("krewe2.sftp.test", own.host)
-        assertEquals("krewe-secret", own.password, "blank password must keep the stored one")
+        assertEquals("krewe-user2", own.username)
+        assertEquals("krewe-secret", own.password, "blank password keeps the stored one while the address is the same")
+    }
+
+    /** DAR-BE-080: a moved host or port with no new secret would send the stored password to the new server. */
+    @Test
+    void movingTheServerNeedsTheSecretAgain() {
+        ownServer("MOVE_SFTP")
+        Map<String, Object> refused = withProductionAuthz {
+            callService(SAVE_SERVICE, [sftpServerId: "MOVE_SFTP", host: "attacker.sftp.test", port: 2222, username: "krewe-user"])
+        }
+        assertFalse(refused.ok as Boolean, "a moved server kept its secret: ${refused}")
+        assertTrue((refused.errors as List).any { it.toString().startsWith("Enter the password or key again") }, "${refused.errors}")
+        assertEquals(["krewe.sftp.test", "krewe-secret"], findRow("MOVE_SFTP").with { [it.host, it.password] }, "the row is unchanged")
+
+        Map<String, Object> moved = withProductionAuthz {
+            callService(SAVE_SERVICE, [sftpServerId: "MOVE_SFTP", host: "krewe2.sftp.test", port: 2222, username: "krewe-user", password: "new-secret"])
+        }
+        assertTrue(moved.ok as Boolean, "${moved.errors}")
+        assertEquals(["krewe2.sftp.test", "new-secret"], findRow("MOVE_SFTP").with { [it.host, it.password] })
+    }
+
+    private void ownServer(String id) {
+        insert("darpan.reconciliation.SftpServer", [sftpServerId: id, companyUserGroupId: KREWE, createdByUserId: EDITOR_ID,
+                scopeEnumId: "DARPAN_SFTP_TENANT", host: "krewe.sftp.test", port: 22, username: "krewe-user", password: "krewe-secret"])
     }
 
     @Test

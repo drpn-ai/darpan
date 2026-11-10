@@ -554,6 +554,14 @@
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for SFTP settings.')"/>
             </if>
+            <!-- DAR-BE-080: the stored password or key is reused only while the server is the same; a moved host or port
+                 with no new secret would send it to whoever runs the new server. -->
+            <if condition="!ec.message.hasError() &amp;&amp; existingServer &amp;&amp; !passwordValue &amp;&amp; !privateKeyValue &amp;&amp; (existingServer.password || existingServer.privateKey)">
+                <set field="movedFields" from="darpan.facade.common.SecretCarryOver.changedFields(existingServer, [host: hostValue, port: portValue], ['host', 'port'])"/>
+                <if condition="movedFields">
+                    <message error="true">${darpan.facade.common.SecretCarryOver.refusal(movedFields, 'password or key')}</message>
+                </if>
+            </if>
             <if condition="!ec.message.hasError() &amp;&amp; !sftpServerIdValue">
                 <set field="sftpServerIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.SftpServer', 'sftpServerId')"/>
             </if>

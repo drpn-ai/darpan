@@ -32,6 +32,16 @@ class StreakCelebrationSupportTests {
         }
     }
 
+    /** DAR-BE-211: every rung of the ladder posts a picture on first earn; a new rung must bring its GIF. */
+    @Test
+    void everyBadgeOnTheLadderHasAGifWithItsOwnTitle() {
+        StreakMilestoneVoice.BADGE_LADDER.each { Map badge ->
+            Map<String, String> entry = StreakCelebrationSupport.CATALOG.get(badge.key as String)
+            assertTrue(entry != null, "${badge.key} has no GIF")
+            assertEquals(badge.title, entry.title, badge.key as String)
+        }
+    }
+
     @Test
     void celebrationPointsAtTheAppsStreaksFolder() {
         Map c = StreakCelebrationSupport.celebration(BASE + "/", "MONTH_DOZE")

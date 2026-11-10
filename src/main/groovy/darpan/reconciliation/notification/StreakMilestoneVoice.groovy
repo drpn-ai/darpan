@@ -15,7 +15,7 @@ package darpan.reconciliation.notification
 class StreakMilestoneVoice {
 
     /**
-     * The ladder, lowest first. Keys match StreakCelebrationSupport.CATALOG where a badge has a GIF. The keys are stored
+     * The ladder, lowest first. Keys match StreakCelebrationSupport.CATALOG (every badge has a GIF since DAR-BE-211). The keys are stored
      * on AutomationStreakBadge rows, so they keep their first names; DAR-BE-138 renamed the titles after the sky
      * (Aditi 2026-10-27), each fitting its day count: a telescope's first look, new moon to full, one lap of the Moon's
      * phases, two of them, a season, half an orbit, a whole one.

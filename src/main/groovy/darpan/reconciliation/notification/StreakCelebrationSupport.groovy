@@ -30,8 +30,14 @@ class StreakCelebrationSupport {
      * quest keys; titles and files follow the DAR-BE-138 astronomy names. Source: tools/streak-gifs in the wrapper repo.
      */
     static final Map<String, Map<String, String>> CATALOG = [
+            HIGH_FIVE            : [file: "darpan-first-light.gif", title: "First Light",
+                                    altText: "Tara squints into a telescope, the lens cap pops off and the first star lights up the sky. Milestone: 5 days clean, First Light."],
+            FIFTEEN_DAYS_OF_FAME : [file: "darpan-full-moon.gif", title: "Full Moon",
+                                    altText: "The Moon rises over Tara and fills from new to full, and she throws her head back for a little howl. Milestone: 15 days clean, Full Moon."],
             MONTH_DOZE           : [file: "darpan-lunar-lap.gif", title: "Lunar Lap",
                                     altText: "The Moon runs a lap round Tara's head through every phase, then parks and winks. Milestone: 30 days clean, Lunar Lap."],
+            DOUBLE_DOZE          : [file: "darpan-twin-moons.gif", title: "Twin Moons",
+                                    altText: "Two Moons circle Tara's head in opposite directions, she goes cross-eyed following both, then they park and wink. Milestone: 60 days clean, Twin Moons."],
             QUARTER_CLEAN        : [file: "darpan-solstice.gif", title: "Solstice",
                                     altText: "The sun sets and rises again, Tara squints, and a pair of sunglasses lowers onto her face. Milestone: 90 days clean, Solstice."],
             HALF_YEAR_HIBERNATION: [file: "darpan-far-side.gif", title: "Far Side of the Sun",

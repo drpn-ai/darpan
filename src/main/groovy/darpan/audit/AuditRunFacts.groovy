@@ -96,8 +96,9 @@ class AuditRunFacts {
 
     static String csvField(String value) {
         String v = value ?: ""
-        // A spreadsheet runs a cell that starts with = + or @ as a formula; record data is never meant to.
-        if (v && "=+@".indexOf(v.substring(0, 1)) >= 0) v = "'" + v
+        // A spreadsheet runs a cell that starts with = + - @ (or a tab / carriage return before one) as a formula;
+        // record data is never meant to. A plain number, a negative amount included, stays a number.
+        if (v && "=+-@\t\r".indexOf(v.substring(0, 1)) >= 0 && !(v ==~ /-?\d+(\.\d+)?/)) v = "'" + v
         return v ==~ /(?s).*[",\r\n].*/ ? '"' + v.replace('"', '""') + '"' : v
     }
 

@@ -51,6 +51,8 @@ class AuditRunFactsTests {
         assertEquals('"two\nlines"', AuditRunFacts.csvField("two\nlines"))
         assertEquals("'=SUM(A1)", AuditRunFacts.csvField("=SUM(A1)"))
         assertEquals("-12.50", AuditRunFacts.csvField("-12.50"), "a negative amount stays a number")
+        assertEquals("'-1+cmd|' /C calc'!A0", AuditRunFacts.csvField("-1+cmd|' /C calc'!A0"), "a - that is not a number is a formula")
+        assertEquals("'\t=1+1", AuditRunFacts.csvField("\t=1+1"), "a leading tab hides a formula")
         assertEquals("", AuditRunFacts.csvField(null))
         assertEquals("a,\"b,c\"\r\nd,\r\n", AuditRunFacts.csv([["a", "b,c"], ["d", null]]))
     }

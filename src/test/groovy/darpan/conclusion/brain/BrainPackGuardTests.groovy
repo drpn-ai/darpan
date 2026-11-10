@@ -43,4 +43,13 @@ class BrainPackGuardTests {
         List<String> ranks = rules(pack()).findAll { it.contains("@concludes(") }.collect { ((it =~ /@rank\((\d+)\)/)[0] as List)[1] as String }
         assertEquals(ranks.size(), ranks.unique(false).size())
     }
+
+    // DAR-BE-151: the conclude seam hands the brain only rows of BrainConclude.BUCKETS (so another bucket cannot use up its
+    // cap); every bucket the pack reads must be one of them, or its rules would never see their rows.
+    @Test
+    void everyBucketThePackReadsIsOneTheBrainIsHanded() {
+        Set<String> read = ((pack() =~ /bucket == "([A-Z_0-9]+)"/).collect { it[1] } as Set<String>)
+        assertFalse(read.isEmpty())
+        assertTrue(BrainConclude.BUCKETS.containsAll(read), "the pack reads ${read}; the brain is handed ${BrainConclude.BUCKETS}")
+    }
 }

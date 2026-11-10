@@ -14,6 +14,12 @@ import darpan.conclusion.brain.fact.Order
 class BrainConclude {
 
     static final List<String> PILOT_PACKS = ["oms-netsuite"]
+    /**
+     * DAR-BE-151: the finding buckets the packs' statements read (BrainPackGuardTests holds the pack to it). Only these rows
+     * are handed to the brain, so a run of another bucket (prod gorjana R1, Nov 1-9: 24,635 billed lines HotWax's read
+     * does not cover) cannot use up its cap before it reaches its own rows.
+     */
+    static final Set<String> BUCKETS = (["MISSING_FROM_FILE_2"] as Set<String>).asImmutable()
     static final int BATCH_FINDINGS = 500
     /** Ids per question call, like the tree's lookups (RunConclusionSupport.LOOKUP_BATCH); tunable for tests. */
     static int fetchBatch = 500

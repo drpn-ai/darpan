@@ -211,8 +211,11 @@ class RunConclusionSupport {
             List<Map> findings = []
             int total = 0
             DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+                // DAR-BE-151: only the rows its statements read count toward the cap; the tree concludes the others.
+                Map f = finding(row)
+                if (!(f.bucket in darpan.conclusion.brain.BrainConclude.BUCKETS)) return
                 if (++total > maxBrainFindings) return
-                findings.add(slimFinding(finding(row), row.get("primaryId")?.toString()))
+                findings.add(slimFinding(f, row.get("primaryId")?.toString()))
             }
             brain = BrainConclude.run((Map) args.brain + [findings: findings])
             if (total > maxBrainFindings) {

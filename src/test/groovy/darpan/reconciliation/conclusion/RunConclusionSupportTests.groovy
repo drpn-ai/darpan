@@ -118,6 +118,32 @@ class RunConclusionSupportTests {
         assertEquals(2, result.brain.asked, "two orders asked in one call")
     }
 
+    // DAR-BE-151 (prod gorjana R1, Nov 1-9: 25,295 rows, 24,635 of them billed lines HotWax's read does not cover): only
+    // the rows the brain's statements read count toward its cap, so rows of another bucket listed first cannot use it up
+    // ("The brain concluded 20000 of 25295 findings", asked 0).
+    @Test
+    void rowsOfABucketTheBrainNeverReadsDoNotUseUpItsCap() {
+        darpan.conclusion.brain.BrainAnswerStore.clear()
+        int saved = RunConclusionSupport.maxBrainFindings
+        RunConclusionSupport.maxBrainFindings = 1
+        try {
+            Map paid = [orderId: "X", paymentPreferenceSlotsFull: false, paymentPreferences: [
+                    [paymentMethodTypeId: "EXT_SHOP_CASH", statusId: "PAYMENT_SETTLED", maxAmount: "10"],
+                    [paymentMethodTypeId: "EXT_SHOP_CASH", statusId: "PAYMENT_REFUNDED", maxAmount: "10"]]]
+            File doc = writeDiffDocument([
+                    missingRow("B1${SEP}01", FILE2, FILE1, [orderId: "B1", orderLineId: "01"]),
+                    missingRow("M7${SEP}01", FILE1, FILE2, [omsOrderId: "M7", orderItemSeqId: "01", orderGrandTotal: 50])])
+            Map a = args(doc, NEVER_REACHED_RULES) + [brain: [kind: "orderLine", tenantId: "T_BUCKET", labelFor: { String c -> c },
+                    fetchQuestion: { String q, List ids -> ids.collectEntries { [(it): paid] } }]]
+            Map result = RunConclusionSupport.concludeRun(a)
+            Map byId = ((List<Map>) parse(doc).differences).collectEntries { [(it.primaryId): it.conclusion.code] }
+            assertEquals("CONC_PARTIAL_PAYMENT_GIVEN_BACK", byId["M7${SEP}01".toString()], "the brain still reaches its row")
+            assertFalse(((List) result.brain.warnings).any { it.toString().contains(" of ") }, "the other bucket's row is not counted")
+        } finally {
+            RunConclusionSupport.maxBrainFindings = saved
+        }
+    }
+
     /** Security review 2026-10-28: the brain takes at most a bounded number of findings per run; the tree concludes the rest. */
     @Test
     void theBrainTakesABoundedNumberOfFindingsAndTheTreeTheRest() {

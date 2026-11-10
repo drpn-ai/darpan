@@ -151,8 +151,10 @@ class RunConclusionStep {
             // connector's own names; the keys bound the read (lookupKeys).
             Map window = [(normalize(connector.dateFromParameterName) ?: "windowStart"): new java.sql.Timestamp(0L),
                           (normalize(connector.dateToParameterName) ?: "windowEnd")  : ec.user.nowTimestamp]
+            // DAR-BE-205: conclusionLookup tells an extract that declares it (HotWax orders) to answer for every id named,
+            // with none of a comparison's built-in exclusions; an audit re-check by key never sends it.
             Map out = ec.service.sync().name(service).parameters(options + window + [(configParameter): lookup.sourceConfigId,
-                    lookupKeys: ids, lookupKeyField: lookup.keyField, companyUserGroupId: tenantId, systemEnumId: connector.systemEnumId,
+                    lookupKeys: ids, lookupKeyField: lookup.keyField, conclusionLookup: true, companyUserGroupId: tenantId, systemEnumId: connector.systemEnumId,
                     fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
             List errors = (List) (out?.errors ?: (ec.message.hasError() ? ec.message.errors : []))
             if (errors) throw new IllegalStateException(errors.join("; "))

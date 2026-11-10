@@ -25,7 +25,7 @@ class AuditCatalogContractTests {
     static final Map<String, List<String>> CODES = [
             AuditCategory       : ["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"],
             AuditStatementWeight: ["firm", "derived"],
-            AuditFindingState   : ["open", "pending", "fixed"],
+            AuditFindingState   : ["open", "fixed"],
             AuditCheckStatus    : ["ran", "partial", "notRun"],
             AuditSourceRead     : ["complete", "partial", "failed"],
             AuditFindingEvent   : ["found", "stillOpen", "fixed", "reopened"],

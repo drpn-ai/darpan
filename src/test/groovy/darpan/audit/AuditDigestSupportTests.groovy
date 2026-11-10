@@ -20,13 +20,14 @@ class AuditDigestSupportTests {
         assertEquals([
                 "Month close · 2026-10 · Thu 22 Oct",
                 "",
-                "Open 2 · Pending 1 · New today 1 · Fixed today 1",
-                "Orders: open 1, pending 1",
+                "Open 3 · New today 1 · Fixed today 1",
+                "Orders: open 2",
                 "Returns: open 1",
                 "",
                 "Oldest open",
                 "F-1 · R2 · 6 days · Invoice INV1 has no Etail id",
                 "F-3 · R8 · 1 day · Return RX-1 has no RMA in NetSuite",
+                "F-2 · R2 · 0 days · Invoice INV2 has no Etail id",
                 "",
                 "Report: ${URL}".toString()].join("\n"), text)
     }
@@ -50,22 +51,22 @@ class AuditDigestSupportTests {
 
     @Test
     void aWeeklySummaryStandsEachCountBesideAWeekBefore() {
-        Map before = [summary: [open: 5, pending: 0]]
+        Map before = [summary: [open: 5]]
         String text = AuditDigestSupport.render(report(), AuditDigestSupport.WEEKLY, false, before, null)
         List<String> lines = text.readLines()
         assertEquals("Month close · 2026-10 · week to Thu 22 Oct", lines[0])
-        assertEquals("Open 2 (5 a week ago) · Pending 1 (0 a week ago)", lines[2])
+        assertEquals("Open 3 (5 a week ago)", lines[2])
         assertFalse(text.contains("New today"), "today's movement is the daily digest's")
     }
 
     @Test
-    void aFullListNamesEveryOpenAndPendingFinding() {
+    void aFullListNamesEveryOpenFinding() {
         String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, true, null, null)
         List<String> lines = text.readLines()
-        int open = lines.indexOf("Open (2)")
-        int pending = lines.indexOf("Pending (1)")
-        assertTrue(open > 0 && pending > open, text)
-        assertEquals("F-2 · R2 · 0 days · Invoice INV2 has no Etail id", lines[pending + 1])
+        int open = lines.indexOf("Open (3)")
+        assertTrue(open > 0, text)
+        assertTrue(lines.contains("F-2 · R2 · 0 days · Invoice INV2 has no Etail id"), "a finding first found today is open (DAR-BE-206)")
+        assertFalse(text.contains("Pending"), "no pending state any more")
         assertFalse(text.contains("more in the report"), "everything fit")
     }
 
@@ -88,10 +89,10 @@ class AuditDigestSupportTests {
     @Test
     void nothingOpenSaysSo() {
         Map doc = report()
-        doc.summary = [open: 0, pending: 0, newToday: 0, fixedToday: 2]
-        doc.categories = [orders: [label: "Orders", counts: [open: 0, pending: 0], statements: [:]]]
+        doc.summary = [open: 0, newToday: 0, fixedToday: 2]
+        doc.categories = [orders: [label: "Orders", counts: [open: 0], statements: [:]]]
         String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null)
-        assertEquals("Nothing open or pending.", text.readLines().last())
+        assertEquals("Nothing open.", text.readLines().last())
     }
 
     @Test
@@ -105,22 +106,22 @@ class AuditDigestSupportTests {
         assertEquals(["F-8", "F-7", "F-6", "F-5", "F-4"], shown.collect { it.split(" · ")[0] }, "oldest first")
     }
 
-    /** One morning: R2 has an open and a pending finding, R8 an open one; R2 also fixed one today. */
+    /** One morning: R2 has two open findings (one first found today), R8 one; R2 also fixed one today. */
     private static Map report() {
         return [
                 schema    : "darpan.audit.report/v1",
                 report    : [audit: [id: "month-close", name: "Month close"], date: "2026-10-22", period: "2026-10"],
                 health    : [complete: true, summary: "Every configured check ran over complete reads.",
                              checks: [ran: 2, partial: 0, notRun: 0]],
-                summary   : [open: 2, pending: 1, newToday: 1, fixedToday: 1],
+                summary   : [open: 3, newToday: 1, fixedToday: 1],
                 categories: [
-                        orders : [label: "Orders", counts: [open: 1, pending: 1], statements: [
+                        orders : [label: "Orders", counts: [open: 2], statements: [
                                 R2: [id: "R2", findingsOmitted: 0, findings: [
                                         [id: "F-1", headline: "Invoice INV1 has no Etail id", state: "open", ageDays: 6],
-                                        [id: "F-2", headline: "Invoice INV2 has no Etail id", state: "pending", ageDays: 0],
+                                        [id: "F-2", headline: "Invoice INV2 has no Etail id", state: "open", ageDays: 0],
                                         [id: "F-9", headline: "Invoice INV9 has no Etail id", state: "fixed", ageDays: 3]]]]],
-                        refundsAndCredits: [label: "Refunds and credits", counts: [open: 0, pending: 0], statements: [:]],
-                        returns: [label: "Returns", counts: [open: 1, pending: 0], statements: [
+                        refundsAndCredits: [label: "Refunds and credits", counts: [open: 0], statements: [:]],
+                        returns: [label: "Returns", counts: [open: 1], statements: [
                                 R8: [id: "R8", findingsOmitted: 0, findings: [
                                         [id: "F-3", headline: "Return RX-1 has no RMA in NetSuite", state: "open", ageDays: 1]]]]],
                 ],

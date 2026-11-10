@@ -229,10 +229,19 @@ class RuleSetCompareScopeAdapter {
         Map<String, Object> ingestBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
             Map<String, Object> config = (Map<String, Object>) plan.config
-            [(fileSide): ReconciliationServices.ingestFile(
-                    ec, spark, (String) plan.fileLocation, (String) plan.fileType, (List) plan.idSpecs,
-                    hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
-                    (String) config.schemaFileName)]
+            try {
+                [(fileSide): ReconciliationServices.ingestFile(
+                        ec, spark, (String) plan.fileLocation, (String) plan.fileType, (List) plan.idSpecs,
+                        hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
+                        (String) config.schemaFileName)]
+            } catch (Exception e) {
+                // DAR-BE-031: the ID field is not in this tenant's records; say so, not as a Spark struct error.
+                String plain = CompareFieldErrors.plainMessage(e, (String) plan.label)
+                // No cause attached: Moqui adds every cause's message as an error of its own, which would put the raw
+                // Spark text back in front of the person. The server log keeps it.
+                if (plain) { logger.warn("Compare scope {} {}: {}", compareScopeId, fileSide, e.toString()); throw new IllegalArgumentException(plain) }
+                throw e
+            }
         }
         // DAR-UI-048: a flowchart child asks only about its parent's branch, and reports what it asked about.
         String includeIdsLocation = ReconciliationServices.normalize(context.get("file1IncludeIdsLocation"))

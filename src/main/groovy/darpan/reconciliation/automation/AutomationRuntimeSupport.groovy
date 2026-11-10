@@ -184,7 +184,10 @@ class AutomationRuntimeSupport {
     }
 
     static String sanitizeErrorMessage(Throwable t) {
-        return sanitizeText(t?.message ?: t?.class?.name ?: "Automation execution failed")
+        // DAR-BE-031: a Java service's failure arrives wrapped as "Java method for service [..] threw an exception"; the
+        // person reads the cause's own message.
+        String plain = darpan.facade.common.FacadeSupport.withoutServicePrefix(t?.message) ?: t?.cause?.message
+        return sanitizeText(plain ?: t?.class?.name ?: "Automation execution failed")
     }
 
     static String sanitizeErrorDetail(Throwable t) {

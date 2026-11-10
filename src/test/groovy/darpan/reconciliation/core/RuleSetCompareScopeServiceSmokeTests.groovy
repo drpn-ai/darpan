@@ -172,6 +172,24 @@ class RuleSetCompareScopeServiceSmokeTests {
         )
     }
 
+    /** DAR-BE-031: records without the run's ID field fail in words that say what to do, not as a Spark struct error. */
+    @Test
+    void aMissingIdFieldFailsInWordsThatNameTheFixNotAsASparkError() {
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("be031")
+        java.nio.file.Path noIds = dir.resolve("orders-no-id.json")
+        noIds.toFile().text = '{"data":{"orders":{"edges":[{"node":{"name":"#1001"}},{"node":{"name":"#1002"}}]}}}'
+        ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
+                .parameters([ruleSetId: "DARPAN_TEST_COMPARE_RS", compareScopeId: "DARPAN_TEST_ORDER_JSON_SCOPE",
+                             file1Location: "component://darpan/data/test/test-orders-1.json", file2Location: noIds.toUri().toString(),
+                             sparkAppName: "RuleSetCompareScopeServiceSmokeTests"])
+                .disableAuthz().call()
+        List<String> errors = darpan.facade.common.FacadeSupport.getErrors(ec)
+        ec.message.clearErrors()
+        assertTrue(errors.any { it.startsWith("The ID field 'id' is not in the HotWax records of this run.") }, "${errors}")
+        assertFalse(errors.any { it.contains("FIELD_NOT_FOUND") || it.startsWith("Java method") }, "${errors}")
+    }
+
     // ---------------------------------------------------------------- DAR-BE-049: single-sided evaluate
 
     @Test

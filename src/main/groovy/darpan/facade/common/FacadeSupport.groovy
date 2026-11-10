@@ -13,7 +13,15 @@ class FacadeSupport {
         (ec.message?.getValidationErrors() ?: []).each { ve ->
             if (ve?.message) validationErrors.add(ve.message.toString())
         }
-        return (baseErrors + validationErrors).findAll { it }
+        return (baseErrors + validationErrors).findAll { it }.collect { withoutServicePrefix(it) }.findAll { it }
+    }
+
+    private static final java.util.regex.Pattern SERVICE_PREFIX = ~/^Java method for service \[[^\]]*\] threw an exception(?:[;,] |\s*$)/
+
+    /** DAR-BE-031: Moqui prefixes a Java service's exception with its internal service name (or adds it as a line of its own,
+     *  which comes back empty here and is dropped); people see only the message. */
+    static String withoutServicePrefix(String message) {
+        return message == null ? null : SERVICE_PREFIX.matcher(message).replaceFirst("")
     }
 
     static Map<String, Object> envelope(def ec) {

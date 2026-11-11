@@ -85,7 +85,8 @@ class AuditChangeBacktest {
                 case "CONCLUSION_ROWS": return conclusionRows(ec, tenantId, target, merged)
                 // A schedule or a new statement moves no landed finding.
                 case "AUDIT_SETTINGS":
-                case "ADD_STATEMENT": return unsupported("NOT_APPLICABLE")
+                case "ADD_STATEMENT":
+                case "ADD_CHECK": return unsupported("NOT_APPLICABLE")
                 default: return unsupported("UNKNOWN_KIND")
             }
         } catch (Exception e) {

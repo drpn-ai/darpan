@@ -28,7 +28,7 @@ import static darpan.common.ValueSupport.normalize
 class AuditChangeLevers {
 
     static final List<String> KINDS = ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "EXPECTED_CAUSES", "FIX_TEXT", "CONCLUSION_ROWS",
-                                      "AUDIT_SETTINGS", "ADD_STATEMENT"].asImmutable()
+                                      "AUDIT_SETTINGS", "ADD_STATEMENT", "ADD_CHECK"].asImmutable()
     static final Map<String, List<String>> TARGET_KEYS = [
             EXCLUSION_FILTER   : ["savedRunId", "fileSide"],
             STATEMENT_NARROWING: ["auditId", "checkCode", "statementCode"],
@@ -36,7 +36,8 @@ class AuditChangeLevers {
             FIX_TEXT           : ["savedRunId", "conclusionCode"],
             CONCLUSION_ROWS    : ["savedRunId"],
             AUDIT_SETTINGS     : ["auditId"],
-            ADD_STATEMENT      : ["auditId"]].asImmutable()
+            ADD_STATEMENT      : ["auditId"],
+            ADD_CHECK          : ["auditId"]].asImmutable()
     static final List<String> SIDES = ["FILE_1", "FILE_2"].asImmutable()
     static final List<String> SIDE_FIELDS = ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId", "nsRestletConfigId",
             "sourceConfigId", "sourceConfigType", "fileTypeEnumId", "schemaFileName", "recordRootExpression"].asImmutable()
@@ -75,7 +76,8 @@ class AuditChangeLevers {
             case "STATEMENT_NARROWING":
             case "EXPECTED_CAUSES": return checkState(ec, kind, t)
             case "AUDIT_SETTINGS":
-            case "ADD_STATEMENT": return auditState(ec, kind, t)
+            case "ADD_STATEMENT":
+            case "ADD_CHECK": return auditState(ec, kind, t)
             default: return treeState(ec, kind, t)
         }
     }
@@ -175,8 +177,27 @@ class AuditChangeLevers {
                  findings: ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
                          .condition("statementId", st.statementId).useCache(false).count()] as Map
             }
+            if (kind == "ADD_CHECK") state.checks = checksOfAudit(ec, tenantId, audit)
         }
         return state
+    }
+
+    /** ADD_CHECK: the audit's checks (linked to one of its statements) by code, each with its run and the findings and runs on it. */
+    private static List<Map> checksOfAudit(def ec, String tenantId, Map audit) {
+        List<String> statementIds = ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId)
+                .condition("auditId", audit.auditId).useCache(false).list()*.statementId.collect { it as String }
+        if (!statementIds) return []
+        List<String> checkIds = ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", tenantId)
+                .condition("statementId", "in", statementIds).useCache(false).list()*.checkId.collect { it as String }.unique()
+        if (!checkIds) return []
+        return ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", tenantId).condition("checkId", "in", checkIds)
+                .useCache(false).list().collect { check ->
+            [id: check.checkCode, savedRunId: check.savedRunId,
+             findings: ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
+                     .condition("checkId", check.checkId).useCache(false).count(),
+             runs: ec.entity.find("darpan.audit.AuditCheckRun").condition("companyUserGroupId", tenantId)
+                     .condition("checkId", check.checkId).useCache(false).count()] as Map
+        }.sort { Map a -> a.id as String }
     }
 
     /** The run's causes marked EXPECTED (its conclusion rules' outcome), sorted, each once. */
@@ -224,6 +245,9 @@ class AuditChangeLevers {
 
     /** The INVALID statusMessage when the audit and its automations already run on the proposed schedule. */
     static final String NO_CHANGE_SCHEDULE_MESSAGE = "NO_CHANGE: the audit and every automation already run on this schedule; nothing would change."
+
+    /** The INVALID statusMessage when the audit already has a check with this code. */
+    static final String NO_CHANGE_CHECK_MESSAGE = "NO_CHANGE: the audit already has a check with this name; nothing would change."
 
     /** The INVALID statusMessage when the audit already has a statement with this text. */
     static final String NO_CHANGE_STATEMENT_MESSAGE = "NO_CHANGE: the audit already has a statement with this text; nothing would change."
@@ -329,6 +353,17 @@ class AuditChangeLevers {
                 statements << [id: "R${top + 1}".toString(), text: text, active: true, checks: 0, findings: 0]
                 state.add = [text: text, category: after.category as String, weight: (after.weight ?: "derived") as String]
                 break
+            case "ADD_CHECK":
+                String checkCode = checkCodeOf(after)
+                List<Map> auditChecks = (List<Map>) state.checks
+                if (auditChecks.any { Map c -> c.id == checkCode }) throw new IllegalArgumentException(NO_CHANGE_CHECK_MESSAGE)
+                String statementCode = after.statementCode as String
+                if (!((List<Map>) state.statements).any { Map st -> st.id == statementCode && st.active })
+                    throw new IllegalArgumentException("Statement ${statementCode} is not an active statement of audit ${state.audit}.".toString())
+                auditChecks << [id: checkCode, savedRunId: after.savedRunId as String, findings: 0, runs: 0]
+                state.add = [id: checkCode, label: (after.label as String).trim(), savedRunId: after.savedRunId as String,
+                             statementCode: statementCode, diffTypes: ((after.diffTypes ?: []) as List).collect { it as String }]
+                break
         }
         return state
     }
@@ -379,6 +414,11 @@ class AuditChangeLevers {
                 String text = (after.text as String).trim()
                 Map added = ((List<Map>) state.statements).find { Map st -> (st.text as String)?.trim()?.equalsIgnoreCase(text) }
                 return [text: text, statement: added == null ? null : pick(added, ["id", "text", "active"])]
+            case "ADD_CHECK":
+                // The check is found by its code (a duplicate is refused at merge): null before the add, its run after it.
+                String checkCode = checkCodeOf(after)
+                Map addedCheck = ((List<Map>) state.checks).find { Map c -> c.id == checkCode }
+                return [id: checkCode, check: addedCheck == null ? null : pick(addedCheck, ["id", "savedRunId"])]
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
                 List<String> codes = ((List<Map>) (after.rows ?: [])).collect { (it.conclusionCode ?: it.code) as String }
@@ -434,6 +474,17 @@ class AuditChangeLevers {
                     throw new IllegalArgumentException("Statement ${added.id} has checks or findings now; take those off first.".toString())
                 statements.remove(added)
                 state.remove = added.id
+                break
+            case "ADD_CHECK":
+                // The revert of an add takes the check out again, only while it has no findings or runs; adding one back is a new proposal.
+                if (lever.check != null) throw new IllegalArgumentException("A removed check is added again by a new proposal.")
+                List<Map> auditChecks = (List<Map>) state.checks
+                Map addedCheck = auditChecks.find { Map c -> c.id == lever.id }
+                if (addedCheck == null) throw new IllegalArgumentException("The check is no longer part of audit ${state.audit}.".toString())
+                if (addedCheck.findings || addedCheck.runs)
+                    throw new IllegalArgumentException("Check ${addedCheck.id} has findings or runs now; take those off first.".toString())
+                auditChecks.remove(addedCheck)
+                state.remove = addedCheck.id
                 break
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
@@ -508,12 +559,46 @@ class AuditChangeLevers {
                     if (row == null) ec.message.addError("Statement ${state.remove} was not found.".toString()) else row.delete()
                 }
                 break
+            case "ADD_CHECK":
+                if (state.add) addCheck(ec, state.audit as String, (Map) state.add)
+                else if (state.remove) removeCheck(ec, state.remove as String)
+                break
             default:
                 // Lookups are left out, which the save reads as "keep them".
                 List nodes = ((List<Map>) state.conclusions).collect { Map n -> pick(n, NODE_KEYS) + [conditions: conditionsOf(n.conditions)] }
                 ec.service.sync().name("facade.RunConclusionFacadeServices.save#RunConclusions").parameters([savedRunId: state.savedRunId,
                         conclusions: nodes]).call()
         }
+    }
+
+    /** save#AuditCheck makes the check (refusing a code already used); the audit then gives it an automation on its own schedule. */
+    private static void addCheck(def ec, String auditCode, Map add) {
+        ec.service.sync().name("facade.AuditFacadeServices.save#AuditCheck").parameters([audit: auditCode,
+                check: [id: add.id, label: add.label, savedRunId: add.savedRunId, create: true],
+                statements: [[id: add.statementCode, diffTypes: add.diffTypes, ruleIds: []]]]).call()
+        if (ec.message.hasError()) return
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        Map audit = tenantId ? AuditSettingsSupport.auditOf(ec, tenantId, auditCode) : null
+        if (audit == null) { ec.message.addError("Audit '${auditCode}' was not found.".toString()); return }
+        AuditSettingsSupport.ensureAutomations(ec, tenantId, audit)
+    }
+
+    /** Removes the check and its links, and pauses its automation unless another check still runs through it. */
+    private static void removeCheck(def ec, String checkCode) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        def check = tenantId ? ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", tenantId)
+                .condition("checkCode", checkCode).useCache(false).list().find() : null
+        if (check == null) { ec.message.addError("Check ${checkCode} was not found.".toString()); return }
+        String automationId = check.automationId as String
+        ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", tenantId)
+                .condition("checkId", check.checkId).useCache(false).deleteAll()
+        check.delete()
+        if (!automationId) return
+        boolean shared = ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", tenantId)
+                .condition("automationId", automationId).useCache(false).count() > 0
+        def automation = shared ? null : ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("companyUserGroupId", tenantId).condition("automationId", automationId).useCache(false).list().find()
+        if (automation != null && automation.isActive == "Y") { automation.set("isActive", "N"); automation.update() }
     }
 
     static final String UNSAFE_TREE_MESSAGE = "This run's conclusions include hidden or brain rows that cannot be saved safely yet; raise a ticket."
@@ -539,6 +624,8 @@ class AuditChangeLevers {
         if (state == null) return out
         if (kind == "EXCLUSION_FILTER") {
             ((Map) state.filters).values().each { List<Map> side -> side.each { Map f -> out.addAll((List<String>) f.filterValues) } }
+        } else if (kind == "ADD_CHECK") {
+            ((List<Map>) state.statements).each { Map st -> out.add(st.id as String) }
         } else if (kind in ["FIX_TEXT", "CONCLUSION_ROWS"]) {
             ((List<Map>) state.conclusions).each { Map n ->
                 ((List<Map>) n.conditions).each { Map c -> out.addAll(((List) c.values).collect { it as String }) }
@@ -608,6 +695,15 @@ class AuditChangeLevers {
             out.values = ((c.values ?: []) as List).collect { it as String }
             out
         }
+    }
+
+    /** The check's code: a revert's own id, else the proposal's label as lower-case words joined by hyphens. */
+    static String checkCodeOf(Map after) {
+        String label = (normalize(after.get("label")) ?: "").toLowerCase(Locale.ROOT)
+        String slug = label.replaceAll("[^a-z0-9]+", "-").replaceAll("^-+", "").take(60).replaceAll("-+\$", "")
+        String code = normalize(after.get("id")) ?: slug
+        if (!code) throw new IllegalArgumentException("after.label needs letters or digits to make a check id from")
+        return code
     }
 
     private static Map pick(Map m, List<String> keys) {

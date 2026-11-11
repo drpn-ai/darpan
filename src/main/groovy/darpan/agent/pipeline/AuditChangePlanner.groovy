@@ -294,6 +294,7 @@ class AuditChangePlanner {
             case "EXPECTED_CAUSES": return "the run's expected causes"
             case "AUDIT_SETTINGS": return "the audit's schedule"
             case "ADD_STATEMENT": return "the audit's statements"
+            case "ADD_CHECK": return "the audit's checks"
             case "FIX_TEXT": return "the conclusion's fix text"
             default: return "the run's conclusion rows"
         }

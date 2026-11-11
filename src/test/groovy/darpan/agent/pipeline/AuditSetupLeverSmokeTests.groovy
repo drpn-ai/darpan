@@ -2,6 +2,7 @@ package darpan.agent.pipeline
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import groovy.json.JsonOutput
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -17,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.*
 /**
  * DAR-BE-220. AUDIT_SETTINGS and ADD_STATEMENT drafted changes plan, apply and revert through save#AuditSettings (which
  * writes every check's automation) and add#AuditStatement, each kept as a config version; their backtest is NOT_APPLICABLE.
+ * DAR-BE-221. ADD_CHECK does the same through save#AuditCheck: the new check's automation joins the audit's schedule, and
+ * revert pauses and removes it.
  * Tenants and rows are synthetic.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -34,6 +37,8 @@ class AuditSetupLeverSmokeTests {
     private static final String AUDIT_ID = "KREWE_MC"
     private static final List<String> AUTOMATIONS = ["TAS_AUTO1", "TAS_AUTO2"]
     private static final String NEW_TEXT = "Every return is credited within a week"
+    private static final String NEW_CHECK = "Vendor memos open"
+    private static final String NEW_CODE = "vendor-memos-open"
     private static final Timestamp FROM = Timestamp.valueOf("2026-04-21 00:00:00")
 
     private ExecutionContext ec
@@ -62,7 +67,8 @@ class AuditSetupLeverSmokeTests {
                         sourceColumn: f[1], sequenceNum: (i + 1) as Long])
             }
         }
-        ["Open credit memos", "Open debit memos"].each { String name ->
+        // The third run has no check yet: ADD_CHECK puts one on it.
+        ["Open credit memos", "Open debit memos", "Open vendor memos"].each { String name ->
             Map run = ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun").parameters([
                     runName: name, scopeMode: "EVALUATE", file1SystemEnumId: "NETSUITE_SUITEQL", file1SourceTypeEnumId: "AUT_SRC_API",
                     file1SourceConfigId: "TAS_Q", file1SourceConfigType: "NETSUITE_SUITEQL",
@@ -71,6 +77,7 @@ class AuditSetupLeverSmokeTests {
             String runId = run.savedRun.savedRunId as String
             runIds << runId
             int i = runIds.size() - 1
+            if (i >= AUTOMATIONS.size()) return
             asSystem {
                 upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: AUTOMATIONS[i], automationName: name,
                         companyUserGroupId: MINE, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: runId, savedRunType: "ruleset",
@@ -98,6 +105,9 @@ class AuditSetupLeverSmokeTests {
                     auditId: AUDIT_ID, createdDate: FROM])
             upsert("darpan.agent.AgentConversation", [conversationId: CONV_OTHER, companyUserGroupId: OTHER, userId: USER,
                     createdDate: FROM])
+            // The person names the run the new check reads (provenance: a run id must come from them or the config).
+            upsert("darpan.agent.AgentMessage", [messageId: "TAS_MSG1", conversationId: CONV, companyUserGroupId: MINE, sequenceNum: 1L,
+                    kind: "USER", contentJson: JsonOutput.toJson("Add a check on run ${runIds[2]} to the first statement".toString())])
         }
     }
 
@@ -118,6 +128,17 @@ class AuditSetupLeverSmokeTests {
             ec.entity.find(VERSION).deleteAll()
             ec.entity.find("darpan.audit.AuditStatement").condition("auditId", AUDIT_ID)
                     .condition("statementCode", "not-in", ["R1", "R2"]).deleteAll()
+            ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", MINE)
+                    .condition("checkCode", "not-in", ["check-1", "check-2"]).list().each { check ->
+                ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", check.checkId).deleteAll()
+                check.delete()
+            }
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("savedRunId", runIds[2]).list().each { automation ->
+                ["darpan.reconciliation.ReconciliationAutomationSourceFilter", "darpan.reconciliation.ReconciliationAutomationSource"].each { String name ->
+                    ec.entity.find(name).condition("automationId", automation.automationId).deleteAll()
+                }
+                automation.delete()
+            }
             ec.entity.find("darpan.audit.Audit").condition("auditId", AUDIT_ID).one()
                     .setAll([scheduleTime: null, scheduleTimeZone: null, scheduleActive: null]).update()
             AUTOMATIONS.each { String id ->
@@ -198,6 +219,60 @@ class AuditSetupLeverSmokeTests {
         assertEquals("REVERTED", proposal(p.proposalId).status)
     }
 
+    // ------------------------------------------------------------------ ADD_CHECK
+
+    @Test
+    void "a check is added on the audit's schedule and revert pauses and removes it"() {
+        asSystem {
+            ec.entity.find("darpan.audit.Audit").condition("auditId", AUDIT_ID).one()
+                    .setAll([scheduleTime: "07:30", scheduleTimeZone: "UTC", scheduleActive: "Y"]).update()
+        }
+        Map p = propose("ADD_CHECK", [auditId: "month-close"], [label: NEW_CHECK, savedRunId: runIds[2], statementCode: "R1"])
+        assertFalse(p.hadError as boolean, p.errorText as String)
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        assertEquals("PASS", p.provenanceStatus, p.blockedIds as String)
+        assertEquals("NOT_APPLICABLE", p.backtest.reason)
+        Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
+        assertFalse(plan.hadError as boolean, plan.errorText as String)
+        assertEquals(["check-1", "check-2"], checkCodes(), "no check before apply")
+        assertEquals(0, runAutomations().size(), "planning makes no automation")
+
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("APPLIED", out.status)
+        assertEquals(["check-1", "check-2", NEW_CODE], checkCodes())
+        def check = asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkCode", NEW_CODE).useCache(false).one() }
+        assertEquals(runIds[2], check.savedRunId)
+        List automations = runAutomations()
+        assertEquals([check.automationId], automations*.automationId, "the check runs through one automation of its run")
+        assertEquals(["0 30 7 * * ?"], automations*.scheduleExpr)
+        assertEquals(["UTC"], automations*.windowTimeZone)
+        assertEquals(["Y"], automations*.isActive)
+        assertEquals(["AGENT_APPLY", "AGENT_APPLY"], asSystem {
+            ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list()*.changeSource })
+
+        Map again = propose("ADD_CHECK", [auditId: "month-close"], [label: NEW_CHECK, savedRunId: runIds[2], statementCode: "R1"])
+        assertEquals("INVALID", again.status, "the same check twice")
+        assertEquals(AuditChangeLevers.NO_CHANGE_CHECK_MESSAGE, again.statusMessage)
+
+        Map r = call("revert#AuditChange", [proposalId: p.proposalId])
+        assertFalse(r.hadError as boolean, r.errorText as String)
+        assertEquals("PLANNED", r.status, r.statusMessage as String)
+        Map back = call("apply#AuditChange", [proposalId: r.newProposalId, planHash: r.planHash])
+        assertFalse(back.hadError as boolean, back.errorText as String)
+        assertEquals(["check-1", "check-2"], checkCodes(), "no active check is left")
+        assertEquals(["N"], runAutomations()*.isActive, "its automation is paused")
+        assertEquals("REVERTED", proposal(p.proposalId).status)
+    }
+
+    @Test
+    void "a check on a statement the audit does not have is refused"() {
+        Map p = propose("ADD_CHECK", [auditId: "month-close"], [label: NEW_CHECK, savedRunId: runIds[2], statementCode: "R9"])
+        assertEquals("INVALID", p.status)
+        assertTrue((p.statusMessage as String).contains("not an active statement"), p.statusMessage as String)
+        assertEquals(["check-1", "check-2"], checkCodes())
+    }
+
     // ------------------------------------------------------------------ refusals
 
     @Test
@@ -224,7 +299,10 @@ class AuditSetupLeverSmokeTests {
         ec.message.clearAll()
         assertNull(AuditChangeLevers.current(ec, "ADD_STATEMENT", [auditId: AUDIT_ID]))
         ec.message.clearAll()
-        ["AUDIT_SETTINGS": [time: "07:30"], "ADD_STATEMENT": [text: NEW_TEXT, category: "returns"]].each { String kind, Map after ->
+        assertNull(AuditChangeLevers.current(ec, "ADD_CHECK", [auditId: AUDIT_ID]))
+        ec.message.clearAll()
+        ["AUDIT_SETTINGS": [time: "07:30"], "ADD_STATEMENT": [text: NEW_TEXT, category: "returns"],
+         "ADD_CHECK": [label: NEW_CHECK, savedRunId: runIds[2], statementCode: "R1"]].each { String kind, Map after ->
             Map p = this.call("create#AuditChangeProposal", [conversationId: CONV_OTHER, kind: kind, target: [auditId: AUDIT_ID],
                     after: after, reasonText: "test"])
             assertFalse(p.hadError as boolean, p.errorText as String)
@@ -236,6 +314,7 @@ class AuditSetupLeverSmokeTests {
         actAs(MINE)
         assertEquals(["0 0 6 * * ?", "0 0 6 * * ?"], automationField("scheduleExpr"))
         assertEquals(["R1", "R2"], statementCodes())
+        assertEquals(["check-1", "check-2"], checkCodes())
     }
 
     // ------------------------------------------------------------------ helpers
@@ -262,6 +341,18 @@ class AuditSetupLeverSmokeTests {
                 ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", id).useCache(false).one().get(field) as String
             }
         }
+    }
+
+    private List<String> checkCodes() {
+        return asSystem {
+            ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", MINE).orderBy("checkCode").useCache(false).list()*.checkCode
+        } as List<String>
+    }
+
+    private List runAutomations() {
+        return asSystem {
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("savedRunId", runIds[2]).useCache(false).list()
+        } as List
     }
 
     private List<String> statementCodes() {

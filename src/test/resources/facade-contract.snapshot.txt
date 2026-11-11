@@ -142,6 +142,8 @@ SERVICE find AuditFindingLookalikes
     findingId : String [required]
     limit : Integer
   OUT:
+    byCause : Map
+    byState : Map
     controls : List
     sameCause : List
 

@@ -116,6 +116,9 @@ class RunConclusionSupportTests {
         assertEquals(1, result.counts.CONC_PARTIAL_PAYMENT_GIVEN_BACK)
         assertEquals(1, result.counts.CONC_NEVER_REACHED_NS)
         assertEquals(2, result.brain.asked, "two orders asked in one call")
+        // DAR-BE-228: the ledger travels with the counts.
+        assertEquals(2, result.brain.questions.orderPayments.asked)
+        assertEquals(1, result.brain.questions.orderPayments.batches)
     }
 
     // DAR-BE-151 (prod gorjana R1, Nov 1-9: 25,295 rows, 24,635 of them billed lines HotWax's read does not cover): only

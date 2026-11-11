@@ -42,6 +42,11 @@ class BrainConclude {
         Map<String, Map<String, Map>> fromFacts = answersInRecords(kind, (List<Map>) (args.findings ?: []), catalog)
         fromFacts.each { String q, Map<String, Map> byId -> answers.get(q).putAll(byId) }
         int answeredFromFacts = (fromFacts.values()*.size().sum() ?: 0) as int
+        // DAR-BE-228: per question, what this pass did with it.
+        Map<String, Map<String, Integer>> ledger = catalog.collectEntries {
+            [(it.name): [asked: 0, reused: 0, dropped: 0, answeredFromFacts: (fromFacts.get(it.name)?.size() ?: 0), failed: 0, batches: 0]]
+        } as Map<String, Map<String, Integer>>
+        Closure<Void> tally = { String q, String what, int n -> if (n && ledger.containsKey(q)) ledger.get(q).put(what, ledger.get(q).get(what) + n) }
         List<String> warnings = []
 
         List<Map> round = batches.collect { fire(engine, kind, it, answers) }
@@ -60,6 +65,9 @@ class BrainConclude {
             Map plan = BrainAskPlanner.plan(asks, best, tenantId, ranks, fromFacts)
             reused += (plan.reused ?: 0) as int
             answeredFromFacts += (plan.fromFacts ?: 0) as int
+            ((Map<String, Map<String, Integer>>) (plan.byQuestion ?: [:])).each { String q, Map<String, Integer> c ->
+                tally(q, "reused", c.reused ?: 0); tally(q, "dropped", c.dropped ?: 0); tally(q, "answeredFromFacts", c.fromFacts ?: 0)
+            }
             dropped += (plan.dropped ?: 0) as int
             Set<String> gained = [] as Set
             ((Map<String, Map>) plan.answered).each { String q, Map byId ->
@@ -76,6 +84,7 @@ class BrainConclude {
                 List<String> allIds = planned.findAll { !failed.contains("${question}|${it}".toString()) }
                 // Bounded calls; a failed batch fails alone and is not remembered.
                 allIds.collate(fetchBatch > 0 ? fetchBatch : entry.batchSize).each { List<String> ids ->
+                    tally(question, "batches", 1)
                     try {
                         Map found = (Map) (fetchQuestion.call(question, ids) ?: [:])
                         ids.each { String id ->
@@ -85,8 +94,10 @@ class BrainConclude {
                             gained.add("${question}|${id}".toString())
                         }
                         asked += ids.size()
+                        tally(question, "asked", ids.size())
                     } catch (Throwable t) {
                         ids.each { failed.add("${question}|${it}".toString()) }
+                        tally(question, "failed", ids.size())
                         warnings.add("Question ${question} not answered for ${ids.size()} subject(s): ${t.message ?: t.class.simpleName}".toString())
                     }
                 }
@@ -100,7 +111,8 @@ class BrainConclude {
         round.each { Map fired ->
             ((List<Conclusion>) fired.conclusions).each { Conclusion c -> byKey.put(c.finding.key, conclusion(engine, c, labelFor)) }
         }
-        return [byKey: byKey, asked: asked, reused: reused, dropped: dropped, answeredFromFacts: answeredFromFacts, warnings: warnings]
+        return [byKey: byKey, asked: asked, reused: reused, dropped: dropped, answeredFromFacts: answeredFromFacts,
+                questions: ledger.findAll { String q, Map<String, Integer> c -> c.values().any { it } }, warnings: warnings]
     }
 
     /**

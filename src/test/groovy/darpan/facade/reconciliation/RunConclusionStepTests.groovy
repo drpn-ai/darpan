@@ -32,6 +32,17 @@ class RunConclusionStepTests {
         assertEquals([], rules[1].conditions)
     }
 
+    // DAR-BE-228: the brain's per-question ledger lands in the step's metadata beside the counts.
+    @Test
+    void theBrainsPerQuestionLedgerLandsInTheRunMetadata() {
+        Map ledger = [orderPayments: [asked: 1, reused: 0, dropped: 0, answeredFromFacts: 0, failed: 1, batches: 2]]
+        Map metrics = RunConclusionStep.stepMetrics([counts: [A: 2], unknownSides: [], brain: [asked: 1, questions: ledger]], ["lookup down"])
+        assertEquals(ledger, metrics.brain.questions)
+        assertEquals([A: 2], metrics.counts)
+        assertEquals(["lookup down"], metrics.lookupWarnings)
+        assertNull(RunConclusionStep.stepMetrics([counts: [:]], []).lookupWarnings)
+    }
+
     @Test
     void aMissingEnumLabelFallsBackToTheCode() {
         List rules = RunConclusionStep.buildRules([[sequenceNum: 1, conclusionEnumId: "X"]], [], [:])

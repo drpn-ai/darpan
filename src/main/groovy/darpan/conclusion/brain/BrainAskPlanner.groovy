@@ -24,6 +24,12 @@ class BrainAskPlanner {
         int factAnswers = 0
         Set<String> seen = [] as Set
         Set<String> droppedKeys = [] as Set
+        // DAR-BE-228: the same counts per question.
+        Map<String, Map<String, Integer>> byQuestion = [:]
+        Closure<Void> count = { String q, String what ->
+            Map<String, Integer> c = byQuestion.computeIfAbsent(q, { [dropped: 0, reused: 0, fromFacts: 0] })
+            c.put(what, c.get(what) + 1)
+        }
         (asks ?: []).each { Ask ask ->
             String id = subjectId(ask.subject)
             if (!id) return
@@ -31,7 +37,7 @@ class BrainAskPlanner {
             // so another order needing the same product still asks.
             Cause best = bestCauses?.get(ask.forOrder ?: ask.subject)
             if (best != null && best.rank >= (mayEnableRanks?.get(ask.question) ?: Integer.MAX_VALUE)) {
-                if (droppedKeys.add("${ask.question}|${id}|${subjectId(ask.forOrder)}".toString())) dropped++
+                if (droppedKeys.add("${ask.question}|${id}|${subjectId(ask.forOrder)}".toString())) { dropped++; count(ask.question, "dropped") }
                 return
             }
             if (!seen.add("${ask.question}|${id}".toString())) return
@@ -39,18 +45,20 @@ class BrainAskPlanner {
             if (known != null && known.containsKey(id)) {
                 answered.computeIfAbsent(ask.question, { [:] }).put(id, known.get(id))
                 factAnswers++
+                count(ask.question, "fromFacts")
                 return
             }
             if (BrainAnswerStore.has(tenantId, ask.question, id)) {
                 answered.computeIfAbsent(ask.question, { [:] }).put(id, BrainAnswerStore.get(tenantId, ask.question, id))
                 reused++
+                count(ask.question, "reused")
                 return
             }
             toFetch.computeIfAbsent(ask.question, { new LinkedHashSet<String>() }).add(id)
         }
         // Sorted: a session hands its facts back in no fixed order, and a run must ask the same way every time.
         return [toFetch : toFetch.collectEntries { String q, Set ids -> [(q): (ids as List<String>).sort()] },
-                answered: answered, dropped: dropped, reused: reused, fromFacts: factAnswers]
+                answered: answered, dropped: dropped, reused: reused, fromFacts: factAnswers, byQuestion: byQuestion]
     }
 
     /** An order's id, a product's (DAR-BE-186), a replacement's return's (DAR-BE-192), or a Shopify order's (DAR-BE-204). */

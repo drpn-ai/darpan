@@ -95,9 +95,7 @@ class RunConclusionStep {
             ])
             int concluded = ((Map) (result.counts ?: [:])).values().sum(0) as int
             RunObservability.endStep(ec, step, RunObservability.STATUS_SUCCESS,
-                    [recordCount: concluded,
-                     metricsJson: JsonOutput.toJson([counts: result.counts, unknownSides: result.unknownSides,
-                                                     lookupWarnings: lookupWarnings ?: null, brain: result.brain])])
+                    [recordCount: concluded, metricsJson: JsonOutput.toJson(stepMetrics(result, lookupWarnings))])
             return result + (lookupWarnings ? [warning: lookupWarnings.join("; ")] : [:])
         } catch (Throwable t) {
             if (ec?.message?.hasError()) ec.message.clearErrors()
@@ -105,6 +103,11 @@ class RunConclusionStep {
                     [errorMessage: "Conclusions not drawn: ${normalize(t.message) ?: t.class.simpleName}".toString()])
             return [ran: false, warning: t.message]
         }
+    }
+
+    /** The conclude step's metadata: counts, unread sides, lookup warnings and the brain's counts with its per-question ledger (DAR-BE-228). */
+    static Map stepMetrics(Map result, List<String> lookupWarnings) {
+        return [counts: result.counts, unknownSides: result.unknownSides, lookupWarnings: lookupWarnings ?: null, brain: result.brain]
     }
 
     /**

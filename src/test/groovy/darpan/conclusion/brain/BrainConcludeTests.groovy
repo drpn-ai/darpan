@@ -86,6 +86,28 @@ class BrainConcludeTests {
         assertFalse(BrainAnswerStore.has("GORJANA", "orderPayments", "M1088731"))
     }
 
+    // DAR-BE-228: per question, what the pass did: asked, reused, dropped, answered from facts, failed, and in how many calls.
+    // A failed batch leaves its findings on their prior cause (no brain conclusion) and fails alone.
+    @Test
+    void theLedgerSaysPerQuestionWhatThePassDidIncludingAFailedBatch() {
+        Map m2 = r1()
+        m2.key = "M2/01"
+        ((Map) ((Map) ((Map) m2.sides).FILE_1).record).omsOrderId = "M2"
+        int saved = BrainConclude.fetchBatch
+        BrainConclude.fetchBatch = 1
+        try {
+            Map out = BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", findings: [r1(), m2],
+                    fetchQuestion: { String q, List ids -> if (ids.contains("M2")) throw new IllegalStateException("OMS 504"); PAYMENTS }])
+            assertEquals([orderPayments: [asked: 1, reused: 0, dropped: 0, answeredFromFacts: 0, failed: 1, batches: 2]], out.questions)
+            assertEquals(CODE, ((Map) out.byKey[KEY]).code)
+            assertFalse(out.byKey.containsKey("M2/01"), "the failed order keeps its prior cause")
+        } finally {
+            BrainConclude.fetchBatch = saved
+        }
+        Map again = run("return", r2(), { String q, List ids -> PAYMENTS })
+        assertEquals([orderPayments: [asked: 0, reused: 1, dropped: 0, answeredFromFacts: 0, failed: 0, batches: 0]], again.questions)
+    }
+
     @Test
     void anOrderNothingWasFoundForIsRememberedAndNotConcluded() {
         Map out = run("orderLine", r1(), { String q, List ids -> [:] })

@@ -276,7 +276,7 @@ class RunConclusionSupport {
         return [ran: true, counts: counts.findAll { !hiddenCodes.contains(it.key) }, unknownSides: unknownSides,
                 hidden: hidden, hiddenByBucket: hiddenByBucket] +
                 (brain ? [brain: [asked: brain.asked, reused: brain.reused, dropped: brain.dropped, answeredFromFacts: brain.answeredFromFacts,
-                                 warnings: brain.warnings]] : [:])
+                                 questions: brain.questions, warnings: brain.warnings]] : [:])
     }
 
     /** DAR-BE-151: what BrainFactAdapter reads of a finding, and nothing else. */

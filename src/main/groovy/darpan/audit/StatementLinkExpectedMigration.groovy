@@ -25,8 +25,9 @@ class StatementLinkExpectedMigration {
         // tenant|run -> the links that read it, so one run gets one answer.
         Map<String, List> byRun = new LinkedHashMap<>()
         links.each { link ->
-            def check = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", link.checkId)
-                    .condition("companyUserGroupId", link.companyUserGroupId).useCache(false).one()
+            // A tenant condition beside the full key is dropped by one(); the owner is checked on the row instead.
+            def check = darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditCheck", "checkId", link.checkId,
+                    link.companyUserGroupId, "DAR-BE-196 migration: the link's own tenant owns its check")
             String runId = normalize(check?.savedRunId)
             if (!runId) { messages << "Link ${link.statementId}/${link.checkId}: its check has no run; list cleared, nothing to mark.".toString() }
             byRun.computeIfAbsent("${link.companyUserGroupId}|${runId ?: ''}".toString()) { [] }.add(link)

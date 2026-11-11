@@ -333,28 +333,29 @@ class TenantOwnedEntityFilterRuntimeTests {
 
     @Test
     void aSharedPeerStillSeesTheOwnersDisabledEndpoint() {
-        // The owner switches OMS off on its config, through the real store service, authz ON.
+        // DAR-BE-052 deleted the OMS REST endpoint; OMS_GQL is the HotWax order read now.
+        // The owner switches OMS_GQL off on its config, through the real store service, authz ON.
         Map<String, Object> catalog = listEndpoints(HWC_OWNED)
         assertTrue(catalog.ok as Boolean, "owner cannot list its own endpoints: ${catalog.errors}")
         List<String> allEndpoints = (catalog.endpoints as List)*.systemEnumId as List<String>
-        assertTrue(allEndpoints.contains("OMS"), "test precondition: OMS is in the HotWax catalog: ${allEndpoints}")
+        assertTrue(allEndpoints.contains("OMS_GQL"), "test precondition: OMS_GQL is in the HotWax catalog: ${allEndpoints}")
         Map<String, Object> stored = withProductionAuthz {
             ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
                     .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
                                  configId            : HWC_OWNED,
-                                 enabledSystemEnumIds: allEndpoints - ["OMS"]]).call()
+                                 enabledSystemEnumIds: allEndpoints - ["OMS_GQL"]]).call()
         }
         assertTrue(stored.ok as Boolean, "owner store failed under production authz: ${stored.errors}")
-        assertEquals(false, endpointState(listEndpoints(HWC_OWNED), "OMS"), "owner must read its own decision")
+        assertEquals(false, endpointState(listEndpoints(HWC_OWNED), "OMS_GQL"), "owner must read its own decision")
 
         // The peer the config is shared with must read the SAME decision. Its rows are stamped with
         // the owner's tenant, so a tenant-filtered read would find none — and absent means enabled.
         actAs(EDITOR_USERNAME, GORJANA)
         Map<String, Object> peer = listEndpoints(HWC_OWNED)
         assertTrue(peer.ok as Boolean, "shared peer was refused: ${peer.errors}")
-        assertEquals(false, endpointState(peer, "OMS"),
+        assertEquals(false, endpointState(peer, "OMS_GQL"),
                 "the owner disabled OMS; a peer reading it as enabled is a fail-open")
-        assertEquals(true, endpointState(peer, (allEndpoints - ["OMS"])[0]), "positive control: an enabled endpoint")
+        assertEquals(true, endpointState(peer, (allEndpoints - ["OMS_GQL"])[0]), "positive control: an enabled endpoint")
     }
 
     @Test

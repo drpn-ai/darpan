@@ -35,7 +35,7 @@ class SourceSystemConstantDuplicationRatchetTest {
      * (OMS/SHOPIFY/NETSUITE = 3) = 7. AutomationExecutionSupport no longer declares any (its copies were
      * removed once dispatch became registry-driven).
      */
-    static final int BASELINE = 7
+    static final int BASELINE = 6
 
     private static final List<String> SCANNED_FILES = [
             "reconciliation/automation/AutomationExecutionSupport.groovy",

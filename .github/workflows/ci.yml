@@ -23,9 +23,12 @@ on:
   push:
     branches: [main]
 
+# DAR-OPS-015: a run on main finishes; a newer push waits for it (GitHub keeps one waiting run per group, the newest).
+# Several sessions push to main, and cancelling there meant the ~20-minute suite never reported. A PR's older run is
+# still cancelled.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read

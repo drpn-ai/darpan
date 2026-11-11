@@ -166,7 +166,8 @@ SERVICE get AgentBrainCatalog
   type        : inline
   authenticate: true
   allow-remote: false
-  IN: (none)
+  IN:
+    findingId : String
   OUT:
     conclusions : List
     rules : List

@@ -18,7 +18,7 @@ import static darpan.conclusion.brain.BrainFactAdapter.RETURN_RMA
  * <ul>
  *   <li>subject: the fact the question is about (fact package simple name); its id is the ask planner's subject id.</li>
  *   <li>batchSize: ids per question call.</li>
- *   <li>freshness: how long an answer is reused (BrainAnswerStore); only `run` exists yet.</li>
+ *   <li>freshness: how long an answer is reused (BrainAnswerStore.TTL_MILLIS): `run` or `stable`.</li>
  *   <li>depth: the longest chain of answers that can come before the question is asked, plus one. A Shopify order's HotWax
  *       order (1), then that order's replacement return (2), then the return's RMA (3).</li>
  *   <li>defaultLookup: the read taken when the scope names no lookup of the question's name, from the scope's HotWax
@@ -39,6 +39,8 @@ class BrainQuestionCatalog {
     }
 
     static final String FRESH_RUN = "run"
+    /** DAR-BE-226: what changes on the scale of a day. */
+    static final String FRESH_STABLE = "stable"
     static final int BATCH = 500
 
     static final List<Entry> ENTRIES = [
@@ -51,7 +53,8 @@ class BrainQuestionCatalog {
                         [name: ORDER_PAYMENTS, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_GQL", sourceConfigId: config,
                          keyField: "orderId", parameters: [keepRecordFields: ["orderId", "grandTotal", "paymentPreferences"]]]
                     }),
-            new Entry(name: PRODUCT_NETSUITE_ID, subject: "Product", batchSize: BATCH, freshness: FRESH_RUN, depth: 2,
+            // DAR-BE-226: whether a product is in NetSuite rarely changes within a day; stable.
+            new Entry(name: PRODUCT_NETSUITE_ID, subject: "Product", batchSize: BATCH, freshness: FRESH_STABLE, depth: 2,
                     // DAR-BE-186: the products named by id, each with its NETSUITE_PRODUCT_ID (extract#HotWaxOmsGqlProducts lookupKeys).
                     defaultLookup: { String config ->
                         [name: PRODUCT_NETSUITE_ID, subject: "FILE_1", idField: "productId", systemEnumId: "OMS_PRODUCTS_GQL",

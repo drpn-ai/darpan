@@ -31,7 +31,7 @@ class BrainQuestionCatalogTests {
         BrainQuestionCatalog.ENTRIES.each { BrainQuestionCatalog.Entry e ->
             assertTrue(e.subject in ["Order", "Product", "ReplacementReturn", "ShopifyOrder"], "${e.name}: subject ${e.subject}")
             assertTrue(e.batchSize > 0, "${e.name}: batch size")
-            assertEquals(BrainQuestionCatalog.FRESH_RUN, e.freshness, "${e.name}: only the run freshness class exists yet")
+            assertTrue(BrainAnswerStore.TTL_MILLIS.containsKey(e.freshness), "${e.name}: freshness ${e.freshness} has a time to live")
             assertTrue(e.depth >= 1, "${e.name}: depth")
         }
     }

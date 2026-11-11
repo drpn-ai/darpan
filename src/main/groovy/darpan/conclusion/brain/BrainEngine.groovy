@@ -4,6 +4,7 @@ import darpan.conclusion.brain.fact.Ask
 import darpan.conclusion.brain.fact.BestCause
 import darpan.conclusion.brain.fact.Cause
 import darpan.conclusion.brain.fact.Conclusion
+import darpan.conclusion.brain.fact.GraphParam
 import org.kie.api.KieServices
 import org.kie.api.builder.KieBuilder
 import org.kie.api.builder.KieFileSystem
@@ -68,10 +69,31 @@ class BrainEngine {
         }
     }
 
+    /** DAR-BE-229. What the rules read as GraphParam facts; a number is a BigDecimal, a text is a String. Today's conclusions. */
+    static final Map<String, Object> PARAM_DEFAULTS = Collections.unmodifiableMap([
+            moneyTolerance        : new BigDecimal("0.01"),
+            currencyShortfallShare: new BigDecimal("0.02"),
+            replacementPrefixes   : "EXC|WTY",
+            exchangePrefixes      : "EXC"] as Map<String, Object>)
+
+    /** The defaults with a per-call override laid over them, as one GraphParam per name. An unknown name is refused. */
+    static List<GraphParam> params(Map<String, Object> overrides) {
+        Map<String, Object> merged = new LinkedHashMap<>(PARAM_DEFAULTS)
+        (overrides ?: [:]).each { String k, Object v ->
+            if (!PARAM_DEFAULTS.containsKey(k)) throw new IllegalArgumentException("Unknown brain parameter ${k}")
+            if (v == null) throw new IllegalArgumentException("Brain parameter ${k} has no value")
+            merged.put(k, v)
+        }
+        return merged.collect { String k, Object v ->
+            PARAM_DEFAULTS.get(k) instanceof BigDecimal ? new GraphParam(k, new BigDecimal(v.toString()), null) : new GraphParam(k, null, v.toString())
+        }
+    }
+
     /** Facts in; the statements' conclusions, the asks still open, and each subject's best cause out. */
-    Map fire(List<Object> facts) {
+    Map fire(List<Object> facts, Map<String, Object> paramOverrides = [:]) {
         KieSession session = container.newKieSession()
         try {
+            params(paramOverrides).each { session.insert(it) }
             (facts ?: []).each { session.insert(it) }
             Map<String, Object> fired = RuleEngineSupport.fireAllRulesBounded(session, "conclusion-brain")
             if (fired.halted) {

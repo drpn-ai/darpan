@@ -16,6 +16,7 @@ import darpan.conclusion.brain.fact.Answered
 import darpan.conclusion.brain.fact.Cause
 import darpan.conclusion.brain.fact.BestCause
 import darpan.conclusion.brain.fact.Conclusion
+import darpan.conclusion.brain.fact.GraphParam
 import java.math.BigDecimal
 import java.util.List
 
@@ -248,8 +249,9 @@ rule "Ask for the return a replacement was made for, when the replacement never 
     @reads("OrderNotInNetsuite, Order, Answered") @asks("replacementReturn")
     @mayEnable("RET_OPEN,RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO,ORIG_OPEN")
 when
+    GraphParam( name == "replacementPrefixes", $rp : prefixRegex )
     OrderNotInNetsuite( $o : order )
-    Order( this == $o, name != null, name matches "(?i)(EXC|WTY)-.+" )
+    Order( this == $o, name != null, name matches $rp )
     not Answered( question == "replacementReturn", subject == $o )
 then
     insertLogical( new Ask( "replacementReturn", $o ) );
@@ -282,8 +284,9 @@ end
 rule "Ask NetSuite for an exchange's original order, when the exchange never reached NetSuite"
     @reads("OrderNotInNetsuite, Order, ReplacementReturn, Answered") @asks("originalInNetsuite") @mayEnable("ORIG_OPEN")
 when
+    GraphParam( name == "exchangePrefixes", $ep : prefixRegex )
     OrderNotInNetsuite( $o : order )
-    Order( this == $o, name != null, name matches "(?i)EXC-.+" )
+    Order( this == $o, name != null, name matches $ep )
     ReplacementReturn( replacement == $o, $orig : original, original != null )
     not Answered( question == "originalInNetsuite", subject == $orig )
 then
@@ -298,8 +301,9 @@ end
 rule "An exchange waits on its original order, which NetSuite has not fulfilled"
     @reads("OrderNotInNetsuite, Order, ReplacementReturn, Answered") @produces("ExchangeWaitsOnOriginal")
 when
+    GraphParam( name == "exchangePrefixes", $ep : prefixRegex )
     OrderNotInNetsuite( $o : order )
-    Order( this == $o, name != null, name matches "(?i)EXC-.+" )
+    Order( this == $o, name != null, name matches $ep )
     ReplacementReturn( replacement == $o, $orig : original, original != null )
     Answered( question == "originalInNetsuite", subject == $orig )
     Order( this == $orig, netsuiteTranId != null, netsuiteStatus != null,
@@ -390,13 +394,15 @@ end
 rule "A replacement's payments do not settle its total"
     @reads("OrderNotInNetsuite, Order, Payment") @produces("PaymentsNotTheTotal")
 when
+    GraphParam( name == "replacementPrefixes", $rp : prefixRegex )
+    GraphParam( name == "moneyTolerance", $tol : number )
     OrderNotInNetsuite( $o : order )
-    Order( this == $o, paymentsComplete == true, total != null, name != null, name matches "(?i)(EXC|WTY)-.+" )
+    Order( this == $o, paymentsComplete == true, total != null, name != null, name matches $rp )
     not Payment( order == $o, state == "SETTLED", amount == null )
     $settled : List() from collect( Payment( order == $o, state == "SETTLED" ) )
 then
     BigDecimal paid = Payment.sum( $settled );
-    if (paid.subtract( $o.getTotal() ).abs().compareTo( new BigDecimal( "0.01" ) ) >= 0) { insertLogical( new PaymentsNotTheTotal( $o, paid ) ); }
+    if (paid.subtract( $o.getTotal() ).abs().compareTo( $tol ) >= 0) { insertLogical( new PaymentsNotTheTotal( $o, paid ) ); }
 end
 
 rule "Every tender taken was given back, and nothing else was"
@@ -473,6 +479,7 @@ end
 rule "Shopify dropped a line after the sale and the payment is its new total"
     @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("LineRemovedAfterSale")
 when
+    GraphParam( name == "moneyTolerance", $tol : number )
     OrderNotInNetsuite( $o : order )
     $s : ShopifyOrder( order == $o, financialStatus == "PAID", total != null, currentTotal != null, currentTotal < total )
     Order( this == $o, paymentsComplete == true, total != null )
@@ -481,7 +488,7 @@ when
     $settled : List( size > 0 ) from collect( Payment( order == $o, state == "SETTLED" ) )
 then
     BigDecimal paid = Payment.sum( $settled );
-    BigDecimal cent = new BigDecimal( "0.01" );
+    BigDecimal cent = $tol;
     if (paid.subtract( $s.getCurrentTotal() ).abs().compareTo( cent ) < 0 && $o.getTotal().subtract( paid ).compareTo( cent ) >= 0) {
         insertLogical( new LineRemovedAfterSale( $o, $s, paid ) );
     }
@@ -491,6 +498,8 @@ end
 rule "An order shipped abroad is paid just under its total"
     @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("ForeignCurrencyShortfall")
 when
+    GraphParam( name == "moneyTolerance", $tol : number )
+    GraphParam( name == "currencyShortfallShare", $share : number )
     OrderNotInNetsuite( $o : order )
     ShopifyOrder( order == $o )
     Order( this == $o, paymentsComplete == true, total != null, total.signum() > 0, shipMethod == "INTL_STANDARD" )
@@ -500,7 +509,7 @@ when
 then
     BigDecimal paid = Payment.sum( $settled );
     BigDecimal gap = $o.getTotal().subtract( paid );
-    if (gap.compareTo( new BigDecimal( "0.01" ) ) >= 0 && gap.compareTo( $o.getTotal().multiply( new BigDecimal( "0.02" ) ) ) <= 0) {
+    if (gap.compareTo( $tol ) >= 0 && gap.compareTo( $o.getTotal().multiply( $share ) ) <= 0) {
         insertLogical( new ForeignCurrencyShortfall( $o, paid ) );
     }
 end
@@ -509,6 +518,7 @@ end
 rule "Approved and paid, and still not in NetSuite"
     @reads("OrderNotInNetsuite, ShopifyOrder, Order, Payment") @produces("ApprovedAndPaid")
 when
+    GraphParam( name == "moneyTolerance", $tol : number )
     OrderNotInNetsuite( $o : order )
     ShopifyOrder( order == $o )
     Order( this == $o, paymentsComplete == true, total != null, statusId == "ORDER_APPROVED" )
@@ -516,7 +526,7 @@ when
     $settled : List( size > 0 ) from collect( Payment( order == $o, state == "SETTLED" ) )
 then
     BigDecimal paid = Payment.sum( $settled );
-    if (paid.compareTo( $o.getTotal().subtract( new BigDecimal( "0.01" ) ) ) >= 0) { insertLogical( new ApprovedAndPaid( $o, paid ) ); }
+    if (paid.compareTo( $o.getTotal().subtract( $tol ) ) >= 0) { insertLogical( new ApprovedAndPaid( $o, paid ) ); }
 end
 
 // ---- DAR-BE-204 causes (ranks unique in the pack)

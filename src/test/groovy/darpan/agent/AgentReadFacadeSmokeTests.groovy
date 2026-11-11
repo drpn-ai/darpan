@@ -324,6 +324,52 @@ class AgentReadFacadeSmokeTests {
     }
 
     @Test
+    void "get#AgentBrainCatalog with a findingId lists its run's causes and its audit's statements only"() {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.rule.RuleSet", [ruleSetId: "${MINE}_RS".toString(), ruleSetName: "Catalog run", companyUserGroupId: MINE])
+            insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "${MINE}_CS".toString(), ruleSetId: "${MINE}_RS".toString(),
+                    scopeMode: "EVALUATE", companyUserGroupId: MINE])
+            insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "${MINE}_CS".toString(), fileSide: "FILE_1", systemEnumId: "NETSUITE_SUITEQL"])
+            insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "${MINE}_CS".toString(), sequenceNum: 1L, conclusionEnumId: "AGR_C1",
+                    companyUserGroupId: MINE])
+            ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "${MINE}_INV".toString()).one().set("savedRunId", "${MINE}_RS".toString()).update()
+            insert("darpan.audit.Audit", [auditId: "${MINE}_OTHER".toString(), companyUserGroupId: MINE, auditCode: "returns-review",
+                    auditName: "Returns review", periodEnumId: "AUDP_MONTH"])
+            insert("darpan.audit.AuditStatement", [statementId: "${MINE}_Z1".toString(), companyUserGroupId: MINE, auditId: "${MINE}_OTHER".toString(),
+                    statementCode: "Z1", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 1L, statementText: "Every return is logged."])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Map whole = call("get#AgentBrainCatalog")
+        assertTrue((whole.statements as List<Map>)*.statementCode.containsAll(["R2", "Z1"]), "without findingId every audit's statements")
+        assertTrue((whole.conclusions as List<Map>)*.id.containsAll(["AGR_C1", "AGR_C2"]))
+
+        Map a = call("get#AgentBrainCatalog", [findingId: f1])
+        Map b = call("get#AgentBrainCatalog", [findingId: f1])
+        assertFalse(a.hadError as boolean, a.errorText as String)
+        assertEquals(["AGR_C1"], (a.conclusions as List<Map>)*.id, "only the causes of the finding's run")
+        assertTrue((a.statements as List<Map>)*.statementCode.contains("R2"), "the finding's audit")
+        assertTrue((a.statements as List<Map>).every { it.audit == "month-close" }, "only the finding's audit")
+        assertFalse(a.statements.toString().contains("Z1"), a.statements.toString())
+        assertEquals(whole.rules, a.rules)
+        assertEquals(groovy.json.JsonOutput.toJson([a.conclusions, a.rules, a.statements]), groovy.json.JsonOutput.toJson([b.conclusions, b.rules, b.statements]))
+
+        Map foreign = call("get#AgentBrainCatalog", [findingId: otherFinding])
+        assertTrue(foreign.hadError as boolean, "another tenant's finding reads as not found")
+        assertTrue((foreign.errorText as String).contains("was not found"), foreign.errorText as String)
+        assertNull(foreign.statements)
+
+        wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${MINE}_Z1".toString()).one().delete()
+            ec.entity.find("darpan.audit.Audit").condition("auditId", "${MINE}_OTHER".toString()).one().delete()
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    }
+
+    @Test
     void "search#AgentKnowledge answers hits and caps the limit"() {
         Map out = call("search#AgentKnowledge", [words: "returns", limit: 3])
         assertFalse(out.hadError as boolean, out.errorText as String)

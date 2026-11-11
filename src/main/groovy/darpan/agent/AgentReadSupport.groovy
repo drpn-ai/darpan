@@ -96,9 +96,36 @@ class AgentReadSupport {
     // ---------------------------------------------------------------- brain catalog
 
     /** Conclusions, rules and the active tenant's statements, each list sorted so two calls give the same bytes. */
-    static Map brainCatalog(def ec) {
+    static Map brainCatalog(def ec) { return brainCatalog(ec, null) }
+
+    /**
+     * DAR-BE-216. With a findingId the conclusions are only the causes the finding's run can reach (the conclusion rules of its
+     * compare scope) and the statements only those of the finding's audit. Null (with an error) when the finding is not the
+     * active tenant's. Without one the catalog is the active tenant's whole.
+     */
+    static Map brainCatalog(def ec, String findingId) {
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        List<Map> conclusions = ConclusionCatalogSupport.catalog(ec).collect { Map c -> [id: c.id, label: c.label, own: c.own] as Map }
+        String auditId = null
+        Set<String> runCauses = null
+        if (findingId) {
+            def finding = tenantId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY) : null
+            def statement = finding == null ? null : TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId", finding.statementId, tenantId, WHY)
+            if (statement == null) {
+                ec.message.addError("Finding ${findingId} was not found".toString())
+                return null
+            }
+            auditId = statement.auditId as String
+            def check = finding.checkId == null ? null : TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditCheck", "checkId", finding.checkId, tenantId, WHY)
+            runCauses = new HashSet<String>()
+            Map resolved = check?.savedRunId ? ReconciliationSavedRunSupport.resolveRuleSetRun(ec, check.savedRunId as String) : null
+            if (resolved?.compareScope != null) {
+                TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetConclusionRule", "transitively tenant-owned; compareScopeId pre-gated via the active-tenant RuleSet")
+                        .condition("compareScopeId", resolved.compareScope.compareScopeId).useCache(false).list()
+                        .each { runCauses.add(it.conclusionEnumId as String) }
+            }
+        }
+        List<Map> conclusions = ConclusionCatalogSupport.catalog(ec).findAll { Map c -> runCauses == null || runCauses.contains(c.id as String) }
+                .collect { Map c -> [id: c.id, label: c.label, own: c.own] as Map }
                 .sort { Map a, Map b -> (a.id as String) <=> (b.id as String) }
         Map<String, Map<String, Object>> meta = BrainEngine.forPacks(BrainConclude.PILOT_PACKS).ruleMetadata()
         List<Map> rules = meta.keySet().sort().collect { String name ->
@@ -116,7 +143,9 @@ class AgentReadSupport {
             Map<String, String> auditCodes = [:]
             ec.entity.find("darpan.audit.Audit").condition("companyUserGroupId", tenantId).useCache(false).list()
                     .each { auditCodes.put(it.auditId as String, it.auditCode as String) }
-            statements = ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId).useCache(false).list()
+            def statementFind = ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId).useCache(false)
+            if (auditId) statementFind.condition("auditId", auditId)
+            statements = statementFind.list()
                     .collect { [statementCode: it.statementCode, audit: auditCodes.get(it.auditId as String), text: it.statementText,
                                 checkCodes: (checksByStatement[it.statementId as String] as List<String>).findAll { it }.unique().sort()] as Map }
                     .sort { Map a, Map b -> ((a.audit ?: "") as String) <=> ((b.audit ?: "") as String) ?: (a.statementCode as String) <=> (b.statementCode as String) }

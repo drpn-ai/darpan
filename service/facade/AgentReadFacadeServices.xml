@@ -75,14 +75,19 @@
 
     <service verb="get" noun="AgentBrainCatalog" authz-action="view" allow-remote="false" authenticate="true">
         <description>What the brain can conclude: the conclusion codes the active tenant may name, the brain's rules (concludes,
-            rank, asks) and the tenant's statements with their check codes. Sorted, so it is byte-stable.</description>
+            rank, asks) and the tenant's statements with their check codes. Sorted, so it is byte-stable. With findingId, only
+            the causes of that finding's run and the statements of its audit (DAR-BE-216); another tenant's finding reads as not found.</description>
+        <in-parameters>
+            <parameter name="findingId"><description>Optional. A finding's id, e.g. F-20761.</description></parameter>
+        </in-parameters>
         <out-parameters>
             <parameter name="conclusions" type="List"/>
             <parameter name="rules" type="List"/>
             <parameter name="statements" type="List"/>
         </out-parameters>
         <actions>
-            <set field="catalog" from="darpan.agent.AgentReadSupport.brainCatalog(ec)"/>
+            <set field="catalog" from="darpan.agent.AgentReadSupport.brainCatalog(ec, findingId)"/>
+            <if condition="catalog == null"><return error="true"/></if>
             <set field="conclusions" from="catalog.conclusions"/>
             <set field="rules" from="catalog.rules"/>
             <set field="statements" from="catalog.statements"/>

@@ -67,6 +67,16 @@ class RunPathParityGateTest {
     ].toSet()
 
     /**
+     * Stages only the scheduler opens, each because its input exists on that path alone. Keep it to that: a stage that
+     * could run from the Run button belongs in CANONICAL_STAGES and in both paths.
+     *
+     * <p>STAGE_RECHECK (DAR-BE-156): an audit's older open findings, read again by key. It needs the audit automation
+     * and its window (AuditRecheckSupport.appendOpenFindings), and an audit only ever runs as an automation; the Run
+     * button runs a saved run with no audit behind it.</p>
+     */
+    private static final Set<String> SCHEDULED_ONLY_STAGES = ["STAGE_RECHECK"].toSet()
+
+    /**
      * The shared entry points that START a verification pass. Every one must be reached from BOTH
      * orchestrators: a fourth pass wired into one path only is exactly how the missing-diff pass
      * spent a year being interactive-only.
@@ -96,7 +106,12 @@ class RunPathParityGateTest {
     @Test
     void bothRunPathsOpenTheSameStages() {
         Set<String> manual = stagesOpenedBy(MANUAL_PATH)
-        Set<String> scheduled = stagesOpenedBy(SCHEDULED_PATH)
+        Set<String> scheduledAll = stagesOpenedBy(SCHEDULED_PATH)
+        assertTrue(scheduledAll.containsAll(SCHEDULED_ONLY_STAGES),
+                "SCHEDULED_ONLY_STAGES names a stage the scheduler no longer opens: ${SCHEDULED_ONLY_STAGES - scheduledAll}. Drop it from the list.")
+        assertTrue(manual.intersect(SCHEDULED_ONLY_STAGES).isEmpty(),
+                "The manual path opens ${manual.intersect(SCHEDULED_ONLY_STAGES)}, so it is not scheduled-only: move it to CANONICAL_STAGES.")
+        Set<String> scheduled = scheduledAll - SCHEDULED_ONLY_STAGES
 
         assertEquals(manual, scheduled,
                 "The two run paths no longer record the same stages. A triggered run must execute the " +

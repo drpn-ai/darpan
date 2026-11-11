@@ -105,7 +105,8 @@ class LifecycleSaveSmokeTests {
                     [startQuery.queryTemplate, startQuery.recordType, startQuery.absentChildRecordType, startQuery.nsAuthConfigId])
             assertEquals("EVALUATE", startSource.scopeMode)
             // The walker's compare reads these off the source; create#RuleSetRun leaves them empty for a connector.
-            assertEquals(["DftJson", "records", "internalId"], [source.fileTypeEnumId, source.recordRootExpression, source.primaryIdExpression])
+            // DAR-BE-115: a connector source's id is stored with its root folded in, the form runs made in the app store.
+            assertEquals(["DftJson", "records", '$.records[*].internalId'], [source.fileTypeEnumId, source.recordRootExpression, source.primaryIdExpression])
             def startRuleSet = ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", start.ruleSetId).one()
             assertEquals(["records", "internalId"], [startRuleSet.explosionPath, startRuleSet.primaryKeyPath])
             def doneScope = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", done.ruleSetId).one()

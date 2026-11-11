@@ -1,5 +1,6 @@
 package darpan.admin
 
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -111,7 +112,7 @@ class AdminScheduleSupportTests {
 
         assertEquals([ts("2026-09-01T15:05:00Z")] * 3, board.fires*.submitsAt)
         assertEquals([3, 3, 3], board.fires*.concurrentAtTick)
-        assertEquals(4, board.inFlightCap)
+        assertEquals(AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS, board.inFlightCap)  // DAR-BE-143 raised it 4 -> 8
     }
 
     @Test

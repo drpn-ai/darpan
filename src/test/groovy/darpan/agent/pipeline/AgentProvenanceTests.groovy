@@ -77,7 +77,13 @@ class AgentProvenanceTests {
     void "fix text placeholders are not identifiers"() {
         assertEquals([] as Set, AgentProvenance.identifiersOf("FIX_TEXT", [fixActionTemplate: "Set {orderId} to {status}"]))
         assertEquals("PASS", AgentProvenance.check("FIX_TEXT", [fixActionTemplate: "Set {orderId}"], [], [:], [] as Set).status)
-        assertEquals([] as Set, AgentProvenance.identifiersOf("STATEMENT_NARROWING", [conclusionCodes: ["A", "B"]]))
+        // DAR-BE-196: expected causes moved off the narrowing onto EXPECTED_CAUSES; neither kind's codes are identifiers.
+        assertEquals([] as Set, AgentProvenance.identifiersOf("STATEMENT_NARROWING", [ruleIds: ["A", "B"]]))
+        assertEquals([] as Set, AgentProvenance.identifiersOf("EXPECTED_CAUSES", [expectedCodes: ["A", "B"]]))
+        IllegalArgumentException old = assertThrows(IllegalArgumentException) {
+            AgentProvenance.identifiersOf("STATEMENT_NARROWING", [conclusionCodes: ["A", "B"]])
+        }
+        assertEquals("Unknown key 'conclusionCodes' in after", old.message)
     }
 
     @Test

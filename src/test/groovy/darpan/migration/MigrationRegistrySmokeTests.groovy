@@ -1,6 +1,7 @@
 package darpan.migration
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import groovy.xml.XmlSlurper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -10,6 +11,7 @@ import org.moqui.context.ExecutionContext
 import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertTrue
 import static org.junit.jupiter.api.Assertions.assertNotNull
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -37,8 +39,18 @@ class MigrationRegistrySmokeTests {
                 .list()
                 .collect { it.getString("migrationId") }
 
-        assertEquals(["TENANT_NOTIF_SETTINGS", "UNDECRYPTABLE_HOOKS", "AUTOMATION_FILTERS",
-                      "RULE_TENANT_STAMPS", "ENDPOINT_ACCESS", "RETIRED_FIELDS", "AUTOMATION_STREAKS"], ids)
+        assertEquals(registeredInSeed(), ids)
+    }
+
+    /** The seed file's DarpanMigration rows by sequenceNum: the list grows with every migration, so it is read, not restated here. */
+    static List<String> registeredInSeed() {
+        File seed = new File(ReconciliationSmokeTestSupport.resolveBackendRoot().toString(),
+                "runtime/component/darpan/data/MigrationRegistrySeedData.xml")
+        List<String> ids = new XmlSlurper().parse(seed).'**'.findAll { it.name() == "darpan.migration.DarpanMigration" }
+                .sort { (it.@sequenceNum.text()) as long }
+                .collect { it.@migrationId.text() }
+        assertTrue(ids.size() >= 10, "the seed holds at least the ten migrations registered by 2026-11-10, read ${ids}")
+        return ids
     }
 
     @Test

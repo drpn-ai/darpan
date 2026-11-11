@@ -547,7 +547,9 @@ class RuleSetCompareScopeServiceSmokeTests {
         List<Map> fields = (List<Map>) result.ruleDifferenceFields
         assertEquals([sku: 1, price: 1], fields.collectEntries { [(it.field): it.count] })
         Map skuTally = fields.find { it.field == "sku" }
-        assertEquals([field: "sku", count: 1, file1Value: "SKU-B", file2Value: "SKU-B-ALT", sameValues: true], skuTally)
+        // DAR-BE-210: one row per rule, carrying the rule's id and display name (none saved here).
+        assertEquals([field: "sku", label: "sku", ruleId: "DARPAN_TEST_PRODUCT_SKU_MISMATCH", ruleName: null, count: 1,
+                      file1Value: "SKU-B", file2Value: "SKU-B-ALT", sameValues: true], skuTally)
         assertEquals(4L, result.differenceCount)
         assertEquals(3L, result.matchedPairCount)
         assertEquals(2, result.ruleCount)

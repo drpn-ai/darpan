@@ -10,7 +10,7 @@ import groovy.json.JsonSlurper
  * check() answers words, one per problem, so a person saving a definition sees all of them at once; parse() throws
  * with the same words joined. Pure: no Moqui, so it runs on load, on save and in tests alike.
  *
- * A query step:
+ * A query step (a REST_JSON step's document is its request instead: RestJsonTransport, checkRestRequest):
  *   {id, kind: "query", document, connectionAt (the root field), recordsAt, hasNextAt, cursorAt (paths under it),
  *    bind: {window: {variables, field, sliceHours, instantFormat, parallel},
  *           ids: {variables, from (LOOKUP_KEYS or <earlier step>.<field>), when (only those records' ids), chunk, parallel,
@@ -255,6 +255,7 @@ class DataSourceDefinitionSupport {
     private static List<String> checkQueryStep(String where, String protocol, Map s, Map limits, Set<String> earlier,
                                                Set<String> optionPlaceholders) {
         List<String> errors = []
+        if (protocol == "REST_JSON") errors.addAll(checkRestRequest(where, s))
         Map doc = [variables: [:], rootFields: []]
         List<String> documents = [s.document?.toString()]
         if (s.selections != null || slots(s.document?.toString())) {
@@ -344,6 +345,73 @@ class DataSourceDefinitionSupport {
             }
             if (b.parallel != null && !inRange(b.parallel, 1, 8)) errors << "${where}: bind.${mode}.parallel is 1 to 8.".toString()
         }
+        return errors
+    }
+
+    /** DAR-BE-234: the page fields of every REST_JSON query step; RestJsonTransport answers in this shape. */
+    static final Map<String, String> REST_PAGE_FIELDS = [connectionAt: RestJsonTransport.PAGE, recordsAt: "records[*]", hasNextAt: "hasNext",
+                                                         cursorAt: "cursor"].asImmutable()
+    private static final java.util.regex.Pattern REST_VARIABLE = ~/\$([A-Za-z][A-Za-z0-9_]*)/
+
+    /**
+     * DAR-BE-234. A REST_JSON query step: its document is the request ({method, path, query, body, recordsAt, paging}), its
+     * page fields are REST_PAGE_FIELDS (filled here when left out), every "$name" the request uses is one the step's bind or
+     * paging variables fill, and the paging mode's variables are the step's own paging variables.
+     */
+    private static List<String> checkRestRequest(String where, Map s) {
+        List<String> errors = []
+        REST_PAGE_FIELDS.each { String k, String v ->
+            if (s[k] == null) s[k] = v
+            else if (s[k] != v) errors << "${where}: a REST_JSON step's ${k} is ${v}.".toString()
+        }
+        if (s.selections != null) errors << "${where}: selections are for GRAPHQL steps.".toString()
+        Object parsed = null
+        try { parsed = s.document ? new JsonSlurper().parseText(s.document.toString()) : null } catch (Exception ignored) { }
+        if (!(parsed instanceof Map)) return errors + ("${where}: a REST_JSON document is the request as a JSON object.".toString())
+        Map r = (Map) parsed
+        Map paging = s.paging instanceof Map ? (Map) s.paging : [:]
+        Map rp = r.paging instanceof Map ? (Map) r.paging : null
+        if (!(r.method in RestJsonTransport.METHODS)) errors << "${where}: the request method is ${RestJsonTransport.METHODS.join(' or ')}.".toString()
+        String path = r.path?.toString() ?: ""
+        if (path && (!path.startsWith("/") || path.length() > 512 || path.contains("..") || path =~ /[?#\s]/)) {
+            errors << "${where}: the request path starts with / and holds no ?, #, .. or spaces (query parameters go in query).".toString()
+        }
+        if (r.query != null && !(r.query instanceof Map && ((Map) r.query).every { k, v -> k ==~ /[A-Za-z0-9_.\[\]-]{1,64}/ && !(v instanceof Map) && !(v instanceof Collection) })) {
+            errors << "${where}: the request query maps parameter names to plain values.".toString()
+        }
+        if (r.body != null && (r.method != "POST" || !(r.body instanceof Map))) errors << "${where}: a request body is a JSON object, for POST only.".toString()
+        if (!(r.recordsAt ==~ PATH)) errors << "${where}: the request needs recordsAt, the records' path in the answer.".toString()
+        String mode = rp?.mode?.toString()
+        if (!(mode in RestJsonTransport.PAGING_MODES)) {
+            errors << "${where}: the request paging.mode is ${RestJsonTransport.PAGING_MODES.join(', ')}.".toString()
+        } else if (mode == "OFFSET") {
+            if (rp.sizeVariable != paging.firstVariable || rp.offsetVariable != paging.afterVariable) {
+                errors << "${where}: OFFSET paging names the step's paging variables: sizeVariable ${paging.firstVariable}, offsetVariable ${paging.afterVariable}.".toString()
+            }
+        } else {
+            if (!(rp.nextAt ==~ PATH)) errors << "${where}: ${mode} paging needs nextAt, a path in the answer.".toString()
+            if (mode == "NEXT_LINK" && rp.cursorVariable != paging.afterVariable) {
+                errors << "${where}: NEXT_LINK paging names the step's afterVariable as cursorVariable.".toString()
+            }
+        }
+        Set<String> filled = [paging.firstVariable, paging.afterVariable].findAll { it != null }.collect { it.toString() } as Set<String>
+        Map bind = s.bind instanceof Map ? (Map) s.bind : [:]
+        ["window", "ids", "all"].each { String m ->
+            if (bind[m] instanceof Map && ((Map) bind[m]).variables instanceof Map) filled.addAll(((Map) ((Map) bind[m]).variables).keySet().collect { it.toString() })
+        }
+        Set<String> used = [] as Set<String>
+        java.util.regex.Matcher pm = REST_VARIABLE.matcher(path)
+        while (pm.find()) used << pm.group(1)
+        Closure collect
+        collect = { Object v ->
+            if (v instanceof Map) ((Map) v).values().each { collect(it) }
+            else if (v instanceof List) ((List) v).each { collect(it) }
+            else if (v != null && REST_VARIABLE.matcher(v.toString()).matches()) used << v.toString().substring(1)
+        }
+        collect(r.query)
+        collect(r.body)
+        List<String> unfilled = (used - filled).sort()
+        if (unfilled) errors << "${where}: the request uses \$${unfilled.join(', $')}, which no bind or paging variable fills.".toString()
         return errors
     }
 

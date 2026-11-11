@@ -23,7 +23,7 @@ import java.time.ZoneOffset
  * system itself.
  *
  * Gate (as every coded extract): the config id is present, the config is the tenant's own or shared with it, the
- * endpoint is enabled for it, and it is not inactive. Then the definition runs (DataSourceRunner over GraphQlTransport)
+ * endpoint is enabled for it, and it is not inactive. Then the definition runs (DataSourceRunner over GraphQlTransport, or RestJsonTransport for REST_JSON)
  * by the run's lookup keys or its window, its records streamed into a work file that is moved into place only when the
  * whole read succeeded; excluded records go to the sidecar beside it, and each drop step's sidecar to
  * `<file>.<suffix>.json` ({manifest, truncated, sourceFileName}). Outputs are the extract contract's: fileName,
@@ -38,6 +38,14 @@ class DataDefinedExtract {
 
     /** How a run reaches the endpoint: the generic GraphQL transport. Replaced only by tests, to answer without a server. */
     static Closure transportFactory = { Map definition, Map connectionRecord -> new GraphQlTransport(definition, connectionRecord) }
+    /** DAR-BE-234: the same for a REST_JSON definition. */
+    static Closure restTransportFactory = { Map definition, Map connectionRecord -> new RestJsonTransport(definition, connectionRecord) }
+
+    /** The transport for a prepared run, by its definition's protocol. */
+    private static Object transportFor(Map prepared) {
+        Closure factory = ((Map) prepared.definitionRow)?.protocol == "REST_JSON" ? restTransportFactory : transportFactory
+        return factory.call((Map) prepared.definition, (Map) prepared.connectionRecord)
+    }
 
     static void run(def ec, Map context) {
         context.put("warnings", [])
@@ -58,7 +66,7 @@ class DataDefinedExtract {
         File outputDirectory = DataManagerSupport.resolveDirectoryFile(ec, outputBaseLocation, true)
         File workFile = outputDirectory != null ? File.createTempFile("data-defined-extract-", ".partial", outputDirectory)
                 : File.createTempFile("data-defined-extract-", ".partial")
-        DataSourceRunner runner = new DataSourceRunner(definition, transportFactory.call(definition, (Map) prepared.connectionRecord))
+        DataSourceRunner runner = new DataSourceRunner(definition, transportFor(prepared))
         try {
             Map result
             int written = 0
@@ -118,7 +126,7 @@ class DataDefinedExtract {
         Map definition = (Map) prepared.definition
         Map request = (Map) prepared.request
         if (request.mode != "ids") { context.put("errors", ["An in-memory read is by lookup keys only."]); return }
-        DataSourceRunner runner = new DataSourceRunner(definition, transportFactory.call(definition, (Map) prepared.connectionRecord))
+        DataSourceRunner runner = new DataSourceRunner(definition, transportFor(prepared))
         List<Map> collected = []
         try {
             Map result = runner.run(request, { List<Map> batch ->

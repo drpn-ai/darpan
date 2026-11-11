@@ -398,9 +398,9 @@ class DataSourceRunner {
                     Map<String, Object> keyed = [:]
                     on.each { keyed.put((String) it.into, JsonPathValues.value(r, (String) it.into)) }
                     atOn.each { keyed.put((String) it.at, JsonPathValues.value(t, (String) it.at)) }
-                    List<Map> candidates = (index.get(keyOf(on.collect { keyed.get(it.into) } + atOn.collect { keyed.get(it.at) })) ?: [])
-                            .findAll { Map f -> notOn.every { keyOf([JsonPathValues.value(r, (String) it.into)]) != keyOf([JsonPathValues.value(f, (String) it.from)]) } }
-                    Map match = candidates ? (last ? candidates.last() : candidates.first()) : null
+                    List<Map> candidates = index.get(keyOf(on.collect { keyed.get(it.into) } + atOn.collect { keyed.get(it.at) })) ?: []
+                    Map match = firstAccepted(candidates, last, notOn.collect { keyOf([JsonPathValues.value(r, (String) it.into)]) },
+                            notOn.collect { it.from as String })
                     if (match != null) attach(t, match, step, copy, false)
                 }
             }
@@ -429,6 +429,21 @@ class DataSourceRunner {
             }
             if (many && step.always == true && !atList && r.get(step.as) == null) r.put((String) step.as, [])
         }
+    }
+
+    /**
+     * The first candidate (the last, with last) whose notOn values all differ from the target's own, scanning only as far
+     * as that one: with no notOn it is first or last outright, so a key many records share stays linear, not targets x candidates.
+     */
+    private static Map firstAccepted(List<Map> candidates, boolean last, List<String> own, List<String> notOnFrom) {
+        int n = candidates.size()
+        for (int i = 0; i < n; i++) {
+            Map f = candidates.get(last ? n - 1 - i : i)
+            boolean accepted = true
+            for (int j = 0; j < own.size() && accepted; j++) accepted = own.get(j) != keyOf([JsonPathValues.value(f, notOnFrom.get(j))])
+            if (accepted) return f
+        }
+        return null
     }
 
     /** Records in a declared order (paths, or {path, as: TEXT}), stably. */

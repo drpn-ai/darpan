@@ -58,6 +58,18 @@ class BrainAskPlannerTests {
         assertEquals([orderPayments: ["M1", "M2"]], plan.toFetch)
     }
 
+    // DAR-BE-227: an answer another read already brought (the record's own field) is answered from facts, never fetched.
+    @Test
+    void anAnswerPresentFromAnotherReadIsNotAsked() {
+        Map fromFacts = [orderPayments: [M1: [paymentPreferences: []]]]
+        Map plan = BrainAskPlanner.plan([new Ask("orderPayments", order("M1")), new Ask("orderPayments", order("M2"))], [:], "T", RANKS,
+                fromFacts)
+        assertEquals([orderPayments: ["M2"]], plan.toFetch)
+        assertEquals([orderPayments: [M1: [paymentPreferences: []]]], plan.answered)
+        assertEquals(1, plan.fromFacts)
+        assertEquals(0, plan.reused)
+    }
+
     @Test
     void anAnswerInTheStoreIsReusedNotFetched() {
         Map answer = [orderId: "M1", paymentPreferences: []]

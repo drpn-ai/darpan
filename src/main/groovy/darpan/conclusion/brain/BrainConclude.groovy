@@ -38,6 +38,10 @@ class BrainConclude {
         List<BrainQuestionCatalog.Entry> catalog = (List<BrainQuestionCatalog.Entry>) (args.catalog ?: BrainQuestionCatalog.ENTRIES)
         // DAR-BE-225: each question's answers by subject id, one map per catalogue entry.
         Map<String, Map<String, Map>> answers = catalog.collectEntries { [(it.name): [:]] } as Map<String, Map<String, Map>>
+        // DAR-BE-227: answers the records already carry, so the worlds never ask them.
+        Map<String, Map<String, Map>> fromFacts = answersInRecords(kind, (List<Map>) (args.findings ?: []), catalog)
+        fromFacts.each { String q, Map<String, Map> byId -> answers.get(q).putAll(byId) }
+        int answeredFromFacts = (fromFacts.values()*.size().sum() ?: 0) as int
         List<String> warnings = []
 
         List<Map> round = batches.collect { fire(engine, kind, it, answers) }
@@ -53,8 +57,9 @@ class BrainConclude {
             List<Ask> asks = (List<Ask>) round.collectMany { (List) it.asks }
             Map<Object, Cause> best = [:]
             round.each { best.putAll((Map) it.bestCauses) }
-            Map plan = BrainAskPlanner.plan(asks, best, tenantId, ranks)
+            Map plan = BrainAskPlanner.plan(asks, best, tenantId, ranks, fromFacts)
             reused += (plan.reused ?: 0) as int
+            answeredFromFacts += (plan.fromFacts ?: 0) as int
             dropped += (plan.dropped ?: 0) as int
             Set<String> gained = [] as Set
             ((Map<String, Map>) plan.answered).each { String q, Map byId ->
@@ -95,7 +100,25 @@ class BrainConclude {
         round.each { Map fired ->
             ((List<Conclusion>) fired.conclusions).each { Conclusion c -> byKey.put(c.finding.key, conclusion(engine, c, labelFor)) }
         }
-        return [byKey: byKey, asked: asked, reused: reused, dropped: dropped, warnings: warnings]
+        return [byKey: byKey, asked: asked, reused: reused, dropped: dropped, answeredFromFacts: answeredFromFacts, warnings: warnings]
+    }
+
+    /**
+     * DAR-BE-227. Per question, the answers the findings' own records carry: an entry's answeredBy field, present and not
+     * empty, keyed by the finding's order or product id. A Shopify finding names no HotWax order, so it carries none.
+     */
+    static Map<String, Map<String, Map>> answersInRecords(String kind, List<Map> findings, List<BrainQuestionCatalog.Entry> catalog) {
+        Map<String, Map<String, Map>> out = [:]
+        catalog.findAll { it.answeredBy && it.subject in ["Order", "Product"] }.each { BrainQuestionCatalog.Entry e ->
+            findings.each { Map f ->
+                Map record = (Map) (((Map) (((Map) (f?.sides ?: [:])).FILE_1 ?: [:])).record ?: [:])
+                Object value = record.get(e.answeredBy)
+                if (value == null || (value instanceof CharSequence && !value.toString().trim())) return
+                String id = e.subject == "Product" ? productIdOf(kind, f) : kind == "shopifyOrder" ? null : orderIdOf(kind, f)
+                if (id) out.computeIfAbsent(e.name, { [:] }).put(id, [(e.answeredBy): value])
+            }
+        }
+        return out
     }
 
     /** Findings of one order stay in one batch, so its world is whole. */

@@ -33,6 +33,8 @@ class BrainQuestionCatalogTests {
             assertTrue(e.batchSize > 0, "${e.name}: batch size")
             assertTrue(BrainAnswerStore.TTL_MILLIS.containsKey(e.freshness), "${e.name}: freshness ${e.freshness} has a time to live")
             assertTrue(e.depth >= 1, "${e.name}: depth")
+            // DAR-BE-227: a record can only answer for its own order or product.
+            if (e.answeredBy) assertTrue(e.subject in ["Order", "Product"], "${e.name}: answeredBy needs an Order or Product subject")
         }
     }
 

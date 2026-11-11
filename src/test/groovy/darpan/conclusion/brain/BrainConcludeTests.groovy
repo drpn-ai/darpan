@@ -51,6 +51,31 @@ class BrainConcludeTests {
         assertEquals(CODE, ((List<Map>) c.path)[0].code)
     }
 
+    // DAR-BE-227: an order record that already carries its payments (a read that kept paymentPreferences) is concluded from
+    // them; the payments question is never fetched.
+    @Test
+    void anOrderWhosePaymentsTheReadBroughtIsConcludedWithoutAFetch() {
+        Map line = r1()
+        ((Map) ((Map) ((Map) line.sides).FILE_1).record).paymentPreferences = PAYMENTS.M1088731.paymentPreferences
+        List asked = []
+        Map out = run("orderLine", line, { String q, List ids -> asked << q; [:] })
+        assertEquals([], asked)
+        assertEquals(CODE, ((Map) out.byKey[KEY]).code)
+        assertEquals(0, out.asked)
+        assertEquals(1, out.answeredFromFacts)
+    }
+
+    // A field the read kept but left empty answers nothing: the question is still asked.
+    @Test
+    void aKeptButEmptyFieldIsNotAnAnswer() {
+        Map line = r1()
+        ((Map) ((Map) ((Map) line.sides).FILE_1).record).paymentPreferences = null
+        List asked = []
+        Map out = run("orderLine", line, { String q, List ids -> asked << q; PAYMENTS })
+        assertEquals(["orderPayments"], asked)
+        assertEquals(0, out.answeredFromFacts)
+    }
+
     /** Review Focus 2. */
     @Test
     void aFailedQuestionLeavesTheFindingToTheTreeAndIsNotRemembered() {

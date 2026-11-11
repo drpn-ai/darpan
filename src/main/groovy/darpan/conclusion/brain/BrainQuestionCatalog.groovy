@@ -21,6 +21,8 @@ import static darpan.conclusion.brain.BrainFactAdapter.RETURN_RMA
  *   <li>freshness: how long an answer is reused (BrainAnswerStore.TTL_MILLIS): `run` or `stable`.</li>
  *   <li>depth: the longest chain of answers that can come before the question is asked, plus one. A Shopify order's HotWax
  *       order (1), then that order's replacement return (2), then the return's RMA (3).</li>
+ *   <li>answeredBy (DAR-BE-227): the record field that already holds the answer when a read kept it (an Order or Product
+ *       question only). A finding whose record carries it non-empty is answered from facts and never asked.</li>
  *   <li>defaultLookup: the read taken when the scope names no lookup of the question's name, from the scope's HotWax
  *       config (the FILE_1 source's); null for a question that has none.</li>
  * </ul>
@@ -34,6 +36,7 @@ class BrainQuestionCatalog {
         int batchSize
         String freshness
         int depth
+        String answeredBy
         /** hotwaxSourceConfigId -> lookup map, or null. */
         Closure<Map> defaultLookup
     }
@@ -48,6 +51,7 @@ class BrainQuestionCatalog {
                     // DAR-BE-204: through the scope's lookup of this name only; a Shopify-paired scope has no HotWax source.
                     defaultLookup: { String config -> null }),
             new Entry(name: ORDER_PAYMENTS, subject: "Order", batchSize: BATCH, freshness: FRESH_RUN, depth: 2,
+                    answeredBy: "paymentPreferences",
                     // The order's raw OPP rows by OMS order id.
                     defaultLookup: { String config ->
                         [name: ORDER_PAYMENTS, subject: "FILE_1", idField: "orderId", systemEnumId: "OMS_GQL", sourceConfigId: config,
@@ -55,6 +59,7 @@ class BrainQuestionCatalog {
                     }),
             // DAR-BE-226: whether a product is in NetSuite rarely changes within a day; stable.
             new Entry(name: PRODUCT_NETSUITE_ID, subject: "Product", batchSize: BATCH, freshness: FRESH_STABLE, depth: 2,
+                    answeredBy: "netsuiteProductId",
                     // DAR-BE-186: the products named by id, each with its NETSUITE_PRODUCT_ID (extract#HotWaxOmsGqlProducts lookupKeys).
                     defaultLookup: { String config ->
                         [name: PRODUCT_NETSUITE_ID, subject: "FILE_1", idField: "productId", systemEnumId: "OMS_PRODUCTS_GQL",

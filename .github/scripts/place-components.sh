@@ -17,7 +17,9 @@ git clone --depth 1 --branch master https://github.com/moqui/moqui-sftp.git \
 # with EntityNotFoundException exactly like the hotwax/shopify case above.
 # DAR-OPS-015: moqui-gql serves the GraphQL API that darpan's GraphQL tests call; without it they
 # failed in CI only. The production image clones it the same way (darpan-docker-config docker/Dockerfile).
-for repo in darpan-hotwax netsuite-darpan shopify-darpan database-darpan moqui-gql; do
+# darpan-agent: its facade services are part of the API contract (ApiContractGenerator.SERVICE_DIRS), which fails
+# without it; the production image carries it too.
+for repo in darpan-hotwax netsuite-darpan shopify-darpan database-darpan moqui-gql darpan-agent; do
   git clone --depth 1 --branch main "https://github.com/drpn-ai/${repo}.git" \
     "darpan-backend/runtime/component/${repo}"
 done

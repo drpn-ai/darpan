@@ -148,6 +148,11 @@ class CliMethodAllowlist {
             "facade.AgentChangeFacadeServices.plan#AuditChange",
             "facade.AgentChangeFacadeServices.reject#AuditChange",
             "facade.AgentChangeFacadeServices.revert#AuditChange",
+            // DAR-BE-159/223 (darpan-agent): the embedded agent is a web panel; a CLI session already is an agent and never
+            // runs a turn of this one or reads its panel.
+            "facade.AgentTurnFacadeServices.get#AgentConversation",
+            "facade.AgentTurnFacadeServices.get#AgentStatus",
+            "facade.AgentTurnFacadeServices.send#AgentTurn",
             // DAR-BE-235: authoring data-defined reads is a super admin's, in the admin app; never a CLI session's.
             "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition",
             "facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition",

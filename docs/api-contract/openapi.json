@@ -207,6 +207,15 @@
                                         "$ref": "#/components/schemas/GetAgentAuditScopeRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAgentConversationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAgentStatusRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SendAgentTurnRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/AddAuditStatementRequest"
                                     },
                                     {
@@ -808,6 +817,9 @@
                                         "facade.AgentChangeFacadeServices.revert#AuditChange": "#/components/schemas/RevertAuditChangeRequest",
                                         "facade.AgentFacadeServices.list#AgentQueryLogs": "#/components/schemas/ListAgentQueryLogsRequest",
                                         "facade.AgentReadFacadeServices.get#AgentAuditScope": "#/components/schemas/GetAgentAuditScopeRequest",
+                                        "facade.AgentTurnFacadeServices.get#AgentConversation": "#/components/schemas/GetAgentConversationRequest",
+                                        "facade.AgentTurnFacadeServices.get#AgentStatus": "#/components/schemas/GetAgentStatusRequest",
+                                        "facade.AgentTurnFacadeServices.send#AgentTurn": "#/components/schemas/SendAgentTurnRequest",
                                         "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
                                         "facade.AuditFacadeServices.create#Audit": "#/components/schemas/CreateAuditRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckExtracts": "#/components/schemas/GetAuditCheckExtractsRequest",
@@ -1185,6 +1197,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAgentAuditScopeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAgentConversationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAgentStatusResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SendAgentTurnResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/AddAuditStatementResponse"
@@ -7794,6 +7815,307 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAgentAuditScopeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAgentConversationParams": {
+                "type": "object",
+                "properties": {
+                    "conversationId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "conversationId"
+                ],
+                "description": "The person's own conversation: its messages (theirs and the agent's replies) and its proposals with their status\n            now. Another person's or another tenant's conversation reads as not found."
+            },
+            "GetAgentConversationResult": {
+                "type": "object",
+                "properties": {
+                    "auditId": {
+                        "type": "string"
+                    },
+                    "findingId": {
+                        "type": "string"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "{messageId, kind (USER or ASSISTANT), text, question}"
+                    },
+                    "proposals": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "{proposalId, kind, status, statusMessage, provenanceStatus, blockedIds, backtest}"
+                    }
+                }
+            },
+            "GetAgentConversationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentTurnFacadeServices.get#AgentConversation",
+                "x-darpan-method": "facade.AgentTurnFacadeServices.get#AgentConversation",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentTurnFacadeServices.get#AgentConversation"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAgentConversationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAgentConversationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentTurnFacadeServices.get#AgentConversation. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAgentConversationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAgentStatusParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Whether the agent can run for the person now: state (ON, AGENT_OFF, AGENT_UNAVAILABLE or AGENT_REFUSED), grantState\n            (their AI access in this tenant: LIVE, NOT_GRANTED, EXPIRED or PAUSED) and canApprove (true only for someone allowed to\n            save the audit's checks)."
+            },
+            "GetAgentStatusResult": {
+                "type": "object",
+                "properties": {
+                    "state": {
+                        "type": "string"
+                    },
+                    "grantState": {
+                        "type": "string"
+                    },
+                    "canApprove": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "GetAgentStatusRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentTurnFacadeServices.get#AgentStatus",
+                "x-darpan-method": "facade.AgentTurnFacadeServices.get#AgentStatus",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentTurnFacadeServices.get#AgentStatus"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAgentStatusParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAgentStatusResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentTurnFacadeServices.get#AgentStatus. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAgentStatusResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SendAgentTurnParams": {
+                "type": "object",
+                "properties": {
+                    "conversationId": {
+                        "type": "string",
+                        "description": "Continue this conversation; empty starts one."
+                    },
+                    "auditId": {
+                        "type": "string"
+                    },
+                    "findingId": {
+                        "type": "string",
+                        "description": "The finding the panel is open on."
+                    },
+                    "text": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "auditId",
+                    "text"
+                ],
+                "description": "One message from the person about an audit, optionally with a finding open. The router splits it into\n            items; read questions are grounded and answered; cause and rule comments become one draft change (for a person to\n            approve with apply#AuditChange) or a staff ticket. Keys, secrets, emails and phones are masked before anything is\n            stored or sent. outcome: AGENT_OFF, AGENT_UNAVAILABLE, RATE_LIMITED, OVER_BUDGET, DECLINED, QUESTION, DONE,\n            INCOMPLETE, TENANT_CHANGED or ERROR."
+            },
+            "SendAgentTurnResult": {
+                "type": "object",
+                "properties": {
+                    "conversationId": {
+                        "type": "string"
+                    },
+                    "outcome": {
+                        "type": "string"
+                    },
+                    "reply": {
+                        "type": "string"
+                    },
+                    "proposals": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "{proposalId, kind, status, statusMessage, provenanceStatus, blockedIds, backtest}"
+                    },
+                    "tickets": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "{ticketId, category, duplicate}"
+                    },
+                    "question": {
+                        "type": "object",
+                        "description": "{text, options, from} when the agent needs the person's answer."
+                    },
+                    "masked": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "The kinds of secret or personal data masked in the text (never the values)."
+                    }
+                }
+            },
+            "SendAgentTurnRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentTurnFacadeServices.send#AgentTurn",
+                "x-darpan-method": "facade.AgentTurnFacadeServices.send#AgentTurn",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentTurnFacadeServices.send#AgentTurn"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SendAgentTurnParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SendAgentTurnResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentTurnFacadeServices.send#AgentTurn. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SendAgentTurnResult"
                     }
                 },
                 "required": [
@@ -31634,6 +31956,9 @@
         "facade.AgentChangeFacadeServices.revert#AuditChange": "RevertAuditChange",
         "facade.AgentFacadeServices.list#AgentQueryLogs": "ListAgentQueryLogs",
         "facade.AgentReadFacadeServices.get#AgentAuditScope": "GetAgentAuditScope",
+        "facade.AgentTurnFacadeServices.get#AgentConversation": "GetAgentConversation",
+        "facade.AgentTurnFacadeServices.get#AgentStatus": "GetAgentStatus",
+        "facade.AgentTurnFacadeServices.send#AgentTurn": "SendAgentTurn",
         "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
         "facade.AuditFacadeServices.create#Audit": "CreateAudit",
         "facade.AuditFacadeServices.get#AuditCheckExtracts": "GetAuditCheckExtracts",

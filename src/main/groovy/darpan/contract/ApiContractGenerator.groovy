@@ -30,6 +30,8 @@ class ApiContractGenerator {
             ["../darpan-hotwax/service/facade", "facade"],
             ["../shopify-darpan/service/facade", "facade"],
             ["../netsuite-darpan/service/facade", "facade"],
+            // DAR-BE-159/223: the embedded agent's turn and panel reads (send#AgentTurn, get#AgentStatus, get#AgentConversation).
+            ["../darpan-agent/service/facade", "facade"],
             ["service/admin", "admin"],
     ]
     static final String SPEC_RELATIVE_PATH = "docs/api-contract/openapi.json"
@@ -100,7 +102,12 @@ class ApiContractGenerator {
             String dir = serviceDir[0]
             String prefix = serviceDir[1]
             File facadeDir = new File(componentRoot, dir)
-            if (!facadeDir.isDirectory()) continue
+            // DAR-OPS-015: a missing component would silently drop its methods from the contract, and the next commit of the
+            // regenerated files would delete them. Fail instead, naming what to place.
+            if (!facadeDir.isDirectory()) {
+                throw new IllegalStateException("Cannot generate the API contract: ${facadeDir.canonicalPath} is missing. Place that " +
+                        "component under runtime/component (the production image and CI carry every one of SERVICE_DIRS).")
+            }
             facadeDir.listFiles({ File f -> f.name.endsWith(".xml") } as FileFilter).sort { it.name }.each { File xml ->
                 operations.addAll(parseServiceFile(xml, prefix))
             }

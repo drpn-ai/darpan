@@ -9,6 +9,7 @@ import org.junit.jupiter.api.TestInstance
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -47,13 +48,28 @@ class ApiContractGeneratorTests {
         int expected = 0
         for (List<String> serviceDir in ApiContractGenerator.SERVICE_DIRS) {
             File facadeDir = new File(componentRoot, serviceDir[0])
-            if (!facadeDir.isDirectory()) continue
+            assertTrue(facadeDir.isDirectory(), "${facadeDir} is not placed")
             facadeDir.listFiles({ File f -> f.name.endsWith(".xml") } as FileFilter).each { File xml ->
                 expected += new XmlParser().parse(xml).service.count { it.@"allow-remote" == "true" }
             }
         }
         assertTrue(expected >= 60, "expected a substantial facade surface, found ${expected}")
         assertEquals(expected, ((Map) spec."x-darpan-methods").size())
+    }
+
+    // DAR-OPS-015: a component that is not placed would drop its methods from the regenerated contract without a word.
+    @Test
+    void aMissingComponentStopsGenerationInsteadOfShrinkingTheContract() {
+        File root = File.createTempDir("contract-root")
+        try {
+            File facade = new File(root, "service/facade")
+            facade.mkdirs()
+            new File(facade, "OneFacadeServices.xml").text = new File(componentRoot, "service/facade/AuthFacadeServices.xml").text
+            IllegalStateException e = assertThrows(IllegalStateException) { ApiContractGenerator.generate(root) }
+            assertTrue(e.message.contains("darpan-hotwax") && e.message.contains("is missing"), e.message)
+        } finally {
+            root.deleteDir()
+        }
     }
 
     @Test

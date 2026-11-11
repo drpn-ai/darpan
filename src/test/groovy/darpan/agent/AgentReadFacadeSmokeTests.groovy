@@ -193,6 +193,38 @@ class AgentReadFacadeSmokeTests {
     }
 
     @Test
+    void "get#AgentAuditScope holds the finding's own statement and check only"() {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.AuditStatement", [statementId: "${MINE}_R9".toString(), companyUserGroupId: MINE, auditId: "${MINE}_MC".toString(),
+                    statementCode: "R9", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 9L,
+                    statementText: "Every refund is approved."])
+            insert("darpan.audit.AuditCheck", [checkId: "${MINE}_REF".toString(), companyUserGroupId: MINE, checkCode: "unapproved-refunds",
+                    label: "Refunds not approved"])
+            insert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_REF".toString(), statementId: "${MINE}_R9".toString(),
+                    companyUserGroupId: MINE, sequenceNum: 1L])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Map out = call("get#AgentAuditScope", [findingId: f1])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("Month close", out.audit.name)
+        assertNotNull((out.schedule as Map).containsKey("time"))
+        assertEquals([code: "R2", text: "Every invoice carries the Etail id."], out.statement)
+        assertEquals([id: "invoices-without-etail-id", label: "Invoices with no Etail id"], out.check)
+        assertTrue(out.run instanceof Map)
+        String text = out.toString()
+        ["R9", "Every refund is approved.", "unapproved-refunds", "Refunds not approved"].each { assertFalse(text.contains(it), "${it} leaked: ${text}") }
+
+        Map foreign = call("get#AgentAuditScope", [findingId: otherFinding])
+        assertTrue(foreign.hadError as boolean, "another tenant's finding reads as not found")
+        assertTrue((foreign.errorText as String).contains("was not found"), foreign.errorText as String)
+        assertNull(foreign.statement)
+        assertNull(foreign.audit)
+        assertNull(foreign.check)
+    }
+
+    @Test
     void "inspect#AgentRecord refuses an unknown readId"() {
         Map out = call("inspect#AgentRecord", [readId: "NO_SUCH_READ", key: "OR1"])
         assertTrue(out.hadError as boolean)

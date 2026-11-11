@@ -24,6 +24,30 @@
         </actions>
     </service>
 
+    <service verb="get" noun="AgentAuditScope" authz-action="view" allow-remote="true" authenticate="true">
+        <description>What the open finding's audit tells the agent (DAR-BE-215): the audit's name and schedule, the finding's own
+            statement and check, and the run that check reads. No other statement of the audit. Another tenant's finding reads as not found.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>The finding's id, e.g. F-20761.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="audit" type="Map"><description>[name].</description></parameter>
+            <parameter name="schedule" type="Map"><description>[active, time, timeZone].</description></parameter>
+            <parameter name="statement" type="Map"><description>[code, text] of the finding's statement.</description></parameter>
+            <parameter name="check" type="Map"><description>[id, label] of the finding's check.</description></parameter>
+            <parameter name="run" type="Map"><description>[savedRunId, sides]; empty when the check has no run.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="scope" from="darpan.agent.AgentReadSupport.auditScope(ec, findingId)"/>
+            <if condition="scope == null"><return error="true"/></if>
+            <set field="audit" from="scope.audit"/>
+            <set field="schedule" from="scope.schedule"/>
+            <set field="statement" from="scope.statement"/>
+            <set field="check" from="scope.check"/>
+            <set field="run" from="scope.run"/>
+        </actions>
+    </service>
+
     <service verb="find" noun="AuditFindingLookalikes" authz-action="view" allow-remote="false" authenticate="true">
         <description>Findings of the same check as one finding: sameCause (same conclusion, any state) and controls (a different
             conclusion, any state), each {findingId, recordKey, state, conclusionCode, statementCode, conditionValues}, plus counts of

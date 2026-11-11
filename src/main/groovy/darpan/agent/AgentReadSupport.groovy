@@ -3,6 +3,7 @@ package darpan.agent
 import darpan.audit.AuditAutomationSupport
 import darpan.audit.AuditReportAssembler
 import darpan.audit.AuditReportGraph
+import darpan.audit.AuditSettingsSupport
 import darpan.conclusion.brain.BrainConclude
 import darpan.conclusion.brain.BrainEngine
 import darpan.datasource.DataDefinedExtract
@@ -194,6 +195,32 @@ class AgentReadSupport {
         if (finding?.checkId == null) return null
         def check = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditCheck", "checkId", finding.checkId, tenantId, WHY)
         return check?.savedRunId ? runSides(ec, check.savedRunId as String) : null
+    }
+
+    /**
+     * DAR-BE-215. What one finding's audit tells the agent: [audit: [name], schedule: [active, time, timeZone], statement: [code, text],
+     * check: [id, label], run], and no other statement or check of the audit. Null (with an error) when the finding is not the active
+     * tenant's. run is empty when the check has no run that resolves.
+     */
+    static Map auditScope(def ec, String findingId) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        def finding = tenantId && findingId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY) : null
+        def statement = finding == null ? null : TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId", finding.statementId, tenantId, WHY)
+        def audit = statement == null ? null : TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", statement.auditId, tenantId, WHY)
+        if (audit == null) {
+            ec.message.addError("Finding ${findingId} was not found".toString())
+            return null
+        }
+        def check = finding.checkId == null ? null : TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditCheck", "checkId", finding.checkId, tenantId, WHY)
+        Map settings = AuditSettingsSupport.settings(ec, tenantId, audit.getMap())
+        Map schedule = settings.schedule as Map
+        Map own = (settings.statements as List<Map>).find { it.id == statement.statementId }
+        Map ownCheck = check == null ? null : (own?.checks as List<Map>)?.find { it.id == check.checkCode }
+        return [audit    : [name: audit.auditName],
+                schedule : [active: schedule.active, time: schedule.time, timeZone: schedule.timeZone],
+                statement: [code: statement.statementCode, text: statement.statementText],
+                check    : ownCheck == null ? null : [id: ownCheck.id, label: ownCheck.label],
+                run      : (check?.savedRunId ? runSides(ec, check.savedRunId as String) : null) ?: [:]]
     }
 
     /** The active tenant's run and the system on each of its sides (see {@link #findingRun}); null when it does not resolve. */

@@ -155,6 +155,15 @@ class RestJsonTransportTests {
         }
     }
 
+    // Security review 2026-11-11: a path value from a record cannot walk to another path on the host.
+    @Test
+    void aPathValueIsEncodedAndADotSegmentIsRefused() {
+        assertEquals("/v1/orders/A%2F1%20x", RestJsonTransport.fill('/v1/orders/$id', [id: "A/1 x"]))
+        ["..", ".", " "].each { String bad ->
+            assertEquals("BAD_PATH_VALUE", assertThrows(DataSourceCallException) { RestJsonTransport.fill('/v1/orders/$id', [id: bad]) }.code, bad)
+        }
+    }
+
     @Test
     void aPostSendsItsBodyWithTheRunsValues() {
         Map request = [method: "POST", path: "/v1/orders/search", body: [filter: [since: '$since', until: '$until'], page: [size: '$first', after: '$after']],

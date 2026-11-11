@@ -198,11 +198,17 @@ class RestJsonTransport {
         return t != null && t ==~ /\$[A-Za-z][A-Za-z0-9_]*/ ? variables?.get(t.substring(1)) : template
     }
 
-    /** A path's "$name" segments filled and URL-encoded. */
+    /**
+     * A path's "$name" segments filled and URL-encoded. A value that is blank, "." or ".." is refused: encoding leaves dots
+     * as they are, and a dot segment would move the request to another path on the host.
+     */
     static String fill(String path, Map variables) {
         return path.replaceAll(/\$([A-Za-z][A-Za-z0-9_]*)/) { List m ->
             Object v = variables?.get(m[1])
             if (v == null) throw new IllegalArgumentException("The request path needs \$${m[1]}, which the run did not set.")
+            if (v.toString().trim() in ["", ".", ".."]) {
+                throw new DataSourceCallException("BAD_PATH_VALUE", "The request path's \$${m[1]} is '${v}'.".toString())
+            }
             URLEncoder.encode(v.toString(), StandardCharsets.UTF_8).replace("+", "%20")
         }
     }

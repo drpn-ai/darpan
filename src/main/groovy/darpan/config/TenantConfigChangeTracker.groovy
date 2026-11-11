@@ -47,17 +47,21 @@ class TenantConfigChangeTracker {
 
     /**
      * Columns a version does not hold, so an update that changes only these is no config change: when an automation last
-     * and next fires and whether it is on (every scheduled run writes the first two), and the update stamps.
+     * and next fires and whether it is on (every scheduled run writes the first two), a script deployment's run state
+     * (DAR-BE-237), and the update stamps.
      */
     static final Set<String> STAMPS = (["lastUpdatedStamp", "lastUpdatedDate"] as Set<String>).asImmutable()
     static final Map<String, Set<String>> OPERATIONAL_FIELDS = [
             "darpan.reconciliation.ReconciliationAutomation": (["isActive", "nextScheduledFireTime", "lastScheduledFireTime"] as Set<String>),
+            // DAR-BE-237: every run of a script deployment writes when it ran, how it went and when it runs next.
+            "darpan.script.TenantScriptDeployment"          : (["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage",
+                                                                "lastRunUnits", "lastUpdatedByUserId"] as Set<String>),
     ].asImmutable()
 
     /** Called by the EECA rules with their entity's name (a write may hand over a plain Map). Never throws. */
     static void note(def ec, String entityName, Map entityValue, String operation = null) {
         try {
-            if (operation == "update" && onlyOperational(entityName, entityValue)) return
+            if (operation == "update" && onlyOperational(ec, entityName, entityValue)) return
             String tenantId = tenantOf(ec, entityName, entityValue)
             if (!tenantId) return
             String userId = ec.user.userId
@@ -96,12 +100,18 @@ class TenantConfigChangeTracker {
      * True when an update changes only operational columns. Only an EntityValue read from the database knows which
      * fields changed; any other update counts as a change (the snapshot then finds nothing new and writes no version).
      */
-    static boolean onlyOperational(String entityName, Map fields) {
+    static boolean onlyOperational(def ec, String entityName, Map fields) {
         Set<String> operational = OPERATIONAL_FIELDS[entityName]
         if (!operational || !(fields instanceof org.moqui.entity.EntityValue)) return false
         def value = (org.moqui.entity.EntityValue) fields
-        List<String> changed = value.getEntityDefinition().getAllFieldNames().findAll { String f -> value.isFieldModified(f) }
-        return changed && changed.every { it in operational || it in STAMPS }
+        // DAR-BE-237: Moqui's modified flags do not always say what an update changed (a TenantScriptDeployment read and
+        // set back marks every field), so the stored row says: the rule runs before the write, so it is still the old one.
+        def stored = TenantScopedFinder.findGlobalUnscoped(ec, entityName, "DAR-BE-160 config change tracking: the row being updated, before the write")
+                .condition(value.getPrimaryKeys()).useCache(false).one()
+        if (stored == null) return false
+        List<String> changed = value.getEntityDefinition().getAllFieldNames()
+                .findAll { String f -> value.isFieldModified(f) && value.get(f) != stored.get(f) }
+        return changed.every { it in operational || it in STAMPS }
     }
 
     /** A field's value without EntityValue.get's throw on a field the entity does not declare. */

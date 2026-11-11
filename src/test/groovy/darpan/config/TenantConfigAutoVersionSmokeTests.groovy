@@ -61,6 +61,11 @@ class TenantConfigAutoVersionSmokeTests {
 
     @AfterAll
     void cleanup() {
+        // The async marks this class sets off can still be running; Moqui's shutdown then races them while it stores its
+        // artifact stats (an NPE in ExecutionContextFactoryImpl.destroy). Let the worker pool go idle first.
+        def pool = ((org.moqui.impl.context.ExecutionContextFactoryImpl) ec.factory).workerPool
+        long until = System.currentTimeMillis() + 10_000L
+        while ((pool.activeCount > 0 || !pool.queue.isEmpty()) && System.currentTimeMillis() < until) sleep(100)
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -107,6 +112,45 @@ class TenantConfigAutoVersionSmokeTests {
         }
         Map pending = waitForPending(MINE)
         assertEquals(1L, pending.changeCount as Long, "one transaction, one mark")
+    }
+
+    // DAR-BE-237: a script or deployment save is a config change; a deployment's run (when it ran, how, when next) is not.
+    @Test
+    void aScriptSaveMarksItsTenantAndADeploymentRunDoesNot() {
+        try {
+            inTransaction {
+                asSystem {
+                    upsert("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TCA_SPACE", companyUserGroupId: MINE, spaceName: "Digest",
+                            isActive: "Y"])
+                    upsert("darpan.script.TenantScript", [tenantScriptId: "TCA_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
+                            scriptProfile: "EXPRESSION", inputSource: "SAMPLE", scriptBody: "'hello'", isActive: "Y"])
+                    upsert("darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: "TCA_DEPLOY", companyUserGroupId: MINE,
+                            tenantScriptId: "TCA_SCRIPT", scheduleExpr: "0 0 9 * * ?", chatSpaceId: "TCA_SPACE", isActive: "Y"])
+                }
+            }
+            assertNotNull(waitForPending(MINE), "saving a script marks its tenant")
+            assertEquals(1L, call("snapshot#PendingTenantConfigs", [nowStamp: new Timestamp(System.currentTimeMillis() + 61_000L)])
+                    .outcomes.count { it.tenant == MINE && it.outcome == "VERSIONED" })
+            Map pack = TenantConfigVersionSupport.currentPack(ec, MINE)
+            assertEquals(["Digest"], (pack.scripts as List<Map>)*.fields*.scriptName, "the version holds the script")
+
+            asSystem { ec.entity.find(PENDING).deleteAll() }
+            inTransaction {
+                asSystem {
+                    ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "TCA_DEPLOY").one()
+                            .setAll([lastRunDate: T, lastRunStatus: "SENT", lastRunMessage: "posted", nextRunDate: T]).update()
+                }
+            }
+            settle()
+            assertNull(pendingOf(MINE), "a run of the deployment changes no config")
+        } finally {
+            settle()
+            asSystem {
+                ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "TCA_DEPLOY").deleteAll()
+                ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", "TCA_SCRIPT").deleteAll()
+                ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "TCA_SPACE").deleteAll()
+            }
+        }
     }
 
     @Test

@@ -108,4 +108,13 @@
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.knowledge.KnowledgeEntry', entityValue, eecaOperation)</script></actions>
     </eeca>
+    <!-- DAR-BE-237: a tenant's scripts and their deployments. -->
+    <eeca id="TenantConfigChange_TenantScript" entity="darpan.script.TenantScript" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.script.TenantScript', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_TenantScriptDeployment" entity="darpan.script.TenantScriptDeployment" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.script.TenantScriptDeployment', entityValue, eecaOperation)</script></actions>
+    </eeca>
 </eecas>

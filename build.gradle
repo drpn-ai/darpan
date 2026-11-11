@@ -217,6 +217,24 @@ gradle.taskGraph.whenReady { graph ->
     focused.include(classTokens.collectMany { String c -> ["**/${c}.class".toString(), "**/${c}\$*.class".toString()] })
 }
 
+// DAR-OPS-015: CI runs the suite in shards (-PtestShard=i/N, i from 1), because on one runner it passed the job's
+// 60-minute limit. Each pool is dealt round-robin over its sorted classes, so every shard gets a like share of the
+// Moqui-booting classes, and the N shards together run exactly the classes an unsharded run does.
+String darpanTestShard = project.findProperty('testShard') as String
+if (darpanTestShard) {
+    java.util.regex.Matcher shard = darpanTestShard =~ /^(\d+)\/(\d+)$/
+    int index = shard.matches() ? (shard.group(1) as int) - 1 : -1
+    int count = shard.matches() ? shard.group(2) as int : 0
+    if (index < 0 || index >= count) throw new GradleException("testShard must be i/N with 1 <= i <= N, got ${darpanTestShard}")
+    List<String> mine = [darpanTestPools.smoke, darpanTestPools.unit].collectMany { List<String> pool ->
+        (0..<pool.size()).findAll { int n -> n % count == index }.collect { int n -> pool[n] }
+    }
+    tasks.named('test', Test) {
+        include(mine.collectMany { String c -> [c, c.substring(0, c.length() - '.class'.length()) + '$*.class'] })
+        doFirst { logger.lifecycle("test shard ${darpanTestShard}: ${mine.size()} classes") }
+    }
+}
+
 // Fast inner-loop pool: the test classes that never boot Moqui. Because they touch no
 // process-global state they need no per-class fork, so this costs a handful of JVM starts
 // instead of one per class.
@@ -356,7 +374,14 @@ jacocoTestReport {
     }
 }
 jacocoTestCoverageVerification {
-    dependsOn test
+    // DAR-OPS-015: CI checks the floors once over every shard's execution data (-PjacocoExecDir=<dir of *.exec>),
+    // with -x test, since no single shard covers the suite.
+    String execDir = project.findProperty('jacocoExecDir') as String
+    if (execDir) {
+        executionData.setFrom(fileTree(execDir) { include '**/*.exec' })
+    } else {
+        dependsOn test
+    }
     violationRules {
         rule {
             // Baseline measured 2026-07-02: LINE 77.57%, BRANCH 52.14% (413-test suite).

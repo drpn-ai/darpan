@@ -47,10 +47,17 @@ jobs:
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz gitleaks
           ./gitleaks detect --source . --no-banner --redact --verbose
 
+  # DAR-OPS-015: the suite runs in four shards (-PtestShard, build.gradle). On one runner it passed this job's
+  # 60-minute limit on every main push from 2026-11-02, so CI was cancelled before it reported. The coverage job
+  # below checks the Jacoco floors once over all four shards' execution data.
   backend-tests:
-    name: Component test suite (JDK 21, H2 + MySQL)
+    name: Component test suite (JDK 21, H2 + MySQL) ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     services:
       # mysql:8.4 deliberately, not 9.x — this mirrors the production server version. The suite is
@@ -129,34 +136,26 @@ jobs:
         working-directory: darpan-backend
         run: ./gradlew --no-daemon --console=plain getRuntime
 
-      - name: Place components (moqui-sftp + the 5 Darpan components — darpan under test + 4 integrations)
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch master https://github.com/moqui/moqui-sftp.git \
-            darpan-backend/runtime/component/moqui-sftp
-          # darpan's main code and test suite reference sibling-component entities: darpan-hotwax
-          # owns darpan.hotwax.HotWaxOmsRestSourceConfig and shopify-darpan owns
-          # darpan.shopify.ShopifyAuthConfig (the Ns* configs are canonical in darpan itself, so
-          # netsuite-darpan is a consumer placed only to assemble the full, proven platform). All
-          # three are public drpn-ai repos on `main` and part of the canonical darpan-cli
-          # REPO_MANIFEST. Without darpan-hotwax/shopify-darpan those entity definitions never load
-          # and ~24 darpan tests fail with EntityNotFoundException in their shared @BeforeEach.
-          # database-darpan owns darpan.database.DatabaseSourceConfig / DatabaseSourceQuery, which
-          # darpan's saved-run, automation and tenant-filter tests read; without it those tests fail
-          # with EntityNotFoundException exactly like the hotwax/shopify case above.
-          for repo in darpan-hotwax netsuite-darpan shopify-darpan database-darpan; do
-            git clone --depth 1 --branch main "https://github.com/drpn-ai/${repo}.git" \
-              "darpan-backend/runtime/component/${repo}"
-          done
-          mv component-darpan darpan-backend/runtime/component/darpan
+      - name: Place components (moqui-sftp, moqui-gql + the 5 Darpan components — darpan under test + 4 integrations)
+        run: bash component-darpan/.github/scripts/place-components.sh
 
+      # Nothing in the build graph depends on moqui-gql (it compileOnly-depends on darpan), so its jar, which adds the
+      # GqlToolFactory loaded at startup, is built by name, as the production image does.
       - name: Load seed data into the embedded H2 database
         working-directory: darpan-backend
-        run: ./gradlew --no-daemon --console=plain load
+        run: ./gradlew --no-daemon --console=plain :runtime:component:moqui-gql:jar load
 
-      - name: Run darpan component test suite
+      - name: Run darpan component test suite (shard ${{ matrix.shard }} of 4)
         working-directory: darpan-backend
-        run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:test
+        run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:test -PtestShard=${{ matrix.shard }}/4
+
+      - name: Keep this shard's coverage data
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: darpan-jacoco-${{ matrix.shard }}
+          path: darpan-backend/runtime/component/darpan/build/jacoco/test.exec
+          if-no-files-found: ignore
 
       # Bitronix issues `XA RECOVER` when it initialises the datasource, and MySQL refuses that
       # statement without XA_RECOVER_ADMIN ON *.* — it comes back as XAER_RMERR and takes the whole
@@ -165,6 +164,7 @@ jobs:
       # dedicated user, that user needs `GRANT XA_RECOVER_ADMIN ON *.* ` explicitly. Asserting it
       # here turns a confusing mid-suite stack trace into a one-line failure.
       - name: Verify MySQL service is reachable and holds XA_RECOVER_ADMIN
+        if: matrix.shard == 1
         run: |
           set -euo pipefail
           # Uses the mysql:8.4 client from the image the service container already pulled, so this
@@ -186,6 +186,7 @@ jobs:
       # --no-daemon matters here beyond speed: Gradle seeds a Test task's environment from the build
       # JVM, and a reused daemon would carry the environment it started with, not these values.
       - name: Run MySQL-backed regression suite (login deadlock)
+        if: matrix.shard == 1
         working-directory: darpan-backend
         env:
           DARPAN_TEST_DB_HOST: 127.0.0.1
@@ -197,9 +198,6 @@ jobs:
 
       # Coverage ratchet (MACH P1): reuses the execution data from :test — no test rerun.
       # Floors sit ~2 points below the measured baseline (build.gradle jacoco block).
-      - name: Enforce coverage floors (Jacoco)
-        working-directory: darpan-backend
-        run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:jacocoTestCoverageVerification
 
       # Contract-drift guard (MACH P0, API management). The XML <-> committed-contract gate
       # already runs inside :test (ApiContractGeneratorTests); this step extends the guard to
@@ -207,6 +205,7 @@ jobs:
       # enforced by darpan-ui's own CI
       # (src/lib/api/__tests__/contractDrift.spec.ts against its committed methods.txt copy).
       - name: Check docs service catalog against the generated API contract
+        if: matrix.shard == 1
         run: |
           git clone --depth 1 https://github.com/drpn-ai/darpan-developers.git darpan-developers
           cd darpan-developers && python3 scripts/check_service_catalog.py \
@@ -216,7 +215,7 @@ jobs:
       # field, type change) fail PRs unless x-darpan-contract-version was consciously bumped.
       # Additive changes always pass (additive-only deprecation policy).
       - name: Check facade contract compatibility against PR base
-        if: github.event_name == 'pull_request'
+        if: matrix.shard == 1 && github.event_name == 'pull_request'
         working-directory: darpan-backend/runtime/component/darpan
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -232,7 +231,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: darpan-test-reports
+          name: darpan-test-reports-${{ matrix.shard }}
           # Both suites, and the raw XML as well as the HTML: a Test task reports BUILD SUCCESSFUL
           # even when it matched zero tests, so the per-suite XML is the only proof of what ran.
           path: |
@@ -241,3 +240,57 @@ jobs:
             darpan-backend/runtime/component/darpan/build/test-results/test/
             darpan-backend/runtime/component/darpan/build/test-results/mysqlTest/
           if-no-files-found: ignore
+
+  # DAR-OPS-015: the Jacoco floors, checked once over the four shards' execution data. It compiles darpan in the same
+  # assembly and runs no tests.
+  coverage:
+    name: Coverage floors (Jacoco, all shards)
+    needs: backend-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out darpan component (code under test)
+        uses: actions/checkout@v5
+        with:
+          path: component-darpan
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('component-darpan/build.gradle') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # Same framework as backend-tests: the drpn-ai fork, never upstream (see the note there).
+      - name: Clone Moqui framework (drpn-ai fork, master)
+        run: git clone --depth 1 --branch master https://github.com/drpn-ai/moqui-framework.git darpan-backend
+
+      - name: Download Moqui runtime (must precede component placement)
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain getRuntime
+
+      - name: Place components
+        run: bash component-darpan/.github/scripts/place-components.sh
+
+      - name: Collect the shards' coverage data
+        uses: actions/download-artifact@v7
+        with:
+          pattern: darpan-jacoco-*
+          path: coverage
+
+      - name: Enforce coverage floors (Jacoco)
+        working-directory: darpan-backend
+        run: |
+          set -euo pipefail
+          test "$(find ../coverage -name '*.exec' | wc -l)" -eq 4 || { echo "::error::expected coverage data from all 4 shards"; exit 1; }
+          ./gradlew --no-daemon --console=plain :runtime:component:darpan:jacocoTestCoverageVerification -x test \
+            -PjacocoExecDir="$GITHUB_WORKSPACE/coverage"

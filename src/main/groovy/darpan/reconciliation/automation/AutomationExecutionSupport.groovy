@@ -2163,6 +2163,11 @@ class AutomationExecutionSupport {
                         normalize(readField(source, "fileSide"))))
         applyStatusParameter(serviceParams, connectorForService, source)
         applyWindowFieldParameter(serviceParams, connectorForService)
+        // DAR-BE-239: the fields this side's rules read. Before, a scheduled run sent none, its HotWax read never asked
+        // for paymentRefNums, and the transaction rule passed every order.
+        List<String> readFields = ReconciliationSavedRunSupport.extractReadFields(ec, serviceName,
+                readField(automation, "compareScopeId"), serviceParams.fileSide)
+        if (readFields) serviceParams.put(ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER, readFields)
         // DAR-BE-119: a read by key (an audit re-checking its older open findings), sent only to an extractor that
         // declares it: any other would ignore the keys and read the whole window.
         // DAR-BE-123: verifying findings reads only their records, by this side's own first key field.

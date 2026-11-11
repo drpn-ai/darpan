@@ -835,6 +835,39 @@ class ReconciliationSavedRunSupport {
         return CompareIdExpressionSupport.topLevelRecordField(expression)
     }
 
+    /** DAR-BE-239: the extract parameter both run paths send the fields a side's rules read in. */
+    static final String READ_FIELDS_PARAMETER = "readFields"
+
+    /**
+     * DAR-BE-239. The top-level record fields this side's enabled rules read, for an extract that selects a field only
+     * when asked (OMS_GQL: paymentRefNums). Not a projection, so unlike {@link #ruleKeepFieldsForSide} nothing here can
+     * drop a field: a path that names no field, or a rule for the other side only, is skipped.
+     */
+    static List<String> ruleReadFieldsForSide(List<Map<String, Object>> ruleRows, Object fileSide) {
+        String side = normalize(fileSide)?.toUpperCase()
+        if (!(side in ["FILE_1", "FILE_2"])) return []
+        String pathKey = side == "FILE_2" ? "file2FieldPath" : "file1FieldPath"
+        return (ruleRows ?: []).findAll { normalize(it?.get("enabled"))?.toUpperCase() != "N" }
+                .collect { topLevelRecordField(it.get(pathKey)) }.findAll { it }.unique() as List<String>
+    }
+
+    /**
+     * The readFields to send an extract service, or null when it does not declare the parameter or no rule reads a field
+     * on this side. Both run paths call this, so a scheduled run reads what an interactive one does (before DAR-BE-239 the
+     * scheduled path sent no fields and its transaction rule compared against nothing).
+     */
+    static List<String> extractReadFields(def ec, String extractServiceName, Object compareScopeId, Object fileSide) {
+        if (!extractServiceName || !ec?.service?.getServiceDefinition(extractServiceName)?.inParameterNameList
+                ?.contains(READ_FIELDS_PARAMETER)) return null
+        String scopeId = normalize(compareScopeId)
+        if (!scopeId) return null
+        // Tenant-gated: a scope outside the active tenant reads as none, never another tenant's rules.
+        def scope = TenantScopedFinder.findTenantScopedByIdQuiet(ec, "darpan.rule.RuleSetCompareScope", "compareScopeId", scopeId)
+        if (scope == null) return null
+        List<String> fields = ruleReadFieldsForSide(collectRuleRows(ec, scope.ruleSetId), fileSide)
+        return fields ?: null
+    }
+
     static List<Map<String, Object>> collectRuleRows(def ec, Object rawRuleSetId) {
         String ruleSetId = normalize(rawRuleSetId)
         if (!ruleSetId) return []

@@ -203,6 +203,39 @@ class RunSideOptionsSmokeTests {
         assertEquals(true, option.supportsExcludeFilters, "the SuiteQL connector takes source filters")
     }
 
+    /**
+     * DAR-BE-239: the fields a side's rules read reach the OMS order read on both run paths. The scheduled path sent none,
+     * so HotWax was never asked for paymentRefNums and the transaction rule passed every order (DOLLS_KILL 2026-11-10:
+     * 1,608 of 1,608). An extract that does not declare readFields is never sent it.
+     */
+    @Test
+    void theRulesFieldsReachTheOmsOrderReadOnBothRunPaths() {
+        Map created = create([file1SystemEnumId: "SHOPIFY", file1PrimaryIdExpression: '$.records[*].id',
+                              file2SystemEnumId: "OMS_GQL", file2PrimaryIdExpression: '$.records[*].externalId',
+                              // The rule as the run editor saves it (buildRuleSetRulePayloads); the server writes its DRL.
+                              rules: [[sequenceNum: 1, ruleType: "FIELD_COMPARISON", enabled: "Y", severity: "WARN",
+                                       ruleText: "paymentTransactionIds all in paymentRefNums", ruleLogic: "",
+                                       expression: '{"type":"FIELD_COMPARISON","file1FieldPath":"$.records[*].paymentTransactionIds",' +
+                                               '"file2FieldPath":"$.records[*].paymentRefNums","operator":"all in"}']]])
+        assertFalse(created.hadError as boolean, created.errorText as String)
+        Map row = source(created, "FILE_2").getMap()
+
+        // The scheduled path's call (AutomationExecutionSupport.callConfiguredSourceExtractor).
+        String gqlOrders = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+        assertEquals(["paymentRefNums"], ReconciliationSavedRunSupport.extractReadFields(ec, gqlOrders, row.compareScopeId, "FILE_2"),
+                "params=${ec.service.getServiceDefinition(gqlOrders)?.inParameterNameList} rules=${ReconciliationSavedRunSupport.collectRuleRows(ec, created.savedRun.savedRunId)}")
+        assertNull(ReconciliationSavedRunSupport.extractReadFields(ec,
+                "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlProducts", row.compareScopeId, "FILE_2"))
+
+        Map api = new LinkedHashMap(row + [sourceConfigId: "gorjana_prod", sourceConfigType: "HOTWAX_OMS_GQL"])
+        Map captured = null
+        RunExtractSupport.extractApiSource(ec, api, "FILE_2", "File 2", [location: "dbresource://tmp/run-side-options", runToken: "t"],
+                [windowStartDate: Timestamp.valueOf("2026-11-10 08:00:00"), windowEndDate: Timestamp.valueOf("2026-11-11 08:00:00")],
+                null, { String service, Map params -> captured = params; [:] })
+        ec.message.clearErrors()
+        assertEquals(["paymentRefNums"], captured?.readFields, captured?.toString())
+    }
+
     @Test
     void theManualRunHandsTheOptionsToTheExtractUnderItsOwnParams() {
         Map created = create([file1ExtractOptions: [onlyCancelledReturns: true]])

@@ -52,7 +52,7 @@
             description="Comma-joined OPP paymentMethodTypeIds from the first two OPPs (detail, not a key)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentRefNums"
             label="Payment IDs" fieldType="string" sequenceNum="11"
-            description="DAR-BE-153: comma-joined OPP manualRefNums (the Shopify transaction id each OPP names), read from up to six OPPs; null when all six slots came back full, so a longer list is never claimed short. Compared against Shopify paymentTransactionIds (paymentTransactionIds all in paymentRefNums)."/>
+            description="DAR-BE-153: comma-joined OPP manualRefNums (the Shopify transaction id each OPP names), read from up to five OPPs; null when all five slots came back full, so a longer list is never claimed short. Compared against Shopify paymentTransactionIds (paymentTransactionIds all in paymentRefNums)."/>
 
     <!-- OMS_RETURNS_GQL (DAR-BE-040 fix 3): HotWax returns. Join on shopifyReturnId rather than externalId:
          externalId is blank on RETURN_REQUESTED returns (no refund id yet). orderProductStoreId (DAR-BE-068) filters by store. -->

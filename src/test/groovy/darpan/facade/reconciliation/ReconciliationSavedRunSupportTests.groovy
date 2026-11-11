@@ -175,6 +175,26 @@ class ReconciliationSavedRunSupportTests {
         assertNull(ReconciliationSavedRunSupport.topLevelRecordField("   "))
     }
 
+    // ─── ruleReadFieldsForSide (DAR-BE-239): what a side's rules read, never a projection ────
+
+    @Test
+    void ruleReadFieldsNameWhatThisSidesEnabledRulesRead() {
+        List<Map<String, Object>> ruleRows = [
+                [file1FieldPath: '$.records[*].isFulfilled', file2FieldPath: '$.records[*].isCompleted', enabled: 'Y'],
+                [file1FieldPath: '$.records[*].paymentTransactionIds', file2FieldPath: '$.records[*].paymentRefNums'],
+                [file1FieldPath: '$.records[*].hasPaymentTransaction', file2FieldPath: '$.records[*].hasPaymentPreference', enabled: 'N'],
+                // A rule naming no path on this side, or a nested one, never turns the read off the way a projection would.
+                [ruleLogic: 'rule "opaque" when then end'],
+                [file1FieldPath: '$.records[*].lines[*].sku', file2FieldPath: '$.records[*].items[*].sku'],
+                [file2FieldPath: '$.records[*].isCompleted'],
+        ]
+        assertEquals(['isCompleted', 'paymentRefNums', 'items'],
+                ReconciliationSavedRunSupport.ruleReadFieldsForSide(ruleRows, 'FILE_2'))
+        assertEquals(['isFulfilled', 'paymentTransactionIds', 'lines'],
+                ReconciliationSavedRunSupport.ruleReadFieldsForSide(ruleRows, 'file_1'))
+        assertEquals([], ReconciliationSavedRunSupport.ruleReadFieldsForSide(ruleRows, 'BOTH'))
+    }
+
     // ─── ruleKeepFieldsForSide: rule-referenced fields for extract projection ────
     // Review fix (task-7-report.md Fix Report): the gate is the side's own primaryIdExpression
     // record-array prefix (e.g. "records[*]" from "$.records[*].orderId"), not merely "did

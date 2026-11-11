@@ -238,6 +238,9 @@ class RunExtractSupport {
                 SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)))
         // DAR-BE-192: readByOtherSideKeys is the run's choice, not the extract's; byKeys carries the other side's keys.
         extractParams.remove(darpan.reconciliation.automation.AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS)
+        // DAR-BE-239: the fields this side's rules read, as the scheduled path sends them.
+        List<String> readFields = ReconciliationSavedRunSupport.extractReadFields(ec, extractServiceName, source?.compareScopeId, fileSide)
+        if (readFields) extractParams[ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER] = readFields
         if (byKeys != null) {
             if (!ec.service.getServiceDefinition(extractServiceName)?.inParameterNameList?.contains("lookupKeys")) {
                 ec.message.addError("${label} is read by the other side's keys, and its source cannot read by key.")

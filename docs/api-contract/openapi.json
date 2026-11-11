@@ -204,6 +204,9 @@
                                         "$ref": "#/components/schemas/ListAgentQueryLogsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAgentAuditScopeRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/AddAuditStatementRequest"
                                     },
                                     {
@@ -795,6 +798,7 @@
                                         "facade.AgentChangeFacadeServices.reject#AuditChange": "#/components/schemas/RejectAuditChangeRequest",
                                         "facade.AgentChangeFacadeServices.revert#AuditChange": "#/components/schemas/RevertAuditChangeRequest",
                                         "facade.AgentFacadeServices.list#AgentQueryLogs": "#/components/schemas/ListAgentQueryLogsRequest",
+                                        "facade.AgentReadFacadeServices.get#AgentAuditScope": "#/components/schemas/GetAgentAuditScopeRequest",
                                         "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
                                         "facade.AuditFacadeServices.create#Audit": "#/components/schemas/CreateAuditRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckExtracts": "#/components/schemas/GetAuditCheckExtractsRequest",
@@ -1166,6 +1170,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListAgentQueryLogsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAgentAuditScopeResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/AddAuditStatementResponse"
@@ -7668,6 +7675,104 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ListAgentQueryLogsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAgentAuditScopeParams": {
+                "type": "object",
+                "properties": {
+                    "findingId": {
+                        "type": "string",
+                        "description": "The finding's id, e.g. F-20761."
+                    }
+                },
+                "required": [
+                    "findingId"
+                ],
+                "description": "What the open finding's audit tells the agent (DAR-BE-215): the audit's name and schedule, the finding's own\n            statement and check, and the run that check reads. No other statement of the audit. Another tenant's finding reads as not found."
+            },
+            "GetAgentAuditScopeResult": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "object",
+                        "description": "[name]."
+                    },
+                    "schedule": {
+                        "type": "object",
+                        "description": "[active, time, timeZone]."
+                    },
+                    "statement": {
+                        "type": "object",
+                        "description": "[code, text] of the finding's statement."
+                    },
+                    "check": {
+                        "type": "object",
+                        "description": "[id, label] of the finding's check."
+                    },
+                    "run": {
+                        "type": "object",
+                        "description": "[savedRunId, sides]; empty when the check has no run."
+                    }
+                }
+            },
+            "GetAgentAuditScopeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentReadFacadeServices.get#AgentAuditScope",
+                "x-darpan-method": "facade.AgentReadFacadeServices.get#AgentAuditScope",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentReadFacadeServices.get#AgentAuditScope"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAgentAuditScopeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAgentAuditScopeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentReadFacadeServices.get#AgentAuditScope. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAgentAuditScopeResult"
                     }
                 },
                 "required": [
@@ -31198,6 +31303,7 @@
         "facade.AgentChangeFacadeServices.reject#AuditChange": "RejectAuditChange",
         "facade.AgentChangeFacadeServices.revert#AuditChange": "RevertAuditChange",
         "facade.AgentFacadeServices.list#AgentQueryLogs": "ListAgentQueryLogs",
+        "facade.AgentReadFacadeServices.get#AgentAuditScope": "GetAgentAuditScope",
         "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
         "facade.AuditFacadeServices.create#Audit": "CreateAudit",
         "facade.AuditFacadeServices.get#AuditCheckExtracts": "GetAuditCheckExtracts",

@@ -148,6 +148,8 @@ class CliMethodAllowlist {
             "facade.AgentChangeFacadeServices.plan#AuditChange",
             "facade.AgentChangeFacadeServices.reject#AuditChange",
             "facade.AgentChangeFacadeServices.revert#AuditChange",
+            // DAR-BE-215: what one finding's audit tells the embedded agent; the agent reads it, not a CLI session.
+            "facade.AgentReadFacadeServices.get#AgentAuditScope",
 
             "admin.KnowledgeAdminServices.get#KnowledgeEntry",
             "admin.KnowledgeAdminServices.get#KnowledgeForReview",

@@ -58,6 +58,7 @@ facade.AgentChangeFacadeServices.plan#AuditChange
 facade.AgentChangeFacadeServices.reject#AuditChange
 facade.AgentChangeFacadeServices.revert#AuditChange
 facade.AgentFacadeServices.list#AgentQueryLogs
+facade.AgentReadFacadeServices.get#AgentAuditScope
 facade.AuditFacadeServices.add#AuditStatement
 facade.AuditFacadeServices.create#Audit
 facade.AuditFacadeServices.get#AuditCheckExtracts

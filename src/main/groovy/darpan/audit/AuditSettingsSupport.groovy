@@ -71,7 +71,7 @@ class AuditSettingsSupport {
                 statements: statements.collect { Map st ->
                     [id    : st.statementId, code: st.statementCode, text: st.statementText, active: (st.isActive ?: "Y") != "N",
                      checks: checksByStatement[st.statementId as String].collect { Map c ->
-                         [id: c.checkCode, label: c.label, savedRunId: c.savedRunId, runName: runNames[c.savedRunId as String]]
+                         [id: c.checkCode, label: c.label, savedRunId: c.savedRunId, runName: c.savedRunId ? runNames[c.savedRunId as String] : null]
                      }]
                 },
                 // DAR-BE-207: the update emailed after each run.

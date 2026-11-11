@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-235. Authoring data-defined reads (DataSourceDefinition): check one, save one as a new version, retire one.
+  Super admins only (TenantAccessSupport.requireSuperAdmin in each). A definition is never edited in place: a save makes a
+  new DRAFT row, the next version of its family (id <FAMILY>_V<n>, as the shipped OMS_ORDERS_GQL_V1), and an ACTIVE row
+  keeps its document. The check is DataSourceDefinitionSupport's, the one load and every run use. Web only: a CLI session
+  never calls these (CliMethodAllowlist.EXCLUDED).
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="validate" noun="DataSourceDefinition" allow-remote="true">
+        <description>Checks a definition document for a protocol and lists every problem, one each. Saves nothing.</description>
+        <in-parameters>
+            <parameter name="protocol" required="true"><description>GRAPHQL or REST_JSON.</description></parameter>
+            <parameter name="definitionJson" required="true" allow-html="any"><description>The definition document.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="errors" type="List"><description>Why the call was refused.</description><parameter name="error"/></parameter>
+            <parameter name="valid" type="Boolean"><description>True when the document has no problem.</description></parameter>
+            <parameter name="problems" type="List"><description>Each problem in words.</description><parameter name="problem"/></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec)"><return error="true"/></if>
+            <set field="problems" from="darpan.datasource.DataSourceDefinitionSupport.problems(protocol, definitionJson)"/>
+            <set field="valid" from="problems.isEmpty()" type="Boolean"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="DataSourceDefinition" allow-remote="true">
+        <description>Saves a definition as a new DRAFT row: the first of a new family (definitionId), or the next version of an
+            existing one (basedOnId; its row, ACTIVE or not, is left as it is). A document with any problem is refused with them all.</description>
+        <in-parameters>
+            <parameter name="definitionId"><description>A new family's name (A-Z, 0-9, _; not ending in _V and a number). Its first row is the name + _V1.</description></parameter>
+            <parameter name="basedOnId"><description>Any row of an existing family: the save is that family's next version.</description></parameter>
+            <parameter name="definitionName"><description>A name people read; defaults to the based-on row's.</description></parameter>
+            <parameter name="protocol"><description>GRAPHQL or REST_JSON; defaults to the based-on row's.</description></parameter>
+            <parameter name="definitionJson" required="true" allow-html="any"><description>The definition document.</description></parameter>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the row was saved.</description></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused: every problem with the document.</description><parameter name="error"/></parameter>
+            <parameter name="dataSourceDefinitionId"><description>The new row's id.</description></parameter>
+            <parameter name="definitionVersion" type="Integer"><description>The new row's version.</description></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec)"><return error="true"/></if>
+            <if condition="basedOnId">
+                <entity-find-one entity-name="darpan.datasource.DataSourceDefinition" value-field="base">
+                    <field-map field-name="dataSourceDefinitionId" from="basedOnId"/>
+                </entity-find-one>
+                <if condition="base == null"><return error="true" message="Definition ${basedOnId} was not found."/></if>
+                <set field="family" from="basedOnId.replaceFirst(/_V\d+$/, '')"/>
+                <set field="protocol" from="protocol ?: base.protocol"/>
+                <set field="definitionName" from="definitionName ?: base.definitionName"/>
+                <set field="description" from="description ?: base.description"/>
+                <else>
+                    <if condition="!(definitionId ==~ /[A-Z][A-Z0-9_]{1,30}/) || definitionId ==~ /.*_V\d+/">
+                        <return error="true" message="A new definition needs definitionId: 2 to 31 of A-Z, 0-9 and _, not ending in _V and a number."/>
+                    </if>
+                    <set field="family" from="definitionId"/>
+                </else>
+            </if>
+            <if condition="!definitionName?.trim()"><return error="true" message="A definition needs definitionName."/></if>
+            <set field="problems" from="darpan.datasource.DataSourceDefinitionSupport.problems(protocol, definitionJson)"/>
+            <if condition="problems">
+                <iterate list="problems" entry="problem"><message error="true">${problem}</message></iterate>
+                <return error="true"/>
+            </if>
+            <entity-find entity-name="darpan.datasource.DataSourceDefinition" list="familyRows">
+                <econdition field-name="dataSourceDefinitionId" operator="like" value="${family}_V%"/>
+            </entity-find>
+            <set field="versions" from="familyRows.findAll { it.dataSourceDefinitionId ==~ (java.util.regex.Pattern.quote(family) + /_V\d+/) }
+                    .collect { Math.max((it.definitionVersion ?: 0) as int, it.dataSourceDefinitionId.replaceFirst(/.*_V/, '') as int) }"/>
+            <if condition="!basedOnId &amp;&amp; versions">
+                <return error="true" message="Definition ${family} already exists; save a change with basedOnId."/>
+            </if>
+            <set field="definitionVersion" from="((versions.max() ?: 0) as int) + 1" type="Integer"/>
+            <set field="dataSourceDefinitionId" from="family + '_V' + definitionVersion" type="String"/>
+            <entity-make-value entity-name="darpan.datasource.DataSourceDefinition" value-field="row"
+                    map="[dataSourceDefinitionId: dataSourceDefinitionId, definitionName: definitionName.trim(), protocol: protocol,
+                          definitionVersion: definitionVersion, statusId: 'DRAFT', definitionJson: definitionJson, description: description,
+                          createdDate: ec.user.nowTimestamp, lastUpdatedDate: ec.user.nowTimestamp]"/>
+            <entity-create value-field="row"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="retire" noun="DataSourceDefinition" allow-remote="true">
+        <description>Marks a definition RETIRED, kept for history. Refused while a connector still reads it. Retiring a retired row is a no-op.</description>
+        <in-parameters>
+            <parameter name="dataSourceDefinitionId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the row is retired.</description></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec)"><return error="true"/></if>
+            <entity-find-one entity-name="darpan.datasource.DataSourceDefinition" value-field="row" for-update="true"/>
+            <if condition="row == null"><return error="true" message="Definition ${dataSourceDefinitionId} was not found."/></if>
+            <entity-find-count entity-name="darpan.reconciliation.SourceSystemConnector" count-field="readers">
+                <econdition field-name="dataSourceDefinitionId"/>
+            </entity-find-count>
+            <if condition="readers">
+                <return error="true" message="Definition ${dataSourceDefinitionId} is still read by ${readers} connector(s); point them at another first."/>
+            </if>
+            <if condition="row.statusId != 'RETIRED'">
+                <set field="row.statusId" value="RETIRED"/>
+                <set field="row.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+                <entity-update value-field="row"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

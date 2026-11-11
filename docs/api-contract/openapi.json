@@ -333,6 +333,15 @@
                                         "$ref": "#/components/schemas/RevokeConfigTenantAccessRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/CreateDataSourceDefinitionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RetireDataSourceDefinitionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ValidateDataSourceDefinitionRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigRequest"
                                     },
                                     {
@@ -841,6 +850,9 @@
                                         "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "#/components/schemas/GrantConfigTenantAccessRequest",
                                         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "#/components/schemas/ListConfigTenantAccessRequest",
                                         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "#/components/schemas/RevokeConfigTenantAccessRequest",
+                                        "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition": "#/components/schemas/CreateDataSourceDefinitionRequest",
+                                        "facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition": "#/components/schemas/RetireDataSourceDefinitionRequest",
+                                        "facade.DataSourceDefinitionFacadeServices.validate#DataSourceDefinition": "#/components/schemas/ValidateDataSourceDefinitionRequest",
                                         "facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigRequest",
                                         "facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema": "#/components/schemas/GetOmsGraphqlSchemaRequest",
                                         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "#/components/schemas/ListHotWaxOmsRestSourceConfigsRequest",
@@ -1299,6 +1311,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/RevokeConfigTenantAccessResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/CreateDataSourceDefinitionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RetireDataSourceDefinitionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ValidateDataSourceDefinitionResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigResponse"
@@ -12944,6 +12965,315 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/RevokeConfigTenantAccessResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "CreateDataSourceDefinitionParams": {
+                "type": "object",
+                "properties": {
+                    "definitionId": {
+                        "type": "string",
+                        "description": "A new family's name (A-Z, 0-9, _; not ending in _V and a number). Its first row is the name + _V1."
+                    },
+                    "basedOnId": {
+                        "type": "string",
+                        "description": "Any row of an existing family: the save is that family's next version."
+                    },
+                    "definitionName": {
+                        "type": "string",
+                        "description": "A name people read; defaults to the based-on row's."
+                    },
+                    "protocol": {
+                        "type": "string",
+                        "description": "GRAPHQL or REST_JSON; defaults to the based-on row's."
+                    },
+                    "definitionJson": {
+                        "type": "string",
+                        "description": "The definition document."
+                    },
+                    "description": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "definitionJson"
+                ],
+                "description": "Saves a definition as a new DRAFT row: the first of a new family (definitionId), or the next version of an\n            existing one (basedOnId; its row, ACTIVE or not, is left as it is). A document with any problem is refused with them all."
+            },
+            "CreateDataSourceDefinitionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the row was saved."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused: every problem with the document."
+                    },
+                    "dataSourceDefinitionId": {
+                        "type": "string",
+                        "description": "The new row's id."
+                    },
+                    "definitionVersion": {
+                        "type": "integer",
+                        "description": "The new row's version."
+                    }
+                }
+            },
+            "CreateDataSourceDefinitionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition",
+                "x-darpan-method": "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateDataSourceDefinitionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateDataSourceDefinitionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateDataSourceDefinitionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RetireDataSourceDefinitionParams": {
+                "type": "object",
+                "properties": {
+                    "dataSourceDefinitionId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "dataSourceDefinitionId"
+                ],
+                "description": "Marks a definition RETIRED, kept for history. Refused while a connector still reads it. Retiring a retired row is a no-op."
+            },
+            "RetireDataSourceDefinitionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the row is retired."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    }
+                }
+            },
+            "RetireDataSourceDefinitionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition",
+                "x-darpan-method": "facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RetireDataSourceDefinitionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RetireDataSourceDefinitionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RetireDataSourceDefinitionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ValidateDataSourceDefinitionParams": {
+                "type": "object",
+                "properties": {
+                    "protocol": {
+                        "type": "string",
+                        "description": "GRAPHQL or REST_JSON."
+                    },
+                    "definitionJson": {
+                        "type": "string",
+                        "description": "The definition document."
+                    }
+                },
+                "required": [
+                    "protocol",
+                    "definitionJson"
+                ],
+                "description": "Checks a definition document for a protocol and lists every problem, one each. Saves nothing."
+            },
+            "ValidateDataSourceDefinitionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why the call was refused."
+                    },
+                    "valid": {
+                        "type": "boolean",
+                        "description": "True when the document has no problem."
+                    },
+                    "problems": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Each problem in words."
+                    }
+                }
+            },
+            "ValidateDataSourceDefinitionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.DataSourceDefinitionFacadeServices.validate#DataSourceDefinition",
+                "x-darpan-method": "facade.DataSourceDefinitionFacadeServices.validate#DataSourceDefinition",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.DataSourceDefinitionFacadeServices.validate#DataSourceDefinition"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ValidateDataSourceDefinitionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ValidateDataSourceDefinitionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.DataSourceDefinitionFacadeServices.validate#DataSourceDefinition. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ValidateDataSourceDefinitionResult"
                     }
                 },
                 "required": [
@@ -31346,6 +31676,9 @@
         "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "GrantConfigTenantAccess",
         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "ListConfigTenantAccess",
         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "RevokeConfigTenantAccess",
+        "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition": "CreateDataSourceDefinition",
+        "facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition": "RetireDataSourceDefinition",
+        "facade.DataSourceDefinitionFacadeServices.validate#DataSourceDefinition": "ValidateDataSourceDefinition",
         "facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig": "DeleteHotWaxOmsRestSourceConfig",
         "facade.HotWaxOmsFacadeServices.get#OmsGraphqlSchema": "GetOmsGraphqlSchema",
         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "ListHotWaxOmsRestSourceConfigs",

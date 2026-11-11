@@ -69,6 +69,17 @@ class DataSourceDefinitionSupport {
 
     /** The definition as a Map, or IllegalArgumentException naming every problem. */
     static Map parse(String protocol, String json, Collection<String> connectionFields = null) {
+        Map read = read(protocol, json, connectionFields)
+        if (read.errors) throw new IllegalArgumentException(((List<String>) read.errors).join(" "))
+        return (Map) read.definition
+    }
+
+    /** DAR-BE-235: every problem with a definition's JSON, one entry each, never thrown (empty when it is good). */
+    static List<String> problems(String protocol, String json, Collection<String> connectionFields = null) {
+        return (List<String>) read(protocol, json, connectionFields).errors
+    }
+
+    private static Map read(String protocol, String json, Collection<String> connectionFields) {
         Map definition = null
         List<String> errors = []
         try {
@@ -79,8 +90,7 @@ class DataSourceDefinitionSupport {
             errors << "The definition is not readable JSON: ${e.message?.readLines()?.find { it.trim() }}".toString()
         }
         if (definition != null) errors.addAll(check(protocol, definition, connectionFields))
-        if (errors) throw new IllegalArgumentException(errors.join(" "))
-        return definition
+        return [definition: definition, errors: errors]
     }
 
     /**

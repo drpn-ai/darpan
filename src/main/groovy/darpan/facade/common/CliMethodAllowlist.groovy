@@ -148,6 +148,10 @@ class CliMethodAllowlist {
             "facade.AgentChangeFacadeServices.plan#AuditChange",
             "facade.AgentChangeFacadeServices.reject#AuditChange",
             "facade.AgentChangeFacadeServices.revert#AuditChange",
+            // DAR-BE-235: authoring data-defined reads is a super admin's, in the admin app; never a CLI session's.
+            "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition",
+            "facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition",
+            "facade.DataSourceDefinitionFacadeServices.validate#DataSourceDefinition",
             // DAR-BE-215: what one finding's audit tells the embedded agent; the agent reads it, not a CLI session.
             "facade.AgentReadFacadeServices.get#AgentAuditScope",
 

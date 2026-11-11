@@ -396,7 +396,7 @@ class LifecycleRuleSmokeTests {
         assertEquals(["Invoice", "Fulfillment"], (got.stages as List<Map>)*.label)
         List<Map> qs = got.questions as List<Map>
         assertTrue(qs.every { !before.contains(it.reconciliationRunId) || it.questionRole == "START" }, "old stage questions are off")
-        assertEquals(8, qs.size(), "the same START and seven new stage questions")
+        assertEquals(9, qs.size(), "the same START and eight new stage questions (DAR-BE-238: the excused-and-done place)")
         assertTrue(qs*.noOutcomeLabel.contains("Billed, never shipped"))
         assertEquals(["Shopify Draft Order"], (got.rules as List<Map>)*.value, "filters live on the START and stay")
         assertEquals([["ItemShip", "Store Pickup"]], (got.exceptions as List<Map>).collect { [it.stageRecordType, it.value] }, "the exception follows its stage")

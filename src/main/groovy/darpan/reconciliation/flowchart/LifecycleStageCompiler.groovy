@@ -82,12 +82,18 @@ class LifecycleStageCompiler {
             }
         }
         // The excused track: a record let past stage k by an exception stops at the first later stage it is missing.
+        // DAR-BE-238: one that reaches every later stage is found beside the track's last ask, as "done" is on the spine,
+        // so it lands in a place too.
         for (int k = 0; k < n - 1; k++) {
             String parent = "x${k}".toString(), branch = "NO"
             for (int j = k + 1; j < n; j++) {
                 String key = "x${k}.not${j}".toString()
                 out << [key: key, parentKey: parent, parentBranch: branch, stageRecordType: stages[j], check: ABSENT,
                         runName: s[j].name, noOutcomeLabel: "${excusedName(s, k)}, ${s[j].neg}".toString()]
+                if (j == n - 1) {
+                    out << [key: "x${k}.done".toString(), parentKey: parent, parentBranch: branch, stageRecordType: stages[j],
+                            check: PRESENT, runName: s[j].name, noOutcomeLabel: excusedDoneName(s, k)]
+                }
                 parent = key
                 branch = "YES"
             }
@@ -126,6 +132,9 @@ class LifecycleStageCompiler {
 
     /** "Fulfillment not expected": the place a person's exceptions name in their own words on the board. */
     static String excusedName(List<Map<String, String>> s, int k) { return "${s[k].name} not expected".toString() }
+
+    /** DAR-BE-238. "Fulfillment not expected, done": excused at that stage, and reached every stage after it. */
+    static String excusedDoneName(List<Map<String, String>> s, int k) { return "${excusedName(s, k)}, done".toString() }
 
     private static String completeName(List<Map<String, String>> s) {
         List<String> p = s.collect { it.past.toLowerCase() }

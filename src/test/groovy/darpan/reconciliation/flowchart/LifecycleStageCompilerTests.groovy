@@ -17,7 +17,7 @@ class LifecycleStageCompilerTests {
     @Test
     void twoStagesGiveFourPlacesEachItsOwnQuestion() {
         List<Map> qs = LifecycleStageCompiler.compile("SalesOrd", ["CustInvc", "ItemShip"])
-        assertEquals(["start", "s0", "x0", "s1", "done", "x0.not1", "s0.has1", "s0.not1"], qs*.key)
+        assertEquals(["start", "s0", "x0", "s1", "done", "x0.not1", "x0.done", "s0.has1", "s0.not1"], qs*.key)
         assertEquals(["START", "SalesOrd", "Sales orders"], [qs[0].questionRole, qs[0].recordType, qs[0].runName])
 
         // The stages, each "is it missing?" on the previous one's yes.
@@ -32,6 +32,9 @@ class LifecycleStageCompilerTests {
         // The excused records stop at the first later stage they are missing, in a place of their own.
         assertEquals(["x0", "NO", "ItemShip", "ABSENT", "Invoice not expected, never shipped"],
                 byKey(qs, "x0.not1").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
+        // DAR-BE-238: and those that then reach every later stage are a place too, found beside the track's last ask.
+        assertEquals(["x0", "NO", "ItemShip", "PRESENT", "Invoice not expected, done"],
+                byKey(qs, "x0.done").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
         // Under "never billed": skipped ahead to shipping, or stopped.
         assertEquals(["s0", "NO", "ItemShip", "PRESENT", "Shipped, never billed"], byKey(qs, "s0.has1").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
         assertEquals(["s0", "NO", "ItemShip", "ABSENT", "Never billed, never shipped"], byKey(qs, "s0.not1").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
@@ -46,11 +49,14 @@ class LifecycleStageCompilerTests {
             assertEquals(!continuesOnNo.contains(q.key), q.noOutcomeLabel != null,
                     "${q.key}: a no that ends is named, a no that continues is not")
         }
-        assertEquals(15, qs.count { it.questionRole != "START" })
+        assertEquals(17, qs.count { it.questionRole != "START" })
         assertEquals(["Credited, never refunded", "Received, credited and refunded", "Item receipt not expected, never credited",
-                      "Item receipt not expected, never refunded", "Credit memo not expected, never refunded", "Credited, never received",
+                      "Item receipt not expected, never refunded", "Item receipt not expected, done", "Credit memo not expected, never refunded",
+                      "Credit memo not expected, done", "Credited, never received",
                       "Refunded, never received", "Never received, nothing after", "Refunded, never credited", "Received, never credited"],
                 qs*.noOutcomeLabel.findAll { it })
+        // DAR-BE-238: the excused-and-done place asks the same records as the track's last "missing?" question.
+        assertEquals(["x0.not1", "YES", "CustRfnd", "PRESENT"], byKey(qs, "x0.done").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check] })
         // A skip-ahead that passes a missing middle stage hangs from "is that missing too?", not from the stage.
         assertEquals(["s0.not1", "NO"], byKey(qs, "s0.has2").with { [it.parentKey, it.parentBranch] })
     }
@@ -104,6 +110,9 @@ class LifecycleStageCompilerTests {
         assertEquals("Never shipped, never billed", qs.find { it.reconciliationRunId == "s0.not1" }.noOutcomeLabel)
         assertEquals(["START", null], qs[0].with { [it.questionRole, it.parentReconciliationRunId] })
         assertEquals("EXCUSED", qs.find { it.reconciliationRunId == "x0" }.questionRole)
+        // DAR-BE-238: the plan carries the excused-and-done place the settings page draws.
+        assertEquals(["x0", "NO", "PRESENT", "Fulfillment not expected, done"],
+                qs.find { it.reconciliationRunId == "x0.done" }.with { [it.parentReconciliationRunId, it.parentBranch, it.check, it.noOutcomeLabel] })
     }
 }
 

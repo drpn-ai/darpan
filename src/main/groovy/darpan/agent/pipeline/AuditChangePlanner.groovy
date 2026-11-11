@@ -220,6 +220,7 @@ class AuditChangePlanner {
             def original = TenantScopedFinder.findOneOwnedByTenant(ec, ENTITY, "proposalId", row.revertOfProposalId, tenantId, WHY)
             if (original != null) { original.set("status", "REVERTED"); original.update() }
         }
+        noteInConversation(ec, row)
         return [status: "APPLIED", appliedVersionId: row.appliedVersionId]
     }
 
@@ -233,7 +234,22 @@ class AuditChangePlanner {
         if (!(row.status in OPEN)) { ec.message.addError("Proposal ${proposalId} is ${row.status}; it cannot be rejected.".toString()); return null }
         row.setAll([status: "REJECTED", statusMessage: reason?.trim()?.take(INTERMEDIATE) ?: null])
         row.update()
+        noteInConversation(ec, row)
         return [status: "REJECTED"]
+    }
+
+    /** An operator message naming the proposal and its status, so the next turn continues from it. No model call. */
+    private static void noteInConversation(def ec, def row) {
+        if (!row.conversationId) return
+        String tenantId = row.companyUserGroupId as String
+        long last = ec.entity.find("darpan.agent.AgentMessage").condition("companyUserGroupId", tenantId)
+                .condition("conversationId", row.conversationId).useCache(false).list().collect { (it.sequenceNum ?: 0) as long }.max() ?: 0L
+        String text = "Proposal ${row.proposalId} is now ${row.status}.".toString()
+        def msg = ec.entity.makeValue("darpan.agent.AgentMessage")
+        msg.setAll([messageId: TenantScopedFinder.mintId(ec, "darpan.agent.AgentMessage", "messageId"), conversationId: row.conversationId,
+                    companyUserGroupId: tenantId, sequenceNum: last + 1L, kind: "OPERATOR",
+                    contentJson: JsonOutput.toJson([[type: "text", text: text]])])
+        msg.create()
     }
 
     /** A new planned proposal that puts back what an applied one moved; its values came from config, so provenance is PASS. */
@@ -264,6 +280,7 @@ class AuditChangePlanner {
                        status: "DRAFT", proposedForUserId: TenantAccessSupport.currentUserId(ec), revertOfProposalId: row.proposalId])
         revert.create()
         Map planned = planRow(ec, revert, current)
+        noteInConversation(ec, revert)
         return [newProposalId: revert.proposalId, status: revert.status, statusMessage: revert.statusMessage, planHash: planned.planHash]
     }
 

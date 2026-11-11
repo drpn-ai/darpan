@@ -479,6 +479,29 @@ class AuditChangeApplySmokeTests {
     }
 
     @Test
+    void "apply, reject and revert each leave one operator message naming the proposal and status"() {
+        asSystem { ec.entity.find("darpan.agent.AgentMessage").condition("conversationId", CONV).condition("kind", "OPERATOR").deleteAll() }
+        Map p = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_A"], [fixActionTemplate: "Re-import the memo"])
+        applied(p)
+        assertEquals(["Proposal ${p.proposalId} is now APPLIED.".toString()], operatorTexts())
+        Map r = call("revert#AuditChange", [proposalId: p.proposalId])
+        assertFalse(r.hadError as boolean, r.errorText as String)
+        assertEquals(["Proposal ${p.proposalId} is now APPLIED.".toString(), "Proposal ${r.newProposalId} is now PLANNED.".toString()], operatorTexts())
+        Map q = propose("FIX_TEXT", [savedRunId: runId, conclusionCode: "CONC_TAC_B"], [fixActionTemplate: "Ask again"])
+        assertFalse(call("reject#AuditChange", [proposalId: q.proposalId, reason: "no"]).hadError as boolean)
+        List<String> texts = operatorTexts()
+        assertEquals(3, texts.size())
+        assertEquals("Proposal ${q.proposalId} is now REJECTED.".toString(), texts[2])
+    }
+
+    private List<String> operatorTexts() {
+        asSystem {
+            ec.entity.find("darpan.agent.AgentMessage").condition("conversationId", CONV).condition("kind", "OPERATOR")
+                    .orderBy("sequenceNum").useCache(false).list().collect { ((List<Map>) new JsonSlurper().parseText(it.contentJson as String))[0].text as String }
+        }
+    }
+
+    @Test
     void "tenant B cannot plan or apply tenant A's proposal"() {
         List<Map> before = filterRows()
         Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])

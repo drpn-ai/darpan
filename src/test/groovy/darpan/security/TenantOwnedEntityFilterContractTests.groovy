@@ -109,6 +109,8 @@ class TenantOwnedEntityFilterContractTests {
                                                           "DARPAN_SCOPE_AGENT_ACCESS_GRANT": "DAR-BE-194 AI access grants; the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_AGENT_ACCESS_GRANT_EVENT": "DAR-BE-194 AI access grants; the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_CLI_ACCESS_GRANT": "DAR-BE-195 CLI access grants; the next release cut generates its pack row",
+                                                          "DARPAN_SCOPE_TENANT_CONFIG_VERSION": "DAR-BE-160 tenant config versions; the next release cut generates its pack row",
+                                                          "DARPAN_SCOPE_TENANT_CONFIG_PENDING": "DAR-BE-160 pending config rows (DAR-OPS-015); the next release cut generates its pack row",
                                                           "DARPAN_SCOPE_CLI_ACCESS_GRANT_EVENT": "DAR-BE-195 CLI access grants; the next release cut generates its pack row"].asImmutable()
 
     /** Every filter row this class pins by id, with its entity. */
@@ -124,8 +126,7 @@ class TenantOwnedEntityFilterContractTests {
                     "through SharedConfigAccessSupport via findGlobalUnscoped",
             "darpan.reconciliation.SftpServerTenantAccess"         : "sharing grant keyed by tenantUserGroupId",
             "darpan.auth.TenantUserPermissionGroupMember"          : "membership row keyed by tenantUserGroupId; it decides " +
-                    "which tenants a user may enter, so it cannot be filtered by the active one",
-            // Parent-only children: no tenant column; reached only through a gated parent.
+                    "which tenants a user may enter, so it cannot be filtered by the active one",            // Parent-only children: no tenant column; reached only through a gated parent.
             "darpan.reconciliation.NsSuiteQlSourceQueryField"      : "child of NsSuiteQlSourceQuery, no tenant column",
             "darpan.mapping.ReconciliationMappingMember"           : "child of ReconciliationMapping, no tenant column",
             "darpan.reconciliation.SlackPostedMessage"             : "child of a run result, no tenant column",

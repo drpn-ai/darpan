@@ -374,6 +374,12 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.config.TenantConfigVersion"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-OPS-015: the pending row is read and written only by config.TenantConfigServices (no user, not facade), which
+         no ArtifactAuthzFilter reaches; the filter keeps it tenant-scoped should a facade read ever be added. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_CONFIG_PENDING"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.config.TenantConfigPending"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <!-- DAR-BE-161 — a tenant's knowledge entries; every read also names the tenant. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_KNOWLEDGE_ENTRY"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"

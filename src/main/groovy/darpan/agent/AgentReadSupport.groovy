@@ -119,7 +119,8 @@ class AgentReadSupport {
             runCauses = new HashSet<String>()
             Map resolved = check?.savedRunId ? ReconciliationSavedRunSupport.resolveRuleSetRun(ec, check.savedRunId as String) : null
             if (resolved?.compareScope != null) {
-                TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetConclusionRule", "transitively tenant-owned; compareScopeId pre-gated via the active-tenant RuleSet")
+                // Read as the active tenant, like RunConclusionStep.scopeRules, rather than trusting the scope's gate alone.
+                TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
                         .condition("compareScopeId", resolved.compareScope.compareScopeId).useCache(false).list()
                         .each { runCauses.add(it.conclusionEnumId as String) }
             }

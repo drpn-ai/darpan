@@ -34,6 +34,8 @@ class AgentProvenance {
         if (kind == "EXCLUSION_FILTER") {
             ((List) after.get("filterValues")).each { Object v -> out.add((String) v) }
             if (after.get("fieldLabel") != null) freeTextIds(out, after.get("fieldLabel").toString())
+        } else if (kind == "ADD_STATEMENT") {
+            freeTextIds(out, (String) after.get("text"))
         } else if (kind == "FIX_TEXT") {
             freeTextIds(out, (String) after.get("fixActionTemplate"))
         } else if (kind == "CONCLUSION_ROWS") {
@@ -98,6 +100,23 @@ class AgentProvenance {
                 strList(after, "expectedCodes", true, "after")
                 if (((List) after.get("expectedCodes")).isEmpty()) throw new IllegalArgumentException("after.expectedCodes must name at least one cause")
                 ((List) after.get("expectedCodes")).each { Object e -> canonical((String) e, "after.expectedCodes entry", true) }
+                break
+            case "AUDIT_SETTINGS":
+                keys(after, ["time", "timeZone", "active"], "after")
+                str(after, "time", false, "after"); str(after, "timeZone", false, "after")
+                canon(after, ["time", "timeZone"], "after")
+                if (after.get("active") != null && !(after.get("active") instanceof Boolean)) throw new IllegalArgumentException("after.active must be true or false")
+                if (after.get("time") != null && !(after.get("time") ==~ /([01]\d|2[0-3]):[0-5]\d/)) throw new IllegalArgumentException("after.time must be HH:mm")
+                if (after.get("timeZone") != null) {
+                    try { java.time.ZoneId.of((String) after.get("timeZone")) } catch (Exception ignored) { throw new IllegalArgumentException("after.timeZone is not a time zone") }
+                }
+                if (["time", "timeZone", "active"].every { String k -> after.get(k) == null }) throw new IllegalArgumentException("after needs a time, timeZone or active")
+                break
+            case "ADD_STATEMENT":
+                keys(after, ["text", "category", "weight"], "after")
+                str(after, "text", true, "after"); str(after, "category", true, "after"); str(after, "weight", false, "after")
+                freeText(after, "text", "after")
+                canon(after, ["category", "weight"], "after")
                 break
             case "FIX_TEXT":
                 keys(after, ["fixActionTemplate"], "after")

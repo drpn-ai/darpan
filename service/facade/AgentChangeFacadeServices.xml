@@ -15,7 +15,7 @@
             DRAFT, "An editor must plan and approve this change."</description>
         <in-parameters>
             <parameter name="conversationId" required="true"/>
-            <parameter name="kind" required="true"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, EXPECTED_CAUSES, FIX_TEXT, CONCLUSION_ROWS, AUDIT_SETTINGS or ADD_STATEMENT.</description></parameter>
+            <parameter name="kind" required="true"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, EXPECTED_CAUSES, FIX_TEXT, CONCLUSION_ROWS, AUDIT_SETTINGS, ADD_STATEMENT or ADD_CHECK.</description></parameter>
             <parameter name="target" type="Map" required="true"/>
             <parameter name="after" type="Map" required="true"/>
             <parameter name="reasonText"/>

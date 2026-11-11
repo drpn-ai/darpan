@@ -134,7 +134,7 @@
         <field name="proposalId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
         <field name="conversationId" type="id"/>
-        <field name="kind" type="text-short"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, EXPECTED_CAUSES, FIX_TEXT, CONCLUSION_ROWS, AUDIT_SETTINGS or ADD_STATEMENT.</description></field>
+        <field name="kind" type="text-short"><description>EXCLUSION_FILTER, STATEMENT_NARROWING, EXPECTED_CAUSES, FIX_TEXT, CONCLUSION_ROWS, AUDIT_SETTINGS, ADD_STATEMENT or ADD_CHECK.</description></field>
         <field name="targetJson" type="text-intermediate"/>
         <field name="beforeJson" type="text-very-long"/>
         <field name="afterJson" type="text-very-long"/>

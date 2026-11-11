@@ -36,6 +36,9 @@ class AgentProvenance {
             if (after.get("fieldLabel") != null) freeTextIds(out, after.get("fieldLabel").toString())
         } else if (kind == "ADD_STATEMENT") {
             freeTextIds(out, (String) after.get("text"))
+        } else if (kind == "ADD_CHECK") {
+            out.add((String) after.get("savedRunId")); out.add((String) after.get("statementCode"))
+            freeTextIds(out, (String) after.get("label"))
         } else if (kind == "FIX_TEXT") {
             freeTextIds(out, (String) after.get("fixActionTemplate"))
         } else if (kind == "CONCLUSION_ROWS") {
@@ -117,6 +120,14 @@ class AgentProvenance {
                 str(after, "text", true, "after"); str(after, "category", true, "after"); str(after, "weight", false, "after")
                 freeText(after, "text", "after")
                 canon(after, ["category", "weight"], "after")
+                break
+            case "ADD_CHECK":
+                keys(after, ["label", "savedRunId", "statementCode", "diffTypes"], "after")
+                ["label", "savedRunId", "statementCode"].each { String k -> str(after, k, true, "after") }
+                freeText(after, "label", "after")
+                canon(after, ["savedRunId", "statementCode"], "after")
+                strList(after, "diffTypes", false, "after")
+                if (after.get("diffTypes") != null) ((List) after.get("diffTypes")).each { Object e -> canonical((String) e, "after.diffTypes entry", true) }
                 break
             case "FIX_TEXT":
                 keys(after, ["fixActionTemplate"], "after")

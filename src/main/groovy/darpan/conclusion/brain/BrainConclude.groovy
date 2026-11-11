@@ -21,12 +21,13 @@ class BrainConclude {
      */
     static final Set<String> BUCKETS = (["MISSING_FROM_FILE_2"] as Set<String>).asImmutable()
     static final int BATCH_FINDINGS = 500
-    /** Ids per question call, like the tree's lookups (RunConclusionSupport.LOOKUP_BATCH); tunable for tests. */
-    static int fetchBatch = 500
-    /** DAR-BE-192: question rounds per pass (a replacement's return, then its RMA and memo). */
-    static final int MAX_ROUNDS = 3
+    /** Test seam: ids per question call when above 0; otherwise each question's catalogue batch size. */
+    static int fetchBatch = 0
 
-    /** args: kind, tenantId, findings ([key, bucket, sides] each), fetchQuestion(question, ids) -> id -> record, labelFor(code). */
+    /**
+     * args: kind, tenantId, findings ([key, bucket, sides] each), fetchQuestion(question, ids) -> id -> record, labelFor(code);
+     * catalog (BrainQuestionCatalog entries, default all of them).
+     */
     static Map run(Map args) {
         String kind = (String) args.kind
         String tenantId = (String) args.tenantId
@@ -34,25 +35,21 @@ class BrainConclude {
         Closure labelFor = (Closure) (args.labelFor ?: { String c -> c })
         BrainEngine engine = BrainEngine.forPacks((List<String>) (args.packs ?: PILOT_PACKS))
         List<List<Map>> batches = batches(kind, (List<Map>) (args.findings ?: []))
-        Map<String, Map> answers = [:]
-        // DAR-BE-186: productNetsuiteId answers, by product id.
-        Map<String, Map> productAnswers = [:]
-        // DAR-BE-192: replacementReturn (by order id), returnRma and returnMemo (by return id).
-        // DAR-BE-151: originalInNetsuite (an exchange's original, by its HotWax order id).
-        Map<String, Map<String, Map>> more = [(BrainQuestions.REPLACEMENT_RETURN): [:], (BrainQuestions.RETURN_RMA): [:],
-                                              (BrainQuestions.RETURN_MEMO): [:], (BrainQuestions.ORIGINAL_IN_NETSUITE): [:],
-                                              // DAR-BE-204: a Shopify order's HotWax order, by Shopify id.
-                                              (BrainQuestions.OMS_ORDER_BY_SHOPIFY_ID): [:]] as Map<String, Map<String, Map>>
+        List<BrainQuestionCatalog.Entry> catalog = (List<BrainQuestionCatalog.Entry>) (args.catalog ?: BrainQuestionCatalog.ENTRIES)
+        // DAR-BE-225: each question's answers by subject id, one map per catalogue entry.
+        Map<String, Map<String, Map>> answers = catalog.collectEntries { [(it.name): [:]] } as Map<String, Map<String, Map>>
         List<String> warnings = []
 
-        List<Map> round = batches.collect { fire(engine, kind, it, answers, productAnswers, more) }
+        List<Map> round = batches.collect { fire(engine, kind, it, answers) }
         int asked = 0, reused = 0, dropped = 0
         Map<String, Integer> ranks = BrainQuestions.mayEnableRanks(engine)
         // A question that failed for a subject is not asked again in a later round of the same pass.
         Set<String> failed = [] as Set
         // DAR-BE-192: an answer can raise a further question (a replacement's return, then its RMA), so questions are asked
-        // in rounds until a round has nothing new to ask; MAX_ROUNDS bounds it. A world is fired again only when it gained one.
-        for (int r = 0; r < MAX_ROUNDS; r++) {
+        // in rounds until a round has nothing new to ask, at most the catalogue's deepest depth (DAR-BE-225). A world is
+        // fired again only when it gained one.
+        int rounds = BrainQuestionCatalog.deepest(catalog)
+        for (int r = 0; r < rounds; r++) {
             List<Ask> asks = (List<Ask>) round.collectMany { (List) it.asks }
             Map<Object, Cause> best = [:]
             round.each { best.putAll((Map) it.bestCauses) }
@@ -61,20 +58,25 @@ class BrainConclude {
             dropped += (plan.dropped ?: 0) as int
             Set<String> gained = [] as Set
             ((Map<String, Map>) plan.answered).each { String q, Map byId ->
-                Map<String, Map> store = answersFor(q, answers, productAnswers, more)
+                Map<String, Map> store = answers.get(q)
                 if (store == null) return
                 byId.each { k, v -> if (!store.containsKey(k)) { store.put((String) k, (Map) v); gained.add("${q}|${k}".toString()) } }
             }
             ((Map<String, List<String>>) plan.toFetch).each { String question, List<String> planned ->
+                BrainQuestionCatalog.Entry entry = BrainQuestionCatalog.entry(question, catalog)
+                if (entry == null) {
+                    warnings.add("Question ${question} is not in the catalogue; not asked".toString())
+                    return
+                }
                 List<String> allIds = planned.findAll { !failed.contains("${question}|${it}".toString()) }
                 // Bounded calls; a failed batch fails alone and is not remembered.
-                allIds.collate(fetchBatch).each { List<String> ids ->
+                allIds.collate(fetchBatch > 0 ? fetchBatch : entry.batchSize).each { List<String> ids ->
                     try {
                         Map found = (Map) (fetchQuestion.call(question, ids) ?: [:])
                         ids.each { String id ->
                             Map answer = (Map) found.get(id)
                             BrainAnswerStore.put(tenantId, question, id, answer)
-                            answersFor(question, answers, productAnswers, more)?.put(id, answer)
+                            answers.get(question).put(id, answer)
                             gained.add("${question}|${id}".toString())
                         }
                         asked += ids.size()
@@ -86,8 +88,7 @@ class BrainConclude {
             }
             if (!gained) break
             round = batches.withIndex().collect { List<Map> batch, int i ->
-                (answers || productAnswers || more.values().any { it }) && touches(kind, batch, answers, productAnswers, more) ?
-                        fire(engine, kind, batch, answers, productAnswers, more) : round[i]
+                touches(kind, batch, answers, catalog) ? fire(engine, kind, batch, answers) : round[i]
             }
         }
         Map<String, Map> byKey = [:]
@@ -109,29 +110,32 @@ class BrainConclude {
         return out
     }
 
-    private static Map fire(BrainEngine engine, String kind, List<Map> batch, Map<String, Map> answers, Map<String, Map> productAnswers,
-                            Map<String, Map<String, Map>> more) {
+    private static Map fire(BrainEngine engine, String kind, List<Map> batch, Map<String, Map<String, Map>> answers) {
         Map<String, Object> world = [:]
-        return engine.fire(batch.collectMany { BrainFactAdapter.facts(kind, it, answers, world, productAnswers, more) } as List<Object>)
+        return engine.fire(batch.collectMany {
+            BrainFactAdapter.facts(kind, it, answers.get(BrainFactAdapter.ORDER_PAYMENTS), world,
+                    answers.get(BrainFactAdapter.PRODUCT_NETSUITE_ID), answers)
+        } as List<Object>)
     }
 
-    /** Where a question's answers are kept; null for a question this pass does not know. */
-    private static Map<String, Map> answersFor(String question, Map<String, Map> answers, Map<String, Map> productAnswers,
-                                               Map<String, Map<String, Map>> more) {
-        if (question == BrainQuestions.ORDER_PAYMENTS) return answers
-        if (question == BrainQuestions.PRODUCT_NETSUITE_ID) return productAnswers
-        return more?.get(question)
-    }
-
-    /** A batch is fired again when any of its orders, products or replacements' returns has an answer. */
-    private static boolean touches(String kind, List<Map> batch, Map<String, Map> answers, Map<String, Map> productAnswers,
-                                   Map<String, Map<String, Map>> more) {
-        Map<String, Map> byReplacement = more?.get(BrainQuestions.REPLACEMENT_RETURN) ?: [:]
-        Map<String, Map> byShopifyId = more?.get(BrainQuestions.OMS_ORDER_BY_SHOPIFY_ID) ?: [:]
+    /**
+     * A batch is fired again when an answer is about one of its findings' subjects: its order (an Order question), its
+     * product, or its Shopify order. A ReplacementReturn's answers reach the batch through its order's replacementReturn
+     * answer, which keeps it firing.
+     */
+    private static boolean touches(String kind, List<Map> batch, Map<String, Map<String, Map>> answers,
+                                   List<BrainQuestionCatalog.Entry> catalog) {
+        List<BrainQuestionCatalog.Entry> answered = catalog.findAll { answers.get(it.name) }
+        if (!answered) return false
         return batch.any { Map f ->
             String o = orderIdOf(kind, f)
-            answers.containsKey(o) || productAnswers.containsKey(productIdOf(kind, f)) || byReplacement.containsKey(o) ||
-                    (kind == "shopifyOrder" && byShopifyId.containsKey(o))
+            String p = productIdOf(kind, f)
+            answered.any { BrainQuestionCatalog.Entry e ->
+                Map<String, Map> byId = answers.get(e.name)
+                e.subject == "Order" ? byId.containsKey(o) :
+                        e.subject == "Product" ? byId.containsKey(p) :
+                                e.subject == "ShopifyOrder" ? kind == "shopifyOrder" && byId.containsKey(o) : false
+            }
         }
     }
 

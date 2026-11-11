@@ -44,6 +44,23 @@ class BrainPackGuardTests {
         assertEquals(ranks.size(), ranks.unique(false).size())
     }
 
+    // DAR-BE-229: a tunable number is a GraphParam fact, never a decimal literal in a rule's when-part.
+    @Test
+    void noRuleWhenPartHoldsADecimalLiteral() {
+        List<String> offenders = rules(pack()).findAll { String r ->
+            String when = r.contains("\nthen\n") ? r.substring(0, r.indexOf("\nthen\n")) : r
+            (when =~ /(?<![\w.])\d+\.\d+(?![\w.])/).find()
+        }.collect { it.readLines()[0] }
+        assertTrue(offenders.isEmpty(), "decimal literal in the when-part of: ${offenders}")
+    }
+
+    @Test
+    void theDecimalLiteralCheckSeesALiteralInAWhenPart() {
+        String drl = 'rule "x"\n    @produces("A")\nwhen\n    Order( total > 0.05 )\nthen\n    f();\nend\n'
+        String when = rules(drl)[0].substring(0, rules(drl)[0].indexOf("\nthen\n"))
+        assertTrue((when =~ /(?<![\w.])\d+\.\d+(?![\w.])/).find())
+    }
+
     // DAR-BE-151: the conclude seam hands the brain only rows of BrainConclude.BUCKETS (so another bucket cannot use up its
     // cap); every bucket the pack reads must be one of them, or its rules would never see their rows.
     @Test

@@ -172,14 +172,15 @@ class DataSourceRunner {
     }
 
     /**
-     * A reader that stopped for any reason ends the run with a stated reason: an Error, an interrupt or a failure with no
-     * message becomes a READ_STOPPED call failure that names what happened. Other failures pass through unchanged.
+     * A reader that stopped for any reason ends the run with a stated reason: an Error, an interrupt, a checked failure or
+     * a failure with no message becomes a READ_STOPPED call failure that names what happened, keeping the failure's own
+     * message. A runtime failure that has a message passes through unchanged.
      */
     static RuntimeException stopped(Throwable t) {
         if (t instanceof RuntimeException && t.message) return (RuntimeException) t
+        // Every other failure keeps its own words after its class name (a socket timeout says "Read timed out").
         String what = t instanceof InterruptedException ? "The read was interrupted."
-                : t instanceof Error ? "The read stopped on ${t.getClass().simpleName}${t.message ? ': ' + t.message : ''}.".toString()
-                : "The read stopped on ${t.getClass().simpleName}.".toString()
+                : "The read stopped on ${t.getClass().simpleName}${t.message ? ': ' + t.message : ''}.".toString()
         DataSourceCallException e = new DataSourceCallException("READ_STOPPED", what)
         e.initCause(t)
         return e

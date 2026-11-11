@@ -83,6 +83,16 @@ class DataDefinedRunEndingTests {
         assertFalse(e.message.isEmpty())
     }
 
+    // A checked failure (a socket timeout) keeps its own words: the class name alone would lose "Read timed out".
+    @Test
+    void aCheckedFailureKeepsItsMessage() {
+        HookedTransport t = new HookedTransport(trigger: "2026-10-12T00", hook: { throw new java.net.SocketTimeoutException("Read timed out") })
+        Throwable e = runWith(t)
+        assertTrue(e instanceof DataSourceCallException, String.valueOf(e))
+        assertEquals("READ_STOPPED", ((DataSourceCallException) e).code)
+        assertTrue(e.message.contains("SocketTimeoutException") && e.message.contains("Read timed out"), e.message)
+    }
+
     @Test
     void aFailureWithAMessageIsKeptAsIs() {
         HookedTransport t = new HookedTransport(trigger: "2026-10-12T00", hook: { throw new DataSourceCallException("HTTP_502", "bad gateway") })

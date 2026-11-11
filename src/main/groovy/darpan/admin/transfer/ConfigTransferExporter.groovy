@@ -140,6 +140,14 @@ class ConfigTransferExporter {
                     .condition("reconciliationId", "in", lifecycles*.reconciliationId).useCache(false).list()
                     .findAll { it.isActive != "N" && it.ruleSetId }.each { runIds.add(it.ruleSetId as String) }
         }
+        // DAR-BE-236: the tenant's scripts travel with its automations, and the runs their deployments read with them.
+        List scripts = withAutomations ? finder(ec, spec(SCRIPT).entityName as String).condition("companyUserGroupId", tenantId)
+                .orderBy(["scriptName", "tenantScriptId"]).useCache(false).list() : []
+        if (scripts) {
+            finder(ec, "darpan.script.TenantScriptDeployment").condition("companyUserGroupId", tenantId)
+                    .condition("tenantScriptId", "in", scripts*.tenantScriptId).useCache(false).list()
+                    .findAll { it.inputSavedRunId != null }.each { runIds.add(it.inputSavedRunId as String) }   // EntityList.findAll wants a Boolean
+        }
         List runs = runIds ? finder(ec, "darpan.rule.RuleSet").condition("companyUserGroupId", tenantId)
                 .condition("ruleSetId", "in", runIds).orderBy(["ruleSetName", "ruleSetId"]).useCache(false).list() : []
         (runIds - (runs*.ruleSetId.collect { it as String } as Set)).each { String id ->
@@ -186,7 +194,10 @@ class ConfigTransferExporter {
             checks.eachWithIndex { check, int i -> TransferSpecs.addHeldRefs(spec(CHECK), checkRecords[i], check, heldAutomations) }
         }
 
-        // DAR-BE-188: the chat spaces those automations post to, the tenant's own only; no webhook is read here.
+        Map scriptSpec = forVersion ? versionSpec(spec(SCRIPT)) : spec(SCRIPT)
+        List<Map> scriptRecords = scripts.collect { labelled(record(ec, scriptSpec, it, namer), it.scriptName ?: it.tenantScriptId) }
+
+        // DAR-BE-188: the chat spaces those automations (and DAR-BE-236 script deployments) post to, the tenant's own only.
         List<Map> chatSpaceRecords = []
         Set<String> spaceIds = reached[CHAT_SPACE]
         if (spaceIds) {
@@ -257,6 +268,8 @@ class ConfigTransferExporter {
             out.automations = automationRecords
         }
         if (knowledgeRecords) out.knowledge = knowledgeRecords
+        // DAR-BE-236: absent when the tenant has none, so its version pack (and hash) is what it was before.
+        if (scriptRecords) out.scripts = scriptRecords
         if (secrets != null) out.secrets = secrets
         return out
     }

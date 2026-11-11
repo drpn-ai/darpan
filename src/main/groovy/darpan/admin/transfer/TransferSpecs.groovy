@@ -55,8 +55,17 @@ class TransferSpecs {
      * retire reaches the target). Imported only into the tenant they came from (ConfigTransferImporter.knowledgeGate).
      */
     static final String KNOWLEDGE = "KNOWLEDGE"
+    /**
+     * DAR-BE-236. A tenant's scripts (darpan.script.TenantScript) with their deployments, carried with automations (a
+     * whole-tenant transfer, and every config version). A deployment's chat space and saved run travel as refs in a
+     * transfer and as plain ids in a version; when it runs is operational and stays the target's, and one created by an
+     * import arrives switched off.
+     */
+    static final String SCRIPT = "SCRIPT"
+    /** DAR-BE-237. A script's deployment, a child kind like RULE: its ref lets a version restore put it back under its own id. */
+    static final String DEPLOYMENT = "DEPLOYMENT"
     /** Kinds that live only as children of another kind's record (refs to them resolve inside their parent). */
-    static final List<String> CHILD_KINDS = [RULE, QUESTION, SCOPE].asImmutable()
+    static final List<String> CHILD_KINDS = [RULE, QUESTION, SCOPE, DEPLOYMENT].asImmutable()
 
     static final List<String> CONNECTION_KINDS = [NETSUITE_AUTH, SHOPIFY_AUTH, HOTWAX_OMS_REST, NETSUITE_RESTLET].asImmutable()
 
@@ -97,6 +106,12 @@ class TransferSpecs {
              refFields: [conclusionEnumId: CONC], children: [
                     [entityName: "darpan.rule.RuleSetConclusionCondition", parentFields: ["compareScopeId", "sequenceNum"],
                      orderBy: ["conditionSeq"]]]]]]
+
+    /** DAR-BE-236. A deployment keeps its target id by position under its script, like a rule under its run. */
+    private static final Map DEPLOYMENT_CHILD = [kind: DEPLOYMENT, entityName: "darpan.script.TenantScriptDeployment", pkField: "tenantScriptDeploymentId",
+            parentFields: ["tenantScriptId"], orderBy: ["createdDate", "tenantScriptDeploymentId"],
+            refFields: [chatSpaceId: CHAT_SPACE, inputSavedRunId: RUN], versionPlainFields: ["chatSpaceId", "inputSavedRunId"],
+            dropFields: ["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage", "lastRunUnits", "lastUpdatedByUserId"]]
 
     /** Creation order. naturalKey matches a record on the target; null means the operator maps it (connections). */
     static final List<Map> KINDS = [
@@ -168,6 +183,9 @@ class TransferSpecs {
             // stamps the tenant, creator and date.
             [kind: KNOWLEDGE, entityName: "darpan.knowledge.KnowledgeEntry", pkField: "knowledgeEntryId", mintPrefix: "KE_",
              naturalKey: "entryKey"],
+            // DAR-BE-236. After the chat spaces and runs its deployments name. A script's own isActive is its content.
+            [kind: SCRIPT, entityName: "darpan.script.TenantScript", pkField: "tenantScriptId", naturalKey: "scriptName",
+             dropFields: ["lastUpdatedByUserId"], children: [DEPLOYMENT_CHILD]],
     ].asImmutable()
 
     /** Every kind's name, for telling a ref inside JSON from a plain value. */
@@ -177,7 +195,8 @@ class TransferSpecs {
     static final Map<String, String> BUNDLE_LISTS = [(NETSUITE_AUTH): "connections", (SHOPIFY_AUTH): "connections",
             (HOTWAX_OMS_REST): "connections", (NETSUITE_RESTLET): "connections", (NETSUITE_SUITEQL): "queries",
             (CONC): "conclusionCodes", (RUN): "runs", (AUDIT): "audits", (STATEMENT): "statements", (CHECK): "checks",
-            (CHAT_SPACE): "chatSpaces", (AUTOMATION): "automations", (LIFECYCLE): "lifecycles", (KNOWLEDGE): "knowledge"].asImmutable()
+            (CHAT_SPACE): "chatSpaces", (AUTOMATION): "automations", (LIFECYCLE): "lifecycles", (KNOWLEDGE): "knowledge",
+            (SCRIPT): "scripts"].asImmutable()
 
     static Map spec(String kind) {
         return KINDS.find { it.kind == kind }
@@ -193,8 +212,13 @@ class TransferSpecs {
      */
     static Map versionSpec(Map spec) {
         List<String> plain = (spec?.versionPlainFields ?: []) as List<String>
-        if (!plain) return spec
+        List<Map> children = (spec?.children ?: []) as List<Map>
+        // DAR-BE-236: a child's plain fields too (a deployment names its chat space by id in a version).
+        List<Map> versionChildren = children.collect { versionSpec(it) }
+        boolean childChanged = (0..<children.size()).any { !versionChildren[it].is(children[it]) }
+        if (!plain && !childChanged) return spec
         Map out = new LinkedHashMap(spec)
+        if (childChanged) out.children = versionChildren
         out.refFields = ((spec.refFields ?: [:]) as Map).findAll { k, v -> !(k in plain) }
         out.positionRefs = ((spec.positionRefs ?: [:]) as Map).findAll { k, v -> !(k in plain) }
         out.dropFields = ((spec.dropFields ?: []) as List<String>).findAll { !(it in plain) }

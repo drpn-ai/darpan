@@ -45,6 +45,8 @@ class ConfigTransferSmokeTests {
 
     /** Every entity a transfer writes, children first, so a wipe never trips a foreign key. */
     private static final List<String> TRANSFER_ENTITIES = [
+            // DAR-BE-236: a deployment names its script, chat space and run, so it goes first.
+            "darpan.script.TenantScriptDeployment", "darpan.script.TenantScript",
             "darpan.reconciliation.ReconciliationRunResult",
             "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
             "darpan.reconciliation.ReconciliationAutomationSourceFilter", "darpan.reconciliation.ReconciliationAutomationSource",
@@ -1422,6 +1424,107 @@ class ConfigTransferSmokeTests {
     private static final String WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=hook-secret-xfer"
     private static final String OLD_WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=old-hook-secret-xfer"
     private static final String SPACE_REF = "CHAT_SPACE:XFER_SPACE"
+    // ---------------------------------------------------------------- DAR-BE-236 scripts and their deployments
+
+    private static final String SCRIPT_REF = "SCRIPT:XFER_SCRIPT"
+    private static final String SCRIPT_BODY = "'open: ' + size(input.differences)"
+
+    /** SRC's script posts a morning digest of XFER_RS to its space (withAutomation's); OTHER has a script of its own. */
+    private void withScript(Closure body) {
+        withAutomation {
+            create("darpan.script.TenantScript", [tenantScriptId: "XFER_SCRIPT", companyUserGroupId: SRC, scriptName: "Morning digest",
+                    scriptProfile: "EXPRESSION", inputSource: "RUN_RESULT", scriptBody: SCRIPT_BODY, isActive: "Y"])
+            create("darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: "XFER_DEPLOY", companyUserGroupId: SRC,
+                    tenantScriptId: "XFER_SCRIPT", scheduleExpr: "0 0 9 * * ?", inputSavedRunId: "XFER_RS", chatSpaceId: "XFER_SPACE",
+                    isActive: "Y", nextRunDate: T0, lastRunDate: T0, lastRunStatus: "SENT", lastRunMessage: "posted", createdDate: T0])
+            create("darpan.script.TenantScript", [tenantScriptId: "XFER_OTHER_SCRIPT", companyUserGroupId: OTHER, scriptName: "Elsewhere only",
+                    scriptProfile: "EXPRESSION", inputSource: "SAMPLE", scriptBody: "'x'", isActive: "Y"])
+            try {
+                body()
+            } finally {
+                wipeTenant(DST)
+                ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "XFER_DEPLOY").disableAuthz().deleteAll()
+                ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", "in", ["XFER_SCRIPT", "XFER_OTHER_SCRIPT"])
+                        .disableAuthz().deleteAll()
+            }
+        }
+    }
+
+    @Test
+    void aWholeTenantTransferCarriesItsScriptsAndNeverAnotherTenants() {
+        withScript {
+            Map bundle = exportWhole()
+            List<Map> scripts = bundle.scripts as List<Map>
+            assertEquals([SCRIPT_REF], scripts*.ref)
+            Map script = scripts[0]
+            assertEquals(SCRIPT_BODY, script.fields.scriptBody)
+            assertEquals("Y", script.fields.isActive, "a script's own switch is its content")
+            Map deployment = (script.children.TenantScriptDeployment as List<Map>)[0]
+            assertEquals([chatSpaceId: SPACE_REF, inputSavedRunId: "RUN:XFER_RS"], deployment.refs)
+            assertEquals("0 0 9 * * ?", deployment.fields.scheduleExpr)
+            ["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage", "chatSpaceId", "inputSavedRunId",
+             "tenantScriptDeploymentId", "tenantScriptId", "companyUserGroupId"].each {
+                assertFalse(deployment.fields.containsKey(it), "${it} does not travel as a value")
+            }
+            assertTrue((bundle.chatSpaces as List<Map>)*.ref.contains(SPACE_REF), "the space it posts to travels")
+            String all = JsonOutput.toJson(bundle)
+            assertFalse(all.contains("XFER_OTHER_SCRIPT") || all.contains("Elsewhere only"), "another tenant's script never travels")
+
+            Map plain = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC, auditCodes: ["month-close"],
+                    sourceInstanceLabel: "local", includeAutomations: false])
+            assertNoErrors(plain)
+            assertFalse((plain.result.bundle as Map).containsKey("scripts"), "scripts travel only with the tenant's automations")
+        }
+    }
+
+    @Test
+    void anImportedDeploymentPointsAtTheTargetsSpaceAndRunAndArrivesSwitchedOff() {
+        withScript {
+            Map handoff = beginHandoff(DST)
+            Map bundle = exportWhole(handoff.publicKey as String)
+            Map map = [(AUTH_REF): "CREATE"]
+            Map preview = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
+            assertNoErrors(preview)
+            assertEquals([], (preview.result.plan as Map).blocking)
+            assertEquals("CREATE", ((preview.result.plan as Map).lines as List<Map>).find { it.ref == SCRIPT_REF }?.action)
+            Map applied = importInto(DST, bundle, map, true, preview.result.planHash as String, handoff.handoffToken as String)
+            assertNoErrors(applied)
+            Map idMap = applied.result.idMap as Map
+
+            def script = ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", idMap[SCRIPT_REF]).disableAuthz().useCache(false).one()
+            assertEquals([DST, "Morning digest", SCRIPT_BODY, "Y"], [script.companyUserGroupId, script.scriptName, script.scriptBody, script.isActive])
+            def deployment = ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptId", script.tenantScriptId)
+                    .disableAuthz().useCache(false).one()
+            assertNotEquals("XFER_DEPLOY", deployment.tenantScriptDeploymentId)
+            assertEquals(DST, deployment.companyUserGroupId)
+            assertEquals("0 0 9 * * ?", deployment.scheduleExpr)
+            assertEquals(idMap[SPACE_REF], deployment.chatSpaceId, "re-pointed to the target's space")
+            assertNotEquals("XFER_SPACE", deployment.chatSpaceId)
+            assertEquals(idMap["RUN:XFER_RS"], deployment.inputSavedRunId, "re-pointed to the target's run")
+            assertEquals("N", deployment.isActive, "an imported deployment arrives switched off")
+            assertNull(deployment.nextRunDate)
+            assertNull(deployment.lastRunStatus, "the source's run state stays behind")
+
+            // Switched on here, then the same bundle again: unchanged, and still on.
+            deployment.set("isActive", "Y")
+            deployment.update()
+            Map again = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
+            assertNoErrors(again)
+            assertEquals("UNCHANGED", ((again.result.plan as Map).lines as List<Map>).find { it.ref == SCRIPT_REF }?.action)
+        }
+    }
+
+    @Test
+    void aVersionKeepsADeploymentsSpaceAndRunAsPlainIds() {
+        withScript {
+            Map pack = ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true)
+            Map deployment = (((pack.scripts as List<Map>)[0].children as Map).TenantScriptDeployment as List<Map>)[0]
+            assertEquals(["XFER_SPACE", "XFER_RS"], [deployment.fields.chatSpaceId, deployment.fields.inputSavedRunId])
+            assertEquals([:], deployment.refs)
+            assertFalse(pack.containsKey("chatSpaces"), "a version holds no space")
+        }
+    }
+
     private static final String AUTO_REF = "AUTOMATION:XFER_AUTO"
 
     /** SRC's run gets a morning automation posting to its Google Chat space (and OTHER a space of the same name). */

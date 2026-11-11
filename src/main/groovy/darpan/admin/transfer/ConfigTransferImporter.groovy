@@ -148,6 +148,8 @@ class ConfigTransferImporter {
         // DAR-BE-188: a check's automation is written after the check, so the check is linked to it now.
         records(ctx, "checks").each { Map c -> linkHeldRefs(ctx, spec(CHECK), c) }
         records(ctx, "knowledge").each { Map k -> writeTree(ctx, spec(KNOWLEDGE), k, "KE_") }
+        // DAR-BE-236: after the chat spaces and runs its deployments name.
+        records(ctx, "scripts").each { Map t -> writeScript(ctx, t) }
         // DAR-BE-161: the tenant's cached knowledge index is dropped now and again once this transaction completes.
         if (records(ctx, "knowledge")) KnowledgeSupport.invalidateAfterWrite(ec, targetTenantId)
 
@@ -192,7 +194,7 @@ class ConfigTransferImporter {
         if (ctx.sameTenant) {
             records(ctx, "conclusionCodes").each { Map c -> matchCode(ctx, c) }
             ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
-             "checks": CHECK, "chatSpaces": CHAT_SPACE, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
+             "checks": CHECK, "chatSpaces": CHAT_SPACE, "automations": AUTOMATION, "knowledge": KNOWLEDGE, "scripts": SCRIPT].each { String list, String kind ->
                 matchById(ctx, list, spec(kind))
             }
         } else {
@@ -232,12 +234,16 @@ class ConfigTransferImporter {
             matchByKey(ctx, "knowledge", "entryKey", { Map k -> text(k.fields?.entryKey) }) { Map k ->
                 scoped(ctx, spec(KNOWLEDGE).entityName as String).condition("entryKey", k.fields?.entryKey).list()
             }
+            // DAR-BE-236: a script's name is unique per tenant.
+            matchByKey(ctx, "scripts", "scriptName", { Map t -> text(t.fields?.scriptName) }) { Map t ->
+                scoped(ctx, spec(SCRIPT).entityName as String).condition("scriptName", t.fields?.scriptName).list()
+            }
         }
         planChatSpaces(ctx)
 
         sourceRuleIdentities(ctx)
         ["queries": NETSUITE_SUITEQL, "runs": RUN, "lifecycles": LIFECYCLE, "audits": AUDIT, "statements": STATEMENT,
-         "checks": CHECK, "chatSpaces": CHAT_SPACE, "automations": AUTOMATION, "knowledge": KNOWLEDGE].each { String list, String kind ->
+         "checks": CHECK, "chatSpaces": CHAT_SPACE, "automations": AUTOMATION, "knowledge": KNOWLEDGE, "scripts": SCRIPT].each { String list, String kind ->
             records(ctx, list).findAll { ctx.matches.containsKey(it.ref) }.each { Map rec -> diff(ctx, kindSpec(ctx, kind), rec) }
         }
         scopeGate(ctx)
@@ -253,7 +259,7 @@ class ConfigTransferImporter {
             if (ctx.actions[c.ref]) lines << line(ctx, c.kind as String, c)
         }
         [queries: NETSUITE_SUITEQL, conclusionCodes: CONC, runs: RUN, lifecycles: LIFECYCLE, audits: AUDIT, statements: STATEMENT,
-         checks: CHECK, chatSpaces: CHAT_SPACE, automations: AUTOMATION, knowledge: KNOWLEDGE].each { String list, String kind ->
+         checks: CHECK, chatSpaces: CHAT_SPACE, automations: AUTOMATION, knowledge: KNOWLEDGE, scripts: SCRIPT].each { String list, String kind ->
             records(ctx, list).each { Map rec -> if (ctx.actions[rec.ref]) lines << line(ctx, kind, rec) }
         }
         return finish(ctx, lines)
@@ -1115,7 +1121,8 @@ class ConfigTransferImporter {
 
     /** The entity and key behind a ref of each kind, children included, for checking who owns an id. */
     private static final Map<String, List<String>> CHILD_ENTITIES = [(RULE): ["darpan.rule.Rule", "ruleId"],
-            (QUESTION): ["darpan.reconciliation.ReconciliationRun", "reconciliationRunId"]].asImmutable()
+            (QUESTION): ["darpan.reconciliation.ReconciliationRun", "reconciliationRunId"],
+            (DEPLOYMENT): ["darpan.script.TenantScriptDeployment", "tenantScriptDeploymentId"]].asImmutable()
 
     /** True when the id names a row of this kind that belongs to the importing tenant (read by key, owner compared in code). */
     private static boolean ownedByTenant(Map ctx, String kind, String id) {
@@ -1261,6 +1268,26 @@ class ConfigTransferImporter {
         if (action == CREATE) row.set("isActive", "N")
         row.set("nextScheduledFireTime", AutomationExecutionSupport.resolveNextScheduledFireTime(row, ctx.now as Timestamp, ctx.now as Timestamp))
         row.update()
+    }
+
+    /**
+     * DAR-BE-236. A script and its deployments. A deployment this import creates arrives switched off with no next run;
+     * one it updates keeps whether it is on and when it runs, which are the target's.
+     */
+    private static void writeScript(Map ctx, Map t) {
+        String action = ctx.actions[t.ref]
+        if (!(action in [CREATE, "UPDATE"])) return
+        Map scriptSpec = kindSpec(ctx, SCRIPT)
+        Map deploymentSpec = ((scriptSpec.children ?: []) as List<Map>)[0]
+        Set<String> before = action == CREATE ? ([] as Set<String>) : (finder(ctx.ec, deploymentSpec.entityName as String)
+                .condition("tenantScriptId", ctx.idMap[t.ref]).useCache(false).list()*.tenantScriptDeploymentId.collect { it as String } as Set<String>)
+        writeTree(ctx, scriptSpec, t, "")
+        finder(ctx.ec, deploymentSpec.entityName as String).condition("tenantScriptId", ctx.idMap[t.ref]).useCache(false).list()
+                .findAll { !((it.tenantScriptDeploymentId as String) in before) }.each { row ->
+            row.set("isActive", "N")
+            row.set("nextRunDate", null)
+            row.update()
+        }
     }
 
     /**

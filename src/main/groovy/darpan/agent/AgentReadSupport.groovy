@@ -22,14 +22,18 @@ import org.moqui.entity.EntityCondition
  */
 class AgentReadSupport {
 
-    static final int MAX_LOOKALIKES = 200
-    static final int DEFAULT_LOOKALIKES = 50
+    static final int MAX_LOOKALIKES = 10
+    static final int DEFAULT_LOOKALIKES = 10
     static final String CATALOG = "darpan.agent.AgentReadCatalog"
     private static final String WHY = "agent read: explicit companyUserGroupId condition applied"
 
     // ---------------------------------------------------------------- look-alikes
 
-    /** [sameCause, controls] of one finding, or null (with an error) when the finding is not the active tenant's. */
+    /**
+     * [byCause, byState, sameCause, controls] of one finding, or null (with an error) when the finding is not the active tenant's.
+     * The counts cover every other finding of the check; each list holds at most limit rows. A condition that is the same on
+     * every row is left out of the rows.
+     */
     static Map lookalikes(def ec, String findingId, Object limitValue) {
         String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!tenantId || !AuditReportGraph.ownsFinding(ec, tenantId, findingId)) {
@@ -49,6 +53,14 @@ class AgentReadSupport {
                         ec.entity.conditionFactory.makeCondition("conclusionEnumId", EntityCondition.EQUALS, null)], EntityCondition.OR)
         def controls = findings(ec, tenantId, base.checkId as String).condition(different).orderBy("findingId").limit(limit).list()
         Map<String, String> stateWords = enumWords(ec, "AuditFindingState")
+        Map<String, Integer> byCause = new TreeMap<String, Integer>()
+        Map<String, Integer> byState = new TreeMap<String, Integer>()
+        findings(ec, tenantId, base.checkId as String).condition("findingId", EntityCondition.NOT_EQUAL, findingId).list().each { def f ->
+            String cause = (f.conclusionEnumId as String) ?: "none"
+            String state = stateWords.get(f.stateEnumId as String) ?: (f.stateEnumId as String)
+            byCause.put(cause, (byCause.get(cause) ?: 0) + 1)
+            byState.put(state, (byState.get(state) ?: 0) + 1)
+        }
         Map<String, String> statementCodes = [:]
         Closure row = { def f ->
             String statementId = f.statementId as String
@@ -61,7 +73,18 @@ class AgentReadSupport {
             [findingId: f.findingId, recordKey: AgentRedaction.safeValue(f.recordKey), state: stateWords.get(f.stateEnumId as String) ?: f.stateEnumId,
              conclusionCode: f.conclusionEnumId, statementCode: statementCodes.get(statementId), conditionValues: checks] as Map
         }
-        return [sameCause: sameCause.collect(row), controls: controls.collect(row)]
+        List<Map> sameRows = sameCause.collect(row)
+        List<Map> controlRows = controls.collect(row)
+        dropSharedConditions(sameRows + controlRows)
+        return [byCause: byCause, byState: byState, sameCause: sameRows, controls: controlRows]
+    }
+
+    /** Removes from every row each condition (label, passed, value) that all rows share; with fewer than two rows nothing is shared. */
+    private static void dropSharedConditions(List<Map> rows) {
+        if (rows.size() < 2) return
+        List<Map> shared = (rows[0].conditionValues as List<Map>).findAll { Map c -> rows.every { Map r -> (r.conditionValues as List<Map>).contains(c) } }
+        if (!shared) return
+        rows.each { Map r -> r.put("conditionValues", (r.conditionValues as List<Map>).findAll { Map c -> !shared.contains(c) }) }
     }
 
     private static def findings(def ec, String tenantId, String checkId) {

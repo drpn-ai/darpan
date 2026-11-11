@@ -26,18 +26,24 @@
 
     <service verb="find" noun="AuditFindingLookalikes" authz-action="view" allow-remote="false" authenticate="true">
         <description>Findings of the same check as one finding: sameCause (same conclusion, any state) and controls (a different
-            conclusion, any state), each {findingId, recordKey, state, conclusionCode, statementCode, conditionValues}.</description>
+            conclusion, any state), each {findingId, recordKey, state, conclusionCode, statementCode, conditionValues}, plus counts of
+            every other finding of the check by conclusion code (none when blank) and by state. Conditions equal on every row are
+            left out of conditionValues.</description>
         <in-parameters>
             <parameter name="findingId" required="true"/>
-            <parameter name="limit" type="Integer" default-value="50"><description>At most this many of each list (200 max).</description></parameter>
+            <parameter name="limit" type="Integer" default-value="10"><description>At most this many of each list (10 max).</description></parameter>
         </in-parameters>
         <out-parameters>
+            <parameter name="byCause" type="Map"><description>Count of the check's other findings by conclusion code.</description></parameter>
+            <parameter name="byState" type="Map"><description>Count of the check's other findings by state.</description></parameter>
             <parameter name="sameCause" type="List"/>
             <parameter name="controls" type="List"/>
         </out-parameters>
         <actions>
             <set field="found" from="darpan.agent.AgentReadSupport.lookalikes(ec, findingId, limit)"/>
             <if condition="found == null"><return error="true"/></if>
+            <set field="byCause" from="found.byCause"/>
+            <set field="byState" from="found.byState"/>
             <set field="sameCause" from="found.sameCause"/>
             <set field="controls" from="found.controls"/>
         </actions>

@@ -141,6 +141,46 @@ class AgentReadFacadeSmokeTests {
     }
 
     @Test
+    void "fifty lookalikes come back as counts, ten rows a list and only the conditions that differ"() {
+        String checkId = "${MINE}_BULK".toString()
+        List<String> ids = []
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: MINE, checkCode: "bulk-check", label: "Bulk check"])
+            (1..50).each { int n ->
+                String id = "AGR_B${n}".toString()
+                String conclusion = n <= 20 ? "AGR_C1" : (n <= 40 ? "AGR_C2" : null)
+                insert("darpan.audit.AuditFinding", [findingId: id, companyUserGroupId: MINE, statementId: "${MINE}_R2".toString(), checkId: checkId,
+                        recordKey: "BULK-${n}".toString(), period: "2026-10", stateEnumId: n % 5 == 0 ? "AUDFS_FIXED" : "AUDFS_OPEN",
+                        headline: "bulk", firstFoundDate: Date.valueOf("2026-10-08"), lastSeenDate: Date.valueOf("2026-10-08"), conclusionEnumId: conclusion])
+                insert("darpan.audit.AuditFindingCondition", [findingId: id, sequenceNum: 1L, companyUserGroupId: MINE, label: "Same on all", passed: "N", checkValue: "no Etail id"])
+                insert("darpan.audit.AuditFindingCondition", [findingId: id, sequenceNum: 2L, companyUserGroupId: MINE, label: "Amount", passed: "N", checkValue: ["billed", "voided", "refunded"][n % 3]])
+                ids << id
+            }
+            insert("darpan.audit.AuditFinding", [findingId: "AGR_BX", companyUserGroupId: OTHER, statementId: "${OTHER}_R2".toString(), checkId: checkId,
+                    recordKey: "FOREIGN-BX", period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "foreign",
+                    firstFoundDate: Date.valueOf("2026-10-08"), lastSeenDate: Date.valueOf("2026-10-08"), conclusionEnumId: "AGR_C1"])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Map out = call("find#AuditFindingLookalikes", [findingId: "AGR_B1"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        String json = groovy.json.JsonOutput.toJson(out.findAll { k, v -> k in ["byCause", "byState", "sameCause", "controls"] })
+        assertTrue(json.length() < 4000, "json is ${json.length()} characters")
+        assertEquals([AGR_C1: 19, AGR_C2: 20, none: 10], out.byCause, "every other finding of the check, not the other tenant's")
+        assertEquals([10, 39], (out.byState as Map).values().toList().sort(), "fixed and open counts")
+        assertEquals(10, (out.sameCause as List).size())
+        assertEquals(10, (out.controls as List).size())
+        ((out.sameCause as List<Map>) + (out.controls as List<Map>)).each { Map r ->
+            assertEquals(["Amount"], (r.conditionValues as List<Map>)*.label, "the condition equal on every row is absent")
+        }
+        assertFalse(json.contains("Same on all"), json)
+        Map foreign = call("find#AuditFindingLookalikes", [findingId: "AGR_BX"])
+        assertTrue(foreign.hadError as boolean, "another tenant's finding reads as not found")
+        assertTrue((foreign.errorText as String).contains("was not found"), foreign.errorText as String)
+    }
+
+    @Test
     void "get#AgentFinding wraps the finding with customer data redacted"() {
         Map out = call("get#AgentFinding", [findingId: f1])
         assertFalse(out.hadError as boolean, out.errorText as String)

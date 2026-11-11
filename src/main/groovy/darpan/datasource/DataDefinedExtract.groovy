@@ -102,7 +102,7 @@ class DataDefinedExtract {
             writeDropSidecars(ec, context, (List<Map>) (result.sidecars ?: []), outputBaseLocation, fileName, outputDirectory)
         } catch (Exception e) {
             String code = e instanceof DataSourceCallException ? "[${((DataSourceCallException) e).code}] " : ""
-            context.put("errors", ["${connector.systemEnumId} read failed: ${code}${e.message}".toString()])
+            context.put("errors", ["${connector.systemEnumId} read failed: ${code}${e.message ?: e.getClass().simpleName}".toString()])
             context.put("dataAvailable", false)
             context.put("recordCount", 0)
             context.put("fileName", null)

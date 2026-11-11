@@ -155,13 +155,34 @@ class DataSourceRunner {
                 t.start()
                 t
             }
-            while (threads.any { it.alive }) {
-                threads.find { it.alive }?.join(PROGRESS_EVERY_MS)
-                if (progress != null) progress.call(rootRecordCount.get())
+            try {
+                while (threads.any { it.alive }) {
+                    threads.find { it.alive }?.join(PROGRESS_EVERY_MS)
+                    if (progress != null) progress.call(rootRecordCount.get())
+                }
+            } catch (Throwable waiting) {
+                // The waiting thread was interrupted or failed: stop the readers instead of leaving them writing.
+                failure.compareAndSet(null, waiting)
+                threads.each { it.interrupt() }
+                if (waiting instanceof InterruptedException) Thread.currentThread().interrupt()
             }
         }
         Throwable t = failure.get()
-        if (t != null) throw t
+        if (t != null) throw stopped(t)
+    }
+
+    /**
+     * A reader that stopped for any reason ends the run with a stated reason: an Error, an interrupt or a failure with no
+     * message becomes a READ_STOPPED call failure that names what happened. Other failures pass through unchanged.
+     */
+    static RuntimeException stopped(Throwable t) {
+        if (t instanceof RuntimeException && t.message) return (RuntimeException) t
+        String what = t instanceof InterruptedException ? "The read was interrupted."
+                : t instanceof Error ? "The read stopped on ${t.getClass().simpleName}${t.message ? ': ' + t.message : ''}.".toString()
+                : "The read stopped on ${t.getClass().simpleName}.".toString()
+        DataSourceCallException e = new DataSourceCallException("READ_STOPPED", what)
+        e.initCause(t)
+        return e
     }
 
     private static int parallelOf(Map bind) {
@@ -362,8 +383,14 @@ class DataSourceRunner {
                 t.start()
                 t
             }
-            threads.each { it.join() }
-            if (failure.get() != null) throw failure.get()
+            try {
+                threads.each { it.join() }
+            } catch (Throwable waiting) {
+                failure.compareAndSet(null, waiting)
+                threads.each { it.interrupt() }
+                if (waiting instanceof InterruptedException) Thread.currentThread().interrupt()
+            }
+            if (failure.get() != null) throw stopped(failure.get())
         }
         return byChunk.flatten() as List<Map>
     }

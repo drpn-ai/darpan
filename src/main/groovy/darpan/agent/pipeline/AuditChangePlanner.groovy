@@ -292,6 +292,8 @@ class AuditChangePlanner {
             case "EXCLUSION_FILTER": return "the run's exclusion filter"
             case "STATEMENT_NARROWING": return "the statement's link to the check"
             case "EXPECTED_CAUSES": return "the run's expected causes"
+            case "AUDIT_SETTINGS": return "the audit's schedule"
+            case "ADD_STATEMENT": return "the audit's statements"
             case "FIX_TEXT": return "the conclusion's fix text"
             default: return "the run's conclusion rows"
         }

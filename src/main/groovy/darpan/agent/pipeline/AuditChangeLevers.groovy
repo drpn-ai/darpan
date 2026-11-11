@@ -1,5 +1,6 @@
 package darpan.agent.pipeline
 
+import darpan.audit.AuditSettingsSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.AutomationFacadeSupport
@@ -26,13 +27,16 @@ import static darpan.common.ValueSupport.normalize
  */
 class AuditChangeLevers {
 
-    static final List<String> KINDS = ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "EXPECTED_CAUSES", "FIX_TEXT", "CONCLUSION_ROWS"].asImmutable()
+    static final List<String> KINDS = ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "EXPECTED_CAUSES", "FIX_TEXT", "CONCLUSION_ROWS",
+                                      "AUDIT_SETTINGS", "ADD_STATEMENT"].asImmutable()
     static final Map<String, List<String>> TARGET_KEYS = [
             EXCLUSION_FILTER   : ["savedRunId", "fileSide"],
             STATEMENT_NARROWING: ["auditId", "checkCode", "statementCode"],
             EXPECTED_CAUSES    : ["auditId", "checkCode"],
             FIX_TEXT           : ["savedRunId", "conclusionCode"],
-            CONCLUSION_ROWS    : ["savedRunId"]].asImmutable()
+            CONCLUSION_ROWS    : ["savedRunId"],
+            AUDIT_SETTINGS     : ["auditId"],
+            ADD_STATEMENT      : ["auditId"]].asImmutable()
     static final List<String> SIDES = ["FILE_1", "FILE_2"].asImmutable()
     static final List<String> SIDE_FIELDS = ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId", "nsRestletConfigId",
             "sourceConfigId", "sourceConfigType", "fileTypeEnumId", "schemaFileName", "recordRootExpression"].asImmutable()
@@ -70,6 +74,8 @@ class AuditChangeLevers {
             case "EXCLUSION_FILTER": return runState(ec, t)
             case "STATEMENT_NARROWING":
             case "EXPECTED_CAUSES": return checkState(ec, kind, t)
+            case "AUDIT_SETTINGS":
+            case "ADD_STATEMENT": return auditState(ec, kind, t)
             default: return treeState(ec, kind, t)
         }
     }
@@ -144,6 +150,35 @@ class AuditChangeLevers {
         return state
     }
 
+    /**
+     * AUDIT_SETTINGS: the audit's own schedule and the schedule each automation of its checks runs on. ADD_STATEMENT: the
+     * audit's statements, each with how many checks and findings hang on it. Another tenant's audit reads as not found.
+     */
+    private static Map auditState(def ec, String kind, Map target) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        Map audit = tenantId ? AuditSettingsSupport.auditOf(ec, tenantId, target.auditId as String) : null
+        if (audit == null) { ec.message.addError("Audit '${target.auditId}' was not found.".toString()); return null }
+        Map state = [kind: kind, target: target, audit: audit.auditCode]
+        if (kind == "AUDIT_SETTINGS") {
+            Map s = AuditSettingsSupport.scheduleOf(ec, audit)
+            state.schedule = [active: s.active, time: s.time, timeZone: s.timeZone]
+            state.automations = AuditSettingsSupport.automationsOfAudit(ec, tenantId, audit).collect { Map a ->
+                [id: a.automationId, time: AuditSettingsSupport.timeOf(a.scheduleExpr as String), timeZone: a.windowTimeZone,
+                 active: a.isActive == "Y"] as Map
+            }.sort { Map a -> a.id as String }
+        } else {
+            state.statements = ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId)
+                    .condition("auditId", audit.auditId).orderBy(["sequenceNum", "statementId"]).useCache(false).list().collect { st ->
+                [id: st.statementCode, text: st.statementText, active: (st.isActive ?: "Y") != "N",
+                 checks: ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", tenantId)
+                         .condition("statementId", st.statementId).useCache(false).count(),
+                 findings: ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
+                         .condition("statementId", st.statementId).useCache(false).count()] as Map
+            }
+        }
+        return state
+    }
+
     /** The run's causes marked EXPECTED (its conclusion rules' outcome), sorted, each once. */
     private static List<String> expectedCodesOf(def ec, String savedRunId) {
         def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope").condition("ruleSetId", savedRunId)
@@ -186,6 +221,12 @@ class AuditChangeLevers {
 
     /** The INVALID statusMessage when every proposed cause is already expected on the run. */
     static final String NO_CHANGE_EXPECTED_MESSAGE = "NO_CHANGE: every cause is already expected on this check's run; nothing would change."
+
+    /** The INVALID statusMessage when the audit and its automations already run on the proposed schedule. */
+    static final String NO_CHANGE_SCHEDULE_MESSAGE = "NO_CHANGE: the audit and every automation already run on this schedule; nothing would change."
+
+    /** The INVALID statusMessage when the audit already has a statement with this text. */
+    static final String NO_CHANGE_STATEMENT_MESSAGE = "NO_CHANGE: the audit already has a statement with this text; nothing would change."
 
     /** R51: the INVALID statusMessage when every proposed value is already excluded on the field. */
     static final String NO_CHANGE_MESSAGE = "NO_CHANGE: every value is already excluded on this field; nothing would change."
@@ -271,6 +312,23 @@ class AuditChangeLevers {
                 List<Map> nodes = (List<Map>) state.conclusions
                 ((List<Map>) after.rows).each { Map row -> mergeRow(nodes, row) }
                 break
+            case "AUDIT_SETTINGS":
+                Map schedule = (Map) state.schedule
+                Map want = [active: after.active == null ? schedule.active : after.active, time: after.time ?: schedule.time,
+                            timeZone: after.timeZone ?: schedule.timeZone]
+                if (want == schedule && ((List<Map>) state.automations).every { Map a -> a.subMap(["time", "timeZone", "active"]) == want })
+                    throw new IllegalArgumentException(NO_CHANGE_SCHEDULE_MESSAGE)
+                state.schedule = want
+                state.automations = ((List<Map>) state.automations).collect { Map a -> a + want }
+                break
+            case "ADD_STATEMENT":
+                String text = (after.text as String).trim()
+                List<Map> statements = (List<Map>) state.statements
+                if (statements.any { Map st -> (st.text as String)?.trim()?.equalsIgnoreCase(text) }) throw new IllegalArgumentException(NO_CHANGE_STATEMENT_MESSAGE)
+                int top = (statements.collect { Map st -> (st.id as String) ==~ /R\d+/ ? ((st.id as String).substring(1) as int) : 0 } + [0]).max()
+                statements << [id: "R${top + 1}".toString(), text: text, active: true, checks: 0, findings: 0]
+                state.add = [text: text, category: after.category as String, weight: (after.weight ?: "derived") as String]
+                break
         }
         return state
     }
@@ -315,6 +373,12 @@ class AuditChangeLevers {
             case "STATEMENT_NARROWING": return [link: copy(((List<Map>) state.statements).find { it.id == target.statementCode })]
             case "EXPECTED_CAUSES": return [expectedCodes: copy(((Map) state.check).expectedCodes ?: [])]
             case "FIX_TEXT": return [fix: onlyNode((List<Map>) state.conclusions, target.conclusionCode as String).fix]
+            case "AUDIT_SETTINGS": return [schedule: copy(state.schedule)]
+            case "ADD_STATEMENT":
+                // The statement is found by its text (a duplicate is refused at merge): null before the add, the statement after it.
+                String text = (after.text as String).trim()
+                Map added = ((List<Map>) state.statements).find { Map st -> (st.text as String)?.trim()?.equalsIgnoreCase(text) }
+                return [text: text, statement: added == null ? null : pick(added, ["id", "text", "active"])]
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
                 List<String> codes = ((List<Map>) (after.rows ?: [])).collect { (it.conclusionCode ?: it.code) as String }
@@ -354,6 +418,22 @@ class AuditChangeLevers {
                 break
             case "FIX_TEXT":
                 onlyNode((List<Map>) state.conclusions, target.conclusionCode as String).fix = lever.fix as String
+                break
+            case "AUDIT_SETTINGS":
+                Map was = (Map) copy(lever.schedule)
+                state.schedule = was
+                state.automations = ((List<Map>) state.automations).collect { Map a -> a + was }
+                break
+            case "ADD_STATEMENT":
+                // The revert of an add takes the statement out again, only while nothing hangs on it.
+                String text = (lever.text as String).trim()
+                List<Map> statements = (List<Map>) state.statements
+                Map added = statements.find { Map st -> (st.text as String)?.trim()?.equalsIgnoreCase(text) }
+                if (added == null) throw new IllegalArgumentException("The statement is no longer part of audit ${state.audit}.".toString())
+                if (added.checks || added.findings)
+                    throw new IllegalArgumentException("Statement ${added.id} has checks or findings now; take those off first.".toString())
+                statements.remove(added)
+                state.remove = added.id
                 break
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
@@ -410,6 +490,23 @@ class AuditChangeLevers {
                 List links = ((List<Map>) state.statements).collect { Map l -> pick(l, ["id"] + NARROWING_KEYS) }
                 ec.service.sync().name("facade.AuditFacadeServices.save#AuditCheck").parameters([audit: state.audit, check: check,
                         statements: links]).call()
+                break
+            case "AUDIT_SETTINGS":
+                ec.service.sync().name("facade.AuditFacadeServices.save#AuditSettings").parameters([audit: state.audit,
+                        schedule: pick((Map) state.schedule, ["active", "time", "timeZone"])]).call()
+                break
+            case "ADD_STATEMENT":
+                if (state.add) {
+                    Map add = (Map) state.add
+                    ec.service.sync().name("facade.AuditFacadeServices.add#AuditStatement").parameters([audit: state.audit,
+                            text: add.text, category: add.category, weight: add.weight]).call()
+                } else if (state.remove) {
+                    String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+                    Map audit = tenantId ? AuditSettingsSupport.auditOf(ec, tenantId, state.audit as String) : null
+                    def row = audit == null ? null : ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId)
+                            .condition("auditId", audit.auditId).condition("statementCode", state.remove).useCache(false).list().find()
+                    if (row == null) ec.message.addError("Statement ${state.remove} was not found.".toString()) else row.delete()
+                }
                 break
             default:
                 // Lookups are left out, which the save reads as "keep them".

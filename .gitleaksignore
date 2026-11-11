@@ -1,0 +1,5 @@
+# Reviewed false positives: gitleaks scans the whole history, so a finding can only be cleared here.
+# Each line is the exact fingerprint gitleaks prints (commit:file:rule:line) with why it is not a secret.
+
+# A made-up test password: TenantConfigVersionSmokeTests asserts it never enters a config version (DAR-BE-160).
+7a9910a1828a42482477866539b613fd1f4300d7:src/test/groovy/darpan/config/TenantConfigVersionSmokeTests.groovy:generic-api-key:31

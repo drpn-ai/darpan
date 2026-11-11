@@ -198,7 +198,10 @@ jobs:
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
+          # -Xmx4g: on the default 512 MB heap the NVD analysis thrashes the GC and the build dies before any
+          # finding is reported (2026-11-10/11); hosted runners have 16 GB.
           ./gradlew --no-daemon --console=plain \
+            -Dorg.gradle.jvmargs=-Xmx4g \
             --init-script /tmp/owasp-dc.init.gradle \
             :runtime:component:darpan:dependencyCheckAnalyze
 

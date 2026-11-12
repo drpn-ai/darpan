@@ -96,22 +96,7 @@ class TenantOwnedEntityFilterContractTests {
      * Filter rows added since the last release cut. No pack carries them yet: the next cut generates its pack from
      * the previous tag, and data/upgrade-data.xml is not hand-edited between cuts. Remove an entry once a pack ships it.
      */
-    static final Map<String, String> PENDING_NEXT_PACK = ["DARPAN_SCOPE_CLI_ACCESS_REQUEST": "DAR-BE-209 CLI access requests; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_KNOWLEDGE_ENTRY": "DAR-BE-161 knowledge entries; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_TENANT_SCRIPT": "DAR-BE-164 tenant scripts; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_TENANT_SCRIPT_DEPLOY": "DAR-BE-167 script deployments; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_AGENT_QUERY_LOG": "DAR-CLI-003 agent query log; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_AGENT_CONVERSATION": "DAR-BE-159 agent entities; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_AGENT_TURN": "DAR-BE-159 agent entities; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_AGENT_MESSAGE": "DAR-BE-159 agent entities; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_AUDIT_CHANGE_PROPOSAL": "DAR-BE-159 agent entities; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_BRAIN_CHANGE_TICKET": "DAR-BE-159 agent entities; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_AGENT_ACCESS_GRANT": "DAR-BE-194 AI access grants; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_AGENT_ACCESS_GRANT_EVENT": "DAR-BE-194 AI access grants; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_CLI_ACCESS_GRANT": "DAR-BE-195 CLI access grants; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_TENANT_CONFIG_VERSION": "DAR-BE-160 tenant config versions; the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_TENANT_CONFIG_PENDING": "DAR-BE-160 pending config rows (DAR-OPS-015); the next release cut generates its pack row",
-                                                          "DARPAN_SCOPE_CLI_ACCESS_GRANT_EVENT": "DAR-BE-195 CLI access grants; the next release cut generates its pack row"].asImmutable()
+    static final Map<String, String> PENDING_NEXT_PACK = [:].asImmutable() // 3.0.0 shipped all 16 (DAR-BE-159/160/161/164/167/194/195/209, DAR-CLI-003)
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS).asImmutable()

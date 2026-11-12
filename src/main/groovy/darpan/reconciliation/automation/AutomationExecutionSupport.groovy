@@ -172,6 +172,10 @@ class AutomationExecutionSupport {
             "[datatype_mismatch",
             // DAR-BE-116: the source answered the same key twice (gorjana R15, NetSuite lines); the data is the data.
             "produced duplicate primary",
+            // DAR-BE-243: Shopify's ACCESS_DENIED ("Access denied for <field> field. Required access: ..."),
+            // a missing scope or a token Shopify will not let run bulk reads. New Era RS_100357 retried
+            // 95 minutes on it (2026-11-12) before dead-lettering.
+            "required access:",
     ]
 
     static final String WINDOW_PREVIOUS_DAY = "AUT_WIN_PREV_DAY"

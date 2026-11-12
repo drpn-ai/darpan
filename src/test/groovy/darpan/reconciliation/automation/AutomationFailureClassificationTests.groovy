@@ -23,6 +23,16 @@ class AutomationFailureClassificationTests {
     }
 
     @Test
+    void aShopifyAccessDeniedIsPermanent() {
+        // DAR-BE-243: New Era RS_100357's four attempts (2026-11-12) all failed this way.
+        assertTrue(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException("Shopify orders extract failed",
+                new RuntimeException("Shopify GraphQL error: Access denied for bulkOperationRunQuery field. " +
+                        "Required access: Only accessible by supported access tokens."))))
+        assertTrue(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException(
+                "Shopify GraphQL error: Access denied for returns field. Required access: `read_returns` access scope.")))
+    }
+
+    @Test
     void aTimeoutOrAGatewayErrorIsStillRetried() {
         assertFalse(AutomationExecutionSupport.isPermanentFailure(new java.net.SocketTimeoutException("Read timed out")))
         assertFalse(AutomationExecutionSupport.isPermanentFailure(new IllegalStateException("OMS returns extract failed with HTTP 504")))

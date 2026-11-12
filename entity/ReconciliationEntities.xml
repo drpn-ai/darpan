@@ -1182,6 +1182,14 @@
                 statusId (NOT_IN_OMS: no item of the order; NO_SUCH_ITEM: the order lacks this one), instead of
                 omsStatusId. Needs omsStatusKeyField.</description>
         </field>
+        <field name="omsShipGroupsField" type="text-short">
+            <description>DAR-BE-245. The record field holding the order's NetSuite fulfillments by location
+                (LINKED_LOCATIONS(ItemShip)). With it each record (one per order) gets HotWax's completed ship groups
+                counted against them per location (facility externalId = NetSuite location id): omsShipGroupCheck
+                MATCHES, SPLIT (one fulfillment became several ship groups), HOTWAX_ONLY (a ship group from a location
+                NetSuite has no fulfillment from), NO_FULFILLMENT (NetSuite shipped nothing yet) or NOT_IN_OMS, with nsFulfillmentCount, omsShipGroupCount and
+                omsShipGroupDetail. Needs omsStatusKeyField; not with omsStatusLineKeyField.</description>
+        </field>
         <field name="lineKeyColumn" type="text-short">
             <description>SALES_LINES only: the transactionline column that names the line on the other
                 side of the pair - for gorjana custcol_hc_order_line_id, the OMS orderItemSeqId HotWax

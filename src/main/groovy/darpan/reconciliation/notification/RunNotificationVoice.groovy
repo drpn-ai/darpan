@@ -891,10 +891,10 @@ class RunNotificationVoice {
      * DAR-BE-155: the mismatch line names the fields that drifted, so the reader is not left to guess from a
      * diagnosis line that cannot know which field moved.
      *
-     * DAR-BE-210: one line per rule, "<label> Mismatch: <count>", busiest first: the label is the rule's name when it
-     * has one ("Fulfillment Sync Mismatch: 14"), else its formula. Past MAX_RULE_LINES the rest fold into one
-     * "+N more rules" line; mismatches no rule claimed read "Other mismatches". A run that sent no per-rule tally
-     * keeps the single "Mismatches: N" line.
+     * DAR-BE-210: one line per named rule, "<name> Mismatch: <count>", busiest first ("Fulfillment Sync Mismatch: 14").
+     * Past MAX_RULE_LINES the rest fold into one "+N more rules" line.
+     * DAR-BE-248 (Aditi 2026-11-12): a rule's formula is never printed. Mismatches on unnamed rules, on no rule, or from a
+     * run that sent no per-rule tally pool into one "Field mismatches: N" line.
      */
     private static List<String> detailsBlock(int missingFromFile1, int missingFromFile2,
                                              int mismatches, String file1Label, String file2Label,
@@ -913,15 +913,15 @@ class RunNotificationVoice {
     static final int MAX_RULE_LINES = 8
 
     private static List<String> mismatchLines(int mismatches, List<Map> rules) {
-        if (!rules) return ["Mismatches: ${mismatches}".toString()]
-        List<String> lines = rules.take(MAX_RULE_LINES).collect { "${it.label} Mismatch: ${it.count}".toString() }
-        List<Map> rest = rules.drop(MAX_RULE_LINES)
+        List<Map> named = (rules ?: []).findAll { it.named }
+        List<String> lines = named.take(MAX_RULE_LINES).collect { "${it.label} Mismatch: ${it.count}".toString() }
+        List<Map> rest = named.drop(MAX_RULE_LINES)
         if (rest) {
             int restCount = (int) rest.sum { it.count }
             lines.add("+${rest.size()} more rule${rest.size() == 1 ? '' : 's'}: ${restCount} mismatch${restCount == 1 ? '' : 'es'}".toString())
         }
-        int other = mismatches - (int) rules.sum { it.count }
-        if (other > 0) lines.add("Other mismatches: ${other}".toString())
+        int pooled = mismatches - (int) named.sum(0) { it.count }
+        if (pooled > 0) lines.add("Field mismatches: ${pooled}".toString())
         return lines
     }
 
@@ -960,12 +960,14 @@ class RunNotificationVoice {
                 "${file1Label} has ${value1} and ${file2Label} has ${value2}".toString() : null
         String unnamed = top.sameValues ? "${file1Label} and ${file2Label} hold different values".toString() :
                 "the values differ from record to record"
+        // DAR-BE-248: an unnamed rule is never spoken by its formula; the fact stands without it.
+        String where = top.named ? top.label as String : "one field"
         if (fields.size() == 1) {
-            if (!values) return "On ${top.label}, ${unnamed}.".toString()
-            return "On ${top.label}, ${values}${((int) top.count) > 1 ? ' every time' : ''}.".toString()
+            String fact = values ? "${values}${((int) top.count) > 1 ? ' every time' : ''}".toString() : unnamed
+            return top.named ? "On ${where}, ${fact}.".toString() : "${fact.capitalize()}.".toString()
         }
         int total = (int) fields.sum { it.count }
-        String lead = ((int) top.count) * 2 > total ? "Most are on ${top.label}" : "The largest share is on ${top.label}"
+        String lead = ((int) top.count) * 2 > total ? "Most are on ${where}" : "The largest share is on ${where}"
         return values ? "${lead}: ${values}.".toString() : "${lead}, where ${unnamed}.".toString()
     }
 

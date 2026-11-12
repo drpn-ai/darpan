@@ -171,7 +171,7 @@ class RunNotificationVoiceTests {
         // onlyInFile1Count is the HotWax-side count, so it is what SHOPIFY is missing.
         assertTrue(text.contains("Missing from Shopify: 39"), text)
         assertTrue(text.contains("Missing from HotWax: 0"), text)
-        assertTrue(text.contains("Mismatches: 8"), text)
+        assertTrue(text.contains("Field mismatches: 8"), text)
     }
 
     @Test
@@ -429,29 +429,30 @@ class RunNotificationVoiceTests {
         assertEquals("On Fulfillment status, HotWax has Y and Shopify has N.", named[1], named.join("\n"))
         List<String> plain = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) + [file1SystemLabel: null, file2SystemLabel: null] +
                 [mismatchFields: [tally("isCompleted = isFulfilled", 1, "Y", "N")]])
-        assertTrue(plain.join("\n").contains("isCompleted = isFulfilled") && !plain.join("\n").contains("HotWax isCompleted"), plain.join("\n"))
+        assertEquals("File 1 has Y and File 2 has N.", plain[1], plain.join("\n"))
+        assertFalse(plain.join("\n").contains("isCompleted"), plain.join("\n"))
     }
 
     @Test
     void valueDriftSaysWhatDiffersWhenEveryMismatchAgrees() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
                 [mismatchFields: [tally("isCompleted = isFulfilled", 1, "Y", "N")]])
-        assertEquals("On HotWax isCompleted = Shopify isFulfilled, HotWax has Y and Shopify has N.", lines[1], lines.join("\n"))
-        assertTrue(lines.contains("HotWax isCompleted = Shopify isFulfilled Mismatch: 1"), lines.join("\n"))
+        assertEquals("HotWax has Y and Shopify has N.", lines[1], lines.join("\n"))
+        assertTrue(lines.contains("Field mismatches: 1"), lines.join("\n"))
     }
 
     @Test
     void valueDriftSaysEveryTimeWhenManyMismatchesAgree() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 4) +
                 [mismatchFields: [tally("isCompleted = isFulfilled", 4, "Y", "N")]])
-        assertEquals("On HotWax isCompleted = Shopify isFulfilled, HotWax has Y and Shopify has N every time.", lines[1], lines.join("\n"))
+        assertEquals("HotWax has Y and Shopify has N every time.", lines[1], lines.join("\n"))
     }
 
     @Test
     void valueDriftSaysValuesVaryRatherThanGuessingACause() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 6) +
                 [mismatchFields: [tally("grand_total = total_amount", 6)]])
-        assertEquals("On HotWax grand_total = Shopify total_amount, the values differ from record to record.", lines[1], lines.join("\n"))
+        assertEquals("The values differ from record to record.", lines[1], lines.join("\n"))
     }
 
     @Test
@@ -459,16 +460,16 @@ class RunNotificationVoiceTests {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 12) +
                 [mismatchFields: [tally("grand_total = total_amount", 7), tally("isCompleted = isFulfilled", 3, "Y", "N"),
                                   tally("c = d", 1), tally("a = b", 1)]])
-        assertEquals("Most are on HotWax grand_total = Shopify total_amount, where the values differ from record to record.", lines[1], lines.join("\n"))
-        assertEquals(["HotWax grand_total = Shopify total_amount Mismatch: 7", "HotWax isCompleted = Shopify isFulfilled Mismatch: 3", "HotWax c = Shopify d Mismatch: 1",
-                      "HotWax a = Shopify b Mismatch: 1"], lines.findAll { it.contains(" Mismatch: ") }, lines.join("\n"))
+        assertEquals("Most are on one field, where the values differ from record to record.", lines[1], lines.join("\n"))
+        assertEquals([], lines.findAll { it.contains(" Mismatch: ") }, lines.join("\n"))
+        assertTrue(lines.contains("Field mismatches: 12"), lines.join("\n"))
     }
 
     @Test
     void valueDriftNamesABlankValueInWords() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 8) +
                 [mismatchFields: [tally("statusId = status", 5, "", "ORDER_COMPLETED"), tally("isCompleted = isFulfilled", 3, "Y", "N")]])
-        assertEquals("Most are on HotWax statusId = Shopify status: HotWax has nothing and Shopify has ORDER_COMPLETED.", lines[1], lines.join("\n"))
+        assertEquals("Most are on one field: HotWax has nothing and Shopify has ORDER_COMPLETED.", lines[1], lines.join("\n"))
     }
 
     // Security review on bb64b03: a record value goes to a chat space. Only flag, code and number values are
@@ -478,7 +479,7 @@ class RunNotificationVoiceTests {
         ["jane@example.com", "Jane Smith", "<https://evil.example|click>", "*bold*", "A" * 33].each { String risky ->
             List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
                     [mismatchFields: [tally("email = email", 1, risky, "ORDER_COMPLETED")]])
-            assertEquals("On HotWax email = Shopify email, HotWax and Shopify hold different values.", lines[1], lines.join("\n"))
+            assertEquals("HotWax and Shopify hold different values.", lines[1], lines.join("\n"))
             assertFalse(lines.join("\n").contains(risky), lines.join("\n"))
         }
     }
@@ -487,14 +488,15 @@ class RunNotificationVoiceTests {
     void valueDriftStripsChatSyntaxFromTheRuleLabel() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
                 [mismatchFields: [tally("<https://evil.example|*status*> = status", 1, "Y", "N")]])
-        assertEquals("On HotWax https://evil.examplestatus = Shopify status, HotWax has Y and Shopify has N.", lines[1], lines.join("\n"))
+        assertEquals("HotWax has Y and Shopify has N.", lines[1], lines.join("\n"))
+        assertFalse(lines.join("\n").contains("evil"), lines.join("\n"))
     }
 
     @Test
     void valueDriftSpeaksNumbersAndFlags() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 1) +
                 [mismatchFields: [tally("grand_total = total_amount", 1, "89.89", "-90.32")]])
-        assertEquals("On HotWax grand_total = Shopify total_amount, HotWax has 89.89 and Shopify has -90.32.", lines[1], lines.join("\n"))
+        assertEquals("HotWax has 89.89 and Shopify has -90.32.", lines[1], lines.join("\n"))
     }
 
     // DAR-BE-210: Dolls Kill result 100832 read "Mismatches: 14 (isFulfilled = isCompleted)". A rule with a name is
@@ -528,12 +530,22 @@ class RunNotificationVoiceTests {
     }
 
     @Test
-    void unnamedRuleKeepsItsFormulaAsTheLabelBothWays() {
+    // DAR-BE-248: prod read "Shopify isFulfilled = HotWax isCompleted Mismatch: 3"; Aditi: not phrased like this. An unnamed
+    // rule's formula is never printed: its mismatches pool into "Field mismatches", beside the named rules' own rows.
+    void unnamedRuleNeverPrintsItsFormula() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 14) +
                 [mismatchFields: [ruleTally(null, "isFulfilled = isCompleted", 14)]])
-        assertTrue(lines.contains("HotWax isFulfilled = Shopify isCompleted Mismatch: 14"), lines.join("\n"))
-        assertEquals("On HotWax isFulfilled = Shopify isCompleted, the values differ from record to record.", lines[1], lines.join("\n"))
+        String text = lines.join("\n")
+        assertTrue(lines.contains("Field mismatches: 14"), text)
+        assertEquals("The values differ from record to record.", lines[1], text)
         assertTrue(lines[0].contains("all value mismatches"), lines[0])
+        assertFalse(text.contains("isFulfilled") || text.contains("isCompleted") || text.contains(" = "), text)
+
+        List<String> mixed = RunNotificationVoice.renderLines(shapeModel(0, 0, 17) +
+                [mismatchFields: [ruleTally(null, "grand_total = total_amount", 9), ruleTally("Fulfillment Sync", "isFulfilled = isCompleted", 8)]])
+        assertEquals(["Fulfillment Sync Mismatch: 8", "Field mismatches: 9"], mixed.findAll { it.contains("ismatch") && it.contains(": ") }, mixed.join("\n"))
+        assertEquals("Most are on one field, where the values differ from record to record.", mixed[1], mixed.join("\n"))
+        assertFalse(mixed.join("\n").contains("grand_total"), mixed.join("\n"))
     }
 
     @Test
@@ -555,20 +567,20 @@ class RunNotificationVoiceTests {
         assertEquals(RunNotificationVoice.MAX_RULE_LINES, rows.size(), lines.join("\n"))
         assertEquals("Rule 1 Mismatch: 19", rows.first())
         assertTrue(lines.contains("+2 more rules: 21 mismatches"), lines.join("\n"))
-        assertTrue(lines.contains("Other mismatches: 4"), lines.join("\n"))
+        assertTrue(lines.contains("Field mismatches: 4"), lines.join("\n"))
     }
 
     @Test
     void noOtherLineWhenEveryMismatchHasARule() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 3) +
                 [mismatchFields: [ruleTally("Transaction Sync", "a = b", 3)]])
-        assertFalse(lines.join("\n").contains("Other mismatches"), lines.join("\n"))
+        assertFalse(lines.join("\n").contains("Field mismatches"), lines.join("\n"))
     }
 
     @Test
     void mismatchLineIsBareWhenTheRunDidNotSayWhichField() {
         List<String> lines = RunNotificationVoice.renderLines(shapeModel(0, 0, 8))
-        assertTrue(lines.contains("Mismatches: 8"), lines.join("\n"))
+        assertTrue(lines.contains("Field mismatches: 8"), lines.join("\n"))
         assertTrue(RunNotificationVoice.VALUE_DRIFT_DIAGNOSES.contains(lines[1]), lines.join("\n"))
     }
 
@@ -637,7 +649,7 @@ class RunNotificationVoiceTests {
             String text = RunNotificationVoice.renderLines(model).join("\n")
             assertTrue(text.contains("Missing from OMS: 1"), text)
             assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
-            assertTrue(text.contains("Mismatches: 2"), text)
+            assertTrue(text.contains("Field mismatches: 2"), text)
         }
     }
 

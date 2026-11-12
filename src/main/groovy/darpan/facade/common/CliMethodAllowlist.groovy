@@ -35,6 +35,9 @@ class CliMethodAllowlist {
             "facade.AuditFacadeServices.get#Audits",
             "facade.AuditFacadeServices.retry#AuditCheck",
             "facade.AuditFacadeServices.run#Audit",
+            // DAR-CLI-004: the audit page's Re-check, a run starter like retry#AuditCheck (tenant write access, reads by key,
+            // updates only the finding ledger); `darpan findings recheck`.
+            "facade.AuditFacadeServices.verify#AuditFinding",
 
             "facade.AuthFacadeServices.get#SessionInfo",
 
@@ -208,7 +211,6 @@ class CliMethodAllowlist {
             "facade.AuditFacadeServices.create#Audit",
             "facade.AuditFacadeServices.save#AuditCheck",
             "facade.AuditFacadeServices.save#AuditSettings",
-            "facade.AuditFacadeServices.verify#AuditFinding",
 
             "facade.AuthFacadeServices.change#ExpiredPassword",
             "facade.AuthFacadeServices.change#OwnPassword",

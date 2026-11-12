@@ -89,9 +89,11 @@ Release date: 2026-11-12 (tagged; not deployed)
 - **Contract 4.** `list#`/`save#HotWaxOmsRestSourceConfig` no longer take or return `ordersPath` and `returnsPageSize`.
   No Darpan client sends them.
 - **Before deploying, set `DARPAN_APP_BASE_URL` on prod and confirm SMTP on EmailServer `SYSTEM`.** DAR-BE-207 turns the
-  audit run email on for every audit of every tenant; without the base URL its links are relative.
-- **The embedded agent stays off** unless `DARPAN_AGENT_ENABLED=true`, `ANTHROPIC_API_KEY` is in the container env, the
-  tenant has `agentEnabled=Y`, and the user holds a live AI access grant with a spend limit (DAR-BE-194).
+  audit run email on for every audit of every tenant; without the base URL its links are left out (the code has no
+  default).
+- **The embedded agent stays off** unless `DARPAN_AGENT_ENABLED=true`, the tenant has `agentEnabled=Y`, and the user holds a
+  live AI access grant with a spend limit (DAR-BE-194). From darpan-agent v0.1.1 it reaches Claude by workload identity
+  federation, not `ANTHROPIC_API_KEY` (see the hotfix section).
 - **Two new scheduled jobs run unpaused**: `scan_TenantScriptDeployments_5m` (due script deployments) and
   `snapshot_PendingTenantConfigs_1m` (a config version per tenant whose audit config changed and went quiet).
 - **Four data migrations** (ledgered, idempotent, dry run supported): `OMS_REST_RETIRED` (80, darpan-hotwax),
@@ -141,3 +143,17 @@ Release date: 2026-11-12 (tagged; not deployed)
 - Migrations do not reverse: findings stay open or fixed, and each audit keeps the one schedule `AUDIT_SCHEDULE_OWNED`
   gave it. How 2.1.12 schedules migrated audits is not verified; check before rolling back past a migration run.
 - Upgrade-data rows stay; 2.1.12 has none of the new entities and does not read them.
+
+## Hotfixes on the 3.0 line (2026-11-12)
+
+Folded into the one 3.0 story (public `updates.mdx` section and the `v3.0.0` GitHub release page); no separate pages.
+
+| Repo | Tag | Content |
+| --- | --- | --- |
+| `drpn-ai/darpan-ui` | `v4.0.1` (`4a90e1f`) | DAR-UI-110: Execute submits once while the uploads are still being read; the run-page spec unmounts its pages (CI-only leak). |
+| `drpn-ai/darpan-agent` | `v0.1.1` (`aac9706`) | DAR-BE-244: with no key, the agent authenticates by AWS workload identity federation (AWS SDK `sts` 2.58.0, URLConnection client). |
+| `drpn-ai/darpan-docker-config` | `v3.0.1` (`82bea6a`) | `DARPAN_AGENT_REF=v0.1.1`; prod template carries the federation ids and `ANTHROPIC_IDENTITY_TOKEN_FILE`; `AgentEnabled` parameter (kill switch via `deploy.sh --set AgentEnabled=false`). |
+
+darpan itself stays `v3.0.0`. Prod: image `prod-v3.0.1-202611120856-82bea6a`, agent on for every tenant, first token exchange
+proven from the task (CloudTrail `GetWebIdentityToken` by the task role, 2026-11-12 09:19:57Z). darpan-agent has no CI;
+its proof is the focused tests (`WorkloadIdentityFederationTests` 7/7) and the live mint.

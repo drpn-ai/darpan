@@ -44,6 +44,20 @@ class AuditRunFactsTests {
         assertEquals(["shopify-vs-netsuite"], (facts.rules as List<Map>).find { it.id == "R9" }.checksNotRun)
     }
 
+    // DAR-BE-250: statements follow the order's story, so the update lists rules and groups by each statement's step.
+    @Test
+    void rulesAndGroupsFollowTheStatementsStepsWhenTheReportGivesThem() {
+        Map stepped = report()
+        Map statements = [:]
+        stepped.categories.each { k, cat -> statements.putAll(cat.statements as Map) }
+        statements.R10.step = 40
+        statements.R2.step = 80
+        statements.R9.step = 120
+        Map facts = AuditRunFacts.build(stepped, units()) { String rule, String cause, String id -> "" }
+        assertEquals(["R10", "R2", "R9"], (facts.rules as List<Map>)*.id, "R10 is step 4 of the story, R2 step 8")
+        assertEquals("R10", (facts.groups as List<Map>)[0].rule)
+    }
+
     @Test
     void csvEscapesAsRfc4180AndNeverHandsASpreadsheetAFormula() {
         assertEquals('"a,b"', AuditRunFacts.csvField("a,b"))

@@ -23,6 +23,8 @@ class AuditRunFacts {
         Map tenant = (head.tenant ?: [:]) as Map
         Map audit = (head.audit ?: [:]) as Map
         Map summary = (report?.summary ?: [:]) as Map
+        // DAR-BE-250: rules in the order's story (each statement's step), then by number.
+        Map<String, Long> stepOf = statements(report).collectEntries { Map st -> [(st.id as String): st.step == null ? null : (st.step as Long)] }
         List<Map> rules = statements(report).collect { Map st ->
             Map counts = (st.counts ?: [:]) as Map
             [id          : st.id,
@@ -31,7 +33,7 @@ class AuditRunFacts {
              newToday    : count(counts.newToday),
              fixedToday  : count(counts.fixedToday),
              checksNotRun: ((st.checks ?: []) as List<Map>).findAll { it.status == "notRun" }*.id]
-        }.sort(false) { Map a, Map b -> ruleOrder(a.id as String, b.id as String) }
+        }.sort(false) { Map a, Map b -> stepOrder(stepOf, a.id as String, b.id as String) }
 
         Map<String, Map> byKey = new LinkedHashMap<>()
         (units ?: []).each { Map unit ->
@@ -54,7 +56,7 @@ class AuditRunFacts {
              fixText: stripPlaceholders(fixTextOf?.call(g.rule as String, g.cause as String, g.sample as String)),
              ids    : n < IDS_BELOW ? new ArrayList<String>(g.ids as Set) : []]
         }.sort(false) { Map a, Map b ->
-            ruleOrder(a.rule as String, b.rule as String) ?: (b.count as int) <=> (a.count as int) ?:
+            stepOrder(stepOf, a.rule as String, b.rule as String) ?: (b.count as int) <=> (a.count as int) ?:
                     ((a.cause ?: "") as String) <=> ((b.cause ?: "") as String)
         }
 
@@ -131,6 +133,12 @@ class AuditRunFacts {
     }
 
     /** R2 before R10; a code without a number after every numbered one. */
+    /** DAR-BE-250. By the statements' steps (none last), then ruleOrder. */
+    static int stepOrder(Map<String, Long> stepOf, String a, String b) {
+        Long sa = stepOf?.get(a), sb = stepOf?.get(b)
+        return (sa ?: Long.MAX_VALUE) <=> (sb ?: Long.MAX_VALUE) ?: ruleOrder(a, b)
+    }
+
     static int ruleOrder(String a, String b) {
         return ruleNumber(a) <=> ruleNumber(b) ?: (a ?: "") <=> (b ?: "")
     }

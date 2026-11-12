@@ -129,6 +129,15 @@ class AuditReportAssembler {
 
         Map<String, Map> statementJsonById = [:]
         Map<String, String> statementCodeById = statements.collectEntries { [(it.statementId): it.statementCode] }
+        // DAR-UI-075. One finding per order: every line's records name its order, so the order's lines are one unit,
+        // counted and capped as one. The ledger stays per line, so each line still opens and closes on its own.
+        // DAR-BE-250. Earliest step wins: an order broken at several steps counts once, at the earliest; the later
+        // steps' units wait on it and are listed under it, not counted. Every statement's records are read up front.
+        Map<String, Map> recordsByFinding = recordsFor(ec, tenantId, ledger*.row*.findingId as List<String>)
+        Map<String, List<Map>> entriesByStatement = statements.collectEntries { Map st ->
+            [(st.statementId as String): sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])] }
+        Map<String, Map> split = stepUnits(statements, entriesByStatement, recordsByFinding)
+        Set<String> waitingIds = split.values().collectMany { ((it.waiting ?: []) as List<Map>).collectMany { (it.entries as List<Map>)*.row*.findingId } } as Set<String>
         statements.each { Map st ->
             List<String> stChecks = checkIdsByStatement[st.statementId as String]
             List<Map> checkJson = stChecks.collect { String checkId ->
@@ -153,24 +162,28 @@ class AuditReportAssembler {
                         bad.collect { "${checksById[it].checkCode}: ${checkReason[it]}" }.join(" ")
             }
 
-            List<Map> entries = sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])
-            // DAR-UI-075. One finding per order: every line's records name its order, so the order's lines are one unit,
-            // counted and capped as one. The ledger stays per line, so each line still opens and closes on its own.
-            Map<String, Map> recordsByFinding = recordsFor(ec, tenantId, entries*.row*.findingId as List<String>)
-            List<Map> units = orderUnits(entries, recordsByFinding)
+            Map stSplit = split[st.statementId as String]
+            List<Map> units = stSplit.counted as List<Map>
             Map counts = countsOf(units, day)
             List<Map> listed = units.take(FINDINGS_CAP)
-            Map<String, Map> causes = conclusionsOf(ec, listed*.entries.flatten()*.row*.conclusionEnumId as List<String>)
+            List<Map> shown = listed + listed.collectMany { ((it.waitingUnits ?: []) as List<Map>) }
+            Map<String, Map> causes = conclusionsOf(ec, shown*.entries.flatten()*.row*.conclusionEnumId as List<String>)
             statementJsonById[st.statementId as String] = [
                     id             : st.statementCode,
+                    // DAR-BE-250: the statement's place in the order's story (sequenceNum); the earliest broken step wins.
+                    step           : st.sequenceNum == null ? null : (st.sequenceNum as Long),
                     text           : st.statementText,
                     weight         : codes[st.weightEnumId as String],
                     status         : codes[worst],
                     reason         : reason,
                     checks         : checkJson,
                     counts         : counts,
-                    findings       : listed.collect { Map unit -> unitFinding(unit, day, recordsByFinding, causes, codes) },
-                    findingsOmitted: units.size() - listed.size()]
+                    findings       : listed.collect { Map unit ->
+                        unitFinding(unit, day, recordsByFinding, causes, codes) +
+                                (unit.waitingUnits ? [waiting: waitingJson(unit, day, recordsByFinding, causes, codes, statementCodeById)] : [:]) },
+                    findingsOmitted: units.size() - listed.size(),
+                    // DAR-BE-250: this statement's findings on orders an earlier step already reports; listed there.
+                    waiting        : (stSplit.waiting as List).size()]
         }
 
         Map<String, Object> categoryJson = new LinkedHashMap<>()
@@ -183,7 +196,7 @@ class AuditReportAssembler {
             byCategory[cat.enumCode as String] = counts
         }
 
-        Map oldest = ledger.findAll { it.state == OPEN }.with { sortOldestFirst(it) }.find()
+        Map oldest = ledger.findAll { it.state == OPEN && !waitingIds.contains(it.row.findingId as String) }.with { sortOldestFirst(it) }.find()
         Map summary = sumCounts(byCategory.values() as List) + [
                 oldestOpen: oldest == null ? null : [
                         id        : oldest.row.findingId,
@@ -369,6 +382,52 @@ class AuditReportAssembler {
         }
     }
 
+    /**
+     * DAR-BE-250. Earliest step wins: each statement's order units (statements in story order, sequenceNum then code),
+     * split into those it counts and those waiting on an earlier step of the same order (OrderWorlds). A unit waits when
+     * every one of its lines does. Each waiting unit is hung, with its statement, on the first open unit its order world
+     * counts (the earliest step's), as waitingUnits. Returns statementId -> [counted: units, waiting: units].
+     */
+    static Map<String, Map> stepUnits(List<Map> statements, Map<String, List<Map>> entriesByStatement, Map<String, Map> recordsByFinding) {
+        Map<String, Long> step = statements.collectEntries { [(it.statementId as String): it.sequenceNum == null ? null : (it.sequenceNum as Long)] }
+        List<Map> all = statements.collectMany { (entriesByStatement[it.statementId as String] ?: []) as List<Map> } as List<Map>
+        Map<String, Map> worlds = OrderWorlds.rank(all, recordsByFinding, step)
+        Map<String, Map> out = new LinkedHashMap<>()
+        Map<String, Map> holderByWorld = [:]
+        statements.each { Map st ->
+            List<Map> counted = [], waiting = []
+            orderUnits((entriesByStatement[st.statementId as String] ?: []) as List<Map>, recordsByFinding).each { Map unit ->
+                List<Map> lines = unit.entries as List<Map>
+                Map first = worlds[lines[0].row.findingId as String]
+                unit.world = first?.world
+                if (lines.every { worlds[it.row.findingId as String]?.waitingOn != null }) {
+                    unit.waitingOn = first.waitingOn
+                    waiting << unit
+                } else {
+                    counted << unit
+                    if (unit.state == OPEN && unit.world != null && !holderByWorld.containsKey(unit.world)) holderByWorld[unit.world as String] = unit
+                }
+            }
+            out[st.statementId as String] = [counted: counted, waiting: waiting]
+        }
+        out.each { String statementId, Map split ->
+            (split.waiting as List<Map>).each { Map unit ->
+                Map holder = holderByWorld[unit.world as String]
+                if (holder != null) ((List) (holder.waitingUnits = holder.waitingUnits ?: [])) << (unit + [statementId: statementId])
+            }
+        }
+        return out
+    }
+
+    /** DAR-BE-250. The findings waiting on a counted one, as it lists them: each with its statement, id, headline and cause. */
+    private static List<Map> waitingJson(Map unit, LocalDate day, Map<String, Map> recordsByFinding, Map<String, Map> causes,
+                                         Map<String, String> codes, Map<String, String> statementCodeById) {
+        return ((unit.waitingUnits ?: []) as List<Map>).collect { Map w ->
+            Map f = unitFinding(w, day, recordsByFinding, causes, codes)
+            [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause]
+        }
+    }
+
     /** Each conclusion's words and, when it is held by another line's cause (relatedEnumId), that cause. */
     private static Map<String, Map> conclusionsOf(def ec, List<String> ids) {
         List<String> wanted = (ids ?: []).findAll() .unique() as List<String>
@@ -491,22 +550,29 @@ class AuditReportAssembler {
      */
     static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period) {
         Map<String, String> codes = enumCodes(ec)
+        // DAR-BE-250: every active statement is read, even for one statement's list, to know which orders an earlier
+        // step already reports; only the asked statement's counted findings are returned, each with those waiting on it.
         List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.getMap()
-                .findAll { (it.isActive ?: "Y") != "N" && (!statementCode || it.statementCode == statementCode) }
+                .findAll { (it.isActive ?: "Y") != "N" }
                 .sort(false) { Map a, Map b ->
                     ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
                             (a.statementCode as String) <=> (b.statementCode as String)
                 }
+        Map<String, String> statementCodeById = statements.collectEntries { [(it.statementId as String): it.statementCode as String] }
         LocalDate today = LocalDate.now((loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId)
-        return statements.collectMany { Map st ->
+        Map<String, List<Map>> entriesByStatement = statements.collectEntries { Map st ->
             def find = tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("statementId", st.statementId)
                     .condition("stateEnumId", OPEN)
             if (period) find.condition("period", period)
-            List<Map> entries = sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })
-            Map<String, Map> records = recordsFor(ec, tenantId, entries*.row*.findingId as List<String>)
-            Map<String, Map> causes = conclusionsOf(ec, entries*.row*.conclusionEnumId as List<String>)
-            orderUnits(entries, records).collect { Map unit ->
-                unitFinding(unit, today, records, causes, codes) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]]
+            [(st.statementId as String): sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })]
+        }
+        Map<String, Map> records = recordsFor(ec, tenantId, entriesByStatement.values().flatten()*.row*.findingId as List<String>)
+        Map<String, Map> causes = conclusionsOf(ec, entriesByStatement.values().flatten()*.row*.conclusionEnumId as List<String>)
+        Map<String, Map> split = stepUnits(statements, entriesByStatement, records)
+        return statements.findAll { !statementCode || it.statementCode == statementCode }.collectMany { Map st ->
+            (split[st.statementId as String].counted as List<Map>).collect { Map unit ->
+                unitFinding(unit, today, records, causes, codes) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]] +
+                        (unit.waitingUnits ? [waiting: waitingJson(unit, today, records, causes, codes, statementCodeById)] : [:])
             }
         } as List<Map>
     }

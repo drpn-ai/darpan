@@ -37,6 +37,7 @@
       "statements": {
         "R2": {
           "id": "R2",
+          "step": 2,
           "text": "Every invoice and credit memo carries the Shopify order id (the Etail id).",
           "weight": "firm",
           "status": "ran",
@@ -60,7 +61,8 @@
               "next": "darpan findings show F-20790"
             }
           ],
-          "findingsOmitted": 0
+          "findingsOmitted": 0,
+          "waiting": 0
         }
       }
     },
@@ -70,6 +72,7 @@
       "statements": {
         "R4": {
           "id": "R4",
+          "step": 4,
           "text": "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open.",
           "weight": "derived",
           "status": "ran",
@@ -94,10 +97,12 @@
               "next": "darpan findings show F-20761"
             }
           ],
-          "findingsOmitted": 0
+          "findingsOmitted": 0,
+          "waiting": 0
         },
         "R5": {
           "id": "R5",
+          "step": 5,
           "text": "Store credit given in Shopify is in NetSuite at the same amount.",
           "weight": "firm",
           "status": "notRun",
@@ -105,7 +110,8 @@
           "checks": [],
           "counts": { "open": 0, "newToday": 0, "fixedToday": 0 },
           "findings": [],
-          "findingsOmitted": 0
+          "findingsOmitted": 0,
+          "waiting": 0
         }
       }
     },

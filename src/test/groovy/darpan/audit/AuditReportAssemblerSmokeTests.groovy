@@ -334,6 +334,60 @@ class AuditReportAssemblerSmokeTests {
         assertEquals(null, ((r4?.findings ?: []) as List<Map>).find()?.kind)
     }
 
+    // DAR-BE-250 (Aditi 2026-11-12: "earliest step wins"). gorjana's M1210830: R10 (step 4) has its exchange's open line in
+    // HotWax's brokering queue, and R1 (step 8) cannot bill its other line because of it. One order, reported once, at
+    // step 4; R1's finding waits on it, listed under it, not counted. An unrelated R1 order still counts.
+    @Test
+    void anOrderBrokenAtTwoStepsCountsOnceAtTheEarliest() {
+        audit(TRUN, "TREP_T_STORY", "story", "Story", "AUDP_MONTH")
+        statement(TRUN, "TREP_T_STORY", "TREP_S4", "S4", "AUDC_ORDERS", "AUDSW_FIRM", 40, "Every order line open in NetSuite is at a facility that can fulfil it.")
+        statement(TRUN, "TREP_T_STORY", "TREP_S8", "S8", "AUDC_ORDERS", "AUDSW_FIRM", 80, "Every line HotWax completes is shipped and invoiced in NetSuite.")
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_C4", companyUserGroupId: TRUN, checkCode: "story-open-lines", label: "open lines"])
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_C8", companyUserGroupId: TRUN, checkCode: "story-completed", label: "completed"])
+        link(TRUN, "TREP_C4", "TREP_S4", 1)
+        link(TRUN, "TREP_C8", "TREP_S8", 1)
+        Closure<List> recordFindings = { String checkId, List findings ->
+            List ids = ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: TRUN, checkId: checkId,
+                    reportDate: Date.valueOf("2026-10-22"), checkStamp: at("2026-10-22", "07:30:00"), findings: findings]).call().findingIds as List
+            noErrors()
+            return ids
+        }
+        List s4 = recordFindings("TREP_C4", [[statementCode: "S4", recordKey: "SO7371002/01", headline: "Line M1210830/01 is open in NetSuite and not at a facility",
+                records: [[systemEnumId: "NETSUITE_SUITEQL", recordType: "salesOrderLine", recordId: "SO7371002", internalId: "81531855"],
+                          [systemEnumId: "OMS_RETURNS_GQL", recordType: "order", recordId: "EXC-#GOR197136981-1", internalId: "M1210830"]]]])
+        List s8 = recordFindings("TREP_C8", [
+                [statementCode: "S8", recordKey: "M1210830/02", headline: "Item M1210830/02 is completed in HotWax and not billed in NetSuite",
+                 records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: "M1210830/02",
+                            recordData: JsonOutput.toJson([omsOrderName: "EXC-#GOR197136981-1"])],
+                           [systemEnumId: "NETSUITE_SUITEQL", recordType: "salesOrderLine", recordId: "SO7371002", internalId: "81531855"]]],
+                [statementCode: "S8", recordKey: "M9/01", headline: "Item M9/01 is completed in HotWax and not billed in NetSuite",
+                 records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: "M9/01"]]]])
+
+        Map doc = report(TRUN, "TREP_T_STORY", "2026-10-22")
+        Map statements = (Map) doc.categories.orders.statements
+        assertEquals([4L * 10, 8L * 10], [statements.S4.step, statements.S8.step]*.toLong())
+        assertEquals([open: 1, newToday: 1, fixedToday: 0], statements.S4.counts, "the order counts at its earliest step")
+        assertEquals([open: 1, newToday: 1, fixedToday: 0], statements.S8.counts, "only M9 counts at step 8")
+        assertEquals([0, 1], [statements.S4.waiting, statements.S8.waiting])
+        assertEquals(["M9"], (statements.S8.findings as List<Map>)*.id)
+        assertEquals([[statement: "S8", id: "M1210830", cause: null]],
+                ((statements.S4.findings[0].waiting) as List<Map>).collect { it.subMap(["statement", "id", "cause"]) })
+        assertEquals(2, doc.summary.open, "two broken orders, not three findings")
+        assertEquals(s4[0], doc.summary.oldestOpen.id)
+
+        ec.artifactExecution.disableAuthz()
+        try {
+            List<Map> all = AuditReportAssembler.findingsByOrder(ec, TRUN, "TREP_T_STORY", null, "2026-10")
+            assertEquals([["S4", "SO7371002", ["S8"]], ["S8", "M9", []]],
+                    all.collect { [it.statement, it.id, ((it.waiting ?: []) as List<Map>)*.statement] })
+            assertEquals(["M9"], AuditReportAssembler.findingsByOrder(ec, TRUN, "TREP_T_STORY", "S8", "2026-10")*.id,
+                    "one statement's list leaves out what waits on an earlier step")
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+        assertEquals(2, s8.size())
+    }
+
     // ---- the finding ---------------------------------------------------------------------------------------------
 
     @Test

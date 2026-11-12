@@ -105,6 +105,9 @@ class AuditRunFactsTests {
         assertTrue(html.contains("M201 #GOR201, M202 #GOR202"), "ids under 25 listed")
         assertTrue(html.contains("No cause named yet"), "Unexplained reads as no cause yet")
         assertFalse(html.contains("font-weight"), "no bold")
+        List<String> hues = (html =~ /#[0-9a-fA-F]{6}\b/).collect { it as String }.findAll { String c -> c[1..2] != c[3..4] || c[3..4] != c[5..6] }
+        assertTrue(hues.isEmpty(), "the email wears the app's monochrome light theme, greys only: ${hues.unique()}".toString())
+        assertTrue(html.contains("'IBM Plex Mono'"), "the app's typeface")
         assertTrue(html.contains("R9 did not run on this morning."))
 
         String written = AuditRunMessage.emailHtml(facts, [headline: "Mostly payments.", fixes: [("R10|" + RMA): "Credit each return."]], BASE)

@@ -9,11 +9,19 @@ import java.time.format.TextStyle
  * ({headline, fixes {"R10|cause": sentence}}; empty when no writer answered). Layout follows the reference design in the
  * wrapper's tools/audit-message/render.py: the email carries every detail, the chat card a summary and the link only
  * (Aditi, 2026-11-10). Inline styles for mail clients; no bold anywhere. Pure.
+ *
+ * The email wears the app's light theme (Aditi, 2026-11-12: "keep the white mode ... in the theme of the app design
+ * system"): darpan-ui style.css :root[data-theme='light'] tokens, IBM Plex Mono at one weight, greys only, hierarchy
+ * from 1px borders (solid ink = needs attention, dashed = empty). The chat card keeps Google Chat's own colours.
  */
 class AuditRunMessage {
-    static final String RED = "#b3261e", AMBER = "#9a6700", GREEN = "#1e7e34", MUTED = "#5f6368", INK = "#202124"
-    private static final String F = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"
-    private static final String MONO = "font-family:SFMono-Regular,Menlo,Consolas,monospace;"
+    /** Chat card colours (Google Chat renders these in its own UI). */
+    static final String RED = "#b3261e", AMBER = "#9a6700", GREEN = "#1e7e34"
+    /** Email: darpan-ui light theme, --text, --text-soft, --text-muted, --text-dim, --border, --border-soft, --surface-2, --accent. */
+    private static final String INK = "#141414", SOFT = "#383838", MUTED = "#5f5f5f", DIM = "#7f7f7f",
+                                LINE = "#d4d4d4", LINE_SOFT = "#e1e1e1", TILE = "#f5f5f5", ACCENT = "#1c1c1c"
+    private static final String F = "font-family:'IBM Plex Mono',SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;"
+    private static final String LINK = "color:${INK};text-decoration:underline;text-decoration-color:${LINE};text-underline-offset:3px;"
     private static final String NO_CAUSE = "No cause named yet"
 
     /** "Gorjana Month close, 1–10 November: 42 open findings". */
@@ -78,15 +86,16 @@ class AuditRunMessage {
         StringBuilder rows = new StringBuilder()
         rules(facts).each { Map r ->
             int open = r.open as int
-            rows << "<tr><td style=\"${F}padding:8px 0;border-top:1px solid #eceef1;font-size:13px;color:${MUTED};width:44px;\">${esc(r.id)}</td>" <<
-                    "<td style=\"${F}padding:8px 8px;border-top:1px solid #eceef1;font-size:14px;color:${open ? INK : MUTED};\">${esc(firstSentence(r.text as String))}</td>" <<
-                    "<td style=\"${F}padding:8px 0;border-top:1px solid #eceef1;font-size:14px;text-align:right;white-space:nowrap;color:${open ? RED : GREEN};\">" <<
+            String cell = "${F}padding:9px 0;border-top:1px solid ${LINE_SOFT};vertical-align:top;"
+            rows << "<tr><td style=\"${cell}font-size:12px;color:${MUTED};width:44px;\">${esc(r.id)}</td>" <<
+                    "<td style=\"${cell}padding-right:12px;font-size:13px;line-height:1.55;color:${open ? INK : DIM};\">${esc(firstSentence(r.text as String))}</td>" <<
+                    "<td style=\"${cell}font-size:13px;text-align:right;white-space:nowrap;color:${open ? INK : DIM};\">" <<
                     "${open ? open + ' open' : 'clean'}</td></tr>"
         }
         StringBuilder act = new StringBuilder()
         actOnFirst(facts).each { Map g ->
-            act << "<tr><td style=\"${F}padding:6px 10px 6px 0;font-size:20px;color:${RED};width:56px;vertical-align:top;\">${g.count}</td>" <<
-                    "<td style=\"${F}padding:6px 0;font-size:14px;color:${INK};vertical-align:top;\">${esc(cause(g))}" <<
+            act << "<tr><td style=\"${F}padding:9px 12px 9px 0;border-top:1px solid ${LINE_SOFT};font-size:20px;line-height:1.2;color:${INK};width:56px;vertical-align:top;\">${g.count}</td>" <<
+                    "<td style=\"${F}padding:9px 0;border-top:1px solid ${LINE_SOFT};font-size:13px;line-height:1.55;color:${INK};vertical-align:top;\">${esc(cause(g))}" <<
                     "<div style=\"font-size:12px;color:${MUTED};\">${esc(g.rule)}</div></td></tr>"
         }
         StringBuilder blocks = new StringBuilder()
@@ -94,43 +103,47 @@ class AuditRunMessage {
             StringBuilder items = new StringBuilder()
             groups(facts).findAll { it.rule == r.id }.each { Map g ->
                 String fix = fixLine(g, words)
-                String ids = g.ids ? "<div style=\"${MONO}font-size:12px;color:${MUTED};margin-top:6px;line-height:1.6;\">${esc((g.ids as List).join(', '))}</div>" : ""
-                String fx = fix ? "<div style=\"${F}font-size:13px;color:${MUTED};margin-top:2px;\">${esc(fix)}</div>" : ""
-                items << "<tr><td style=\"${F}padding:10px 12px 10px 0;font-size:18px;color:${INK};width:48px;vertical-align:top;\">${g.count}</td>" <<
-                        "<td style=\"${F}padding:10px 0;border-top:1px solid #eceef1;vertical-align:top;\">" <<
-                        "<div style=\"font-size:14px;color:${INK};\">${esc(cause(g))}</div>${fx}${ids}</td></tr>"
+                String ids = g.ids ? "<div style=\"${F}font-size:12px;color:${DIM};margin-top:6px;line-height:1.6;\">${esc((g.ids as List).join(', '))}</div>" : ""
+                String fx = fix ? "<div style=\"${F}font-size:12px;line-height:1.55;color:${MUTED};margin-top:2px;\">${esc(fix)}</div>" : ""
+                items << "<tr><td style=\"${F}padding:10px 12px 10px 0;border-top:1px solid ${LINE_SOFT};font-size:16px;line-height:1.3;color:${INK};width:48px;vertical-align:top;\">${g.count}</td>" <<
+                        "<td style=\"${F}padding:10px 0;border-top:1px solid ${LINE_SOFT};vertical-align:top;\">" <<
+                        "<div style=\"font-size:13px;line-height:1.55;color:${INK};\">${esc(cause(g))}</div>${fx}${ids}</td></tr>"
             }
             String ruleUrl = reportUrl(base, facts, r.id as String)
-            String link = ruleUrl ? " · <a href=\"${esc(ruleUrl)}\" style=\"color:#1a73e8;text-decoration:none;\">open ${esc(r.id)} in Darpan</a>" : ""
-            blocks << "<div style=\"margin-top:28px;\">" <<
-                    "<div style=\"${F}font-size:12px;color:${MUTED};letter-spacing:.04em;\">${esc(r.id)} · ${r.open} OPEN · ${r.newToday} NEW</div>" <<
-                    "<div style=\"${F}font-size:16px;color:${INK};margin:2px 0 8px;\">${esc(firstSentence(r.text as String))}</div>" <<
+            String link = ruleUrl ? " · <a href=\"${esc(ruleUrl)}\" style=\"${LINK}\">open ${esc(r.id)} in Darpan</a>" : ""
+            blocks << "<div style=\"margin-top:20px;padding:16px 18px;border:1px solid ${LINE};border-radius:10px;\">" <<
+                    eyebrow("${esc(r.id)} · ${r.open} OPEN · ${r.newToday} NEW", 0) <<
+                    "<div style=\"${F}font-size:15px;line-height:1.45;letter-spacing:-.01em;color:${INK};margin:4px 0 10px;\">${esc(firstSentence(r.text as String))}</div>" <<
                     "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;\">${items}</table>" <<
-                    "<div style=\"${F}font-size:12px;color:${MUTED};margin-top:8px;\">All ${r.open} in <span style=\"${MONO}\">${esc(csvName(facts, r.id as String))}</span>${link}</div></div>"
+                    "<div style=\"${F}font-size:12px;color:${MUTED};margin-top:10px;padding-top:10px;border-top:1px dashed ${LINE};\">All ${r.open} in ${esc(csvName(facts, r.id as String))}${link}</div></div>"
         }
-        String headline = words?.headline ? "<p style=\"${F}font-size:15px;line-height:1.5;color:${INK};margin:20px 0 0;\">${esc(words.headline as String)}</p>" : ""
+        String headline = words?.headline ? "<p style=\"${F}font-size:14px;line-height:1.6;color:${SOFT};margin:18px 0 0;\">${esc(words.headline as String)}</p>" : ""
         List<String> notRun = rulesNotRun(facts)
-        String warn = notRun ? "<p style=\"${F}font-size:13px;color:${AMBER};margin:12px 0 0;\">${esc(notRun.join(', '))} did not run on this morning.</p>" : ""
-        String actSection = act ? "<div style=\"${F}font-size:12px;color:${MUTED};letter-spacing:.04em;margin-top:24px;\">ACT ON FIRST</div>" +
-                "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin-top:6px;\">${act}</table>" : ""
-        String button = url ? "<div style=\"margin-top:28px;\"><a href=\"${esc(url)}\" style=\"${F}display:inline-block;background:#1a73e8;color:#fff;" +
-                "font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none;\">Open the report in Darpan</a></div>" : ""
-        return """<!doctype html><html><head><meta charset="utf-8"><title>${esc(subject(facts))}</title></head>
-<body style="margin:0;background:#eef0f3;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0f3;padding:24px 12px;"><tr><td align="center">
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#ffffff;border-radius:14px;"><tr><td style="padding:28px 28px 32px;">
-<div style="${F}font-size:12px;color:${MUTED};letter-spacing:.04em;">DARPAN AUDIT</div>
-<div style="${F}font-size:22px;color:${INK};margin-top:4px;">${esc(title(facts))}</div>
-<div style="${F}font-size:14px;color:${MUTED};margin-top:2px;">${esc(subtitle(facts))}</div>
+        String warn = notRun ? "<p style=\"${F}font-size:13px;line-height:1.5;color:${INK};margin:14px 0 0;padding:10px 12px;border:1px solid ${INK};border-radius:8px;\">" +
+                "${esc(notRun.join(', '))} did not run on this morning.</p>" : ""
+        String actSection = act ? eyebrow("ACT ON FIRST", 28) +
+                "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin-top:8px;border-collapse:collapse;\">${act}</table>" : ""
+        String button = url ? "<div style=\"margin-top:28px;\"><a href=\"${esc(url)}\" style=\"${F}display:inline-block;background:${ACCENT};color:#ffffff;" +
+                "border:1px solid ${ACCENT};font-size:13px;padding:11px 20px;border-radius:8px;text-decoration:none;\">Open the report in Darpan</a></div>" : ""
+        return """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&amp;display=swap" rel="stylesheet">
+<title>${esc(subject(facts))}</title></head>
+<body style="margin:0;background:${TILE};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${TILE};padding:28px 12px;"><tr><td align="center">
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid ${LINE};border-radius:10px;"><tr><td style="padding:28px 28px 30px;">
+${eyebrow("DARPAN · AUDIT", 0)}
+<div style="${F}font-size:20px;line-height:1.35;letter-spacing:-.015em;color:${INK};margin-top:8px;">${esc(title(facts))}</div>
+<div style="${F}font-size:13px;color:${MUTED};margin-top:4px;">${esc(subtitle(facts))}</div>
 ${headline}${warn}
-<table role="presentation" cellpadding="0" cellspacing="8" style="width:100%;margin:16px -8px 0;border-collapse:separate;"><tr>
-${tile("Open", t.open, RED)}${tile("New", t.newToday, INK)}${tile("Fixed", t.fixedToday, GREEN)}</tr></table>
+<table role="presentation" cellpadding="0" cellspacing="8" style="width:100%;margin:18px -8px 0;border-collapse:separate;"><tr>
+${tile("Open", t.open, true)}${tile("New", t.newToday, false)}${tile("Fixed", t.fixedToday, false)}</tr></table>
 ${actSection}
-<div style="${F}font-size:12px;color:${MUTED};letter-spacing:.04em;margin-top:24px;">RULES</div>
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-top:6px;border-collapse:collapse;">${rows}</table>
+${eyebrow("RULES", 28)}
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-top:8px;border-collapse:collapse;">${rows}</table>
 ${blocks}
 ${button}
-<p style="${F}font-size:12px;color:${MUTED};margin:24px 0 0;line-height:1.5;">Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns).</p>
+<p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns).</p>
 </td></tr></table></td></tr></table></body></html>""".toString()
     }
 
@@ -203,10 +216,18 @@ ${button}
         return (text ?: "").split(/\. /)[0].replaceAll(/\.$/, "")
     }
 
-    private static String tile(String label, Object value, String color) {
-        return "<td style=\"padding:14px 16px;background:#f6f7f9;border-radius:10px;width:33%;\">" +
-                "<div style=\"${F}font-size:12px;color:${MUTED};letter-spacing:.02em;\">${label}</div>" +
-                "<div style=\"${F}font-size:28px;color:${color};margin-top:2px;\">${value}</div></td>"
+    /** The app's summary tile: a zero reads as empty (dashed, dim); a count that needs acting on gets the ink border. */
+    private static String tile(String label, Object value, boolean attention) {
+        boolean empty = (value ?: 0) as int == 0
+        String border = empty ? "1px dashed ${LINE}" : attention ? "1px solid ${INK}" : "1px solid ${LINE}"
+        return "<td style=\"padding:14px 16px;background:${empty ? '#ffffff' : TILE};border:${border};border-radius:8px;width:33%;\">" +
+                "<div style=\"${F}font-size:11px;color:${MUTED};letter-spacing:.06em;text-transform:uppercase;\">${label}</div>" +
+                "<div style=\"${F}font-size:26px;line-height:1.2;letter-spacing:-.015em;color:${empty ? DIM : INK};margin-top:4px;\">${value}</div></td>"
+    }
+
+    /** The app's eyebrow label: small, muted, widely tracked caps. */
+    private static String eyebrow(String text, int marginTop) {
+        return "<div style=\"${F}font-size:11px;color:${MUTED};letter-spacing:.13em;text-transform:uppercase;margin-top:${marginTop}px;\">${text}</div>"
     }
 
     private static String enc(String value) { return URLEncoder.encode(value ?: "", "UTF-8") }

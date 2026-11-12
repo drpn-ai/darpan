@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*
  * writes every check's automation) and add#AuditStatement, each kept as a config version; their backtest is NOT_APPLICABLE.
  * DAR-BE-221. ADD_CHECK does the same through save#AuditCheck: the new check's automation joins the audit's schedule, and
  * revert pauses and removes it.
+ * DAR-BE-242. STATEMENT_EDIT rewords a statement or turns it on or off through save#AuditSettings, and revert puts both back.
  * Tenants and rows are synthetic.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -219,6 +220,63 @@ class AuditSetupLeverSmokeTests {
         assertEquals("REVERTED", proposal(p.proposalId).status)
     }
 
+    // ------------------------------------------------------------------ STATEMENT_EDIT
+
+    @Test
+    void "a statement is reworded and turned off, and revert puts both back"() {
+        Map was = statementRow("R1")
+        String reworded = "${was.statementText} within a week".toString()
+        try {
+            Map p = propose("STATEMENT_EDIT", [auditId: "month-close", statementCode: "R1"], [text: reworded, active: false])
+            assertFalse(p.hadError as boolean, p.errorText as String)
+            assertEquals("PLANNED", p.status, p.statusMessage as String)
+            assertEquals("NOT_APPLICABLE", p.backtest.reason, "on/off counts from the next run, not landed data")
+            assertEquals(was.statementText, statementRow("R1").statementText, "planning writes nothing")
+            Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
+            Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
+            assertFalse(out.hadError as boolean, out.errorText as String)
+            assertEquals("APPLIED", out.status)
+            Map now = statementRow("R1")
+            assertEquals(reworded, now.statementText)
+            assertEquals("N", now.isActive)
+            assertEquals("R2 text", statementRow("R2").statementText, "only the named statement moves")
+            assertEquals("Y", statementRow("R2").isActive)
+
+            Map r = call("revert#AuditChange", [proposalId: p.proposalId])
+            assertFalse(r.hadError as boolean, r.errorText as String)
+            assertEquals("PLANNED", r.status, r.statusMessage as String)
+            Map back = call("apply#AuditChange", [proposalId: r.newProposalId, planHash: r.planHash])
+            assertFalse(back.hadError as boolean, back.errorText as String)
+            now = statementRow("R1")
+            assertEquals(was.statementText, now.statementText)
+            assertEquals((was.isActive ?: "Y") != "N", (now.isActive ?: "Y") != "N")
+            assertEquals("REVERTED", proposal(p.proposalId).status)
+        } finally {
+            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one()
+                    .setAll([statementText: was.statementText, isActive: was.isActive]).update() }
+        }
+    }
+
+    @Test
+    void "wording alone is display only, and no change or another statement's text is refused"() {
+        Map r1 = statementRow("R1"), r2 = statementRow("R2")
+        Map target = [auditId: "month-close", statementCode: "R1"]
+        Map p = propose("STATEMENT_EDIT", target, [text: "${r1.statementText} today".toString()])
+        assertEquals("PLANNED", p.status, p.statusMessage as String)
+        assertEquals("DISPLAY_ONLY", p.backtest.reason)
+        assertEquals(r1.statementText, statementRow("R1").statementText, "a draft writes nothing")
+
+        Map same = propose("STATEMENT_EDIT", target, [text: r1.statementText, active: true])
+        assertEquals("INVALID", same.status)
+        assertEquals(AuditChangeLevers.NO_CHANGE_STATEMENT_EDIT_MESSAGE, same.statusMessage)
+        Map dup = propose("STATEMENT_EDIT", target, [text: r2.statementText])
+        assertEquals("INVALID", dup.status)
+        assertEquals(AuditChangeLevers.DUPLICATE_STATEMENT_TEXT_MESSAGE, dup.statusMessage)
+        Map missing = propose("STATEMENT_EDIT", [auditId: "month-close", statementCode: "R9"], [active: false])
+        assertEquals("INVALID", missing.status, "a statement the audit does not have")
+        assertTrue(propose("STATEMENT_EDIT", target, [:]).hadError as boolean, "off the contract: neither text nor active")
+    }
+
     // ------------------------------------------------------------------ ADD_CHECK
 
     @Test
@@ -311,9 +369,14 @@ class AuditSetupLeverSmokeTests {
             Map out = this.call("apply#AuditChange", [proposalId: p.proposalId, planHash: "x"])
             assertTrue(out.hadError as boolean, "an invalid proposal is not applied")
         }
+        Map edit = this.call("create#AuditChangeProposal", [conversationId: CONV_OTHER, kind: "STATEMENT_EDIT",
+                target: [auditId: AUDIT_ID, statementCode: "R1"], after: [active: false], reasonText: "test"])
+        assertEquals("INVALID", edit.status, "STATEMENT_EDIT")
+        assertTrue((edit.statusMessage as String).contains("not found"), edit.statusMessage as String)
         actAs(MINE)
         assertEquals(["0 0 6 * * ?", "0 0 6 * * ?"], automationField("scheduleExpr"))
         assertEquals(["R1", "R2"], statementCodes())
+        assertNotEquals("N", statementRow("R1").isActive, "the other tenant's draft turned nothing off")
         assertEquals(["check-1", "check-2"], checkCodes())
     }
 
@@ -353,6 +416,13 @@ class AuditSetupLeverSmokeTests {
         return asSystem {
             ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("savedRunId", runIds[2]).useCache(false).list()
         } as List
+    }
+
+    private Map statementRow(String code) {
+        return asSystem {
+            ec.entity.find("darpan.audit.AuditStatement").condition("auditId", AUDIT_ID).condition("statementCode", code)
+                    .useCache(false).list().find()?.getMap()
+        } as Map
     }
 
     private List<String> statementCodes() {

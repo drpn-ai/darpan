@@ -87,6 +87,9 @@ class AuditChangeBacktest {
                 case "AUDIT_SETTINGS":
                 case "ADD_STATEMENT":
                 case "ADD_CHECK": return unsupported("NOT_APPLICABLE")
+                // DAR-BE-242: new wording moves nothing; a statement switched on or off counts from its next run, not landed data.
+                case "STATEMENT_EDIT": return statementOnOffChanged(ec, target, merged, current) ? unsupported("NOT_APPLICABLE")
+                        : result(true, "DISPLAY_ONLY", null, [], [], 0, [])
                 default: return unsupported("UNKNOWN_KIND")
             }
         } catch (Exception e) {
@@ -496,6 +499,12 @@ class AuditChangeBacktest {
 
     private static String basisId(List<Map> bases) {
         return bases*.executionId.collect { it as String }.join(",")
+    }
+
+    private static boolean statementOnOffChanged(def ec, Map target, Map merged, Map current) {
+        Map was = current ?: AuditChangeLevers.current(ec, "STATEMENT_EDIT", target)
+        Closure<Object> activeIn = { Map state -> ((List<Map>) (state?.statements ?: [])).find { Map st -> st.id == target.statementCode }?.active }
+        return activeIn(was) != activeIn(merged)
     }
 
     private static Map unsupported(String reason) {

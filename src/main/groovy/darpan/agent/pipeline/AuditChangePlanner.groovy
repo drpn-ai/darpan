@@ -312,6 +312,7 @@ class AuditChangePlanner {
             case "AUDIT_SETTINGS": return "the audit's schedule"
             case "ADD_STATEMENT": return "the audit's statements"
             case "ADD_CHECK": return "the audit's checks"
+            case "STATEMENT_EDIT": return "the statement's wording or on/off"
             case "FIX_TEXT": return "the conclusion's fix text"
             default: return "the run's conclusion rows"
         }

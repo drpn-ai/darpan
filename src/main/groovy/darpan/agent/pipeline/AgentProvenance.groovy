@@ -36,6 +36,8 @@ class AgentProvenance {
             if (after.get("fieldLabel") != null) freeTextIds(out, after.get("fieldLabel").toString())
         } else if (kind == "ADD_STATEMENT") {
             freeTextIds(out, (String) after.get("text"))
+        } else if (kind == "STATEMENT_EDIT") {
+            if (after.get("text") != null) freeTextIds(out, (String) after.get("text"))
         } else if (kind == "ADD_CHECK") {
             out.add((String) after.get("savedRunId")); out.add((String) after.get("statementCode"))
             freeTextIds(out, (String) after.get("label"))
@@ -120,6 +122,14 @@ class AgentProvenance {
                 str(after, "text", true, "after"); str(after, "category", true, "after"); str(after, "weight", false, "after")
                 freeText(after, "text", "after")
                 canon(after, ["category", "weight"], "after")
+                break
+            case "STATEMENT_EDIT":
+                // DAR-BE-242: new wording, on/off, or both.
+                keys(after, ["text", "active"], "after")
+                str(after, "text", false, "after")
+                if (after.get("text") != null) freeText(after, "text", "after")
+                if (after.get("active") != null && !(after.get("active") instanceof Boolean)) throw new IllegalArgumentException("after.active must be true or false")
+                if (after.get("text") == null && after.get("active") == null) throw new IllegalArgumentException("after needs a text or active")
                 break
             case "ADD_CHECK":
                 keys(after, ["label", "savedRunId", "statementCode", "diffTypes"], "after")

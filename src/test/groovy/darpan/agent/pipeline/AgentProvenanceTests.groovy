@@ -98,6 +98,16 @@ class AgentProvenanceTests {
     }
 
     @Test
+    void "STATEMENT_EDIT takes new wording, on or off, or both, and an id in the wording needs provenance"() {
+        assertEquals([] as Set, AgentProvenance.identifiersOf("STATEMENT_EDIT", [active: false]))
+        assertEquals(["5"] as Set, AgentProvenance.identifiersOf("STATEMENT_EDIT", [text: "Refunded returns are received within 5 days"]))
+        assertEquals("PASS", AgentProvenance.check("STATEMENT_EDIT", [text: "Received within 5 days"], ["say within 5 days"], [:], [] as Set).status)
+        assertThrows(IllegalArgumentException) { AgentProvenance.identifiersOf("STATEMENT_EDIT", [:]) }
+        assertThrows(IllegalArgumentException) { AgentProvenance.identifiersOf("STATEMENT_EDIT", [active: "N"]) }
+        assertThrows(IllegalArgumentException) { AgentProvenance.identifiersOf("STATEMENT_EDIT", [text: "x", category: "returns"]) }
+    }
+
+    @Test
     void "an unknown kind fails closed"() {
         assertThrows(IllegalArgumentException) { AgentProvenance.identifiersOf("NOPE", [:]) }
         assertThrows(IllegalArgumentException) { AgentProvenance.check("NOPE", [:], [], [:], [] as Set) }

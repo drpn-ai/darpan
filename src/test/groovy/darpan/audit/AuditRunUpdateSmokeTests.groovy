@@ -264,7 +264,7 @@ class AuditRunUpdateSmokeTests {
 
     @Test
     void withoutTheOptionalWriterThereAreNoWordsAndTheHookAsksOnlyForAnAuditRun() {
-        assertFalse(ec.service.isServiceDefined(AuditRunUpdateSupport.WORDS_SERVICE), "darpan-agent is not installed here")
+        // darpan-agent may be installed beside core here; the agent is off in tests, so either way there are no words.
         assertEquals([:], AuditRunUpdateSupport.words(ec, GORJANA, [:]))
 
         List<Map> asked = []

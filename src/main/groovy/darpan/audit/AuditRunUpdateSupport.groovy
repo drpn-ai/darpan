@@ -167,7 +167,10 @@ class AuditRunUpdateSupport {
                 ec.message.clearErrors()
                 return [:]
             }
-            return [headline: normalize(out?.headline), fixes: out?.fixes instanceof Map ? out.fixes : [:]]
+            String headline = normalize(out?.headline)
+            Map fixes = out?.fixes instanceof Map ? out.fixes as Map : [:]
+            // The writer answers nothing when the agent is off for the tenant: the same as no writer installed.
+            return headline || fixes ? [headline: headline, fixes: fixes] : [:]
         } catch (Throwable t) {
             ec.message.clearErrors()
             logger.warn("Audit run update: the writer failed: {}", t.message)

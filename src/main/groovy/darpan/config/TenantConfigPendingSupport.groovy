@@ -22,18 +22,30 @@ class TenantConfigPendingSupport {
     static final long BACK_OFF_MILLIS = 15L * 60L * 1000L
     static final int VERSION_TIMEOUT_SECONDS = 300
 
-    /** Marks the tenant pending: creates its row, or moves its last change forward and counts one more save. */
+    /** One lock per tenant: two saves that commit together mark it from two worker threads at once. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object> MARK_LOCKS = new java.util.concurrent.ConcurrentHashMap<>()
+
+    /**
+     * Marks the tenant pending: creates its row, or moves its last change forward and counts one more save. Two marks of
+     * one tenant take turns, each read and write committed before the next reads, so neither creates the row twice nor
+     * overwrites the other's count (one server runs the workers).
+     */
     static void markPending(def ec, String tenantId, String userId, Timestamp at = null) {
         if (!tenantId) return
         Timestamp now = at ?: ec.user.nowTimestamp
-        def row = ec.entity.find(ENTITY).condition("companyUserGroupId", tenantId).useCache(false).one()
-        if (row == null) {
-            ec.entity.makeValue(ENTITY).setAll([companyUserGroupId: tenantId, firstChangeDate: now, lastChangeDate: now,
-                    lastChangedByUserId: userId, changeCount: 1L]).create()
-        } else {
-            row.setAll([lastChangeDate: now, lastChangedByUserId: userId ?: row.lastChangedByUserId,
-                        changeCount: ((row.changeCount ?: 0L) as Long) + 1L])
-            row.update()
+        Object lock = MARK_LOCKS.computeIfAbsent(tenantId) { new Object() }
+        synchronized (lock) {
+            ec.transaction.runRequireNew(null, "Could not mark tenant ${tenantId}'s config pending") {
+                def row = ec.entity.find(ENTITY).condition("companyUserGroupId", tenantId).useCache(false).one()
+                if (row == null) {
+                    ec.entity.makeValue(ENTITY).setAll([companyUserGroupId: tenantId, firstChangeDate: now, lastChangeDate: now,
+                            lastChangedByUserId: userId, changeCount: 1L]).create()
+                } else {
+                    row.setAll([lastChangeDate: now, lastChangedByUserId: userId ?: row.lastChangedByUserId,
+                                changeCount: ((row.changeCount ?: 0L) as Long) + 1L])
+                    row.update()
+                }
+            }
         }
     }
 

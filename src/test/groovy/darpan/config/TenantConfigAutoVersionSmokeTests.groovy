@@ -61,11 +61,6 @@ class TenantConfigAutoVersionSmokeTests {
 
     @AfterAll
     void cleanup() {
-        // The async marks this class sets off can still be running; Moqui's shutdown then races them while it stores its
-        // artifact stats (an NPE in ExecutionContextFactoryImpl.destroy). Let the worker pool go idle first.
-        def pool = ((org.moqui.impl.context.ExecutionContextFactoryImpl) ec.factory).workerPool
-        long until = System.currentTimeMillis() + 10_000L
-        while ((pool.activeCount > 0 || !pool.queue.isEmpty()) && System.currentTimeMillis() < until) sleep(100)
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -162,6 +157,36 @@ class TenantConfigAutoVersionSmokeTests {
             }
         }
         assertNotNull(waitForPending(MINE), "a query column marks the query's tenant")
+    }
+
+    // Two saves of one tenant that commit together mark it from two worker threads at once. Each must count: before, both
+    // found no row, both created one, and the second failed on the duplicate key and lost its change.
+    @Test
+    void savesThatCommitTogetherAllCount() {
+        int n = 8
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1)
+        List<Throwable> failures = Collections.synchronizedList([])
+        List<String> errors = Collections.synchronizedList([])
+        List<Thread> threads = (1..n).collect { int i ->
+            Thread.start {
+                ExecutionContext tec = ec.factory.getExecutionContext()
+                try {
+                    tec.artifactExecution.disableAuthz()
+                    start.await()
+                    darpan.config.TenantConfigPendingSupport.markPending(tec, OTHER, USER)
+                    if (tec.message.hasError()) errors << tec.message.errorsString
+                } catch (Throwable t) {
+                    failures << t
+                } finally {
+                    tec.destroy()
+                }
+            }
+        }
+        start.countDown()
+        threads*.join(30_000L)
+        assertTrue(failures.isEmpty(), "no mark may fail: ${failures*.toString()}")
+        assertTrue(errors.isEmpty(), "no mark may report an error: ${errors}")
+        assertEquals(n as Long, pendingOf(OTHER)?.changeCount as Long, "every save is counted")
     }
 
     @Test

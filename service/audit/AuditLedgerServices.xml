@@ -89,8 +89,37 @@
                     <econdition field-name="recordKey" from="f.recordKey"/>
                 </entity-find>
                 <set field="eventTypeEnumId" from="null"/>
+                <!-- DAR-BE-254. A check moved to another statement keeps its findings: an open one it left under a statement
+                     it no longer tests is the same problem, so it moves here with its history (RAILS 2026-11-12: the ship
+                     group check moved R8 -> R10 and every order showed twice). If this statement already holds one, the
+                     left-behind copy closes, saying where it went. -->
+                <entity-find entity-name="darpan.audit.AuditFinding" list="leftBehind" for-update="true">
+                    <econdition field-name="companyUserGroupId"/>
+                    <econdition field-name="checkId"/>
+                    <econdition field-name="period"/>
+                    <econdition field-name="recordKey" from="f.recordKey"/>
+                    <econdition field-name="stateEnumId" value="AUDFS_OPEN"/>
+                    <econdition field-name="statementId" operator="not-in" from="statementIdByCode.values()"/>
+                </entity-find>
+                <if condition="!existingList &amp;&amp; leftBehind">
+                    <set field="existingList" from="[leftBehind[0]]"/>
+                    <set field="leftBehind" from="leftBehind.size() > 1 ? leftBehind[1..-1] : []"/>
+                </if>
+                <iterate list="leftBehind" entry="moved">
+                    <set field="moved.stateEnumId" value="AUDFS_FIXED"/>
+                    <set field="moved.diagnosisText" from="'Moved to ' + f.statementCode + ' with its check; reported there.'"/>
+                    <set field="moved.closedStamp" from="checkStamp"/>
+                    <set field="moved.closedByTypeEnumId" value="AUDAT_CHECK"/>
+                    <set field="moved.closedById" from="checkId"/>
+                    <set field="moved.lastCheckedStamp" from="checkStamp"/>
+                    <entity-update value-field="moved"/>
+                    <service-call name="audit.AuditLedgerServices.create#FindingEvent"
+                            in-map="[companyUserGroupId:companyUserGroupId, findingId:moved.findingId, checkId:checkId,
+                                     eventTypeEnumId:'AUDFE_FIXED', eventStamp:checkStamp, eventDate:reportDate]"/>
+                </iterate>
                 <if condition="existingList">
                     <set field="finding" from="existingList[0]"/>
+                    <set field="finding.statementId" from="statementId"/>
                     <if condition="finding.stateEnumId == 'AUDFS_FIXED'">
                         <set field="eventTypeEnumId" value="AUDFE_REOPENED"/>
                         <set field="reopenedCount" from="reopenedCount + 1"/>

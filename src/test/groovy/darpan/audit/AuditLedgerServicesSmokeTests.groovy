@@ -226,6 +226,35 @@ class AuditLedgerServicesSmokeTests {
         assertEquals("160.22 vs 160.23", checks[1].checkValue)
     }
 
+    // DAR-BE-254 (RAILS 2026-11-12: the ship-group check moved R8 -> R10 and every order showed under both). A check moved to
+    // another statement takes its open finding with it; a copy already opened there closes the one left behind.
+    @Test
+    void aCheckMovedToAnotherStatementTakesItsOpenFindingWithIt() {
+        insert("darpan.audit.AuditCheck", [checkId: "TLED_MOVE", companyUserGroupId: GORJANA, checkCode: "moves", label: "moves"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TLED_MOVE", statementId: "TLED_R1", companyUserGroupId: GORJANA])
+        String moved = (record("TLED_MOVE", "2026-10-07", [finding("R1", "MOVE-1")]).findingIds as List)[0]
+        String leftBehind = (record("TLED_MOVE", "2026-10-07", [finding("R1", "MOVE-2")]).findingIds as List)[0]
+        // MOVE-2 already has a copy under R4, as prod had (opened after the move, before this change): made while the
+        // check still tested both statements, then the check leaves R1.
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TLED_MOVE", statementId: "TLED_R4", companyUserGroupId: GORJANA])
+        String copy = (record("TLED_MOVE", "2026-10-08", [finding("R4", "MOVE-2")]).findingIds as List)[0]
+        assertTrue(copy != leftBehind, "set-up: the copy under R4 is its own finding")
+        ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", "TLED_MOVE").condition("statementId", "TLED_R1")
+                .disableAuthz().deleteAll()
+
+        Map out = record("TLED_MOVE", "2026-10-09", [finding("R4", "MOVE-1"), finding("R4", "MOVE-2")])
+
+        assertEquals([moved, copy], out.findingIds, "MOVE-1 keeps its finding, now under R4; MOVE-2 keeps the R4 copy")
+        assertEquals(0, out.foundCount, "nothing is opened twice")
+        assertEquals("TLED_R4", row(moved).statementId)
+        assertEquals("AUDFS_OPEN", row(moved).stateEnumId)
+        assertEquals(Date.valueOf("2026-10-07"), row(moved).firstFoundDate, "its history moves with it")
+        assertEquals("AUDFS_FIXED", row(leftBehind).stateEnumId, "the copy left under R1 closes")
+        assertEquals("Moved to R4 with its check; reported there.", row(leftBehind).diagnosisText)
+        assertEquals(1L, ec.entity.find("darpan.audit.AuditFinding").condition("recordKey", "MOVE-2")
+                .condition("stateEnumId", "AUDFS_OPEN").count(), "one open finding per problem")
+    }
+
     @Test
     void oneRecordBreakingTwoStatementsIsTwoFindings() {
         Map out = record(CHECK, "2026-10-07", [finding("R4", "TWO-1"), finding("R9", "TWO-1")])

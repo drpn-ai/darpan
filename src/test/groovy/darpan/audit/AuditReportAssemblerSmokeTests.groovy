@@ -916,4 +916,16 @@ class AuditReportAssemblerSmokeTests {
         assertEquals(line, document.NetSuite.salesOrderLine[0].data)
         assertFalse(report.Shopify.order[0].containsKey("data"))
     }
+
+    // DAR-BE-254 (Aditi on RAILS #1028236: "it says R4 here.. shouldnt it be the SKU"): what a waiting finding is about.
+    @Test
+    void aWaitingFindingIsNamedByItsItem() {
+        Map item = [records: [OMS: [orderItem: [[id: "165068/02", sku: "889C-369B-82848284:S"]]], NetSuite: [salesOrderLine: [[id: "SO8453628"]]]]]
+        assertEquals("889C-369B-82848284:S", AuditReportAssembler.itemOf(item))
+        Map threeSkus = [records: [OMS: [orderItem: [[sku: "A"], [sku: "B"], [sku: "C"], [sku: "A"]]]]]
+        assertEquals("A, B and 1 more", AuditReportAssembler.itemOf(threeSkus))
+        assertEquals("M1/01, M1/02", AuditReportAssembler.itemOf([records: [:], lines: [[id: "M1/01"], [id: "M1/02"]]]),
+                "no SKU on the records: its lines")
+        assertNull(AuditReportAssembler.itemOf([records: [NetSuite: [salesOrder: [[id: "SO8450832"]]]]]), "an order-level finding names no item")
+    }
 }

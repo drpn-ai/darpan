@@ -424,8 +424,23 @@ class AuditReportAssembler {
                                          Map<String, String> codes, Map<String, String> statementCodeById) {
         return ((unit.waitingUnits ?: []) as List<Map>).collect { Map w ->
             Map f = unitFinding(w, day, recordsByFinding, causes, codes)
-            [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause]
+            [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause, item: itemOf(f)]
         }
+    }
+
+    /**
+     * DAR-BE-254. What a finding is about, for a row that names it in a word (Aditi: "it says R4 here.. shouldnt it be the
+     * SKU"): its records' SKUs (up to two, then "and N more"), else its line ids, else null (an order-level finding).
+     */
+    static String itemOf(Map finding) {
+        List<Map> recs = []
+        (((finding?.records ?: [:]) as Map).values()).each { Object byType ->
+            ((byType ?: [:]) as Map).values().each { Object list -> recs.addAll(((list ?: []) as List).findAll { it instanceof Map } as List<Map>) }
+        }
+        List<String> skus = recs.collect { it.sku as String }.findAll().unique()
+        List<String> picked = skus ?: ((finding?.lines ?: []) as List<Map>).collect { it.id as String }.findAll().unique()
+        if (!picked) return null
+        return picked.size() <= 2 ? picked.join(', ') : "${picked.take(2).join(', ')} and ${picked.size() - 2} more".toString()
     }
 
     /** Each conclusion's words and, when it is held by another line's cause (relatedEnumId), that cause. */

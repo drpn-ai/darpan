@@ -44,7 +44,9 @@ class ApiContractGenerator {
      */
     // 3 (1.5.0): list#TenantChatSpaces dropped the out-field chatSpaces[].googleChatWebhookUrlMasked
     //            when chat webhooks moved to clear text; googleChatWebhookUrl replaces it.
-    static final int CONTRACT_VERSION = 3
+    // 4 (3.0.0): list#/save#HotWaxOmsRestSourceConfig dropped ordersPath and returnsPageSize
+    //            (OMS reads are GraphQL only, DAR-BE-052).
+    static final int CONTRACT_VERSION = 4
 
     static final Map<String, Map<String, Object>> SCALAR_TYPES = [
             String    : [type: "string"],

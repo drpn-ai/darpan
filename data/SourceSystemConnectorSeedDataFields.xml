@@ -41,6 +41,9 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].salesChannelEnumId"
             label="Sales channel" fieldType="string" sequenceNum="12"
             description="DAR-BE-153: NOT in keepFieldsBase; selected only when a filter or rule reads it. On the Order type since the 2026-10-28 moqui-gql upgrade; Steve Madden's daily order run excludes POS_SALES_CHANNEL on it."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].itemQuantity"
+            label="Item quantity" fieldType="string" sequenceNum="13"
+            description="DAR-BE-251: the order's units, its item rows' quantities summed (HotWax keeps one row per unit), read from the items by order id only when a rule reads it. Compared against Shopify itemQuantity (Item Sync: itemQuantity = itemQuantity); orderItemCount is a copy of Shopify's line count, not this."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
             label="Has payment" fieldType="string" sequenceNum="8"
             description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (hasPaymentTransaction requires hasPaymentPreference, DAR-BE-126)."/>
@@ -123,6 +126,8 @@
             label="Payment IDs" fieldType="String" sequenceNum="10" description="DAR-BE-153: comma-joined ids of the SUCCESS SALE and CAPTURE transactions, and of a SUCCESS AUTHORIZATION nothing captured; the ids HotWax keeps on its OPPs as manualRefNum."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].transactionIds"
             label="All transaction IDs" fieldType="String" sequenceNum="11" description="DAR-BE-153: comma-joined ids of every SUCCESS transaction on the order, any kind (authorization, capture, sale, void, refund). Each HotWax OPP manualRefNum must be among them (paymentRefNums all in transactionIds); extra Shopify ids are fine."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].itemQuantity"
+            label="Item quantity" fieldType="String" sequenceNum="12" description="DAR-BE-251: units ordered (Order.subtotalLineItemsQuantity, the sum of line quantities as ordered, before refunds or removals). Compared against HotWax itemQuantity (Item Sync: itemQuantity = itemQuantity)."/>
 
     <!-- Shopify return references (DAR-BE-018 task 9; 2026-08-17 returns-refund-grain-alignment plan,
          Task 2, REVISION 2026-08-18). Derived from the EMITTED record shape pinned at

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Candidate release-scoped upgrade data for Darpan 3.0.3.
+Generated from backend compare range: v3.0.2..HEAD
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Review each record before loading into an environment.
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Added records from data/SourceSystemConnectorSeedDataFields.xml -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].itemQuantity" label="Item quantity" fieldType="string" sequenceNum="13" description="DAR-BE-251: the order's units, its item rows' quantities summed (HotWax keeps one row per unit), read from the items by order id only when a rule reads it. Compared against Shopify itemQuantity (Item Sync: itemQuantity = itemQuantity); orderItemCount is a copy of Shopify's line count, not this."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].itemQuantity" label="Item quantity" fieldType="String" sequenceNum="12" description="DAR-BE-251: units ordered (Order.subtotalLineItemsQuantity, the sum of line quantities as ordered, before refunds or removals). Compared against HotWax itemQuantity (Item Sync: itemQuantity = itemQuantity)."/>
+</entity-facade-xml>

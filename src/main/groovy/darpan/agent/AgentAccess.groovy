@@ -37,6 +37,10 @@ class AgentAccess {
      * thruDate is reached; PAUSED when paused, or when spend is at or over the limit (before the pause is written); else LIVE.
      */
     static Map access(def ec, String tenantId, String userId) {
+        // DAR-BE-246 (Aditi 2026-11-12): a Darpan admin has AI access in every tenant without a grant, and no per-user limit; the
+        // tenant switch, its daily budget and the hourly turn limit still apply.
+        if (tenantId && isSuperAdminUser(ec, userId))
+            return [state: LIVE, grantId: null, fromDate: null, thruDate: null, capMicros: null, spentMicros: 0L, pauseReason: null]
         def g = (tenantId && userId) ? currentGrant(ec, tenantId, userId) : null
         if (g == null) return [state: NOT_GRANTED, grantId: null, fromDate: null, thruDate: null, capMicros: null, spentMicros: 0L, pauseReason: null]
         long spent = spentMicros(ec, g.grantId as String)
@@ -141,6 +145,7 @@ class AgentAccess {
      */
     static Map adminCreate(def ec, String userId, String tenantId, Timestamp fromDate, Timestamp thruDate, Integer days, BigDecimal costCapUsd) {
         Timestamp now = ec.user.nowTimestamp
+        if (isSuperAdminUser(ec, userId)) { ec.message.addError("User ${userId} is a Darpan admin, with AI access in every tenant; there is nothing to grant.".toString()); return null }
         if (!isMember(ec, tenantId, userId)) { ec.message.addError("User ${userId} is not a member of tenant ${tenantId}.".toString()); return null }
         Timestamp from = fromDate ?: now
         Map end = windowEnd(ec, from, thruDate, days, false)
@@ -265,15 +270,19 @@ class AgentAccess {
         return micros == null ? null : new BigDecimal(micros).divide(new BigDecimal(1_000_000), 4, RoundingMode.HALF_UP).toPlainString()
     }
 
-    /** A member of the tenant, or a super admin (who enters every tenant without a membership row). */
+    /** A member of the tenant by a membership row. */
     private static boolean isMember(def ec, String tenantId, String userId) {
-        Timestamp now = ec.user.nowTimestamp
-        if (ec.entity.find(darpan.facade.common.TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
-                .condition("tenantUserGroupId", tenantId).condition("userId", userId).conditionDate("fromDate", "thruDate", now)
-                .useCache(false).count() > 0) return true
-        return ec.entity.find("moqui.security.UserGroupMember").condition("userId", userId)
+        return ec.entity.find(darpan.facade.common.TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
+                .condition("tenantUserGroupId", tenantId).condition("userId", userId).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .useCache(false).count() > 0
+    }
+
+    /** The user is in a super-admin group (ADMIN, DARPAN_SUPER_ADMIN) now; named by userId, never read from the signed-in user. */
+    static boolean isSuperAdminUser(def ec, String userId) {
+        if (!userId) return false
+        return ec.entity.find("moqui.security.UserGroupMember").disableAuthz().condition("userId", userId)
                 .condition("userGroupId", EntityCondition.IN, darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS)
-                .conditionDate("fromDate", "thruDate", now).useCache(false).count() > 0
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).useCache(false).count() > 0
     }
 
     /** The grant, unless missing or revoked (both an error). */

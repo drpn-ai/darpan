@@ -88,6 +88,34 @@ class AgentAccessSmokeTests {
     }
 
     @Test
+    void "a Darpan admin is LIVE in every tenant with no grant and no limit, even beside a paused one"() {
+        // DAR-BE-246. Read outside asSystem, as the agent reads it for the signed-in person.
+        String admin = "AAS_ADMIN"
+        asSystem {
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_SUPER_ADMIN", description: "Darpan super admin"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: admin, username: "aas.admin", disabled: "N"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_SUPER_ADMIN", userId: admin, fromDate: inHours(-1)]).createOrUpdate()
+        }
+        try {
+            [ALPHA, BETA].each { String t ->
+                Map a = AgentAccess.access(ec, t, admin)
+                assertEquals([AgentAccess.LIVE, null, null], [a.state, a.grantId, a.capMicros], "tenant ${t}")
+            }
+            grant("G_ADMIN_PAUSED", ALPHA, admin, [statusId: "PAUSED", pauseReason: "ADMIN"])
+            assertEquals(AgentAccess.LIVE, AgentAccess.access(ec, ALPHA, admin).state, "a leftover grant does not limit an admin")
+            asSystem { ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).updateAll([thruDate: now()]) }
+            assertEquals(AgentAccess.PAUSED, AgentAccess.access(ec, ALPHA, admin).state, "an ended membership falls back to the grant")
+            assertEquals(AgentAccess.NOT_GRANTED, AgentAccess.access(ec, ALPHA, ANN).state, "a plain user still needs a grant")
+        } finally {
+            asSystem {
+                ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).deleteAll()
+                ec.entity.find("darpan.agent.AgentAccessGrant").condition("userId", admin).deleteAll()
+                ec.entity.find("moqui.security.UserAccount").condition("userId", admin).deleteAll()
+            }
+        }
+    }
+
+    @Test
     void "a grant whose thruDate has passed is EXPIRED"() {
         grant("G_OLD", ALPHA, ANN, [fromDate: inHours(-48), thruDate: inHours(-24)])
         Map a = AgentAccess.access(ec, ALPHA, ANN)

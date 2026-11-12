@@ -178,11 +178,13 @@ class AgentAccessAdminSmokeTests {
     }
 
     @Test
-    void "a Darpan admin can be granted in a tenant they reach only as super admin"() {
-        // A super admin enters every tenant without a membership row (TenantAccessSupport.listAvailableTenants); the spec has
-        // admins need a grant too, so they must be grantable.
-        Map g = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: SUPER_ID, tenantUserGroupId: ALPHA, days: 1]).grant
-        assertEquals([SUPER_ID, ALPHA, AgentAccess.LIVE], [g.userId, g.tenantUserGroupId, g.state])
+    void "a Darpan admin is not granted: they have AI access in every tenant already"() {
+        // DAR-BE-246: a super admin is LIVE everywhere without a grant (AgentAccess.access), so a grant would only be a second limit.
+        Map h = admin("create#AgentAccessGrant", [costCapUsd: 5, userId: SUPER_ID, tenantUserGroupId: ALPHA, days: 1])
+        assertTrue(h.hasError as boolean, "a Darpan admin is refused a grant")
+        assertTrue((h.errors as String).contains("Darpan admin"), "the refusal says why: ${h.errors}")
+        assertEquals(0L, grantCount(), "nothing written")
+        assertEquals(AgentAccess.LIVE, asSystem { AgentAccess.access(ec, ALPHA, SUPER_ID) }.state)
         assertTrue(admin("create#AgentAccessGrant", [costCapUsd: 5, userId: OUTSIDER, tenantUserGroupId: ALPHA]).hasError as boolean, "a plain non-member is still refused")
     }
 

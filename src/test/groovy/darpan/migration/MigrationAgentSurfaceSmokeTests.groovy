@@ -128,7 +128,7 @@ class MigrationAgentSurfaceSmokeTests {
         Map<String, Object> sweep = ec.service.sync()
                 .name("migration.MigrationServices.run#PendingMigrations")
                 .parameters([:]).disableAuthz().call()
-        assertEquals(9, sweep.appliedCount, "a parked migration must not run in the sweep")
+        assertEquals(10, sweep.appliedCount, "a parked migration must not run in the sweep")
 
         Map<String, Object> targeted = ec.service.sync()
                 .name("migration.MigrationServices.run#Migration")

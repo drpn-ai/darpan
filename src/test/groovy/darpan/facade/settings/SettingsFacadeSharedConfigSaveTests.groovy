@@ -267,6 +267,63 @@ class SettingsFacadeSharedConfigSaveTests {
                 (List<String>) otherAccount.errors)
     }
 
+    /** DAR-BE-258: the account is kept on the auth config, so removing its endpoints does not reopen it; an unreadable
+     *  token URL refuses rather than lets anything through. */
+    @Test
+    void theAccountStaysOnTheAuthConfigWhenItsEndpointsGo() {
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "DETACH_AUTH"], [
+                nsAuthConfigId: "DETACH_AUTH", companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, authType: "BASIC",
+                username: "u", password: "stored-password", isActive: "Y"])
+        Map<String, Object> endpoint = [description: "Detach", httpMethod: "POST", nsAuthConfigId: "DETACH_AUTH", headersJson: "{}"]
+
+        Map<String, Object> first = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", endpoint + [endpointUrl: "https://5555555.app.netsuite.com/r"])
+        assertTrue((Boolean) first.ok, first.errors?.toString())
+        assertEquals("5555555", findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "DETACH_AUTH"]).netsuiteAccount, "the first endpoint sets the account")
+
+        ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsAuthConfigId", "DETACH_AUTH").disableAuthz().deleteAll()
+        ec.message.clearErrors()
+        Map<String, Object> afterDelete = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", endpoint + [endpointUrl: "https://6666666.app.netsuite.com/r"])
+        assertEquals(["This endpoint must stay on NetSuite account 5555555, the account its auth config uses. Use an auth config for account 6666666 instead."],
+                (List<String>) afterDelete.errors, "deleting every endpoint must not reset the account")
+
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "BAD_TOKEN_AUTH"], [
+                nsAuthConfigId: "BAD_TOKEN_AUTH", companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, authType: "OAUTH2_M2M_JWT",
+                tokenUrl: "not a url", clientId: "client", certId: "cert", privateKeyPem: "stored-key", isActive: "Y"])
+        ec.message.clearErrors()
+        Map<String, Object> badToken = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", endpoint + [
+                nsAuthConfigId: "BAD_TOKEN_AUTH", endpointUrl: "https://5555555.app.netsuite.com/r"])
+        assertEquals(["The auth config's token URL names no NetSuite account. Fix its token URL first."], (List<String>) badToken.errors)
+    }
+
+    /** DAR-BE-258: NS_AUTH_ACCOUNTS fills the account from the token URL, else the oldest endpoint; dry run writes nothing;
+     *  a second run finds nothing. */
+    @Test
+    void theNsAuthAccountsMigrationStoresEachAuthConfigsAccount() {
+        Map<String, Object> base = [companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, isActive: "Y"]
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_TOKEN"], base + [nsAuthConfigId: "MIG_TOKEN", authType: "OAUTH2_M2M_JWT",
+                tokenUrl: "https://7777777-SB1.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token"])
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_BASIC"], base + [nsAuthConfigId: "MIG_BASIC", authType: "BASIC"])
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_EMPTY"], base + [nsAuthConfigId: "MIG_EMPTY", authType: "BASIC"])
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MIG_SET"], base + [nsAuthConfigId: "MIG_SET", authType: "BASIC", netsuiteAccount: "1010101"])
+        ["MIG_EP_1": "https://8888888.app.netsuite.com/r", "MIG_EP_2": "https://9999999.app.netsuite.com/r"].each { String id, String url ->
+            upsertEntityValue("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: id], base + [nsRestletConfigId: id, nsAuthConfigId: "MIG_BASIC",
+                    endpointUrl: url, httpMethod: "POST", headersJson: "{}", connectTimeoutSeconds: 30, readTimeoutSeconds: 60])
+        }
+        Closure<String> account = { String id -> findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: id]).netsuiteAccount as String }
+
+        Map<String, Object> dry = ec.service.sync().name("facade.SettingsFacadeServices.migrate#NsAuthAccounts").parameters([dryRun: true]).disableAuthz().call()
+        assertTrue((dry.rowsUpdated as Integer) >= 2, dry.toString())
+        assertNull(account("MIG_TOKEN"), "a dry run writes nothing")
+
+        Map<String, Object> real = ec.service.sync().name("facade.SettingsFacadeServices.migrate#NsAuthAccounts").parameters([:]).disableAuthz().call()
+        assertTrue((Boolean) real.ok, real.errors?.toString())
+        assertEquals(["7777777-sb1", "8888888", null, "1010101"], ["MIG_TOKEN", "MIG_BASIC", "MIG_EMPTY", "MIG_SET"].collect(account))
+        assertTrue((real.messages as List<String>).any { it.contains("MIG_BASIC (8888888, 9999999)") }, "endpoints on two accounts are reported: ${real.messages}")
+
+        Map<String, Object> again = ec.service.sync().name("facade.SettingsFacadeServices.migrate#NsAuthAccounts").parameters([:]).disableAuthz().call()
+        assertEquals(0, again.rowsUpdated as Integer, "idempotent: ${again.messages}")
+    }
+
     // --- helpers ------------------------------------------------------------------------------
 
     private Map<String, Object> saveFacade(String serviceName, Map<String, Object> parameters) {

@@ -768,7 +768,7 @@
                 <set field="nsAuthConfigIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.NsAuthConfig', 'nsAuthConfigId')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: keptAuth?.password, apiToken: nsApiTokenValue ?: keptAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: keptAuth?.privateKeyPem]"/>
+                <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, netsuiteAccount: (nsTokenUrlValue ? darpan.facade.settings.NsEndpointAccount.accountOf(nsTokenUrlValue) : null) ?: existingAuth?.netsuiteAccount, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: keptAuth?.password, apiToken: nsApiTokenValue ?: keptAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: keptAuth?.privateKeyPem]"/>
                 <if condition="existingAuth == null || !existingAuth.companyUserGroupId">
                     <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(authMap, ec)"/>
                 </if>
@@ -913,6 +913,57 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-258: registered migration NS_AUTH_ACCOUNTS (data/MigrationRegistrySeedData.xml). -->
+    <service verb="migrate" noun="NsAuthAccounts" authenticate="false" allow-remote="false">
+        <description>One-time: store on each NetSuite auth config the account its secret belongs to, so save#NsRestletConfig
+            stops inferring it from the endpoints bound now (detaching or deleting them would reset it). The account comes
+            from the token URL, else from its oldest endpoint; endpoints on other accounts are reported, not changed, and
+            are refused on their next save. Rows that already have one, or have neither, are left. Every tenant at once
+            (the supervisor runs this with authz disabled). Idempotent: a second run finds nothing. Not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.reconciliation.NsAuthConfig" list="authList" for-update="true">
+                <econdition field-name="netsuiteAccount" operator="is-null"/>
+                <order-by field-name="nsAuthConfigId"/>
+            </entity-find>
+            <set field="rowsUpdated" from="0" type="Integer"/>
+            <set field="conflicts" from="[]"/>
+            <iterate list="authList" entry="auth">
+                <set field="account" from="auth.tokenUrl ? darpan.facade.settings.NsEndpointAccount.accountOf(auth.tokenUrl) : null"/>
+                <if condition="!auth.tokenUrl">
+                    <entity-find entity-name="darpan.reconciliation.NsRestletConfig" list="endpointList">
+                        <econdition field-name="nsAuthConfigId" from="auth.nsAuthConfigId"/>
+                        <order-by field-name="nsRestletConfigId"/>
+                    </entity-find>
+                    <set field="endpointAccounts" from="endpointList.collect { darpan.facade.settings.NsEndpointAccount.accountOf(it.endpointUrl) }.findAll { it }"/>
+                    <set field="account" from="endpointAccounts ? endpointAccounts[0] : null"/>
+                    <if condition="endpointAccounts.unique(false).size() &gt; 1">
+                        <script>conflicts.add(auth.nsAuthConfigId + ' (' + endpointAccounts.unique(false).join(', ') + ')')</script>
+                    </if>
+                </if>
+                <if condition="account">
+                    <set field="rowsUpdated" from="rowsUpdated + 1" type="Integer"/>
+                    <if condition="!dryRun">
+                        <set field="auth.netsuiteAccount" from="account"/>
+                        <entity-update value-field="auth"/>
+                    </if>
+                </if>
+            </iterate>
+            <set field="messages" from="[(dryRun ? 'Would store' : 'Stored') + ' the NetSuite account on ' + rowsUpdated + ' auth config(s).'] +
+                    (conflicts ? ['Endpoints on more than one account (the oldest endpoint\'s account kept; the others are refused on their next save): ' + conflicts.join('; ') + '.'] : [])"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+
     <service verb="save" noun="NsRestletConfig" allow-remote="true" authenticate="true">
         <description>Create or update a NetSuite endpoint configuration bound to an auth config.</description>
         <in-parameters>
@@ -1016,11 +1067,13 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <!-- DAR-BE-258: the endpoint is sent this auth config's secret, so it stays on the auth config's
-                     NetSuite account (NsEndpointAccount). The caller already passed canActiveTenantUseConfig on the
-                     auth config above; its other endpoints are read only for their URLs. -->
-                <set field="boundEndpointUrls" from="authCfg.tokenUrl ? [] : darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'save#NsRestletConfig account check (DAR-BE-258): URLs of the endpoints already bound to an auth config the caller may use').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).list()*.endpointUrl"/>
-                <set field="accountRefusal" from="darpan.facade.settings.NsEndpointAccount.refusal(nsEndpointUrlValue, authCfg.tokenUrl as String, boundEndpointUrls)"/>
-                <if condition="accountRefusal"><message error="true">${accountRefusal}</message></if>
+                     NetSuite account (NsEndpointAccount): its token URL's, else the account stored on the auth config.
+                     The row is re-read for update so two first endpoints cannot both set the account. The caller
+                     already passed canActiveTenantUseConfig on the auth config above. -->
+                <set field="authCfg" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig', 'save#NsRestletConfig account check (DAR-BE-258), row locked; access gated above').condition('nsAuthConfigId', nsAuthConfigIdValue).forUpdate(true).useCache(false).one()"/>
+                <set field="boundEndpointUrls" from="authCfg.tokenUrl || authCfg.netsuiteAccount ? [] : darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'save#NsRestletConfig account check (DAR-BE-258): until NS_AUTH_ACCOUNTS has run, a row without an account takes its endpoints\' account').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).list()*.endpointUrl"/>
+                <set field="accountDecision" from="darpan.facade.settings.NsEndpointAccount.decide(nsEndpointUrlValue, authCfg.tokenUrl as String, authCfg.netsuiteAccount as String, boundEndpointUrls)"/>
+                <if condition="accountDecision.error"><message error="true">${accountDecision.error}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite endpoint settings.')"/>
@@ -1035,6 +1088,11 @@
                 </if>
                 <if condition="!ec.message.hasError()">
                     <service-call name="store#darpan.reconciliation.NsRestletConfig" in-map="endpointMap"/>
+                    <if condition="accountDecision?.store">
+                        <!-- DAR-BE-258: the first endpoint of an auth config without an account sets it, on the row. -->
+                        <service-call name="store#darpan.reconciliation.NsAuthConfig"
+                                in-map="[nsAuthConfigId: nsAuthConfigIdValue, netsuiteAccount: accountDecision.store]"/>
+                    </if>
                     <set field="savedRestletConfig" from="[nsRestletConfigId: nsRestletConfigIdValue, description: nsDescriptionValue, endpointUrl: nsEndpointUrlValue, httpMethod: nsHttpMethodValue, nsAuthConfigId: nsAuthConfigIdValue, headersJson: nsHeadersJsonValue, connectTimeoutSeconds: nsConnectTimeoutValue, readTimeoutSeconds: nsReadTimeoutValue, isActive: nsIsActiveValue]"/>
                     <message>Saved NS endpoint config ${nsRestletConfigIdValue}.</message>
                 </if>

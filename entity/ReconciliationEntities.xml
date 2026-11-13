@@ -976,6 +976,10 @@
         <field name="password" type="text-medium" encrypt="true"/>
         <field name="apiToken" type="text-long" encrypt="true"/>
         <field name="tokenUrl" type="text-long"/>
+        <field name="netsuiteAccount" type="text-short"><description>DAR-BE-258: the NetSuite account this auth config's
+            secret belongs to (a host's first label, lower case, _ read as -). Set from the token URL when there is one,
+            else by the first endpoint saved under it; endpoints on any other account are refused. Kept on the row, never
+            inferred from the endpoints bound now, so detaching or deleting endpoints cannot reset it.</description></field>
         <field name="clientId" type="text-medium"/>
         <field name="certId" type="text-medium"/>
         <field name="privateKeyPem" type="text-long" encrypt="true"/>

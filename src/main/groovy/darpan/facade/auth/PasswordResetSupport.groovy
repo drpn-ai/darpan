@@ -82,7 +82,7 @@ class PasswordResetSupport {
         } else {
             Timestamp now = ec.user.nowTimestamp
             Timestamp hourAgo = new Timestamp(now.time - HOUR_MILLIS)
-            String ip = normalize(ec.user.clientIp)
+            String ip = AuthPrimitives.recordedIp(ec.user.clientIp as String)
             int accountCodes = (int) codes(ec, "rate limit: codes per account").condition("userId", account.userId)
                     .condition("fromDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, hourAgo).count()
             // Counts codes ISSUED from the IP: a request that sends nothing writes no row, which is fine,

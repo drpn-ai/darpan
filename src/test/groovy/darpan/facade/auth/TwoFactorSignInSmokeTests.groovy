@@ -573,7 +573,7 @@ class TwoFactorSignInSmokeTests {
     }
 
     @Test
-    @DisplayName("review H1/L: a client IP is stored only as an IP literal; an oversized proxy header cannot break the sign-in step")
+    @DisplayName("review H1/L: a client IP is stored only as an IP literal (sign-in challenge, reset code, CLI start); an oversized proxy header cannot break the step")
     void clientIpIsStoredOnlyWhenItIsAnIp() {
         enrol(USER_ID, USERNAME)
         def user = ec.user
@@ -585,6 +585,11 @@ class TwoFactorSignInSmokeTests {
             def row = ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", USER_ID).orderBy("-createdDate")
                     .disableAuthz().useCache(false).list().first()
             assertNull(row.requestIp, "not an IP: not stored")
+            // The same check for a password reset code and a CLI sign-in start (the start limit buckets it as unknown).
+            assertEquals("sent", anon("request#PasswordReset", [usernameOrEmail: USERNAME]).out.outcome)
+            assertNull(ec.entity.find("darpan.auth.PasswordResetCode").condition("userId", USER_ID).disableAuthz()
+                    .useCache(false).one().requestIp)
+            assertEquals(CliAuthSupport.UNKNOWN_ADDRESS, CliAuthSupport.requestAddress(ec))
 
             user.@clientIpInternal = "2001:db8::7"
             assertTrue(anon("login#Session", [username: USERNAME, password: PASSWORD]).out.twoFactorRequired as boolean)

@@ -105,8 +105,9 @@ class CliAuthSupport {
 
     // ---- start limit ----
 
+    /** The client IP the start limit buckets by and the row keeps (AuthPrimitives.recordedIp), else UNKNOWN_ADDRESS. */
     static String requestAddress(def ec) {
-        return normalize(ec?.user?.clientIp) ?: UNKNOWN_ADDRESS
+        return AuthPrimitives.recordedIp(ec?.user?.clientIp as String) ?: UNKNOWN_ADDRESS
     }
 
     /** True once MAX_STARTS_PER_ADDRESS_PER_MINUTE starts came from this address in the last 60 s. Counted from

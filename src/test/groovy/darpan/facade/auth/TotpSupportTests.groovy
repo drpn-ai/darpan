@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets
 
 import static org.junit.jupiter.api.Assertions.*
 
-/** DAR-BE-264 — TOTP (RFC 6238). Pure, no boot. */
+/** DAR-BE-264 — TOTP (RFC 6238) and the recovery code format. Pure, no boot. */
 class TotpSupportTests {
 
     /** RFC 6238 Appendix B, SHA-1: the ASCII key "12345678901234567890". */
@@ -74,5 +74,18 @@ class TotpSupportTests {
         assertTrue(qr.startsWith("data:image/svg+xml;base64,"))
         String svg = new String(qr.substring("data:image/svg+xml;base64,".length()).decodeBase64(), StandardCharsets.UTF_8)
         assertTrue(svg.startsWith("<svg ") && svg.contains("<path"), svg.take(200))
+    }
+
+    @Test
+    @DisplayName("recovery codes: 16 characters of a 32-letter alphabet (80 bits), shown xxxx-xxxx-xxxx-xxxx; input ignores case, spaces and dashes")
+    void recoveryCodeFormat() {
+        String value = TwoFactorSupport.newRecoveryCode()
+        assertTrue(value ==~ /^[A-HJ-NP-Z2-9]{16}$/, value)
+        assertEquals(32, TwoFactorSupport.RECOVERY_ALPHABET.length())
+        String shown = TwoFactorSupport.formatRecoveryCode(value)
+        assertTrue(shown ==~ /^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/, shown)
+        assertEquals(value, TwoFactorSupport.normalizeRecoveryCode(" ${shown.toUpperCase().replace('-', ' ')} "))
+        assertEquals("", TwoFactorSupport.normalizeRecoveryCode("abcd-efgh"))
+        assertEquals("123456", TwoFactorSupport.normalizeTotp(" 123 456\n"))
     }
 }

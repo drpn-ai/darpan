@@ -82,8 +82,6 @@ class AuthFacadeSupport {
         if (!passwordValue) ec.message.addError("password is required")
 
         boolean loggedIn = false
-        String issuedAuthToken = null
-        Integer authTokenExpiresInSecondsValue = null
         String passwordChangeReason = null
         if (!ec.message.hasError()) {
             loggedIn = ec.user.loginUser(usernameValue, passwordValue)
@@ -96,38 +94,31 @@ class AuthFacadeSupport {
         String userId = normalize(ec?.user?.userId)
         boolean authenticated = loggedIn && userId != null
 
-        if (authenticated) {
-            // DAR-BE-261: the key starts with one idle window and slides on each request
-            // (AuthSessionSupport.enforceWebSignInLifetime), never past sign-in + the absolute lifetime.
-            issuedAuthToken = ec?.user?.getLoginKey(AuthSessionSupport.initialLoginKeyHours(ec))?.toString()?.trim()
-            if (!issuedAuthToken) {
-                ec.message.addError("Unable to issue auth token")
-                logoutCurrentSessionOnly(ec)
-                authenticated = false
-            } else {
-                // The absolute lifetime, not the idle window: darpan-ui drops its token at this time, so the
-                // server's sliding idle check is what ends an idle sign-in sooner.
-                authTokenExpiresInSecondsValue = resolveLoginKeyExpiresInSeconds(ec)
-                // Audit W5 #39 — augment header response with a persistent-login cookie. SPA
-                // contract (header `login_key`) is unchanged; the cookie is the side channel that
-                // survives localStorage loss. SameSite is resolved per request inside the helper.
-                AuthSessionSupport.writePersistentLoginCookie(ec, issuedAuthToken)
-            }
+        // DAR-BE-264: the password matched; a person with two-factor on (or due and not set up) gets a challenge, not
+        // a session. Said only after a right password, so it reveals nothing new (as [PWDCHG]).
+        Map<String, Object> twoFactorStep = authenticated ? TwoFactorSupport.signInStep(ec, userId) : null
+        if (twoFactorStep != null) {
+            logoutCurrentSessionOnly(ec)
+            authenticated = false
         }
 
         Map<String, Object> result = [
                 authenticated         : authenticated,
                 passwordChangeRequired: passwordChangeReason != null,
+                twoFactorRequired     : twoFactorStep?.purpose == TwoFactorSupport.PURPOSE_CODE,
+                twoFactorSetupRequired: twoFactorStep?.purpose == TwoFactorSupport.PURPOSE_SETUP,
         ]
-        if (authenticated) {
-            result.sessionInfo = TenantAccessSupport.buildSessionInfo(ec)
-            result.authToken = issuedAuthToken
-            result.authTokenType = "LOGIN_KEY"
-            result.authTokenHeaderName = "login_key"
-            result.authTokenExpiresInSeconds = authTokenExpiresInSecondsValue
-        }
+        if (authenticated) authenticated = issueSignedInSession(ec, result)
 
         result.putAll(FacadeSupport.envelope(ec))
+
+        if (twoFactorStep != null) {
+            // A completed call carrying a required next step, like the password-change case below.
+            result.challengeToken = twoFactorStep.challengeToken
+            result.challengeExpiresInSeconds = twoFactorStep.expiresInSeconds
+            result.ok = true
+            result.errors = []
+        }
 
         if (passwordChangeReason != null) {
             // Drop the framework text entirely: it names the account and quotes the internal code, and this
@@ -148,6 +139,140 @@ class AuthFacadeSupport {
         }
 
         return result
+    }
+
+    /**
+     * Mint the signed-in user's web login key and fill result as login#Session answers a sign-in: authenticated,
+     * sessionInfo, authToken (also written as the persistent-login cookie), its type, header name and lifetime. Shared by
+     * login#Session, verify#SignInCode and confirm#TwoFactorSetup (DAR-BE-264). Returns whether a key was issued.
+     */
+    static boolean issueSignedInSession(def ec, Map<String, Object> result) {
+        // DAR-BE-261: the key starts with one idle window and slides on each request
+        // (AuthSessionSupport.enforceWebSignInLifetime), never past sign-in + the absolute lifetime.
+        String issuedAuthToken = ec?.user?.getLoginKey(AuthSessionSupport.initialLoginKeyHours(ec))?.toString()?.trim()
+        if (!issuedAuthToken) {
+            ec.message.addError("Unable to issue auth token")
+            logoutCurrentSessionOnly(ec)
+            result.authenticated = false
+            return false
+        }
+        // Audit W5 #39 — augment header response with a persistent-login cookie. SPA
+        // contract (header `login_key`) is unchanged; the cookie is the side channel that
+        // survives localStorage loss. SameSite is resolved per request inside the helper.
+        AuthSessionSupport.writePersistentLoginCookie(ec, issuedAuthToken)
+        result.authenticated = true
+        result.sessionInfo = TenantAccessSupport.buildSessionInfo(ec)
+        result.authToken = issuedAuthToken
+        result.authTokenType = "LOGIN_KEY"
+        result.authTokenHeaderName = "login_key"
+        // The absolute lifetime, not the idle window: darpan-ui drops its token at this time, so the
+        // server's sliding idle check is what ends an idle sign-in sooner.
+        result.authTokenExpiresInSeconds = resolveLoginKeyExpiresInSeconds(ec)
+        return true
+    }
+
+    // ---- DAR-BE-264: two-factor sign-in ----
+
+    /**
+     * verify#SignInCode: the challenge token from login#Session with a current code or a recovery code. On success the
+     * person is signed in (no second UserLoginHistory row: the password step wrote one) and the reply is login#Session's.
+     * Every refusal is "That code didn't work." held to TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS; challengeEnded says
+     * the token is spent (expired, used, 5 wrong codes), so the client goes back to the password.
+     */
+    static Map<String, Object> verifySignInCode(def ec, Object challengeToken, Object code, Object recoveryCode) {
+        long started = System.nanoTime()
+        Map<String, Object> claim = TwoFactorSupport.claimSignInChallenge(ec, challengeToken, code, recoveryCode)
+        Map<String, Object> result = [authenticated: false, challengeEnded: claim.challengeEnded == true]
+        boolean signedIn = false
+        if (claim.ok) {
+            def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                    "pre-auth: the account a verified sign-in challenge belongs to").condition("userId", claim.userId).one()
+            if (CliAuthSupport.canSignIn(ec, account)) {
+                signedIn = ec.user.internalLoginUser((String) account.username, false) as boolean
+            }
+            if (signedIn) {
+                signedIn = issueSignedInSession(ec, result)
+                if (claim.recoveryCodesLeft != null) result.recoveryCodesLeft = claim.recoveryCodesLeft
+            } else {
+                result.challengeEnded = true
+            }
+        }
+        if (!signedIn) {
+            ec.message.clearAll()
+            ec.message.addError(TwoFactorSupport.CODE_REFUSAL)
+            TwoFactorSupport.holdToFloor(started)
+        }
+        result.putAll(FacadeSupport.envelope(ec))
+        return result
+    }
+
+    /**
+     * begin#TwoFactorSetup: signed in (a first setup needs the current password, a replacement a current code), or with
+     * a setup challenge from login#Session. Returns the secret, the otpauth URI, the QR data URI and expiresInSeconds.
+     */
+    static Map<String, Object> beginTwoFactorSetup(def ec, Object challengeToken, Object currentPassword, Object code) {
+        String userId = setupSubject(ec, challengeToken, currentPassword, code)
+        Map<String, Object> result = [:]
+        if (userId) result.putAll(TwoFactorSupport.beginSetup(ec, userId))
+        result.putAll(FacadeSupport.envelope(ec))
+        return result
+    }
+
+    /**
+     * confirm#TwoFactorSetup: the first right code from the new app turns two-factor on, ends every other login key
+     * (CLI keys too) and returns the recovery codes, once. The caller is then signed in with a fresh key: through a setup
+     * challenge this is the sign-in itself; from a signed-in tab the old key predates the factor and stops working, so
+     * the tab swaps to the authToken returned here.
+     */
+    static Map<String, Object> confirmTwoFactorSetup(def ec, Object challengeToken, Object code) {
+        Map<String, Object> result = [authenticated: false]
+        boolean viaChallenge = normalize(challengeToken) != null
+        String userId = viaChallenge ? TwoFactorSupport.setupChallengeUser(ec, challengeToken) : normalize(ec.user.userId)
+        if (!userId) {
+            ec.message.addError(viaChallenge ? "This sign-in has expired. Enter your password again." : "Sign in first.")
+            result.challengeEnded = viaChallenge
+            result.putAll(FacadeSupport.envelope(ec))
+            return result
+        }
+        Map<String, Object> confirmed = TwoFactorSupport.confirmSetup(ec, userId, code)
+        if (!confirmed.ok) {
+            if (viaChallenge) result.challengeEnded = TwoFactorSupport.countSetupChallengeFailure(ec, challengeToken)
+            ec.message.addError(confirmed.expired ? TwoFactorSupport.SETUP_EXPIRED : TwoFactorSupport.CODE_REFUSAL)
+            result.putAll(FacadeSupport.envelope(ec))
+            return result
+        }
+        if (viaChallenge) {
+            TwoFactorSupport.useChallenge(ec, challengeToken)
+            def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                    "pre-auth: the account a setup challenge belongs to").condition("userId", userId).one()
+            if (!CliAuthSupport.canSignIn(ec, account) || !ec.user.internalLoginUser((String) account.username, false)) {
+                ec.message.clearAll()
+                ec.message.addError("This account can no longer sign in.")
+                result.putAll(FacadeSupport.envelope(ec))
+                return result
+            }
+        }
+        issueSignedInSession(ec, result)
+        result.recoveryCodes = confirmed.recoveryCodes
+        result.putAll(FacadeSupport.envelope(ec))
+        return result
+    }
+
+    /** Who begin#TwoFactorSetup acts for: a setup challenge's person, else the signed-in person once they pass
+     *  TwoFactorSupport.signedInSetupProblem. Null, with an error added, otherwise. */
+    private static String setupSubject(def ec, Object challengeToken, Object currentPassword, Object code) {
+        if (normalize(challengeToken)) {
+            String userId = TwoFactorSupport.setupChallengeUser(ec, challengeToken)
+            if (!userId) ec.message.addError("This sign-in has expired. Enter your password again.")
+            return userId
+        }
+        String problem = TwoFactorSupport.signedInSetupProblem(ec, currentPassword, code)
+        if (problem) {
+            ec.message.clearAll()
+            ec.message.addError(problem)
+            return null
+        }
+        return normalize(ec.user.userId)
     }
 
     /** Reduce every non-recoverable login refusal to one indistinguishable answer.

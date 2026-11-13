@@ -138,6 +138,12 @@
                                         "$ref": "#/components/schemas/GetScheduleBoardRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetTwoFactorPoliciesRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateTwoFactorPolicyRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CreateTenantRequest"
                                     },
                                     {
@@ -190,6 +196,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/ResetPasswordRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResetTwoFactorRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/UpdateUserAccountRequest"
@@ -270,6 +279,9 @@
                                         "$ref": "#/components/schemas/VerifyAuditFindingRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/BeginTwoFactorSetupRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ChangeExpiredPasswordRequest"
                                     },
                                     {
@@ -279,10 +291,22 @@
                                         "$ref": "#/components/schemas/CompletePasswordResetRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ConfirmTwoFactorSetupRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/CreateRecoveryCodesRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DisableTwoFactorRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetPasswordResetStatusRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetSessionInfoRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetTwoFactorStatusRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/LoginSessionRequest"
@@ -310,6 +334,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/VerifyPasswordResetCodeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/VerifySignInCodeRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetMyCliAccessRequest"
@@ -803,6 +830,8 @@
                                         "admin.ObserveAdminServices.get#LiveOperations": "#/components/schemas/GetLiveOperationsRequest",
                                         "admin.RetentionAdminServices.dryRun#Retention": "#/components/schemas/DryRunRetentionRequest",
                                         "admin.ScheduleAdminServices.get#ScheduleBoard": "#/components/schemas/GetScheduleBoardRequest",
+                                        "admin.SecurityAdminServices.get#TwoFactorPolicies": "#/components/schemas/GetTwoFactorPoliciesRequest",
+                                        "admin.SecurityAdminServices.update#TwoFactorPolicy": "#/components/schemas/UpdateTwoFactorPolicyRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
                                         "admin.TenantAdminServices.get#TenantDetail": "#/components/schemas/GetTenantDetailRequest",
@@ -821,6 +850,7 @@
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
                                         "admin.UserAdminServices.remove#DarpanAdmin": "#/components/schemas/RemoveDarpanAdminRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
+                                        "admin.UserAdminServices.reset#TwoFactor": "#/components/schemas/ResetTwoFactorRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
                                         "facade.AgentChangeFacadeServices.apply#AuditChange": "#/components/schemas/ApplyAuditChangeRequest",
                                         "facade.AgentChangeFacadeServices.list#BrainChangeTickets": "#/components/schemas/ListBrainChangeTicketsRequest",
@@ -847,11 +877,16 @@
                                         "facade.AuditFacadeServices.save#AuditCheck": "#/components/schemas/SaveAuditCheckRequest",
                                         "facade.AuditFacadeServices.save#AuditSettings": "#/components/schemas/SaveAuditSettingsRequest",
                                         "facade.AuditFacadeServices.verify#AuditFinding": "#/components/schemas/VerifyAuditFindingRequest",
+                                        "facade.AuthFacadeServices.begin#TwoFactorSetup": "#/components/schemas/BeginTwoFactorSetupRequest",
                                         "facade.AuthFacadeServices.change#ExpiredPassword": "#/components/schemas/ChangeExpiredPasswordRequest",
                                         "facade.AuthFacadeServices.change#OwnPassword": "#/components/schemas/ChangeOwnPasswordRequest",
                                         "facade.AuthFacadeServices.complete#PasswordReset": "#/components/schemas/CompletePasswordResetRequest",
+                                        "facade.AuthFacadeServices.confirm#TwoFactorSetup": "#/components/schemas/ConfirmTwoFactorSetupRequest",
+                                        "facade.AuthFacadeServices.create#RecoveryCodes": "#/components/schemas/CreateRecoveryCodesRequest",
+                                        "facade.AuthFacadeServices.disable#TwoFactor": "#/components/schemas/DisableTwoFactorRequest",
                                         "facade.AuthFacadeServices.get#PasswordResetStatus": "#/components/schemas/GetPasswordResetStatusRequest",
                                         "facade.AuthFacadeServices.get#SessionInfo": "#/components/schemas/GetSessionInfoRequest",
+                                        "facade.AuthFacadeServices.get#TwoFactorStatus": "#/components/schemas/GetTwoFactorStatusRequest",
                                         "facade.AuthFacadeServices.login#Session": "#/components/schemas/LoginSessionRequest",
                                         "facade.AuthFacadeServices.logout#AllSessions": "#/components/schemas/LogoutAllSessionsRequest",
                                         "facade.AuthFacadeServices.logout#Session": "#/components/schemas/LogoutSessionRequest",
@@ -861,6 +896,7 @@
                                         "facade.AuthFacadeServices.save#UserSettings": "#/components/schemas/SaveUserSettingsRequest",
                                         "facade.AuthFacadeServices.verify#OwnPassword": "#/components/schemas/VerifyOwnPasswordRequest",
                                         "facade.AuthFacadeServices.verify#PasswordResetCode": "#/components/schemas/VerifyPasswordResetCodeRequest",
+                                        "facade.AuthFacadeServices.verify#SignInCode": "#/components/schemas/VerifySignInCodeRequest",
                                         "facade.CliAccessFacadeServices.get#MyCliAccess": "#/components/schemas/GetMyCliAccessRequest",
                                         "facade.CliAccessFacadeServices.request#CliAccess": "#/components/schemas/RequestCliAccessRequest",
                                         "facade.CliAuthFacadeServices.approve#CliLogin": "#/components/schemas/ApproveCliLoginRequest",
@@ -1142,6 +1178,12 @@
                                             "$ref": "#/components/schemas/GetScheduleBoardResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetTwoFactorPoliciesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateTwoFactorPolicyResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/CreateTenantResponse"
                                         },
                                         {
@@ -1194,6 +1236,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ResetPasswordResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ResetTwoFactorResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateUserAccountResponse"
@@ -1274,6 +1319,9 @@
                                             "$ref": "#/components/schemas/VerifyAuditFindingResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/BeginTwoFactorSetupResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ChangeExpiredPasswordResponse"
                                         },
                                         {
@@ -1283,10 +1331,22 @@
                                             "$ref": "#/components/schemas/CompletePasswordResetResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/ConfirmTwoFactorSetupResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/CreateRecoveryCodesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DisableTwoFactorResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetPasswordResetStatusResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetSessionInfoResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetTwoFactorStatusResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/LoginSessionResponse"
@@ -1314,6 +1374,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/VerifyPasswordResetCodeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/VerifySignInCodeResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetMyCliAccessResponse"
@@ -5520,6 +5583,265 @@
                     "result"
                 ]
             },
+            "GetTwoFactorPoliciesParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Each role the two-factor policy covers (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN in\n            any tenant) with its date and who in it is and is not enrolled, plus how many super admins are enrolled (the\n            break-glass rule needs two before super-admin enforcement can be switched on)."
+            },
+            "GetTwoFactorPoliciesResult": {
+                "type": "object",
+                "properties": {
+                    "policies": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "policy": {
+                                    "type": "object",
+                                    "properties": {
+                                        "permissionGroupId": {
+                                            "type": "string"
+                                        },
+                                        "requiredFromDate": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "number"
+                                                }
+                                            ],
+                                            "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. Empty: optional. Future: grace period."
+                                        },
+                                        "lastChangedByUserId": {
+                                            "type": "string"
+                                        },
+                                        "lastChangedDate": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "number"
+                                                }
+                                            ],
+                                            "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                        },
+                                        "enrolledCount": {
+                                            "type": "integer"
+                                        },
+                                        "notEnrolledCount": {
+                                            "type": "integer"
+                                        },
+                                        "enrolled": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "user": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "userId": {
+                                                                "type": "string"
+                                                            },
+                                                            "username": {
+                                                                "type": "string"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "notEnrolled": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "user": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "userId": {
+                                                                "type": "string"
+                                                            },
+                                                            "username": {
+                                                                "type": "string"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "One entry per role, in the order above."
+                    },
+                    "enrolledSuperAdminCount": {
+                        "type": "integer",
+                        "description": "Super admins (ADMIN, DARPAN_SUPER_ADMIN) with two-factor on."
+                    }
+                }
+            },
+            "GetTwoFactorPoliciesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SecurityAdminServices.get#TwoFactorPolicies",
+                "x-darpan-method": "admin.SecurityAdminServices.get#TwoFactorPolicies",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SecurityAdminServices.get#TwoFactorPolicies"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTwoFactorPoliciesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTwoFactorPoliciesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SecurityAdminServices.get#TwoFactorPolicies. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTwoFactorPoliciesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateTwoFactorPolicyParams": {
+                "type": "object",
+                "properties": {
+                    "permissionGroupId": {
+                        "type": "string",
+                        "description": "ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN or DARPAN_TENANT_ADMIN."
+                    },
+                    "requiredFromDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. Required from this date. Leave out with clear."
+                    },
+                    "clear": {
+                        "type": "boolean",
+                        "description": "True makes the role optional again."
+                    }
+                },
+                "required": [
+                    "permissionGroupId"
+                ],
+                "description": "Require two-factor for a role from a date (today or earlier: now; later: a grace period during which\n            sign-in prompts), or make it optional again (clear). Super admins only. Requiring it for ADMIN or\n            DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row."
+            },
+            "UpdateTwoFactorPolicyResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the policy was saved."
+                    }
+                }
+            },
+            "UpdateTwoFactorPolicyRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SecurityAdminServices.update#TwoFactorPolicy",
+                "x-darpan-method": "admin.SecurityAdminServices.update#TwoFactorPolicy",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SecurityAdminServices.update#TwoFactorPolicy"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateTwoFactorPolicyParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateTwoFactorPolicyResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SecurityAdminServices.update#TwoFactorPolicy. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateTwoFactorPolicyResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "CreateTenantParams": {
                 "type": "object",
                 "properties": {
@@ -6135,6 +6457,10 @@
                     "tenantUserGroupId": {
                         "type": "string",
                         "description": "The target tenant."
+                    },
+                    "twoFactorCode": {
+                        "type": "string",
+                        "description": "DAR-BE-264. A current code from the caller's authenticator app; required\n                when they have two-factor on."
                     }
                 },
                 "required": [
@@ -6269,6 +6595,10 @@
                     "includeAutomations": {
                         "type": "boolean",
                         "description": "DAR-BE-188. True also sends\n                every lifecycle, the automations of the runs and lifecycles sent, and the chat spaces those automations post\n                to (their webhooks sealed with the credentials, never in clear). Automations an import creates start paused.\n                False (the default) sends exactly what it always has."
+                    },
+                    "twoFactorCode": {
+                        "type": "string",
+                        "description": "DAR-BE-264. A current code from the caller's authenticator app; required\n                when they have two-factor on."
                     }
                 },
                 "required": [
@@ -6956,6 +7286,32 @@
                                 },
                                 "description": "Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order).\n                    A Darpan admin usually has no tenant memberships: they reach tenants through these groups."
                             },
+                            "twoFactor": {
+                                "type": "string",
+                                "description": "DAR-BE-264. ON, OFF, or REQUIRED_NOT_SET_UP."
+                            },
+                            "twoFactorConfirmedDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. DAR-BE-264. When it was turned on."
+                            },
+                            "twoFactorRequiredFromDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. DAR-BE-264. When a role of theirs requires it; empty when optional."
+                            },
                             "memberships": {
                                 "type": "array",
                                 "items": {
@@ -7105,6 +7461,10 @@
                                                 "type": "string"
                                             },
                                             "description": "Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order)."
+                                        },
+                                        "twoFactor": {
+                                            "type": "string",
+                                            "description": "DAR-BE-264. ON, OFF, or REQUIRED_NOT_SET_UP (a role requires it now and it is not on)."
                                         }
                                     }
                                 }
@@ -7348,6 +7708,98 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ResetPasswordResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ResetTwoFactorParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User whose two-factor resets."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why, for the audit trail (\"Two-factor reset: reason\")."
+                    },
+                    "adminCode": {
+                        "type": "string",
+                        "description": "A current code from the acting admin's own authenticator app."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "reason",
+                    "adminCode"
+                ],
+                "description": "DAR-BE-264. End a user's two-factor (lost phone and no recovery code): their authenticator and recovery\n            codes go, every session and CLI key ends, and a user whose role requires it sets up again at the next sign-in.\n            Super admins only, never on one's own account; needs a reason and the acting admin's own current code (so they\n            must have two-factor on). Writes an AdminAuditLog row, a TwoFactorEvent naming the admin, and emails the user."
+            },
+            "ResetTwoFactorResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when reset."
+                    }
+                }
+            },
+            "ResetTwoFactorRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.reset#TwoFactor",
+                "x-darpan-method": "admin.UserAdminServices.reset#TwoFactor",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.reset#TwoFactor"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ResetTwoFactorParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ResetTwoFactorResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.reset#TwoFactor. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ResetTwoFactorResult"
                     }
                 },
                 "required": [
@@ -10032,6 +10484,123 @@
                     "result"
                 ]
             },
+            "BeginTwoFactorSetupParams": {
+                "type": "object",
+                "properties": {
+                    "challengeToken": {
+                        "type": "string",
+                        "description": "A setup challenge from login#Session; leave out when signed in."
+                    },
+                    "currentPassword": {
+                        "type": "string",
+                        "description": "Signed in, first setup: the account's password (a wrong one counts as a failed login)."
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "Signed in, replacing an app that is on: a current code from it."
+                    }
+                },
+                "description": "DAR-BE-264. Start setting up an authenticator app: a new secret (any earlier unfinished setup ends),\n            shown once. Either signed in (a first setup needs currentPassword; replacing an app that is on needs a current\n            code from it), or with a setup challengeToken from login#Session (twoFactorSetupRequired). Finish within 15\n            minutes with confirm#TwoFactorSetup."
+            },
+            "BeginTwoFactorSetupResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "secret": {
+                        "type": "string",
+                        "description": "The key, Base32 (show grouped in fours for typing). In this reply only; never returned again."
+                    },
+                    "otpauthUri": {
+                        "type": "string",
+                        "description": "otpauth://totp/Darpan:username?secret=...&issuer=Darpan&digits=6&period=30&algorithm=SHA1\n                    (issuer from DARPAN_TOTP_ISSUER, e.g. \"Darpan UAT\")."
+                    },
+                    "qrDataUri": {
+                        "type": "string",
+                        "description": "The otpauthUri as a QR code: an SVG data URI (data:image/svg+xml;base64,...) for an img src."
+                    },
+                    "expiresInSeconds": {
+                        "type": "integer",
+                        "description": "Seconds left to confirm: 900."
+                    }
+                }
+            },
+            "BeginTwoFactorSetupRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.begin#TwoFactorSetup",
+                "x-darpan-method": "facade.AuthFacadeServices.begin#TwoFactorSetup",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.begin#TwoFactorSetup"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/BeginTwoFactorSetupParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "BeginTwoFactorSetupResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.begin#TwoFactorSetup. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/BeginTwoFactorSetupResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ChangeExpiredPasswordParams": {
                 "type": "object",
                 "properties": {
@@ -10314,6 +10883,20 @@
                             },
                             "isSuperAdmin": {
                                 "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             }
                         },
                         "description": "Refreshed authenticated session metadata returned to darpan-ui."
@@ -10488,6 +11071,469 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/CompletePasswordResetResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ConfirmTwoFactorSetupParams": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "The 6-digit code the new app shows."
+                    },
+                    "challengeToken": {
+                        "type": "string",
+                        "description": "The setup challenge from login#Session; leave out when signed in."
+                    }
+                },
+                "required": [
+                    "code"
+                ],
+                "description": "DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI\n            key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken\n            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. Returns 10\n            recovery codes, once."
+            },
+            "ConfirmTwoFactorSetupResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "authenticated": {
+                        "type": "boolean",
+                        "description": "True when a session was issued."
+                    },
+                    "authToken": {
+                        "type": "string",
+                        "description": "The login key darpan-ui sends in the `login_key` header (also set as the persistent-login cookie)."
+                    },
+                    "authTokenType": {
+                        "type": "string",
+                        "description": "`LOGIN_KEY`."
+                    },
+                    "authTokenHeaderName": {
+                        "type": "string",
+                        "description": "`login_key`."
+                    },
+                    "authTokenExpiresInSeconds": {
+                        "type": "integer",
+                        "description": "The sign-in's absolute lifetime in seconds, as login#Session."
+                    },
+                    "sessionInfo": {
+                        "type": "object",
+                        "properties": {
+                            "userId": {
+                                "type": "string"
+                            },
+                            "username": {
+                                "type": "string"
+                            },
+                            "displayName": {
+                                "type": "string"
+                            },
+                            "locale": {
+                                "type": "string"
+                            },
+                            "timeZone": {
+                                "type": "string"
+                            },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
+                                "type": "string"
+                            },
+                            "lastLoginDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
+                            },
+                            "lastRun": {
+                                "type": "object",
+                                "properties": {
+                                    "reconciliationRunResultId": {
+                                        "type": "string"
+                                    },
+                                    "savedRunId": {
+                                        "type": "string"
+                                    },
+                                    "savedRunType": {
+                                        "type": "string"
+                                    },
+                                    "reconciliationRunId": {
+                                        "type": "string"
+                                    },
+                                    "createdDate": {
+                                        "oneOf": [
+                                            {
+                                                "type": "string"
+                                            },
+                                            {
+                                                "type": "number"
+                                            }
+                                        ],
+                                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                    }
+                                }
+                            },
+                            "scopeType": {
+                                "type": "string"
+                            },
+                            "customerScopeId": {
+                                "type": "string"
+                            },
+                            "activeTenantUserGroupId": {
+                                "type": "string"
+                            },
+                            "activeTenantLabel": {
+                                "type": "string"
+                            },
+                            "availableTenants": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "userGroupId": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            },
+                            "activeTenantPermissionGroupIds": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "canViewActiveTenantData": {
+                                "type": "boolean"
+                            },
+                            "canRunActiveTenantReconciliation": {
+                                "type": "boolean"
+                            },
+                            "canEditActiveTenantData": {
+                                "type": "boolean"
+                            },
+                            "canManageDarpanCore": {
+                                "type": "boolean"
+                            },
+                            "isSuperAdmin": {
+                                "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            }
+                        },
+                        "description": "As login#Session's sessionInfo."
+                    },
+                    "recoveryCodes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only."
+                    },
+                    "challengeEnded": {
+                        "type": "boolean",
+                        "description": "With a challengeToken: true when it can no longer be used (expired, 5 wrong codes)."
+                    }
+                }
+            },
+            "ConfirmTwoFactorSetupRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.confirm#TwoFactorSetup",
+                "x-darpan-method": "facade.AuthFacadeServices.confirm#TwoFactorSetup",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.confirm#TwoFactorSetup"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ConfirmTwoFactorSetupParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ConfirmTwoFactorSetupResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.confirm#TwoFactorSetup. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ConfirmTwoFactorSetupResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "CreateRecoveryCodesParams": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "A current code from the authenticator app."
+                    }
+                },
+                "required": [
+                    "code"
+                ],
+                "description": "DAR-BE-264. Ten new recovery codes for the signed-in person, replacing every old one. Needs a current\n            authenticator code."
+            },
+            "CreateRecoveryCodesResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "recoveryCodes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only."
+                    }
+                }
+            },
+            "CreateRecoveryCodesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.create#RecoveryCodes",
+                "x-darpan-method": "facade.AuthFacadeServices.create#RecoveryCodes",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.create#RecoveryCodes"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateRecoveryCodesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateRecoveryCodesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.create#RecoveryCodes. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateRecoveryCodesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DisableTwoFactorParams": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "A current code from the authenticator app."
+                    }
+                },
+                "required": [
+                    "code"
+                ],
+                "description": "DAR-BE-264. Turn two-factor off for the signed-in person, with a current code. Refused when a role of\n            theirs requires it. Every other session and CLI key ends; this one carries on."
+            },
+            "DisableTwoFactorResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    }
+                }
+            },
+            "DisableTwoFactorRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.disable#TwoFactor",
+                "x-darpan-method": "facade.AuthFacadeServices.disable#TwoFactor",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.disable#TwoFactor"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DisableTwoFactorParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DisableTwoFactorResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.disable#TwoFactor. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DisableTwoFactorResult"
                     }
                 },
                 "required": [
@@ -10718,6 +11764,20 @@
                             },
                             "isSuperAdmin": {
                                 "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             }
                         },
                         "description": "Authenticated session metadata returned to darpan-ui."
@@ -10784,6 +11844,134 @@
                     "result"
                 ]
             },
+            "GetTwoFactorStatusParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-BE-264. The signed-in person's two-factor state, for User Settings. Never the secret."
+            },
+            "GetTwoFactorStatusResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "True when an authenticator app is on."
+                    },
+                    "confirmedDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When it was turned on."
+                    },
+                    "recoveryCodesLeft": {
+                        "type": "integer",
+                        "description": "Unused recovery codes."
+                    },
+                    "required": {
+                        "type": "boolean",
+                        "description": "True when a role of theirs requires it now (no \"Off\" action)."
+                    },
+                    "requiredFromDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When it is or becomes required; empty when optional."
+                    },
+                    "codesLocked": {
+                        "type": "boolean",
+                        "description": "True after 20 wrong codes in 24 hours, until a password or admin reset."
+                    }
+                }
+            },
+            "GetTwoFactorStatusRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.get#TwoFactorStatus",
+                "x-darpan-method": "facade.AuthFacadeServices.get#TwoFactorStatus",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.get#TwoFactorStatus"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTwoFactorStatusParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTwoFactorStatusResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.get#TwoFactorStatus. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTwoFactorStatusResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "LoginSessionParams": {
                 "type": "object",
                 "properties": {
@@ -10834,6 +12022,22 @@
                     "passwordChangeReason": {
                         "type": "string",
                         "description": "Why the password must change: `PWDCHG` when the account is flagged to change at next\n                    login, `PWDTIM` when the current password has aged past the configured rotation window.\n                    Absent unless passwordChangeRequired is true."
+                    },
+                    "twoFactorRequired": {
+                        "type": "boolean",
+                        "description": "DAR-BE-264. True when the password was right and the account has two-factor on: no session\n                    yet. ok=true, authenticated=false; send challengeToken with a code to verify#SignInCode."
+                    },
+                    "twoFactorSetupRequired": {
+                        "type": "boolean",
+                        "description": "DAR-BE-264. True when the password was right and two-factor is required for the account's role\n                    but not set up: no session yet. ok=true, authenticated=false; challengeToken allows only\n                    begin#TwoFactorSetup and confirm#TwoFactorSetup, and confirm signs in."
+                    },
+                    "challengeToken": {
+                        "type": "string",
+                        "description": "DAR-BE-264. With twoFactorRequired or twoFactorSetupRequired: the sign-in challenge. Keep it in\n                    page memory only (never storage or a cookie); a refresh goes back to the password step."
+                    },
+                    "challengeExpiresInSeconds": {
+                        "type": "integer",
+                        "description": "DAR-BE-264. Seconds the challenge lives: 300."
                     },
                     "authToken": {
                         "type": "string",
@@ -10966,6 +12170,20 @@
                             },
                             "isSuperAdmin": {
                                 "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             }
                         },
                         "description": "Authenticated session metadata returned to darpan-ui."
@@ -11484,6 +12702,20 @@
                             },
                             "isSuperAdmin": {
                                 "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             }
                         },
                         "description": "Refreshed authenticated session metadata returned to darpan-ui."
@@ -11809,6 +13041,20 @@
                             },
                             "isSuperAdmin": {
                                 "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             }
                         },
                         "description": "Refreshed authenticated session metadata returned to darpan-ui."
@@ -12032,6 +13278,20 @@
                             },
                             "isSuperAdmin": {
                                 "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             }
                         },
                         "description": "Refreshed authenticated session metadata returned to darpan-ui."
@@ -12196,6 +13456,271 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/VerifyPasswordResetCodeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "VerifySignInCodeParams": {
+                "type": "object",
+                "properties": {
+                    "challengeToken": {
+                        "type": "string",
+                        "description": "From login#Session."
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "The 6-digit code from the authenticator app; spaces ignored."
+                    },
+                    "recoveryCode": {
+                        "type": "string",
+                        "description": "Instead of code: a recovery code, xxxx-xxxx-xxxx-xxxx (case, spaces and dashes ignored). Used once."
+                    }
+                },
+                "required": [
+                    "challengeToken"
+                ],
+                "description": "DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a\n            current authenticator code or a recovery code. Success answers as login#Session does (a session and its key).\n            Every refusal is \"That code didn't work.\"; 5 wrong codes end the challenge (challengeEnded), and each wrong code\n            also counts as a failed login. A used recovery code emails the person."
+            },
+            "VerifySignInCodeResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "authenticated": {
+                        "type": "boolean",
+                        "description": "True when a session was issued."
+                    },
+                    "authToken": {
+                        "type": "string",
+                        "description": "The login key darpan-ui sends in the `login_key` header (also set as the persistent-login cookie)."
+                    },
+                    "authTokenType": {
+                        "type": "string",
+                        "description": "`LOGIN_KEY`."
+                    },
+                    "authTokenHeaderName": {
+                        "type": "string",
+                        "description": "`login_key`."
+                    },
+                    "authTokenExpiresInSeconds": {
+                        "type": "integer",
+                        "description": "The sign-in's absolute lifetime in seconds, as login#Session."
+                    },
+                    "sessionInfo": {
+                        "type": "object",
+                        "properties": {
+                            "userId": {
+                                "type": "string"
+                            },
+                            "username": {
+                                "type": "string"
+                            },
+                            "displayName": {
+                                "type": "string"
+                            },
+                            "locale": {
+                                "type": "string"
+                            },
+                            "timeZone": {
+                                "type": "string"
+                            },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
+                                "type": "string"
+                            },
+                            "lastLoginDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
+                            },
+                            "lastRun": {
+                                "type": "object",
+                                "properties": {
+                                    "reconciliationRunResultId": {
+                                        "type": "string"
+                                    },
+                                    "savedRunId": {
+                                        "type": "string"
+                                    },
+                                    "savedRunType": {
+                                        "type": "string"
+                                    },
+                                    "reconciliationRunId": {
+                                        "type": "string"
+                                    },
+                                    "createdDate": {
+                                        "oneOf": [
+                                            {
+                                                "type": "string"
+                                            },
+                                            {
+                                                "type": "number"
+                                            }
+                                        ],
+                                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                    }
+                                }
+                            },
+                            "scopeType": {
+                                "type": "string"
+                            },
+                            "customerScopeId": {
+                                "type": "string"
+                            },
+                            "activeTenantUserGroupId": {
+                                "type": "string"
+                            },
+                            "activeTenantLabel": {
+                                "type": "string"
+                            },
+                            "availableTenants": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "userGroupId": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            },
+                            "activeTenantPermissionGroupIds": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "canViewActiveTenantData": {
+                                "type": "boolean"
+                            },
+                            "canRunActiveTenantReconciliation": {
+                                "type": "boolean"
+                            },
+                            "canEditActiveTenantData": {
+                                "type": "boolean"
+                            },
+                            "canManageDarpanCore": {
+                                "type": "boolean"
+                            },
+                            "isSuperAdmin": {
+                                "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            }
+                        },
+                        "description": "As login#Session's sessionInfo."
+                    },
+                    "recoveryCodesLeft": {
+                        "type": "integer",
+                        "description": "With a recovery code: how many are left. At 3 or fewer darpan-ui asks for new ones."
+                    },
+                    "challengeEnded": {
+                        "type": "boolean",
+                        "description": "True when the challenge can no longer be used (expired, used, 5 wrong codes): go back to the password."
+                    }
+                }
+            },
+            "VerifySignInCodeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.verify#SignInCode",
+                "x-darpan-method": "facade.AuthFacadeServices.verify#SignInCode",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.verify#SignInCode"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/VerifySignInCodeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "VerifySignInCodeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.verify#SignInCode. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/VerifySignInCodeResult"
                     }
                 },
                 "required": [
@@ -12400,6 +13925,10 @@
                     "userCode": {
                         "type": "string",
                         "description": "The user code shown by the CLI."
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "DAR-BE-264. A current code from the approver's authenticator app; required\n                when they have two-factor on (approval mints a 7-day key, so a hijacked tab must not be enough)."
                     }
                 },
                 "required": [
@@ -32255,6 +33784,8 @@
         "admin.ObserveAdminServices.get#LiveOperations": "GetLiveOperations",
         "admin.RetentionAdminServices.dryRun#Retention": "DryRunRetention",
         "admin.ScheduleAdminServices.get#ScheduleBoard": "GetScheduleBoard",
+        "admin.SecurityAdminServices.get#TwoFactorPolicies": "GetTwoFactorPolicies",
+        "admin.SecurityAdminServices.update#TwoFactorPolicy": "UpdateTwoFactorPolicy",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",
         "admin.TenantAdminServices.get#TenantDetail": "GetTenantDetail",
@@ -32273,6 +33804,7 @@
         "admin.UserAdminServices.get#UserList": "GetUserList",
         "admin.UserAdminServices.remove#DarpanAdmin": "RemoveDarpanAdmin",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
+        "admin.UserAdminServices.reset#TwoFactor": "ResetTwoFactor",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
         "facade.AgentChangeFacadeServices.apply#AuditChange": "ApplyAuditChange",
         "facade.AgentChangeFacadeServices.list#BrainChangeTickets": "ListBrainChangeTickets",
@@ -32299,11 +33831,16 @@
         "facade.AuditFacadeServices.save#AuditCheck": "SaveAuditCheck",
         "facade.AuditFacadeServices.save#AuditSettings": "SaveAuditSettings",
         "facade.AuditFacadeServices.verify#AuditFinding": "VerifyAuditFinding",
+        "facade.AuthFacadeServices.begin#TwoFactorSetup": "BeginTwoFactorSetup",
         "facade.AuthFacadeServices.change#ExpiredPassword": "ChangeExpiredPassword",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
         "facade.AuthFacadeServices.complete#PasswordReset": "CompletePasswordReset",
+        "facade.AuthFacadeServices.confirm#TwoFactorSetup": "ConfirmTwoFactorSetup",
+        "facade.AuthFacadeServices.create#RecoveryCodes": "CreateRecoveryCodes",
+        "facade.AuthFacadeServices.disable#TwoFactor": "DisableTwoFactor",
         "facade.AuthFacadeServices.get#PasswordResetStatus": "GetPasswordResetStatus",
         "facade.AuthFacadeServices.get#SessionInfo": "GetSessionInfo",
+        "facade.AuthFacadeServices.get#TwoFactorStatus": "GetTwoFactorStatus",
         "facade.AuthFacadeServices.login#Session": "LoginSession",
         "facade.AuthFacadeServices.logout#AllSessions": "LogoutAllSessions",
         "facade.AuthFacadeServices.logout#Session": "LogoutSession",
@@ -32313,6 +33850,7 @@
         "facade.AuthFacadeServices.save#UserSettings": "SaveUserSettings",
         "facade.AuthFacadeServices.verify#OwnPassword": "VerifyOwnPassword",
         "facade.AuthFacadeServices.verify#PasswordResetCode": "VerifyPasswordResetCode",
+        "facade.AuthFacadeServices.verify#SignInCode": "VerifySignInCode",
         "facade.CliAccessFacadeServices.get#MyCliAccess": "GetMyCliAccess",
         "facade.CliAccessFacadeServices.request#CliAccess": "RequestCliAccess",
         "facade.CliAuthFacadeServices.approve#CliLogin": "ApproveCliLogin",

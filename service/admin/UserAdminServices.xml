@@ -164,6 +164,7 @@
                     <parameter name="emailAddress"/><parameter name="disabled" type="Boolean"/>
                     <parameter name="darpanRoles" type="List"><description>Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order).</description>
                         <parameter name="darpanRole"/></parameter>
+                    <parameter name="twoFactor"><description>DAR-BE-264. ON, OFF, or REQUIRED_NOT_SET_UP (a role requires it now and it is not on).</description></parameter>
                 </parameter>
             </parameter>
             <parameter name="totalCount" type="Integer"><description>Total matches across all pages.</description></parameter>
@@ -186,6 +187,9 @@
                 <parameter name="darpanRoles" type="List"><description>Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order).
                     A Darpan admin usually has no tenant memberships: they reach tenants through these groups.</description>
                     <parameter name="darpanRole"/></parameter>
+                <parameter name="twoFactor"><description>DAR-BE-264. ON, OFF, or REQUIRED_NOT_SET_UP.</description></parameter>
+                <parameter name="twoFactorConfirmedDate" type="Timestamp"><description>DAR-BE-264. When it was turned on.</description></parameter>
+                <parameter name="twoFactorRequiredFromDate" type="Timestamp"><description>DAR-BE-264. When a role of theirs requires it; empty when optional.</description></parameter>
                 <parameter name="memberships" type="List"><parameter name="membership" type="Map">
                     <parameter name="tenantUserGroupId"/><parameter name="permissionUserGroupId"/>
                     <parameter name="fromDate" type="Timestamp"/>
@@ -220,6 +224,11 @@
                     disabled: targetAccount.disabled == 'Y',
                     requirePasswordChange: targetAccount.requirePasswordChange == 'Y', darpanRoles: darpanRoleList,
                     memberships: membershipList]"/>
+            <!-- DAR-BE-264: two-factor state, never the secret. -->
+            <set field="twoFactorStatus" from="darpan.facade.auth.TwoFactorSupport.status(ec, userId)"/>
+            <set field="userDetail.twoFactor" from="twoFactorStatus.enabled ? 'ON' : (twoFactorStatus.required ? 'REQUIRED_NOT_SET_UP' : 'OFF')"/>
+            <set field="userDetail.twoFactorConfirmedDate" from="twoFactorStatus.confirmedDate"/>
+            <set field="userDetail.twoFactorRequiredFromDate" from="twoFactorStatus.requiredFromDate"/>
         </actions>
     </service>
 
@@ -300,6 +309,31 @@
             <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
                     serviceName: 'admin.UserAdminServices.remove#DarpanAdmin', targetType: 'User', targetId: userId,
                     detailText: 'Removed ' + userId + ' from ' + activeRoleRows*.userGroupId.unique().join(', ') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
+    </service>
+
+    <service verb="reset" noun="TwoFactor" allow-remote="true">
+        <description>DAR-BE-264. End a user's two-factor (lost phone and no recovery code): their authenticator and recovery
+            codes go, every session and CLI key ends, and a user whose role requires it sets up again at the next sign-in.
+            Super admins only, never on one's own account; needs a reason and the acting admin's own current code (so they
+            must have two-factor on). Writes an AdminAuditLog row, a TwoFactorEvent naming the admin, and emails the user.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>User whose two-factor resets.</description></parameter>
+            <parameter name="reason" required="true"><description>Why, for the audit trail ("Two-factor reset: reason").</description></parameter>
+            <parameter name="adminCode" required="true"><description>A current code from the acting admin's own authenticator app.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when reset.</description></parameter></out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="userId == ec.user.userId"><return error="true" message="You cannot reset your own two-factor. Ask another super admin."/></if>
+            <if condition="!reason?.trim()"><return error="true" message="A reason is required."/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.adminReset(ec, userId, reason.trim(), adminCode)"/>
+            <if condition="problem"><return error="true" message="${problem}"/></if>
+            <set field="ok" from="true"/>
         </actions>
     </service>
 </services>

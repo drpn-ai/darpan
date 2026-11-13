@@ -321,6 +321,7 @@ class CliAuthSupport {
     }
 
     static final String CLI_SESSION_EXPIRED = "This CLI session has expired. Run darpan login to sign in again."
+    static final String CLI_TWO_FACTOR_NEEDED = "Two-factor is required for this account. Set it up in the Darpan app, then run darpan login again."
 
     static String cliSessionProblem(def ec, String cliKeyHash, def cliSession) {
         if (cliSession == null || cliSession.revokedDate != null) return "This CLI session was signed out. Run darpan login to sign in again."
@@ -331,6 +332,10 @@ class CliAuthSupport {
         if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) return CLI_SESSION_EXPIRED
         // DAR-BE-261: the age limit, for admins too, so an admin key issued for 30 days before the change ends at 7.
         if (CliAccess.signInExpired((Timestamp) cliSession.createdDate)) return CLI_SESSION_EXPIRED
+        // DAR-BE-264: a key from before the person's two-factor was confirmed, or of a person now required to use
+        // two-factor and not set up, is refused.
+        if (TwoFactorSupport.keyPredatesFactor(ec, (String) cliSession.userId, loginKey.fromDate)) return CLI_SESSION_EXPIRED
+        if (TwoFactorSupport.requiredButNotEnrolled(ec, (String) cliSession.userId)) return CLI_TWO_FACTOR_NEEDED
         def account = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserAccount",
                         "self-scoped auth: re-check that a CLI session's account can still sign in")
                 .condition("userId", cliSession.userId).useCache(false).one()

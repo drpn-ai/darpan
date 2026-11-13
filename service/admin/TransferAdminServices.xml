@@ -52,6 +52,8 @@
                 every lifecycle, the automations of the runs and lifecycles sent, and the chat spaces those automations post
                 to (their webhooks sealed with the credentials, never in clear). Automations an import creates start paused.
                 False (the default) sends exactly what it always has.</description></parameter>
+            <parameter name="twoFactorCode"><description>DAR-BE-264. A current code from the caller's authenticator app; required
+                when they have two-factor on.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="bundle" type="Map"><description>{bundleVersion, source, connections, queries, conclusionCodes,
@@ -60,6 +62,9 @@
         </out-parameters>
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <!-- DAR-BE-264: a fresh code from an exporter with two-factor on. -->
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshCodeProblem(ec, twoFactorCode)"/>
+            <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="bundle" from="darpan.admin.transfer.ConfigTransferExporter.bundle(ec, tenantUserGroupId, auditCodes,
                     savedRunIds, connectionRefs, sourceInstanceLabel, secretsPublicKey, false, includeAutomations as boolean)"/>
             <if condition="bundle == null"><return error="true"/></if>
@@ -115,6 +120,8 @@
             instance's entity crypt pass, for this tenant, for 30 minutes. Nothing is stored but one AdminAuditLog row.</description>
         <in-parameters>
             <parameter name="tenantUserGroupId" required="true"><description>The target tenant.</description></parameter>
+            <parameter name="twoFactorCode"><description>DAR-BE-264. A current code from the caller's authenticator app; required
+                when they have two-factor on.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="publicKey"><description>Base64 SPKI, for export#ConfigBundle secretsPublicKey.</description></parameter>
@@ -126,6 +133,9 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <if condition="!darpan.admin.transfer.ConfigTransferExporter.requireTenant(ec, tenantUserGroupId)"><return error="true"/></if>
+            <!-- DAR-BE-264: a fresh code from an operator with two-factor on. -->
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshCodeProblem(ec, twoFactorCode)"/>
+            <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="handoff" from="darpan.admin.transfer.SecretHandoff.begin(ec, tenantUserGroupId)"/>
             <set field="publicKey" from="handoff.publicKey"/>
             <set field="handoffToken" from="handoff.handoffToken"/>

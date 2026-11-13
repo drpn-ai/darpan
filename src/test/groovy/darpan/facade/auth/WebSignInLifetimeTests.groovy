@@ -145,6 +145,26 @@ class WebSignInLifetimeTests {
         assertEquals(0.5f, AuthSessionSupport.initialLoginKeyHours(new Expando(factory: new FactoryStub(expireHours: 0.5f))))
     }
 
+    @Test
+    @DisplayName("DAR-BE-264: a key (or, with no key, a web session) from before two-factor was confirmed ends the sign-in")
+    void aKeyFromBeforeTwoFactorEnds() {
+        long now = System.currentTimeMillis()
+        Map factor = [userId: USER, statusId: "ACTIVE", confirmedDate: new Timestamp(now - 10 * MINUTE)]
+        def oldKey = new EntityStub(keys: [key(APP_KEY, now - 20 * MINUTE, now + 40 * MINUTE)], factors: [factor])
+        def oldEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now)), oldKey)
+        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(oldEc))
+        assertNull(oldEc.user.userId)
+
+        def newKey = new EntityStub(keys: [key(APP_KEY, now - 5 * MINUTE, now + 55 * MINUTE)], factors: [factor])
+        def newEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 20 * MINUTE)), newKey)
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(newEc), "the key decides, not the older web session")
+        assertEquals(USER, newEc.user.userId)
+
+        def sessionOnly = new SessionStub(creationTime: now - 20 * MINUTE)
+        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(ec(new RequestStub(session: sessionOnly), new EntityStub(factors: [factor]))))
+        assertTrue(sessionOnly.invalidated)
+    }
+
     // ---- stubs ----
 
     private static Map key(String raw, long fromMillis, long thruMillis, String userId = USER) {
@@ -174,10 +194,12 @@ class WebSignInLifetimeTests {
     static class EntityStub {
         List<Map> keys = []
         List<Map> cliSessions = []
+        List<Map> factors = []
         int writes = 0
         FinderStub find(String entityName) {
             if (entityName == "moqui.security.UserLoginKey") return new FinderStub(rows: keys, owner: this)
             if (entityName == "darpan.auth.CliSession") return new FinderStub(rows: cliSessions, owner: this)
+            if (entityName == "darpan.auth.TwoFactorFactor") return new FinderStub(rows: factors, owner: this)
             return new FinderStub(owner: this)
         }
     }

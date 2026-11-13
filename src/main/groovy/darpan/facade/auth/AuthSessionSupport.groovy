@@ -180,16 +180,21 @@ class AuthSessionSupport {
         long now = System.currentTimeMillis()
         long absoluteMillis = absoluteLifetimeMillis(ec)
         boolean ended = sessionOlderThan(request, now, absoluteMillis)
+        // DAR-BE-264: a key (or, with no key, a web session) from before the person's two-factor was confirmed stops working.
+        Timestamp factorConfirmed = TwoFactorSupport.activeConfirmedDate(ec, userId)
         boolean decided = false
         for (String hash : CliAuthSupport.requestLoginKeyHashes(ec)) {
             def key = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
                             "self-scoped auth: slide the request's own web login key (pre-auth path, no active tenant)")
                     .condition("loginKey", hash).useCache(false).one()
             if (key == null || key.userId != userId) continue
-            boolean live = slideWebLoginKey(ec, key, now, absoluteMillis)
+            boolean predates = factorConfirmed != null && key.fromDate instanceof Timestamp &&
+                    ((Timestamp) key.fromDate).before(factorConfirmed)
+            boolean live = !predates && slideWebLoginKey(ec, key, now, absoluteMillis)
             if (!decided && !live) ended = true
             decided = true
         }
+        if (!decided && factorConfirmed != null && sessionCreatedBefore(request, factorConfirmed.time)) ended = true
         if (ended) endWebSignIn(ec, request)
         return ended
     }
@@ -216,6 +221,15 @@ class AuthSessionSupport {
             }
         }
         return slid.time > nowMillis
+    }
+
+    private static boolean sessionCreatedBefore(def request, long millis) {
+        try {
+            def session = request.getSession(false)
+            return session != null && session.creationTime < millis
+        } catch (IllegalStateException ignored) {
+            return false // already invalidated
+        }
     }
 
     private static boolean sessionOlderThan(def request, long nowMillis, long ageMillis) {

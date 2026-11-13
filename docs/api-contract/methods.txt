@@ -36,6 +36,8 @@ admin.ObserveAdminServices.get#AdminSessionInfo
 admin.ObserveAdminServices.get#LiveOperations
 admin.RetentionAdminServices.dryRun#Retention
 admin.ScheduleAdminServices.get#ScheduleBoard
+admin.SecurityAdminServices.get#TwoFactorPolicies
+admin.SecurityAdminServices.update#TwoFactorPolicy
 admin.TenantAdminServices.create#Tenant
 admin.TenantAdminServices.deactivate#Tenant
 admin.TenantAdminServices.get#TenantDetail
@@ -54,6 +56,7 @@ admin.UserAdminServices.get#UserDetail
 admin.UserAdminServices.get#UserList
 admin.UserAdminServices.remove#DarpanAdmin
 admin.UserAdminServices.reset#Password
+admin.UserAdminServices.reset#TwoFactor
 admin.UserAdminServices.update#UserAccount
 facade.AgentChangeFacadeServices.apply#AuditChange
 facade.AgentChangeFacadeServices.list#BrainChangeTickets
@@ -80,11 +83,16 @@ facade.AuditFacadeServices.run#Audit
 facade.AuditFacadeServices.save#AuditCheck
 facade.AuditFacadeServices.save#AuditSettings
 facade.AuditFacadeServices.verify#AuditFinding
+facade.AuthFacadeServices.begin#TwoFactorSetup
 facade.AuthFacadeServices.change#ExpiredPassword
 facade.AuthFacadeServices.change#OwnPassword
 facade.AuthFacadeServices.complete#PasswordReset
+facade.AuthFacadeServices.confirm#TwoFactorSetup
+facade.AuthFacadeServices.create#RecoveryCodes
+facade.AuthFacadeServices.disable#TwoFactor
 facade.AuthFacadeServices.get#PasswordResetStatus
 facade.AuthFacadeServices.get#SessionInfo
+facade.AuthFacadeServices.get#TwoFactorStatus
 facade.AuthFacadeServices.login#Session
 facade.AuthFacadeServices.logout#AllSessions
 facade.AuthFacadeServices.logout#Session
@@ -94,6 +102,7 @@ facade.AuthFacadeServices.save#RecoveryEmail
 facade.AuthFacadeServices.save#UserSettings
 facade.AuthFacadeServices.verify#OwnPassword
 facade.AuthFacadeServices.verify#PasswordResetCode
+facade.AuthFacadeServices.verify#SignInCode
 facade.CliAccessFacadeServices.get#MyCliAccess
 facade.CliAccessFacadeServices.request#CliAccess
 facade.CliAuthFacadeServices.approve#CliLogin

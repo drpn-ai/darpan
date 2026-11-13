@@ -197,6 +197,10 @@ class CliMethodAllowlist {
             "admin.TenantAdminServices.reactivate#Tenant",
             "admin.TenantAdminServices.update#Tenant",
 
+            // DAR-BE-264: the two-factor policy and its reset are the admin app's; sign-in and credentials are never a CLI session's.
+            "admin.SecurityAdminServices.get#TwoFactorPolicies",
+            "admin.SecurityAdminServices.update#TwoFactorPolicy",
+
             "admin.TransferAdminServices.begin#SecretHandoff",
             "admin.TransferAdminServices.export#ConfigBundle",
             "admin.TransferAdminServices.get#TransferCatalog",
@@ -211,6 +215,7 @@ class CliMethodAllowlist {
             "admin.UserAdminServices.get#UserDetail",
             "admin.UserAdminServices.get#UserList",
             "admin.UserAdminServices.reset#Password",
+            "admin.UserAdminServices.reset#TwoFactor", // DAR-BE-264
             "admin.UserAdminServices.update#UserAccount",
 
             "facade.AuditFacadeServices.add#AuditStatement",
@@ -231,6 +236,13 @@ class CliMethodAllowlist {
             "facade.AuthFacadeServices.save#UserSettings",
             "facade.AuthFacadeServices.verify#OwnPassword",
             "facade.AuthFacadeServices.verify#PasswordResetCode",
+            // DAR-BE-264: two-factor sign-in, setup and recovery codes: credentials, never on the CLI list (get#TwoFactorStatus too).
+            "facade.AuthFacadeServices.begin#TwoFactorSetup",
+            "facade.AuthFacadeServices.confirm#TwoFactorSetup",
+            "facade.AuthFacadeServices.create#RecoveryCodes",
+            "facade.AuthFacadeServices.disable#TwoFactor",
+            "facade.AuthFacadeServices.get#TwoFactorStatus",
+            "facade.AuthFacadeServices.verify#SignInCode",
 
             "facade.CliAuthFacadeServices.approve#CliLogin",
             "facade.CliAuthFacadeServices.deny#CliLogin",

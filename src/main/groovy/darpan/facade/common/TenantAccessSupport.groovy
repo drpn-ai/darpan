@@ -7,6 +7,7 @@ import java.time.DateTimeException
 import java.util.TimeZone
 
 import darpan.facade.auth.PasswordResetSupport
+import darpan.facade.auth.TwoFactorSupport
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.sanitizeFileToken
@@ -438,6 +439,13 @@ class TenantAccessSupport {
             String recoveryEmail = normalize(ec?.user?.userAccount?.emailAddress)
             sessionInfo.recoveryEmailMissing = !recoveryEmail
             sessionInfo.emailAddressMasked = PasswordResetSupport.maskEmail(recoveryEmail)
+            // DAR-BE-264: whether two-factor is on, and by when it must be (the UI prompts in the grace period).
+            // Informational: a failed read leaves the two fields out rather than failing the sign-in.
+            try {
+                sessionInfo.putAll(TwoFactorSupport.sessionFields(ec, sessionInfo.userId as String))
+            } catch (Exception e) {
+                org.slf4j.LoggerFactory.getLogger(TenantAccessSupport.class).warn("Could not read two-factor state for the session: ${e.message}")
+            }
         }
         applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-264. The two-factor enforcement switch per role. A policy is data: turning a role on or off needs no
+         deploy. Every role starts optional (empty date). Spec: wrapper
+         docs/superpowers/specs/2026-11-13-dar-be-264-two-factor-sign-in-design.md ("Rollout"). -->
+
+    <service verb="get" noun="TwoFactorPolicies" allow-remote="true" authz-action="view">
+        <description>Each role the two-factor policy covers (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN in
+            any tenant) with its date and who in it is and is not enrolled, plus how many super admins are enrolled (the
+            break-glass rule needs two before super-admin enforcement can be switched on).</description>
+        <out-parameters>
+            <parameter name="policies" type="List"><description>One entry per role, in the order above.</description>
+                <parameter name="policy" type="Map">
+                    <parameter name="permissionGroupId"/>
+                    <parameter name="requiredFromDate" type="Timestamp"><description>Empty: optional. Future: grace period.</description></parameter>
+                    <parameter name="lastChangedByUserId"/>
+                    <parameter name="lastChangedDate" type="Timestamp"/>
+                    <parameter name="enrolledCount" type="Integer"/>
+                    <parameter name="notEnrolledCount" type="Integer"/>
+                    <parameter name="enrolled" type="List"><parameter name="user" type="Map"><parameter name="userId"/><parameter name="username"/></parameter></parameter>
+                    <parameter name="notEnrolled" type="List"><parameter name="user" type="Map"><parameter name="userId"/><parameter name="username"/></parameter></parameter>
+                </parameter>
+            </parameter>
+            <parameter name="enrolledSuperAdminCount" type="Integer"><description>Super admins (ADMIN, DARPAN_SUPER_ADMIN) with two-factor on.</description></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="result" from="darpan.facade.auth.TwoFactorSupport.policies(ec)"/>
+            <set field="policies" from="result.policies"/>
+            <set field="enrolledSuperAdminCount" from="result.enrolledSuperAdminCount"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="TwoFactorPolicy" allow-remote="true">
+        <description>Require two-factor for a role from a date (today or earlier: now; later: a grace period during which
+            sign-in prompts), or make it optional again (clear). Super admins only. Requiring it for ADMIN or
+            DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row.</description>
+        <in-parameters>
+            <parameter name="permissionGroupId" required="true"><description>ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN or DARPAN_TENANT_ADMIN.</description></parameter>
+            <parameter name="requiredFromDate" type="Timestamp"><description>Required from this date. Leave out with clear.</description></parameter>
+            <parameter name="clear" type="Boolean" default-value="false"><description>True makes the role optional again.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when the policy was saved.</description></parameter></out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.updatePolicy(ec, permissionGroupId, requiredFromDate, clear as boolean)"/>
+            <if condition="problem"><return error="true" message="${problem}"/></if>
+            <set field="ok" from="true"/>
+        </actions>
+    </service>
+</services>

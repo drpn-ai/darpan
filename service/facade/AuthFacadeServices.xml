@@ -39,6 +39,22 @@
                     login, `PWDTIM` when the current password has aged past the configured rotation window.
                     Absent unless passwordChangeRequired is true.</description>
             </parameter>
+            <parameter name="twoFactorRequired" type="Boolean">
+                <description>DAR-BE-264. True when the password was right and the account has two-factor on: no session
+                    yet. ok=true, authenticated=false; send challengeToken with a code to verify#SignInCode.</description>
+            </parameter>
+            <parameter name="twoFactorSetupRequired" type="Boolean">
+                <description>DAR-BE-264. True when the password was right and two-factor is required for the account's role
+                    but not set up: no session yet. ok=true, authenticated=false; challengeToken allows only
+                    begin#TwoFactorSetup and confirm#TwoFactorSetup, and confirm signs in.</description>
+            </parameter>
+            <parameter name="challengeToken" type="String">
+                <description>DAR-BE-264. With twoFactorRequired or twoFactorSetupRequired: the sign-in challenge. Keep it in
+                    page memory only (never storage or a cookie); a refresh goes back to the password step.</description>
+            </parameter>
+            <parameter name="challengeExpiresInSeconds" type="Integer">
+                <description>DAR-BE-264. Seconds the challenge lives: 300.</description>
+            </parameter>
             <parameter name="authToken" type="String">
                 <description>Explicit login-key token that darpan-ui sends on later requests through the `login_key` header.</description>
             </parameter>
@@ -84,6 +100,8 @@
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -99,6 +117,10 @@
             <set field="authTokenHeaderName" from="authResult.authTokenHeaderName"/>
             <set field="authTokenExpiresInSeconds" from="authResult.authTokenExpiresInSeconds"/>
             <set field="sessionInfo" from="authResult.sessionInfo"/>
+            <set field="twoFactorRequired" from="authResult.twoFactorRequired"/>
+            <set field="twoFactorSetupRequired" from="authResult.twoFactorSetupRequired"/>
+            <set field="challengeToken" from="authResult.challengeToken"/>
+            <set field="challengeExpiresInSeconds" from="authResult.challengeExpiresInSeconds"/>
         </actions>
     </service>
 
@@ -152,6 +174,8 @@
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -225,6 +249,8 @@
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -300,6 +326,8 @@
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -375,6 +403,8 @@
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -452,6 +482,8 @@
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -804,6 +836,272 @@
             <set field="authenticated" from="authResult.authenticated"/>
             <set field="authTokenRevoked" from="authResult.authTokenRevoked"/>
             <set field="allSessionsRevoked" from="authResult.allSessionsRevoked"/>
+        </actions>
+    </service>
+
+    <!-- DAR-BE-264. Two-factor sign-in (TOTP). Spec: wrapper docs/superpowers/specs/2026-11-13-dar-be-264-two-factor-sign-in-design.md.
+         The secret is in begin#TwoFactorSetup's reply only; recovery codes in confirm#TwoFactorSetup's and
+         create#RecoveryCodes' only. None of these is on the CLI allowlist. -->
+
+    <service verb="verify" noun="SignInCode" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a
+            current authenticator code or a recovery code. Success answers as login#Session does (a session and its key).
+            Every refusal is "That code didn't work."; 5 wrong codes end the challenge (challengeEnded), and each wrong code
+            also counts as a failed login. A used recovery code emails the person.</description>
+        <in-parameters>
+            <parameter name="challengeToken" required="true"><description>From login#Session.</description></parameter>
+            <parameter name="code"><description>The 6-digit code from the authenticator app; spaces ignored.</description></parameter>
+            <parameter name="recoveryCode"><description>Instead of code: a recovery code, xxxx-xxxx-xxxx-xxxx (case, spaces and dashes ignored). Used once.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when a session was issued.</description></parameter>
+            <parameter name="authToken" type="String">
+                <description>The login key darpan-ui sends in the `login_key` header (also set as the persistent-login cookie).</description></parameter>
+            <parameter name="authTokenType" type="String"><description>`LOGIN_KEY`.</description></parameter>
+            <parameter name="authTokenHeaderName" type="String"><description>`login_key`.</description></parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer">
+                <description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
+            <parameter name="sessionInfo" type="Map">
+                <description>As login#Session's sessionInfo.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
+                <parameter name="lastRun" type="Map">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants" type="List">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
+            </parameter>
+            <parameter name="recoveryCodesLeft" type="Integer">
+                <description>With a recovery code: how many are left. At 3 or fewer darpan-ui asks for new ones.</description></parameter>
+            <parameter name="challengeEnded" type="Boolean">
+                <description>True when the challenge can no longer be used (expired, used, 5 wrong codes): go back to the password.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.verifySignInCode(ec, challengeToken, code, recoveryCode)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="authenticated" from="authResult.authenticated"/>
+            <set field="authToken" from="authResult.authToken"/>
+            <set field="authTokenType" from="authResult.authTokenType"/>
+            <set field="authTokenHeaderName" from="authResult.authTokenHeaderName"/>
+            <set field="authTokenExpiresInSeconds" from="authResult.authTokenExpiresInSeconds"/>
+            <set field="sessionInfo" from="authResult.sessionInfo"/>
+            <set field="recoveryCodesLeft" from="authResult.recoveryCodesLeft"/>
+            <set field="challengeEnded" from="authResult.challengeEnded"/>
+        </actions>
+    </service>
+
+    <service verb="begin" noun="TwoFactorSetup" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-264. Start setting up an authenticator app: a new secret (any earlier unfinished setup ends),
+            shown once. Either signed in (a first setup needs currentPassword; replacing an app that is on needs a current
+            code from it), or with a setup challengeToken from login#Session (twoFactorSetupRequired). Finish within 15
+            minutes with confirm#TwoFactorSetup.</description>
+        <in-parameters>
+            <parameter name="challengeToken"><description>A setup challenge from login#Session; leave out when signed in.</description></parameter>
+            <parameter name="currentPassword"><description>Signed in, first setup: the account's password (a wrong one counts as a failed login).</description></parameter>
+            <parameter name="code"><description>Signed in, replacing an app that is on: a current code from it.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="secret" type="String">
+                <description>The key, Base32 (show grouped in fours for typing). In this reply only; never returned again.</description></parameter>
+            <parameter name="otpauthUri" type="String">
+                <description>otpauth://totp/Darpan:username?secret=...&amp;issuer=Darpan&amp;digits=6&amp;period=30&amp;algorithm=SHA1
+                    (issuer from DARPAN_TOTP_ISSUER, e.g. "Darpan UAT").</description></parameter>
+            <parameter name="qrDataUri" type="String">
+                <description>The otpauthUri as a QR code: an SVG data URI (data:image/svg+xml;base64,...) for an img src.</description></parameter>
+            <parameter name="expiresInSeconds" type="Integer"><description>Seconds left to confirm: 900.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginTwoFactorSetup(ec, challengeToken, currentPassword, code)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="secret" from="authResult.secret"/>
+            <set field="otpauthUri" from="authResult.otpauthUri"/>
+            <set field="qrDataUri" from="authResult.qrDataUri"/>
+            <set field="expiresInSeconds" from="authResult.expiresInSeconds"/>
+        </actions>
+    </service>
+
+    <service verb="confirm" noun="TwoFactorSetup" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI
+            key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken
+            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. Returns 10
+            recovery codes, once.</description>
+        <in-parameters>
+            <parameter name="code" required="true"><description>The 6-digit code the new app shows.</description></parameter>
+            <parameter name="challengeToken"><description>The setup challenge from login#Session; leave out when signed in.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when a session was issued.</description></parameter>
+            <parameter name="authToken" type="String">
+                <description>The login key darpan-ui sends in the `login_key` header (also set as the persistent-login cookie).</description></parameter>
+            <parameter name="authTokenType" type="String"><description>`LOGIN_KEY`.</description></parameter>
+            <parameter name="authTokenHeaderName" type="String"><description>`login_key`.</description></parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer">
+                <description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
+            <parameter name="sessionInfo" type="Map">
+                <description>As login#Session's sessionInfo.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
+                <parameter name="lastRun" type="Map">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants" type="List">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
+            </parameter>
+            <parameter name="recoveryCodes" type="List">
+                <description>10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only.</description><parameter name="recoveryCode"/></parameter>
+            <parameter name="challengeEnded" type="Boolean">
+                <description>With a challengeToken: true when it can no longer be used (expired, 5 wrong codes).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.confirmTwoFactorSetup(ec, challengeToken, code)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="authenticated" from="authResult.authenticated"/>
+            <set field="authToken" from="authResult.authToken"/>
+            <set field="authTokenType" from="authResult.authTokenType"/>
+            <set field="authTokenHeaderName" from="authResult.authTokenHeaderName"/>
+            <set field="authTokenExpiresInSeconds" from="authResult.authTokenExpiresInSeconds"/>
+            <set field="sessionInfo" from="authResult.sessionInfo"/>
+            <set field="recoveryCodes" from="authResult.recoveryCodes"/>
+            <set field="challengeEnded" from="authResult.challengeEnded"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="TwoFactorStatus" allow-remote="true" authenticate="true" authz-action="view">
+        <description>DAR-BE-264. The signed-in person's two-factor state, for User Settings. Never the secret.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="enabled" type="Boolean"><description>True when an authenticator app is on.</description></parameter>
+            <parameter name="confirmedDate" type="Timestamp"><description>When it was turned on.</description></parameter>
+            <parameter name="recoveryCodesLeft" type="Integer"><description>Unused recovery codes.</description></parameter>
+            <parameter name="required" type="Boolean"><description>True when a role of theirs requires it now (no "Off" action).</description></parameter>
+            <parameter name="requiredFromDate" type="Timestamp"><description>When it is or becomes required; empty when optional.</description></parameter>
+            <parameter name="codesLocked" type="Boolean"><description>True after 20 wrong codes in 24 hours, until a password or admin reset.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="status" from="darpan.facade.auth.TwoFactorSupport.status(ec, ec.user.userId)"/>
+            <set field="enabled" from="status.enabled"/>
+            <set field="confirmedDate" from="status.confirmedDate"/>
+            <set field="recoveryCodesLeft" from="status.recoveryCodesLeft"/>
+            <set field="required" from="status.required"/>
+            <set field="requiredFromDate" from="status.requiredFromDate"/>
+            <set field="codesLocked" from="status.codesLocked"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="RecoveryCodes" allow-remote="true" authenticate="true">
+        <description>DAR-BE-264. Ten new recovery codes for the signed-in person, replacing every old one. Needs a current
+            authenticator code.</description>
+        <in-parameters>
+            <parameter name="code" required="true"><description>A current code from the authenticator app.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="recoveryCodes" type="List">
+                <description>10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only.</description><parameter name="recoveryCode"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="renewed" from="darpan.facade.auth.TwoFactorSupport.renewRecoveryCodes(ec, code)"/>
+            <if condition="renewed.error"><return error="true" message="${renewed.error}"/></if>
+            <set field="recoveryCodes" from="renewed.recoveryCodes"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="disable" noun="TwoFactor" allow-remote="true" authenticate="true">
+        <description>DAR-BE-264. Turn two-factor off for the signed-in person, with a current code. Refused when a role of
+            theirs requires it. Every other session and CLI key ends; this one carries on.</description>
+        <in-parameters>
+            <parameter name="code" required="true"><description>A current code from the authenticator app.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.turnOff(ec, code)"/>
+            <if condition="problem"><return error="true" message="${problem}"/></if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 </services>

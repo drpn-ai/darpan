@@ -612,14 +612,56 @@ class ReconciliationOutputSupportTests {
             )
         }
 
-        def gorjanaEc = ecFor("GORJANA")
-        // Authoritative owner is GORJANA (from the RuleSet), NOT the forged ATTACKER in the file.
-        assertEquals("GORJANA", ReconciliationOutputSupport.resolveGeneratedOutputTenantUserGroupId(gorjanaEc, resultFile, resultPath))
-        assertTrue(ReconciliationOutputSupport.canAccessGeneratedOutputFile(gorjanaEc, resultFile, resultPath))
-
         // The forged in-file tenant must not grant the attacker (active tenant ATTACKER) access.
         def attackerEc = ecFor("ATTACKER")
         assertFalse(ReconciliationOutputSupport.canAccessGeneratedOutputFile(attackerEc, resultFile, resultPath))
+
+        // DAR-BE-269: a stamp that disagrees with the folder's owner leaves the file with no owner,
+        // so the folder's tenant is refused as well. A stamp can deny; it never grants.
+        def gorjanaEc = ecFor("GORJANA")
+        assertNull(ReconciliationOutputSupport.resolveGeneratedOutputTenantUserGroupId(gorjanaEc, resultFile, resultPath))
+        assertFalse(ReconciliationOutputSupport.canAccessGeneratedOutputFile(gorjanaEc, resultFile, resultPath))
+    }
+
+    @Test
+    void reusedRunIdDoesNotHandOrphanedResultsToTheNewRunsTenant(@TempDir File dataManagerRoot) {
+        // DAR-BE-269: RAILS results stay in reconciliation-runs/RS_100102/ after their run result rows
+        // are gone; a later ACME run is issued the same id. The folder now resolves to ACME's run.
+        String runFolderPath = "reconciliation-runs/RS_100102/20261026-161634398"
+        File runFolder = new File(dataManagerRoot, runFolderPath)
+        assertTrue(runFolder.mkdirs())
+        Map<String, String> stamps = [
+                "RS_100102_rails_result.json"   : '{"metadata":{"companyUserGroupId":"RAILS"},"differences":[]}',
+                "RS_100102_unstamped_result.json": '{"metadata":{},"differences":[]}',
+                "RS_100102_acme_result.json"    : '{"metadata":{"companyUserGroupId":"ACME"},"differences":[]}',
+        ]
+        stamps.each { String name, String body -> new File(runFolder, name).text = body }
+
+        def acmeEc = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                user    : new Expando(
+                        userId       : "acme.admin",
+                        nowTimestamp : Timestamp.valueOf("2026-11-13 12:00:00"),
+                        getPreference: { String key -> key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "ACME" : null }
+                ),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult": [],
+                        "darpan.rule.RuleSet"                          : [[ruleSetId: "RS_100102", companyUserGroupId: "ACME"]],
+                        "moqui.security.UserGroupAndMember"            : [[
+                                userId         : "acme.admin",
+                                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+                                userGroupId    : "ACME",
+                        ]],
+                        "moqui.security.UserGroupMember"               : [],
+                ])
+        )
+
+        Closure<Boolean> acmeCanRead = { String name ->
+            ReconciliationOutputSupport.canAccessGeneratedOutputFile(acmeEc, new File(runFolder, name), "${runFolderPath}/${name}")
+        }
+        assertFalse(acmeCanRead("RS_100102_rails_result.json"), "another tenant's stamped result must not follow the reused id")
+        assertTrue(acmeCanRead("RS_100102_unstamped_result.json"), "an unstamped file still belongs to the folder's owner")
+        assertTrue(acmeCanRead("RS_100102_acme_result.json"), "a file stamped for the folder's owner stays readable")
     }
 
     @Test

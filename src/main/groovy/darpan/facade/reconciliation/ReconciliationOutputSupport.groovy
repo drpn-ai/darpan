@@ -96,8 +96,22 @@ class ReconciliationOutputSupport {
         // the path keys a RuleSet / mapping / run-result, each carrying companyUserGroupId. The in-file
         // value below now triggers only for a genuinely orphaned file with no owning entity at all.
         String runFolderTenantUserGroupId = resolveTenantFromRunFolderEntity(ec, safePath)
-        if (runFolderTenantUserGroupId) return runFolderTenantUserGroupId
+        String stampedTenantUserGroupId = readStampedTenantUserGroupId(ec, file, safePath)
+        if (runFolderTenantUserGroupId) {
+            // DAR-BE-269: no run result names this file, so the folder's owner is whichever run holds that
+            // id NOW. After an id is issued twice (a database restore while result folders survive), that is
+            // another tenant's run. A file stamped for a different tenant has no owner: the stamp can only
+            // deny, never grant, so a forged stamp still opens nothing.
+            if (stampedTenantUserGroupId && stampedTenantUserGroupId != runFolderTenantUserGroupId) {
+                logger.warn("[tenant-scope] result file {} is stamped for a tenant other than its run folder's owner; access denied", safePath)
+                return null
+            }
+            return runFolderTenantUserGroupId
+        }
+        return stampedTenantUserGroupId
+    }
 
+    private static String readStampedTenantUserGroupId(def ec, File file, String safePath) {
         File tenantSourceFile = OutputPathSupport.isGeneratedResultFile(safePath) ? file : (OutputPathSupport.resolveSourceArtifactResultFile(ec, safePath) ?: file)
         Map<String, Object> outputDocument = OutputDescriptorSupport.readOutputDocumentHeader(tenantSourceFile)
         return normalize(outputDocument?.metadata instanceof Map ? outputDocument.metadata.companyUserGroupId : null)

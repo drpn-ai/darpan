@@ -84,6 +84,13 @@ class TotpSupport {
         return matched
     }
 
+    /** The label an authenticator app (and a passkey prompt) shows: "Darpan", or DARPAN_TOTP_ISSUER / darpan.totp.issuer
+     *  (e.g. "Darpan UAT") so instances are told apart. */
+    static String issuer() {
+        String configured = System.getenv("DARPAN_TOTP_ISSUER")?.trim() ?: System.getProperty("darpan.totp.issuer")?.trim()
+        return (configured ?: "Darpan").replace(":", " ")
+    }
+
     /** otpauth://totp/Issuer:account?secret=...&issuer=...&digits=6&period=30&algorithm=SHA1 */
     static String otpauthUri(String issuer, String accountName, String secret) {
         String label = encode(issuer) + ":" + encode(accountName)

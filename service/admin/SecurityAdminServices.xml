@@ -27,7 +27,7 @@
         </out-parameters>
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <set field="result" from="darpan.facade.auth.TwoFactorSupport.policies(ec)"/>
+            <set field="result" from="darpan.facade.auth.TwoFactorPolicy.policies(ec)"/>
             <set field="policies" from="result.policies"/>
             <set field="enrolledSuperAdminCount" from="result.enrolledSuperAdminCount"/>
         </actions>
@@ -50,8 +50,31 @@
         <actions>
             <set field="ok" from="false"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.updatePolicy(ec, permissionGroupId, requiredFromDate, clear as boolean, adminCode, adminPasskeyAssertion)"/>
+            <set field="policyGroupIds" from="darpan.facade.auth.TwoFactorPolicy.POLICY_GROUP_IDS"/>
+            <if condition="!(permissionGroupId in policyGroupIds)">
+                <return error="true" message="${permissionGroupId ?: '(missing)'} is not a role the two-factor policy covers (${policyGroupIds.join(', ')})."/></if>
+            <if condition="!clear &amp;&amp; requiredFromDate == null">
+                <return error="true" message="Give requiredFromDate, or clear=true to make it optional."/></if>
+            <!-- Break-glass: one lost phone must not lock the platform out. -->
+            <if condition="!clear &amp;&amp; permissionGroupId in darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS">
+                <set field="enrolledSuperAdminCount" from="darpan.facade.auth.TwoFactorPolicy.enrolledSuperAdminCount(ec)"/>
+                <set field="minimumSuperAdmins" from="darpan.facade.auth.TwoFactorPolicy.MIN_ENROLLED_SUPER_ADMINS"/>
+                <if condition="enrolledSuperAdminCount &lt; minimumSuperAdmins">
+                    <return error="true" message="At least ${minimumSuperAdmins} super admins must have two-factor on before it is required for ${permissionGroupId} (${enrolledSuperAdminCount} do)."/></if>
+            </if>
+            <!-- The fresh proof last (review M4), so a request refused above spends no code. -->
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, adminCode, adminPasskeyAssertion)"/>
+            <if condition="problem == darpan.facade.auth.TwoFactorRefusal.NOT_ENROLLED">
+                <return error="true" message="Set up two-factor on your own account before changing the two-factor policy."/></if>
             <if condition="problem"><return error="true" message="${problem}"/></if>
+            <set field="requiredFromDate" from="clear ? null : requiredFromDate"/>
+            <service-call name="store#darpan.auth.TwoFactorRolePolicy" in-map="[permissionGroupId: permissionGroupId,
+                    requiredFromDate: requiredFromDate, lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.SecurityAdminServices.update#TwoFactorPolicy', targetType: 'TwoFactorPolicy', targetId: permissionGroupId,
+                    detailText: requiredFromDate == null ? 'Two-factor optional for ' + permissionGroupId + '.'
+                            : 'Two-factor required for ' + permissionGroupId + ' from ' + requiredFromDate + '.',
+                    auditTimestamp: ec.user.nowTimestamp]"/>
             <set field="ok" from="true"/>
         </actions>
     </service>
@@ -95,8 +118,8 @@
         <actions>
             <set field="ok" from="false"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, adminCode, adminPasskeyAssertion, false)"/>
-            <if condition="problem == darpan.facade.auth.TwoFactorSupport.NOT_ENROLLED">
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, adminCode, adminPasskeyAssertion)"/>
+            <if condition="problem == darpan.facade.auth.TwoFactorRefusal.NOT_ENROLLED">
                 <return error="true" message="Set up two-factor on your own account before rotating the encryption key."/></if>
             <if condition="problem"><return error="true" message="${problem}"/></if>
 

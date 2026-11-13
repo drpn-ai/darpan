@@ -601,7 +601,7 @@ class AuthFacadeSupportTests {
     void refusalReasonsAreTheDocumentedSet() {
         assertEquals(["CODE", "PASSKEY", "PROOF_NEEDED", "PASSWORD", "CHALLENGE_ENDED", "SETUP_EXPIRED", "PASSKEYS_UNAVAILABLE",
                       "PASSKEY_LIMIT", "PASSKEY_EXISTS", "ACCOUNT_CANNOT_SIGN_IN", "SIGN_IN_FIRST"] as Set,
-                AuthFacadeSupport.REFUSAL_REASONS.values() as Set)
+                TwoFactorRefusal.values()*.reason.findAll { it } as Set)
     }
 
     /** A refusal whose wording this code does not recognise must fall to the safe side — spend the hash.
@@ -1274,7 +1274,7 @@ class AuthFacadeSupportTests {
             }
         }
 
-        /** The two-factor reads after a right password (TwoFactorSupport.enabled) count rows: none here, so no factor. */
+        /** The two-factor reads after a right password (TwoFactorRecords.enabled) count rows: none here, so no factor. */
         long count() {
             return list().size()
         }

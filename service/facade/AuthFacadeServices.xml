@@ -925,7 +925,7 @@
                 PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.verifySignInCode(ec, challengeToken, code, recoveryCode, passkeyAssertion)"/>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.verifySignInCode(ec, challengeToken, code, recoveryCode, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -973,7 +973,7 @@
                 PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginTwoFactorSetup(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.beginTwoFactorSetup(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -1055,7 +1055,7 @@
                 PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.confirmTwoFactorSetup(ec, challengeToken, code)"/>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.confirmTwoFactorSetup(ec, challengeToken, code)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -1130,7 +1130,7 @@
         </out-parameters>
         <actions>
             <set field="renewed" from="darpan.facade.auth.TwoFactorSupport.renewRecoveryCodes(ec, code, passkeyAssertion)"/>
-            <if condition="renewed.error"><return error="true" message="${renewed.error}"/></if>
+            <if condition="renewed.refusal"><return error="true" message="${renewed.refusal}"/></if>
             <set field="recoveryCodes" from="renewed.recoveryCodes"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -1161,8 +1161,8 @@
             <parameter name="authTokenExpiresInSeconds" type="Integer"><description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="outcome" from="darpan.facade.auth.AuthFacadeSupport.turnOffTwoFactor(ec, code, passkeyAssertion, appOnly as boolean)"/>
-            <if condition="outcome.error"><return error="true" message="${outcome.error}"/></if>
+            <set field="outcome" from="darpan.facade.auth.TwoFactorFacadeSupport.turnOffTwoFactor(ec, code, passkeyAssertion, appOnly as boolean)"/>
+            <if condition="outcome.refusal"><return error="true" message="${outcome.refusal}"/></if>
             <set field="authenticated" from="outcome.authenticated"/>
             <set field="authToken" from="outcome.authToken"/>
             <set field="authTokenType" from="outcome.authTokenType"/>
@@ -1205,7 +1205,7 @@
                 PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeySignIn(ec, challengeToken)"/>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.beginPasskeySignIn(ec, challengeToken)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -1231,7 +1231,7 @@
         </out-parameters>
         <actions>
             <set field="begun" from="darpan.facade.auth.PasskeySupport.proofOptions(ec)"/>
-            <if condition="begun.error"><return error="true" message="${begun.error}"/></if>
+            <if condition="begun.refusal"><return error="true" message="${begun.refusal}"/></if>
             <set field="publicKeyOptions" from="begun.publicKeyOptions"/>
             <set field="expiresInSeconds" from="begun.expiresInSeconds"/>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -1266,7 +1266,7 @@
                 PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeyRegistration(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.beginPasskeyRegistration(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -1345,7 +1345,7 @@
                 PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.finishPasskeyRegistration(ec, challengeToken, credential, name)"/>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.finishPasskeyRegistration(ec, challengeToken, credential, name)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -1405,8 +1405,8 @@
             <parameter name="authTokenExpiresInSeconds" type="Integer"><description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="outcome" from="darpan.facade.auth.AuthFacadeSupport.deletePasskey(ec, passkeyId, code, passkeyAssertion)"/>
-            <if condition="outcome.error"><return error="true" message="${outcome.error}"/></if>
+            <set field="outcome" from="darpan.facade.auth.TwoFactorFacadeSupport.deletePasskey(ec, passkeyId, code, passkeyAssertion)"/>
+            <if condition="outcome.refusal"><return error="true" message="${outcome.refusal}"/></if>
             <set field="twoFactorEnabled" from="outcome.twoFactorEnabled"/>
             <set field="authenticated" from="outcome.authenticated"/>
             <set field="authToken" from="outcome.authToken"/>

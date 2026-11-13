@@ -87,11 +87,11 @@ class TwoFactorSignInSmokeTests {
             return true
         }
         ec.user.logoutUser()
-        [TwoFactorSupport.FACTOR, TwoFactorSupport.RECOVERY, TwoFactorSupport.CHALLENGE, "darpan.auth.CliSession",
+        [TwoFactorRecords.FACTOR, TwoFactorRecords.RECOVERY, SignInChallenges.CHALLENGE, "darpan.auth.CliSession",
          "darpan.auth.CliDeviceCode", "darpan.auth.PasswordResetCode"].each { ec.entity.find(it).disableAuthz().deleteAll() }
-        AuditLogTestSupport.wipe(ec, TwoFactorSupport.EVENT)
+        AuditLogTestSupport.wipe(ec, TwoFactorRecords.EVENT)
         AuditLogTestSupport.wipe(ec)
-        TwoFactorSupport.POLICY_GROUP_IDS.each { setPolicy(it, null) }
+        TwoFactorPolicy.POLICY_GROUP_IDS.each { setPolicy(it, null) }
         [[USER_ID, USERNAME], [OTHER_ID, OTHER_USERNAME], [SUPER_ID, SUPER_USERNAME], [SUPER2_ID, SUPER2_USERNAME],
          [TADMIN_ID, TADMIN_USERNAME]].each { upsertAccount(it[0], it[1]) }
         group(SUPER_ID, "DARPAN_SUPER_ADMIN")
@@ -201,7 +201,7 @@ class TwoFactorSignInSmokeTests {
         assertEquals([REFUSAL], crossed.errors)
         assertFalse(crossed.out.authenticated as boolean)
 
-        def row = ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", USER_ID).disableAuthz().useCache(false).list()[0]
+        def row = ec.entity.find(SignInChallenges.CHALLENGE).condition("userId", USER_ID).disableAuthz().useCache(false).list()[0]
         row.expiresDate = new Timestamp(System.currentTimeMillis() - 1000L)
         row.update()
         Map expired = anon("verify#SignInCode", [challengeToken: token, code: code(secret)])
@@ -236,7 +236,7 @@ class TwoFactorSignInSmokeTests {
         20.times {
             ec.transaction.runRequireNew(null, "test", { TwoFactorSupport.consumeTotp(ec, USER_ID, "000000") })
         }
-        def factor = TwoFactorSupport.activeFactor(ec, USER_ID)
+        def factor = TwoFactorSupport.activeApp(ec, USER_ID)
         assertNotNull(factor.codesLockedDate)
         assertEquals(1, sent.count { it.templateId == TwoFactorSupport.TEMPLATE_CODES_LOCKED })
         assertEquals(1, events(USER_ID, "CODES_LOCKED").size())
@@ -251,7 +251,7 @@ class TwoFactorSignInSmokeTests {
         Map completed = anon("complete#PasswordReset", [usernameOrEmail: USERNAME, code: resetCode,
                 newPassword: NEW_PASSWORD, newPasswordVerify: NEW_PASSWORD])
         assertTrue(completed.out.passwordUpdated as boolean, "${completed.errors}")
-        factor = TwoFactorSupport.activeFactor(ec, USER_ID)
+        factor = TwoFactorSupport.activeApp(ec, USER_ID)
         assertNotNull(factor, "a reset never ends the factor")
         assertNull(factor.codesLockedDate)
 
@@ -295,7 +295,7 @@ class TwoFactorSignInSmokeTests {
         assertEquals(true, TwoFactorSupport.status(ec, USER_ID).enabled)
 
         // signed in with a required factor: turning it off is refused
-        assertEquals([TwoFactorSupport.REQUIRED_CANNOT_TURN_OFF], signedIn(USERNAME, "disable#TwoFactor", [code: code(begun.out.secret as String)]).errors)
+        assertEquals([TwoFactorRefusal.REQUIRED_CANNOT_TURN_OFF.message], signedIn(USERNAME, "disable#TwoFactor", [code: code(begun.out.secret as String)]).errors)
     }
 
     @Test
@@ -304,12 +304,12 @@ class TwoFactorSignInSmokeTests {
         setPolicy("DARPAN_TENANT_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
         ec.entity.makeValue("darpan.auth.TenantUserPermissionGroupMember").setAll([tenantUserGroupId: TENANT_B, userId: TADMIN_ID,
                 permissionUserGroupId: "DARPAN_TENANT_ADMIN", fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
-        assertTrue(TwoFactorSupport.isRequiredNow(ec, TADMIN_ID))
+        assertTrue(TwoFactorPolicy.isRequiredNow(ec, TADMIN_ID))
         assertTrue(anon("login#Session", [username: TADMIN_USERNAME, password: PASSWORD]).out.twoFactorSetupRequired as boolean)
 
         ec.entity.find("darpan.auth.TenantUserPermissionGroupMember").condition("userId", TADMIN_ID).disableAuthz()
                 .updateAll([thruDate: new Timestamp(System.currentTimeMillis() - 1000L)])
-        assertFalse(TwoFactorSupport.isRequiredNow(ec, TADMIN_ID))
+        assertFalse(TwoFactorPolicy.isRequiredNow(ec, TADMIN_ID))
         assertTrue(anon("login#Session", [username: TADMIN_USERNAME, password: PASSWORD]).out.authenticated as boolean)
     }
 
@@ -381,7 +381,7 @@ class TwoFactorSignInSmokeTests {
         ec.message.clearAll()
 
         Map noCode = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode])
-        assertEquals([TwoFactorSupport.CODE_NEEDED], noCode.errors)
+        assertEquals([TwoFactorRefusal.CODE_NEEDED.message], noCode.errors)
         Map wrong = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode, code: "000000"])
         assertEquals([REFUSAL], wrong.errors)
         assertEquals(1, events(USER_ID, "CODE_FAILED").size(), "the wrong code is counted although the call rolled back")
@@ -403,7 +403,7 @@ class TwoFactorSignInSmokeTests {
 
         String secret = enrol(USER_ID, USERNAME).secret
         Map replaceNoCode = signedIn(USERNAME, "begin#TwoFactorSetup", [currentPassword: PASSWORD])
-        assertEquals([TwoFactorSupport.CODE_NEEDED], replaceNoCode.errors)
+        assertEquals([TwoFactorRefusal.CODE_NEEDED.message], replaceNoCode.errors)
 
         assertEquals([REFUSAL], signedIn(USERNAME, "create#RecoveryCodes", [code: "000000"]).errors)
         Map renewed = signedIn(USERNAME, "create#RecoveryCodes", [code: code(secret)])
@@ -582,7 +582,7 @@ class TwoFactorSignInSmokeTests {
             Map login = anon("login#Session", [username: USERNAME, password: PASSWORD])
             assertEquals([], login.errors)
             assertTrue(login.out.twoFactorRequired as boolean, "${login}")
-            def row = ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", USER_ID).orderBy("-createdDate")
+            def row = ec.entity.find(SignInChallenges.CHALLENGE).condition("userId", USER_ID).orderBy("-createdDate")
                     .disableAuthz().useCache(false).list().first()
             assertNull(row.requestIp, "not an IP: not stored")
             // The same check for a password reset code and a CLI sign-in start (the start limit buckets it as unknown).
@@ -593,12 +593,12 @@ class TwoFactorSignInSmokeTests {
 
             user.@clientIpInternal = "2001:db8::7"
             assertTrue(anon("login#Session", [username: USERNAME, password: PASSWORD]).out.twoFactorRequired as boolean)
-            def ipv6 = ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", USER_ID).orderBy("-createdDate")
+            def ipv6 = ec.entity.find(SignInChallenges.CHALLENGE).condition("userId", USER_ID).orderBy("-createdDate")
                     .disableAuthz().useCache(false).list().first()
             assertEquals("2001:db8::7", ipv6.requestIp)
             assertEquals(["203.0.113.7", null, null, null], ["203.0.113.7", "203.0.113.7, 10.0.0.1", "not-an-ip", ""].collect {
                 user.@clientIpInternal = it
-                TwoFactorSupport.recordedIp(ec)
+                AuthPrimitives.recordedIp(ec.user.clientIp as String)
             })
         } finally {
             user.@clientIpInternal = null
@@ -616,8 +616,8 @@ class TwoFactorSignInSmokeTests {
 
         // Meanwhile the person turns two-factor on another way (here: a passkey row, as finish#PasskeyRegistration writes).
         Timestamp now = new Timestamp(System.currentTimeMillis())
-        ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: PasskeySupport.TYPE_PASSKEY,
-                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary().create()
+        ec.entity.makeValue(TwoFactorRecords.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: TwoFactorRecords.TYPE_PASSKEY,
+                statusId: TwoFactorRecords.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary().create()
 
         Map confirmed = anon("confirm#TwoFactorSetup", [challengeToken: token, code: code(begun.out.secret as String)])
         assertEquals(["This sign-in has expired. Enter your password again."], confirmed.errors)
@@ -627,14 +627,14 @@ class TwoFactorSignInSmokeTests {
         assertNull(confirmed.out.recoveryCodes)
         assertEquals(false, TwoFactorSupport.status(ec, OTHER_ID).appEnabled, "the stale setup put no app on the account")
         assertEquals(0, keyCount(OTHER_ID))
-        assertNotNull(ec.entity.find(TwoFactorSupport.CHALLENGE).condition("tokenHash", AuthPrimitives.sha256Hex(token))
+        assertNotNull(ec.entity.find(SignInChallenges.CHALLENGE).condition("tokenHash", AuthPrimitives.sha256Hex(token))
                 .disableAuthz().useCache(false).one().usedDate, "the challenge is spent")
 
         // A fresh setup challenge cannot exist for an enrolled person; one made before they enrolled is refused at begin too.
-        TwoFactorSupport.FACTOR.with { ec.entity.find(it).condition("userId", OTHER_ID).disableAuthz().deleteAll() }
+        TwoFactorRecords.FACTOR.with { ec.entity.find(it).condition("userId", OTHER_ID).disableAuthz().deleteAll() }
         String second = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD]).out.challengeToken
-        ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: PasskeySupport.TYPE_PASSKEY,
-                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary().create()
+        ec.entity.makeValue(TwoFactorRecords.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: TwoFactorRecords.TYPE_PASSKEY,
+                statusId: TwoFactorRecords.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary().create()
         Map lateBegin = anon("begin#TwoFactorSetup", [challengeToken: second])
         assertEquals(["This sign-in has expired. Enter your password again."], lateBegin.errors)
         assertTrue(lateBegin.out.challengeEnded as boolean)
@@ -678,17 +678,17 @@ class TwoFactorSignInSmokeTests {
         setPolicy("DARPAN_TENANT_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
         Map noCode = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true])
-        assertEquals([TwoFactorSupport.CODE_NEEDED], noCode.errors, "a session alone cannot switch enforcement off")
+        assertEquals([TwoFactorRefusal.CODE_NEEDED.message], noCode.errors, "a session alone cannot switch enforcement off")
         Map wrong = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true, adminCode: "000000"])
         assertEquals([REFUSAL], wrong.errors)
-        assertNotNull(ec.entity.find(TwoFactorSupport.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
+        assertNotNull(ec.entity.find(TwoFactorPolicy.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
                 .disableAuthz().useCache(false).one().requiredFromDate, "still required after the refusals")
 
         Map cleared = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true, adminCode: code(secret)])
         assertEquals([], cleared.errors)
-        assertNull(ec.entity.find(TwoFactorSupport.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
+        assertNull(ec.entity.find(TwoFactorPolicy.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
                 .disableAuthz().useCache(false).one().requiredFromDate)
     }
 
@@ -808,8 +808,8 @@ class TwoFactorSignInSmokeTests {
         context.updateLoggers()
         try {
             assertEquals(true, TwoFactorSupport.sessionFields(ec, USER_ID).twoFactorEnabled)
-            assertFalse(TwoFactorSupport.requiredButNotEnrolled(ec, USER_ID))
-            assertFalse(TwoFactorSupport.requiredButNotEnrolled(ec, OTHER_ID))
+            assertFalse(TwoFactorPolicy.requiredButNotEnrolled(ec, USER_ID))
+            assertFalse(TwoFactorPolicy.requiredButNotEnrolled(ec, OTHER_ID))
         } finally {
             root.removeAppender(capture.name)
             context.updateLoggers()
@@ -958,7 +958,7 @@ class TwoFactorSignInSmokeTests {
     }
 
     private List events(String userId, String type) {
-        return ec.entity.find(TwoFactorSupport.EVENT).condition("userId", userId).condition("eventType", type)
+        return ec.entity.find(TwoFactorRecords.EVENT).condition("userId", userId).condition("eventType", type)
                 .disableAuthz().useCache(false).list()
     }
 
@@ -975,7 +975,7 @@ class TwoFactorSignInSmokeTests {
     }
 
     private void setPolicy(String groupId, Timestamp date) {
-        ec.entity.makeValue(TwoFactorSupport.POLICY).setAll([permissionGroupId: groupId, requiredFromDate: date]).createOrUpdate()
+        ec.entity.makeValue(TwoFactorPolicy.POLICY).setAll([permissionGroupId: groupId, requiredFromDate: date]).createOrUpdate()
     }
 
     private void group(String userId, String groupId) {

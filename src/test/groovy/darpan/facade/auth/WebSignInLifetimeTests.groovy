@@ -180,9 +180,9 @@ class WebSignInLifetimeTests {
         raced.user.userAccount = [sessionsEndedDate: new Timestamp(now - 10 * MINUTE)]
         assertTrue(AuthSessionSupport.enforceWebSignInLifetime(raced))
         assertNull(raced.user.userId)
-        assertTrue(TwoFactorSupport.predatesSessionsEnd(new Timestamp(now - 1), new Timestamp(now)))
-        assertFalse(TwoFactorSupport.predatesSessionsEnd(new Timestamp(now), new Timestamp(now)), "the fresh key minted at the stamp passes")
-        assertFalse(TwoFactorSupport.predatesSessionsEnd(new Timestamp(now - 1), null), "never ended: nothing predates")
+        assertTrue(AuthSessionSupport.predatesSessionsEnd(new Timestamp(now - 1), new Timestamp(now)))
+        assertFalse(AuthSessionSupport.predatesSessionsEnd(new Timestamp(now), new Timestamp(now)), "the fresh key minted at the stamp passes")
+        assertFalse(AuthSessionSupport.predatesSessionsEnd(new Timestamp(now - 1), null), "never ended: nothing predates")
     }
 
     @Test

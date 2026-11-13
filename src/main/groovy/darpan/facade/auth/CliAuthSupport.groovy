@@ -333,9 +333,9 @@ class CliAuthSupport {
         // DAR-BE-264: a CLI session or key issued before a two-factor change ended the person's sign-ins (one minted while
         // TwoFactorSupport.endSessions ran escaped its revoke), or of a person now required to use two-factor and not set
         // up, is refused.
-        if (TwoFactorSupport.predatesSessionsEnd(cliSession.createdDate, account?.sessionsEndedDate) ||
-                TwoFactorSupport.predatesSessionsEnd(loginKey.fromDate, account?.sessionsEndedDate)) return CLI_SESSION_EXPIRED
-        if (TwoFactorSupport.requiredButNotEnrolled(ec, (String) cliSession.userId)) return CLI_TWO_FACTOR_NEEDED
+        if (AuthSessionSupport.predatesSessionsEnd(cliSession.createdDate, account?.sessionsEndedDate) ||
+                AuthSessionSupport.predatesSessionsEnd(loginKey.fromDate, account?.sessionsEndedDate)) return CLI_SESSION_EXPIRED
+        if (TwoFactorPolicy.requiredButNotEnrolled(ec, (String) cliSession.userId)) return CLI_TWO_FACTOR_NEEDED
         if (!canSignIn(ec, account)) return "This account can no longer sign in."
         if (!cliAccessAllowed(ec, (String) cliSession.userId)) return CLI_ACCESS_REFUSED
         return null

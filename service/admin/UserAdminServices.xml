@@ -226,14 +226,8 @@
                     disabled: targetAccount.disabled == 'Y',
                     requirePasswordChange: targetAccount.requirePasswordChange == 'Y', darpanRoles: darpanRoleList,
                     memberships: membershipList]"/>
-            <!-- DAR-BE-264: two-factor state, never the secret. -->
-            <set field="twoFactorStatus" from="darpan.facade.auth.TwoFactorSupport.status(ec, userId)"/>
-            <set field="userDetail.twoFactor" from="twoFactorStatus.enabled ? 'ON' : (twoFactorStatus.required ? 'REQUIRED_NOT_SET_UP' : 'OFF')"/>
-            <set field="userDetail.twoFactorConfirmedDate" from="twoFactorStatus.confirmedDate"/>
-            <set field="userDetail.twoFactorRequiredFromDate" from="twoFactorStatus.requiredFromDate"/>
-            <!-- DAR-BE-270: which factors, never a key or credential id. -->
-            <set field="userDetail.twoFactorAppEnabled" from="twoFactorStatus.appEnabled"/>
-            <set field="userDetail.twoFactorPasskeyCount" from="twoFactorStatus.passkeys.size()"/>
+            <!-- DAR-BE-264/270: two-factor state and which factors, never a secret, key or credential id. -->
+            <set field="ignorePutAll" from="userDetail.putAll(darpan.facade.auth.TwoFactorSupport.adminDetail(ec, userId))"/>
         </actions>
     </service>
 
@@ -339,6 +333,8 @@
                 <field-map field-name="userId"/></entity-find-one>
             <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
             <set field="problem" from="darpan.facade.auth.TwoFactorSupport.adminReset(ec, userId, reason.trim(), adminCode, adminPasskeyAssertion)"/>
+            <if condition="problem == darpan.facade.auth.TwoFactorRefusal.NOT_ENROLLED">
+                <return error="true" message="Set up two-factor on your own account before resetting someone else's."/></if>
             <if condition="problem"><return error="true" message="${problem}"/></if>
             <set field="ok" from="true"/>
         </actions>

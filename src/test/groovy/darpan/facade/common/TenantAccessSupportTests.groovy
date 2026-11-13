@@ -1051,6 +1051,11 @@ class TenantAccessSupportTests {
             }
         }
 
+        /** sessionInfo's two-factor read (TwoFactorRecords.enabled) counts rows. */
+        long count() {
+            return list().size()
+        }
+
         FinderStub disableAuthz() {
             disableAuthzCalled = true
             return this

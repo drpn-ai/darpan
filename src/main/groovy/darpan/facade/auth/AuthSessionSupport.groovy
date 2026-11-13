@@ -117,7 +117,7 @@ class AuthSessionSupport {
                 .one()
         String username = userAccount?.username?.toString()?.trim()
         // DAR-BE-264: a key issued before a two-factor change ended the person's sign-ins restores nothing.
-        if (!username || TwoFactorSupport.predatesSessionsEnd(userLoginKey.fromDate, userAccount.sessionsEndedDate)) {
+        if (!username || predatesSessionsEnd(userLoginKey.fromDate, userAccount.sessionsEndedDate)) {
             clearPersistentLoginCookie(ec)
             return false
         }
@@ -148,6 +148,13 @@ class AuthSessionSupport {
      * from every reply. Used by every sign-in that follows a check other than the password: the persistent-login cookie,
      * verify#SignInCode, and a setup challenge's confirm#TwoFactorSetup / finish#PasskeyRegistration.
      */
+    /** True when a key or CLI session issued at issuedDate predates the person's sessionsEndedDate (both dates): a
+     *  two-factor change ended every sign-in at that moment (TwoFactorSupport.endSessions). Pure. */
+    static boolean predatesSessionsEnd(Object issuedDate, Object sessionsEndedDate) {
+        return issuedDate instanceof Timestamp && sessionsEndedDate instanceof Timestamp &&
+                ((Timestamp) issuedDate).before((Timestamp) sessionsEndedDate)
+    }
+
     static boolean signInOnNewSession(def ec, String username, boolean saveHistory) {
         def web = ec?.web
         if (web != null && web.metaClass.respondsTo(web, "makeNewSession")) web.makeNewSession()
@@ -206,7 +213,7 @@ class AuthSessionSupport {
                             "self-scoped auth: slide the request's own web login key (pre-auth path, no active tenant)")
                     .condition("loginKey", hash).useCache(false).one()
             if (key == null || key.userId != userId) continue
-            boolean live = !TwoFactorSupport.predatesSessionsEnd(key.fromDate, sessionsEnded) && slideWebLoginKey(ec, key, now, absoluteMillis)
+            boolean live = !predatesSessionsEnd(key.fromDate, sessionsEnded) && slideWebLoginKey(ec, key, now, absoluteMillis)
             if (!decided && !live) ended = true
             decided = true
         }

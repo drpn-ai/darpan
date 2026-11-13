@@ -65,7 +65,7 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <!-- DAR-BE-264: a fresh code from an exporter with two-factor on. -->
-            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, twoFactorCode, twoFactorPasskeyAssertion)"/>
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, twoFactorCode, twoFactorPasskeyAssertion)"/>
             <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="bundle" from="darpan.admin.transfer.ConfigTransferExporter.bundle(ec, tenantUserGroupId, auditCodes,
                     savedRunIds, connectionRefs, sourceInstanceLabel, secretsPublicKey, false, includeAutomations as boolean)"/>
@@ -138,7 +138,7 @@
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <if condition="!darpan.admin.transfer.ConfigTransferExporter.requireTenant(ec, tenantUserGroupId)"><return error="true"/></if>
             <!-- DAR-BE-264: a fresh code from an operator with two-factor on. -->
-            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, twoFactorCode, twoFactorPasskeyAssertion)"/>
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, twoFactorCode, twoFactorPasskeyAssertion)"/>
             <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="handoff" from="darpan.admin.transfer.SecretHandoff.begin(ec, tenantUserGroupId)"/>
             <set field="publicKey" from="handoff.publicKey"/>

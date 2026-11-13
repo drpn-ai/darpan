@@ -443,13 +443,9 @@ class TenantAccessSupport {
             String recoveryEmail = normalize(ec?.user?.userAccount?.emailAddress)
             sessionInfo.recoveryEmailMissing = !recoveryEmail
             sessionInfo.emailAddressMasked = PasswordResetSupport.maskEmail(recoveryEmail)
-            // DAR-BE-264: whether two-factor is on, and by when it must be (the UI prompts in the grace period).
-            // Informational: a failed read leaves the two fields out rather than failing the sign-in.
-            try {
-                sessionInfo.putAll(TwoFactorSupport.sessionFields(ec, sessionInfo.userId as String))
-            } catch (Exception e) {
-                org.slf4j.LoggerFactory.getLogger(TenantAccessSupport.class).warn("Could not read two-factor state for the session: ${e.message}")
-            }
+            // DAR-BE-264: whether two-factor is on, and by when it must be (the UI prompts in the grace period). Two
+            // indexed reads; one that fails fails the request rather than answer a sign-in without them.
+            sessionInfo.putAll(TwoFactorSupport.sessionFields(ec, sessionInfo.userId as String))
         }
         applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo

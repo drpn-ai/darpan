@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import org.apache.commons.validator.routines.InetAddressValidator
 import org.slf4j.Logger
@@ -55,6 +56,21 @@ class AuthPrimitives {
         String ip = clientIp?.trim()
         if (!ip || ip.length() > MAX_IP_LENGTH) return null
         return InetAddressValidator.getInstance().isValid(ip) ? ip : null
+    }
+
+    /**
+     * One failed login for the person (the framework's increment#UserAccountFailedLogins, in a transaction of its own so it
+     * stands when the caller's refusal rolls back): a wrong password or a wrong second factor feeds the same lockout.
+     */
+    @CompileDynamic
+    static void countFailedLogin(def ec, String userId) {
+        if (!userId) return
+        try {
+            ec.service.sync().name("org.moqui.impl.UserServices.increment#UserAccountFailedLogins")
+                    .parameters([userId: userId]).requireNewTransaction(true).call()
+        } catch (Exception e) {
+            logger.warn("Could not count a failed login for userId {}: {}", userId, e.message)
+        }
     }
 
     /**

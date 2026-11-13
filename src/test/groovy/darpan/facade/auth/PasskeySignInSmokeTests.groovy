@@ -40,7 +40,7 @@ class PasskeySignInSmokeTests {
     private static final String SUPER_ID = "PK_SUPER"
     private static final String SUPER_USERNAME = "pk.super"
     private static final String PASSWORD = "Pk-passw0rd-one!"
-    private static final String REFUSAL = PasskeySupport.PASSKEY_REFUSAL
+    private static final String REFUSAL = TwoFactorRefusal.PASSKEY.message
 
     @BeforeAll
     void setup() {
@@ -70,11 +70,11 @@ class PasskeySignInSmokeTests {
             sent << [templateId: templateId, to: to, params: params]
         }
         ec.user.logoutUser()
-        [PasskeySupport.CREDENTIAL, TwoFactorSupport.FACTOR, TwoFactorSupport.RECOVERY, TwoFactorSupport.CHALLENGE,
+        [PasskeySupport.CREDENTIAL, TwoFactorRecords.FACTOR, TwoFactorRecords.RECOVERY, SignInChallenges.CHALLENGE,
          "darpan.auth.CliSession", "darpan.auth.CliDeviceCode"].each { ec.entity.find(it).disableAuthz().deleteAll() }
-        AuditLogTestSupport.wipe(ec, TwoFactorSupport.EVENT)
+        AuditLogTestSupport.wipe(ec, TwoFactorRecords.EVENT)
         AuditLogTestSupport.wipe(ec)
-        TwoFactorSupport.POLICY_GROUP_IDS.each { setPolicy(it, null) }
+        TwoFactorPolicy.POLICY_GROUP_IDS.each { setPolicy(it, null) }
         [[USER_ID, USERNAME], [OTHER_ID, OTHER_USERNAME], [SUPER_ID, SUPER_USERNAME]].each { upsertAccount(it[0], it[1]) }
         group(SUPER_ID, "DARPAN_SUPER_ADMIN")
         ec.message.clearAll()
@@ -293,9 +293,9 @@ class PasskeySignInSmokeTests {
         ec.message.clearAll()
 
         Map none = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode])
-        assertEquals([TwoFactorSupport.PROOF_NEEDED], none.errors)
+        assertEquals([TwoFactorRefusal.PROOF_NEEDED.message], none.errors)
         Map wrongCode = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode, code: "123456"])
-        assertEquals([TwoFactorSupport.PROOF_NEEDED], wrongCode.errors, "a code is no use without an app")
+        assertEquals([TwoFactorRefusal.PROOF_NEEDED.message], wrongCode.errors, "a code is no use without an app")
 
         String proof = proofAssertion(USERNAME, key)
         Map approved = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode, passkeyAssertion: proof])
@@ -324,8 +324,8 @@ class PasskeySignInSmokeTests {
         setPolicy("DARPAN_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
         String passkeyId = (TwoFactorSupport.status(ec, USER_ID).passkeys as List<Map>)[0].passkeyId
         Map refused = signedIn(USERNAME, "delete#Passkey", [passkeyId: passkeyId, passkeyAssertion: proofAssertion(USERNAME, key)])
-        assertEquals([TwoFactorSupport.LAST_FACTOR_REQUIRED], refused.errors)
-        assertTrue(TwoFactorSupport.enabled(ec, USER_ID))
+        assertEquals([TwoFactorRefusal.LAST_FACTOR_REQUIRED.message], refused.errors)
+        assertTrue(TwoFactorRecords.enabled(ec, USER_ID))
 
         // With a second passkey the first can go; renaming needs no proof.
         SoftwarePasskey second = new SoftwarePasskey()
@@ -340,7 +340,7 @@ class PasskeySignInSmokeTests {
         // OTHER is optional: removing their only passkey turns two-factor off and drops the recovery codes.
         SoftwarePasskey otherKey = enrolPasskey(OTHER_USERNAME)
         String otherId = (TwoFactorSupport.status(ec, OTHER_ID).passkeys as List<Map>)[0].passkeyId
-        assertEquals([PasskeySupport.NOT_FOUND], signedIn(USERNAME, "delete#Passkey", [passkeyId: otherId,
+        assertEquals([TwoFactorRefusal.PASSKEY_NOT_FOUND.message], signedIn(USERNAME, "delete#Passkey", [passkeyId: otherId,
                 passkeyAssertion: proofAssertion(USERNAME, second)]).errors, "not someone else's")
         Map off = signedIn(OTHER_USERNAME, "delete#Passkey", [passkeyId: otherId, passkeyAssertion: proofAssertion(OTHER_USERNAME, otherKey)])
         assertEquals([], off.errors)
@@ -358,8 +358,8 @@ class PasskeySignInSmokeTests {
         Map reset = signedInCall(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: "lost laptop",
                 adminPasskeyAssertion: proofAssertion(SUPER_USERNAME, adminKey)])
         assertEquals([], reset.errors)
-        assertFalse(TwoFactorSupport.enabled(ec, USER_ID))
-        assertEquals("ADMIN_RESET", ec.entity.find(TwoFactorSupport.FACTOR).condition("userId", USER_ID).disableAuthz().one().endedReason)
+        assertFalse(TwoFactorRecords.enabled(ec, USER_ID))
+        assertEquals("ADMIN_RESET", ec.entity.find(TwoFactorRecords.FACTOR).condition("userId", USER_ID).disableAuthz().one().endedReason)
         assertEquals(0, TwoFactorSupport.recoveryCodesLeft(ec, USER_ID))
         assertEquals(1, ec.entity.find("darpan.admin.AdminAuditLog").condition("serviceName", "admin.UserAdminServices.reset#TwoFactor")
                 .condition("targetId", USER_ID).disableAuthz().useCache(false).count())
@@ -459,19 +459,19 @@ class PasskeySignInSmokeTests {
 
         // While this removal proves itself, another one (of the other passkey) commits: as two tabs pressing Remove at once.
         Closure concurrentRemoval = { String factorId ->
-            ec.entity.find(TwoFactorSupport.FACTOR).condition("factorId", factorId).disableAuthz().updateAll([statusId: TwoFactorSupport.ENDED])
+            ec.entity.find(TwoFactorRecords.FACTOR).condition("factorId", factorId).disableAuthz().updateAll([statusId: TwoFactorRecords.ENDED])
         }
-        TwoFactorSupport.metaClass.static.freshProofProblem = { def ecArg, Object c, Object a, boolean onlyIfEnrolled ->
+        TwoFactorSupport.metaClass.static.freshProofProblem = { def ecArg, Object c, Object a ->
             concurrentRemoval(ids[1])
             return null
         }
         try {
             Map refused = signedIn(USERNAME, "delete#Passkey", [passkeyId: ids[0], passkeyAssertion: proof])
-            assertEquals([TwoFactorSupport.LAST_FACTOR_REQUIRED], refused.errors)
+            assertEquals([TwoFactorRefusal.LAST_FACTOR_REQUIRED.message], refused.errors)
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(TwoFactorSupport)
         }
-        assertTrue(TwoFactorSupport.enabled(ec, USER_ID), "the required person keeps a factor")
+        assertTrue(TwoFactorRecords.enabled(ec, USER_ID), "the required person keeps a factor")
 
         // The same for the app: app-only removal while the last passkey goes.
         String secret = enrolApp(OTHER_USERNAME)
@@ -479,13 +479,13 @@ class PasskeySignInSmokeTests {
         assertEquals([], finish(OTHER_USERNAME, otherKey.register(beginRegistration(OTHER_USERNAME, [code: code(secret)]))).errors)
         group(OTHER_ID, "DARPAN_ADMIN")
         String otherPasskeyId = (TwoFactorSupport.status(ec, OTHER_ID).passkeys as List<Map>)[0].passkeyId
-        TwoFactorSupport.metaClass.static.freshProofProblem = { def ecArg, Object c, Object a, boolean onlyIfEnrolled ->
+        TwoFactorSupport.metaClass.static.freshProofProblem = { def ecArg, Object c, Object a ->
             concurrentRemoval(otherPasskeyId)
             return null
         }
         try {
             Map refusedApp = signedIn(OTHER_USERNAME, "disable#TwoFactor", [appOnly: true, code: code(secret)])
-            assertEquals([TwoFactorSupport.REQUIRED_CANNOT_TURN_OFF], refusedApp.errors)
+            assertEquals([TwoFactorRefusal.REQUIRED_CANNOT_TURN_OFF.message], refusedApp.errors)
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(TwoFactorSupport)
         }
@@ -498,19 +498,19 @@ class PasskeySignInSmokeTests {
         SoftwarePasskey key = enrolPasskey(USERNAME)
         Timestamp twoDaysAgo = new Timestamp(System.currentTimeMillis() - 2 * 86_400_000L)
         Closure stale = { String userId, String purpose ->
-            ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: AuthPrimitives.sha256Hex(UUID.randomUUID().toString()),
+            ec.entity.makeValue(SignInChallenges.CHALLENGE).setAll([userId: userId, tokenHash: AuthPrimitives.sha256Hex(UUID.randomUUID().toString()),
                     purposeEnumId: purpose, createdDate: twoDaysAgo, expiresDate: twoDaysAgo, failedAttempts: 0]).setSequencedIdPrimary().create()
         }
-        Closure count = { String userId -> ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", userId)
+        Closure count = { String userId -> ec.entity.find(SignInChallenges.CHALLENGE).condition("userId", userId)
                 .condition("expiresDate", twoDaysAgo).disableAuthz().useCache(false).count() as int }
-        stale(USER_ID, TwoFactorSupport.PURPOSE_CODE)
-        stale(OTHER_ID, TwoFactorSupport.PURPOSE_CODE)
+        stale(USER_ID, SignInChallenges.PURPOSE_CODE)
+        stale(OTHER_ID, SignInChallenges.PURPOSE_CODE)
 
         challenge(USERNAME)
         assertEquals(0, count(USER_ID), "the person's own stale row went")
         assertEquals(1, count(OTHER_ID), "nobody else's is touched by this person's sign-in")
 
-        stale(USER_ID, PasskeySupport.PURPOSE_PROOF)
+        stale(USER_ID, SignInChallenges.PURPOSE_PROOF)
         proofAssertion(USERNAME, key)
         assertEquals(0, count(USER_ID), "a passkey ceremony sweeps too")
     }
@@ -607,7 +607,7 @@ class PasskeySignInSmokeTests {
     }
 
     private List events(String userId, String type) {
-        return ec.entity.find(TwoFactorSupport.EVENT).condition("userId", userId).condition("eventType", type)
+        return ec.entity.find(TwoFactorRecords.EVENT).condition("userId", userId).condition("eventType", type)
                 .disableAuthz().useCache(false).list()
     }
 
@@ -628,7 +628,7 @@ class PasskeySignInSmokeTests {
     }
 
     private void setPolicy(String groupId, Timestamp date) {
-        ec.entity.makeValue(TwoFactorSupport.POLICY).setAll([permissionGroupId: groupId, requiredFromDate: date]).createOrUpdate()
+        ec.entity.makeValue(TwoFactorPolicy.POLICY).setAll([permissionGroupId: groupId, requiredFromDate: date]).createOrUpdate()
     }
 
     private void group(String userId, String groupId) {

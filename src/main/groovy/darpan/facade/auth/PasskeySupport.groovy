@@ -19,7 +19,6 @@ import com.webauthn4j.data.client.Origin
 import com.webauthn4j.data.client.challenge.DefaultChallenge
 import com.webauthn4j.server.ServerProperty
 import com.webauthn4j.verifier.exception.MaliciousCounterValueException
-import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.json.JsonOutput
 import org.moqui.entity.EntityCondition
@@ -37,8 +36,8 @@ import static darpan.common.ValueSupport.normalize
  *
  * <p>A passkey is a TwoFactorFactor row (DrpnTfPkey) plus its PasskeyCredential. Every ceremony starts with a
  * SignInChallenge row holding a fresh webauthnChallenge: begin#PasskeySignIn sets it on the sign-in row, begin#PasskeyProof
- * and begin#PasskeyRegistration make a row whose tokenHash is the challenge's own hash, so the clientDataJSON the browser
- * signs names its row. Any attempt against a row uses its challenge up.
+ * and begin#PasskeyRegistration make a row whose token is the challenge itself (SignInChallenges.create with webauthn), so
+ * the clientDataJSON the browser signs names its row. Any attempt against a row uses its challenge up.
  *
  * <p>Checked on every assertion (webauthn4j): origin in the allowed set, rpId hash, the stored challenge, the signature
  * with the stored COSE key, user present and user verified, the credential among the person's live passkeys, and the
@@ -48,24 +47,11 @@ class PasskeySupport {
     private static final Logger logger = LoggerFactory.getLogger(PasskeySupport.class)
 
     static final String CREDENTIAL = "darpan.auth.PasskeyCredential"
-    static final String TYPE_PASSKEY = "DrpnTfPkey"
-    static final String PURPOSE_PROOF = "DrpnScProof"
-    static final String PURPOSE_ADD = "DrpnScPkAdd"
-
-    static final String METHOD_APP = "app"
-    static final String METHOD_PASSKEY = "passkey"
 
     static final int MAX_PASSKEYS = 10
     static final int NAME_MAX_LENGTH = 60
     static final int CEREMONY_TIMEOUT_MILLIS = 120_000
     static final String DEFAULT_NAME = "Passkey"
-
-    static final String UNAVAILABLE = "Passkeys are not available on this Darpan instance."
-    static final String PASSKEY_REFUSAL = "That passkey didn't work."
-    static final String TOO_MANY = "You have ${MAX_PASSKEYS} passkeys already. Remove one first.".toString()
-    static final String NOT_FOUND = "That passkey was not found."
-    static final String SETUP_EXPIRED = "This passkey setup has expired. Start again."
-    static final String ALREADY_REGISTERED = "That passkey is already registered."
 
     static final String TEMPLATE_PASSKEY_ADDED = "DARPAN_2FA_PASSKEY_ADDED"
 
@@ -80,6 +66,34 @@ class PasskeySupport {
 
     // ---- relying party (per instance) ----
 
+    /** This instance's relying party: its id and the origins a ceremony may come from. Built once per call. */
+    static final class RelyingParty {
+        final String id
+        final Set<String> origins
+
+        RelyingParty(String id, Set<String> origins) {
+            this.id = id
+            this.origins = origins.asImmutable()
+        }
+
+        ServerProperty serverProperty(String challenge) {
+            return ServerProperty.builder().origins(origins.collect { new Origin(it) } as Set<Origin>).rpId(id)
+                    .challenge(new DefaultChallenge(challenge)).build()
+        }
+    }
+
+    /** The relying party, or null when passkeys are unavailable here (no rpId, or no allowed origin on it). */
+    static RelyingParty relyingParty(def ec) {
+        String id = rpId(ec)
+        if (!id) return null
+        Set<String> allowed = originsFor(id, originCandidates(ec))
+        return allowed ? new RelyingParty(id, allowed) : null
+    }
+
+    static boolean available(def ec) {
+        return relyingParty(ec) != null
+    }
+
     /**
      * The relying party id: DARPAN_WEBAUTHN_RP_ID / darpan.webauthn.rpId, else the host of the app origin
      * (DARPAN_APP_BASE_URL, else the first non-* webapp_allow_origins entry). The UI's host, never the API's: the browser
@@ -91,22 +105,19 @@ class PasskeySupport {
         return hostOf(TenantNotificationSupport.resolveAppBaseUrl(ec))
     }
 
-    /** The origins a ceremony may come from: DARPAN_WEBAUTHN_ORIGINS / darpan.webauthn.origins (comma list), else the
-     *  webapp_allow_origins entries plus the app origin. Either way only https origins on the rpId or under it (http only
-     *  for localhost). */
+    /** The origins a ceremony may come from (see originCandidates), or none when passkeys are unavailable. */
     static Set<String> origins(def ec) {
-        String rp = rpId(ec)
-        if (!rp) return [] as Set
+        return relyingParty(ec)?.origins ?: ([] as Set<String>)
+    }
+
+    /** DARPAN_WEBAUTHN_ORIGINS / darpan.webauthn.origins (comma list), else the webapp_allow_origins entries plus the app
+     *  origin. originsFor keeps only the ones on the rpId. */
+    private static List<String> originCandidates(def ec) {
         String configured = normalize(System.getenv("DARPAN_WEBAUTHN_ORIGINS")) ?: normalize(System.getProperty("darpan.webauthn.origins"))
-        List<String> candidates
-        if (configured) {
-            candidates = configured.split(",").collect { it.trim() }
-        } else {
-            // default-property values live in System properties (see TenantNotificationSupport.resolveFirstAllowedOrigin)
-            String allowed = normalize((ec?.resource?.properties?.get("webapp_allow_origins") ?: System.getProperty("webapp_allow_origins"))?.toString())
-            candidates = (allowed ? allowed.split(",").collect { it.trim() } : []) + [TenantNotificationSupport.resolveAppBaseUrl(ec)]
-        }
-        return originsFor(rp, candidates)
+        if (configured) return configured.split(",").collect { it.trim() }
+        // default-property values live in System properties (see TenantNotificationSupport.resolveFirstAllowedOrigin)
+        String allowed = normalize((ec?.resource?.properties?.get("webapp_allow_origins") ?: System.getProperty("webapp_allow_origins"))?.toString())
+        return (allowed ? allowed.split(",").collect { it.trim() } : []) + [TenantNotificationSupport.resolveAppBaseUrl(ec)]
     }
 
     /** Pure, for tests: the candidates that are well-formed origins on rp (or under it), https or http://localhost. */
@@ -130,10 +141,6 @@ class PasskeySupport {
         return out
     }
 
-    static boolean available(def ec) {
-        return rpId(ec) && !origins(ec).isEmpty()
-    }
-
     private static String hostOf(String url) {
         if (!url) return null
         try {
@@ -145,87 +152,79 @@ class PasskeySupport {
 
     // ---- reads ----
 
-    private static def find(def ec, String entityName, String reason) {
-        return TenantScopedFinder.findGlobalUnscoped(ec, entityName, reason)
-    }
-
     /** The person's live passkeys: [factor, credential] pairs, oldest first. */
     static List<Map> activePasskeys(def ec, String userId) {
         if (!userId) return []
-        List factors = find(ec, TwoFactorSupport.FACTOR, "self-scoped auth: the person's live passkeys").condition("userId", userId)
-                .condition("factorTypeEnumId", TYPE_PASSKEY).condition("statusId", TwoFactorSupport.ACTIVE)
-                .orderBy("confirmedDate").useCache(false).list()
-        if (!factors) return []
-        Map<String, Object> credentials = find(ec, CREDENTIAL, "self-scoped auth: the person's passkey credentials")
-                .condition("factorId", EntityCondition.IN, factors*.factorId).useCache(false).list()
-                .collectEntries { [(it.factorId): it] }
-        return factors.findAll { credentials[it.factorId] != null }.collect { [factor: it, credential: credentials[it.factorId]] }
+        return withCredentials(ec, TwoFactorRecords.find(ec, TwoFactorRecords.FACTOR, "self-scoped auth: the person's live passkeys")
+                .condition("userId", userId).condition("factorTypeEnumId", TwoFactorRecords.TYPE_PASSKEY)
+                .condition("statusId", TwoFactorRecords.ACTIVE).orderBy("confirmedDate").useCache(false).list())
     }
 
-    static int activePasskeyCount(def ec, String userId) {
-        if (!userId) return 0
-        return (int) find(ec, TwoFactorSupport.FACTOR, "self-scoped auth: count the person's live passkeys").condition("userId", userId)
-                .condition("factorTypeEnumId", TYPE_PASSKEY).condition("statusId", TwoFactorSupport.ACTIVE).useCache(false).count()
-    }
-
-    /** For get#TwoFactorStatus: never the key or the credential id. */
-    static List<Map> describe(def ec, String userId) {
-        return activePasskeys(ec, userId).collect { Map p ->
+    /** For get#TwoFactorStatus, from the person's active factors already read: never the key or the credential id. */
+    static List<Map> describe(def ec, List activeFactors) {
+        List passkeyFactors = activeFactors.findAll { it.factorTypeEnumId == TwoFactorRecords.TYPE_PASSKEY }
+                .sort { it.confirmedDate }
+        return withCredentials(ec, passkeyFactors).collect { Map p ->
             [passkeyId   : p.factor.factorId, name: p.credential.name, createdDate: p.factor.confirmedDate,
              lastUsedDate: p.factor.lastUsedDate, transports: splitTransports(p.credential.transports),
              backedUp    : p.credential.backedUp == "Y"]
         }
     }
 
-    /** What the person can answer a sign-in challenge with here: "app" and/or "passkey". */
-    static List<String> methods(def ec, String userId) {
-        List<String> out = []
-        if (TwoFactorSupport.activeFactor(ec, userId) != null) out << METHOD_APP
-        if (available(ec) && activePasskeyCount(ec, userId) > 0) out << METHOD_PASSKEY
-        return out
+    /** [factor, credential] pairs for passkey factor rows, in their order; one read of the credentials. */
+    private static List<Map> withCredentials(def ec, List factors) {
+        if (!factors) return []
+        Map<String, Object> credentials = TwoFactorRecords.find(ec, CREDENTIAL, "self-scoped auth: the person's passkey credentials")
+                .condition("factorId", EntityCondition.IN, factors*.factorId).useCache(false).list()
+                .collectEntries { [(it.factorId): it] }
+        return factors.findAll { credentials[it.factorId] != null }.collect { [factor: it, credential: credentials[it.factorId]] }
     }
 
     // ---- ceremony options ----
 
-    /** begin#PasskeySignIn: a fresh challenge on a live sign-in row and request options for the person's passkeys. */
+    /** begin#PasskeySignIn: a fresh challenge on a live sign-in row and request options for the person's passkeys.
+     *  Returns [publicKeyOptions], [challengeEnded: true] or [refusal]. */
     static Map<String, Object> signInOptions(def ec, Object challengeToken) {
-        if (!available(ec)) return [error: UNAVAILABLE]
+        RelyingParty rp = relyingParty(ec)
+        if (rp == null) return [refusal: TwoFactorRefusal.PASSKEYS_UNAVAILABLE]
         return (Map<String, Object>) ec.transaction.runRequireNew(null, "Could not start a passkey sign-in", {
-            def row = TwoFactorSupport.liveChallenge(ec, challengeToken, true)
-            if (row == null || row.purposeEnumId != TwoFactorSupport.PURPOSE_CODE) return [challengeEnded: true]
+            def row = SignInChallenges.live(ec, challengeToken, true)
+            if (row == null || row.purposeEnumId != SignInChallenges.PURPOSE_CODE) return [challengeEnded: true]
             List<Map> passkeys = activePasskeys(ec, (String) row.userId)
-            if (!passkeys) return [error: PASSKEY_REFUSAL]
+            if (!passkeys) return [refusal: TwoFactorRefusal.PASSKEY]
             String challenge = AuthPrimitives.newToken()
             row.webauthnChallenge = challenge
             row.update()
-            return [publicKeyOptions: requestOptionsJson(ec, challenge, passkeys)]
+            return [publicKeyOptions: requestOptionsJson(rp, challenge, passkeys)]
         })
     }
 
-    /** begin#PasskeyProof: request options for the signed-in person, for one fresh-proof action. */
+    /** begin#PasskeyProof: request options for the signed-in person, for one fresh-proof action. [publicKeyOptions,
+     *  expiresInSeconds] or [refusal]. */
     static Map<String, Object> proofOptions(def ec) {
         String userId = normalize(ec.user.userId)
-        if (!userId) return [error: TwoFactorSupport.SIGN_IN_FIRST]
-        if (!available(ec)) return [error: UNAVAILABLE]
+        if (!userId) return [refusal: TwoFactorRefusal.SIGN_IN_FIRST]
+        RelyingParty rp = relyingParty(ec)
+        if (rp == null) return [refusal: TwoFactorRefusal.PASSKEYS_UNAVAILABLE]
         List<Map> passkeys = activePasskeys(ec, userId)
-        if (!passkeys) return [error: "You have no passkey on this account."]
-        String challenge = AuthPrimitives.newToken()
-        createChallengeRow(ec, userId, PURPOSE_PROOF, challenge)
-        return [publicKeyOptions: requestOptionsJson(ec, challenge, passkeys), expiresInSeconds: TwoFactorSupport.CHALLENGE_LIFETIME_SECONDS]
+        if (!passkeys) return [refusal: TwoFactorRefusal.NO_PASSKEY]
+        String challenge = SignInChallenges.create(ec, userId, SignInChallenges.PURPOSE_PROOF, true)
+        return [publicKeyOptions: requestOptionsJson(rp, challenge, passkeys), expiresInSeconds: SignInChallenges.LIFETIME_SECONDS]
     }
 
-    /** begin#PasskeyRegistration (the caller has checked the fresh proof): creation options for the person. */
+    /** begin#PasskeyRegistration (the caller has checked the fresh proof): creation options for the person.
+     *  [publicKeyOptions, expiresInSeconds] or [refusal]. */
     static Map<String, Object> registrationOptions(def ec, String userId) {
-        if (!available(ec)) return [error: UNAVAILABLE]
+        RelyingParty rp = relyingParty(ec)
+        if (rp == null) return [refusal: TwoFactorRefusal.PASSKEYS_UNAVAILABLE]
         List<Map> passkeys = activePasskeys(ec, userId)
-        if (passkeys.size() >= MAX_PASSKEYS) return [error: TOO_MANY]
-        def account = find(ec, "moqui.security.UserAccount", "self-scoped auth: the account adding a passkey")
+        if (passkeys.size() >= MAX_PASSKEYS) return [refusal: TwoFactorRefusal.PASSKEY_LIMIT]
+        def account = TwoFactorRecords.find(ec, "moqui.security.UserAccount", "self-scoped auth: the account adding a passkey")
                 .condition("userId", userId).useCache(false).one()
-        String challenge = AuthPrimitives.newToken()
-        createChallengeRow(ec, userId, PURPOSE_ADD, challenge)
+        String challenge = SignInChallenges.create(ec, userId, SignInChallenges.PURPOSE_ADD, true)
         String username = (String) account?.username ?: userId
         Map options = [
-                rp                    : [id: rpId(ec), name: TwoFactorSupport.issuer()],
+                rp                    : [id: rp.id, name: TotpSupport.issuer()],
                 user                  : [id: userHandle(userId), name: username, displayName: normalize(account?.userFullName) ?: username],
                 challenge             : challenge,
                 pubKeyCredParams      : ALGORITHMS.collect { [type: "public-key", alg: it.value] },
@@ -234,11 +233,11 @@ class PasskeySupport {
                 authenticatorSelection: [residentKey: "preferred", requireResidentKey: false, userVerification: "required"],
                 attestation           : "none",
         ]
-        return [publicKeyOptions: JsonOutput.toJson(options), expiresInSeconds: TwoFactorSupport.CHALLENGE_LIFETIME_SECONDS]
+        return [publicKeyOptions: JsonOutput.toJson(options), expiresInSeconds: SignInChallenges.LIFETIME_SECONDS]
     }
 
-    private static String requestOptionsJson(def ec, String challenge, List<Map> passkeys) {
-        return JsonOutput.toJson([challenge       : challenge, rpId: rpId(ec), timeout: CEREMONY_TIMEOUT_MILLIS,
+    private static String requestOptionsJson(RelyingParty rp, String challenge, List<Map> passkeys) {
+        return JsonOutput.toJson([challenge       : challenge, rpId: rp.id, timeout: CEREMONY_TIMEOUT_MILLIS,
                                   allowCredentials: passkeys.collect { descriptor(it.credential) }, userVerification: "required"])
     }
 
@@ -249,51 +248,40 @@ class PasskeySupport {
         return d
     }
 
-    private static void createChallengeRow(def ec, String userId, String purpose, String challenge) {
-        TwoFactorSupport.sweepExpiredChallenges(ec, userId)
-        Timestamp now = ec.user.nowTimestamp
-        ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: AuthPrimitives.sha256Hex(challenge),
-                purposeEnumId: purpose, webauthnChallenge: challenge, createdDate: now,
-                expiresDate: new Timestamp(now.time + TwoFactorSupport.CHALLENGE_LIFETIME_SECONDS * 1000L), failedAttempts: 0,
-                requestIp: TwoFactorSupport.recordedIp(ec)]).setSequencedIdPrimary().create()
-    }
-
     // ---- registration ----
 
     /**
      * finish#PasskeyRegistration's check and store (call inside a transaction): the registration row named by the
      * credential's clientDataJSON must be live, of this person, and is used up whatever happens; then webauthn4j checks
      * the attestation (origin, rpId hash, challenge, user present + verified, algorithm) and no live passkey anywhere may
-     * have the credential id. Returns [ok, factorId, name] or [ok: false, error].
+     * have the credential id. Returns [factorId, name] or [refusal].
      */
     static Map<String, Object> register(def ec, String userId, Object credentialJson, Object name) {
-        if (!available(ec)) return [ok: false, error: UNAVAILABLE]
+        RelyingParty rp = relyingParty(ec)
+        if (rp == null) return [refusal: TwoFactorRefusal.PASSKEYS_UNAVAILABLE]
         String json = normalize(credentialJson)
-        if (!json) return [ok: false, error: PASSKEY_REFUSAL]
+        if (!json) return [refusal: TwoFactorRefusal.PASSKEY]
         RegistrationData parsed
         try {
             parsed = manager.parseRegistrationResponseJSON(json)
         } catch (Exception e) {
             logger.info("Passkey registration refused for userId {}: unreadable credential ({})", userId, e.class.simpleName)
-            return [ok: false, error: PASSKEY_REFUSAL]
+            return [refusal: TwoFactorRefusal.PASSKEY]
         }
-        String challenge = parsed.collectedClientData?.challenge?.value ? AuthPrimitives.b64url(parsed.collectedClientData.challenge.value) : null
-        def row = challenge ? TwoFactorSupport.liveChallenge(ec, challenge, true) : null
-        if (row == null || row.purposeEnumId != PURPOSE_ADD || row.userId != userId || row.webauthnChallenge != challenge) {
-            return [ok: false, error: SETUP_EXPIRED]
+        String challenge = presentedChallenge(parsed.collectedClientData)
+        if (SignInChallenges.claimCeremony(ec, challenge, SignInChallenges.PURPOSE_ADD, userId) == null) {
+            return [refusal: TwoFactorRefusal.PASSKEY_SETUP_EXPIRED]
         }
-        row.usedDate = ec.user.nowTimestamp
-        row.update()
-        if (activePasskeys(ec, userId).size() >= MAX_PASSKEYS) return [ok: false, error: TOO_MANY]
+        if (activePasskeys(ec, userId).size() >= MAX_PASSKEYS) return [refusal: TwoFactorRefusal.PASSKEY_LIMIT]
 
         RegistrationData verified
         try {
             List<PublicKeyCredentialParameters> params = ALGORITHMS.collect { new PublicKeyCredentialParameters(PublicKeyCredentialType.PUBLIC_KEY, it) }
-            verified = manager.verify(parsed, new RegistrationParameters(serverProperty(ec, challenge), params, true, true))
+            verified = manager.verify(parsed, new RegistrationParameters(rp.serverProperty(challenge), params, true, true))
         } catch (Exception e) {
             logger.info("Passkey registration refused for userId {}: {}", userId, e.class.simpleName)
-            TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
-            return [ok: false, error: PASSKEY_REFUSAL]
+            TwoFactorRecords.event(ec, userId, "PASSKEY_FAILED")
+            return [refusal: TwoFactorRefusal.PASSKEY]
         }
         AuthenticatorData authData = verified.attestationObject.authenticatorData
         AttestedCredentialData attested = authData.attestedCredentialData
@@ -301,14 +289,13 @@ class PasskeySupport {
         String credentialIdHash = AuthPrimitives.sha256Hex(credentialIdBytes)
         if (liveOwnerOf(ec, credentialIdHash) != null) {
             logger.info("Passkey registration refused for userId {}: credential already registered", userId)
-            return [ok: false, error: ALREADY_REGISTERED]
+            return [refusal: TwoFactorRefusal.PASSKEY_EXISTS]
         }
 
         Timestamp now = ec.user.nowTimestamp
         String label = cleanName(name)
-        def factor = ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: userId, factorTypeEnumId: TYPE_PASSKEY,
-                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now])
-                .setSequencedIdPrimary()
+        def factor = ec.entity.makeValue(TwoFactorRecords.FACTOR).setAll([userId: userId, factorTypeEnumId: TwoFactorRecords.TYPE_PASSKEY,
+                statusId: TwoFactorRecords.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary()
         factor.create()
         byte[] coseBytes = objectConverter.cborConverter.writeValueAsBytes(attested.getCOSEKey())
         ec.entity.makeValue(CREDENTIAL).setAll([factorId: factor.factorId, userId: userId, credentialId: AuthPrimitives.b64url(credentialIdBytes),
@@ -316,17 +303,18 @@ class PasskeySupport {
                 transports: (verified.transports ?: [])*.value.join(","), aaguid: attested.aaguid?.value?.toString(), name: label,
                 backupEligible: authData.flagBE ? "Y" : "N", backedUp: authData.flagBS ? "Y" : "N",
                 uvInitialized: authData.flagUV ? "Y" : "N"]).create()
-        TwoFactorSupport.event(ec, userId, "PASSKEY_ADDED")
-        TwoFactorSupport.notify(ec, userId, TEMPLATE_PASSKEY_ADDED, [passkeyName: label])
-        return [ok: true, factorId: factor.factorId, name: label]
+        TwoFactorRecords.event(ec, userId, "PASSKEY_ADDED")
+        TwoFactorRecords.notify(ec, userId, TEMPLATE_PASSKEY_ADDED, [passkeyName: label])
+        return [factorId: factor.factorId, name: label]
     }
 
     private static def liveOwnerOf(def ec, String credentialIdHash) {
-        List rows = find(ec, CREDENTIAL, "global: is this credential id already a live passkey of anyone")
+        List rows = TwoFactorRecords.find(ec, CREDENTIAL, "global: is this credential id already a live passkey of anyone")
                 .condition("credentialIdHash", credentialIdHash).useCache(false).list()
         if (!rows) return null
-        return find(ec, TwoFactorSupport.FACTOR, "global: the factors behind a credential id").condition("factorId", EntityCondition.IN, rows*.factorId)
-                .condition("statusId", TwoFactorSupport.ACTIVE).useCache(false).list()?.find { true }
+        return TwoFactorRecords.find(ec, TwoFactorRecords.FACTOR, "global: the factors behind a credential id")
+                .condition("factorId", EntityCondition.IN, rows*.factorId)
+                .condition("statusId", TwoFactorRecords.ACTIVE).useCache(false).list()?.find { true }
     }
 
     // ---- assertions ----
@@ -334,31 +322,23 @@ class PasskeySupport {
     /**
      * The assertion check (call inside a transaction; it locks the passkey's factor row). expectedChallenge null means
      * "the row the clientDataJSON names" (a proof): that row must be a live DrpnScProof row of this person and is used up.
-     * With expectedChallenge (a sign-in) the caller has claimed the row. Returns [ok, factorId] or [ok: false].
+     * With expectedChallenge (a sign-in) the caller has claimed the row. True when the assertion passes.
      */
-    static Map<String, Object> verifyAssertion(def ec, String userId, Object assertionJson, String expectedChallenge) {
-        if (!available(ec) || !userId) return [ok: false]
+    static boolean verifyAssertion(def ec, String userId, Object assertionJson, String expectedChallenge) {
+        RelyingParty rp = relyingParty(ec)
         String json = normalize(assertionJson)
-        if (!json) return [ok: false]
+        if (rp == null || !userId || !json) return false
         AuthenticationData parsed
         try {
             parsed = manager.parseAuthenticationResponseJSON(json)
         } catch (Exception e) {
             logger.info("Passkey assertion refused for userId {}: unreadable ({})", userId, e.class.simpleName)
-            TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
-            return [ok: false]
+            return refuse(ec, userId)
         }
-        String presented = parsed.collectedClientData?.challenge?.value ? AuthPrimitives.b64url(parsed.collectedClientData.challenge.value) : null
         String challenge = expectedChallenge
         if (challenge == null) {
-            def row = presented ? TwoFactorSupport.liveChallenge(ec, presented, true) : null
-            if (row == null || row.purposeEnumId != PURPOSE_PROOF || row.userId != userId || row.webauthnChallenge != presented) {
-                TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
-                return [ok: false]
-            }
-            row.usedDate = ec.user.nowTimestamp
-            row.update()
-            challenge = presented
+            challenge = presentedChallenge(parsed.collectedClientData)
+            if (SignInChallenges.claimCeremony(ec, challenge, SignInChallenges.PURPOSE_PROOF, userId) == null) return refuse(ec, userId)
         }
         byte[] credentialId = parsed.credentialId
         List<Map> passkeys = activePasskeys(ec, userId)
@@ -366,30 +346,24 @@ class PasskeySupport {
         byte[] handle = parsed.userHandle
         if (match == null || (handle != null && handle.length > 0 && AuthPrimitives.b64url(handle) != userHandle(userId))) {
             logger.info("Passkey assertion refused for userId {}: not one of their live passkeys", userId)
-            TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
-            return [ok: false]
+            return refuse(ec, userId)
         }
-        def factor = find(ec, TwoFactorSupport.FACTOR, "self-scoped auth: lock the passkey being used")
+        def factor = TwoFactorRecords.find(ec, TwoFactorRecords.FACTOR, "self-scoped auth: lock the passkey being used")
                 .condition("factorId", match.factor.factorId).forUpdate(true).useCache(false).one()
-        def credential = find(ec, CREDENTIAL, "self-scoped auth: the passkey being used")
+        def credential = TwoFactorRecords.find(ec, CREDENTIAL, "self-scoped auth: the passkey being used")
                 .condition("factorId", match.factor.factorId).forUpdate(true).useCache(false).one()
-        if (factor?.statusId != TwoFactorSupport.ACTIVE || credential == null) {
-            TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
-            return [ok: false]
-        }
+        if (factor?.statusId != TwoFactorRecords.ACTIVE || credential == null) return refuse(ec, userId)
         try {
-            CredentialRecordImpl record = credentialRecord(credential)
             List<byte[]> allowed = passkeys.collect { AuthPrimitives.b64urlDecode((String) it.credential.credentialId) }
-            manager.verify(parsed, new AuthenticationParameters(serverProperty(ec, challenge), record, allowed, true, true))
+            manager.verify(parsed, new AuthenticationParameters(rp.serverProperty(challenge), credentialRecord(credential), allowed, true, true))
         } catch (MaliciousCounterValueException e) {
             logger.warn("Passkey {} of userId {} presented a signature counter that did not move forward (stored {}): refused; a cloned authenticator?",
                     factor.factorId, userId, credential.signCount)
-            TwoFactorSupport.event(ec, userId, "PASSKEY_COUNTER_REGRESSED")
-            return [ok: false]
+            TwoFactorRecords.event(ec, userId, "PASSKEY_COUNTER_REGRESSED")
+            return false
         } catch (Exception e) {
             logger.info("Passkey assertion refused for userId {}: {}", userId, e.class.simpleName)
-            TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
-            return [ok: false]
+            return refuse(ec, userId)
         }
         AuthenticatorData authData = parsed.authenticatorData
         credential.signCount = authData.signCount
@@ -397,8 +371,19 @@ class PasskeySupport {
         credential.update()
         factor.lastUsedDate = ec.user.nowTimestamp
         factor.update()
-        TwoFactorSupport.event(ec, userId, "PASSKEY_OK")
-        return [ok: true, factorId: factor.factorId]
+        TwoFactorRecords.event(ec, userId, "PASSKEY_OK")
+        return true
+    }
+
+    /** A refused assertion: the PASSKEY_FAILED event, and false. */
+    private static boolean refuse(def ec, String userId) {
+        TwoFactorRecords.event(ec, userId, "PASSKEY_FAILED")
+        return false
+    }
+
+    private static String presentedChallenge(def collectedClientData) {
+        byte[] value = collectedClientData?.challenge?.value
+        return value ? AuthPrimitives.b64url(value) : null
     }
 
     private static CredentialRecordImpl credentialRecord(def credential) {
@@ -418,22 +403,17 @@ class PasskeySupport {
                 credential.backedUp == "Y", (credential.signCount ?: 0L) as long, attested, null, null, null, transports)
     }
 
-    private static ServerProperty serverProperty(def ec, String challenge) {
-        return ServerProperty.builder().origins(origins(ec).collect { new Origin(it) } as Set<Origin>).rpId(rpId(ec))
-                .challenge(new DefaultChallenge(challenge)).build()
-    }
-
     // ---- managing ----
 
-    /** rename#Passkey: the person's own live passkey only. */
-    static String rename(def ec, Object passkeyId, Object name) {
+    /** rename#Passkey: the person's own live passkey only. The refusal, or null. */
+    static TwoFactorRefusal rename(def ec, Object passkeyId, Object name) {
         String userId = normalize(ec.user.userId)
         def credential = ownLive(ec, userId, passkeyId)
-        if (credential == null) return NOT_FOUND
-        if (!normalize(name)) return "A name is required."
+        if (credential == null) return TwoFactorRefusal.PASSKEY_NOT_FOUND
+        if (!normalize(name)) return TwoFactorRefusal.NAME_REQUIRED
         credential.name = cleanName(name)
         credential.update()
-        TwoFactorSupport.event(ec, userId, "PASSKEY_RENAMED")
+        TwoFactorRecords.event(ec, userId, "PASSKEY_RENAMED")
         return null
     }
 
@@ -442,11 +422,12 @@ class PasskeySupport {
         String id = normalize(passkeyId)
         if (!userId || !id) return null
         // Read by the primary key, then checked here: Moqui's one() ignores conditions beside a full primary key.
-        def factor = find(ec, TwoFactorSupport.FACTOR, "self-scoped auth: the person's passkey by id").condition("factorId", id)
+        def factor = TwoFactorRecords.find(ec, TwoFactorRecords.FACTOR, "self-scoped auth: the person's passkey by id")
+                .condition("factorId", id).useCache(false).one()
+        if (factor == null || factor.userId != userId || factor.factorTypeEnumId != TwoFactorRecords.TYPE_PASSKEY
+                || factor.statusId != TwoFactorRecords.ACTIVE) return null
+        return TwoFactorRecords.find(ec, CREDENTIAL, "self-scoped auth: the person's passkey credential").condition("factorId", id)
                 .useCache(false).one()
-        if (factor == null || factor.userId != userId || factor.factorTypeEnumId != TYPE_PASSKEY
-                || factor.statusId != TwoFactorSupport.ACTIVE) return null
-        return find(ec, CREDENTIAL, "self-scoped auth: the person's passkey credential").condition("factorId", id).useCache(false).one()
     }
 
     // ---- small helpers ----
@@ -466,5 +447,4 @@ class PasskeySupport {
     private static List<String> splitTransports(Object value) {
         return value ? value.toString().split(",").collect { it.trim() }.findAll { it } : []
     }
-
 }

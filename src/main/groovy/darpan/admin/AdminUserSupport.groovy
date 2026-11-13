@@ -1,6 +1,6 @@
 package darpan.admin
 
-import darpan.facade.auth.TwoFactorSupport
+import darpan.facade.auth.TwoFactorPolicy
 import darpan.facade.common.TenantAccessSupport
 import groovy.transform.CompileDynamic
 import org.moqui.entity.EntityCondition
@@ -34,7 +34,7 @@ class AdminUserSupport {
         int index = pageIndex ?: 0
         List page = filtered.sort { it.username }.drop(index * size).take(size)
         // DAR-BE-264: ON, OFF or REQUIRED_NOT_SET_UP per user on the page, so "everyone enrolled" is one look.
-        Map<String, String> twoFactorByUser = TwoFactorSupport.adminStates(ec, page*.userId as List<String>)
+        Map<String, String> twoFactorByUser = TwoFactorPolicy.adminStates(ec, page*.userId as List<String>)
         return [users: page.collect {
             [userId: it.userId, username: it.username, userFullName: it.userFullName,
              emailAddress: it.emailAddress, disabled: it.disabled == "Y",

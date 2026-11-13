@@ -2,6 +2,8 @@ package darpan.admin
 
 import darpan.common.CryptRotationSupport
 import darpan.facade.auth.TotpSupport
+import darpan.facade.auth.SignInChallenges
+import darpan.facade.auth.TwoFactorRecords
 import darpan.facade.auth.TwoFactorSupport
 import darpan.facade.common.CliMethodAllowlist
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -69,7 +71,7 @@ class CryptRotationAdminSmokeTests {
         originalClock = TwoFactorSupport.codeClock
         TwoFactorSupport.codeClock = { clock }
         ec.user.logoutUser()
-        [TwoFactorSupport.FACTOR, TwoFactorSupport.RECOVERY, TwoFactorSupport.CHALLENGE, SFTP].each {
+        [TwoFactorRecords.FACTOR, TwoFactorRecords.RECOVERY, SignInChallenges.CHALLENGE, SFTP].each {
             ec.entity.find(it).disableAuthz().deleteAll()
         }
         AuditLogTestSupport.wipe(ec)
@@ -124,7 +126,7 @@ class CryptRotationAdminSmokeTests {
         assertEquals(false, dry.out.rotationPending)
         assertNull(dry.out.totalRows)
         assertEquals([valueCount: 3, currentKey: 2, oldKeyOnly: 0, undecryptable: 1], counts(dry.out, SFTP))
-        assertEquals([valueCount: 1, currentKey: 1, oldKeyOnly: 0, undecryptable: 0], counts(dry.out, TwoFactorSupport.FACTOR))
+        assertEquals([valueCount: 1, currentKey: 1, oldKeyOnly: 0, undecryptable: 0], counts(dry.out, TwoFactorRecords.FACTOR))
         assertEquals(dry.out.entities.sum { it.valueCount }, dry.out.valueCount)
         assertEquals(1, dry.out.undecryptableCount)
         assertEquals(strayRaw, rawColumn("CR_STRAY", "password"), "a dry run writes nothing")
@@ -165,7 +167,7 @@ class CryptRotationAdminSmokeTests {
             assertEquals(true, dry.out.oldKeyConfigured)
             assertEquals(true, dry.out.rotationPending)
             assertEquals([valueCount: 4, currentKey: 0, oldKeyOnly: 3, undecryptable: 1], counts(dry.out, SFTP))
-            assertEquals([valueCount: 1, currentKey: 1, oldKeyOnly: 0, undecryptable: 0], counts(dry.out, TwoFactorSupport.FACTOR))
+            assertEquals([valueCount: 1, currentKey: 1, oldKeyOnly: 0, undecryptable: 0], counts(dry.out, TwoFactorRecords.FACTOR))
 
             Map real = asUser(SUPER_USERNAME, [adminCode: code(secret), dryRun: false])
             assertEquals([], real.errors)

@@ -190,7 +190,7 @@
             <if condition="!darpan.facade.auth.CliAuthSupport.cliAccessAllowed(ec, ec.user.userId)">
                 <return error="true" message="${darpan.facade.auth.CliAuthSupport.CLI_ACCESS_REFUSED}"/></if>
             <!-- DAR-BE-264: a fresh code (DAR-BE-270: or passkey assertion) from an approver with two-factor on (checked in its own transaction). -->
-            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, code, passkeyAssertion)"/>
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, code, passkeyAssertion)"/>
             <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <entity-find entity-name="darpan.auth.CliDeviceCode" list="deviceRows" limit="1" for-update="true">
                 <econdition field-name="userCode" from="darpan.facade.auth.CliAuthSupport.normalizeUserCode(userCode)"/>

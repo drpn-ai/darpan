@@ -496,6 +496,10 @@
             <set field="authenticated" from="((ec.user.userId)?.toString()?.trim()) != null"/>
             <set field="passwordUpdated" from="false"/>
             <if condition="authenticated">
+                <!-- Checked here first, as save#RecoveryEmail does: update#Password compares it too but counts no failed
+                     login, so a session could guess the password without tripping the lockout (review M5). -->
+                <set field="passwordCheck" from="darpan.facade.auth.AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)"/>
+                <if condition="!passwordCheck.passwordVerified"><return error="true" message="Current password is incorrect."/></if>
                 <service-call name="org.moqui.impl.UserServices.update#Password" out-map="passwordUpdateOut">
                     <field-map field-name="userId" from="ec.user.userId"/>
                     <field-map field-name="oldPassword" from="currentPassword"/>
@@ -728,13 +732,10 @@
                 <return error="true" message="Enter a valid email address."/></if>
 
             <!-- A session token alone must not redirect future resets (change the address, then reset the password,
-                 is a takeover), so the current password is checked here. A wrong one counts toward the login lockout;
-                 the count runs in its own transaction, so it survives this service's rollback. -->
+                 is a takeover), so the current password is checked here. A wrong one counts toward the login lockout
+                 (verifyOwnPassword counts it in its own transaction, so it survives this service's rollback). -->
             <set field="passwordCheck" from="darpan.facade.auth.AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)"/>
-            <if condition="!passwordCheck.passwordVerified">
-                <script>darpan.facade.auth.AuthFacadeSupport.incrementFailedLogins(ec, ec.user.userId)</script>
-                <return error="true" message="Current password is incorrect."/>
-            </if>
+            <if condition="!passwordCheck.passwordVerified"><return error="true" message="Current password is incorrect."/></if>
 
             <set field="emailAddressMasked" from="darpan.facade.auth.PasswordResetSupport.maskEmail(email)"/>
             <entity-find entity-name="moqui.security.UserAccount" list="otherHolderList" limit="1">

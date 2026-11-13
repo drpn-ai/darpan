@@ -490,18 +490,14 @@ class TwoFactorSupport {
      * begin#TwoFactorSetup and begin#PasskeyRegistration from a signed-in session (no setup challenge): with two-factor on,
      * a fresh proof from an existing factor (a code, or a passkey assertion); with none yet, the current password. So a
      * session token alone cannot put someone else's app or passkey on the account. A wrong password counts as a failed
-     * login (its own transaction, as save#RecoveryEmail does).
+     * login (AuthFacadeSupport.verifyOwnPassword counts it).
      */
     static String signedInSetupProblem(def ec, Object currentPassword, Object code, Object passkeyAssertion = null) {
         String userId = normalize(ec.user.userId)
         if (!userId) return "Sign in first."
         if (enabled(ec, userId)) return freshProofProblem(ec, code, passkeyAssertion, false)
         if (!currentPassword) return "Current password is required."
-        Map check = AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)
-        if (!check.passwordVerified) {
-            AuthFacadeSupport.incrementFailedLogins(ec, userId)
-            return "Current password is incorrect."
-        }
+        if (!AuthFacadeSupport.verifyOwnPassword(ec, currentPassword).passwordVerified) return "Current password is incorrect."
         return null
     }
 

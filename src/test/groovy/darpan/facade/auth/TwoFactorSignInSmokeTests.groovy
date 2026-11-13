@@ -688,6 +688,39 @@ class TwoFactorSignInSmokeTests {
                 .disableAuthz().useCache(false).one().requiredFromDate)
     }
 
+    @Test
+    @DisplayName("review M5: a wrong current password while signed in is one failed login, wherever it is checked")
+    void wrongCurrentPasswordsCountOnce() {
+        Closure failures = { account(USER_ID).successiveFailedLogins as int }
+        Closure fresh = { ec.entity.find("moqui.security.UserAccount").condition("userId", USER_ID).disableAuthz()
+                .updateAll([successiveFailedLogins: 0, disabled: "N", disabledDateTime: null]) }
+
+        fresh()
+        Map verified = signedIn(USERNAME, "verify#OwnPassword", [currentPassword: "wrong-password"])
+        assertFalse(verified.out.passwordVerified as boolean)
+        assertEquals(1, failures(), "verify#OwnPassword")
+
+        fresh()
+        Map changed = signedIn(USERNAME, "change#OwnPassword", [currentPassword: "wrong-password", newPassword: NEW_PASSWORD,
+                newPasswordVerify: NEW_PASSWORD])
+        assertEquals(["Current password is incorrect."], changed.errors)
+        assertEquals(1, failures(), "change#OwnPassword")
+
+        fresh()
+        Map email = signedIn(USERNAME, "save#RecoveryEmail", [emailAddress: "tf.user.new@example.com", currentPassword: "wrong-password"])
+        assertEquals(["Current password is incorrect."], email.errors)
+        assertEquals(1, failures(), "save#RecoveryEmail, not twice")
+
+        fresh()
+        Map setup = signedIn(USERNAME, "begin#TwoFactorSetup", [currentPassword: "wrong-password"])
+        assertEquals(["Current password is incorrect."], setup.errors)
+        assertEquals(1, failures(), "begin#TwoFactorSetup, not twice")
+
+        fresh()
+        assertTrue(signedIn(USERNAME, "verify#OwnPassword", [currentPassword: PASSWORD]).out.passwordVerified as boolean)
+        assertEquals(0, failures(), "a right password counts nothing")
+    }
+
     // ---- regressions and invariants ----
 
     @Test

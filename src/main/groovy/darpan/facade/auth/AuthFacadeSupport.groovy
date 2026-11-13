@@ -670,6 +670,12 @@ class AuthFacadeSupport {
         }
     }
 
+    /**
+     * The signed-in person's current password, checked (verify#OwnPassword, and before change#OwnPassword,
+     * save#RecoveryEmail and a first two-factor setup). A wrong one is a failed login, counted here once for every caller
+     * (review M5) in its own transaction, so the framework's lockout throttles password guessing from a signed-in session
+     * (a CLI key included) as it does at sign-in.
+     */
     static Map<String, Object> verifyOwnPassword(def ec, Object currentPassword) {
         String currentPasswordValue = currentPassword?.toString()
 
@@ -696,6 +702,7 @@ class AuthFacadeSupport {
                 passwordVerified = ec.ecfi
                         .getCredentialsMatcher(userAccount.passwordHashType, "Y".equals(userAccount.passwordBase64?.toString()))
                         .doCredentialsMatch(token, info)
+                if (!passwordVerified) incrementFailedLogins(ec, normalize(ec.user.userId))
             }
         }
 

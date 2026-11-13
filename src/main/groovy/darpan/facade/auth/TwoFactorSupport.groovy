@@ -3,6 +3,7 @@ package darpan.facade.auth
 import darpan.admin.AdminAuditSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import org.apache.commons.validator.routines.InetAddressValidator
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -220,7 +221,7 @@ class TwoFactorSupport {
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
         ec.entity.makeValue(CHALLENGE).setAll([userId: userId, tokenHash: sha256(token), purposeEnumId: purpose,
                 createdDate: now, expiresDate: new Timestamp(now.time + CHALLENGE_LIFETIME_SECONDS * 1000L),
-                failedAttempts: 0, requestIp: normalize(ec.user.clientIp)]).setSequencedIdPrimary().create()
+                failedAttempts: 0, requestIp: recordedIp(ec)]).setSequencedIdPrimary().create()
         return token
     }
 
@@ -339,7 +340,7 @@ class TwoFactorSupport {
             return [ok: false]
         }
         match.usedDate = ec.user.nowTimestamp
-        match.usedIp = normalize(ec.user.clientIp)
+        match.usedIp = recordedIp(ec)
         match.update()
         int left = rows.size() - 1
         event(ec, userId, "RECOVERY_USED")
@@ -757,7 +758,7 @@ class TwoFactorSupport {
 
     static void event(def ec, String userId, String type, String byUserId = null) {
         ec.entity.makeValue(EVENT).setAll([userId: userId, eventType: type, byUserId: byUserId,
-                eventDate: ec.user.nowTimestamp, ip: normalize(ec.user.clientIp)]).setSequencedIdPrimary().create()
+                eventDate: ec.user.nowTimestamp, ip: recordedIp(ec)]).setSequencedIdPrimary().create()
     }
 
     /** Through PasswordResetSupport.sendEmail (async, the seam tests record). No email on file: nothing to send. */
@@ -775,6 +776,20 @@ class TwoFactorSupport {
     }
 
     // ---- small helpers ----
+
+    /** The longest text form of an IP address (IPv6 with an embedded IPv4 part). */
+    static final int MAX_IP_LENGTH = 45
+
+    /**
+     * The request's client IP as challenges, events and used recovery codes store it: an IPv4 or IPv6 literal, else null.
+     * It comes from a proxy header, so it is checked rather than trusted to fit a column: an oversized or made-up value
+     * would otherwise fail the insert (and with it the sign-in step) or put text that is no address on the record.
+     */
+    static String recordedIp(def ec) {
+        String ip = normalize(ec.user.clientIp)
+        if (!ip || ip.length() > MAX_IP_LENGTH) return null
+        return InetAddressValidator.getInstance().isValid(ip) ? ip : null
+    }
 
     /** The authenticator app's label: "Darpan", or DARPAN_TOTP_ISSUER (e.g. "Darpan UAT") so instances are told apart. */
     static String issuer() {

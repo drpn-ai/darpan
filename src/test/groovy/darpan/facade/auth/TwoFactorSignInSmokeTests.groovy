@@ -558,6 +558,50 @@ class TwoFactorSignInSmokeTests {
         assertNull(ec.user.userId)
     }
 
+    @Test
+    @DisplayName("review H1: login#Session fails closed: if the two-factor step throws after the password, no one stays signed in")
+    void loginFailsClosed() {
+        enrol(USER_ID, USERNAME)
+        int keysBefore = keyCount(USER_ID)
+        TwoFactorSupport.metaClass.static.signInStep = { def ecArg, String userId -> throw new IllegalStateException("forced") }
+        try {
+            Map login = anon("login#Session", [username: USERNAME, password: PASSWORD])
+            assertFalse(login.errors.isEmpty(), "the call failed: ${login}")
+            assertNull(ec.user.userId, "the password step's sign-in did not outlive the failure")
+            assertEquals(keysBefore, keyCount(USER_ID))
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(TwoFactorSupport)
+        }
+    }
+
+    @Test
+    @DisplayName("review H1/L: a client IP is stored only as an IP literal; an oversized proxy header cannot break the sign-in step")
+    void clientIpIsStoredOnlyWhenItIsAnIp() {
+        enrol(USER_ID, USERNAME)
+        def user = ec.user
+        try {
+            user.@clientIpInternal = "9" * 300
+            Map login = anon("login#Session", [username: USERNAME, password: PASSWORD])
+            assertEquals([], login.errors)
+            assertTrue(login.out.twoFactorRequired as boolean, "${login}")
+            def row = ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", USER_ID).orderBy("-createdDate")
+                    .disableAuthz().useCache(false).list().first()
+            assertNull(row.requestIp, "not an IP: not stored")
+
+            user.@clientIpInternal = "2001:db8::7"
+            assertTrue(anon("login#Session", [username: USERNAME, password: PASSWORD]).out.twoFactorRequired as boolean)
+            def ipv6 = ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", USER_ID).orderBy("-createdDate")
+                    .disableAuthz().useCache(false).list().first()
+            assertEquals("2001:db8::7", ipv6.requestIp)
+            assertEquals(["203.0.113.7", null, null, null], ["203.0.113.7", "203.0.113.7, 10.0.0.1", "not-an-ip", ""].collect {
+                user.@clientIpInternal = it
+                TwoFactorSupport.recordedIp(ec)
+            })
+        } finally {
+            user.@clientIpInternal = null
+        }
+    }
+
     // ---- regressions and invariants ----
 
     @Test

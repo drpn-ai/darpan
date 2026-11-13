@@ -94,21 +94,32 @@ class AuthFacadeSupport {
         String userId = normalize(ec?.user?.userId)
         boolean authenticated = loggedIn && userId != null
 
-        // DAR-BE-264: the password matched; a person with two-factor on (or due and not set up) gets a challenge, not
-        // a session. Said only after a right password, so it reveals nothing new (as [PWDCHG]).
-        Map<String, Object> twoFactorStep = authenticated ? TwoFactorSupport.signInStep(ec, userId) : null
-        if (twoFactorStep != null) {
-            logoutCurrentSessionOnly(ec)
-            authenticated = false
-        }
+        // loginUser has made an authenticated session; it may stand only once the steps below have settled what this
+        // request gets (review H1). Anything that throws first (the two-factor read, the challenge or key write) signs
+        // the request out again, so a failure never leaves a session behind the password alone.
+        Map<String, Object> twoFactorStep = null
+        Map<String, Object> result
+        boolean settled = !authenticated
+        try {
+            // DAR-BE-264: the password matched; a person with two-factor on (or due and not set up) gets a challenge,
+            // not a session. Said only after a right password, so it reveals nothing new (as [PWDCHG]).
+            twoFactorStep = authenticated ? TwoFactorSupport.signInStep(ec, userId) : null
+            if (twoFactorStep != null) {
+                logoutCurrentSessionOnly(ec)
+                authenticated = false
+            }
 
-        Map<String, Object> result = [
-                authenticated         : authenticated,
-                passwordChangeRequired: passwordChangeReason != null,
-                twoFactorRequired     : twoFactorStep?.purpose == TwoFactorSupport.PURPOSE_CODE,
-                twoFactorSetupRequired: twoFactorStep?.purpose == TwoFactorSupport.PURPOSE_SETUP,
-        ]
-        if (authenticated) authenticated = issueSignedInSession(ec, result)
+            result = [
+                    authenticated         : authenticated,
+                    passwordChangeRequired: passwordChangeReason != null,
+                    twoFactorRequired     : twoFactorStep?.purpose == TwoFactorSupport.PURPOSE_CODE,
+                    twoFactorSetupRequired: twoFactorStep?.purpose == TwoFactorSupport.PURPOSE_SETUP,
+            ]
+            if (authenticated) authenticated = issueSignedInSession(ec, result)
+            settled = true
+        } finally {
+            if (!settled) logoutCurrentSessionOnly(ec)
+        }
 
         result.putAll(FacadeSupport.envelope(ec))
 

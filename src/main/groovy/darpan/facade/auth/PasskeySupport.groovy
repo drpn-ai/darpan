@@ -254,7 +254,7 @@ class PasskeySupport {
         ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: TwoFactorSupport.sha256(challenge),
                 purposeEnumId: purpose, webauthnChallenge: challenge, createdDate: now,
                 expiresDate: new Timestamp(now.time + TwoFactorSupport.CHALLENGE_LIFETIME_SECONDS * 1000L), failedAttempts: 0,
-                requestIp: normalize(ec.user.clientIp)]).setSequencedIdPrimary().create()
+                requestIp: TwoFactorSupport.recordedIp(ec)]).setSequencedIdPrimary().create()
     }
 
     // ---- registration ----

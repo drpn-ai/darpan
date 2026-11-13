@@ -523,9 +523,12 @@ class TwoFactorSignInSmokeTests {
         assertEquals(false, TwoFactorSupport.status(ec, OTHER_ID).enabled, "a refused confirm leaves two-factor off")
         assertEquals(0, keyCount(OTHER_ID))
 
-        // Methods whose refusal carries no field stay JSON-RPC errors.
+        // Methods whose refusal carries no field stay JSON-RPC errors (review QM2: begin#PasskeyProof among them).
         Map unknown = rpc("verify#SignInCode", [code: "000000"])
         assertNotNull(unknown.error, "a missing required parameter is still a JSON-RPC error")
+        Map proof = rpc("begin#PasskeyProof", [:], OTHER_USERNAME)
+        assertNull(proof.result, "${proof}")
+        assertEquals("You have no passkey on this account.", (proof.error?.message as String)?.trim())
     }
 
     @Test
@@ -914,13 +917,15 @@ class TwoFactorSignInSmokeTests {
      * The call as /rpc/json makes it: Moqui's own ServiceJsonRpcDispatcher, with a stub web facade (the hook
      * ExecutionContextImpl.setWebFacade keeps for tests) handing it the request and catching the JSON reply.
      */
-    private Map rpc(String verbNoun, Map params) {
-        return rpcRequest([method: "facade.AuthFacadeServices.${verbNoun}".toString(), params: params, id: 7])
+    private Map rpc(String verbNoun, Map params, String asUsername = null) {
+        return rpcRequest([method: "facade.AuthFacadeServices.${verbNoun}".toString(), params: params, id: 7], asUsername)
     }
 
-    /** The dispatcher on a raw /rpc/json request map (a single call, or _requestBodyJsonList for a batch). */
-    private Map rpcRequest(Map requestParameters) {
+    /** The dispatcher on a raw /rpc/json request map (a single call, or _requestBodyJsonList for a batch), anonymous or
+     *  signed in as asUsername. */
+    private Map rpcRequest(Map requestParameters, String asUsername = null) {
         ec.user.logoutUser()
+        if (asUsername) assertTrue(ec.user.internalLoginUser(asUsername))
         ec.message.clearAll()
         Map captured = [:]
         // sessionAttributes: what a sign-in inside the call touches (UserFacadeImpl.internalLoginToken), so a login the

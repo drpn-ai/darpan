@@ -322,15 +322,6 @@ class AuthFacadeSupport {
         return result
     }
 
-    /** begin#PasskeyProof: request options for the signed-in person's passkeys, for one fresh-proof action. */
-    static Map<String, Object> beginPasskeyProof(def ec) {
-        Map<String, Object> begun = PasskeySupport.proofOptions(ec)
-        if (begun.error) return refused(ec, [:], (String) begun.error, false)
-        Map<String, Object> result = [publicKeyOptions: begun.publicKeyOptions, expiresInSeconds: begun.expiresInSeconds]
-        result.putAll(FacadeSupport.envelope(ec))
-        return result
-    }
-
     /**
      * begin#PasskeyRegistration: creation options for the person, after the same fresh proof begin#TwoFactorSetup asks
      * (a setup challenge; signed in: the current password with no factor yet, else a code or a passkey assertion).

@@ -1162,8 +1162,12 @@
     <!-- DAR-BE-270. Passkeys and security keys (WebAuthn) as a second factor. Spec: wrapper
          docs/superpowers/specs/2026-11-13-dar-be-270-passkeys-design.md. Options go out as JSON text (publicKeyOptions: the
          WebAuthn L3 options JSON for PublicKeyCredential.parseCreationOptionsFromJSON / parseRequestOptionsFromJSON);
-         credentials come back as JSON text (JSON.stringify(credential.toJSON())). Refusals are completed calls with ok
-         false and the reason in errors (not JSON-RPC errors), as DAR-BE-264's. -->
+         credentials come back as JSON text (JSON.stringify(credential.toJSON())).
+         One refusal rule for every two-factor method (review QM2): a refusal is a completed call (ok false, errors, a
+         reason code, and the step's own fields such as challengeEnded) ONLY where the caller needs those fields to choose its
+         next step: the sign-in and setup steps (verify#SignInCode, begin/confirm#TwoFactorSetup, begin#PasskeySignIn,
+         begin/finish#PasskeyRegistration). Every other method (begin#PasskeyProof, rename/delete#Passkey,
+         create#RecoveryCodes, disable#TwoFactor, get#TwoFactorStatus) refuses with a plain JSON-RPC error. -->
 
     <service verb="begin" noun="PasskeySignIn" allow-remote="true" authenticate="anonymous-all">
         <description>DAR-BE-270. Request options for a sign-in login#Session answered with twoFactorRequired and
@@ -1196,7 +1200,8 @@
         <description>DAR-BE-270. Request options for the signed-in person's passkeys, for one action that asks for a fresh
             proof (approve#CliLogin, create#RecoveryCodes, disable#TwoFactor, begin#TwoFactorSetup,
             begin#PasskeyRegistration, delete#Passkey, and the admin app's /transfer export and handoff, two-factor reset and
-            key rotation). The assertion is single-use and lives 5 minutes.</description>
+            key rotation). The assertion is single-use and lives 5 minutes. A refusal (not signed in, passkeys unavailable,
+            no passkey) is a JSON-RPC error.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
@@ -1206,12 +1211,13 @@
             <parameter name="expiresInSeconds" type="Integer"><description>Seconds the challenge lives: 300.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeyProof(ec)"/>
-            <set field="ok" from="authResult.ok"/>
-            <set field="messages" from="authResult.messages"/>
-            <set field="errors" from="authResult.errors"/>
-            <set field="publicKeyOptions" from="authResult.publicKeyOptions"/>
-            <set field="expiresInSeconds" from="authResult.expiresInSeconds"/>
+            <set field="begun" from="darpan.facade.auth.PasskeySupport.proofOptions(ec)"/>
+            <if condition="begun.error"><return error="true" message="${begun.error}"/></if>
+            <set field="publicKeyOptions" from="begun.publicKeyOptions"/>
+            <set field="expiresInSeconds" from="begun.expiresInSeconds"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 

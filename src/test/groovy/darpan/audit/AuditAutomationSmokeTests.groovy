@@ -20,6 +20,7 @@ import java.time.ZoneId
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -331,6 +332,32 @@ class AuditAutomationSmokeTests {
         Map row = [type: "MISSING_IN_FILE_2", id: "M1137118\u001F01", note: "missing"]
         assertEquals("Item M1137118/01 is not billed", AuditAutomationSupport.headline(check, row))
         assertEquals(["M1137118/01"], AuditAutomationSupport.recordsOf(check, row, omsSource, nsSource)*.recordId)
+    }
+
+    @Test
+    void theLedgerStoresTheConnectionThatReadEachRecord() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-16", ["FC1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("d16", [row("MISSING_IN_FILE_2", "FC1", "missing in NetSuite")])], null,
+                null, [FILE_1: "OMS_CFG_LEDGER"])
+        List recs = records(finding("FC1").findingId as String)
+        assertTrue(recs.size() > 0)
+        assertEquals("OMS_CFG_LEDGER", recs[0].sourceConfigId)
+    }
+
+    @Test
+    void aRecordSaysWhichConnectionReadItAndANamedRelatedRecordDoesNot() {
+        // DAR-BE-284: a Shopify shop/redact erases exactly the records read through that store's connection. The OMS
+        // order here was read through FILE_1's connection; the Shopify order it names was not read at all.
+        Map check = [checkId: "X", file1RecordType: "order"]
+        Map row = [type: "MISSING_IN_FILE_2", id: "M5551", data: [orderId: "M5551", orderName: "M5551", etailOrderId: "5551"]]
+        List<Map> recs = AuditAutomationSupport.recordsOf(check, row, omsSource, nsSource, [FILE_1: "OMS_CFG_1", FILE_2: "NS_CFG_2"])
+        Map own = recs.find { it.recordType == "order" && it.recordId == "M5551" }
+        Map related = recs.find { it.systemEnumId == "SHOPIFY" }
+        assertEquals("OMS_CFG_1", own?.sourceConfigId)
+        assertNotNull(related, "${recs}")
+        assertNull(related.sourceConfigId)
+        assertNull(AuditAutomationSupport.recordsOf(check, row, omsSource, nsSource).find { it.recordId == "M5551" }.sourceConfigId,
+                "no connections given (older callers): none recorded")
     }
 
     /**

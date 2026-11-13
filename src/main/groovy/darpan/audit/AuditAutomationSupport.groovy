@@ -221,7 +221,8 @@ class AuditAutomationSupport {
      */
     static void recordWindow(def ec, def automation, List<Map> checks, Map<String, Object> window,
                              def file1Source, def file2Source, Map file1Result, Map file2Result,
-                             Map reconcileResult, Throwable failure, String automationExecutionId = null) {
+                             Map reconcileResult, Throwable failure, String automationExecutionId = null,
+                             Map<String, String> sideConfigIds = null) {
         if (!checks || !window?.auditPeriod) return
         List<String> priorErrors = ec.message.hasError() ? new ArrayList<String>(ec.message.errors) : []
         ec.message.clearErrors()
@@ -240,7 +241,7 @@ class AuditAutomationSupport {
                 Set<String> unjudged = unjudgedKeys(ec, automation, check, window, diff, file1Source, file2Source)
                 List<String> judged = unjudged ? examined.findAll { !unjudged.contains(it) } as List<String> : new ArrayList<String>(examined)
                 recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source,
-                        judged, now, unjudged, automationExecutionId)
+                        judged, now, unjudged, automationExecutionId, sideConfigIds)
             }
         } catch (Exception e) {
             logger.error("Audit ledger write failed for automation ${readField(automation, 'automationId')} window ${window.auditPeriod}: ${sanitizeErrorDetail(e)}")
@@ -279,7 +280,7 @@ class AuditAutomationSupport {
 
     private static void recordCheck(def ec, String tenantId, Map check, Map window, List<Map> reads, String notRunReason,
                                     File diff, def file1Source, def file2Source, List<String> examined, Timestamp now,
-                                    Set<String> unjudged, String automationExecutionId) {
+                                    Set<String> unjudged, String automationExecutionId, Map<String, String> sideConfigIds = null) {
         Map base = [companyUserGroupId: tenantId, checkId: check.checkId, reportDate: window.auditReportDate,
                     period: window.auditPeriod]
         // DAR-UI-063. Played days keep their own dates; the morning run's are the period to date (the ledger's default).
@@ -291,7 +292,7 @@ class AuditAutomationSupport {
                 [checkStatusEnumId: reads.every { it.statusEnumId == "AUDSR_COMPLETE" } ? "AUDCS_RAN" : "AUDCS_PARTIAL"]
         if (run == null || run.checkStatusEnumId == "AUDCS_NOT_RUN") return
         Map<String, Map> explained = [:]
-        List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained)
+        List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained, sideConfigIds)
                 .findAll { !unjudged.contains(it.recordKey as String) } : []
         if (call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings]) == null) return
         // DAR-BE-118: closes what THIS run examined and did not report, so a later run the same morning closes too.
@@ -347,7 +348,7 @@ class AuditAutomationSupport {
      * finding.
      */
     static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source,
-                                  Map<String, Map> explained) {
+                                  Map<String, Map> explained, Map<String, String> sideConfigIds = null) {
         List<Map> links = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("checkId", check.checkId)
                 .orderBy("sequenceNum").list()*.getMap()
         // DAR-UI-063. A statement turned off records no findings.
@@ -390,7 +391,7 @@ class AuditAutomationSupport {
                 String statementCode = codeById[link.statementId as String]
                 String recordKey = row.id as String
                 if (!statementCode || !recordKey) return
-                List<Map> records = AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source)
+                List<Map> records = AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source, sideConfigIds)
                 byKey.putIfAbsent("${statementCode}|${recordKey}".toString(), [
                         statementCode   : statementCode,
                         recordKey       : recordKey,
@@ -519,7 +520,7 @@ class AuditAutomationSupport {
      * has no evidence, and its records no status. After them, the records in other systems those records name
      * (RELATED_IDS), each once.
      */
-    static List<Map> recordsOf(Map check, Map row, def file1Source, def file2Source) {
+    static List<Map> recordsOf(Map check, Map row, def file1Source, def file2Source, Map<String, String> sideConfigIds = null) {
         String type = row.type as String
         // A missing row also names the other side's record when the run found one (screened out, or under another key):
         // its ids ride on the row (RunConclusionSupport), e.g. the NetSuite order of a line not billed (R1 F-100781).
@@ -558,11 +559,13 @@ class AuditAutomationSupport {
                     recordId    : recordId,
                     internalId  : internalId == recordId ? null : internalId,
                     recordStatus: normalize(evidence?.state),
+                    // DAR-BE-284: read through this side's connection (related records below were not read, so none).
+                    sourceConfigId: normalize(sideConfigIds?.get(side)),
                     recordData  : whole ?: null]
         }
         Set<String> seen = own.collect { "${rootSystem(it.systemEnumId as String)}|${it.recordType}|${it.recordId}".toString() } as Set
         return own + related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) } +
-                orderLineRecords(row, file1Source, file2Source)
+                orderLineRecords(row, file1Source, file2Source, sideConfigIds)
     }
 
     /** DAR-UI-099: the record type of every other line of a finding's order (firstKeyRecords). */
@@ -574,7 +577,7 @@ class AuditAutomationSupport {
      * by a filter), one record per line key: units of one line count as its quantity. A line with no key of its own (a
      * NetSuite store-credit payment line) is named by its item. The row's own line is not repeated.
      */
-    static List<Map> orderLineRecords(Map row, def file1Source, def file2Source) {
+    static List<Map> orderLineRecords(Map row, def file1Source, def file2Source, Map<String, String> sideConfigIds = null) {
         Map byFile = row.firstKeyRecords instanceof Map ? (Map) row.firstKeyRecords : null
         if (!byFile) return []
         List<Map> out = []
@@ -593,7 +596,8 @@ class AuditAutomationSupport {
                 Map line = byLine.get(id)
                 if (line != null) { line.recordData.units = ((line.recordData.units ?: 1) as int) + 1; return }
                 byLine.put(id, [systemEnumId: systemEnumId, recordType: ORDER_LINE, recordId: id, internalId: null,
-                                recordStatus: null, recordData: record + [presence: normalize(entry.presence), units: 1]])
+                                recordStatus: null, sourceConfigId: normalize(sideConfigIds?.get(file == "file1" ? "FILE_1" : "FILE_2")),
+                                recordData: record + [presence: normalize(entry.presence), units: 1]])
             }
             out.addAll(byLine.values())
         }

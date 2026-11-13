@@ -356,6 +356,11 @@
         <field name="recordStatus" type="text-medium">
             <description>The record's status in its own system's words, when the check read it.</description>
         </field>
+        <field name="sourceConfigId" type="id">
+            <description>DAR-BE-284. The connection that read this record (the source's config id, e.g. a
+                ShopifyAuthConfig id, so a Shopify shop/redact can erase exactly one store's records). Null for a record
+                named inside another system's record (it was not read) and for records written before 2026-11-13.</description>
+        </field>
         <field name="recordData" type="text-very-long">
             <description>DAR-UI-080. Every field the check's read gave for the record, as JSON, e.g. a HotWax item's order
                 name and status, a return's channel, warranty and total, a NetSuite order's customer deposits. The finding

@@ -490,6 +490,8 @@ class AutomationExecutionSupport {
         Map<String, Object> executionParams = new LinkedHashMap<String, Object>(input)
         Map<String, Object> sourceExtractorConfigDefaults = resolveSourceExtractorConfigDefaults(ec, automation, [file1Source, file2Source])
         if (sourceExtractorConfigDefaults) executionParams.sourceExtractorConfigDefaults = sourceExtractorConfigDefaults
+        // DAR-BE-284: the connection each side reads through, so each audit finding record says where it came from.
+        Map<String, String> auditSideConfigIds = auditChecks ? sideConfigIds(ec, file1Source, file2Source, sourceExtractorConfigDefaults) : null
         // DAR-BE-142: a retry from the last extract reads nothing; every side is the failed attempt's file. A by-key
         // lookup (the audit's open-finding re-checks) still reads, as it reads records the window's file may not hold.
         String replayFrom = normalize(input.replayFromExecutionId)
@@ -711,7 +713,7 @@ class AutomationExecutionSupport {
                     // its chat space against deletion forever, so purge it here.
                     TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
                     AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
-                            file1Result, file2Result, null, null, automationExecutionId)
+                            file1Result, file2Result, null, null, automationExecutionId, auditSideConfigIds)
                     executionResults << noDataFields + [
                             automationExecutionId: automationExecutionId,
                             childWindowStartDate : window.childWindowStartDate,
@@ -828,7 +830,8 @@ class AutomationExecutionSupport {
                 // makes the check notRun, so nothing closes on a compare that did not fully evaluate.
                 AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
                         file1Result, file2Result, reconcileResult,
-                        ruleExecutionFailed ? new IllegalStateException("A rule failed to build or evaluate.") : null, automationExecutionId)
+                        ruleExecutionFailed ? new IllegalStateException("A rule failed to build or evaluate.") : null, automationExecutionId,
+                        auditSideConfigIds)
                 // DAR-BE-123: a verify answers the person who asked, on the finding; the run's space is not told.
                 if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
                         reconciliationRunResultId: reconciliationRunResultId,
@@ -889,7 +892,7 @@ class AutomationExecutionSupport {
                 updateAutomationExecution(ec, execution, failureFields)
                 // DAR-BE-092: the failed read (or compare) is recorded, so the check is partial or notRun and closes nothing.
                 AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
-                        file1Result, file2Result, reconcileResult, t, automationExecutionId)
+                        file1Result, file2Result, reconcileResult, t, automationExecutionId, auditSideConfigIds)
                 // Task 2b terminal guarantee: close the row minted at RUNNING on EVERY failure exit,
                 // including a transient one that requeues the execution to PENDING. Left RUNNING it would
                 // be an active run nobody is running, which the reaper turns into a spurious FAILED alert
@@ -2307,6 +2310,29 @@ class AutomationExecutionSupport {
             if (configId) defaults[configParameterName] = configId
         }
         return defaults
+    }
+
+    /**
+     * DAR-BE-284: the config id each side reads through, resolved the same way the extract resolves it
+     * (resolveSourceExtractorMetadata with the run's defaults), keyed FILE_1/FILE_2. A side with no connector config
+     * (or an evaluate-mode audit's missing second side) is absent. Never throws: the ledger writes null instead.
+     */
+    static Map<String, String> sideConfigIds(def ec, def file1Source, def file2Source, Map<String, Object> configDefaults) {
+        Map<String, String> out = [:]
+        [FILE_1: file1Source, FILE_2: file2Source].each { String side, def source ->
+            if (source == null) return
+            try {
+                Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(readField(source, "systemEnumId")))
+                String parameterName = normalize(connector?.configParameterName)
+                if (!parameterName) return
+                Map parameters = resolveSourceExtractorMetadata(ec, source, configDefaults ?: [:]).parameters as Map
+                String configId = normalize(parameters?.get(parameterName))
+                if (configId) out[side] = configId
+            } catch (Exception e) {
+                logger.warn("Audit record connection for ${side} could not be resolved: ${e.class.simpleName}")
+            }
+        }
+        return out
     }
 
     protected static Map<String, Object> resolveSourceExtractorMetadata(def ec, def source, Map<String, Object> configDefaults = [:]) {

@@ -97,7 +97,7 @@ class ConfigTransferSmokeTests {
     @BeforeEach
     void reset() {
         wipeTenant(DST)
-        ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().deleteAll()
+        AuditLogTestSupport.wipe(ec)
         ec.message.clearErrors()
     }
 

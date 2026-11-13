@@ -2,17 +2,24 @@
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
-    <entity entity-name="AdminAuditLog" package="darpan.admin" use="nontransactional" cache="never">
-        <description>Immutable trail of platform-admin mutations (admin.* services), and since DAR-BE-267 of public
-            GraphQL API key mints, rotations and disables (moqui-gql gql.GqlAuthServices, by a tenant admin or super
-            admin). One row per mutation, written in the same transaction as the change itself.</description>
+    <entity entity-name="AdminAuditLog" package="darpan.admin" use="nontransactional" cache="never" create-only="true">
+        <description>Immutable trail of platform-admin mutations (admin.* services, migrations, super-admin data-source
+            definitions, crypt-key rotation, retention runs), and since DAR-BE-267 of public GraphQL API key mints,
+            rotations and disables (moqui-gql gql.GqlAuthServices, by a tenant admin or super admin). One row per
+            mutation, written in the same transaction as the change itself (a migration run or a retention run, which
+            own no transaction, write theirs once done).
+            DAR-BE-265: create-only, so the entity facade refuses every update and delete (EntityValue.update/delete,
+            updateAll, deleteAll, and the update#/delete#/store# entity-auto services); the database-level REVOKE of
+            UPDATE and DELETE from the app user is the ops step in docs/reconciliation/platform/security.md ("Admin audit trail").</description>
         <field name="adminAuditLogId" type="id" is-pk="true"/>
         <field name="adminUserId" type="id" not-null="true">
             <description>Operator who performed the mutation: a super admin, or a tenant admin for a GqlApiKey row.</description></field>
         <field name="serviceName" type="text-medium" not-null="true">
             <description>Full admin service name that performed the mutation.</description></field>
         <field name="targetType" type="text-short" not-null="true">
-            <description>Kind of record affected: Tenant, User, Membership, GqlApiKey, ...</description></field>
+            <description>Kind of record affected, e.g. Tenant, User, Membership, AgentAccessGrant, CliAccessGrant,
+                CliAccessRequest, Migration, DataSourceDefinition, EncryptedFields, GeneratedOutputFiles, Retention,
+                GqlApiKey.</description></field>
         <field name="targetId" type="text-medium" not-null="true">
             <description>Primary identifier of the affected record (tenant group id, user id, or composite).</description></field>
         <field name="detailText" type="text-long">
@@ -22,5 +29,36 @@
         <relationship type="one-nofk" title="AdminUser" related="moqui.security.UserAccount" short-alias="adminUser">
             <key-map field-name="adminUserId" related-field-name="userId"/>
         </relationship>
+    </entity>
+
+    <entity entity-name="DataExportLog" package="darpan.admin" use="nontransactional" cache="never" create-only="true">
+        <description>DAR-BE-265. One row per file a person downloads or exports from Darpan: who, which tenant, which file
+            and format, how big, when. Never the file's contents. Create-only like AdminAuditLog: the app cannot change or
+            remove a row.</description>
+        <field name="dataExportLogId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true">
+            <description>The person who downloaded it.</description></field>
+        <field name="companyUserGroupId" type="id">
+            <description>The active tenant the file was read for; blank only for a super admin's legacy screen download
+                with no tenant selected.</description></field>
+        <field name="resourceType" type="text-short" not-null="true">
+            <description>What was served: GENERATED_OUTPUT (a run result or a run's source file through
+                get#GeneratedOutput) or LEGACY_DIFF_FILE (the super-admin screen download).</description></field>
+        <field name="resourceRef" type="text-medium" not-null="true">
+            <description>The file name or data-manager relative path that was asked for.</description></field>
+        <field name="format" type="text-short">
+            <description>json or csv, as served.</description></field>
+        <field name="byteCount" type="number-integer">
+            <description>Characters served, when known.</description></field>
+        <field name="serviceName" type="text-medium" not-null="true">
+            <description>The service or screen transition that served it.</description></field>
+        <field name="eventTimestamp" type="date-time" not-null="true"/>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user">
+            <key-map field-name="userId"/>
+        </relationship>
+        <index name="DATAEXP_TENANT_TIME">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="eventTimestamp"/>
+        </index>
     </entity>
 </entities>

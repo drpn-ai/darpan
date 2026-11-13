@@ -251,6 +251,22 @@ class AgentAccessAdminSmokeTests {
     }
 
     @Test
+    void "every grant change writes one admin audit row by the admin, and a refused change writes none"() {
+        // DAR-BE-265
+        String id = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: ALPHA, days: 1]).grant.grantId
+        adminOk("pause#AgentAccessGrant", [grantId: id])
+        adminOk("unpause#AgentAccessGrant", [grantId: id, days: 3])
+        adminOk("update#AgentAccessGrant", [grantId: id, costCapUsd: 2])
+        adminOk("revoke#AgentAccessGrant", [grantId: id])
+        assertTrue(admin("unpause#AgentAccessGrant", [grantId: id]).hasError as boolean)
+        List<Map> rows = asSystem { ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", id).orderBy("adminAuditLogId").useCache(false).list()*.getMap() }
+        assertEquals(["create#AgentAccessGrant", "pause#AgentAccessGrant", "unpause#AgentAccessGrant", "update#AgentAccessGrant", "revoke#AgentAccessGrant"]
+                .collect { "${SVC}.${it}".toString() }, rows*.serviceName, "one row per change; the refused unpause adds none")
+        assertTrue(rows.every { it.adminUserId == SUPER_ID && it.targetType == "AgentAccessGrant" })
+        assertTrue((rows[0].detailText as String).contains(EDITOR) && (rows[0].detailText as String).contains("\$5"), "${rows[0].detailText}")
+    }
+
+    @Test
     void "usage sums the ledger by day and by role and model for a user and a tenant"() {
         String id = adminOk("create#AgentAccessGrant", [costCapUsd: 5, userId: EDITOR, tenantUserGroupId: ALPHA]).grant.grantId
         Timestamp today = new Timestamp(System.currentTimeMillis())

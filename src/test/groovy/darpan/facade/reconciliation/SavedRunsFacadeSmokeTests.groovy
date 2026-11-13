@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
+import org.moqui.entity.EntityCondition
 
 import java.nio.file.Path
 import java.sql.Timestamp
@@ -611,6 +612,16 @@ class SavedRunsFacadeSmokeTests {
 
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         assertEquals(true, stillVisibleResult.ok)
+
+        // DAR-BE-265: each served download is attributed to its user and tenant, with the file and format and no contents;
+        // the refused cross-tenant reads leave no row.
+        List<Map> exports = ec.entity.find("darpan.admin.DataExportLog").condition("resourceRef", EntityCondition.IN, [outputFileName, sourceFilePath])
+                .orderBy("dataExportLogId").disableAuthz().useCache(false).list()*.getMap()
+        assertEquals([[SAME_TENANT_USER_ID, KREWE, outputFileName, "json"], [SAME_TENANT_USER_ID, KREWE, sourceFilePath, "csv"],
+                      [SAME_TENANT_USER_ID, KREWE, outputFileName, "json"]],
+                exports.collect { [it.userId, it.companyUserGroupId, it.resourceRef, it.format] })
+        assertTrue(exports.every { it.resourceType == "GENERATED_OUTPUT" && (it.byteCount as Long) > 0 && it.eventTimestamp != null })
+        assertFalse(exports.any { it.userId == OUTSIDE_TENANT_USER_ID })
     }
 
     /**

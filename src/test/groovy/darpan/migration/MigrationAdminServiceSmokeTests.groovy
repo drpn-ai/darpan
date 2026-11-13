@@ -307,6 +307,42 @@ class MigrationAdminServiceSmokeTests {
     }
 
     @Test
+    void parkingRunningAndRunningPendingAreOnTheAdminTrailAndADryRunIsNot() {
+        // DAR-BE-265: migrations rewrite every tenant's data; the admin trail must name who ran or parked what.
+        Closure<List<Map>> rows = { String targetId ->
+            ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", targetId).orderBy("adminAuditLogId")
+                    .disableAuthz().useCache(false).list()*.getMap()
+        }
+        int pendingBefore = rows("PENDING").size()
+        int endpointBefore = rows("ENDPOINT_ACCESS").size()
+        int retiredBefore = rows("RETIRED_FIELDS").size()
+
+        ec.service.sync().name("admin.MigrationAdminServices.dryRun#PendingMigrations").parameters([:]).disableAuthz().call()
+        ec.service.sync().name("admin.MigrationAdminServices.dryRun#Migration").parameters([migrationId: "ENDPOINT_ACCESS"]).disableAuthz().call()
+        assertEquals(pendingBefore, rows("PENDING").size(), "a dry run writes no audit row")
+        assertEquals(endpointBefore, rows("ENDPOINT_ACCESS").size(), "a dry run writes no audit row")
+
+        ec.service.sync().name("admin.MigrationAdminServices.set#MigrationEnabled")
+                .parameters([migrationId: "RETIRED_FIELDS", enabled: false]).disableAuthz().call()
+        ec.service.sync().name("admin.MigrationAdminServices.run#Migration")
+                .parameters([migrationId: "ENDPOINT_ACCESS"]).disableAuthz().call()
+        ec.service.sync().name("admin.MigrationAdminServices.run#PendingMigrations").parameters([:]).disableAuthz().call()
+
+        Map parked = rows("RETIRED_FIELDS").last()
+        assertEquals(retiredBefore + 1, rows("RETIRED_FIELDS").size())
+        assertEquals(["admin.MigrationAdminServices.set#MigrationEnabled", SUPER_ADMIN_USER_ID, "Parked migration RETIRED_FIELDS."],
+                [parked.serviceName, parked.adminUserId, parked.detailText])
+        Map one = rows("ENDPOINT_ACCESS").last()
+        assertEquals(endpointBefore + 1, rows("ENDPOINT_ACCESS").size())
+        assertEquals("admin.MigrationAdminServices.run#Migration", one.serviceName)
+        assertTrue((one.detailText as String).contains("APPLIED"), "${one.detailText}")
+        Map pending = rows("PENDING").last()
+        assertEquals(pendingBefore + 1, rows("PENDING").size())
+        assertEquals("admin.MigrationAdminServices.run#PendingMigrations", pending.serviceName)
+        assertTrue((pending.detailText as String).startsWith("Ran pending migrations: applied 9,"), "${pending.detailText}")
+    }
+
+    @Test
     void aDeniedCallerGetsNoDataAndNoSilentEmptyList() {
         // An empty migrations list and a denial must never look alike: an agent reading [] as
         // "nothing to do" on a client that is actually behind would report an upgrade complete.

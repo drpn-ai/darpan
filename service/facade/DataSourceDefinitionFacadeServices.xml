@@ -86,6 +86,11 @@
                           definitionVersion: definitionVersion, statusId: 'DRAFT', definitionJson: definitionJson, description: description,
                           createdDate: ec.user.nowTimestamp, lastUpdatedDate: ec.user.nowTimestamp]"/>
             <entity-create value-field="row"/>
+            <!-- DAR-BE-265: a definition is platform config every tenant's runs read, so its author is on the admin trail. -->
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition', targetType: 'DataSourceDefinition',
+                    targetId: dataSourceDefinitionId, detailText: 'Saved data-source definition ' + dataSourceDefinitionId + ' (DRAFT'
+                    + (basedOnId ? ', based on ' + basedOnId : '') + ').', auditTimestamp: ec.user.nowTimestamp]"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
@@ -114,6 +119,10 @@
                 <set field="row.statusId" value="RETIRED"/>
                 <set field="row.lastUpdatedDate" from="ec.user.nowTimestamp"/>
                 <entity-update value-field="row"/>
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'facade.DataSourceDefinitionFacadeServices.retire#DataSourceDefinition', targetType: 'DataSourceDefinition',
+                        targetId: dataSourceDefinitionId, detailText: 'Retired data-source definition ' + dataSourceDefinitionId + '.',
+                        auditTimestamp: ec.user.nowTimestamp]"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

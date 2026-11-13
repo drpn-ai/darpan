@@ -1,6 +1,7 @@
 package darpan.migration
 
 import darpan.admin.AdminAccessSupport
+import darpan.admin.AdminAuditSupport
 import groovy.transform.CompileDynamic
 
 /**
@@ -55,11 +56,20 @@ class MigrationAdminSupport {
     static Map<String, Object> runPending(def ec, boolean dryRun) {
         if (!gate(ec)) return null
         Map<String, Object> out = call(ec, RUN_PENDING_SERVICE, [dryRun: dryRun])
-        return [results     : (out?.get("results") as List) ?: [],
-                appliedCount: asInt(out?.get("appliedCount")),
-                skippedCount: asInt(out?.get("skippedCount")),
-                blockedCount: asInt(out?.get("blockedCount")),
-                failedCount : asInt(out?.get("failedCount"))]
+        Map<String, Object> outcome = [results     : (out?.get("results") as List) ?: [],
+                                       appliedCount: asInt(out?.get("appliedCount")),
+                                       skippedCount: asInt(out?.get("skippedCount")),
+                                       blockedCount: asInt(out?.get("blockedCount")),
+                                       failedCount : asInt(out?.get("failedCount"))]
+        // DAR-BE-265: a real run rewrites every tenant's data, so it is on the admin trail; a dry run writes nothing.
+        if (!dryRun) {
+            List<String> ran = ((List<Map>) outcome.results).findAll { it?.outcome && it.outcome != "ALREADY_APPLIED" }
+                    .collect { "${it.migrationId} ${it.outcome}".toString() }
+            AdminAuditSupport.recordRun(ec, "admin.MigrationAdminServices.run#PendingMigrations", "Migration", "PENDING",
+                    ("Ran pending migrations: applied ${outcome.appliedCount}, skipped ${outcome.skippedCount}, " +
+                            "blocked ${outcome.blockedCount}, failed ${outcome.failedCount}" + (ran ? " (${ran.join(', ')})" : "") + ".").toString())
+        }
+        return outcome
     }
 
     /** Runs, or previews, one named migration. Null (with an error) if denied. */
@@ -68,6 +78,10 @@ class MigrationAdminSupport {
         Map<String, Object> params = dryRun ? [migrationId: migrationId]
                 : [migrationId: migrationId, force: force]
         Map<String, Object> out = call(ec, dryRun ? DRY_RUN_ONE_SERVICE : RUN_ONE_SERVICE, params)
+        if (!dryRun) {
+            AdminAuditSupport.recordRun(ec, "admin.MigrationAdminServices.run#Migration", "Migration", migrationId,
+                    "Ran migration ${migrationId}${force ? ' (forced)' : ''}: ${out?.get('outcome') ?: 'no outcome'}, rows ${out?.get('rowsAffected') ?: 0}.".toString())
+        }
         return [migrationId : migrationId,
                 outcome     : out?.get("outcome"),
                 runId       : out?.get("runId"),
@@ -78,8 +92,10 @@ class MigrationAdminSupport {
     /** Parks or unparks a migration. False (with an error) if denied or unknown. */
     static boolean setEnabled(def ec, String migrationId, boolean enabled) {
         if (!gate(ec)) return false
-        return call(ec, SET_ENABLED_SERVICE, [migrationId: migrationId, enabled: enabled])
-                ?.get("ok") == true
+        boolean ok = call(ec, SET_ENABLED_SERVICE, [migrationId: migrationId, enabled: enabled])?.get("ok") == true
+        if (ok) AdminAuditSupport.record(ec, "admin.MigrationAdminServices.set#MigrationEnabled", "Migration", migrationId,
+                "${enabled ? 'Unparked' : 'Parked'} migration ${migrationId}.".toString())
+        return ok
     }
 
     private static Map<String, Object> call(def ec, String serviceName, Map<String, Object> parameters) {

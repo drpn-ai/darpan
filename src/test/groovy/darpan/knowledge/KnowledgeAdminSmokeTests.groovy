@@ -1,5 +1,7 @@
 package darpan.knowledge
 
+import darpan.admin.AuditLogTestSupport
+
 import darpan.admin.AdminAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -113,9 +115,10 @@ class KnowledgeAdminSmokeTests {
 
     @BeforeEach
     void reset() {
-        [ENTRY, "darpan.auth.TenantSetting", "darpan.admin.AdminAuditLog", "darpan.config.TenantConfigPending"].each {
+        [ENTRY, "darpan.auth.TenantSetting", "darpan.config.TenantConfigPending"].each {
             ec.entity.find(it).disableAuthz().deleteAll()
         }
+        AuditLogTestSupport.wipe(ec)
         [ACME, BETA].each { KnowledgeSupport.invalidate(it) }
         System.setProperty(WRITES, "true")
         System.setProperty(PRODUCT_PATH, productRoot.toString())

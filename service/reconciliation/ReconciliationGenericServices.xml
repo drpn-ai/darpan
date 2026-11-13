@@ -177,6 +177,13 @@
                 <set field="retainedCount" from="purgeResult.retainedCount"/>
                 <set field="failedFiles" from="purgeResult.failedFiles"/>
                 <set field="statusMessage" from="purgeResult.statusMessage"/>
+                <!-- DAR-BE-265: a person running the purge by hand is on the admin trail; the nightly job is not a person. -->
+                <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                    <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: currentUserId,
+                            serviceName: 'reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles', targetType: 'GeneratedOutputFiles',
+                            targetId: resolvedOutputLocation ?: '-', detailText: 'Purged generated output files older than ' + retentionDays
+                            + ' days: deleted ' + deletedCount + ' of ' + scannedCount + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+                </if>
             </if>
         </actions>
     </service>
@@ -203,6 +210,12 @@
                 <set field="reencryptedByEntity" from="darpan.common.CryptRotationSupport.reencryptAll(ec)"/>
                 <set field="totalRows" from="(reencryptedByEntity.values().sum() ?: 0) as int"/>
                 <message>Re-encrypted ${totalRows} rows across ${reencryptedByEntity.size()} entities.</message>
+                <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                    <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: currentUserId,
+                            serviceName: 'reconciliation.ReconciliationGenericServices.rotate#EncryptedFieldValues', targetType: 'EncryptedFields',
+                            targetId: 'ALL', detailText: 'Re-encrypted ' + totalRows + ' rows across ' + reencryptedByEntity.size()
+                            + ' entities with the active crypt key.', auditTimestamp: ec.user.nowTimestamp]"/>
+                </if>
             </if>
         </actions>
     </service>

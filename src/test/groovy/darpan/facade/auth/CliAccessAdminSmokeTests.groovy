@@ -112,6 +112,37 @@ class CliAccessAdminSmokeTests {
         assertTrue(evts.every { it.byUserId == SUPER_ID })
     }
 
+    @Test
+    void "every grant and request decision writes one admin audit row by the admin, and a refused call writes none"() {
+        // DAR-BE-265
+        String id = adminOk("create#CliAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA]).grant.grantId
+        adminOk("pause#CliAccessGrant", [grantId: id])
+        adminOk("unpause#CliAccessGrant", [grantId: id])
+        adminOk("update#CliAccessGrant", [grantId: id, days: 10])
+        adminOk("revoke#CliAccessGrant", [grantId: id])
+        assertTrue(admin("unpause#CliAccessGrant", [grantId: id]).hasError as boolean)
+        assertEquals(["create#CliAccessGrant", "pause#CliAccessGrant", "unpause#CliAccessGrant", "update#CliAccessGrant", "revoke#CliAccessGrant"]
+                .collect { "${SVC}.${it}".toString() }, auditRows(id)*.serviceName, "one row per change; the refused unpause adds none")
+        assertTrue(auditRows(id).every { it.adminUserId == SUPER_ID && it.targetType == "CliAccessGrant" && it.detailText })
+
+        asSystem {
+            ["CAA_REQ_1", "CAA_REQ_2"].each { String r ->
+                upsert(CliAccessRequests.REQUEST, [requestId: r, userId: VIEWER, companyUserGroupId: ALPHA, statusId: CliAccessRequests.PENDING, requestedDate: FROM])
+            }
+        }
+        Map approved = adminOk("approve#CliAccessRequest", [requestId: "CAA_REQ_1", days: 7])
+        adminOk("decline#CliAccessRequest", [requestId: "CAA_REQ_2", decisionNote: "Not yet"])
+        assertTrue(admin("decline#CliAccessRequest", [requestId: "CAA_REQ_2"]).hasError as boolean, "a decided request is refused")
+        assertEquals(["${SVC}.approve#CliAccessRequest".toString()], auditRows("CAA_REQ_1")*.serviceName)
+        assertTrue((auditRows("CAA_REQ_1")[0].detailText as String).contains(approved.grant.grantId as String), "the row names the grant it made")
+        assertEquals(["${SVC}.decline#CliAccessRequest".toString()], auditRows("CAA_REQ_2")*.serviceName)
+        assertEquals([], auditRows(approved.grant.grantId as String), "an approval is one row, under the request")
+    }
+
+    private List<Map> auditRows(String targetId) {
+        asSystem { ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", targetId).orderBy("adminAuditLogId").useCache(false).list()*.getMap() }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private Map admin(String verbNoun, Map params) {

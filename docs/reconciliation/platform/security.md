@@ -78,6 +78,35 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
 - Alert on unusual access patterns or data volumes
 - Regular access reviews and key rotation
 
+### Admin audit trail (DAR-BE-265)
+
+- `darpan.admin.AdminAuditLog` gets one row per platform-admin mutation: every `admin.*` mutation (tenants, users,
+  memberships, Darpan admins, knowledge, brain tickets, config transfer, AI access grants, CLI grants and requests,
+  migration runs and parking), shared-config grants, super-admin data-source definitions, and a person-run output purge or
+  crypt-key rotation. Reads, previews and dry runs write none. GraphQL API key mint and revoke live in `moqui-gql`
+  (DAR-BE-267).
+- `darpan.admin.DataExportLog` gets one row per file served for download (`get#GeneratedOutput`, and the super-admin
+  legacy screen download): user, active tenant, file, format, size, time. Never the contents. Client-side exports the
+  browser builds from already-loaded data are not seen by the server.
+- Both entities are `create-only`: Moqui's entity facade refuses update and delete on them, including `updateAll`,
+  `deleteAll` and the `update#`/`delete#`/`store#` entity-auto services. Raw SQL is the only way past that, so the
+  database user the app connects as must not hold UPDATE or DELETE on the two tables. Ops step, run once per database
+  by the database owner (MySQL; table names as Moqui creates them):
+
+  ```sql
+  -- The app user keeps INSERT and SELECT; it loses UPDATE and DELETE on the audit tables only.
+  -- MySQL has no column-free table-level REVOKE once the grant is schema-wide, so grant per table:
+  -- 1. If the app user holds ALL ON <schema>.*, replace it with per-table grants first (or use a role), then:
+  REVOKE UPDATE, DELETE ON <schema>.ADMIN_AUDIT_LOG FROM '<app_user>'@'%';
+  REVOKE UPDATE, DELETE ON <schema>.DATA_EXPORT_LOG FROM '<app_user>'@'%';
+  SHOW GRANTS FOR '<app_user>'@'%';  -- evidence for the audit
+  ```
+
+  MySQL cannot revoke a privilege on one table that was granted schema-wide (`ON <schema>.*`); in that case move the app
+  user to a role with explicit per-table grants, or add a `BEFORE UPDATE` / `BEFORE DELETE` trigger on each table that
+  signals an error (`SIGNAL SQLSTATE '45000'`). Choose one with the database owner; record the `SHOW GRANTS` or
+  `SHOW TRIGGERS` output as evidence.
+
 ## Operational Practices
 
 - Minimize PII in reconciliation datasets

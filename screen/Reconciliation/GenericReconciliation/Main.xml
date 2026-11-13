@@ -41,6 +41,10 @@
             <if condition="fileRef == null || !fileRef.getExists()">
                 <return error="true" message="Diff file not found"/>
             </if>
+            <service-call name="create#darpan.admin.DataExportLog" in-map="[userId: ec.user.userId ?: '_NA_',
+                    companyUserGroupId: darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                    resourceType: 'LEGACY_DIFF_FILE', resourceRef: filename, format: filename.tokenize('.').last(),
+                    serviceName: 'screen GenericReconciliation/Main.downloadDiff', eventTimestamp: ec.user.nowTimestamp]"/>
             <set field="sendResponse" from="ec.web.sendResourceResponse(fileRef.getLocation())"/>
             <return/>
         </actions>

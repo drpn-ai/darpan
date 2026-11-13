@@ -10,6 +10,7 @@ import org.junit.jupiter.api.TestInstance
 import org.moqui.Moqui
 import org.moqui.context.ArtifactAuthorizationException
 import org.moqui.context.ExecutionContext
+import org.moqui.entity.EntityException
 
 import java.nio.file.Path
 import java.sql.Timestamp
@@ -99,10 +100,11 @@ class AdminServicesSmokeTests {
     void resetFixtures() {
         // initMoqui leaves the main thread with authz disabled, so these writes are unrestricted.
         ["darpan.auth.TenantSetting", "darpan.auth.TenantUserPermissionGroupMember",
-         "darpan.admin.AdminAuditLog", "moqui.security.UserPreference", "moqui.security.UserLoginKey",
+         "moqui.security.UserPreference", "moqui.security.UserLoginKey",
          "moqui.security.UserGroupMember"].each { String entityName ->
             ec.entity.find(entityName).disableAuthz().deleteAll()
         }
+        AuditLogTestSupport.wipe(ec)
 
         upsert("moqui.security.UserAccount", [userId: SUPER_ID, username: SUPER_USERNAME,
                 userFullName: "Admin Super", emailAddress: "admsvc.super@example.com", disabled: "N", requirePasswordChange: "N"])
@@ -385,7 +387,7 @@ class AdminServicesSmokeTests {
         assertEquals("Y", find("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA]).disabled)
         assertAudit("admin.TenantAdminServices.deactivate#Tenant", "Tenant", ALPHA, "Deactivated tenant ${ALPHA}.")
 
-        ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().deleteAll()
+        AuditLogTestSupport.wipe(ec)
         Map on = callAs(SUPER_USERNAME, "admin.TenantAdminServices.reactivate#Tenant", [tenantUserGroupId: ALPHA])
         assertEquals(true, on.result.ok)
         assertEquals("N", find("darpan.auth.TenantSetting", [companyUserGroupId: ALPHA]).disabled)
@@ -512,7 +514,7 @@ class AdminServicesSmokeTests {
         assertEquals(1, loginKeyCount(PLAIN_ID), "only the target's keys go")
         assertAudit("admin.UserAdminServices.disable#UserAccount", "User", TARGET_ID, "Disabled user ${TARGET_ID}.")
 
-        ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().deleteAll()
+        AuditLogTestSupport.wipe(ec)
         Map on = callAs(SUPER_USERNAME, "admin.UserAdminServices.enable#UserAccount", [userId: TARGET_ID])
         assertEquals(true, on.result.ok)
         assertEquals("N", find("moqui.security.UserAccount", [userId: TARGET_ID]).disabled)
@@ -869,6 +871,35 @@ class AdminServicesSmokeTests {
         Map moquiAdmin = callAs(SUPER_USERNAME, "admin.UserAdminServices.remove#DarpanAdmin", [userId: TARGET_ID, darpanRoleId: "ADMIN"])
         assertEquals(["ADMIN is not a Darpan admin role (DARPAN_ADMIN or DARPAN_SUPER_ADMIN)."], moquiAdmin.errors)
         assertEquals(1, activeGroupRows(TARGET_ID, "ADMIN").size(), "Moqui ADMIN is never ended here")
+    }
+
+    @Test
+    void theAuditTrailCannotBeChangedOrRemovedThroughTheApp() {
+        // DAR-BE-265: AdminAuditLog and DataExportLog are create-only. Every write path short of raw SQL is refused, for a
+        // super admin too, so the app cannot rewrite its own trail.
+        Map out = callAs(SUPER_USERNAME, "admin.TenantAdminServices.update#Tenant", [tenantUserGroupId: ALPHA, label: "Alpha Renamed"])
+        assertNoErrors(out)
+        List rows = ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()
+        assertEquals(1, rows.size())
+        def row = rows[0]
+        String id = row.adminAuditLogId
+        ec.entity.makeValue("darpan.admin.DataExportLog").setAll([userId: SUPER_ID, resourceType: "GENERATED_OUTPUT", resourceRef: "r.json",
+                serviceName: "test", eventTimestamp: ec.user.nowTimestamp]).setSequencedIdPrimary().create()
+
+        assertThrows(EntityException) { row.set("detailText", "rewritten"); row.update() }
+        assertThrows(EntityException) { row.delete() }
+        assertThrows(EntityException) { ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().updateAll([detailText: "x"]) }
+        assertThrows(EntityException) { ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().deleteAll() }
+        assertThrows(EntityException) { ec.entity.find("darpan.admin.DataExportLog").disableAuthz().deleteAll() }
+        ["update", "delete", "store"].each { String verb ->
+            Map svc = callAs(SUPER_USERNAME, "${verb}#darpan.admin.AdminAuditLog".toString(),
+                    [adminAuditLogId: id, detailText: "rewritten"], true)
+            assertTrue(svc.hasError as boolean || svc.failure != null, "${verb}# must be refused: ${svc}")
+        }
+        assertEquals("Updated tenant ${ALPHA}.".toString(), ec.entity.find("darpan.admin.AdminAuditLog").condition("adminAuditLogId", id)
+                .disableAuthz().useCache(false).one().detailText, "the row is unchanged")
+        assertEquals(1L, ec.entity.find("darpan.admin.DataExportLog").disableAuthz().useCache(false).count())
+        AuditLogTestSupport.wipe(ec, "darpan.admin.DataExportLog")
     }
 
     // ---------------------------------------------------------------- harness

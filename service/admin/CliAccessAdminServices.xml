@@ -35,6 +35,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.facade.auth.CliAccess.adminCreate(ec, userId, tenantUserGroupId, fromDate, thruDate, days)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.CliAccessAdminServices.create#CliAccessGrant', targetType: 'CliAccessGrant', targetId: grant.grantId,
+                        detailText: 'Turned the CLI on for user ' + userId + ' in tenant ' + tenantUserGroupId + ', ends ' + (grant.thruDate ?: 'never') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -50,6 +55,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.facade.auth.CliAccess.adminUpdate(ec, grantId, thruDate, days, clearThruDate)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.CliAccessAdminServices.update#CliAccessGrant', targetType: 'CliAccessGrant', targetId: grantId,
+                        detailText: 'Changed CLI grant ' + grantId + ': ends ' + (grant.thruDate ?: 'never') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -62,6 +72,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.facade.auth.CliAccess.adminPause(ec, grantId)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.CliAccessAdminServices.pause#CliAccessGrant', targetType: 'CliAccessGrant', targetId: grantId,
+                        detailText: 'Paused CLI grant ' + grantId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -76,6 +91,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.facade.auth.CliAccess.adminUnpause(ec, grantId, thruDate, days)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.CliAccessAdminServices.unpause#CliAccessGrant', targetType: 'CliAccessGrant', targetId: grantId,
+                        detailText: 'Unpaused CLI grant ' + grantId + ': ends ' + (grant.thruDate ?: 'never') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -88,6 +108,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.facade.auth.CliAccess.adminRevoke(ec, grantId)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.CliAccessAdminServices.revoke#CliAccessGrant', targetType: 'CliAccessGrant', targetId: grantId,
+                        detailText: 'Revoked CLI grant ' + grantId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -122,6 +147,11 @@
             <set field="approved" from="darpan.facade.auth.CliAccessRequests.adminApprove(ec, requestId, thruDate, days)"/>
             <set field="request" from="approved?.request"/>
             <set field="grant" from="approved?.grant"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.CliAccessAdminServices.approve#CliAccessRequest', targetType: 'CliAccessRequest', targetId: requestId,
+                        detailText: 'Approved CLI request ' + requestId + ' for user ' + request.userId + ' in tenant ' + request.tenantUserGroupId + ' as grant ' + grant.grantId + ', ends ' + (grant.thruDate ?: 'never') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -135,6 +165,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="request" from="darpan.facade.auth.CliAccessRequests.adminDecline(ec, requestId, decisionNote)"/>
+            <if condition="request">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.CliAccessAdminServices.decline#CliAccessRequest', targetType: 'CliAccessRequest', targetId: requestId,
+                        detailText: 'Declined CLI request ' + requestId + ' for user ' + request.userId + ' in tenant ' + request.tenantUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 </services>

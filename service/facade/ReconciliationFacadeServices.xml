@@ -4039,6 +4039,14 @@
             <set field="messages" from="generatedOutputResult.messages"/>
             <set field="errors" from="generatedOutputResult.errors"/>
             <set field="outputFile" from="generatedOutputResult.outputFile"/>
+            <!-- DAR-BE-265: every download is attributed (who, tenant, which file, format, size, when); never the contents. -->
+            <if condition="outputFile">
+                <service-call name="create#darpan.admin.DataExportLog" in-map="[userId: ec.user.userId ?: '_NA_',
+                        companyUserGroupId: darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                        resourceType: 'GENERATED_OUTPUT', resourceRef: outputFile.fileName, format: outputFile.format,
+                        byteCount: outputFile.contentText?.length(), serviceName: 'facade.ReconciliationFacadeServices.get#GeneratedOutput',
+                        eventTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 

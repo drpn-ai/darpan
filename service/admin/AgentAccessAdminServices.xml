@@ -37,6 +37,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.agent.AgentAccess.adminCreate(ec, userId, tenantUserGroupId, fromDate, thruDate, days, costCapUsd)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.AgentAccessAdminServices.create#AgentAccessGrant', targetType: 'AgentAccessGrant', targetId: grant.grantId,
+                        detailText: 'Granted AI access to user ' + userId + ' in tenant ' + tenantUserGroupId + ', limit $' + grant.costCapUsd + ', ends ' + (grant.thruDate ?: 'never') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -53,6 +58,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.agent.AgentAccess.adminUpdate(ec, grantId, thruDate, days, costCapUsd, clearThruDate)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.AgentAccessAdminServices.update#AgentAccessGrant', targetType: 'AgentAccessGrant', targetId: grantId,
+                        detailText: 'Changed AI access grant ' + grantId + ': limit $' + grant.costCapUsd + ', ends ' + (grant.thruDate ?: 'never') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -65,6 +75,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.agent.AgentAccess.adminPause(ec, grantId)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.AgentAccessAdminServices.pause#AgentAccessGrant', targetType: 'AgentAccessGrant', targetId: grantId,
+                        detailText: 'Paused AI access grant ' + grantId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -80,6 +95,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.agent.AgentAccess.adminUnpause(ec, grantId, costCapUsd, thruDate, days)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.AgentAccessAdminServices.unpause#AgentAccessGrant', targetType: 'AgentAccessGrant', targetId: grantId,
+                        detailText: 'Unpaused AI access grant ' + grantId + ': limit $' + grant.costCapUsd + ', ends ' + (grant.thruDate ?: 'never') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 
@@ -92,6 +112,11 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="grant" from="darpan.agent.AgentAccess.adminRevoke(ec, grantId)"/>
+            <if condition="grant">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                        serviceName: 'admin.AgentAccessAdminServices.revoke#AgentAccessGrant', targetType: 'AgentAccessGrant', targetId: grantId,
+                        detailText: 'Revoked AI access grant ' + grantId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
         </actions>
     </service>
 

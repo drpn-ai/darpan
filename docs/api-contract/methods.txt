@@ -34,6 +34,7 @@ admin.MigrationAdminServices.run#PendingMigrations
 admin.MigrationAdminServices.set#MigrationEnabled
 admin.ObserveAdminServices.get#AdminSessionInfo
 admin.ObserveAdminServices.get#LiveOperations
+admin.RetentionAdminServices.dryRun#Retention
 admin.ScheduleAdminServices.get#ScheduleBoard
 admin.TenantAdminServices.create#Tenant
 admin.TenantAdminServices.deactivate#Tenant

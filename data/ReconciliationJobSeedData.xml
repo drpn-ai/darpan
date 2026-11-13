@@ -47,4 +47,13 @@
             serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
             cronExpression="0 15 * * * ?"
             paused="N"/>
+
+    <!-- DAR-BE-266: per-table retention. Seeded PAUSED, and every period (darpan.retention.<table>.days) is unset by
+         default, which keeps the table forever: resuming the job deletes nothing until a period is set. -->
+    <moqui.service.job.ServiceJob
+            jobName="run_DataRetention_daily"
+            description="Delete audit findings, run results, AI transcripts and agent query logs older than their configured retention periods."
+            serviceName="retention.RetentionServices.run#Retention"
+            cronExpression="0 30 3 * * ?"
+            paused="Y"/>
 </entity-facade-xml>

@@ -107,6 +107,28 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
   signals an error (`SIGNAL SQLSTATE '45000'`). Choose one with the database owner; record the `SHOW GRANTS` or
   `SHOW TRIGGERS` output as evidence.
 
+### Data retention (DAR-BE-266)
+
+- `retention.RetentionServices.run#Retention` deletes, tenant by tenant, in batches of their own transaction
+  (`darpan.retention.batchSize`, default 500), the rows older than each table's period:
+
+  | Table key | What goes | Period property (days) |
+  |---|---|---|
+  | `AUDIT_FINDING` | `AuditFinding` last seen before the cutoff, with its records, conditions and events | `darpan.retention.auditFinding.days` |
+  | `RUN_RESULT` | finished `ReconciliationRunResult` created before the cutoff, with its steps, Slack message handles and notify subscriptions; an automation execution keeps its row and counts and forgets the run result id | `darpan.retention.runResult.days` |
+  | `AGENT_MESSAGE` | the transcript (`AgentMessage`) of a conversation started before the cutoff with no model run since; the conversation and `AgentTurn` (spend ledger) stay | `darpan.retention.agentMessage.days` |
+  | `AGENT_QUERY_LOG` | `AgentQueryLog` created before the cutoff | `darpan.retention.agentQueryLog.days` |
+
+- Unset, blank, not a whole number, or below 1 keeps the table forever. Nothing is deleted until a period is set
+  (DAR-OPS-017 decision 7). Rows with no tenant stamp are never touched.
+- The job `run_DataRetention_daily` (03:30) is seeded paused. Each real run with any period set writes one
+  `AdminAuditLog` row with the counts per table (target `Retention`).
+- `admin.RetentionAdminServices.dryRun#Retention` (super admin) counts what a run would delete now, per table and tenant,
+  and takes optional preview periods (`periodDays: {AUDIT_FINDING: 395}`) before any is set.
+- Not covered here: generated output files (the existing 15-day `purge#GeneratedOutputFiles` job), run input and extract
+  files on disk, `GqlQueryLog` (moqui-gql's own `gql.queryLog.retainDays`), and tenant offboarding
+  ([design note](tenant-offboarding-delete-design.md), not built).
+
 ## Operational Practices
 
 - Minimize PII in reconciliation datasets

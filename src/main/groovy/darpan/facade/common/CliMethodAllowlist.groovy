@@ -182,6 +182,9 @@ class CliMethodAllowlist {
             "admin.MigrationAdminServices.run#PendingMigrations",
             "admin.MigrationAdminServices.set#MigrationEnabled",
 
+            // DAR-BE-266: the retention preview is a Darpan admin's, in the admin app.
+            "admin.RetentionAdminServices.dryRun#Retention",
+
             "admin.ObserveAdminServices.get#AdminSessionInfo",
             "admin.ObserveAdminServices.get#LiveOperations",
 
@@ -199,6 +202,9 @@ class CliMethodAllowlist {
             "admin.TransferAdminServices.get#TransferCatalog",
             "admin.TransferAdminServices.import#ConfigBundle",
 
+            // DAR-ADMIN-011: setting Darpan admins is the admin app's (left unlisted when it shipped; CliMethodAllowlistTests was red).
+            "admin.UserAdminServices.add#DarpanAdmin",
+            "admin.UserAdminServices.remove#DarpanAdmin",
             "admin.UserAdminServices.create#UserAccount",
             "admin.UserAdminServices.disable#UserAccount",
             "admin.UserAdminServices.enable#UserAccount",

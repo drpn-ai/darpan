@@ -132,6 +132,9 @@
                                         "$ref": "#/components/schemas/GetLiveOperationsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DryRunRetentionRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetScheduleBoardRequest"
                                     },
                                     {
@@ -798,6 +801,7 @@
                                         "admin.MigrationAdminServices.set#MigrationEnabled": "#/components/schemas/SetMigrationEnabledRequest",
                                         "admin.ObserveAdminServices.get#AdminSessionInfo": "#/components/schemas/GetAdminSessionInfoRequest",
                                         "admin.ObserveAdminServices.get#LiveOperations": "#/components/schemas/GetLiveOperationsRequest",
+                                        "admin.RetentionAdminServices.dryRun#Retention": "#/components/schemas/DryRunRetentionRequest",
                                         "admin.ScheduleAdminServices.get#ScheduleBoard": "#/components/schemas/GetScheduleBoardRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
@@ -1130,6 +1134,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetLiveOperationsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DryRunRetentionResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetScheduleBoardResponse"
@@ -5288,6 +5295,105 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetLiveOperationsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DryRunRetentionParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "One tenant; blank covers every tenant."
+                    },
+                    "periodDays": {
+                        "type": "object",
+                        "description": "Optional preview periods in days by table key (AUDIT_FINDING,\n                RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the configured ones."
+                    }
+                },
+                "description": "Counts the rows each table's retention period would delete now, per table and tenant. Deletes nothing."
+            },
+            "DryRunRetentionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the preview ran."
+                    },
+                    "tenantCount": {
+                        "type": "integer",
+                        "description": "Tenants covered."
+                    },
+                    "batchSize": {
+                        "type": "integer",
+                        "description": "Rows per delete transaction a run would use."
+                    },
+                    "tables": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "One entry per table: table, property, periodDays (blank: keep\n                forever), status (KEEP_FOREVER, INVALID_PERIOD, DRY_RUN), cutoff, rows, dependentRows, byTenant."
+                    }
+                }
+            },
+            "DryRunRetentionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.RetentionAdminServices.dryRun#Retention",
+                "x-darpan-method": "admin.RetentionAdminServices.dryRun#Retention",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.RetentionAdminServices.dryRun#Retention"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DryRunRetentionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DryRunRetentionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.RetentionAdminServices.dryRun#Retention. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DryRunRetentionResult"
                     }
                 },
                 "required": [
@@ -32147,6 +32253,7 @@
         "admin.MigrationAdminServices.set#MigrationEnabled": "SetMigrationEnabled",
         "admin.ObserveAdminServices.get#AdminSessionInfo": "GetAdminSessionInfo",
         "admin.ObserveAdminServices.get#LiveOperations": "GetLiveOperations",
+        "admin.RetentionAdminServices.dryRun#Retention": "DryRunRetention",
         "admin.ScheduleAdminServices.get#ScheduleBoard": "GetScheduleBoard",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",

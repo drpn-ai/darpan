@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-266. Per-table retention: audit findings, run results, AI transcripts (AgentMessage) and agent query logs. Each
+  table's period is a system property (darpan.retention.<table>.days); unset keeps the table forever, so nothing is
+  deleted until a period is set (DAR-OPS-017 decision 7). Internal only: the scheduled job run_DataRetention_daily (seeded
+  PAUSED) calls run#Retention, and admin.RetentionAdminServices.dryRun#Retention is the remote preview.
+  A dry run and a run are two services, not one flag, for the reason MigrationAdminServices gives: an omitted flag must
+  never pick the destructive branch. The logic is darpan.retention.RetentionSupport.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="dryRun" noun="Retention" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Counts, per table and tenant, the rows a retention run would delete now. Deletes nothing.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId"><description>One tenant; blank sweeps every tenant.</description></parameter>
+            <parameter name="periodDays" type="Map"><description>Optional preview periods by table key (AUDIT_FINDING,
+                RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), in days, used instead of the configured ones.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="tenantCount" type="Integer"/>
+            <parameter name="batchSize" type="Integer"/>
+            <parameter name="tables" type="List"><description>One entry per table: table, property, periodDays (blank: keep
+                forever), status (KEEP_FOREVER, INVALID_PERIOD, DRY_RUN), cutoff, rows, dependentRows {entity: rows},
+                byTenant {tenant: rows}.</description><parameter name="table" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="report" from="darpan.retention.RetentionSupport.run(ec, tenantUserGroupId, true, periodDays)"/>
+            <set field="tenantCount" from="report.tenantCount"/>
+            <set field="batchSize" from="report.batchSize"/>
+            <set field="tables" from="report.tables"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="Retention" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Deletes, tenant by tenant in batches of their own transaction, the rows each configured period expires,
+            and writes one AdminAuditLog row with the counts when any period is set. Tables with no period are kept.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId"><description>One tenant; blank sweeps every tenant.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="tenantCount" type="Integer"/>
+            <parameter name="batchSize" type="Integer"/>
+            <parameter name="tables" type="List"><parameter name="table" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="currentUserId" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
+            <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                <set field="allowed" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Only super-admin users may run retention.')"/>
+                <if condition="!allowed"><return error="true"/></if>
+            </if>
+            <set field="report" from="darpan.retention.RetentionSupport.run(ec, tenantUserGroupId, false, null)"/>
+            <set field="tenantCount" from="report.tenantCount"/>
+            <set field="batchSize" from="report.batchSize"/>
+            <set field="tables" from="report.tables"/>
+        </actions>
+    </service>
+</services>

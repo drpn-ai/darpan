@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-266. The remote preview of retention for Darpan admins (super admins): what each table's period would delete now,
+  per table and tenant. admin.* and therefore inside the DARPAN_ADMIN_API fence; the service checks super admin again.
+  Read-only, so it writes no AdminAuditLog row. Deleting stays with the scheduled job (run_DataRetention_daily, seeded
+  paused) over retention.RetentionServices.run#Retention.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="dryRun" noun="Retention" allow-remote="true" authenticate="true" transaction="ignore">
+        <description>Counts the rows each table's retention period would delete now, per table and tenant. Deletes nothing.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId"><description>One tenant; blank covers every tenant.</description></parameter>
+            <parameter name="periodDays" type="Map"><description>Optional preview periods in days by table key (AUDIT_FINDING,
+                RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the configured ones.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the preview ran.</description></parameter>
+            <parameter name="tenantCount" type="Integer"><description>Tenants covered.</description></parameter>
+            <parameter name="batchSize" type="Integer"><description>Rows per delete transaction a run would use.</description></parameter>
+            <parameter name="tables" type="List"><description>One entry per table: table, property, periodDays (blank: keep
+                forever), status (KEEP_FOREVER, INVALID_PERIOD, DRY_RUN), cutoff, rows, dependentRows, byTenant.</description>
+                <parameter name="table" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <service-call name="retention.RetentionServices.dryRun#Retention" out-map="preview"
+                    in-map="[tenantUserGroupId: tenantUserGroupId, periodDays: periodDays]"/>
+            <set field="tenantCount" from="preview?.tenantCount"/>
+            <set field="batchSize" from="preview?.batchSize"/>
+            <set field="tables" from="preview?.tables"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+        </actions>
+    </service>
+</services>

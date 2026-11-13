@@ -86,9 +86,10 @@ class PasswordResetSupport {
             int accountCodes = (int) codes(ec, "rate limit: codes per account").condition("userId", account.userId)
                     .condition("fromDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, hourAgo).count()
             // Counts codes ISSUED from the IP: a request that sends nothing writes no row, which is fine,
-            // because only issued codes put mail in someone's inbox.
-            int ipCodes = ip ? (int) codes(ec, "rate limit: codes per client IP").condition("requestIp", ip)
-                    .condition("fromDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, hourAgo).count() : 0
+            // because only issued codes put mail in someone's inbox. Fails closed: every request with no usable IP
+            // (none, or a proxy header that is no address) shares one bucket, the rows whose requestIp is null.
+            int ipCodes = (int) codes(ec, "rate limit: codes per client IP").condition("requestIp", ip)
+                    .condition("fromDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, hourAgo).count()
             if (overLimit(accountCodes, ipCodes)) {
                 outcome = "overLimit"
                 logger.info("Password reset over the hourly limit: {} for the account, {} from {}", accountCodes, ipCodes, ip ?: 'unknown IP')

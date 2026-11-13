@@ -5,6 +5,7 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
@@ -198,6 +199,29 @@ class PasswordResetServicesSmokeTests {
         List outcomes = (1..4).collect { anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME]).out.outcome }
         assertEquals(["sent", "sent", "sent", "overLimit"], outcomes)
         assertEquals(3, sent.size())
+    }
+
+    @Test
+    @DisplayName("requests with no usable client IP share one per-IP bucket: the hourly limit holds for them too")
+    void noUsableIpSharesOneBucket() {
+        java.sql.Timestamp now = new java.sql.Timestamp(System.currentTimeMillis())
+        // Codes already issued this hour to other accounts from requests whose IP was not an address (stored null).
+        PasswordResetSupport.MAX_CODES_PER_IP_PER_HOUR.times { int i ->
+            ec.entity.makeValue("darpan.auth.PasswordResetCode").setAll([userId: "PWR_OTHER_${i}".toString(),
+                    purposeEnumId: PasswordResetSupport.PURPOSE_PASSWORD_RESET, codeHash: "x", codeSalt: "x", fromDate: now,
+                    thruDate: now, failedAttempts: 0, requestIp: null]).setSequencedIdPrimary().create()
+        }
+        def user = ec.user
+        try {
+            user.@clientIpInternal = "not-an-ip, 10.0.0.1"
+            assertEquals("overLimit", anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME]).out.outcome)
+            user.@clientIpInternal = "9" * 300
+            assertEquals("overLimit", anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME]).out.outcome)
+            user.@clientIpInternal = "203.0.113.9"
+            assertEquals("sent", anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME]).out.outcome, "a real IP is its own bucket")
+        } finally {
+            user.@clientIpInternal = null
+        }
     }
 
     @Test

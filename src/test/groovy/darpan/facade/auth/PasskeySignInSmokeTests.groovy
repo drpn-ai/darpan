@@ -134,6 +134,7 @@ class PasskeySignInSmokeTests {
         setPolicy("DARPAN_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
         Map login = anon("login#Session", [username: USERNAME, password: PASSWORD]).out
         assertTrue(login.twoFactorSetupRequired as boolean)
+        assertEquals(true, login.passkeysAvailable, "a forced setup can offer a passkey")
         Map begun = anon("begin#PasskeyRegistration", [challengeToken: login.challengeToken])
         assertEquals([], begun.errors)
         Map finished = anon("finish#PasskeyRegistration", [challengeToken: login.challengeToken,
@@ -145,6 +146,7 @@ class PasskeySignInSmokeTests {
         assertEquals(PasskeySupport.DEFAULT_NAME, (TwoFactorSupport.status(ec, USER_ID).passkeys as List<Map>)[0].name)
         Map reused = anon("begin#PasskeyRegistration", [challengeToken: login.challengeToken])
         assertTrue(reused.out.challengeEnded as boolean, "the setup challenge is spent")
+        assertEquals("CHALLENGE_ENDED", reused.out.reason)
     }
 
     @Test
@@ -205,6 +207,7 @@ class PasskeySignInSmokeTests {
 
         Map replay = anon("verify#SignInCode", [challengeToken: login.challengeToken, passkeyAssertion: assertion])
         assertEquals([REFUSAL], replay.errors)
+        assertEquals("PASSKEY", replay.out.reason, "a machine-readable reason, so the UIs never match the text")
         assertTrue(replay.out.challengeEnded as boolean, "the challenge was used")
 
         String token2 = challenge(USERNAME)

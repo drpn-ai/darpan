@@ -108,6 +108,8 @@
                 <parameter name="twoFactorEnabled" type="Boolean"/>
                 <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
+            <parameter name="passkeysAvailable" type="Boolean"><description>DAR-BE-270. With a challenge: whether this instance
+                offers passkeys (an rpId and an allowed origin), so a forced setup knows to offer one beside the app.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.loginSession(ec, username, password)"/>
@@ -127,6 +129,7 @@
             <set field="challengeToken" from="authResult.challengeToken"/>
             <set field="challengeExpiresInSeconds" from="authResult.challengeExpiresInSeconds"/>
             <set field="twoFactorMethods" from="authResult.twoFactorMethods"/>
+            <set field="passkeysAvailable" from="authResult.passkeysAvailable"/>
         </actions>
     </service>
 
@@ -917,12 +920,16 @@
                 <description>With a recovery code: how many are left. At 3 or fewer darpan-ui asks for new ones.</description></parameter>
             <parameter name="challengeEnded" type="Boolean">
                 <description>True when the challenge can no longer be used (expired, used, 5 wrong codes): go back to the password.</description></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,
+                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.verifySignInCode(ec, challengeToken, code, recoveryCode, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
             <set field="authenticated" from="authResult.authenticated"/>
             <set field="authToken" from="authResult.authToken"/>
             <set field="authTokenType" from="authResult.authTokenType"/>
@@ -961,12 +968,16 @@
             <parameter name="expiresInSeconds" type="Integer"><description>Seconds left to confirm: 900.</description></parameter>
             <parameter name="challengeEnded" type="Boolean">
                 <description>With a challengeToken: true when it can no longer be used (expired, used, 5 wrong codes): go back to the password.</description></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,
+                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginTwoFactorSetup(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
             <set field="secret" from="authResult.secret"/>
             <set field="otpauthUri" from="authResult.otpauthUri"/>
             <set field="qrDataUri" from="authResult.qrDataUri"/>
@@ -1039,12 +1050,16 @@
                     this reply only.</description><parameter name="recoveryCode"/></parameter>
             <parameter name="challengeEnded" type="Boolean">
                 <description>With a challengeToken: true when it can no longer be used (expired, 5 wrong codes).</description></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,
+                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.confirmTwoFactorSetup(ec, challengeToken, code)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
             <set field="authenticated" from="authResult.authenticated"/>
             <set field="authToken" from="authResult.authToken"/>
             <set field="authTokenType" from="authResult.authTokenType"/>
@@ -1185,12 +1200,16 @@
                     transports}], userVerification: "required"}.</description></parameter>
             <parameter name="challengeEnded" type="Boolean">
                 <description>True when the challenge can no longer be used: go back to the password.</description></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,
+                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeySignIn(ec, challengeToken)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
             <set field="publicKeyOptions" from="authResult.publicKeyOptions"/>
             <set field="challengeEnded" from="authResult.challengeEnded"/>
         </actions>
@@ -1242,12 +1261,16 @@
             <parameter name="expiresInSeconds" type="Integer"><description>Seconds left to finish: 300.</description></parameter>
             <parameter name="challengeEnded" type="Boolean">
                 <description>With a challengeToken: true when it can no longer be used: go back to the password.</description></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,
+                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeyRegistration(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
             <set field="publicKeyOptions" from="authResult.publicKeyOptions"/>
             <set field="expiresInSeconds" from="authResult.expiresInSeconds"/>
             <set field="challengeEnded" from="authResult.challengeEnded"/>
@@ -1317,12 +1340,16 @@
                 <description>First factor only: 10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only.</description><parameter name="recoveryCode"/></parameter>
             <parameter name="challengeEnded" type="Boolean">
                 <description>With a challengeToken: true when it can no longer be used (expired, 5 refusals).</description></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,
+                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.finishPasskeyRegistration(ec, challengeToken, credential, name)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
             <set field="passkeyId" from="authResult.passkeyId"/>
             <set field="authenticated" from="authResult.authenticated"/>
             <set field="authToken" from="authResult.authToken"/>

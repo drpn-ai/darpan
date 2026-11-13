@@ -132,6 +132,8 @@ class AuthFacadeSupport {
             result.challengeToken = twoFactorStep.challengeToken
             result.challengeExpiresInSeconds = twoFactorStep.expiresInSeconds
             result.twoFactorMethods = twoFactorStep.methods
+            // What a forced setup can offer here: an authenticator app always, a passkey when the instance has an rpId.
+            result.passkeysAvailable = PasskeySupport.available(ec)
             result.ok = true
             result.errors = []
         }
@@ -238,7 +240,7 @@ class AuthFacadeSupport {
         String userId = setupSubject(ec, challengeToken, currentPassword, code, passkeyAssertion)
         if (!userId) {
             List<String> problems = FacadeSupport.getErrors(ec)
-            return refused(ec, [challengeEnded: viaChallenge], problems ? problems[0] : "Sign in first.", false)
+            return refused(ec, [challengeEnded: viaChallenge], problems ? problems[0] : TwoFactorSupport.SIGN_IN_FIRST, false)
         }
         Map<String, Object> result = [challengeEnded: false]
         result.putAll(TwoFactorSupport.beginSetup(ec, userId))
@@ -258,7 +260,7 @@ class AuthFacadeSupport {
         String userId = viaChallenge ? TwoFactorSupport.setupChallengeUser(ec, challengeToken) : normalize(ec.user.userId)
         if (!userId) {
             result.challengeEnded = viaChallenge
-            return refused(ec, result, viaChallenge ? "This sign-in has expired. Enter your password again." : "Sign in first.", false)
+            return refused(ec, result, viaChallenge ? TwoFactorSupport.CHALLENGE_EXPIRED : TwoFactorSupport.SIGN_IN_FIRST, false)
         }
         Map<String, Object> confirmed = TwoFactorSupport.confirmSetup(ec, userId, code)
         if (!confirmed.ok) {
@@ -273,7 +275,7 @@ class AuthFacadeSupport {
                 // The factor was switched on and the challenge used above: neither may stand for an account that
                 // cannot sign in.
                 result.challengeEnded = true
-                return refused(ec, result, "This account can no longer sign in.", true)
+                return refused(ec, result, TwoFactorSupport.CANNOT_SIGN_IN, true)
             }
         }
         issueSignedInSession(ec, result)
@@ -315,7 +317,7 @@ class AuthFacadeSupport {
         if (begun.challengeEnded || begun.error) {
             TwoFactorSupport.holdToFloor(started)
             return refused(ec, [challengeEnded: begun.challengeEnded == true],
-                    begun.challengeEnded ? "This sign-in has expired. Enter your password again." : (String) begun.error, false)
+                    begun.challengeEnded ? TwoFactorSupport.CHALLENGE_EXPIRED : (String) begun.error, false)
         }
         Map<String, Object> result = [challengeEnded: false, publicKeyOptions: begun.publicKeyOptions]
         result.putAll(FacadeSupport.envelope(ec))
@@ -332,7 +334,7 @@ class AuthFacadeSupport {
         String userId = setupSubject(ec, challengeToken, currentPassword, code, passkeyAssertion)
         if (!userId) {
             List<String> problems = FacadeSupport.getErrors(ec)
-            return refused(ec, [challengeEnded: viaChallenge], problems ? problems[0] : "Sign in first.", false)
+            return refused(ec, [challengeEnded: viaChallenge], problems ? problems[0] : TwoFactorSupport.SIGN_IN_FIRST, false)
         }
         Map<String, Object> begun = PasskeySupport.registrationOptions(ec, userId)
         if (begun.error) return refused(ec, [challengeEnded: false], (String) begun.error, false)
@@ -355,7 +357,7 @@ class AuthFacadeSupport {
         String userId = viaChallenge ? TwoFactorSupport.setupChallengeUser(ec, challengeToken) : normalize(ec.user.userId)
         if (!userId) {
             result.challengeEnded = viaChallenge
-            return refused(ec, result, viaChallenge ? "This sign-in has expired. Enter your password again." : "Sign in first.", false)
+            return refused(ec, result, viaChallenge ? TwoFactorSupport.CHALLENGE_EXPIRED : TwoFactorSupport.SIGN_IN_FIRST, false)
         }
         // Under the person lock (setupChallengeUser took it already on that path), so "first" still holds at commit.
         TwoFactorSupport.lockPerson(ec, userId)
@@ -377,7 +379,7 @@ class AuthFacadeSupport {
                     "pre-auth: the account a setup challenge belongs to").condition("userId", userId).one()
             if (!CliAuthSupport.canSignIn(ec, account) || !AuthSessionSupport.signInOnNewSession(ec, (String) account.username, false)) {
                 result.challengeEnded = true
-                return refused(ec, result, "This account can no longer sign in.", true)
+                return refused(ec, result, TwoFactorSupport.CANNOT_SIGN_IN, true)
             }
         }
         if (first || viaChallenge) issueSignedInSession(ec, result)
@@ -386,8 +388,33 @@ class AuthFacadeSupport {
     }
 
     /**
-     * A refused two-factor step, answered as a completed call: [ok: false, errors: [message], messages: []] plus the
-     * step's own fields (challengeEnded, ...). Moqui's JSON-RPC dispatcher answers any call that ends with a
+     * The machine-readable reason a refused sign-in or setup step carries beside its message, so the UIs never match
+     * message text. One small set, keyed by the message constants the steps refuse with (spec DAR-BE-270, API as built):
+     * CODE (a code or recovery code did not work), PASSKEY (a passkey did not work), PROOF_NEEDED (a code or passkey is
+     * needed and none, or the wrong kind, was given), PASSWORD (current password missing or wrong), CHALLENGE_ENDED (the
+     * challenge is spent: go back to the password), SETUP_EXPIRED (start the setup again), PASSKEYS_UNAVAILABLE,
+     * PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN, SIGN_IN_FIRST. A message outside the table answers REFUSED.
+     */
+    static final Map<String, String> REFUSAL_REASONS = [
+            (TwoFactorSupport.CODE_REFUSAL)     : "CODE",
+            (PasskeySupport.PASSKEY_REFUSAL)    : "PASSKEY",
+            (TwoFactorSupport.CODE_NEEDED)      : "PROOF_NEEDED",
+            (TwoFactorSupport.PROOF_NEEDED)     : "PROOF_NEEDED",
+            (TwoFactorSupport.PASSWORD_NEEDED)  : "PASSWORD",
+            (TwoFactorSupport.PASSWORD_REFUSAL) : "PASSWORD",
+            (TwoFactorSupport.CHALLENGE_EXPIRED): "CHALLENGE_ENDED",
+            (TwoFactorSupport.SETUP_EXPIRED)    : "SETUP_EXPIRED",
+            (PasskeySupport.SETUP_EXPIRED)      : "SETUP_EXPIRED",
+            (PasskeySupport.UNAVAILABLE)        : "PASSKEYS_UNAVAILABLE",
+            (PasskeySupport.TOO_MANY)           : "PASSKEY_LIMIT",
+            (PasskeySupport.ALREADY_REGISTERED) : "PASSKEY_EXISTS",
+            (TwoFactorSupport.CANNOT_SIGN_IN)   : "ACCOUNT_CANNOT_SIGN_IN",
+            (TwoFactorSupport.SIGN_IN_FIRST)    : "SIGN_IN_FIRST",
+    ].asImmutable()
+
+    /**
+     * A refused two-factor step, answered as a completed call: [ok: false, errors: [message], messages: [], reason] plus
+     * the step's own fields (challengeEnded, ...). Moqui's JSON-RPC dispatcher answers any call that ends with a
      * MessageFacade error with a bare JSON-RPC error and drops the result, so the client would never see challengeEnded;
      * the refusal therefore travels in the envelope only and the MessageFacade is left empty. With undo (the call wrote
      * something in this transaction that must not stand) the transaction is marked rollback-only; counts written in
@@ -405,6 +432,7 @@ class AuthFacadeSupport {
         result.ok = false
         result.messages = []
         result.errors = [message]
+        result.reason = REFUSAL_REASONS[message] ?: "REFUSED"
         return result
     }
 
@@ -414,7 +442,7 @@ class AuthFacadeSupport {
                                        Object passkeyAssertion = null) {
         if (normalize(challengeToken)) {
             String userId = TwoFactorSupport.setupChallengeUser(ec, challengeToken)
-            if (!userId) ec.message.addError("This sign-in has expired. Enter your password again.")
+            if (!userId) ec.message.addError(TwoFactorSupport.CHALLENGE_EXPIRED)
             return userId
         }
         String problem = TwoFactorSupport.signedInSetupProblem(ec, currentPassword, code, passkeyAssertion)

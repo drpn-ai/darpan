@@ -79,6 +79,11 @@ class TwoFactorSupport {
     static final String SETUP_EXPIRED = "Setup has expired. Start again."
     static final String NOT_ENROLLED = "Two-factor is not on for this account."
     static final String SETUP_FIRST = "Two-factor is required for this account. Set it up in the Darpan app first."
+    static final String CHALLENGE_EXPIRED = "This sign-in has expired. Enter your password again."
+    static final String SIGN_IN_FIRST = "Sign in first."
+    static final String PASSWORD_NEEDED = "Current password is required."
+    static final String PASSWORD_REFUSAL = "Current password is incorrect."
+    static final String CANNOT_SIGN_IN = "This account can no longer sign in."
 
     static final String TEMPLATE_RECOVERY_USED = "DARPAN_2FA_RECOVERY_USED"
     static final String TEMPLATE_CODES_LOCKED = "DARPAN_2FA_CODES_LOCKED"
@@ -429,7 +434,7 @@ class TwoFactorSupport {
     static String freshProofProblem(def ec, Object code, Object passkeyAssertion, boolean onlyIfEnrolled = true) {
         long started = System.nanoTime()
         String userId = normalize(ec.user.userId)
-        if (!userId) return "Sign in first."
+        if (!userId) return SIGN_IN_FIRST
         List factors = activeFactors(ec, userId)
         if (!factors) return onlyIfEnrolled ? null : NOT_ENROLLED
         boolean hasApp = factors.any { it.factorTypeEnumId == TYPE_TOTP }
@@ -517,10 +522,10 @@ class TwoFactorSupport {
      */
     static String signedInSetupProblem(def ec, Object currentPassword, Object code, Object passkeyAssertion = null) {
         String userId = normalize(ec.user.userId)
-        if (!userId) return "Sign in first."
+        if (!userId) return SIGN_IN_FIRST
         if (enabled(ec, userId)) return freshProofProblem(ec, code, passkeyAssertion, false)
-        if (!currentPassword) return "Current password is required."
-        if (!AuthFacadeSupport.verifyOwnPassword(ec, currentPassword).passwordVerified) return "Current password is incorrect."
+        if (!currentPassword) return PASSWORD_NEEDED
+        if (!AuthFacadeSupport.verifyOwnPassword(ec, currentPassword).passwordVerified) return PASSWORD_REFUSAL
         return null
     }
 

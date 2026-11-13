@@ -65,6 +65,8 @@ class PasskeySupport {
     static final String PASSKEY_REFUSAL = "That passkey didn't work."
     static final String TOO_MANY = "You have ${MAX_PASSKEYS} passkeys already. Remove one first.".toString()
     static final String NOT_FOUND = "That passkey was not found."
+    static final String SETUP_EXPIRED = "This passkey setup has expired. Start again."
+    static final String ALREADY_REGISTERED = "That passkey is already registered."
 
     static final String TEMPLATE_PASSKEY_ADDED = "DARPAN_2FA_PASSKEY_ADDED"
 
@@ -205,7 +207,7 @@ class PasskeySupport {
     /** begin#PasskeyProof: request options for the signed-in person, for one fresh-proof action. */
     static Map<String, Object> proofOptions(def ec) {
         String userId = normalize(ec.user.userId)
-        if (!userId) return [error: "Sign in first."]
+        if (!userId) return [error: TwoFactorSupport.SIGN_IN_FIRST]
         if (!available(ec)) return [error: UNAVAILABLE]
         List<Map> passkeys = activePasskeys(ec, userId)
         if (!passkeys) return [error: "You have no passkey on this account."]
@@ -280,7 +282,7 @@ class PasskeySupport {
         String challenge = parsed.collectedClientData?.challenge?.value ? b64(parsed.collectedClientData.challenge.value) : null
         def row = challenge ? TwoFactorSupport.liveChallenge(ec, challenge, true) : null
         if (row == null || row.purposeEnumId != PURPOSE_ADD || row.userId != userId || row.webauthnChallenge != challenge) {
-            return [ok: false, error: "This passkey setup has expired. Start again."]
+            return [ok: false, error: SETUP_EXPIRED]
         }
         row.usedDate = ec.user.nowTimestamp
         row.update()
@@ -301,7 +303,7 @@ class PasskeySupport {
         String credentialIdHash = TwoFactorSupport.sha256Bytes(credentialIdBytes)
         if (liveOwnerOf(ec, credentialIdHash) != null) {
             logger.info("Passkey registration refused for userId {}: credential already registered", userId)
-            return [ok: false, error: "That passkey is already registered."]
+            return [ok: false, error: ALREADY_REGISTERED]
         }
 
         Timestamp now = ec.user.nowTimestamp

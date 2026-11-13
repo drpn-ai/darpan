@@ -493,8 +493,8 @@ class TwoFactorSignInSmokeTests {
         Map first = rpc("verify#SignInCode", [challengeToken: token, code: "000000"])
         assertNull(first.error, "${first}")
         assertEquals(7, first.id)
-        assertEquals([ok: false, errors: [REFUSAL], messages: [], authenticated: false, challengeEnded: false],
-                (first.result as Map).subMap(["ok", "errors", "messages", "authenticated", "challengeEnded"]))
+        assertEquals([ok: false, errors: [REFUSAL], messages: [], authenticated: false, challengeEnded: false, reason: "CODE"],
+                (first.result as Map).subMap(["ok", "errors", "messages", "authenticated", "challengeEnded", "reason"]))
         assertNull(first.result.authToken)
         3.times { assertFalse(rpc("verify#SignInCode", [challengeToken: token, code: "000000"]).result.challengeEnded as boolean) }
         Map fifth = rpc("verify#SignInCode", [challengeToken: token, code: "000000"])
@@ -511,14 +511,14 @@ class TwoFactorSignInSmokeTests {
         String setupToken = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD]).out.challengeToken
         Map spent = rpc("begin#TwoFactorSetup", [challengeToken: "not-a-token"])
         assertNull(spent.error, "${spent}")
-        assertEquals([false, ["This sign-in has expired. Enter your password again."], true],
-                [spent.result.ok, spent.result.errors, spent.result.challengeEnded])
+        assertEquals([false, ["This sign-in has expired. Enter your password again."], true, "CHALLENGE_ENDED"],
+                [spent.result.ok, spent.result.errors, spent.result.challengeEnded, spent.result.reason])
         Map begun = rpc("begin#TwoFactorSetup", [challengeToken: setupToken])
         assertEquals([true, false], [begun.result.ok, begun.result.challengeEnded])
         Map wrongSetup = rpc("confirm#TwoFactorSetup", [challengeToken: setupToken, code: "000000"])
         assertNull(wrongSetup.error, "${wrongSetup}")
-        assertEquals([false, [REFUSAL], false, false], [wrongSetup.result.ok, wrongSetup.result.errors,
-                wrongSetup.result.challengeEnded, wrongSetup.result.authenticated])
+        assertEquals([false, [REFUSAL], false, false, "CODE"], [wrongSetup.result.ok, wrongSetup.result.errors,
+                wrongSetup.result.challengeEnded, wrongSetup.result.authenticated, wrongSetup.result.reason])
         assertNull(wrongSetup.result.recoveryCodes)
         assertEquals(false, TwoFactorSupport.status(ec, OTHER_ID).enabled, "a refused confirm leaves two-factor off")
         assertEquals(0, keyCount(OTHER_ID))
@@ -616,6 +616,7 @@ class TwoFactorSignInSmokeTests {
 
         Map confirmed = anon("confirm#TwoFactorSetup", [challengeToken: token, code: code(begun.out.secret as String)])
         assertEquals(["This sign-in has expired. Enter your password again."], confirmed.errors)
+        assertEquals("CHALLENGE_ENDED", confirmed.out.reason)
         assertTrue(confirmed.out.challengeEnded as boolean)
         assertNull(confirmed.out.authToken)
         assertNull(confirmed.out.recoveryCodes)
@@ -712,6 +713,7 @@ class TwoFactorSignInSmokeTests {
         fresh()
         Map setup = signedIn(USERNAME, "begin#TwoFactorSetup", [currentPassword: "wrong-password"])
         assertEquals(["Current password is incorrect."], setup.errors)
+        assertEquals("PASSWORD", setup.out.reason)
         assertEquals(1, failures(), "begin#TwoFactorSetup, not twice")
 
         fresh()

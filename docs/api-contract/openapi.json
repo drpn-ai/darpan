@@ -165,6 +165,9 @@
                                         "$ref": "#/components/schemas/ImportConfigBundleRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/AddDarpanAdminRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CreateUserAccountRequest"
                                     },
                                     {
@@ -178,6 +181,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetUserListRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RemoveDarpanAdminRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/ResetPasswordRequest"
@@ -803,11 +809,13 @@
                                         "admin.TransferAdminServices.export#ConfigBundle": "#/components/schemas/ExportConfigBundleRequest",
                                         "admin.TransferAdminServices.get#TransferCatalog": "#/components/schemas/GetTransferCatalogRequest",
                                         "admin.TransferAdminServices.import#ConfigBundle": "#/components/schemas/ImportConfigBundleRequest",
+                                        "admin.UserAdminServices.add#DarpanAdmin": "#/components/schemas/AddDarpanAdminRequest",
                                         "admin.UserAdminServices.create#UserAccount": "#/components/schemas/CreateUserAccountRequest",
                                         "admin.UserAdminServices.disable#UserAccount": "#/components/schemas/DisableUserAccountRequest",
                                         "admin.UserAdminServices.enable#UserAccount": "#/components/schemas/EnableUserAccountRequest",
                                         "admin.UserAdminServices.get#UserDetail": "#/components/schemas/GetUserDetailRequest",
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
+                                        "admin.UserAdminServices.remove#DarpanAdmin": "#/components/schemas/RemoveDarpanAdminRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
                                         "facade.AgentChangeFacadeServices.apply#AuditChange": "#/components/schemas/ApplyAuditChangeRequest",
@@ -1157,6 +1165,9 @@
                                             "$ref": "#/components/schemas/ImportConfigBundleResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/AddDarpanAdminResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/CreateUserAccountResponse"
                                         },
                                         {
@@ -1170,6 +1181,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetUserListResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RemoveDarpanAdminResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ResetPasswordResponse"
@@ -6439,6 +6453,96 @@
                     "result"
                 ]
             },
+            "AddDarpanAdminParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User to promote."
+                    },
+                    "darpanRoleId": {
+                        "type": "string",
+                        "description": "DARPAN_ADMIN (default) or DARPAN_SUPER_ADMIN."
+                    }
+                },
+                "required": [
+                    "userId"
+                ],
+                "description": "DAR-ADMIN-011. Make a user a Darpan admin (DARPAN_ADMIN: app settings, the CLI with no grant) or a super\n            admin (DARPAN_SUPER_ADMIN: every tenant, the admin app, AI with no grant, every audit email). Idempotent: a role\n            already in force is left as it is (changed=false, no audit row). Moqui's ADMIN group is never set here."
+            },
+            "AddDarpanAdminResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the user holds the role afterwards."
+                    },
+                    "changed": {
+                        "type": "boolean",
+                        "description": "True when this call started the role; false when it was already in force."
+                    }
+                }
+            },
+            "AddDarpanAdminRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.add#DarpanAdmin",
+                "x-darpan-method": "admin.UserAdminServices.add#DarpanAdmin",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.add#DarpanAdmin"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/AddDarpanAdminParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "AddDarpanAdminResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.add#DarpanAdmin. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/AddDarpanAdminResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "CreateUserAccountParams": {
                 "type": "object",
                 "properties": {
@@ -6713,7 +6817,7 @@
                 "required": [
                     "userId"
                 ],
-                "description": "One user with account state and active tenant memberships, for the admin user detail board."
+                "description": "One user with account state, Darpan-wide roles and active tenant memberships, for the admin user detail board."
             },
             "GetUserDetailResult": {
                 "type": "object",
@@ -6738,6 +6842,13 @@
                             },
                             "requirePasswordChange": {
                                 "type": "boolean"
+                            },
+                            "darpanRoles": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order).\n                    A Darpan admin usually has no tenant memberships: they reach tenants through these groups."
                             },
                             "memberships": {
                                 "type": "array",
@@ -6848,6 +6959,10 @@
                     "pageSize": {
                         "type": "integer",
                         "description": "Rows per page; defaults to 25."
+                    },
+                    "darpanAdminsOnly": {
+                        "type": "boolean",
+                        "description": "Only users with a Darpan-wide role in force (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN)."
                     }
                 },
                 "description": "Paged user search over username, email, and display name for the admin Users board."
@@ -6877,6 +6992,13 @@
                                         },
                                         "disabled": {
                                             "type": "boolean"
+                                        },
+                                        "darpanRoles": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            },
+                                            "description": "Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order)."
                                         }
                                     }
                                 }
@@ -6943,6 +7065,96 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetUserListResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RemoveDarpanAdminParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User to demote."
+                    },
+                    "darpanRoleId": {
+                        "type": "string",
+                        "description": "DARPAN_ADMIN or DARPAN_SUPER_ADMIN; both when omitted."
+                    }
+                },
+                "required": [
+                    "userId"
+                ],
+                "description": "DAR-ADMIN-011. End a user's Darpan admin role: thruDate the membership (no row deletes, history kept).\n            Omit darpanRoleId to end both DARPAN_ADMIN and DARPAN_SUPER_ADMIN. Ending your own super admin is refused.\n            That also guarantees a super admin is always left: the caller must be one to call this at all.\n            Idempotent: no role in force is changed=false. Moqui's ADMIN group is never ended here.\n            Live CLI keys need no revoke: CliAuthSupport re-checks the role on every call."
+            },
+            "RemoveDarpanAdminResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the user no longer holds the role(s)."
+                    },
+                    "changed": {
+                        "type": "boolean",
+                        "description": "True when this call ended a role; false when none was in force."
+                    }
+                }
+            },
+            "RemoveDarpanAdminRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.remove#DarpanAdmin",
+                "x-darpan-method": "admin.UserAdminServices.remove#DarpanAdmin",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.remove#DarpanAdmin"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RemoveDarpanAdminParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RemoveDarpanAdminResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.remove#DarpanAdmin. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RemoveDarpanAdminResult"
                     }
                 },
                 "required": [
@@ -31946,11 +32158,13 @@
         "admin.TransferAdminServices.export#ConfigBundle": "ExportConfigBundle",
         "admin.TransferAdminServices.get#TransferCatalog": "GetTransferCatalog",
         "admin.TransferAdminServices.import#ConfigBundle": "ImportConfigBundle",
+        "admin.UserAdminServices.add#DarpanAdmin": "AddDarpanAdmin",
         "admin.UserAdminServices.create#UserAccount": "CreateUserAccount",
         "admin.UserAdminServices.disable#UserAccount": "DisableUserAccount",
         "admin.UserAdminServices.enable#UserAccount": "EnableUserAccount",
         "admin.UserAdminServices.get#UserDetail": "GetUserDetail",
         "admin.UserAdminServices.get#UserList": "GetUserList",
+        "admin.UserAdminServices.remove#DarpanAdmin": "RemoveDarpanAdmin",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
         "facade.AgentChangeFacadeServices.apply#AuditChange": "ApplyAuditChange",

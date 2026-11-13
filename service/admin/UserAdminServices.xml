@@ -155,31 +155,37 @@
             <parameter name="searchText"><description>Case-insensitive substring filter; all users when omitted.</description></parameter>
             <parameter name="pageIndex" type="Integer"><description>Zero-based page; defaults to 0.</description></parameter>
             <parameter name="pageSize" type="Integer"><description>Rows per page; defaults to 25.</description></parameter>
+            <parameter name="darpanAdminsOnly" type="Boolean"><description>Only users with a Darpan-wide role in force (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN).</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="users" type="List"><description>Users on the requested page, sorted by username.</description>
                 <parameter name="user" type="Map">
                     <parameter name="userId"/><parameter name="username"/><parameter name="userFullName"/>
                     <parameter name="emailAddress"/><parameter name="disabled" type="Boolean"/>
+                    <parameter name="darpanRoles" type="List"><description>Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order).</description>
+                        <parameter name="darpanRole"/></parameter>
                 </parameter>
             </parameter>
             <parameter name="totalCount" type="Integer"><description>Total matches across all pages.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="result" from="darpan.admin.AdminUserSupport.listUsers(ec, searchText, pageIndex, pageSize)"/>
+            <set field="result" from="darpan.admin.AdminUserSupport.listUsers(ec, searchText, pageIndex, pageSize, darpanAdminsOnly)"/>
             <set field="users" from="result?.users ?: []"/>
             <set field="totalCount" from="result?.totalCount ?: 0"/>
         </actions>
     </service>
 
     <service verb="get" noun="UserDetail" allow-remote="true" authz-action="view">
-        <description>One user with account state and active tenant memberships, for the admin user detail board.</description>
+        <description>One user with account state, Darpan-wide roles and active tenant memberships, for the admin user detail board.</description>
         <in-parameters><parameter name="userId" required="true"><description>User to read.</description></parameter></in-parameters>
         <out-parameters>
             <parameter name="userDetail" type="Map"><description>User detail or null when not found.</description>
                 <parameter name="userId"/><parameter name="username"/><parameter name="userFullName"/>
                 <parameter name="emailAddress"/><parameter name="disabled" type="Boolean"/>
                 <parameter name="requirePasswordChange" type="Boolean"/>
+                <parameter name="darpanRoles" type="List"><description>Darpan-wide roles in force: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (in that order).
+                    A Darpan admin usually has no tenant memberships: they reach tenants through these groups.</description>
+                    <parameter name="darpanRole"/></parameter>
                 <parameter name="memberships" type="List"><parameter name="membership" type="Map">
                     <parameter name="tenantUserGroupId"/><parameter name="permissionUserGroupId"/>
                     <parameter name="fromDate" type="Timestamp"/>
@@ -203,10 +209,97 @@
                             permissionUserGroupId: permissionRow.permissionUserGroupId, fromDate: permissionRow.fromDate])"/>
                 </if>
             </iterate>
+            <entity-find entity-name="moqui.security.UserGroupMember" list="roleRowList">
+                <date-filter/>
+                <econdition field-name="userId"/>
+                <econdition field-name="userGroupId" operator="in" from="darpan.admin.AdminUserSupport.DARPAN_ROLE_GROUP_IDS"/>
+            </entity-find>
+            <set field="darpanRoleList" from="darpan.admin.AdminUserSupport.DARPAN_ROLE_GROUP_IDS.findAll { it in roleRowList*.userGroupId }"/>
             <set field="userDetail" from="[userId: targetAccount.userId, username: targetAccount.username,
                     userFullName: targetAccount.userFullName, emailAddress: targetAccount.emailAddress,
                     disabled: targetAccount.disabled == 'Y',
-                    requirePasswordChange: targetAccount.requirePasswordChange == 'Y', memberships: membershipList]"/>
+                    requirePasswordChange: targetAccount.requirePasswordChange == 'Y', darpanRoles: darpanRoleList,
+                    memberships: membershipList]"/>
+        </actions>
+    </service>
+
+    <service verb="add" noun="DarpanAdmin" allow-remote="true">
+        <description>DAR-ADMIN-011. Make a user a Darpan admin (DARPAN_ADMIN: app settings, the CLI with no grant) or a super
+            admin (DARPAN_SUPER_ADMIN: every tenant, the admin app, AI with no grant, every audit email). Idempotent: a role
+            already in force is left as it is (changed=false, no audit row). Moqui's ADMIN group is never set here.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>User to promote.</description></parameter>
+            <parameter name="darpanRoleId" default-value="DARPAN_ADMIN"><description>DARPAN_ADMIN (default) or DARPAN_SUPER_ADMIN.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the user holds the role afterwards.</description></parameter>
+            <parameter name="changed" type="Boolean"><description>True when this call started the role; false when it was already in force.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <set field="changed" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!(darpanRoleId in darpan.admin.AdminUserSupport.SETTABLE_DARPAN_ROLES)">
+                <return error="true" message="${darpanRoleId ?: '(missing)'} is not a Darpan admin role (DARPAN_ADMIN or DARPAN_SUPER_ADMIN)."/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <entity-find entity-name="moqui.security.UserGroupMember" list="activeRoleRows">
+                <date-filter/>
+                <econdition field-name="userGroupId" from="darpanRoleId"/><econdition field-name="userId"/>
+            </entity-find>
+            <set field="ok" from="true"/>
+            <if condition="activeRoleRows"><return/></if>
+            <service-call name="create#moqui.security.UserGroupMember"
+                    in-map="[userGroupId: darpanRoleId, userId: userId, fromDate: ec.user.nowTimestamp]"/>
+            <set field="changed" from="true"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.UserAdminServices.add#DarpanAdmin', targetType: 'User', targetId: userId,
+                    detailText: 'Added ' + userId + ' to ' + darpanRoleId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
+    </service>
+
+    <service verb="remove" noun="DarpanAdmin" allow-remote="true">
+        <description>DAR-ADMIN-011. End a user's Darpan admin role: thruDate the membership (no row deletes, history kept).
+            Omit darpanRoleId to end both DARPAN_ADMIN and DARPAN_SUPER_ADMIN. Ending your own super admin is refused.
+            That also guarantees a super admin is always left: the caller must be one to call this at all.
+            Idempotent: no role in force is changed=false. Moqui's ADMIN group is never ended here.
+            Live CLI keys need no revoke: CliAuthSupport re-checks the role on every call.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>User to demote.</description></parameter>
+            <parameter name="darpanRoleId"><description>DARPAN_ADMIN or DARPAN_SUPER_ADMIN; both when omitted.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the user no longer holds the role(s).</description></parameter>
+            <parameter name="changed" type="Boolean"><description>True when this call ended a role; false when none was in force.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <set field="changed" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="darpanRoleId &amp;&amp; !(darpanRoleId in darpan.admin.AdminUserSupport.SETTABLE_DARPAN_ROLES)">
+                <return error="true" message="${darpanRoleId} is not a Darpan admin role (DARPAN_ADMIN or DARPAN_SUPER_ADMIN)."/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <set field="roleIds" from="darpanRoleId ? [darpanRoleId] : darpan.admin.AdminUserSupport.SETTABLE_DARPAN_ROLES"/>
+            <entity-find entity-name="moqui.security.UserGroupMember" list="activeRoleRows">
+                <date-filter/>
+                <econdition field-name="userGroupId" operator="in" from="roleIds"/><econdition field-name="userId"/>
+            </entity-find>
+            <if condition="userId == ec.user.userId &amp;&amp; activeRoleRows.any { it.userGroupId == darpan.facade.common.TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID }">
+                <return error="true" message="You cannot remove your own super admin."/></if>
+            <set field="ok" from="true"/>
+            <if condition="!activeRoleRows"><return/></if>
+            <set field="thruDate" from="ec.user.nowTimestamp"/>
+            <iterate list="activeRoleRows" entry="roleRow">
+                <service-call name="update#moqui.security.UserGroupMember" in-map="[userGroupId: roleRow.userGroupId,
+                        userId: userId, fromDate: roleRow.fromDate, thruDate: thruDate]"/>
+            </iterate>
+            <set field="changed" from="true"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.UserAdminServices.remove#DarpanAdmin', targetType: 'User', targetId: userId,
+                    detailText: 'Removed ' + userId + ' from ' + activeRoleRows*.userGroupId.unique().join(', ') + '.', auditTimestamp: ec.user.nowTimestamp]"/>
         </actions>
     </service>
 </services>

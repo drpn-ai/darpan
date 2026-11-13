@@ -71,6 +71,8 @@ class AdminServicesSmokeTests {
             "admin.MembershipAdminServices.add#TenantMember",
             "admin.MembershipAdminServices.update#TenantMemberRole",
             "admin.MembershipAdminServices.remove#TenantMember",
+            "admin.UserAdminServices.add#DarpanAdmin",
+            "admin.UserAdminServices.remove#DarpanAdmin",
     ]
 
     private int uniqueCounter = 0
@@ -726,6 +728,9 @@ class AdminServicesSmokeTests {
                 "admin.MembershipAdminServices.add#TenantMember"   : [userId: PLAIN_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_ADMIN"],
                 "admin.MembershipAdminServices.update#TenantMemberRole": [userId: TARGET_ID, tenantUserGroupId: ALPHA, permissionUserGroupId: "DARPAN_TENANT_ADMIN"],
                 "admin.MembershipAdminServices.remove#TenantMember": [userId: TARGET_ID, tenantUserGroupId: ALPHA],
+                // A tenant admin promoting themselves, and demoting the only super admin.
+                "admin.UserAdminServices.add#DarpanAdmin"          : [userId: PLAIN_ID, darpanRoleId: "DARPAN_SUPER_ADMIN"],
+                "admin.UserAdminServices.remove#DarpanAdmin"       : [userId: SUPER_ID],
         ]
         assertEquals(MUTATIONS.toSet(), params.keySet())
         String passwordBefore = find("moqui.security.UserAccount", [userId: TARGET_ID]).currentPassword
@@ -751,7 +756,119 @@ class AdminServicesSmokeTests {
         assertEquals([], activeGroupRows(PLAIN_ID, DELTA))
         assertEquals(["DARPAN_TENANT_USER"], activePermissionRows(TARGET_ID, ALPHA)*.permissionUserGroupId)
         assertEquals(1, activeGroupRows(TARGET_ID, ALPHA).size())
+        assertEquals([], activeGroupRows(PLAIN_ID, "DARPAN_SUPER_ADMIN"))
+        assertEquals(1, activeGroupRows(SUPER_ID, "DARPAN_SUPER_ADMIN").size())
         assertNoAudit()
+    }
+
+    // ---------------------------------------------------------------- Darpan admins (DAR-ADMIN-011)
+
+    @Test
+    void userDetailAndListShowDarpanRolesInForceOnly() {
+        groupMember("DARPAN_ADMIN", TARGET_ID, T0, T1)      // ended: not a role any more
+        groupMember("ADMIN", DORMANT_ID, T0, null)          // Moqui built-in: shown, read-only
+        groupMember("DARPAN_ADMIN", DORMANT_ID, T0, null)
+
+        Map superDetail = callAs(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail", [userId: SUPER_ID])
+        assertNoErrors(superDetail)
+        assertEquals(["DARPAN_SUPER_ADMIN"], superDetail.result.userDetail.darpanRoles)
+        assertEquals([], superDetail.result.userDetail.memberships,
+                "the super admin has no tenant rows (ALPHA expired): the roles are what shows their access")
+        assertEquals([], callAs(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail", [userId: TARGET_ID])
+                .result.userDetail.darpanRoles, "an ended DARPAN_ADMIN row is not a role")
+        assertEquals(["ADMIN", "DARPAN_ADMIN"], callAs(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail",
+                [userId: DORMANT_ID]).result.userDetail.darpanRoles, "fixed order: ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN")
+
+        Map all = callAs(SUPER_USERNAME, "admin.UserAdminServices.get#UserList", [searchText: "admsvc."])
+        assertEquals([["ADMIN", "DARPAN_ADMIN"], [], ["DARPAN_SUPER_ADMIN"], []],
+                (all.result.users as List<Map>)*.darpanRoles, "dormant, plain, super, target")
+
+        Map admins = callAs(SUPER_USERNAME, "admin.UserAdminServices.get#UserList", [searchText: "admsvc.", darpanAdminsOnly: true])
+        assertNoErrors(admins)
+        assertEquals(["admsvc.dormant", SUPER_USERNAME], (admins.result.users as List<Map>)*.username)
+        assertEquals(2, admins.result.totalCount, "the count is of the filtered set")
+    }
+
+    @Test
+    void addDarpanAdminStartsTheRoleOnceAndAuditsIt() {
+        Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.add#DarpanAdmin", [userId: TARGET_ID])
+        assertNoErrors(out)
+        assertEquals([ok: true, changed: true], out.result.subMap(["ok", "changed"]))
+        assertEquals(1, activeGroupRows(TARGET_ID, "DARPAN_ADMIN").size(), "DARPAN_ADMIN is the default role")
+        assertAudit("admin.UserAdminServices.add#DarpanAdmin", "User", TARGET_ID, "Added ${TARGET_ID} to DARPAN_ADMIN.")
+
+        Map again = callAs(SUPER_USERNAME, "admin.UserAdminServices.add#DarpanAdmin", [userId: TARGET_ID])
+        assertNoErrors(again)
+        assertEquals([ok: true, changed: false], again.result.subMap(["ok", "changed"]))
+        assertEquals(1, activeGroupRows(TARGET_ID, "DARPAN_ADMIN").size(), "no second row")
+        assertEquals(1L, ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).count(), "no second audit row")
+
+        Map superOut = callAs(SUPER_USERNAME, "admin.UserAdminServices.add#DarpanAdmin", [userId: TARGET_ID, darpanRoleId: "DARPAN_SUPER_ADMIN"])
+        assertEquals(true, superOut.result.changed)
+        assertEquals(["DARPAN_SUPER_ADMIN", "DARPAN_ADMIN"], callAs(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail",
+                [userId: TARGET_ID]).result.userDetail.darpanRoles)
+    }
+
+    @Test
+    void addDarpanAdminRefusesMoquiAdminATenantRoleAndAnUnknownUser() {
+        ["ADMIN", "DARPAN_TENANT_ADMIN"].each { String roleId ->
+            Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.add#DarpanAdmin", [userId: TARGET_ID, darpanRoleId: roleId])
+            assertEquals(["${roleId} is not a Darpan admin role (DARPAN_ADMIN or DARPAN_SUPER_ADMIN).".toString()], out.errors)
+            assertEquals(false, out.result.ok)
+        }
+        Map unknown = callAs(SUPER_USERNAME, "admin.UserAdminServices.add#DarpanAdmin", [userId: "NOPE"])
+        assertEquals(["User NOPE was not found."], unknown.errors)
+        assertEquals([], activeGroupRows(TARGET_ID, "ADMIN"))
+        assertEquals(0L, ec.entity.find("moqui.security.UserGroupMember").condition("userId", "NOPE").disableAuthz().useCache(false).count())
+        assertNoAudit()
+    }
+
+    @Test
+    void removeDarpanAdminEndsTheRoleKeepsHistoryAndIsIdempotent() {
+        groupMember("DARPAN_ADMIN", TARGET_ID, T0, null)
+        groupMember("DARPAN_SUPER_ADMIN", TARGET_ID, T0, null)
+
+        Map one = callAs(SUPER_USERNAME, "admin.UserAdminServices.remove#DarpanAdmin", [userId: TARGET_ID, darpanRoleId: "DARPAN_ADMIN"])
+        assertNoErrors(one)
+        assertEquals([ok: true, changed: true], one.result.subMap(["ok", "changed"]))
+        assertEquals([], activeGroupRows(TARGET_ID, "DARPAN_ADMIN"))
+        assertNotNull(find("moqui.security.UserGroupMember", [userGroupId: "DARPAN_ADMIN", userId: TARGET_ID, fromDate: T0]).thruDate,
+                "the row is ended, not deleted")
+        assertEquals(1, activeGroupRows(TARGET_ID, "DARPAN_SUPER_ADMIN").size(), "only the named role ends")
+        assertAudit("admin.UserAdminServices.remove#DarpanAdmin", "User", TARGET_ID, "Removed ${TARGET_ID} from DARPAN_ADMIN.")
+
+        Map both = callAs(SUPER_USERNAME, "admin.UserAdminServices.remove#DarpanAdmin", [userId: TARGET_ID])
+        assertEquals(true, both.result.changed, "no role named: every settable role still in force ends")
+        assertEquals([], activeGroupRows(TARGET_ID, "DARPAN_SUPER_ADMIN"))
+
+        Map again = callAs(SUPER_USERNAME, "admin.UserAdminServices.remove#DarpanAdmin", [userId: TARGET_ID])
+        assertNoErrors(again)
+        assertEquals([ok: true, changed: false], again.result.subMap(["ok", "changed"]))
+    }
+
+    @Test
+    void removeDarpanAdminRefusesYourOwnSuperAdminSoOneIsAlwaysLeft() {
+        groupMember("DARPAN_ADMIN", SUPER_ID, T0, null)
+        groupMember("ADMIN", TARGET_ID, T0, null)
+
+        // SUPER is the only DARPAN_SUPER_ADMIN: refusing self-removal is what keeps one.
+        ["DARPAN_SUPER_ADMIN", null].each { String roleId ->
+            Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.remove#DarpanAdmin",
+                    roleId ? [userId: SUPER_ID, darpanRoleId: roleId] : [userId: SUPER_ID])
+            assertEquals(["You cannot remove your own super admin."], out.errors)
+            assertEquals(false, out.result.ok)
+        }
+        assertEquals(1, activeGroupRows(SUPER_ID, "DARPAN_SUPER_ADMIN").size())
+        assertEquals(1, activeGroupRows(SUPER_ID, "DARPAN_ADMIN").size(), "a refused call ends nothing, not even the other role")
+        assertNoAudit()
+
+        Map ownDarpanAdmin = callAs(SUPER_USERNAME, "admin.UserAdminServices.remove#DarpanAdmin", [userId: SUPER_ID, darpanRoleId: "DARPAN_ADMIN"])
+        assertNoErrors(ownDarpanAdmin)
+        assertEquals(true, ownDarpanAdmin.result.changed, "your own DARPAN_ADMIN may go: you stay a super admin")
+
+        Map moquiAdmin = callAs(SUPER_USERNAME, "admin.UserAdminServices.remove#DarpanAdmin", [userId: TARGET_ID, darpanRoleId: "ADMIN"])
+        assertEquals(["ADMIN is not a Darpan admin role (DARPAN_ADMIN or DARPAN_SUPER_ADMIN)."], moquiAdmin.errors)
+        assertEquals(1, activeGroupRows(TARGET_ID, "ADMIN").size(), "Moqui ADMIN is never ended here")
     }
 
     // ---------------------------------------------------------------- harness

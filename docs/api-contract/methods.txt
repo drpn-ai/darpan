@@ -45,11 +45,13 @@ admin.TransferAdminServices.begin#SecretHandoff
 admin.TransferAdminServices.export#ConfigBundle
 admin.TransferAdminServices.get#TransferCatalog
 admin.TransferAdminServices.import#ConfigBundle
+admin.UserAdminServices.add#DarpanAdmin
 admin.UserAdminServices.create#UserAccount
 admin.UserAdminServices.disable#UserAccount
 admin.UserAdminServices.enable#UserAccount
 admin.UserAdminServices.get#UserDetail
 admin.UserAdminServices.get#UserList
+admin.UserAdminServices.remove#DarpanAdmin
 admin.UserAdminServices.reset#Password
 admin.UserAdminServices.update#UserAccount
 facade.AgentChangeFacadeServices.apply#AuditChange

@@ -24,62 +24,94 @@ deploy, which uses the Dockerfile and entrypoint from the private `drpn-ai/darpa
 The Darpan deploy entrypoints (`entrypoint.sh` and `prod/entrypoint.sh` in `darpan-docker-config`)
 fail fast with `:?` on `entity_ds_crypt_pass` — there is no insecure default in the Darpan deploy path.
 
-## Rotation Steps
+## Rotation steps on Darpan's AWS (prod)
 
-### 1. Prepare
+The window is opened and closed with `darpan-docker-config/aws/deploy.sh` (see `/darpan-aws-deploy`); the
+sweep runs from the admin app or the darpan-admin CLI as `admin.SecurityAdminServices.rotate#EncryptedFields`
+(below). The full standard, with the snapshot and evidence steps, is the wrapper's
+`docs/security/encryption-key-management.md` section 5. Run the whole procedure on UAT first.
 
-Verify the current key is set and all pods are healthy:
+Use one shell for steps 2 and 3 and never echo a key: each value goes from Secrets Manager straight back into
+Secrets Manager.
 
-```
-entity_ds_crypt_pass=<current-key>    # already required; pods running normally
-entity_ds_crypt_pass_old=<unset>      # defaulting to current key — no rotation in progress
-```
+1. **Prepare.** Quiet window: scheduler off (`deploy.sh prod --set SchedulerEnabled=false`), and a manual RDS
+   snapshot (it holds old-key ciphertext and is the rollback point).
+2. **Keep the outgoing key.** Create a secret named `CryptPassOldSecret` holding the current value of
+   `CryptPassSecret`. The name matters: the task execution role reads `CryptPassOldSecret-*` and the
+   `CryptPassOldSecretArn` parameter accepts only that name.
+   ```
+   aws secretsmanager create-secret --name CryptPassOldSecret --profile darpan-prod --region us-east-2 \
+     --secret-string "$(aws secretsmanager get-secret-value --secret-id <CryptPassSecret arn> \
+        --query SecretString --output text --profile darpan-prod --region us-east-2)" \
+     --query ARN --output text
+   ```
+3. **Store the new key** as a new version of `CryptPassSecret` (never replace or regenerate the resource; the
+   previous version stays labelled `AWSPREVIOUS`). No punctuation: the entrypoint writes conf values with `sed`.
+   ```
+   aws secretsmanager put-secret-value --secret-id <CryptPassSecret arn> --profile darpan-prod --region us-east-2 \
+     --secret-string "$(aws secretsmanager get-random-password --password-length 48 --exclude-punctuation \
+        --query RandomPassword --output text --profile darpan-prod --region us-east-2)"
+   ```
+4. **Roll the task with both keys:** `aws/deploy.sh prod --ref <current ref> --tag <running image tag> --set
+   CryptPassOldSecretArn=<arn from step 2>` (plan), then the same with `--yes`. The new task encrypts with the
+   new key and reads old-key values through the `decrypt-alt` entries. Check one connection per tenant.
+5. **Dry run:** `rotate#EncryptedFields` with `dryRun` left at true. Expect `oldKeyConfigured: true`,
+   `rotationPending: true`, `oldKeyOnlyCount` = the stored values, `undecryptableCount: 0`. A non-zero
+   `undecryptableCount` means values neither key reads (stop and find out which entity before going on).
+6. **Rotate:** the same command with `dryRun: false` (a new code: a code works once). Save `totalRows` and
+   `reencryptedByEntity`. The reply's counts are re-read after the sweep: expect `oldKeyOnlyCount: 0` and
+   `rotationPending: false`. Check one connection per tenant again; search the logs for `decrypt`, `crypt`, `PBE`.
+7. **Close the window:** `aws/deploy.sh prod ... --set CryptPassOldSecretArn=` (empty) and roll the task. The
+   entrypoint then defaults `entity_ds_crypt_pass_old` to the current key and the `decrypt-alt` entries are a no-op.
+   A dry run now shows `oldKeyConfigured: false` and every value on the current key.
+8. **Retire the old key.** Delete `CryptPassOldSecret` only once every backup and snapshot taken before step 6
+   has expired (they hold old-key ciphertext); until then it stays in Secrets Manager, unwired. Scheduler back on.
 
-### 2. Start the rotation window
+If something fails before step 6: put the old value back as the current version of `CryptPassSecret`, clear
+`CryptPassOldSecretArn`, roll the task; nothing was re-encrypted. After step 6: keep both keys wired and re-run.
 
-Set the old key to the current key and the new key in your secrets manager / deployment config:
+## The rotation command
 
-```
-entity_ds_crypt_pass=<new-key>
-entity_ds_crypt_pass_old=<current-key>   # the key being retired
-```
+`admin.SecurityAdminServices.rotate#EncryptedFields` (DAR-OPS-019), over `/rpc/json` from the admin app or the
+darpan-admin CLI. Super admins only; never on the tenant CLI list. Since DAR-BE-264 closed the Moqui tools
+app's sign-in, this is the only way to run the sweep on a deployed instance.
 
-Both env vars must be available to the container at start time. The entrypoint exports
-`entity_ds_crypt_pass_old` as a shell default — if it is already in the environment it is used
-as-is; if not, it falls back to `entity_ds_crypt_pass` (safe no-op, but in the rotation case you
-must set it explicitly).
+- In: `adminCode` (required: a current code from the acting admin's own authenticator; an admin without
+  two-factor is refused), `dryRun` (Boolean, default true).
+- Out: `ok`, `oldKeyConfigured`, `rotationPending`, `valueCount`, `currentKeyCount`, `oldKeyOnlyCount`,
+  `undecryptableCount`, `entities` (per entity: `entityName`, `fields`, `valueCount`, `currentKey`,
+  `oldKeyOnly`, `undecryptable`); on a real run also `reencryptedByEntity` and `totalRows`.
+- A real run is refused ("Nothing to rotate") unless an old key different from the current one is wired in.
+- Every run writes an `AdminAuditLog` row with counts only; a real run also gets the sweep's own row
+  (`rotate#EncryptedFieldValues`).
 
-### 3. Rolling deploy with both keys
+The sweep underneath, `reconciliation.ReconciliationGenericServices.rotate#EncryptedFieldValues`, stays
+internal-only (`allow-remote="false"`). It derives every `encrypt="true"` field from the live entity
+definitions, reads each raw column, decrypts it with the current key first and then the old key, and writes the
+plaintext back so Moqui encrypts it with the active key. Idempotent, safe to re-run.
 
-Deploy the new image. Each new container boots with the new key as the active encryption key and
-the old key wired into three `<decrypt-alt>` entries:
+Two things it handles that a plain read-and-rewrite would not:
 
-- PBEWithMD5AndDES + current key (backward-compat for pre-AES values)
-- PBEWithMD5AndDES + old key (rotation-window DES values)
-- PBEWithHmacSHA256AndAES_128 + old key (rotation-window AES-128 values)
+- **A wrong key that seems to work.** The values are AES-CBC with PKCS5 padding, so the new key decrypts about
+  one old-key value in 256 without an error, into random bytes; Moqui's read keeps that result and never tries
+  the old key. A result counts only when it is text (no replacement or control characters), so the sweep
+  writes the real plaintext. During the window, before the sweep, such a value reads as garbage in the app
+  (that connection fails until the sweep runs); that includes an admin's own two-factor secret, in which case
+  another super admin runs the command.
+- **A value no key reads** (Moqui reads it as `_DECRYPT_FAILED_`) is left as it is, not overwritten with the
+  placeholder; the dry run counts it as `undecryptable`.
 
-Reads against data written under the old key succeed via decrypt-alt. New writes use the new key.
-Old pods still running during a rolling deploy continue to read and write with the old key — they
-can also decrypt new-key values if they have both `<decrypt-alt>` entries, but the standard Moqui
-framework conf already contains those entries; only this prod-conf override needed to be fixed.
+Covered by `CryptRotationSmokeTests` and `CryptRotationAdminSmokeTests` (a real key switch in the test, a
+padding collision included).
 
-### 4. Re-encrypt existing data
+## Generic steps (any deployment)
 
-Run the one-shot rotation sweep (added 2026-07-02, MACH P2):
-
-```
-reconciliation.ReconciliationGenericServices.rotate#EncryptedFieldValues
-```
-
-It derives every `encrypt="true"` field from the live entity definitions (no hardcoded list to
-drift), loads each row via an unscoped system read, and forces the encrypted columns back through
-an UPDATE — Moqui re-encrypts at write time with the ACTIVE key. Internal-only
-(`allow-remote="false"`), super-admin gated when called by a user, idempotent, safe to re-run.
-Returns per-entity re-encrypted row counts. Covered by `CryptRotationSmokeTests` (at-rest
-ciphertext + decrypted round-trip verified against H2).
-
-If the sweep cannot be run, records also re-encrypt naturally on next write — keep
-`entity_ds_crypt_pass_old` set until all rows have been rewritten.
+1. Start the window: `entity_ds_crypt_pass=<new-key>`, `entity_ds_crypt_pass_old=<current-key>`, both present
+   at container start (the entrypoint defaults the old one to the current key when it is unset).
+2. Restart every container with both keys.
+3. Dry run, then rotate (above).
+4. Remove `entity_ds_crypt_pass_old` and restart.
+5. Confirm no decrypt errors in the logs (`grep -i "decrypt\|crypt\|PBE"`).
 
 ### A note on crypt-salt (determinism)
 
@@ -89,30 +121,8 @@ equal ciphertext at rest. Do NOT change `crypt-salt` on an existing deployment o
 rotation window: the salt participates in key derivation, so changing it breaks decryption of
 existing data exactly like a key change. If a deployment-unique salt is wanted, rotate it with
 the same dual-key procedure (a `<decrypt-alt>` entry carrying the OLD salt + old key), then run
-the sweep above.
-
-### 5. Drop the old key
-
-Once all encrypted-field data has been re-written under the new key:
-
-```
-entity_ds_crypt_pass=<new-key>
-# Remove entity_ds_crypt_pass_old from your secrets manager / deployment config.
-# The entrypoint will default it to entity_ds_crypt_pass — decrypt-alt becomes a no-op again.
-```
-
-Deploy (rolling). The rotation is complete.
-
-### 6. Verify
-
-After step 5, confirm that no decrypt failures appear in the application logs. Search for:
-
-```
-grep -i "decrypt\|crypt\|PBE" <log-file>
-```
-
-Any decryption error against a live record would indicate a record that was not yet re-encrypted
-in step 4. If found, temporarily re-add `entity_ds_crypt_pass_old` and complete the re-encrypt pass.
+the sweep above. (The dry run's key check compares crypt-pass only, so it reports a salt-only change as
+nothing to rotate; extend `CryptRotationSupport.configuredKeys` before doing one.)
 
 ## Where the dual-key wiring lives
 

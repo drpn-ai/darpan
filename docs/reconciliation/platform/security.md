@@ -131,7 +131,9 @@ admins' lost factors through the admin app and record the incident.
 - `darpan.admin.AdminAuditLog` gets one row per platform-admin mutation: every `admin.*` mutation (tenants, users,
   memberships, Darpan admins, knowledge, brain tickets, config transfer, AI access grants, CLI grants and requests,
   migration runs and parking), shared-config grants, super-admin data-source definitions, and a person-run output purge or
-  crypt-key rotation. Reads, previews and dry runs write none. GraphQL API key mint and revoke live in `moqui-gql`
+  crypt-key rotation. Reads, previews and dry runs write none, except the crypt-key rotation's dry run
+  (`admin.SecurityAdminServices.rotate#EncryptedFields`, DAR-OPS-019), which decrypts every stored credential to count
+  them and so is on the trail too (counts only). GraphQL API key mint and revoke live in `moqui-gql`
   (DAR-BE-267).
 - `darpan.admin.DataExportLog` gets one row per file served for download (`get#GeneratedOutput`, and the super-admin
   legacy screen download): user, active tenant, file, format, size, time. Never the contents. Client-side exports the

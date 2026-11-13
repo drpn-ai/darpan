@@ -33,6 +33,8 @@ class ApiContractGenerator {
             // DAR-BE-159/223: the embedded agent's turn and panel reads (send#AgentTurn, get#AgentStatus, get#AgentConversation).
             ["../darpan-agent/service/facade", "facade"],
             ["service/admin", "admin"],
+            // DAR-BE-275: registering Darpan's own Shopify apps (list/save#ShopifyApp), super admin only.
+            ["../shopify-darpan/service/admin", "admin"],
     ]
     static final String SPEC_RELATIVE_PATH = "docs/api-contract/openapi.json"
     static final String METHODS_RELATIVE_PATH = "docs/api-contract/methods.txt"

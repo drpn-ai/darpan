@@ -204,6 +204,9 @@ class CliMethodAllowlist {
             "admin.SecurityAdminServices.update#TwoFactorPolicy",
 
             "admin.TransferAdminServices.begin#SecretHandoff",
+            "admin.ShopifyAppAdminServices.list#ShopifyApps",
+            "admin.ShopifyAppAdminServices.save#ShopifyApp",
+
             "admin.TransferAdminServices.export#ConfigBundle",
             "admin.TransferAdminServices.get#TransferCatalog",
             "admin.TransferAdminServices.import#ConfigBundle",

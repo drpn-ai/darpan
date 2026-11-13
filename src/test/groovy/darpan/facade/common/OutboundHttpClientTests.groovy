@@ -116,6 +116,46 @@ class OutboundHttpClientTests {
     }
 
     @Test
+    @DisplayName("security review: a Set-Cookie from one call is never sent on the next (the client is shared across tenants)")
+    void cookiesAreNeverReplayed() {
+        ServerSocket server = new ServerSocket(0, 5, LOOPBACK)
+        List<String> requests = Collections.synchronizedList([])
+        Thread responder = Thread.start {
+            2.times {
+                Socket s = server.accept()
+                try {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(s.inputStream, "ISO-8859-1"))
+                    StringBuilder head = new StringBuilder()
+                    String line
+                    while ((line = reader.readLine()) != null && !line.isEmpty()) head.append(line).append("\n")
+                    requests << head.toString()
+                    String reply = "HTTP/1.1 200 OK\r\nSet-Cookie: tenantSession=tenant-a-secret; Path=/\r\nContent-Type: application/json\r\n" +
+                            "Content-Length: 2\r\nConnection: close\r\n\r\n{}"
+                    s.outputStream.write(reply.getBytes("ISO-8859-1"))
+                    s.outputStream.flush()
+                } finally {
+                    s.close()
+                }
+            }
+        }
+        HttpClient client = OutboundHttpClient.newClient({ String host, int port, Map ctx, Promise promise ->
+            promise.succeeded([new InetSocketAddress(LOOPBACK, port)])
+        } as SocketAddressResolver)
+        try {
+            String url = "http://shared-host.test:${server.localPort}/graphql".toString()
+            assertEquals(200, OutboundHttpClient.send(client, "GET", url, [:], null, 5).statusCode, "tenant A's call")
+            assertEquals(200, OutboundHttpClient.send(client, "GET", url, [:], null, 5).statusCode, "tenant B's call")
+            responder.join(3000)
+            assertEquals(2, requests.size())
+            assertFalse(requests[1].toLowerCase().contains("cookie:"), "the second call carried a cookie:\n${requests[1]}")
+            assertTrue(client.httpCookieStore instanceof org.eclipse.jetty.http.HttpCookieStore.Empty)
+        } finally {
+            client.stop()
+            server.close()
+        }
+    }
+
+    @Test
     @DisplayName("TLS is unchanged by the pin: certificates are verified against the URL's host name")
     void tlsHostnameVerificationStaysOn() {
         HttpClient client = OutboundHttpClient.shared()

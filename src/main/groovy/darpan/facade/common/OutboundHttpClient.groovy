@@ -5,6 +5,7 @@ import org.eclipse.jetty.client.ContentResponse
 import org.eclipse.jetty.client.HttpClient
 import org.eclipse.jetty.client.Request
 import org.eclipse.jetty.client.StringRequestContent
+import org.eclipse.jetty.http.HttpCookieStore
 import org.eclipse.jetty.http.HttpField
 import org.eclipse.jetty.util.Promise
 import org.eclipse.jetty.util.SocketAddressResolver
@@ -26,7 +27,8 @@ import java.util.function.Function
  * TLS is unchanged by the pin: Jetty still sends the URL's host name as SNI and verifies the certificate against it
  * (SslContextFactory.Client, endpoint identification HTTPS, the JVM trust store). Redirects are not followed.
  *
- * One shared client (thread-safe, daemon threads, started on first use) serves every transport.
+ * One shared client (thread-safe, daemon threads, started on first use) serves every transport, so it keeps NO cookies:
+ * Jetty's default in-memory cookie store would replay one tenant's Set-Cookie on another tenant's call to the same host.
  */
 class OutboundHttpClient {
     static final long CONNECT_TIMEOUT_MILLIS = 30_000L
@@ -56,6 +58,8 @@ class OutboundHttpClient {
         client.setSocketAddressResolver(resolver)
         client.setConnectTimeout(CONNECT_TIMEOUT_MILLIS)
         client.setFollowRedirects(false)
+        // Shared across tenants: never store or replay cookies (Jetty keeps them by default; java.net.http did not).
+        client.setHttpCookieStore(new HttpCookieStore.Empty())
         client.start()
         return client
     }

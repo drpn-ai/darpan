@@ -280,7 +280,8 @@ class AgentAccess {
     /** The user is in a super-admin group (ADMIN, DARPAN_SUPER_ADMIN) now; named by userId, never read from the signed-in user. */
     static boolean isSuperAdminUser(def ec, String userId) {
         if (!userId) return false
-        return ec.entity.find("moqui.security.UserGroupMember").disableAuthz().condition("userId", userId)
+        return darpan.facade.common.TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserGroupMember",
+                        "self-scoped auth: is this named user a super admin (a global group, no tenant)").condition("userId", userId)
                 .condition("userGroupId", EntityCondition.IN, darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS)
                 .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).useCache(false).count() > 0
     }

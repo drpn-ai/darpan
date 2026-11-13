@@ -141,7 +141,9 @@ class DisableAuthzRatchetTest {
      * ({@code <set from="ec.entity.find(..).disableAuthz()..">} or {@code <service-call disable-authz="true">})
      * or in any other Darpan component grew unseen — and moving Groovy into XML actions (DAR-BE-074) would
      * have hidden the sites it moved. Same fail-mode rule: each count must equal its baseline exactly.
-     * Counts are frozen at 2026-10-19; none is a known leak — the point is that growth is now visible.
+     * Counts are frozen at 2026-10-19; none is a known leak — the point is that growth is now visible. darpan-agent was
+     * added by DAR-BE-263 (2026-11-13). moqui-gql (a separate repo) and moqui-sftp (third-party upstream) stay outside
+     * the gate; moqui-gql is DAR-BE-267.
      */
     static final Map<String, Integer> COMPONENT_BASELINES = [
             "darpan service+screen XML .disableAuthz("            : 69,
@@ -155,12 +157,19 @@ class DisableAuthzRatchetTest {
             // 5 since DAR-BE-111: extractNetSuiteOrders asks lookup#HotWaxOmsOrderStatuses for each page's HotWax status. A
             // service-call bypass, tenant-pinned by the query row's own companyUserGroupId (the trusted run owner, checked by
             // the lookup's config gate); a scheduled extract may run with no signed-in user to authorize it.
-            "netsuite-darpan Groovy .disableAuthz("               : 5,
+            // 6 since DAR-BE-245 (baselined by DAR-BE-263): the same lookup again, asking where ship groups ship from for
+            // orders with 2+ completed groups; the same tenant pin (the query row's companyUserGroupId).
+            "netsuite-darpan Groovy .disableAuthz("               : 6,
             "netsuite-darpan service+screen XML .disableAuthz("   : 0,
             "netsuite-darpan service+screen XML disable-authz=\"true\"": 0,
             "database-darpan Groovy .disableAuthz("               : 10,
             "database-darpan service+screen XML .disableAuthz("   : 0,
             "database-darpan service+screen XML disable-authz=\"true\"": 0,
+            // DAR-BE-263: darpan-agent joined the gate at 0 in every scope (its Groovy reads go through TenantScopedFinder
+            // and its service XML carries no bypass), so its first bypass is a conscious baseline change.
+            "darpan-agent Groovy .disableAuthz("                  : 0,
+            "darpan-agent service+screen XML .disableAuthz("      : 0,
+            "darpan-agent service+screen XML disable-authz=\"true\"": 0,
     ]
 
     @Test
@@ -169,7 +178,7 @@ class DisableAuthzRatchetTest {
         Map<String, Integer> counts = [:]
         Map<String, List<String>> sites = [:]
 
-        ["darpan", "darpan-hotwax", "shopify-darpan", "netsuite-darpan", "database-darpan"].each { String component ->
+        ["darpan", "darpan-hotwax", "shopify-darpan", "netsuite-darpan", "database-darpan", "darpan-agent"].each { String component ->
             Path root = componentRoot.resolve(component)
             assertTrue(Files.exists(root), "Could not locate component ${component} at ${root}")
             if (component != "darpan") {

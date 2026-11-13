@@ -90,19 +90,19 @@ class ReconciliationSavedRunSupport {
      * would leave the other path running. A disabled run that still fires nightly is worse than
      * no disable at all, because the operator believes it is off.</p>
      *
-     * <p>Archived and disabled both stop a run, and they say DIFFERENT things when they do.
-     * "Disabled" invites you to enable it; "archived" tells you where it went, because the
-     * operator who binned it will not think to look for a disable switch.</p>
+     * <p>Archived and disabled both stop a run, and they say DIFFERENT things when they do, so the
+     * operator who deleted a run is not sent looking for a disable switch. The app has no restore or
+     * enable control for a saved run (DAR-BE-257), so both name who can undo it: a Darpan admin.</p>
      *
      * @return true when the run may proceed; adds the operator-facing error and returns false otherwise
      */
     static boolean requireRunEnabled(def ec, def ruleSet, String runLabel) {
         if (isRunArchived(ruleSet)) {
-            ec?.message?.addError("Run '${runLabel}' is archived. Restore it from Show archived before running it.")
+            ec?.message?.addError("Run '${runLabel}' is archived. Ask a Darpan admin to restore it.")
             return false
         }
         if (isRunEnabled(ruleSet)) return true
-        ec?.message?.addError("Run '${runLabel}' is disabled. Enable it before running it.")
+        ec?.message?.addError("Run '${runLabel}' is disabled. Ask a Darpan admin to enable it.")
         return false
     }
 

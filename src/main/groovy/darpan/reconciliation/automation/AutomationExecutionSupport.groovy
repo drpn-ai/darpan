@@ -455,11 +455,11 @@ class AutomationExecutionSupport {
                     .condition("ruleSetId", ruleSetId).useCache(false).one()
             if (ruleSet != null && ReconciliationSavedRunSupport.isRunArchived(ruleSet)) {
                 throw new IllegalStateException("Automation ${automationId} points at run ${ruleSetId}, " +
-                        "which is archived. Restore the run before this automation can fire.")
+                        "which is archived. Ask a Darpan admin to restore the run.")
             }
             if (ruleSet != null && !ReconciliationSavedRunSupport.isRunEnabled(ruleSet)) {
                 throw new IllegalStateException("Automation ${automationId} points at run ${ruleSetId}, " +
-                        "which is disabled. Enable the run before this automation can fire.")
+                        "which is disabled. Ask a Darpan admin to enable the run.")
             }
         }
 

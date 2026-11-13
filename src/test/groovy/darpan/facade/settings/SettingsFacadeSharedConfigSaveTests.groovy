@@ -204,6 +204,35 @@ class SettingsFacadeSharedConfigSaveTests {
         assertEquals(STRANGER, findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: mintedId]).companyUserGroupId)
     }
 
+    /** DAR-BE-255: a blank private key is kept only while the token URL (the NetSuite account) is the same. */
+    @Test
+    void aMovedTokenUrlNeedsThePrivateKeyAgain() {
+        String tokenUrl = "https://1111111.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token"
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MOVE_AUTH"], [
+                nsAuthConfigId: "MOVE_AUTH", companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, authType: "OAUTH2_M2M_JWT",
+                tokenUrl: tokenUrl, clientId: "client", certId: "cert", privateKeyPem: "krewe-private-key", isActive: "Y"])
+        Map<String, Object> base = [nsAuthConfigId: "MOVE_AUTH", authType: "OAUTH2_M2M_JWT", clientId: "client", certId: "cert"]
+
+        Map<String, Object> same = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", base + [tokenUrl: " " + tokenUrl + "/"])
+        assertTrue((Boolean) same.ok, same.errors?.toString())
+        assertEquals("krewe-private-key", findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MOVE_AUTH"]).privateKeyPem,
+                "the same token URL keeps the stored key")
+
+        ec.message.clearErrors()
+        String otherAccount = "https://2222222.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token"
+        Map<String, Object> refused = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", base + [tokenUrl: otherAccount])
+        assertFalse((Boolean) refused.ok, "a moved token URL kept the stored key: ${refused}")
+        assertEquals(["Enter the private key again: the token URL changed, so the saved private key is not sent to the new address."],
+                (List<String>) refused.errors)
+        assertEquals("krewe-private-key", findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MOVE_AUTH"]).privateKeyPem)
+
+        ec.message.clearErrors()
+        Map<String, Object> moved = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", base + [tokenUrl: otherAccount, privateKeyPem: "new-private-key"])
+        assertTrue((Boolean) moved.ok, moved.errors?.toString())
+        def row = findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MOVE_AUTH"])
+        assertEquals([otherAccount, "new-private-key"], [row.tokenUrl, row.privateKeyPem])
+    }
+
     // --- helpers ------------------------------------------------------------------------------
 
     private Map<String, Object> saveFacade(String serviceName, Map<String, Object> parameters) {

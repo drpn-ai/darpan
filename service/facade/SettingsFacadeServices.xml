@@ -727,6 +727,18 @@
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite auth settings.')"/>
             </if>
+            <!-- DAR-BE-255 (as DAR-BE-080 for SFTP, database and HotWax): a stored password, token or private key is reused
+                 only while the token URL is the same. The token URL names the NetSuite account, and its allow-list admits
+                 every account, so an editor (a shared peer, too) could otherwise point it at an account of their own and
+                 have the next test or run sign in there with this one's key. When it moved, NO stored secret is carried
+                 over; the auth type's own secret must come with the save. -->
+            <set field="nsMovedFields" from="existingAuth &amp;&amp; (existingAuth.password || existingAuth.apiToken || existingAuth.privateKeyPem) ? darpan.facade.common.SecretCarryOver.changedFields(['token URL': existingAuth.tokenUrl], ['token URL': nsTokenUrlValue], ['token URL']) : []"/>
+            <set field="keptAuth" from="nsMovedFields ? null : existingAuth"/>
+            <set field="nsSecretLabel" from="[OAUTH2_M2M_JWT: 'private key', BASIC: 'password', BEARER: 'API token'][nsAuthTypeValue]"/>
+            <set field="nsSecretSent" from="nsAuthTypeValue == 'OAUTH2_M2M_JWT' ? nsPrivateKeyPemValue : (nsAuthTypeValue == 'BASIC' ? nsPasswordValue : (nsApiTokenValue ?: nsPasswordValue))"/>
+            <if condition="!ec.message.hasError() &amp;&amp; nsMovedFields &amp;&amp; nsSecretLabel &amp;&amp; !nsSecretSent">
+                <message error="true">${darpan.facade.common.SecretCarryOver.refusal(nsMovedFields, nsSecretLabel)}</message>
+            </if>
             <if condition="!ec.message.hasError()">
                 <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsTokenUrlValue">
                     <message error="true">Token URL is required for OAUTH2_M2M_JWT auth.</message>
@@ -745,10 +757,10 @@
                 <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsCertIdValue">
                     <message error="true">Cert ID is required for OAUTH2_M2M_JWT auth.</message>
                 </if>
-                <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsPrivateKeyPemValue &amp;&amp; !existingAuth?.privateKeyPem">
+                <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsPrivateKeyPemValue &amp;&amp; !keptAuth?.privateKeyPem">
                     <message error="true">Private Key PEM is required for OAUTH2_M2M_JWT auth.</message>
                 </if>
-                <if condition="nsAuthTypeValue == 'BEARER' &amp;&amp; !nsApiTokenValue &amp;&amp; !nsPasswordValue &amp;&amp; !existingAuth?.apiToken &amp;&amp; !existingAuth?.password">
+                <if condition="nsAuthTypeValue == 'BEARER' &amp;&amp; !nsApiTokenValue &amp;&amp; !nsPasswordValue &amp;&amp; !keptAuth?.apiToken &amp;&amp; !keptAuth?.password">
                     <message>Provide API Token (or password fallback) for BEARER auth.</message>
                 </if>
             </if>
@@ -756,7 +768,7 @@
                 <set field="nsAuthConfigIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.NsAuthConfig', 'nsAuthConfigId')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: existingAuth?.password, apiToken: nsApiTokenValue ?: existingAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: existingAuth?.privateKeyPem]"/>
+                <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: keptAuth?.password, apiToken: nsApiTokenValue ?: keptAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: keptAuth?.privateKeyPem]"/>
                 <if condition="existingAuth == null || !existingAuth.companyUserGroupId">
                     <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(authMap, ec)"/>
                 </if>

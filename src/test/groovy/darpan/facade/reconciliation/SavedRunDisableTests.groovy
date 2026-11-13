@@ -60,7 +60,8 @@ class SavedRunDisableTests {
 
     /**
      * Both stop a run and they must not say the same thing. The operator who pressed a trash can
-     * will not go looking for a disable switch, so the message has to name where it went.
+     * will not go looking for a disable switch, so the message says it was archived and who restores
+     * it (the app has no restore control for a saved run, DAR-BE-257).
      */
     @Test
     void anArchivedRunIsRefusedAndTheMessageSaysWhereItWent() {
@@ -69,7 +70,7 @@ class SavedRunDisableTests {
         assertFalse(ReconciliationSavedRunSupport.requireRunEnabled(ec, [isArchived: 'Y'], 'Nightly OMS'))
         assertEquals(1, ec.errors.size())
         assertTrue(ec.errors[0].toLowerCase().contains('archived'), ec.errors[0] as String)
-        assertTrue(ec.errors[0].contains('Show archived'), ec.errors[0] as String)
+        assertTrue(ec.errors[0].contains('Ask a Darpan admin to restore it'), ec.errors[0] as String)
     }
 
     /** Archived wins the message when a run is both, because it is the more surprising state. */

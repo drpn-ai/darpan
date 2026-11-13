@@ -648,9 +648,22 @@ class TwoFactorSupport {
 
     // ---- sessions and keys ----
 
-    /** Ends every login key of the person but keepHashes (web and CLI), and marks their CLI sessions revoked. */
+    /**
+     * Ends every sign-in of the person but keepHashes: their login keys (web and CLI) are deleted, their CLI sessions
+     * marked revoked, and UserAccount.sessionsEndedDate moves to now (never back), so a web session that holds no key, a
+     * session cookie alone, ends at its next request too (AuthSessionSupport.enforceWebSignInLifetime). A request that
+     * carries a kept key is decided by that key.
+     */
     static void endSessions(def ec, String userId, List<String> keepHashes) {
         List<String> keep = (keepHashes ?: []).findAll { it }
+        Timestamp endedAt = ec.user.nowTimestamp
+        def account = find(ec, "moqui.security.UserAccount", "self-scoped auth: stamp when the person's sign-ins were ended")
+                .condition("userId", userId).useCache(false).one()
+        Timestamp previous = account?.sessionsEndedDate as Timestamp
+        if (account != null && (previous == null || previous.before(endedAt))) {
+            account.sessionsEndedDate = endedAt
+            account.update()
+        }
         def keys = find(ec, "moqui.security.UserLoginKey", "self-scoped auth: end the person's login keys after a two-factor change")
                 .condition("userId", userId)
         if (keep) keys = keys.condition("loginKey", EntityCondition.NOT_IN, keep)
@@ -663,32 +676,6 @@ class TwoFactorSupport {
             row.revokedDate = now
             row.update()
         }
-    }
-
-    /**
-     * True when the key was issued before the person's two-factor was confirmed: such a key stops working (checked
-     * by AuthSessionSupport.enforceWebSignInLifetime and CliAuthSupport.cliSessionProblem on every request). Runs per
-     * request, so it is one indexed read.
-     */
-    static boolean keyPredatesFactor(def ec, String userId, Object keyFromDate) {
-        if (!userId || !(keyFromDate instanceof Timestamp)) return false
-        Timestamp confirmed = activeConfirmedDate(ec, userId)
-        return confirmed != null && ((Timestamp) keyFromDate).before(confirmed)
-    }
-
-    /**
-     * The date a key must not predate: the app's confirmedDate while the app is on (replacing it ends older keys), else
-     * the earliest live passkey's (DAR-BE-270: adding a second passkey ends nothing). Null with no factor.
-     */
-    static Timestamp activeConfirmedDate(def ec, String userId) {
-        if (!userId) return null
-        List factors = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, FACTOR,
-                        "self-scoped auth: the person's two-factor confirmation date, for the login-key rule (per request)")
-                .condition("userId", userId).condition("statusId", ACTIVE).useCache(false).list()
-        if (!factors) return null
-        def app = factors.find { it.factorTypeEnumId == TYPE_TOTP }
-        if (app != null) return app.confirmedDate as Timestamp
-        return factors*.confirmedDate.findAll { it != null }.min() as Timestamp
     }
 
     /** A CLI key of a person who is required and not enrolled is refused (the policy switched on after they signed in). */

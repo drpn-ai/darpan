@@ -337,28 +337,23 @@ class TwoFactorSignInSmokeTests {
     // ---- keys and sessions ----
 
     @Test
-    @DisplayName("confirming ends every other key (web and CLI) and issues a fresh one; a key from before the confirm is refused")
+    @DisplayName("confirming ends every other key (web and CLI) and every older web session, and issues a fresh key")
     void confirmEndsOtherKeys() {
         ec.user.internalLoginUser(USERNAME)
         String oldWebKey = ec.user.getLoginKey(1.0f)
         String oldHash = AuthSessionSupport.hashLoginKey(ec, oldWebKey)
-        def oldRow = loginKey(oldHash)
         ec.entity.makeValue("darpan.auth.CliSession").setAll([loginKeyHash: oldHash, userId: USER_ID, createdDate: ec.user.nowTimestamp]).create()
         ec.user.logoutUser()
+        long before = System.currentTimeMillis()
 
         Map enrolled = enrol(USER_ID, USERNAME)
         assertNull(loginKey(oldHash), "the earlier key ended")
-        assertNotNull(ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", oldHash).disableAuthz().one().revokedDate)
-        assertNotNull(loginKey(AuthSessionSupport.hashLoginKey(ec, enrolled.authToken as String)), "the confirming tab gets a fresh key")
-
-        assertTrue(TwoFactorSupport.keyPredatesFactor(ec, USER_ID, oldRow.fromDate))
-        assertFalse(TwoFactorSupport.keyPredatesFactor(ec, USER_ID, loginKey(AuthSessionSupport.hashLoginKey(ec, enrolled.authToken as String)).fromDate))
         def cliRow = ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", oldHash).disableAuthz().one()
-        ec.entity.makeValue("moqui.security.UserLoginKey").setAll(oldRow.getMap()).create()
-        cliRow.revokedDate = null
-        cliRow.update()
-        assertEquals(CliAuthSupport.CLI_SESSION_EXPIRED, CliAuthSupport.cliSessionProblem(ec, oldHash, cliRow),
-                "a CLI key from before the confirm is refused")
+        assertNotNull(cliRow.revokedDate)
+        assertEquals("This CLI session was signed out. Run darpan login to sign in again.", CliAuthSupport.cliSessionProblem(ec, oldHash, cliRow))
+        assertNotNull(loginKey(AuthSessionSupport.hashLoginKey(ec, enrolled.authToken as String)), "the confirming tab gets a fresh key")
+        // Web sessions without a key (a JSESSIONID alone) end at their next request: AuthSessionSupport compares this date.
+        assertTrue((account(USER_ID).sessionsEndedDate as Timestamp).time >= before, "sessions ended at the confirm")
     }
 
     @Test

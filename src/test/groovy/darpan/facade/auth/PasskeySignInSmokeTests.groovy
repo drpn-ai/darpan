@@ -367,17 +367,57 @@ class PasskeySignInSmokeTests {
     }
 
     @Test
-    @DisplayName("keys: a key from before the first passkey stops working; adding a second passkey ends nothing")
-    void keyRule() {
-        ec.user.internalLoginUser(USERNAME)
-        def oldRow = loginKey(AuthSessionSupport.hashLoginKey(ec, ec.user.getLoginKey(1.0f)))
-        ec.user.logoutUser()
-        SoftwarePasskey key = enrolPasskey(USERNAME)
-        assertTrue(TwoFactorSupport.keyPredatesFactor(ec, USER_ID, oldRow.fromDate))
+    @DisplayName("review QH1: adding a passkey, removing the oldest one, or removing the app while a passkey stays ends no key")
+    void removingAFactorEndsNoKey() {
+        // A passkey first: the tab's fresh key comes from the finish, a CLI key after it.
+        SoftwarePasskey first = new SoftwarePasskey()
+        Map enrolled = finish(USERNAME, first.register(beginRegistration(USERNAME, [currentPassword: PASSWORD])))
+        String webKey = enrolled.out.authToken
+        String cliHash = cliKey(USER_ID, USERNAME)
         int keys = keyCount(USER_ID)
-        assertEquals([], finish(USERNAME, new SoftwarePasskey().register(beginRegistration(USERNAME,
-                [passkeyAssertion: proofAssertion(USERNAME, key)]))).errors)
+        Thread.sleep(5)
+        SoftwarePasskey second = new SoftwarePasskey()
+        assertEquals([], finish(USERNAME, second.register(beginRegistration(USERNAME, [passkeyAssertion: proofAssertion(USERNAME, first)]))).errors)
         assertEquals(keys, keyCount(USER_ID), "adding a second passkey ends no key and mints none")
+        Thread.sleep(5)
+        String oldestId = (TwoFactorSupport.status(ec, USER_ID).passkeys as List<Map>)[0].passkeyId
+        assertEquals([], signedIn(USERNAME, "delete#Passkey", [passkeyId: oldestId, passkeyAssertion: proofAssertion(USERNAME, second)]).errors)
+        assertKeysStillWork(USER_ID, webKey, cliHash, "after removing the oldest passkey")
+
+        // The app first, then a passkey, then the app goes.
+        Map begun = signedIn(OTHER_USERNAME, "begin#TwoFactorSetup", [currentPassword: PASSWORD])
+        Map confirmed = signedIn(OTHER_USERNAME, "confirm#TwoFactorSetup", [code: code(begun.out.secret as String)], false)
+        String otherWebKey = confirmed.out.authToken
+        String otherCliHash = cliKey(OTHER_ID, OTHER_USERNAME)
+        Thread.sleep(5)
+        SoftwarePasskey otherKey = new SoftwarePasskey()
+        assertEquals([], finish(OTHER_USERNAME, otherKey.register(beginRegistration(OTHER_USERNAME, [code: code(begun.out.secret as String)]))).errors)
+        Thread.sleep(5)
+        assertEquals([], signedIn(OTHER_USERNAME, "disable#TwoFactor", [appOnly: true, passkeyAssertion: proofAssertion(OTHER_USERNAME, otherKey)]).errors)
+        assertKeysStillWork(OTHER_ID, otherWebKey, otherCliHash, "after removing the app")
+    }
+
+    /** A CLI key of the person, as approve#CliLogin leaves one: a login key and its CliSession. Returns its hash. */
+    private String cliKey(String userId, String username) {
+        ec.user.logoutUser()
+        ec.user.internalLoginUser(username)
+        String hash = AuthSessionSupport.hashLoginKey(ec, ec.user.getLoginKey(1.0f))
+        ec.user.logoutUser()
+        ec.entity.makeValue("darpan.auth.CliSession").setAll([loginKeyHash: hash, userId: userId, createdDate: ec.user.nowTimestamp]).create()
+        return hash
+    }
+
+    /** The web key passes the per-request check (a stub request over the real entity facade) and the CLI key the CLI check. */
+    private void assertKeysStillWork(String userId, String webKey, String cliHash, String when) {
+        def request = new WebSignInLifetimeTests.RequestStub(headers: [login_key: webKey],
+                session: new WebSignInLifetimeTests.SessionStub(creationTime: System.currentTimeMillis() - 60_000L))
+        def user = new WebSignInLifetimeTests.UserStub(userId: userId, userAccount: account(userId).getMap())
+        def webEc = new Expando(context: [:], web: new Expando(request: request, secureRequestParameters: [:]), user: user,
+                entity: ec.entity, factory: ec.factory, transaction: ec.transaction)
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(webEc), "the web key ends nothing ${when}")
+        assertEquals(userId, user.userId, "still signed in ${when}")
+        def cliRow = ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", cliHash).disableAuthz().useCache(false).one()
+        assertNotEquals(CliAuthSupport.CLI_SESSION_EXPIRED, CliAuthSupport.cliSessionProblem(ec, cliHash, cliRow), "the CLI key ${when}")
     }
 
     @Test

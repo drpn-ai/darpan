@@ -20,8 +20,7 @@
             <description>The TOTP secret, Base32. Returned once, by begin#TwoFactorSetup; never logged or returned again.</description></field>
         <field name="createdDate" type="date-time"/>
         <field name="confirmedDate" type="date-time">
-            <description>When it was turned on (the app's first right code; a passkey's registration). A login key issued
-                before the app's date, or with no app before the earliest live passkey's, stops working.</description></field>
+            <description>When it was turned on (the app's first right code; a passkey's registration).</description></field>
         <field name="endedDate" type="date-time"/>
         <field name="endedReason" type="text-short"><description>USER_OFF, USER_REMOVED, ADMIN_RESET or REPLACED.</description></field>
         <field name="lastUsedTimeStep" type="number-integer">
@@ -132,4 +131,13 @@
         <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
         <index name="TWOFA_EVENT_USER"><index-field name="userId"/><index-field name="eventDate"/></index>
     </entity>
+
+    <extend-entity entity-name="UserAccount" package="moqui.security">
+        <field name="sessionsEndedDate" type="date-time">
+            <description>DAR-BE-264 (review QH1). When every sign-in of the person was last ended by a two-factor change
+                (a factor first turned on, two-factor turned off, an admin reset): TwoFactorSupport.endSessions deletes the
+                login keys and sets this, never earlier than it was. A web session with no live key of the person (a session
+                cookie alone) that started before it is ended at its next request (AuthSessionSupport.enforceWebSignInLifetime);
+                keys need no date, they are deleted. Read from the UserAccount the framework loads on every request.</description></field>
+    </extend-entity>
 </entities>

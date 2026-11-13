@@ -146,36 +146,40 @@ class WebSignInLifetimeTests {
     }
 
     @Test
-    @DisplayName("DAR-BE-264: a key (or, with no key, a web session) from before two-factor was confirmed ends the sign-in")
-    void aKeyFromBeforeTwoFactorEnds() {
+    @DisplayName("review QH1: a web session with no live key of the person, from before their sessions were ended, ends; a live key decides")
+    void aKeylessSessionFromBeforeSessionsEndedEnds() {
         long now = System.currentTimeMillis()
-        Map factor = [userId: USER, factorTypeEnumId: "DrpnTfTotp", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 10 * MINUTE)]
-        def oldKey = new EntityStub(keys: [key(APP_KEY, now - 20 * MINUTE, now + 40 * MINUTE)], factors: [factor])
-        def oldEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now)), oldKey)
-        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(oldEc))
-        assertNull(oldEc.user.userId)
+        Timestamp ended = new Timestamp(now - 10 * MINUTE)
 
-        def newKey = new EntityStub(keys: [key(APP_KEY, now - 5 * MINUTE, now + 55 * MINUTE)], factors: [factor])
-        def newEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 20 * MINUTE)), newKey)
-        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(newEc), "the key decides, not the older web session")
-        assertEquals(USER, newEc.user.userId)
+        def stale = new SessionStub(creationTime: now - 20 * MINUTE)
+        def staleEc = ec(new RequestStub(session: stale), new EntityStub())
+        staleEc.user.userAccount = [sessionsEndedDate: ended]
+        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(staleEc), "a JSESSIONID alone from before the end")
+        assertTrue(stale.invalidated)
+        assertNull(staleEc.user.userId)
 
-        def sessionOnly = new SessionStub(creationTime: now - 20 * MINUTE)
-        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(ec(new RequestStub(session: sessionOnly), new EntityStub(factors: [factor]))))
-        assertTrue(sessionOnly.invalidated)
+        def later = new SessionStub(creationTime: now - 5 * MINUTE)
+        def laterEc = ec(new RequestStub(session: later), new EntityStub())
+        laterEc.user.userAccount = [sessionsEndedDate: ended]
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(laterEc), "a session started after it")
+
+        // The key endSessions kept (the tab that turned two-factor off) carries its older web session on.
+        def kept = new EntityStub(keys: [key(APP_KEY, now - 30 * MINUTE, now + 30 * MINUTE)])
+        def keptEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 30 * MINUTE)), kept)
+        keptEc.user.userAccount = [sessionsEndedDate: ended]
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(keptEc))
+        assertEquals(USER, keptEc.user.userId)
     }
 
     @Test
-    @DisplayName("DAR-BE-270: the key rule's date is the app's while it is on, else the earliest live passkey's")
-    void theKeyRuleDateWithPasskeys() {
+    @DisplayName("review QH1: live factors end no key: a key older than every live factor (the oldest one removed) still passes")
+    void liveFactorDatesEndNoKey() {
         long now = System.currentTimeMillis()
-        Map app = [userId: USER, factorTypeEnumId: "DrpnTfTotp", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 5 * MINUTE)]
-        Map pk1 = [userId: USER, factorTypeEnumId: "DrpnTfPkey", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 30 * MINUTE)]
-        Map pk2 = [userId: USER, factorTypeEnumId: "DrpnTfPkey", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 10 * MINUTE)]
-        def ecWith = { List<Map> factors -> ec(new RequestStub(), new EntityStub(factors: factors)) }
-        assertEquals(app.confirmedDate, TwoFactorSupport.activeConfirmedDate(ecWith([pk1, app, pk2]), USER))
-        assertEquals(pk1.confirmedDate, TwoFactorSupport.activeConfirmedDate(ecWith([pk2, pk1]), USER), "a second passkey ends nothing")
-        assertNull(TwoFactorSupport.activeConfirmedDate(ecWith([]), USER))
+        Map passkey = [userId: USER, factorTypeEnumId: "DrpnTfPkey", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 5 * MINUTE)]
+        def entity = new EntityStub(keys: [key(APP_KEY, now - 20 * MINUTE, now + 40 * MINUTE)], factors: [passkey])
+        def stubEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 20 * MINUTE)), entity)
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(stubEc))
+        assertEquals(USER, stubEc.user.userId)
     }
 
     // ---- stubs ----
@@ -201,6 +205,7 @@ class WebSignInLifetimeTests {
 
     static class UserStub {
         String userId = USER
+        Map userAccount = [:]
         void logoutLocal() { userId = null }
     }
 

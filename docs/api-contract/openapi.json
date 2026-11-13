@@ -282,6 +282,15 @@
                                         "$ref": "#/components/schemas/VerifyAuditFindingRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/BeginPasskeyProofRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/BeginPasskeyRegistrationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/BeginPasskeySignInRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/BeginTwoFactorSetupRequest"
                                     },
                                     {
@@ -300,7 +309,13 @@
                                         "$ref": "#/components/schemas/CreateRecoveryCodesRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeletePasskeyRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DisableTwoFactorRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/FinishPasskeyRegistrationRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetPasswordResetStatusRequest"
@@ -319,6 +334,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/LogoutSessionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RenamePasskeyRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/RequestPasswordResetRequest"
@@ -881,19 +899,25 @@
                                         "facade.AuditFacadeServices.save#AuditCheck": "#/components/schemas/SaveAuditCheckRequest",
                                         "facade.AuditFacadeServices.save#AuditSettings": "#/components/schemas/SaveAuditSettingsRequest",
                                         "facade.AuditFacadeServices.verify#AuditFinding": "#/components/schemas/VerifyAuditFindingRequest",
+                                        "facade.AuthFacadeServices.begin#PasskeyProof": "#/components/schemas/BeginPasskeyProofRequest",
+                                        "facade.AuthFacadeServices.begin#PasskeyRegistration": "#/components/schemas/BeginPasskeyRegistrationRequest",
+                                        "facade.AuthFacadeServices.begin#PasskeySignIn": "#/components/schemas/BeginPasskeySignInRequest",
                                         "facade.AuthFacadeServices.begin#TwoFactorSetup": "#/components/schemas/BeginTwoFactorSetupRequest",
                                         "facade.AuthFacadeServices.change#ExpiredPassword": "#/components/schemas/ChangeExpiredPasswordRequest",
                                         "facade.AuthFacadeServices.change#OwnPassword": "#/components/schemas/ChangeOwnPasswordRequest",
                                         "facade.AuthFacadeServices.complete#PasswordReset": "#/components/schemas/CompletePasswordResetRequest",
                                         "facade.AuthFacadeServices.confirm#TwoFactorSetup": "#/components/schemas/ConfirmTwoFactorSetupRequest",
                                         "facade.AuthFacadeServices.create#RecoveryCodes": "#/components/schemas/CreateRecoveryCodesRequest",
+                                        "facade.AuthFacadeServices.delete#Passkey": "#/components/schemas/DeletePasskeyRequest",
                                         "facade.AuthFacadeServices.disable#TwoFactor": "#/components/schemas/DisableTwoFactorRequest",
+                                        "facade.AuthFacadeServices.finish#PasskeyRegistration": "#/components/schemas/FinishPasskeyRegistrationRequest",
                                         "facade.AuthFacadeServices.get#PasswordResetStatus": "#/components/schemas/GetPasswordResetStatusRequest",
                                         "facade.AuthFacadeServices.get#SessionInfo": "#/components/schemas/GetSessionInfoRequest",
                                         "facade.AuthFacadeServices.get#TwoFactorStatus": "#/components/schemas/GetTwoFactorStatusRequest",
                                         "facade.AuthFacadeServices.login#Session": "#/components/schemas/LoginSessionRequest",
                                         "facade.AuthFacadeServices.logout#AllSessions": "#/components/schemas/LogoutAllSessionsRequest",
                                         "facade.AuthFacadeServices.logout#Session": "#/components/schemas/LogoutSessionRequest",
+                                        "facade.AuthFacadeServices.rename#Passkey": "#/components/schemas/RenamePasskeyRequest",
                                         "facade.AuthFacadeServices.request#PasswordReset": "#/components/schemas/RequestPasswordResetRequest",
                                         "facade.AuthFacadeServices.save#ActiveTenant": "#/components/schemas/SaveActiveTenantRequest",
                                         "facade.AuthFacadeServices.save#RecoveryEmail": "#/components/schemas/SaveRecoveryEmailRequest",
@@ -1326,6 +1350,15 @@
                                             "$ref": "#/components/schemas/VerifyAuditFindingResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/BeginPasskeyProofResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/BeginPasskeyRegistrationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/BeginPasskeySignInResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/BeginTwoFactorSetupResponse"
                                         },
                                         {
@@ -1344,7 +1377,13 @@
                                             "$ref": "#/components/schemas/CreateRecoveryCodesResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/DeletePasskeyResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/DisableTwoFactorResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/FinishPasskeyRegistrationResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetPasswordResetStatusResponse"
@@ -1363,6 +1402,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/LogoutSessionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RenamePasskeyResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/RequestPasswordResetResponse"
@@ -5757,17 +5799,18 @@
                 "properties": {
                     "adminCode": {
                         "type": "string",
-                        "description": "A current code from the acting admin's own authenticator app."
+                        "description": "A current code from the acting admin's own authenticator app (or adminPasskeyAssertion)."
+                    },
+                    "adminPasskeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of adminCode: a passkey assertion over\n                facade.AuthFacadeServices.begin#PasskeyProof's options."
                     },
                     "dryRun": {
                         "type": "boolean",
                         "description": "True (default): count only, write nothing.\n                False: run the sweep."
                     }
                 },
-                "required": [
-                    "adminCode"
-                ],
-                "description": "Re-encrypt every stored encrypted field (tenant connector credentials, two-factor secrets) with the\n            current key, or with dryRun (the default) only report which key each value is on. Super admins only, with a\n            current code from their own authenticator app. A real run is refused unless an old key different from the\n            current one is configured (entity_ds_crypt_pass_old). Writes an AdminAuditLog row with counts, never values."
+                "description": "Re-encrypt every stored encrypted field (tenant connector credentials, two-factor secrets) with the\n            current key, or with dryRun (the default) only report which key each value is on. Super admins only, with a\n            current code from their own authenticator app or (DAR-BE-270) a passkey assertion. A real run is refused unless an old key different from the\n            current one is configured (entity_ds_crypt_pass_old). Writes an AdminAuditLog row with counts, never values."
             },
             "RotateEncryptedFieldsResult": {
                 "type": "object",
@@ -6620,7 +6663,11 @@
                     },
                     "twoFactorCode": {
                         "type": "string",
-                        "description": "DAR-BE-264. A current code from the caller's authenticator app; required\n                when they have two-factor on."
+                        "description": "DAR-BE-264. A current code from the caller's authenticator app; required\n                when they have two-factor on (or twoFactorPasskeyAssertion)."
+                    },
+                    "twoFactorPasskeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of twoFactorCode: a passkey assertion over\n                facade.AuthFacadeServices.begin#PasskeyProof's options."
                     }
                 },
                 "required": [
@@ -6758,7 +6805,11 @@
                     },
                     "twoFactorCode": {
                         "type": "string",
-                        "description": "DAR-BE-264. A current code from the caller's authenticator app; required\n                when they have two-factor on."
+                        "description": "DAR-BE-264. A current code from the caller's authenticator app; required\n                when they have two-factor on (or twoFactorPasskeyAssertion)."
+                    },
+                    "twoFactorPasskeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of twoFactorCode: a passkey assertion over\n                facade.AuthFacadeServices.begin#PasskeyProof's options."
                     }
                 },
                 "required": [
@@ -7472,6 +7523,14 @@
                                 ],
                                 "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. DAR-BE-264. When a role of theirs requires it; empty when optional."
                             },
+                            "twoFactorAppEnabled": {
+                                "type": "boolean",
+                                "description": "DAR-BE-270. True when the authenticator app is on."
+                            },
+                            "twoFactorPasskeyCount": {
+                                "type": "integer",
+                                "description": "DAR-BE-270. Live passkeys."
+                            },
                             "memberships": {
                                 "type": "array",
                                 "items": {
@@ -7888,15 +7947,18 @@
                     },
                     "adminCode": {
                         "type": "string",
-                        "description": "A current code from the acting admin's own authenticator app."
+                        "description": "A current code from the acting admin's own authenticator app (or adminPasskeyAssertion)."
+                    },
+                    "adminPasskeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of adminCode: a passkey assertion over\n                facade.AuthFacadeServices.begin#PasskeyProof's options."
                     }
                 },
                 "required": [
                     "userId",
-                    "reason",
-                    "adminCode"
+                    "reason"
                 ],
-                "description": "DAR-BE-264. End a user's two-factor (lost phone and no recovery code): their authenticator and recovery\n            codes go, every session and CLI key ends, and a user whose role requires it sets up again at the next sign-in.\n            Super admins only, never on one's own account; needs a reason and the acting admin's own current code (so they\n            must have two-factor on). Writes an AdminAuditLog row, a TwoFactorEvent naming the admin, and emails the user."
+                "description": "DAR-BE-264. End a user's two-factor (lost phone and no recovery code): their authenticator app, passkeys\n            (DAR-BE-270) and recovery codes go, every session and CLI key ends, and a user whose role requires it sets up again at the next sign-in.\n            Super admins only, never on one's own account; needs a reason and the acting admin's own current code (so they\n            must have two-factor on). Writes an AdminAuditLog row, a TwoFactorEvent naming the admin, and emails the user."
             },
             "ResetTwoFactorResult": {
                 "type": "object",
@@ -10644,6 +10706,325 @@
                     "result"
                 ]
             },
+            "BeginPasskeyProofParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-BE-270. Request options for the signed-in person's passkeys, for one action that asks for a fresh\n            proof (approve#CliLogin, create#RecoveryCodes, disable#TwoFactor, begin#TwoFactorSetup,\n            begin#PasskeyRegistration, delete#Passkey, and the admin app's /transfer export and handoff, two-factor reset and\n            key rotation). The assertion is single-use and lives 5 minutes."
+            },
+            "BeginPasskeyProofResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "publicKeyOptions": {
+                        "type": "string",
+                        "description": "PublicKeyCredentialRequestOptionsJSON, as begin#PasskeySignIn."
+                    },
+                    "expiresInSeconds": {
+                        "type": "integer",
+                        "description": "Seconds the challenge lives: 300."
+                    }
+                }
+            },
+            "BeginPasskeyProofRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.begin#PasskeyProof",
+                "x-darpan-method": "facade.AuthFacadeServices.begin#PasskeyProof",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.begin#PasskeyProof"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/BeginPasskeyProofParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "BeginPasskeyProofResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.begin#PasskeyProof. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/BeginPasskeyProofResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "BeginPasskeyRegistrationParams": {
+                "type": "object",
+                "properties": {
+                    "challengeToken": {
+                        "type": "string",
+                        "description": "A setup challenge from login#Session; leave out when signed in."
+                    },
+                    "currentPassword": {
+                        "type": "string",
+                        "description": "Signed in, no two-factor yet: the account's password (a wrong one counts as a failed login)."
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "Signed in, two-factor on: a current code from the app."
+                    },
+                    "passkeyAssertion": {
+                        "type": "string",
+                        "description": "Signed in, two-factor on: instead of code, a passkey assertion over begin#PasskeyProof's options."
+                    }
+                },
+                "description": "DAR-BE-270. Creation options for a new passkey. Either signed in (no two-factor yet: currentPassword;\n            with two-factor on: a code or a passkey assertion), or with a setup challengeToken from login#Session\n            (twoFactorSetupRequired). Finish within 5 minutes with finish#PasskeyRegistration. Up to 10 passkeys."
+            },
+            "BeginPasskeyRegistrationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "publicKeyOptions": {
+                        "type": "string",
+                        "description": "PublicKeyCredentialCreationOptionsJSON: {rp{id, name}, user{id, name, displayName}, challenge,\n                    pubKeyCredParams, timeout, excludeCredentials, authenticatorSelection{residentKey: \"preferred\",\n                    userVerification: \"required\"}, attestation: \"none\"}."
+                    },
+                    "expiresInSeconds": {
+                        "type": "integer",
+                        "description": "Seconds left to finish: 300."
+                    },
+                    "challengeEnded": {
+                        "type": "boolean",
+                        "description": "With a challengeToken: true when it can no longer be used: go back to the password."
+                    }
+                }
+            },
+            "BeginPasskeyRegistrationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.begin#PasskeyRegistration",
+                "x-darpan-method": "facade.AuthFacadeServices.begin#PasskeyRegistration",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.begin#PasskeyRegistration"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/BeginPasskeyRegistrationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "BeginPasskeyRegistrationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.begin#PasskeyRegistration. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/BeginPasskeyRegistrationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "BeginPasskeySignInParams": {
+                "type": "object",
+                "properties": {
+                    "challengeToken": {
+                        "type": "string",
+                        "description": "From login#Session."
+                    }
+                },
+                "required": [
+                    "challengeToken"
+                ],
+                "description": "DAR-BE-270. Request options for a sign-in login#Session answered with twoFactorRequired and\n            twoFactorMethods containing \"passkey\". Each call replaces the previous challenge; send the assertion to\n            verify#SignInCode (passkeyAssertion) with the same challengeToken."
+            },
+            "BeginPasskeySignInResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "publicKeyOptions": {
+                        "type": "string",
+                        "description": "PublicKeyCredentialRequestOptionsJSON: {challenge, rpId, timeout, allowCredentials[{type, id,\n                    transports}], userVerification: \"required\"}."
+                    },
+                    "challengeEnded": {
+                        "type": "boolean",
+                        "description": "True when the challenge can no longer be used: go back to the password."
+                    }
+                }
+            },
+            "BeginPasskeySignInRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.begin#PasskeySignIn",
+                "x-darpan-method": "facade.AuthFacadeServices.begin#PasskeySignIn",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.begin#PasskeySignIn"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/BeginPasskeySignInParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "BeginPasskeySignInResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.begin#PasskeySignIn. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/BeginPasskeySignInResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "BeginTwoFactorSetupParams": {
                 "type": "object",
                 "properties": {
@@ -10657,7 +11038,11 @@
                     },
                     "code": {
                         "type": "string",
-                        "description": "Signed in, replacing an app that is on: a current code from it."
+                        "description": "Signed in, with two-factor on: a current code from the app."
+                    },
+                    "passkeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Signed in, with two-factor on: instead of code, a passkey\n                assertion over begin#PasskeyProof's options."
                     }
                 },
                 "description": "DAR-BE-264. Start setting up an authenticator app: a new secret (any earlier unfinished setup ends),\n            shown once. Either signed in (a first setup needs currentPassword; replacing an app that is on needs a current\n            code from it), or with a setup challengeToken from login#Session (twoFactorSetupRequired). Finish within 15\n            minutes with confirm#TwoFactorSetup. A refusal is a completed call with ok false and the reason in errors (not a\n            JSON-RPC error); through a challenge it carries challengeEnded."
@@ -11512,12 +11897,13 @@
                     "code": {
                         "type": "string",
                         "description": "A current code from the authenticator app."
+                    },
+                    "passkeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of code: a passkey assertion over begin#PasskeyProof's options."
                     }
                 },
-                "required": [
-                    "code"
-                ],
-                "description": "DAR-BE-264. Ten new recovery codes for the signed-in person, replacing every old one. Needs a current\n            authenticator code."
+                "description": "DAR-BE-264. Ten new recovery codes for the signed-in person, replacing every old one. Needs a current\n            authenticator code or (DAR-BE-270) a passkey assertion."
             },
             "CreateRecoveryCodesResult": {
                 "type": "object",
@@ -11609,18 +11995,131 @@
                     "result"
                 ]
             },
+            "DeletePasskeyParams": {
+                "type": "object",
+                "properties": {
+                    "passkeyId": {
+                        "type": "string",
+                        "description": "From get#TwoFactorStatus passkeys."
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "A current code from the authenticator app."
+                    },
+                    "passkeyAssertion": {
+                        "type": "string",
+                        "description": "Instead of code: a passkey assertion over begin#PasskeyProof's options."
+                    }
+                },
+                "required": [
+                    "passkeyId"
+                ],
+                "description": "DAR-BE-270. Remove one of the signed-in person's passkeys, with a current code or a passkey assertion\n            (it may come from the passkey being removed). Removing the last factor is refused when a role of theirs\n            requires two-factor; for anyone else it turns two-factor off as disable#TwoFactor does."
+            },
+            "DeletePasskeyResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "twoFactorEnabled": {
+                        "type": "boolean",
+                        "description": "False when this was the last factor."
+                    }
+                }
+            },
+            "DeletePasskeyRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.delete#Passkey",
+                "x-darpan-method": "facade.AuthFacadeServices.delete#Passkey",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.delete#Passkey"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeletePasskeyParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeletePasskeyResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.delete#Passkey. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeletePasskeyResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DisableTwoFactorParams": {
                 "type": "object",
                 "properties": {
                     "code": {
                         "type": "string",
                         "description": "A current code from the authenticator app."
+                    },
+                    "passkeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of code: a passkey assertion over begin#PasskeyProof's options."
+                    },
+                    "appOnly": {
+                        "type": "boolean",
+                        "description": "DAR-BE-270. Remove only the\n                authenticator app, keeping the passkeys."
                     }
                 },
-                "required": [
-                    "code"
-                ],
-                "description": "DAR-BE-264. Turn two-factor off for the signed-in person, with a current code. Refused when a role of\n            theirs requires it. Every other session and CLI key ends; this one carries on."
+                "description": "DAR-BE-264. Turn two-factor off for the signed-in person (the app and every passkey), with a current code\n            or (DAR-BE-270) a passkey assertion. Refused when a role of theirs requires it. Every other session and CLI key\n            ends; this one carries on. With appOnly and a passkey left: removes just the authenticator app (allowed when\n            required too), sessions unchanged."
             },
             "DisableTwoFactorResult": {
                 "type": "object",
@@ -11698,6 +12197,278 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/DisableTwoFactorResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "FinishPasskeyRegistrationParams": {
+                "type": "object",
+                "properties": {
+                    "credential": {
+                        "type": "string",
+                        "description": "JSON.stringify(credential.toJSON()) of navigator.credentials.create()."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The person's label, e.g. MacBook Touch ID (60 characters; default Passkey)."
+                    },
+                    "challengeToken": {
+                        "type": "string",
+                        "description": "The setup challenge from login#Session; leave out when signed in."
+                    }
+                },
+                "required": [
+                    "credential"
+                ],
+                "description": "DAR-BE-270. Store the new passkey (the browser's credential for begin#PasskeyRegistration's options) and\n            email the person. When it is their first factor two-factor turns on as confirm#TwoFactorSetup does: every other\n            session and CLI key ends, the reply carries a fresh authToken (swap to it; with a setup challenge it is the\n            sign-in) and 10 recovery codes, once. An added passkey changes no session: no authToken."
+            },
+            "FinishPasskeyRegistrationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    },
+                    "passkeyId": {
+                        "type": "string",
+                        "description": "The new passkey's id (for rename#Passkey and delete#Passkey)."
+                    },
+                    "authenticated": {
+                        "type": "boolean",
+                        "description": "True when a session was issued: the first factor (swap to authToken) or a setup challenge (the sign-in)."
+                    },
+                    "authToken": {
+                        "type": "string",
+                        "description": "The login key darpan-ui sends in the `login_key` header (also set as the persistent-login cookie)."
+                    },
+                    "authTokenType": {
+                        "type": "string",
+                        "description": "`LOGIN_KEY`."
+                    },
+                    "authTokenHeaderName": {
+                        "type": "string",
+                        "description": "`login_key`."
+                    },
+                    "authTokenExpiresInSeconds": {
+                        "type": "integer",
+                        "description": "The sign-in's absolute lifetime in seconds, as login#Session."
+                    },
+                    "sessionInfo": {
+                        "type": "object",
+                        "properties": {
+                            "userId": {
+                                "type": "string"
+                            },
+                            "username": {
+                                "type": "string"
+                            },
+                            "displayName": {
+                                "type": "string"
+                            },
+                            "locale": {
+                                "type": "string"
+                            },
+                            "timeZone": {
+                                "type": "string"
+                            },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
+                                "type": "string"
+                            },
+                            "lastLoginDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
+                            },
+                            "lastRun": {
+                                "type": "object",
+                                "properties": {
+                                    "reconciliationRunResultId": {
+                                        "type": "string"
+                                    },
+                                    "savedRunId": {
+                                        "type": "string"
+                                    },
+                                    "savedRunType": {
+                                        "type": "string"
+                                    },
+                                    "reconciliationRunId": {
+                                        "type": "string"
+                                    },
+                                    "createdDate": {
+                                        "oneOf": [
+                                            {
+                                                "type": "string"
+                                            },
+                                            {
+                                                "type": "number"
+                                            }
+                                        ],
+                                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                    }
+                                }
+                            },
+                            "scopeType": {
+                                "type": "string"
+                            },
+                            "customerScopeId": {
+                                "type": "string"
+                            },
+                            "activeTenantUserGroupId": {
+                                "type": "string"
+                            },
+                            "activeTenantLabel": {
+                                "type": "string"
+                            },
+                            "availableTenants": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "userGroupId": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            },
+                            "activeTenantPermissionGroupIds": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "canViewActiveTenantData": {
+                                "type": "boolean"
+                            },
+                            "canRunActiveTenantReconciliation": {
+                                "type": "boolean"
+                            },
+                            "canEditActiveTenantData": {
+                                "type": "boolean"
+                            },
+                            "canManageDarpanCore": {
+                                "type": "boolean"
+                            },
+                            "isSuperAdmin": {
+                                "type": "boolean"
+                            },
+                            "twoFactorEnabled": {
+                                "type": "boolean"
+                            },
+                            "twoFactorDueDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            }
+                        },
+                        "description": "As login#Session's sessionInfo."
+                    },
+                    "recoveryCodes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "First factor only: 10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only."
+                    },
+                    "challengeEnded": {
+                        "type": "boolean",
+                        "description": "With a challengeToken: true when it can no longer be used (expired, 5 refusals)."
+                    }
+                }
+            },
+            "FinishPasskeyRegistrationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.finish#PasskeyRegistration",
+                "x-darpan-method": "facade.AuthFacadeServices.finish#PasskeyRegistration",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.finish#PasskeyRegistration"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/FinishPasskeyRegistrationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "FinishPasskeyRegistrationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.finish#PasskeyRegistration. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/FinishPasskeyRegistrationResult"
                     }
                 },
                 "required": [
@@ -12038,7 +12809,7 @@
                     },
                     "enabled": {
                         "type": "boolean",
-                        "description": "True when an authenticator app is on."
+                        "description": "True when two-factor is on: the authenticator app or a passkey."
                     },
                     "confirmedDate": {
                         "oneOf": [
@@ -12049,7 +12820,7 @@
                                 "type": "number"
                             }
                         ],
-                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When it was turned on."
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. When it was first turned on."
                     },
                     "recoveryCodesLeft": {
                         "type": "integer",
@@ -12073,6 +12844,66 @@
                     "codesLocked": {
                         "type": "boolean",
                         "description": "True after 20 wrong codes in 24 hours, until a password or admin reset."
+                    },
+                    "appEnabled": {
+                        "type": "boolean",
+                        "description": "DAR-BE-270. True when the authenticator app is on."
+                    },
+                    "passkeysAvailable": {
+                        "type": "boolean",
+                        "description": "DAR-BE-270. False when this instance has no passkey\n                relying party configured (no add button)."
+                    },
+                    "passkeys": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "passkey": {
+                                    "type": "object",
+                                    "properties": {
+                                        "passkeyId": {
+                                            "type": "string"
+                                        },
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "createdDate": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "number"
+                                                }
+                                            ],
+                                            "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                        },
+                                        "lastUsedDate": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "number"
+                                                }
+                                            ],
+                                            "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                        },
+                                        "transports": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "backedUp": {
+                                            "type": "boolean",
+                                            "description": "A synced passkey (on more than one device)."
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "DAR-BE-270. The person's passkeys, oldest first."
                     }
                 }
             },
@@ -12202,6 +13033,13 @@
                     "challengeExpiresInSeconds": {
                         "type": "integer",
                         "description": "DAR-BE-264. Seconds the challenge lives: 300."
+                    },
+                    "twoFactorMethods": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "DAR-BE-270. With twoFactorRequired: what this person can answer with here, \"app\" (a code to\n                    verify#SignInCode) and/or \"passkey\" (begin#PasskeySignIn, then the assertion to verify#SignInCode)."
                     },
                     "authToken": {
                         "type": "string",
@@ -12602,6 +13440,107 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/LogoutSessionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RenamePasskeyParams": {
+                "type": "object",
+                "properties": {
+                    "passkeyId": {
+                        "type": "string",
+                        "description": "From get#TwoFactorStatus passkeys."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The new label (60 characters at most)."
+                    }
+                },
+                "required": [
+                    "passkeyId",
+                    "name"
+                ],
+                "description": "DAR-BE-270. Rename one of the signed-in person's passkeys (no fresh proof: a label weakens nothing)."
+            },
+            "RenamePasskeyResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Why it was refused."
+                    }
+                }
+            },
+            "RenamePasskeyRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.rename#Passkey",
+                "x-darpan-method": "facade.AuthFacadeServices.rename#Passkey",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.rename#Passkey"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RenamePasskeyParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RenamePasskeyResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.rename#Passkey. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RenamePasskeyResult"
                     }
                 },
                 "required": [
@@ -13641,12 +14580,16 @@
                     "recoveryCode": {
                         "type": "string",
                         "description": "Instead of code: a recovery code, xxxx-xxxx-xxxx-xxxx (case, spaces and dashes ignored). Used once."
+                    },
+                    "passkeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of code: JSON.stringify(credential.toJSON()) of the\n                navigator.credentials.get() result for begin#PasskeySignIn's publicKeyOptions."
                     }
                 },
                 "required": [
                     "challengeToken"
                 ],
-                "description": "DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a\n            current authenticator code or a recovery code. Success answers as login#Session does (a session and its key).\n            Every refusal is \"That code didn't work.\"; 5 wrong codes end the challenge (challengeEnded), and each wrong code\n            also counts as a failed login. A used recovery code emails the person. A refusal is a completed call with\n            ok false and the reason in errors (not a JSON-RPC error), so challengeEnded reaches the caller."
+                "description": "DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a\n            current authenticator code, a recovery code, or (DAR-BE-270) a passkey assertion over begin#PasskeySignIn's\n            options. Success answers as login#Session does (a session and its key). A refused passkey reads \"That passkey\n            didn't work.\", counts against the challenge and is not a failed login.\n            Every refusal is \"That code didn't work.\"; 5 wrong codes end the challenge (challengeEnded), and each wrong code\n            also counts as a failed login. A used recovery code emails the person. A refusal is a completed call with\n            ok false and the reason in errors (not a JSON-RPC error), so challengeEnded reaches the caller."
             },
             "VerifySignInCodeResult": {
                 "type": "object",
@@ -14093,6 +15036,10 @@
                     "code": {
                         "type": "string",
                         "description": "DAR-BE-264. A current code from the approver's authenticator app; required\n                when they have two-factor on (approval mints a 7-day key, so a hijacked tab must not be enough)."
+                    },
+                    "passkeyAssertion": {
+                        "type": "string",
+                        "description": "DAR-BE-270. Instead of code: a passkey assertion over\n                facade.AuthFacadeServices.begin#PasskeyProof's options."
                     }
                 },
                 "required": [
@@ -33996,19 +34943,25 @@
         "facade.AuditFacadeServices.save#AuditCheck": "SaveAuditCheck",
         "facade.AuditFacadeServices.save#AuditSettings": "SaveAuditSettings",
         "facade.AuditFacadeServices.verify#AuditFinding": "VerifyAuditFinding",
+        "facade.AuthFacadeServices.begin#PasskeyProof": "BeginPasskeyProof",
+        "facade.AuthFacadeServices.begin#PasskeyRegistration": "BeginPasskeyRegistration",
+        "facade.AuthFacadeServices.begin#PasskeySignIn": "BeginPasskeySignIn",
         "facade.AuthFacadeServices.begin#TwoFactorSetup": "BeginTwoFactorSetup",
         "facade.AuthFacadeServices.change#ExpiredPassword": "ChangeExpiredPassword",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
         "facade.AuthFacadeServices.complete#PasswordReset": "CompletePasswordReset",
         "facade.AuthFacadeServices.confirm#TwoFactorSetup": "ConfirmTwoFactorSetup",
         "facade.AuthFacadeServices.create#RecoveryCodes": "CreateRecoveryCodes",
+        "facade.AuthFacadeServices.delete#Passkey": "DeletePasskey",
         "facade.AuthFacadeServices.disable#TwoFactor": "DisableTwoFactor",
+        "facade.AuthFacadeServices.finish#PasskeyRegistration": "FinishPasskeyRegistration",
         "facade.AuthFacadeServices.get#PasswordResetStatus": "GetPasswordResetStatus",
         "facade.AuthFacadeServices.get#SessionInfo": "GetSessionInfo",
         "facade.AuthFacadeServices.get#TwoFactorStatus": "GetTwoFactorStatus",
         "facade.AuthFacadeServices.login#Session": "LoginSession",
         "facade.AuthFacadeServices.logout#AllSessions": "LogoutAllSessions",
         "facade.AuthFacadeServices.logout#Session": "LogoutSession",
+        "facade.AuthFacadeServices.rename#Passkey": "RenamePasskey",
         "facade.AuthFacadeServices.request#PasswordReset": "RequestPasswordReset",
         "facade.AuthFacadeServices.save#ActiveTenant": "SaveActiveTenant",
         "facade.AuthFacadeServices.save#RecoveryEmail": "SaveRecoveryEmail",

@@ -56,15 +56,17 @@ class OutputPathSupport {
         String safePath = normalizeDataManagerRelativePath(ec, rawFileName)
         if (!safePath) return null
 
-        File dataManagerFile = DataManagerSupport.resolveDataManagerFile(ec, safePath, false)
-        if (dataManagerFile?.exists() && dataManagerFile.isFile() && isGeneratedResultFile(dataManagerFile.name)) {
-            return dataManagerFile
-        }
-
+        // DAR-BE-280: a bare name looks in the tenant's own output folder before the shared data-manager root,
+        // so another tenant's same-named root file never shadows the caller's own.
         if (!safePath.contains("/")) {
             File legacyOutputDir = ec?.resource?.getLocationReference(TenantAccessSupport.resolveGenericOutputLocation(ec))?.getFile()
             File legacyFile = legacyOutputDir != null ? new File(legacyOutputDir, safePath) : null
             if (legacyFile?.exists() && legacyFile.isFile() && isSupportedOutputFile(legacyFile.name)) return legacyFile
+        }
+
+        File dataManagerFile = DataManagerSupport.resolveDataManagerFile(ec, safePath, false)
+        if (dataManagerFile?.exists() && dataManagerFile.isFile() && isGeneratedResultFile(dataManagerFile.name)) {
+            return dataManagerFile
         }
 
         return null

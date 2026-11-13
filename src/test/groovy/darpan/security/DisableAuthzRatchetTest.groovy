@@ -146,7 +146,7 @@ class DisableAuthzRatchetTest {
      * upstream) stays outside the gate.
      */
     static final Map<String, Integer> COMPONENT_BASELINES = [
-            "darpan service+screen XML .disableAuthz("            : 69,
+            "darpan service+screen XML .disableAuthz("            : 66, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
             "darpan service+screen XML disable-authz=\"true\""    : 35,
             "darpan-hotwax Groovy .disableAuthz("                 : 6,
             "darpan-hotwax service+screen XML .disableAuthz("     : 0,

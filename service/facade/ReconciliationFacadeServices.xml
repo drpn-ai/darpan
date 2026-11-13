@@ -3813,11 +3813,8 @@
             </if>
             <set field="executionRows" from="[]"/>
             <if condition="!ec.message.hasError()">
-                <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-                <set field="executionFinder" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').orderBy('-createdDate,-scheduledDate,-automationExecutionId').disableAuthz().useCache(false)"/>
-                <if condition="activeTenantUserGroupId">
-                    <set field="ignoreTenantCondition" from="executionFinder.condition('companyUserGroupId', activeTenantUserGroupId)"/>
-                </if>
+                <!-- DAR-BE-279: no active tenant lists nothing (sentinel), never every tenant's executions -->
+                <set field="executionFinder" from="darpan.facade.common.TenantScopedFinder.findTenantScoped(ec, 'darpan.reconciliation.ReconciliationAutomationExecution').orderBy('-createdDate,-scheduledDate,-automationExecutionId').useCache(false)"/>
                 <if condition="automationIdValue">
                     <set field="ignoreAutomationCondition" from="executionFinder.condition('automationId', automationIdValue)"/>
                 </if>
@@ -4380,8 +4377,9 @@
                 <set field="statusMessage" from="deleteResult.statusMessage"/>
                 <if condition="deleted">
                     <!-- delete the observability step timeline first: ReconciliationRunStep rows hold an FK (RECSTEP_RUN) to the run rows deleted below -->
-                    <set field="ignoreRunStepDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('resultDataManagerPath', fileNameValue).disableAuthz().useCache(false).list().each { runRow -> ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runRow.reconciliationRunResultId).disableAuthz().useCache(false).deleteAll() }"/>
-                    <set field="ignoreRunResultDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('resultDataManagerPath', fileNameValue).disableAuthz().useCache(false).deleteAll()"/>
+                    <!-- DAR-BE-280: only the caller's own run rows; another tenant's run may name the same bare file -->
+                    <set field="ignoreRunStepDelete" from="darpan.facade.common.TenantScopedFinder.findTenantScoped(ec, 'darpan.reconciliation.ReconciliationRunResult').condition('resultDataManagerPath', fileNameValue).useCache(false).list().each { runRow -> ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runRow.reconciliationRunResultId).disableAuthz().useCache(false).deleteAll() }"/>
+                    <set field="ignoreRunResultDelete" from="darpan.facade.common.TenantScopedFinder.findTenantScoped(ec, 'darpan.reconciliation.ReconciliationRunResult').condition('resultDataManagerPath', fileNameValue).useCache(false).deleteAll()"/>
                 </if>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>

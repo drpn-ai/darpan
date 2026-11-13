@@ -49,13 +49,25 @@ class ReconciliationOutputSupport {
 
     static boolean canAccessGeneratedOutputFile(def ec, File file, Object rawFileName) {
         String safePath = OutputPathSupport.normalizeDataManagerRelativePath(ec, rawFileName)
-        if (!safePath?.contains("/")) return true
+        if (!safePath) return false
 
         String activeTenantUserGroupId = normalize(TenantAccessSupport.currentActiveTenantUserGroupId(ec))
         if (!activeTenantUserGroupId) return false
 
+        // DAR-BE-280: a bare name (legacy flat layout) is the tenant's only if it sits in the tenant's own
+        // output folder or one of the tenant's run rows names it; the data-manager root is shared.
+        if (!safePath.contains("/")) return isOwnBareOutputFile(ec, file, safePath)
+
         String outputCompanyUserGroupId = resolveGeneratedOutputTenantUserGroupId(ec, file, safePath)
         return outputCompanyUserGroupId && outputCompanyUserGroupId == activeTenantUserGroupId
+    }
+
+    protected static boolean isOwnBareOutputFile(def ec, File file, String bareName) {
+        File ownOutputDir = ec?.resource?.getLocationReference(TenantAccessSupport.resolveGenericOutputLocation(ec))?.getFile()
+        if (file != null && ownOutputDir != null && file.canonicalFile.parentFile == ownOutputDir.canonicalFile) return true
+
+        def finder = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
+        return finder != null && finder.condition("resultDataManagerPath", bareName).useCache(false).count() > 0
     }
 
     static def resolveRunResultForArtifactPath(def ec, Object rawFileName) {

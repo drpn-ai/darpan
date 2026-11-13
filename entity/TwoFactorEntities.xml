@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-264. Two-factor sign-in (TOTP). Spec: wrapper docs/superpowers/specs/2026-11-13-dar-be-264-two-factor-sign-in-design.md.
+         Every entity here belongs to a person, not a tenant (like PasswordResetCode): no DARPAN_ACTIVE_COMPANY_SCOPE
+         filter, every read through TenantScopedFinder.findGlobalUnscoped with a reason, and darpan.facade.auth.TwoFactorSupport
+         is the only writer. Darpan never writes moqui.security.UserAuthcFactor nor sets UserGroup.requireAuthcFactor: the
+         framework's own second-factor paths (no attempt limit, no replay check) stay inert. /transfer never exports these. -->
+
+    <entity entity-name="TwoFactorFactor" package="darpan.auth" use="transactional" cache="never">
+        <description>One authenticator (TOTP) set up by a person. At most one ACTIVE and one live PENDING row per user; a PENDING
+            row older than 15 minutes is ignored. The secret is read only by the code check.</description>
+        <field name="factorId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="factorTypeEnumId" type="id"><description>DrpnTfTotp (WebAuthn later).</description></field>
+        <field name="statusId" type="id"><description>PENDING (set up, not confirmed), ACTIVE or ENDED.</description></field>
+        <field name="secret" type="text-medium" encrypt="true">
+            <description>The TOTP secret, Base32. Returned once, by begin#TwoFactorSetup; never logged or returned again.</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="confirmedDate" type="date-time">
+            <description>When the first right code made it ACTIVE. A login key issued before this stops working.</description></field>
+        <field name="endedDate" type="date-time"/>
+        <field name="endedReason" type="text-short"><description>USER_OFF, ADMIN_RESET or REPLACED.</description></field>
+        <field name="lastUsedTimeStep" type="number-integer">
+            <description>The 30-second step of the last code accepted; a code is accepted only for a later step (no replay).</description></field>
+        <field name="lastUsedDate" type="date-time"/>
+        <field name="failedCodeCount" type="number-integer"><description>Wrong codes since failedWindowStart.</description></field>
+        <field name="failedWindowStart" type="date-time"><description>Start of the 24-hour window failedCodeCount counts in.</description></field>
+        <field name="codesLockedDate" type="date-time">
+            <description>Set at 20 wrong codes in 24 hours: codes are refused until a password reset or an admin reset.</description></field>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <relationship type="one" title="FactorType" related="moqui.basic.Enumeration" short-alias="factorType">
+            <key-map field-name="factorTypeEnumId" related="enumId"/>
+        </relationship>
+        <index name="TWOFA_FACTOR_USER"><index-field name="userId"/><index-field name="statusId"/></index>
+    </entity>
+
+    <entity entity-name="TwoFactorRecoveryCode" package="darpan.auth" use="transactional" cache="never">
+        <description>One single-use recovery code (80 bits, xxxx-xxxx-xxxx-xxxx). Stored as a salted SHA-256 hash only.</description>
+        <field name="recoveryCodeId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="factorId" type="id"/>
+        <field name="codeHash" type="text-medium"/>
+        <field name="codeSalt" type="text-short"><description>Random per row.</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="usedDate" type="date-time"/>
+        <field name="usedIp" type="text-short"/>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="TWOFA_RECOVERY_USER"><index-field name="userId"/></index>
+    </entity>
+
+    <entity entity-name="SignInChallenge" package="darpan.auth" use="transactional" cache="never">
+        <description>The step between a right password and a session, for a person with two-factor on (enter a code) or due
+            and not set up (set up first). The client holds the token in page memory only; only its SHA-256 is stored.
+            Lives 5 minutes, used once, and 5 wrong codes end it.</description>
+        <field name="challengeId" type="id" is-pk="true"/>
+        <field name="tokenHash" type="id-long" not-null="true"><description>SHA-256 (hex) of the 32-byte random token.</description></field>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="purposeEnumId" type="id"><description>DrpnScCode (enter a code) or DrpnScSetup (set up first).</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="expiresDate" type="date-time"/>
+        <field name="failedAttempts" type="number-integer"/>
+        <field name="usedDate" type="date-time"/>
+        <field name="requestIp" type="text-short"/>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <relationship type="one" title="Purpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/>
+        </relationship>
+        <index name="TWOFA_CHAL_TOKEN" unique="true"><index-field name="tokenHash"/></index>
+        <index name="TWOFA_CHAL_USER"><index-field name="userId"/></index>
+    </entity>
+
+    <entity entity-name="TwoFactorRolePolicy" package="darpan.auth" use="configuration" cache="never">
+        <description>Per-role enforcement switch: from requiredFromDate on, a person in this role cannot get a session without
+            two-factor. Empty = optional (every seed row starts empty, so a deploy changes nothing). A date in the future is
+            the grace period: sign-in still works and prompts. Written only by admin.SecurityAdminServices.update#TwoFactorPolicy.</description>
+        <field name="permissionGroupId" type="id" is-pk="true">
+            <description>ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN (UserGroupMember) or DARPAN_TENANT_ADMIN (in any tenant).</description></field>
+        <field name="requiredFromDate" type="date-time"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="TwoFactorEvent" package="darpan.auth" use="nontransactional" cache="never" create-only="true">
+        <description>Who actually got in: every setup, code check, recovery code use, turn-off, admin reset and lock. The
+            framework's UserLoginHistory marks the password step successful even when the code then fails, so this is the
+            evidence. Create-only, like AdminAuditLog. Never holds a code or the secret.</description>
+        <field name="eventId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="eventType" type="text-short">
+            <description>SETUP_STARTED, SETUP_CONFIRMED, CODE_OK, CODE_FAILED, RECOVERY_USED, CODES_RENEWED, TURNED_OFF,
+                ADMIN_RESET, CODES_LOCKED or LOCK_CLEARED.</description></field>
+        <field name="byUserId" type="id"><description>Who did it, when not the person themselves (an admin reset).</description></field>
+        <field name="eventDate" type="date-time"/>
+        <field name="ip" type="text-short"/>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="TWOFA_EVENT_USER"><index-field name="userId"/><index-field name="eventDate"/></index>
+    </entity>
+</entities>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-264 email body. No bold and no links (a link in a security email is the phishing shape). -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <widgets>
+        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
+        <container><label text="Hi ${firstName}, a recovery code was used to sign in to Darpan on ${at}. ${recoveryCodesLeft} left."/></container>
+        <container><label text="If that was you, make new codes in User Settings when you are low."/></container>
+        <container><label text="Not you? Change your password now and tell your Darpan administrator."/></container>
+        <container><label text="— Darpan"/></container>
+        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+    </widgets>
+</screen>

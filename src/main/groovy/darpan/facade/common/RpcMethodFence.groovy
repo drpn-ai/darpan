@@ -21,8 +21,9 @@ import org.moqui.util.StringUtilities
  * <p>Also closes the framework's /rest/login transition, which no Darpan client uses and which
  * returns the realm's raw "no account" vs "password incorrect" text.
  *
- * <p>And /Login/resetPassword (DAR-BE-028): the framework reset#Password it reaches reveals whether an account
- * exists and emails a reset password that never expires; darpan-ui uses Darpan's own reset instead.
+ * <p>The framework's /Login/resetPassword (DAR-BE-028: it reveals whether an account exists and emails a password that
+ * never expires) needs no rule here: /Login is its only mount, and darpan.facade.auth.PasswordOnlyRouteFence, which runs
+ * first in the same hook, answers 404 for /Login and everything under it (DAR-BE-264).
  *
  * <p>DAR-CLI-003: a CLI session (CliAuthSupport.isCliSession) is held to CliMethodAllowlist on top: only the paths in
  * CLI_PATHS, and on /rpc/json only ALLOWED methods, every batch entry included. That check runs on every path, not
@@ -135,7 +136,7 @@ class RpcMethodFence {
     /**
      * Null when the request may proceed; otherwise the refusal reason. Pure, for unit tests. Every check runs on the
      * path Moqui routes on and on the container's normalised path; either refusing refuses. And when the two views
-     * differ about any fence decision (is it JSON-RPC, /rest/login, /Login/resetPassword) the request is refused even
+     * differ about any fence decision (is it JSON-RPC, /rest/login) the request is refused even
      * if neither check alone would: the disagreement itself is the refusal, whichever view is right.
      */
     static String rejection(List<String> routed, List<String> normalised, Map params) {
@@ -148,7 +149,7 @@ class RpcMethodFence {
 
     /** What each fence decision turns on, for one view of the path. */
     static List<Boolean> fenceVerdicts(List<String> segments) {
-        return [isJsonRpc(segments), hasPair(segments, "rest", "login"), hasPair(segments, "Login", "resetPassword")]
+        return [isJsonRpc(segments), hasPair(segments, "rest", "login")]
     }
 
     static boolean isDotSegment(String segment) {
@@ -158,9 +159,6 @@ class RpcMethodFence {
     private static String rejectionOf(List<String> segments, Map params) {
         // A transition takes trailing path segments, so match the pair, not the exact path.
         if (hasPair(segments, "rest", "login")) return "The /rest/login endpoint is not available."
-        // DAR-BE-028: Darpan has its own reset (facade.AuthFacadeServices.request#PasswordReset), so the framework's
-        // weaker one goes. DAR-BE-264: /Login itself now answers 404 too (darpan.facade.auth.PasswordOnlyRouteFence).
-        if (hasPair(segments, "Login", "resetPassword")) return "The /Login/resetPassword endpoint is not available."
         if (!isJsonRpc(segments)) return null
 
         for (String method in requestedMethods(params)) {
@@ -196,7 +194,7 @@ class RpcMethodFence {
     }
 
     /** Matches on each segment's name before its first dot: Moqui strips a render-mode extension before it
-     *  matches a screen or transition (ScreenUrlInfo), so /Login/resetPassword.json reaches resetPassword. */
+     *  matches a screen or transition (ScreenUrlInfo), so /rest/login.json reaches login. */
     static boolean hasPair(List<String> segments, String first, String second) {
         for (int i = 0; i < segments.size() - 1; i++) {
             if (nameBeforeDot(segments[i]) == first && nameBeforeDot(segments[i + 1]) == second) return true

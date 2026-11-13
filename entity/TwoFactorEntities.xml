@@ -56,18 +56,15 @@
         <field name="backupEligible" type="text-indicator"><description>Y: a synced passkey (may be copied to other devices).</description></field>
         <field name="backedUp" type="text-indicator"><description>Y: backed up at its last use.</description></field>
         <field name="uvInitialized" type="text-indicator"/>
-        <field name="createdDate" type="date-time"/>
         <relationship type="one" related="darpan.auth.TwoFactorFactor" short-alias="factor"/>
         <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
         <index name="PASSKEY_CRED_HASH"><index-field name="credentialIdHash"/></index>
-        <index name="PASSKEY_CRED_USER"><index-field name="userId"/></index>
     </entity>
 
     <entity entity-name="TwoFactorRecoveryCode" package="darpan.auth" use="transactional" cache="never">
         <description>One single-use recovery code (80 bits, xxxx-xxxx-xxxx-xxxx). Stored as a salted SHA-256 hash only.</description>
         <field name="recoveryCodeId" type="id" is-pk="true"/>
         <field name="userId" type="id" not-null="true"/>
-        <field name="factorId" type="id"/>
         <field name="codeHash" type="text-medium"/>
         <field name="codeSalt" type="text-short"><description>Random per row.</description></field>
         <field name="createdDate" type="date-time"/>

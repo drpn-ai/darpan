@@ -38,6 +38,17 @@ class PasswordOnlyRouteFenceTests {
     }
 
     @Test
+    @DisplayName("DAR-BE-028: the framework's /Login/resetPassword answers 404 in every shape (RpcMethodFence no longer fences it itself)")
+    void loginResetPasswordIsClosed() {
+        ["/Login/resetPassword", "/Login/resetPassword;jsessionid=x", "/Login/resetPassword/x", "/Login/resetPassword.json",
+         "/Login.html/resetPassword", "/Login/~a/resetPassword", "/~a/Login/resetPassword", "/x/../Login/resetPassword"].each { String uri ->
+            def ec = new Expando(web: new Expando(request: new RequestStub(uri: uri, servletPath: ""), requestParameters: [username: "x"],
+                    secureRequestParameters: [:]), user: new WebSignInLifetimeTests.UserStub())
+            assertThrows(ScreenResourceNotFoundException, { PasswordOnlyRouteFence.enforce(ec) }, uri)
+        }
+    }
+
+    @Test
     @DisplayName("a Basic sign-in is signed out again and refused with 401, right password or not")
     void basicIsRefusedAndSignedOut() {
         def session = new WebSignInLifetimeTests.SessionStub()

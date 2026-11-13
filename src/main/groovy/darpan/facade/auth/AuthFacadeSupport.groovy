@@ -371,7 +371,7 @@ class AuthFacadeSupport {
         }
         result.passkeyId = added.factorId
         if (first) {
-            result.recoveryCodes = TwoFactorSupport.firstFactorOn(ec, userId, (String) added.factorId)
+            result.recoveryCodes = TwoFactorSupport.firstFactorOn(ec, userId)
         }
         if (viaChallenge) {
             TwoFactorSupport.useChallenge(ec, challengeToken)

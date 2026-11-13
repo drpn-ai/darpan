@@ -42,7 +42,7 @@ class TotpSupport {
     }
 
     static byte[] decodeSecret(String secret) {
-        return new Base32().decode(secret.replaceAll(/[\s=-]/, "").toUpperCase())
+        return new Base32().decode(secret)
     }
 
     static long timeStep(long epochMillis) {
@@ -88,11 +88,6 @@ class TotpSupport {
     static String otpauthUri(String issuer, String accountName, String secret) {
         String label = encode(issuer) + ":" + encode(accountName)
         return "otpauth://totp/${label}?secret=${secret}&issuer=${encode(issuer)}&digits=${DIGITS}&period=${STEP_SECONDS}&algorithm=SHA1".toString()
-    }
-
-    /** The secret grouped in fours, as the setup page shows it for typing. */
-    static String groupedSecret(String secret) {
-        return secret.toList().collate(4).collect { List<String> group -> group.join("") }.join(" ")
     }
 
     /** A QR code of text as an SVG data URI (one path, black modules on white, a 4-module quiet zone). */

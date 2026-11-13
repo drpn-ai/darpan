@@ -91,28 +91,14 @@ class RpcMethodFenceTests {
         assertNull(RpcMethodFence.rejection("/rest/s1/graphql/sdl", [:]))
     }
 
-    /** DAR-BE-028 — the framework's reset#Password screen transition is a weaker second reset (it reveals
-     *  whether an account exists and its emailed password never expires); /Login itself stays for legacy /apps. */
-    @Test
-    void closesTheFrameworkLoginResetPasswordTransition() {
-        ["/Login/resetPassword", "/Login/resetPassword;jsessionid=x", "/Login/resetPassword/x"].each { String path ->
-            assertEquals("The /Login/resetPassword endpoint is not available.",
-                    RpcMethodFence.rejection(path, [username: "x"]), "not fenced: ${path}")
-        }
-        assertNull(RpcMethodFence.rejection("/Login", [:]))
-        assertNull(RpcMethodFence.rejection("/Login/login", [username: "x", password: "y"]))
-    }
-
     /** Security review 2026-10-21: Moqui strips a render-mode extension before matching a screen or transition
      *  name (ScreenUrlInfo: "is there an extension beyond a transition name?"), so a fenced transition must be
      *  matched on the name before the first dot. */
     @Test
     void fencedTransitionsCannotBeReachedWithARenderModeExtension() {
-        ["/Login/resetPassword.json", "/Login/resetPassword.html", "/Login.html/resetPassword",
-         "/rest/login.json", "/rest.json/login"].each { String path ->
+        ["/rest/login.json", "/rest.json/login"].each { String path ->
             assertNotNull(RpcMethodFence.rejection(path, [username: "x"]), "not fenced: ${path}")
         }
-        assertNull(RpcMethodFence.rejection("/Login/login.json", [username: "x", password: "y"]))
     }
 
     @Test
@@ -274,7 +260,7 @@ class RpcMethodFenceTests {
             }
             assertEquals(RpcMethodFence.AMBIGUOUS_PATH_REFUSAL, ambiguous.message, rawUri)
         }
-        ["/Login/~a/resetPassword", "/Login/~a=b/resetPassword", "/rest/~a/login"].each { String rawUri ->
+        ["/rest/~a/login", "/rest/~a=b/login"].each { String rawUri ->
             assertThrows(ArtifactAuthorizationException, {
                 RpcMethodFence.enforce(stubEc(false, rawUri, [username: "x"], rawUri))
             }, "fence let through ${rawUri}".toString())

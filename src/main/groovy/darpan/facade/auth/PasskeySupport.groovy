@@ -307,7 +307,7 @@ class PasskeySupport {
         Timestamp now = ec.user.nowTimestamp
         String label = cleanName(name)
         def factor = ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: userId, factorTypeEnumId: TYPE_PASSKEY,
-                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now, failedCodeCount: 0])
+                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now])
                 .setSequencedIdPrimary()
         factor.create()
         byte[] coseBytes = objectConverter.cborConverter.writeValueAsBytes(attested.getCOSEKey())
@@ -315,7 +315,7 @@ class PasskeySupport {
                 credentialIdHash: credentialIdHash, publicKeyCose: AuthPrimitives.b64url(coseBytes), signCount: authData.signCount,
                 transports: (verified.transports ?: [])*.value.join(","), aaguid: attested.aaguid?.value?.toString(), name: label,
                 backupEligible: authData.flagBE ? "Y" : "N", backedUp: authData.flagBS ? "Y" : "N",
-                uvInitialized: authData.flagUV ? "Y" : "N", createdDate: now]).create()
+                uvInitialized: authData.flagUV ? "Y" : "N"]).create()
         TwoFactorSupport.event(ec, userId, "PASSKEY_ADDED")
         TwoFactorSupport.notify(ec, userId, TEMPLATE_PASSKEY_ADDED, [passkeyName: label])
         return [ok: true, factorId: factor.factorId, name: label]
@@ -334,8 +334,7 @@ class PasskeySupport {
     /**
      * The assertion check (call inside a transaction; it locks the passkey's factor row). expectedChallenge null means
      * "the row the clientDataJSON names" (a proof): that row must be a live DrpnScProof row of this person and is used up.
-     * With expectedChallenge (a sign-in) the caller has claimed the row. Returns [ok, factorId] or [ok: false, reason]
-     * where reason is COUNTER for a counter that did not move forward.
+     * With expectedChallenge (a sign-in) the caller has claimed the row. Returns [ok, factorId] or [ok: false].
      */
     static Map<String, Object> verifyAssertion(def ec, String userId, Object assertionJson, String expectedChallenge) {
         if (!available(ec) || !userId) return [ok: false]
@@ -386,7 +385,7 @@ class PasskeySupport {
             logger.warn("Passkey {} of userId {} presented a signature counter that did not move forward (stored {}): refused; a cloned authenticator?",
                     factor.factorId, userId, credential.signCount)
             TwoFactorSupport.event(ec, userId, "PASSKEY_COUNTER_REGRESSED")
-            return [ok: false, reason: "COUNTER"]
+            return [ok: false]
         } catch (Exception e) {
             logger.info("Passkey assertion refused for userId {}: {}", userId, e.class.simpleName)
             TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")

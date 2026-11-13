@@ -66,7 +66,6 @@ class TotpSupportTests {
         assertEquals(32, secret.length())
         assertEquals(20, TotpSupport.decodeSecret(secret).length)
         assertNotEquals(secret, TotpSupport.newSecret())
-        assertEquals(20, TotpSupport.decodeSecret(TotpSupport.groupedSecret(secret).toLowerCase()).length, "grouped and lower case still decode")
 
         String uri = TotpSupport.otpauthUri("Darpan UAT", "riya.m@example.com", secret)
         assertEquals("otpauth://totp/Darpan%20UAT:riya.m%40example.com?secret=${secret}&issuer=Darpan%20UAT&digits=6&period=30&algorithm=SHA1".toString(), uri)

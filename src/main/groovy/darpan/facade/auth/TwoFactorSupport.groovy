@@ -353,8 +353,6 @@ class TwoFactorSupport {
         Long step = TotpSupport.matchStep((String) factor.secret, normalizeTotp(code), codeClock.call(),
                 factor.lastUsedTimeStep as Long)
         if (step != null) {
-            long offset = step - TotpSupport.timeStep(codeClock.call())
-            logger.debug("Two-factor code accepted for userId {} at step offset {}", userId, offset)
             factor.lastUsedTimeStep = step
             factor.lastUsedDate = ec.user.nowTimestamp
             factor.update()
@@ -469,7 +467,7 @@ class TwoFactorSupport {
         }
         String secret = TotpSupport.newSecret()
         ec.entity.makeValue(FACTOR).setAll([userId: userId, factorTypeEnumId: TYPE_TOTP, statusId: PENDING, secret: secret,
-                createdDate: now, failedCodeCount: 0]).setSequencedIdPrimary().create()
+                createdDate: now]).setSequencedIdPrimary().create()
         event(ec, userId, "SETUP_STARTED")
         String uri = TotpSupport.otpauthUri(issuer(), (String) account?.username ?: userId, secret)
         return [secret: secret, otpauthUri: uri, qrDataUri: TotpSupport.qrDataUri(uri), expiresInSeconds: PENDING_LIFETIME_SECONDS]
@@ -504,7 +502,7 @@ class TwoFactorSupport {
         pending.update()
         // A factor nobody was told about is the account-takeover step: say so, as a new passkey does (review M2).
         notify(ec, userId, TEMPLATE_APP_ADDED, [:])
-        if (first) return [ok: true, recoveryCodes: firstFactorOn(ec, userId, (String) pending.factorId)]
+        if (first) return [ok: true, recoveryCodes: firstFactorOn(ec, userId)]
         endSessions(ec, userId)
         event(ec, userId, "SETUP_CONFIRMED")
         return [ok: true]
@@ -527,8 +525,8 @@ class TwoFactorSupport {
 
     /** The person's first factor (the app or a passkey) is on: 10 recovery codes (returned once) and every login key
      *  ends, CLI keys included (the caller gets a fresh key). */
-    static List<String> firstFactorOn(def ec, String userId, String factorId) {
-        List<String> codes = replaceRecoveryCodes(ec, userId, factorId)
+    static List<String> firstFactorOn(def ec, String userId) {
+        List<String> codes = replaceRecoveryCodes(ec, userId)
         endSessions(ec, userId)
         event(ec, userId, "SETUP_CONFIRMED")
         return codes
@@ -539,8 +537,7 @@ class TwoFactorSupport {
         String userId = normalize(ec.user.userId)
         String problem = freshProofProblem(ec, code, passkeyAssertion, false)
         if (problem) return [error: problem]
-        def factor = activeFactor(ec, userId) ?: activeFactors(ec, userId).find { true }
-        List<String> codes = replaceRecoveryCodes(ec, userId, (String) factor.factorId)
+        List<String> codes = replaceRecoveryCodes(ec, userId)
         event(ec, userId, "CODES_RENEWED")
         return [recoveryCodes: codes]
     }
@@ -671,7 +668,7 @@ class TwoFactorSupport {
         find(ec, RECOVERY, "self-scoped auth: delete the person's recovery codes").condition("userId", userId).deleteAll()
     }
 
-    private static List<String> replaceRecoveryCodes(def ec, String userId, String factorId) {
+    private static List<String> replaceRecoveryCodes(def ec, String userId) {
         find(ec, RECOVERY, "self-scoped auth: replace the person's recovery codes").condition("userId", userId).deleteAll()
         Timestamp now = ec.user.nowTimestamp
         List<String> codes = []
@@ -680,7 +677,7 @@ class TwoFactorSupport {
             byte[] saltBytes = new byte[16]
             random.nextBytes(saltBytes)
             String salt = saltBytes.encodeHex().toString()
-            ec.entity.makeValue(RECOVERY).setAll([userId: userId, factorId: factorId, codeHash: recoveryHash(value, salt),
+            ec.entity.makeValue(RECOVERY).setAll([userId: userId, codeHash: recoveryHash(value, salt),
                     codeSalt: salt, createdDate: now]).setSequencedIdPrimary().create()
             codes << formatRecoveryCode(value)
         }

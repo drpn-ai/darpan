@@ -316,18 +316,18 @@ class TwoFactorSignInSmokeTests {
     @Test
     @DisplayName("super-admin enforcement needs two enrolled super admins; a policy change is on the admin trail")
     void superAdminPolicyNeedsTwoEnrolled() {
-        Map refused = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+        Map refused = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp])
         assertTrue(refused.errors.any { it.contains("At least 2 super admins") }, "${refused.errors}")
         String superSecret = enrol(SUPER_ID, SUPER_USERNAME).secret
         enrol(SUPER2_ID, SUPER2_USERNAME)
-        Map ok = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+        Map ok = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp, adminCode: code(superSecret)])
         assertEquals([], ok.errors)
         def audit = ec.entity.find("darpan.admin.AdminAuditLog").condition("targetType", "TwoFactorPolicy").disableAuthz().useCache(false).list()
         assertEquals(["DARPAN_SUPER_ADMIN"], audit*.targetId)
 
-        Map board = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.get#TwoFactorPolicies", [:]).out
+        Map board = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.get#TwoFactorPolicies", [:]).out
         assertEquals(2, board.enrolledSuperAdminCount)
         Map superRow = (board.policies as List<Map>).find { it.permissionGroupId == "DARPAN_SUPER_ADMIN" }
         assertEquals(2, superRow.enrolledCount)
@@ -439,12 +439,12 @@ class TwoFactorSignInSmokeTests {
         List<String> said = [capture.lines.join("\n"),
                 signedIn(USERNAME, "get#TwoFactorStatus", [:]).out.toString(),
                 signedIn(USERNAME, "get#SessionInfo", [:]).out.toString(),
-                signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail", [userId: USER_ID]).out.toString(),
-                signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.get#UserList", [searchText: "tf.user"]).out.toString()]
+                signedInCall(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail", [userId: USER_ID]).out.toString(),
+                signedInCall(SUPER_USERNAME, "admin.UserAdminServices.get#UserList", [searchText: "tf.user"]).out.toString()]
         said.each { assertFalse(it.contains(secret), "secret leaked: ${it.take(400)}") }
         (enrolled.recoveryCodes as List<String>).each { String rc -> said.each { assertFalse(it.contains(rc)) } }
-        assertEquals("ON", signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail", [userId: USER_ID]).out.userDetail.twoFactor)
-        Map listed = (signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.get#UserList", [searchText: "tf.user"]).out.users as List<Map>)
+        assertEquals("ON", signedInCall(SUPER_USERNAME, "admin.UserAdminServices.get#UserDetail", [userId: USER_ID]).out.userDetail.twoFactor)
+        Map listed = (signedInCall(SUPER_USERNAME, "admin.UserAdminServices.get#UserList", [searchText: "tf.user"]).out.users as List<Map>)
                 .find { it.userId == USER_ID }
         assertEquals("ON", listed.twoFactor)
     }
@@ -455,22 +455,22 @@ class TwoFactorSignInSmokeTests {
     @DisplayName("admin reset: super admins only, never their own, needs a reason and their own code; ends keys and leaves evidence")
     void adminReset() {
         enrol(USER_ID, USERNAME)
-        Map notSuper = signedInAdmin(OTHER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: "lost phone", adminCode: "123456"])
+        Map notSuper = signedInCall(OTHER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: "lost phone", adminCode: "123456"])
         assertFalse(notSuper.errors.isEmpty(), "a non-super-admin is refused")
 
-        Map unenrolledAdmin = signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: "lost phone", adminCode: "123456"])
+        Map unenrolledAdmin = signedInCall(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: "lost phone", adminCode: "123456"])
         assertTrue(unenrolledAdmin.errors.any { it.contains("Set up two-factor on your own account") }, "${unenrolledAdmin.errors}")
 
         String adminSecret = enrol(SUPER_ID, SUPER_USERNAME).secret
-        Map own = signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: SUPER_ID, reason: "x", adminCode: code(adminSecret)])
+        Map own = signedInCall(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: SUPER_ID, reason: "x", adminCode: code(adminSecret)])
         assertTrue(own.errors.any { it.contains("your own") }, "${own.errors}")
-        Map noReason = signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: " ", adminCode: code(adminSecret)])
+        Map noReason = signedInCall(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: " ", adminCode: code(adminSecret)])
         assertFalse(noReason.errors.isEmpty())
 
         ec.user.internalLoginUser(USERNAME)
         String liveKey = ec.user.getLoginKey(1.0f)
         ec.user.logoutUser()
-        Map done = signedInAdmin(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: "lost phone", adminCode: code(adminSecret)])
+        Map done = signedInCall(SUPER_USERNAME, "admin.UserAdminServices.reset#TwoFactor", [userId: USER_ID, reason: "lost phone", adminCode: code(adminSecret)])
         assertEquals([], done.errors)
         assertEquals(false, TwoFactorSupport.status(ec, USER_ID).enabled)
         assertNull(loginKey(AuthSessionSupport.hashLoginKey(ec, liveKey)), "every key ended")
@@ -617,7 +617,7 @@ class TwoFactorSignInSmokeTests {
         // Meanwhile the person turns two-factor on another way (here: a passkey row, as finish#PasskeyRegistration writes).
         Timestamp now = new Timestamp(System.currentTimeMillis())
         ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: PasskeySupport.TYPE_PASSKEY,
-                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now, failedCodeCount: 0]).setSequencedIdPrimary().create()
+                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary().create()
 
         Map confirmed = anon("confirm#TwoFactorSetup", [challengeToken: token, code: code(begun.out.secret as String)])
         assertEquals(["This sign-in has expired. Enter your password again."], confirmed.errors)
@@ -634,7 +634,7 @@ class TwoFactorSignInSmokeTests {
         TwoFactorSupport.FACTOR.with { ec.entity.find(it).condition("userId", OTHER_ID).disableAuthz().deleteAll() }
         String second = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD]).out.challengeToken
         ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: PasskeySupport.TYPE_PASSKEY,
-                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now, failedCodeCount: 0]).setSequencedIdPrimary().create()
+                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary().create()
         Map lateBegin = anon("begin#TwoFactorSetup", [challengeToken: second])
         assertEquals(["This sign-in has expired. Enter your password again."], lateBegin.errors)
         assertTrue(lateBegin.out.challengeEnded as boolean)
@@ -670,22 +670,22 @@ class TwoFactorSignInSmokeTests {
     @Test
     @DisplayName("review M4: changing the two-factor policy (setting a date or clearing it) needs the acting admin's fresh proof")
     void policyChangeNeedsAFreshProof() {
-        Map unenrolled = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+        Map unenrolled = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_TENANT_ADMIN", requiredFromDate: ec.user.nowTimestamp])
         assertEquals(["Set up two-factor on your own account before changing the two-factor policy."], unenrolled.errors)
 
         String secret = enrol(SUPER_ID, SUPER_USERNAME).secret
         setPolicy("DARPAN_TENANT_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
-        Map noCode = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+        Map noCode = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true])
         assertEquals([TwoFactorSupport.CODE_NEEDED], noCode.errors, "a session alone cannot switch enforcement off")
-        Map wrong = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+        Map wrong = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true, adminCode: "000000"])
         assertEquals([REFUSAL], wrong.errors)
         assertNotNull(ec.entity.find(TwoFactorSupport.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
                 .disableAuthz().useCache(false).one().requiredFromDate, "still required after the refusals")
 
-        Map cleared = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+        Map cleared = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true, adminCode: code(secret)])
         assertEquals([], cleared.errors)
         assertNull(ec.entity.find(TwoFactorSupport.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
@@ -898,10 +898,6 @@ class TwoFactorSignInSmokeTests {
         ec.user.logoutUser()
         assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
         return call(serviceName, params)
-    }
-
-    private Map signedInAdmin(String username, String serviceName, Map params) {
-        return signedInCall(username, serviceName, params)
     }
 
     private Map call(String serviceName, Map params) {

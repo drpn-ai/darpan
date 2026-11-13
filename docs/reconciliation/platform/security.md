@@ -66,6 +66,54 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
 - Short-lived credentials for services
 - Environment-level separation (dev, staging, prod)
 
+### Two-factor sign-in (DAR-BE-264)
+
+- Authenticator-app codes (TOTP: 6 digits, 30 seconds, SHA-1) for every way a person gets a session: `login#Session`
+  answers a right password from someone with two-factor on with a challenge, not a session (`twoFactorRequired`,
+  `challengeToken`), and `verify#SignInCode` finishes it with a code or a one-time recovery code. Factors, recovery codes,
+  challenges, the per-role policy and the evidence trail live in `darpan.auth` (`entity/TwoFactorEntities.xml`); Darpan
+  never writes the framework's `moqui.security.UserAuthcFactor` and no `UserGroup` has `requireAuthcFactor=Y`.
+- Who must use it is data: `darpan.auth.TwoFactorRolePolicy` per role (`ADMIN`, `DARPAN_SUPER_ADMIN`, `DARPAN_ADMIN`,
+  `DARPAN_TENANT_ADMIN` in any tenant). Every role ships optional; `admin.SecurityAdminServices.update#TwoFactorPolicy`
+  sets a date (a future date is the grace period, during which sign-in prompts) and writes an `AdminAuditLog` row.
+  Requiring it for `ADMIN` or `DARPAN_SUPER_ADMIN` is refused until at least two super admins have it on.
+- Limits: 5 wrong codes end a challenge; every wrong code is a failed login (the framework lockout: 3, then 5 minutes);
+  20 wrong codes in 24 hours lock codes until a password reset or an admin reset, and the person is emailed. A code is
+  accepted once (replay check). A password reset never ends or changes two-factor; it clears the code lock.
+- A fresh code is asked for when approving a CLI sign-in (`approve#CliLogin`), a `/transfer` export or secret handoff
+  (`twoFactorCode`), new recovery codes, turning it off, and an admin reset (the acting admin's own code).
+- A login key issued before the person's factor was confirmed stops working (web and CLI); a CLI key of someone required
+  and not enrolled is refused. Confirming a factor ends every other key and hands the confirming tab a fresh one.
+- The framework's password-only ways in are refused for everyone (`PasswordOnlyRouteFence`, webroot before-request):
+  HTTP Basic and `authUsername`/`authPassword` answer 401 (signed out again first), `/Login`, `/SecondFactor` and
+  `/ChangePassword` answer 404. Not covered: a WebSocket handshake with Basic (no before-request hook; Darpan serves no
+  WebSocket its clients use).
+- Instance label in the authenticator app: set `DARPAN_TOTP_ISSUER` (e.g. `Darpan UAT`, `Darpan SM`); default `Darpan`.
+- Reset: `admin.UserAdminServices.reset#TwoFactor` (super admins only, never one's own, a reason and the admin's own
+  code) ends the factor and recovery codes and every session and CLI key, and writes `AdminAuditLog`, a
+  `TwoFactorEvent` naming the admin, and an email to the person.
+
+#### Break-glass: no super admin can pass two-factor
+
+Keep at least two super admins enrolled (the policy switch refuses fewer), so one lost phone is a `reset#TwoFactor` by
+the other. Only when no enrolled super admin can sign in, Aditi ends her own factor directly in the database, from an
+ECS Exec session on the backend task (or the database console), and writes the same evidence the service would:
+
+```sql
+UPDATE TWO_FACTOR_FACTOR SET STATUS_ID = 'ENDED', ENDED_DATE = CURRENT_TIMESTAMP, ENDED_REASON = 'ADMIN_RESET'
+  WHERE USER_ID = '<userId>' AND STATUS_ID IN ('ACTIVE', 'PENDING');
+DELETE FROM TWO_FACTOR_RECOVERY_CODE WHERE USER_ID = '<userId>';
+DELETE FROM USER_LOGIN_KEY WHERE USER_ID = '<userId>';
+INSERT INTO TWO_FACTOR_EVENT (EVENT_ID, USER_ID, EVENT_TYPE, BY_USER_ID, EVENT_DATE)
+  VALUES ('BREAKGLASS-<yyyymmdd>', '<userId>', 'ADMIN_RESET', '<userId>', CURRENT_TIMESTAMP);
+INSERT INTO ADMIN_AUDIT_LOG (ADMIN_AUDIT_LOG_ID, ADMIN_USER_ID, SERVICE_NAME, TARGET_TYPE, TARGET_ID, DETAIL_TEXT, AUDIT_TIMESTAMP)
+  VALUES ('BREAKGLASS-<yyyymmdd>', '<userId>', 'break-glass (runbook)', 'User', '<userId>',
+          'Two-factor reset: break-glass, <reason>', CURRENT_TIMESTAMP);
+```
+
+The next sign-in then asks for setup (the role is required), and the first thing after it is to reset the other super
+admins' lost factors through the admin app and record the incident.
+
 ## Data Protection
 
 - TLS for all ingestion endpoints (SFTP, API, GraphQL)

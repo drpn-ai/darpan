@@ -23,6 +23,23 @@ class PasskeySupportTests {
     }
 
     @Test
+    @DisplayName("with no DARPAN_APP_BASE_URL, rpId and origins come from the webapp_allow_origins System property (Moqui's default-property)")
+    void fallsBackToTheAllowOriginsSystemProperty() {
+        // An ec whose resource properties do not carry webapp_allow_origins, as on a real instance.
+        def ec = [resource: [properties: [:]]]
+        String before = System.getProperty("webapp_allow_origins")
+        try {
+            System.setProperty("webapp_allow_origins", "http://localhost:5173,http://localhost:5174")
+            if (System.getenv("DARPAN_WEBAUTHN_RP_ID") || System.getenv("DARPAN_APP_BASE_URL")) return // env set: not this case
+            assertEquals("localhost", PasskeySupport.rpId(ec))
+            assertEquals(["http://localhost:5173", "http://localhost:5174"] as Set, PasskeySupport.origins(ec))
+            assertTrue(PasskeySupport.available(ec))
+        } finally {
+            if (before == null) System.clearProperty("webapp_allow_origins") else System.setProperty("webapp_allow_origins", before)
+        }
+    }
+
+    @Test
     @DisplayName("names are trimmed to 60 characters without control characters; blank becomes Passkey")
     void names() {
         assertEquals("MacBook Touch ID", PasskeySupport.cleanName("  MacBook\u0007 Touch ID "))

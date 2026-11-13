@@ -662,7 +662,10 @@ class TenantNotificationSupport {
     }
 
     protected static String resolveFirstAllowedOrigin(def ec) {
-        String rawOrigins = ec?.resource?.properties?.get("webapp_allow_origins")?.toString()?.trim()
+        // Moqui writes conf default-property values (webapp_allow_origins among them) as System properties, which
+        // ec.resource.properties does not hold; without the fallback an instance with no DARPAN_APP_BASE_URL (local, UAT)
+        // never resolved an app origin.
+        String rawOrigins = (ec?.resource?.properties?.get("webapp_allow_origins") ?: System.getProperty("webapp_allow_origins"))?.toString()?.trim()
         if (!rawOrigins || rawOrigins == "*") return null
         return rawOrigins.split(",").collect { it.trim() }.find { it && it != "*" }
     }

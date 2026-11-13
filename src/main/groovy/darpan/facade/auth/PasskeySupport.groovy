@@ -102,7 +102,8 @@ class PasskeySupport {
         if (configured) {
             candidates = configured.split(",").collect { it.trim() }
         } else {
-            String allowed = normalize(ec?.resource?.properties?.get("webapp_allow_origins")?.toString())
+            // default-property values live in System properties (see TenantNotificationSupport.resolveFirstAllowedOrigin)
+            String allowed = normalize((ec?.resource?.properties?.get("webapp_allow_origins") ?: System.getProperty("webapp_allow_origins"))?.toString())
             candidates = (allowed ? allowed.split(",").collect { it.trim() } : []) + [TenantNotificationSupport.resolveAppBaseUrl(ec)]
         }
         return originsFor(rp, candidates)

@@ -117,8 +117,11 @@ class TransferSpecs {
     static final List<Map> KINDS = [
             [kind: NETSUITE_AUTH, entityName: "darpan.reconciliation.NsAuthConfig", pkField: "nsAuthConfigId", naturalKey: null,
              grantType: SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH],
+            // DAR-BE-275: an app install's refresh token is single-use, so a copy on another instance would let the first
+            // instance to refresh cut the other off. The install itself stays behind; the target installs the app again.
             [kind: SHOPIFY_AUTH, entityName: "darpan.shopify.ShopifyAuthConfig", pkField: "shopifyAuthConfigId", naturalKey: null,
-             grantType: SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH],
+             grantType: SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH,
+             dropFields: ["shopifyAppId", "refreshToken", "accessTokenExpiresDate", "refreshTokenExpiresDate", "grantedScopes", "installedDate"]],
             [kind: HOTWAX_OMS_REST, entityName: "darpan.hotwax.HotWaxOmsRestSourceConfig", pkField: "omsRestSourceConfigId",
              naturalKey: null, grantType: SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, extraSecretFields: ["headersJson"]],
             [kind: NETSUITE_RESTLET, entityName: "darpan.reconciliation.NsRestletConfig", pkField: "nsRestletConfigId",
@@ -324,9 +327,11 @@ class TransferSpecs {
         return (ed.getAllFieldNames() as List<String>).findAll { !isSecret(ed, it) }
     }
 
+    /** Encrypted columns that travel sealed. A secret the kind drops (dropFields) stays behind like any dropped column. */
     static List<String> secretFields(def ec, String entityName) {
         def ed = ec.entity.getEntityDefinition(entityName)
-        return (ed.getAllFieldNames() as List<String>).findAll { isSecret(ed, it) }.sort()
+        List<String> dropped = (specForEntity(entityName)?.dropFields ?: []) as List<String>
+        return (ed.getAllFieldNames() as List<String>).findAll { isSecret(ed, it) && !(it in dropped) }.sort()
     }
 
     /**

@@ -116,6 +116,10 @@ class TenantOwnedEntityFilterContractTests {
             "moqui.gql.GqlApiKey"                                  : "moqui.* entities are skipped by the framework " +
                     "(ArtifactExecutionFacadeImpl.getFindFiltersForUser) — a filter row would be inert",
             // Tenant-named differently: a [companyUserGroupId: ...] filter cannot apply.
+            // DAR-BE-275: platform-owned, managed only by super admins (admin.ShopifyAppAdminServices); tenantUserGroupId
+            // names the one tenant allowed to install the app, it is not ownership.
+            "darpan.shopify.ShopifyApp"                            : "platform-owned Shopify app; tenantUserGroupId is an " +
+                    "install permission, read only via findGlobalUnscoped with an explicit tenant condition",
             "darpan.auth.ConfigTenantAccess"                       : "peer-group grant keyed by tenantUserGroupId; read only " +
                     "through SharedConfigAccessSupport via findGlobalUnscoped",
             "darpan.reconciliation.SftpServerTenantAccess"         : "sharing grant keyed by tenantUserGroupId",

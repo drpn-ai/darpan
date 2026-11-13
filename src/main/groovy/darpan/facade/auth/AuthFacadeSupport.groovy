@@ -45,6 +45,9 @@ class AuthFacadeSupport {
      *  message this list does not recognise — is treated as having skipped the hash, so drift in the
      *  framework's wording costs a redundant hash rather than reopening the timing channel. */
     private static final List<String> POST_PASSWORD_REFUSAL_MARKERS = [
+            // A wrong password: the realm ran the matcher to find out. Without this marker a decoy was spent on top, and
+            // with the PBKDF2 hash (DAR-BE-268) two hashes against an unknown username's one is a tell past the floor.
+            "Password incorrect for username",
             PASSWORD_CHANGE_REQUIRED_MARKER,
             PASSWORD_EXPIRED_MARKER,
             "is not in allowed list",
@@ -74,6 +77,7 @@ class AuthFacadeSupport {
     private static final long LOGIN_REFUSAL_FLOOR_MILLIS = 25L
 
     static Map<String, Object> loginSession(def ec, Object username, Object password) {
+        measurePasswordHashCostOnce(ec)
         long attemptStartedNanos = System.nanoTime()
         String usernameValue = normalize(username)
         String passwordValue = password?.toString()
@@ -491,6 +495,11 @@ class AuthFacadeSupport {
             POST_PASSWORD_REFUSAL_MARKERS.any { marker -> refusal?.contains(marker) }
         }
         if (hashAlreadySpent) return
+        spendDecoyHash(ec, usernameValue, passwordValue)
+    }
+
+    /** One decoy credential check; its cost is recorded for the floor. */
+    private static void spendDecoyHash(def ec, String usernameValue, String passwordValue) {
         try {
             // Drive the SAME matcher the real path uses rather than hashing directly: a bare SimpleHash
             // leaves out the matcher construction, salt byte-source conversion and digest comparison around
@@ -501,10 +510,18 @@ class AuthFacadeSupport {
             long decoyStartedNanos = System.nanoTime()
             ec.ecfi.getCredentialsMatcher(decoyHashType(ec), false).doCredentialsMatch(token, info)
             recordPasswordHashCost((System.nanoTime() - decoyStartedNanos).intdiv(1_000_000L) as long)
+            passwordHashCostMeasured = true
         } catch (Exception e) {
             // Never fail a login response over the decoy; worst case the timing difference returns.
             logger.warn("Decoy credential check failed, refused-login timing may be distinguishable: ${e.message}")
         }
+    }
+
+    /** Review L3: the floor needs the cost of one hash from the first refusal on, not from the first one that happened
+     *  to spend a decoy (until then the floor was the bare 25 ms, below a slow hash). The first sign-in attempt after
+     *  start measures it, before that attempt's clock starts, so the measurement never shows in a refusal's timing. */
+    private static void measurePasswordHashCostOnce(def ec) {
+        if (!passwordHashCostMeasured) spendDecoyHash(ec, "", "")
     }
 
     /** The hash type the decoy spends: the one a password set now gets (DAR-BE-268: PBKDF2, which every account
@@ -522,6 +539,8 @@ class AuthFacadeSupport {
      *  sits this far above LOGIN_REFUSAL_FLOOR_MILLIS: a slow hash (tens to hundreds of ms) would otherwise put
      *  every refusal past a fixed 25ms floor, leaving the residual it exists to hide uncovered. */
     private static volatile long passwordHashCostMillis = 0L
+    /** Set by the first decoy: a hash that measures 0 ms (SHA-256) is measured, not missing. */
+    private static volatile boolean passwordHashCostMeasured = false
 
     private static void recordPasswordHashCost(long millis) {
         long previous = passwordHashCostMillis

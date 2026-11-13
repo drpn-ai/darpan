@@ -2,6 +2,7 @@ package darpan.facade.auth
 
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -13,6 +14,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class AuthFacadeSupportTests {
+
+    /** The one-time hash measurement (review L3) has run, as it has in a live JVM after its first sign-in attempt, so
+     *  the decoy counts below see only the refusal's own work whatever order the tests run in. */
+    @BeforeEach
+    void hashCostAlreadyMeasured() {
+        AuthFacadeSupport.@passwordHashCostMeasured = true
+    }
 
     @Test
     void loginSessionIssuesLoginKeyTokenAndSessionInfo() {
@@ -555,6 +563,39 @@ class AuthFacadeSupportTests {
                 "the framework already hashed on this path; a decoy would make it the slow one instead")
     }
 
+    /** A wrong password is refused AFTER the realm hashed it, so a decoy would make it the slow refusal: with the
+     *  PBKDF2 hash (DAR-BE-268) two hashes against an unknown username's one is a tell far past the floor. */
+    @Test
+    void loginSessionDoesNotSpendADecoyOnAWrongPassword() {
+        EcfiStub ecfi = new EcfiStub(credentialsMatch: false)
+        UserStub user = new UserStub(loginUserResult: false, loginFailureError: ACCOUNT_REVEALING_REFUSALS.wrongPassword)
+        AuthFacadeSupport.loginSession(executionContext(user: user, ecfi: ecfi), "avnindra.sharma", "guess")
+        assertEquals(0, ecfi.credentialChecks.size(), "the realm already spent the hash on a wrong password")
+    }
+
+    /** Review L3: the floor sits above the measured hash cost, and that cost is measured before the first attempt, so
+     *  parity holds from the first refusal after start, not only once some refusal has spent a decoy. */
+    @Test
+    void theFirstRefusalAfterStartIsHeldAboveTheHashCost() {
+        AuthFacadeSupport.@passwordHashCostMillis = 0L
+        AuthFacadeSupport.@passwordHashCostMeasured = false
+        try {
+            EcfiStub ecfi = new EcfiStub(credentialsMatch: false, checkMillis: 60L)
+            UserStub user = new UserStub(loginUserResult: false, loginFailureError: ACCOUNT_REVEALING_REFUSALS.wrongPassword,
+                    loginMillis: 60L)
+            def ec = executionContext(user: user, ecfi: ecfi)
+            long started = System.nanoTime()
+            AuthFacadeSupport.loginSession(ec, "avnindra.sharma", "guess")
+            long elapsed = (System.nanoTime() - started).intdiv(1_000_000L)
+            assertTrue(AuthFacadeSupport.@passwordHashCostMillis >= 60L, "measured before the attempt")
+            // the measurement (60), then the attempt held to 25 + 60 (the realm's own hash is 60 of it)
+            assertTrue(elapsed >= 145L, "the first refusal was held above the hash cost, took ${elapsed}ms")
+        } finally {
+            AuthFacadeSupport.@passwordHashCostMillis = 0L
+            AuthFacadeSupport.@passwordHashCostMeasured = false
+        }
+    }
+
     /** A refusal whose wording this code does not recognise must fall to the safe side — spend the hash.
      *  Framework wording drifting should cost a redundant hash, never reopen the timing channel. */
     @Test
@@ -895,7 +936,11 @@ class AuthFacadeSupportTests {
         Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         Object userAccount = new Expando(timeZone: "Asia/Kolkata")
 
+        /** How long the realm's own password check takes here (a slow hash), for the timing tests. */
+        long loginMillis = 0L
+
         boolean loginUser(String loginUsername, String password) {
+            if (loginMillis) Thread.sleep(loginMillis)
             if (loginUserResult) {
                 userId = userId ?: "EX_USER"
                 username = username ?: loginUsername
@@ -945,6 +990,8 @@ class AuthFacadeSupportTests {
         /** One entry per credential check actually spent on this request. UserStub fakes the framework's own
          *  check, so in these tests this counts decoys only — exactly what the timing parity depends on. */
         List<String> credentialChecks = []
+        /** How long one credential check takes (a slow hash), for the timing tests. */
+        long checkMillis = 0L
 
         Object getCredentialsMatcher(Object hashType, boolean base64) {
             requestedHashType = hashType
@@ -966,6 +1013,7 @@ class AuthFacadeSupportTests {
         EcfiStub ecfi
 
         boolean doCredentialsMatch(Object token, Object info) {
+            if (ecfi?.checkMillis) Thread.sleep(ecfi.checkMillis)
             ecfi?.credentialChecks?.add(info?.toString())
             return credentialsMatch
         }

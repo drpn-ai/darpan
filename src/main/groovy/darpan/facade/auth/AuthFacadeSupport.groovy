@@ -204,7 +204,7 @@ class AuthFacadeSupport {
             def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
                     "pre-auth: the account a verified sign-in challenge belongs to").condition("userId", claim.userId).one()
             if (CliAuthSupport.canSignIn(ec, account)) {
-                signedIn = loggedInHere = ec.user.internalLoginUser((String) account.username, false) as boolean
+                signedIn = loggedInHere = AuthSessionSupport.signInOnNewSession(ec, (String) account.username, false)
             }
             if (signedIn) {
                 signedIn = issueSignedInSession(ec, result)
@@ -265,7 +265,7 @@ class AuthFacadeSupport {
             TwoFactorSupport.useChallenge(ec, challengeToken)
             def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
                     "pre-auth: the account a setup challenge belongs to").condition("userId", userId).one()
-            if (!CliAuthSupport.canSignIn(ec, account) || !ec.user.internalLoginUser((String) account.username, false)) {
+            if (!CliAuthSupport.canSignIn(ec, account) || !AuthSessionSupport.signInOnNewSession(ec, (String) account.username, false)) {
                 // The factor was switched on and the challenge used above: neither may stand for an account that
                 // cannot sign in.
                 result.challengeEnded = true
@@ -360,7 +360,7 @@ class AuthFacadeSupport {
             TwoFactorSupport.useChallenge(ec, challengeToken)
             def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
                     "pre-auth: the account a setup challenge belongs to").condition("userId", userId).one()
-            if (!CliAuthSupport.canSignIn(ec, account) || !ec.user.internalLoginUser((String) account.username, false)) {
+            if (!CliAuthSupport.canSignIn(ec, account) || !AuthSessionSupport.signInOnNewSession(ec, (String) account.username, false)) {
                 result.challengeEnded = true
                 return refused(ec, result, "This account can no longer sign in.", true)
             }

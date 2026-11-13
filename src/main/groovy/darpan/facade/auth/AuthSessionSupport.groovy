@@ -131,12 +131,26 @@ class AuthSessionSupport {
 
         boolean restored = false
         try {
-            restored = ec?.user?.internalLoginUser(username) as boolean
+            restored = signInOnNewSession(ec, username, true)
         } catch (Exception e) {
             logger.warn("restoreAuthenticatedSession failed for cookie token (username=${username}): ${e.message}")
         }
         if (!restored) clearPersistentLoginCookie(ec)
         return restored
+    }
+
+    /**
+     * Signs the request in as username without a password (internalLoginUser) on a NEW servlet session, as
+     * UserFacadeImpl.loginUser does for a password (review M3): a session id the client held before this sign-in, one an
+     * attacker may have planted (session fixation), must not become the signed-in session. WebFacadeImpl.makeNewSession
+     * keeps the old session's attributes and sends the new CSRF token in the X-CSRF-Token header, which darpan-ui takes
+     * from every reply. Used by every sign-in that follows a check other than the password: the persistent-login cookie,
+     * verify#SignInCode, and a setup challenge's confirm#TwoFactorSetup / finish#PasskeyRegistration.
+     */
+    static boolean signInOnNewSession(def ec, String username, boolean saveHistory) {
+        def web = ec?.web
+        if (web != null && web.metaClass.respondsTo(web, "makeNewSession")) web.makeNewSession()
+        return ec.user.internalLoginUser(username, saveHistory) as boolean
     }
 
     // ---- DAR-BE-261: idle timeout and absolute lifetime of a web sign-in ----

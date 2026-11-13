@@ -639,6 +639,30 @@ class TwoFactorSignInSmokeTests {
         assertTrue(lateFinish.out.challengeEnded as boolean, "${lateFinish}")
     }
 
+    @Test
+    @DisplayName("review M3: a sign-in after a challenge starts a new servlet session: verify#SignInCode and a setup confirm")
+    void challengeSignInsStartANewSession() {
+        List<String> signedInFresh = []
+        AuthSessionSupport.metaClass.static.signInOnNewSession = { def ecArg, String username, boolean saveHistory ->
+            signedInFresh << username
+            return ecArg.user.internalLoginUser(username, saveHistory) as boolean
+        }
+        try {
+            String secret = enrol(USER_ID, USERNAME).secret
+            assertTrue(anon("verify#SignInCode", [challengeToken: challenge(USERNAME), code: code(secret)]).out.authenticated as boolean)
+
+            group(OTHER_ID, "DARPAN_ADMIN")
+            setPolicy("DARPAN_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
+            String token = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD]).out.challengeToken
+            String otherSecret = anon("begin#TwoFactorSetup", [challengeToken: token]).out.secret
+            assertTrue(anon("confirm#TwoFactorSetup", [challengeToken: token, code: code(otherSecret)]).out.authenticated as boolean)
+
+            assertEquals([USERNAME, OTHER_USERNAME], signedInFresh)
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(AuthSessionSupport)
+        }
+    }
+
     // ---- regressions and invariants ----
 
     @Test

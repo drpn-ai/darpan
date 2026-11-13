@@ -6,6 +6,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -213,6 +214,28 @@ class AuthSessionSupportTests {
         assertNull(user.userId)
     }
 
+    @Test
+    void cookieRestoreSignsInOnANewSession() {
+        // Review M3: a session id the browser held before the restore (one an attacker may have planted) must not become
+        // the signed-in session. The new session comes first, then the sign-in, as UserFacadeImpl.loginUser does.
+        List<String> calls = []
+        def user = new UserStub(userId: null, loginUserResult: true, calls: calls)
+        def loginKeyEntity = new Expando(loginKey: "hash:cookie-session-key", userId: "EX_USER")
+        loginKeyEntity.getTimestamp = { String field -> field == "thruDate" ? new Timestamp(System.currentTimeMillis() + 3_600_000L) : null }
+        def entity = new EntityFacadeStub(finders: [
+            "moqui.security.UserLoginKey": new FinderStub(oneResult: loginKeyEntity),
+            "moqui.security.UserAccount" : new FinderStub(oneResult: new Expando(userId: "EX_USER", username: "test.user")),
+        ])
+        def web = new RotatingWebStub(request: new RequestStub(cookies: [new CookieStub(name: "darpan_login_key", value: "cookie-session-key")]),
+                response: new ResponseStub(), calls: calls)
+        def ec = buildEc(user: user, web: web, entity: entity)
+
+        assertTrue(AuthSessionSupport.restoreAuthenticatedSession(ec))
+        assertEquals(["new session", "sign in"], calls)
+        assertNotEquals("planted-session", web.sessionId)
+        assertEquals("EX_USER", user.userId)
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
@@ -242,15 +265,27 @@ class AuthSessionSupportTests {
         String  userId
         String  username
         boolean loginUserResult = false
+        List<String> calls
 
         /** Called by AuthSessionSupport.restoreAuthenticatedSession when rebuilding the session. */
-        boolean internalLoginUser(String uname) {
+        boolean internalLoginUser(String uname, boolean saveHistory = true) {
+            calls?.add("sign in")
             if (loginUserResult) {
                 userId   = "EX_USER"
                 username = uname
             }
             return loginUserResult
         }
+    }
+
+    /** A web facade whose servlet session can be replaced, as WebFacadeImpl.makeNewSession does. */
+    static class RotatingWebStub {
+        RequestStub request
+        ResponseStub response
+        List<String> calls
+        String sessionId = "planted-session"
+        Object makeNewSession() { calls?.add("new session"); sessionId = "fresh-session"; return null }
+        String getSessionToken() { sessionId }
     }
 
     static class RequestStub {

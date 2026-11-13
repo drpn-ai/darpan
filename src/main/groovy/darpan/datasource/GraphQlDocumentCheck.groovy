@@ -76,8 +76,9 @@ class GraphQlDocumentCheck {
      * mutation, subscription) and fields — every field it selects, in every operation, as [path, arguments]. path is the
      * list of real field names from the operation's root (an alias is ignored, so it cannot hide a field); an inline
      * fragment or a spread fragment's type condition joins the path as "on:Type". arguments maps each argument name to
-     * [kind: "string", value] for a string literal, [kind: "variable", name] for a $variable, [kind: "null"] or
-     * [kind: "other"]. A list, not a map keyed by name, so two fields of one name (aliased, or in two operations) are
+     * [kind: "string", value] for a string literal, [kind: "null"], [kind: "other"], or for a $variable
+     * [kind: "variable", name, hasDefault, default: the default's own report]. A path's "on:" steps are not depth: a
+     * field is at the root when its path holds one name besides them. A list, not a map keyed by name, so two fields of one name (aliased, or in two operations) are
      * both reported. Plain lists and maps, so a component without graphql-java can use it. Never throws: errors is
      * non-empty when the document can't be read.
      */
@@ -92,40 +93,55 @@ class GraphQlDocumentCheck {
         Map<String, FragmentDefinition> fragments = doc.getDefinitionsOfType(FragmentDefinition).collectEntries { [(it.name): it] }
         List<OperationDefinition> ops = doc.getDefinitionsOfType(OperationDefinition)
         List<Map> fields = []
-        ops.each { OperationDefinition op -> walkPaths(op.selectionSet, fragments, [], [] as Set<String>, fields) }
+        ops.each { OperationDefinition op ->
+            // A $variable's default is what the server uses when no value is sent, so it is reported with the argument.
+            Map<String, Map> defaults = (op.variableDefinitions ?: []).collectEntries { VariableDefinition v ->
+                [(v.name): v.defaultValue == null ? null : valueReport(v.defaultValue)]
+            }
+            walkPaths(op.selectionSet, fragments, [], [] as Set<String>, fields, defaults)
+        }
         List<String> errors = []
         if (doc.definitions.size() != ops.size() + fragments.size()) errors << "The document holds something other than operations and fragments."
         return [errors: errors, operations: ops.collect { it.operation.name().toLowerCase() }, fields: fields]
     }
 
-    private static Map<String, Map> argumentsOf(Field f) {
+    private static Map<String, Map> argumentsOf(Field f, Map<String, Map> defaults) {
         return (f.arguments ?: []).collectEntries { Argument a ->
             def v = a.value
-            [(a.name): v instanceof StringValue ? [kind: "string", value: ((StringValue) v).value] :
-                    v instanceof VariableReference ? [kind: "variable", name: ((VariableReference) v).name] :
-                            v instanceof NullValue ? [kind: "null"] : [kind: "other"]]
+            Map report = valueReport(v)
+            if (v instanceof VariableReference) {
+                String name = ((VariableReference) v).name
+                report = [kind: "variable", name: name, hasDefault: defaults.containsKey(name) && defaults.get(name) != null,
+                          default: defaults.get(name)]
+            }
+            [(a.name): report]
         } as Map<String, Map>
     }
 
+    private static Map valueReport(def v) {
+        return v instanceof StringValue ? [kind: "string", value: ((StringValue) v).value] :
+                v instanceof NullValue ? [kind: "null"] : [kind: "other"]
+    }
+
     private static void walkPaths(SelectionSet set, Map<String, FragmentDefinition> fragments, List<String> prefix,
-            Set<String> fragmentsOnPath, List<Map> fields) {
+            Set<String> fragmentsOnPath, List<Map> fields, Map<String, Map> defaults) {
         for (Selection s : (set?.selections ?: [])) {
             if (s instanceof Field) {
                 Field f = (Field) s
                 List<String> path = prefix + [f.name]
-                fields << [path: path, arguments: argumentsOf(f)]
-                walkPaths(f.selectionSet, fragments, path, fragmentsOnPath, fields)
+                fields << [path: path, arguments: argumentsOf(f, defaults)]
+                walkPaths(f.selectionSet, fragments, path, fragmentsOnPath, fields, defaults)
             } else if (s instanceof InlineFragment) {
                 InlineFragment inline = (InlineFragment) s
                 String type = inline.typeCondition?.name
-                walkPaths(inline.selectionSet, fragments, type ? prefix + ["on:${type}".toString()] : prefix, fragmentsOnPath, fields)
+                walkPaths(inline.selectionSet, fragments, type ? prefix + ["on:${type}".toString()] : prefix, fragmentsOnPath, fields, defaults)
             } else if (s instanceof FragmentSpread) {
                 String name = ((FragmentSpread) s).name
                 FragmentDefinition fragment = fragments.get(name)
                 // Once per path, so a fragment that spreads itself cannot loop; a fragment reused elsewhere is walked again there.
                 if (fragment == null || fragmentsOnPath.contains(name)) continue
                 walkPaths(fragment.selectionSet, fragments, prefix + ["on:${fragment.typeCondition?.name}".toString()],
-                        fragmentsOnPath + [name] as Set<String>, fields)
+                        fragmentsOnPath + [name] as Set<String>, fields, defaults)
             }
         }
     }

@@ -17,19 +17,25 @@ import org.moqui.impl.webapp.ScreenResourceNotFoundException
  * that carried them is signed out again and refused with 401 whether the password was right or not, so the refusal says
  * nothing about it. The three screens answer 404 on either view of the path (RpcMethodFence's routed and normalised).
  *
+ * <p>DAR-BE-276: the framework also signed a service call in from authUsername/authPassword/authUserAccount inside its
+ * own parameters, which over /rpc/json are the JSON body's params (or each call of a batch) and over GraphQL its
+ * variables. The fork no longer does (ServiceCallSyncImpl); as a second line, a body carrying any of those keys at any
+ * depth is refused here the same way, read from the body the framework has already parsed.
+ *
  * <p>Not covered: a WebSocket handshake (UserFacadeImpl.initFromHandshakeRequest also reads Basic), which runs no
  * before-request hook. Darpan serves no WebSocket endpoint its clients use.
  */
 class PasswordOnlyRouteFence {
 
     static final List<String> CLOSED_SCREENS = ["Login", "SecondFactor", "ChangePassword"].asImmutable()
-    static final List<String> CREDENTIAL_PARAMETERS = ["authUsername", "authPassword"].asImmutable()
+    static final Set<String> CREDENTIAL_PARAMETERS = (["authUsername", "authPassword", "authUserAccount"] as Set<String>).asImmutable()
     static final String CREDENTIALS_REFUSAL = "Sign in through the Darpan app. Passwords are not accepted on this request."
 
     static void enforce(def ec) {
         def request = ec?.web?.request
         if (request == null) return
-        if (carriesPasswordCredentials(request.getHeader("Authorization") as String, parameterNames(ec))) {
+        if (carriesPasswordCredentials(request.getHeader("Authorization") as String, parameterNames(ec))
+                || nestsCredentials(requestParameters(ec))) {
             signOut(ec, request)
             throw new AuthenticationRequiredException(CREDENTIALS_REFUSAL)
         }
@@ -39,11 +45,37 @@ class PasswordOnlyRouteFence {
         if (closed) throw new ScreenResourceNotFoundException(null, routed, null, closed, null, null)
     }
 
-    /** True for an HTTP Basic Authorization header (any case) or an authUsername/authPassword parameter. Pure. */
+    /** True for an HTTP Basic Authorization header (any case) or an authUsername/authPassword/authUserAccount parameter. Pure. */
     static boolean carriesPasswordCredentials(String authorization, Collection<String> parameterNames) {
         String value = authorization?.trim()
         if (value && value.length() >= 5 && value.substring(0, 5).equalsIgnoreCase("Basic")) return true
         return parameterNames?.any { it in CREDENTIAL_PARAMETERS } ?: false
+    }
+
+    /**
+     * True when a credential key sits in any map at any depth of an already-parsed request (JSON-RPC params, each call of a
+     * batch's _requestBodyJsonList, GraphQL variables). Keys only: a value that merely reads "authUsername" is fine. Walks
+     * maps and lists without recursion, so a deeply nested body cannot exhaust the stack. Pure.
+     */
+    static boolean nestsCredentials(Object parsed) {
+        Deque<Object> pending = new ArrayDeque<>()
+        if (parsed instanceof Map || parsed instanceof Collection) pending.push(parsed)
+        while (!pending.isEmpty()) {
+            Object value = pending.pop()
+            Collection children
+            if (value instanceof Map) {
+                for (Object key : ((Map) value).keySet()) {
+                    if (key instanceof String && CREDENTIAL_PARAMETERS.contains((String) key)) return true
+                }
+                children = ((Map) value).values()
+            } else {
+                children = (Collection) value
+            }
+            for (Object child : children) {
+                if (child instanceof Map || child instanceof Collection) pending.push(child)
+            }
+        }
+        return false
     }
 
     /** The closed screen a path starts at, matched on the name before its first dot (a render-mode extension), or null. Pure. */
@@ -53,6 +85,15 @@ class PasswordOnlyRouteFence {
         int dot = first.indexOf('.')
         String name = dot >= 0 ? first.substring(0, dot) : first
         return name in CLOSED_SCREENS ? name : null
+    }
+
+    /** The parameters the framework parsed for this request (query, form and JSON body), or null. */
+    private static Object requestParameters(def ec) {
+        try {
+            return ec.web.requestParameters
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     private static Set<String> parameterNames(def ec) {

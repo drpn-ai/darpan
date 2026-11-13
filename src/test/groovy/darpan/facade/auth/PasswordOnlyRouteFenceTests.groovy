@@ -69,6 +69,30 @@ class PasswordOnlyRouteFenceTests {
         assertEquals("WEB_USER", ownLogin.user.userId, "nothing signed out")
     }
 
+    @Test
+    @DisplayName("DAR-BE-276: credentials anywhere in a JSON body are refused: params, a batch, GraphQL variables, authUserAccount")
+    void credentialsInsideAJsonBody() {
+        Map refused = [
+                rpcParams   : [method: "facade.AuthFacadeServices.get#SessionInfo", params: [authUsername: "tf.user", authPassword: "x"]],
+                rpcAccount  : [method: "facade.AuthFacadeServices.get#SessionInfo", params: [authUserAccount: [username: "tf.user", currentPassword: "x"]]],
+                batch       : [_requestBodyJsonList: [[method: "facade.AuthFacadeServices.get#SessionInfo", params: [:]],
+                                                      [method: "facade.AuthFacadeServices.logout#AllSessions", params: [authPassword: "x"]]]],
+                gqlVariables: [query: "query { x }", variables: [input: [list: [[authUsername: "tf.user"]]]]],
+        ]
+        refused.each { String name, Map body ->
+            def user = new WebSignInLifetimeTests.UserStub()
+            def ec = new Expando(web: new Expando(request: new RequestStub(uri: "/rpc/json", servletPath: ""),
+                    requestParameters: body, secureRequestParameters: body), user: user)
+            assertThrows(AuthenticationRequiredException, { PasswordOnlyRouteFence.enforce(ec) }, name)
+            assertNull(user.userId, "${name}: signed out again")
+        }
+
+        assertTrue(PasswordOnlyRouteFence.nestsCredentials([params: [deep: [[authPassword: "x"]]]]))
+        assertFalse(PasswordOnlyRouteFence.nestsCredentials([method: "facade.AuthFacadeServices.login#Session",
+                params: [username: "tf.user", password: "x", note: "authUsername as a value is fine"]]))
+        assertFalse(PasswordOnlyRouteFence.nestsCredentials(null))
+    }
+
     static class RequestStub {
         Map<String, String> headers = [:]
         WebSignInLifetimeTests.SessionStub session

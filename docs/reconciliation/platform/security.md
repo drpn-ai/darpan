@@ -85,8 +85,10 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
 - A login key issued before the person's factor was confirmed stops working (web and CLI); a CLI key of someone required
   and not enrolled is refused. Confirming a factor ends every other key and hands the confirming tab a fresh one.
 - The framework's password-only ways in are refused for everyone (`PasswordOnlyRouteFence`, webroot before-request):
-  HTTP Basic and `authUsername`/`authPassword` answer 401 (signed out again first), `/Login`, `/SecondFactor` and
-  `/ChangePassword` answer 404. Not covered: a WebSocket handshake with Basic (no before-request hook; Darpan serves no
+  HTTP Basic and `authUsername`/`authPassword`/`authUserAccount` answer 401 (signed out again first), as a request
+  parameter or anywhere in a JSON body (JSON-RPC params, each call of a batch, GraphQL variables), `/Login`,
+  `/SecondFactor` and `/ChangePassword` answer 404. The framework fork itself no longer signs a service call in from
+  those parameters (DAR-BE-276). Not covered: a WebSocket handshake with Basic (no before-request hook; Darpan serves no
   WebSocket its clients use).
 - Instance label in the authenticator app: set `DARPAN_TOTP_ISSUER` (e.g. `Darpan UAT`, `Darpan SM`); default `Darpan`.
 - Reset: `admin.UserAdminServices.reset#TwoFactor` (super admins only, never one's own, a reason and the admin's own

@@ -533,6 +533,31 @@ class TwoFactorSignInSmokeTests {
         assertNotNull(unknown.error, "a missing required parameter is still a JSON-RPC error")
     }
 
+    @Test
+    @DisplayName("DAR-BE-276: credentials inside a call's params sign no one in: one call, authUserAccount, a batch, in process")
+    void parameterCredentialsSignNoOneIn() {
+        enrol(USER_ID, USERNAME)
+
+        // get#TwoFactorStatus answers for the signed-in person: the enrolled user's status would mean the params signed them in.
+        Map single = rpc("get#TwoFactorStatus", [authUsername: USERNAME, authPassword: PASSWORD])
+        assertNotEquals(true, single.result?.enabled, "a password inside params is not a sign-in: ${single}")
+        Map viaAccount = rpc("get#TwoFactorStatus", [authUserAccount: [username: USERNAME, currentPassword: PASSWORD]])
+        assertNotEquals(true, viaAccount.result?.enabled, "nor inside authUserAccount: ${viaAccount}")
+
+        // A batch runs every call but Moqui's dispatcher sends no batch reply, so the proof is a sign-in's own side effect:
+        // a successful password check resets the account's failed-login count, in the call's transaction.
+        ec.entity.find("moqui.security.UserAccount").condition("userId", OTHER_ID).disableAuthz().updateAll([successiveFailedLogins: 2])
+        rpcRequest([_requestBodyJsonList: [[method: "facade.AuthFacadeServices.get#TwoFactorStatus",
+                params: [authUsername: OTHER_USERNAME, authPassword: PASSWORD], id: 1]]])
+        assertEquals(2, account(OTHER_ID).successiveFailedLogins as int, "no password was checked inside a batch call")
+
+        // Not only the web path: a service call in process never signs in from its parameters either.
+        ec.user.logoutUser()
+        Map inProcess = call("facade.AuthFacadeServices.get#TwoFactorStatus", [authUsername: USERNAME, authPassword: PASSWORD])
+        assertNotEquals(true, inProcess.out.enabled, "${inProcess}")
+        assertNull(ec.user.userId)
+    }
+
     // ---- regressions and invariants ----
 
     @Test
@@ -639,10 +664,19 @@ class TwoFactorSignInSmokeTests {
      * ExecutionContextImpl.setWebFacade keeps for tests) handing it the request and catching the JSON reply.
      */
     private Map rpc(String verbNoun, Map params) {
+        return rpcRequest([method: "facade.AuthFacadeServices.${verbNoun}".toString(), params: params, id: 7])
+    }
+
+    /** The dispatcher on a raw /rpc/json request map (a single call, or _requestBodyJsonList for a batch). */
+    private Map rpcRequest(Map requestParameters) {
         ec.user.logoutUser()
         ec.message.clearAll()
         Map captured = [:]
-        WebFacade web = [getRequestParameters: { -> [method: "facade.AuthFacadeServices.${verbNoun}".toString(), params: params, id: 7] },
+        // sessionAttributes: what a sign-in inside the call touches (UserFacadeImpl.internalLoginToken), so a login the
+        // framework would make from the params is made here too, not lost to a missing stub method.
+        Map sessionAttributes = [:]
+        WebFacade web = [getRequestParameters: { -> requestParameters },
+                         getSessionAttributes: { -> sessionAttributes },
                          sendJsonResponse    : { Object reply -> captured.reply = reply }] as WebFacade
         ExecutionContextImpl eci = (ExecutionContextImpl) ec
         eci.setWebFacade(web)

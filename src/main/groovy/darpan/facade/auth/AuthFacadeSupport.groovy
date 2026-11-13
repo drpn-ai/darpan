@@ -198,8 +198,10 @@ class AuthFacadeSupport {
      *
      *  What this does NOT equalise: loginPrePassword falls through up to three entity lookups for a username
      *  it cannot find (exact, case-insensitive, then email) versus one for a hit, so lookup cost still varies
-     *  by a smaller amount in the opposite direction. On this component's SHA-256 hashing the two roughly
-     *  cancel; a slower database or a costlier hash would change that balance, so the residual is worth
+     *  by a smaller amount in the opposite direction. On SHA-256 hashing the two roughly cancel; with the
+     *  PBKDF2 hash (DAR-BE-268) the floor rides above the measured hash cost instead (holdRefusalToFloor), which
+     *  also covers an account still on SHA-256 until its next sign-in. A slower database would change the
+     *  balance, so the residual is worth
      *  re-measuring against a production-like database rather than assumed to stay closed. The tests below
      *  pin the deterministic half of this — that both paths spend exactly one hash. */
     private static void burnSkippedPasswordHash(def ec, List<String> refusals, String usernameValue,
@@ -215,24 +217,49 @@ class AuthFacadeSupport {
             def token = new UsernamePasswordToken(usernameValue ?: "", passwordValue ?: "")
             def info = new SimpleAuthenticationInfo(usernameValue ?: "", DECOY_STORED_CREDENTIAL,
                     new SimpleByteSource(DECOY_PASSWORD_SALT), "moquiRealm")
-            ec.ecfi.getCredentialsMatcher(ec.ecfi.passwordHashType, false).doCredentialsMatch(token, info)
+            long decoyStartedNanos = System.nanoTime()
+            ec.ecfi.getCredentialsMatcher(decoyHashType(ec), false).doCredentialsMatch(token, info)
+            recordPasswordHashCost((System.nanoTime() - decoyStartedNanos).intdiv(1_000_000L) as long)
         } catch (Exception e) {
             // Never fail a login response over the decoy; worst case the timing difference returns.
             logger.warn("Decoy credential check failed, refused-login timing may be distinguishable: ${e.message}")
         }
     }
 
+    /** The hash type the decoy spends: the one a password set now gets (DAR-BE-268: PBKDF2, which every account
+     *  moves to at its next sign-in), so an unknown username costs what a real account's check costs. Falls back
+     *  to encrypt-hash-type on a framework without slow hashing. */
+    private static String decoyHashType(def ec) {
+        try {
+            String newType = ec.ecfi.newPasswordHashType
+            if (newType) return newType
+        } catch (MissingPropertyException | MissingMethodException ignored) { }
+        return ec.ecfi.passwordHashType
+    }
+
+    /** What one password hash costs here, smoothed over the decoys spent so far (0 until the first). The floor
+     *  sits this far above LOGIN_REFUSAL_FLOOR_MILLIS: a slow hash (tens to hundreds of ms) would otherwise put
+     *  every refusal past a fixed 25ms floor, leaving the residual it exists to hide uncovered. */
+    private static volatile long passwordHashCostMillis = 0L
+
+    private static void recordPasswordHashCost(long millis) {
+        long previous = passwordHashCostMillis
+        passwordHashCostMillis = previous == 0L ? millis : ((previous * 3L + millis).intdiv(4L) as long)
+    }
+
     /** Hold a refusal open until the floor, so whatever the decoy could not equalise has nothing to show.
+     *  The floor is LOGIN_REFUSAL_FLOOR_MILLIS above the measured cost of one hash, which both refusal paths spend.
      *
      *  Overshooting the floor is not an error but it does mean the masking has stopped working, so say so —
      *  a silent regression here looks exactly like a working defence. */
     private static void holdRefusalToFloor(long attemptStartedNanos) {
         long elapsedMillis = (System.nanoTime() - attemptStartedNanos).intdiv(1_000_000L)
-        long remainingMillis = LOGIN_REFUSAL_FLOOR_MILLIS - elapsedMillis
+        long floorMillis = LOGIN_REFUSAL_FLOOR_MILLIS + passwordHashCostMillis
+        long remainingMillis = floorMillis - elapsedMillis
         if (remainingMillis <= 0) {
             logger.warn("Refused login took {}ms, past the {}ms floor — refusals are no longer held to a " +
                     "constant time and may again be distinguishable by how fast they return",
-                    elapsedMillis, LOGIN_REFUSAL_FLOOR_MILLIS)
+                    elapsedMillis, floorMillis)
             return
         }
         try {

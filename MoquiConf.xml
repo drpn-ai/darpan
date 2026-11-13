@@ -45,6 +45,9 @@
          for the 60-minute idle window and slid on each request, never past this (AuthSessionSupport). CLI keys keep their
          own lifetime (CliAccess.SIGN_IN_DAYS). -->
     <user-facade>
+        <!-- DAR-BE-268: 12 characters minimum (framework default 8); the framework hashes new and changed passwords
+            with PBKDF2-HMAC-SHA256 and re-hashes older rows at sign-in (user-facade.password.@slow-hash-type). -->
+        <password min-length="12"/>
         <login-key expire-hours="24"/>
     </user-facade>
     <screen-facade>

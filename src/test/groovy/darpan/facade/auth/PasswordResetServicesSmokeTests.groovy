@@ -34,8 +34,8 @@ class PasswordResetServicesSmokeTests {
     private static final String OK_EMAIL = "pwr.ok@example.com"
     private static final String NOEMAIL_ID = "PWR_NOEMAIL"
     private static final String DISABLED_ID = "PWR_DISABLED"
-    private static final String OLD_PASSWORD = "Old-pass1!"
-    private static final String NEW_PASSWORD = "New-pass2!"
+    private static final String OLD_PASSWORD = "Old-passw0rd1!"
+    private static final String NEW_PASSWORD = "New-passw0rd2!"
     private static final String CODE_FAILURE = "That code didn't work. Request a new one."
 
     @BeforeAll
@@ -306,7 +306,7 @@ class PasswordResetServicesSmokeTests {
         assertFalse(refused.out.passwordUpdated as boolean)
         assertFalse(refused.errors.isEmpty())
         assertNotEquals([CODE_FAILURE], refused.errors)
-        assertTrue(refused.errors.any { it.contains("8") }, "policy errors: ${refused.errors}")
+        assertTrue(refused.errors.any { it.contains("12") }, "policy errors: ${refused.errors}")
         assertTrue(verify(code).out.verified as boolean, "a policy refusal must not use up or count against the code")
         assertEquals(0, codeRow(OK_ID).failedAttempts ?: 0)
     }

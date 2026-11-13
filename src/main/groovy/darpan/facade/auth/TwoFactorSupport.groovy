@@ -100,6 +100,11 @@ class TwoFactorSupport {
         return TenantScopedFinder.findGlobalUnscoped(ec, entityName, reason)
     }
 
+    /** For the reads that run on every request (sessionInfo, the CLI key check): logged at DEBUG, not INFO (review QM1). */
+    private static def findPerRequest(def ec, String entityName, String reason) {
+        return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, entityName, reason)
+    }
+
     /** The person's authenticator app (the ACTIVE DrpnTfTotp row), or null. Passkeys are PasskeySupport's. */
     static def activeFactor(def ec, String userId, boolean forUpdate = false) {
         if (!userId) return null
@@ -127,16 +132,16 @@ class TwoFactorSupport {
     static Timestamp requiredFrom(def ec, String userId) {
         if (!userId) return null
         // The policy first: while every role is optional (the shipped state) that is the only read.
-        Map<String, Timestamp> dated = find(ec, POLICY, "two-factor policy is platform configuration, not tenant data")
+        Map<String, Timestamp> dated = findPerRequest(ec, POLICY, "two-factor policy is platform configuration, not tenant data")
                 .useCache(false).list().findAll { it.requiredFromDate != null }
                 .collectEntries { [(it.permissionGroupId as String): it.requiredFromDate as Timestamp] }
         if (!dated) return null
         Timestamp now = ec.user.nowTimestamp
-        List<String> groups = find(ec, "moqui.security.UserGroupMember", "self-scoped auth: the person's Darpan-wide roles for the two-factor policy")
+        List<String> groups = findPerRequest(ec, "moqui.security.UserGroupMember", "self-scoped auth: the person's Darpan-wide roles for the two-factor policy")
                 .condition("userId", userId).condition("userGroupId", EntityCondition.IN, DARPAN_ROLE_GROUP_IDS)
                 .conditionDate("fromDate", "thruDate", now).useCache(false).list()*.userGroupId as List<String>
         if (dated.containsKey(TENANT_ADMIN_GROUP_ID)) {
-            boolean tenantAdmin = find(ec, "darpan.auth.TenantUserPermissionGroupMember",
+            boolean tenantAdmin = findPerRequest(ec, "darpan.auth.TenantUserPermissionGroupMember",
                     "self-scoped auth: is the person a tenant admin in any tenant, for the two-factor policy")
                     .condition("userId", userId).condition("permissionUserGroupId", TENANT_ADMIN_GROUP_ID)
                     .conditionDate("fromDate", "thruDate", now).useCache(false).count() > 0
@@ -156,7 +161,7 @@ class TwoFactorSupport {
     /** True while any factor (the app or a passkey) is ACTIVE. */
     static boolean enabled(def ec, String userId) {
         if (!userId) return false
-        return find(ec, FACTOR, "self-scoped auth: does the person have two-factor on").condition("userId", userId)
+        return findPerRequest(ec, FACTOR, "self-scoped auth: does the person have two-factor on").condition("userId", userId)
                 .condition("statusId", ACTIVE).useCache(false).count() > 0
     }
 
@@ -721,9 +726,10 @@ class TwoFactorSupport {
                 ((Timestamp) issuedDate).before((Timestamp) sessionsEndedDate)
     }
 
-    /** A CLI key of a person who is required and not enrolled is refused (the policy switched on after they signed in). */
+    /** A CLI key of a person who is required and not enrolled is refused (the policy switched on after they signed in).
+     *  Runs on every CLI request: the policy first, so while no role has a date (the shipped state) that is the only read. */
     static boolean requiredButNotEnrolled(def ec, String userId) {
-        return !enabled(ec, userId) && isRequiredNow(ec, userId)
+        return isRequiredNow(ec, userId) && !enabled(ec, userId)
     }
 
     // ---- policy (admin.SecurityAdminServices) ----

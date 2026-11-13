@@ -785,6 +785,30 @@ class TwoFactorSignInSmokeTests {
         }
     }
 
+    @Test
+    @DisplayName("review QM1: the per-request two-factor reads (sessionInfo, the CLI key check) write no INFO line")
+    void perRequestReadsAreQuiet() {
+        enrol(USER_ID, USERNAME)
+        setPolicy("DARPAN_TENANT_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
+        Capture capture = new Capture()
+        LoggerContext context = (LoggerContext) LogManager.getContext(false)
+        LoggerConfig root = context.configuration.rootLogger
+        capture.start()
+        root.addAppender(capture, Level.ALL, null)
+        context.updateLoggers()
+        try {
+            assertEquals(true, TwoFactorSupport.sessionFields(ec, USER_ID).twoFactorEnabled)
+            assertFalse(TwoFactorSupport.requiredButNotEnrolled(ec, USER_ID))
+            assertFalse(TwoFactorSupport.requiredButNotEnrolled(ec, OTHER_ID))
+        } finally {
+            root.removeAppender(capture.name)
+            context.updateLoggers()
+            capture.stop()
+        }
+        List<String> loud = capture.lines.findAll { it.startsWith("INFO") && it.contains("[tenant-scope]") }
+        assertEquals([], loud)
+    }
+
     // ---- regressions and invariants ----
 
     @Test
@@ -974,7 +998,7 @@ class TwoFactorSignInSmokeTests {
 
         @Override
         void append(LogEvent event) {
-            lines << (event.message.formattedMessage + (event.thrown ? " " + event.thrown.toString() : ""))
+            lines << (event.level.toString() + " " + event.message.formattedMessage + (event.thrown ? " " + event.thrown.toString() : ""))
         }
     }
 }

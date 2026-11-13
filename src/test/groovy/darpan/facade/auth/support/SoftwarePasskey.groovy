@@ -7,7 +7,10 @@ import com.webauthn4j.data.attestation.AttestationObject
 import com.webauthn4j.data.attestation.authenticator.AAGUID
 import com.webauthn4j.data.attestation.authenticator.AttestedCredentialData
 import com.webauthn4j.data.attestation.authenticator.AuthenticatorData
+import com.webauthn4j.data.attestation.authenticator.COSEKey
 import com.webauthn4j.data.attestation.authenticator.EC2COSEKey
+import com.webauthn4j.data.attestation.authenticator.EdDSACOSEKey
+import com.webauthn4j.data.attestation.authenticator.RSACOSEKey
 import com.webauthn4j.data.attestation.statement.COSEAlgorithmIdentifier
 import com.webauthn4j.data.attestation.statement.NoneAttestationStatement
 import groovy.json.JsonOutput
@@ -20,10 +23,13 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.Signature
 import java.security.interfaces.ECPublicKey
+import java.security.interfaces.EdECPublicKey
+import java.security.interfaces.RSAPublicKey
 import java.security.spec.ECGenParameterSpec
 
 /**
- * DAR-BE-270 tests — a software authenticator: a P-256 key pair from the JDK and webauthn4j-core's own CBOR converters,
+ * DAR-BE-270 tests — a software authenticator: a JDK key pair (ES256 P-256 by default; RS256 RSA-2048 or EdDSA Ed25519 on
+ * request, the algorithms Windows Hello and some security keys use) and webauthn4j-core's own CBOR converters,
  * answering the server's options JSON the way navigator.credentials.create/get + toJSON() would (attestation "none",
  * user present and verified). Each assertion moves the signature counter on by one unless told otherwise. Test scope only.
  */
@@ -31,17 +37,41 @@ class SoftwarePasskey {
     private static final ObjectConverter converter = new ObjectConverter()
     private static final SecureRandom random = new SecureRandom()
 
+    final COSEAlgorithmIdentifier algorithm
     final KeyPair keyPair
     final byte[] credentialId
     long counter = 0
     String userHandle
 
-    SoftwarePasskey() {
-        KeyPairGenerator generator = KeyPairGenerator.getInstance("EC")
-        generator.initialize(new ECGenParameterSpec("secp256r1"))
+    SoftwarePasskey(COSEAlgorithmIdentifier algorithm = COSEAlgorithmIdentifier.ES256) {
+        this.algorithm = algorithm
+        KeyPairGenerator generator
+        if (algorithm == COSEAlgorithmIdentifier.ES256) {
+            generator = KeyPairGenerator.getInstance("EC")
+            generator.initialize(new ECGenParameterSpec("secp256r1"))
+        } else if (algorithm == COSEAlgorithmIdentifier.RS256) {
+            generator = KeyPairGenerator.getInstance("RSA")
+            generator.initialize(2048)
+        } else if (algorithm == COSEAlgorithmIdentifier.EdDSA) {
+            generator = KeyPairGenerator.getInstance("Ed25519")
+        } else {
+            throw new IllegalArgumentException("unsupported algorithm ${algorithm}")
+        }
         keyPair = generator.generateKeyPair()
         credentialId = new byte[32]
         random.nextBytes(credentialId)
+    }
+
+    private COSEKey coseKey() {
+        if (algorithm == COSEAlgorithmIdentifier.RS256) return RSACOSEKey.create((RSAPublicKey) keyPair.public, algorithm)
+        if (algorithm == COSEAlgorithmIdentifier.EdDSA) return EdDSACOSEKey.create((EdECPublicKey) keyPair.public, algorithm)
+        return EC2COSEKey.create((ECPublicKey) keyPair.public, algorithm)
+    }
+
+    private String signatureAlgorithm() {
+        if (algorithm == COSEAlgorithmIdentifier.RS256) return "SHA256withRSA"
+        if (algorithm == COSEAlgorithmIdentifier.EdDSA) return "Ed25519"
+        return "SHA256withECDSA"
     }
 
     String getId() { return b64(credentialId) }
@@ -54,14 +84,13 @@ class SoftwarePasskey {
         byte[] clientData = clientData("webauthn.create", (String) options.challenge, (String) (overrides.origin ?: "http://localhost:5173"))
         byte flags = (byte) (AuthenticatorData.BIT_UP | AuthenticatorData.BIT_AT |
                 (overrides.userVerified == false ? 0 : AuthenticatorData.BIT_UV))
-        AttestedCredentialData attested = new AttestedCredentialData(AAGUID.ZERO, credentialId,
-                EC2COSEKey.create((ECPublicKey) keyPair.public, COSEAlgorithmIdentifier.ES256))
+        AttestedCredentialData attested = new AttestedCredentialData(AAGUID.ZERO, credentialId, coseKey())
         AuthenticatorData authData = new AuthenticatorData(sha256(rpId.getBytes(StandardCharsets.UTF_8)), flags, counter, attested)
         byte[] attestationObject = new AttestationObjectConverter(converter)
                 .convertToBytes(new AttestationObject(authData, new NoneAttestationStatement()))
         return JsonOutput.toJson([id: id, rawId: id, type: "public-key", authenticatorAttachment: "platform",
                 response: [clientDataJSON: b64(clientData), attestationObject: b64(attestationObject), transports: ["internal", "hybrid"],
-                           publicKeyAlgorithm: -7], clientExtensionResults: [:]])
+                           publicKeyAlgorithm: algorithm.value], clientExtensionResults: [:]])
     }
 
     /** The assertion JSON for request options (begin#PasskeySignIn / begin#PasskeyProof). overrides: origin, rpId,
@@ -76,7 +105,7 @@ class SoftwarePasskey {
         byte flags = (byte) (AuthenticatorData.BIT_UP | AuthenticatorData.BIT_UV)
         byte[] authData = new AuthenticatorDataConverter(converter)
                 .convert(new AuthenticatorData(sha256(rpId.getBytes(StandardCharsets.UTF_8)), flags, counter, (AttestedCredentialData) null))
-        Signature signer = Signature.getInstance("SHA256withECDSA")
+        Signature signer = Signature.getInstance(signatureAlgorithm())
         signer.initSign(keyPair.private)
         signer.update(authData)
         signer.update(sha256(clientData))

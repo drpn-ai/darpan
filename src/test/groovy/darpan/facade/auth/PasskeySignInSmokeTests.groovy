@@ -4,6 +4,7 @@ import darpan.admin.AuditLogTestSupport
 import darpan.facade.auth.support.SoftwarePasskey
 import darpan.facade.common.CliMethodAllowlist
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import com.webauthn4j.data.attestation.statement.COSEAlgorithmIdentifier
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -216,6 +217,23 @@ class PasskeySignInSmokeTests {
         assertEquals([REFUSAL], stale.errors, "an assertion over an older challenge is refused")
         assertFalse(stale.out.challengeEnded as boolean)
         assertEquals(0, account(USER_ID).successiveFailedLogins as int, "a refused passkey is not a failed login")
+    }
+
+    @Test
+    @DisplayName("RS256 and EdDSA passkeys register, are stored and read back, and sign in (not only ES256)")
+    void rs256AndEdDsaPasskeysSignIn() {
+        [COSEAlgorithmIdentifier.RS256, COSEAlgorithmIdentifier.EdDSA].each { COSEAlgorithmIdentifier algorithm ->
+            [PasskeySupport.CREDENTIAL, TwoFactorRecords.FACTOR, TwoFactorRecords.RECOVERY].each { ec.entity.find(it).disableAuthz().deleteAll() }
+            SoftwarePasskey key = new SoftwarePasskey(algorithm)
+            Map finished = finish(USERNAME, key.register(beginRegistration(USERNAME, [currentPassword: PASSWORD])))
+            assertEquals([], finished.errors, "${algorithm} registers")
+            ec.user.logoutUser()
+            String token = challenge(USERNAME)
+            String options = anon("begin#PasskeySignIn", [challengeToken: token]).out.publicKeyOptions
+            Map verified = anon("verify#SignInCode", [challengeToken: token, passkeyAssertion: key.assertion(options)])
+            assertEquals([], verified.errors, "${algorithm} signs in")
+            assertTrue(verified.out.authenticated as boolean)
+        }
     }
 
     @Test

@@ -46,12 +46,13 @@
         <field name="credentialId" type="text-long"><description>Base64url credential id (up to 1023 bytes).</description></field>
         <field name="credentialIdHash" type="id-long">
             <description>SHA-256 (hex) of the credential id bytes: the lookup and the one-live-owner check.</description></field>
-        <field name="publicKeyCose" type="text-long"><description>Base64url COSE public key, as the authenticator gave it.</description></field>
+        <field name="attestedCredentialData" type="text-long"><description>Base64url attested credential data as the
+            authenticator gave it at registration: AAGUID (the authenticator model, all zeros when withheld), credential id
+            and COSE public key, in webauthn4j's AttestedCredentialDataConverter layout.</description></field>
         <field name="signCount" type="number-integer">
             <description>The authenticator's signature counter at its last use; a counter that does not move forward is refused
                 (0 on both sides is allowed: synced passkeys report 0).</description></field>
         <field name="transports" type="text-medium"><description>Comma list the browser reported: internal, hybrid, usb, nfc, ble.</description></field>
-        <field name="aaguid" type="text-short"><description>Authenticator model id (all zeros when the authenticator withholds it).</description></field>
         <field name="name" type="text-medium"><description>The person's label, e.g. MacBook Touch ID (60 characters at most).</description></field>
         <field name="backupEligible" type="text-indicator"><description>Y: a synced passkey (may be copied to other devices).</description></field>
         <field name="backedUp" type="text-indicator"><description>Y: backed up at its last use.</description></field>

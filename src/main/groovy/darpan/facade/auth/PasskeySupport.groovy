@@ -11,7 +11,6 @@ import com.webauthn4j.data.PublicKeyCredentialParameters
 import com.webauthn4j.data.PublicKeyCredentialType
 import com.webauthn4j.data.RegistrationData
 import com.webauthn4j.data.RegistrationParameters
-import com.webauthn4j.data.attestation.authenticator.AAGUID
 import com.webauthn4j.data.attestation.authenticator.AttestedCredentialData
 import com.webauthn4j.data.attestation.authenticator.AuthenticatorData
 import com.webauthn4j.data.attestation.statement.COSEAlgorithmIdentifier
@@ -63,6 +62,8 @@ class PasskeySupport {
     /** attestation "none" is asked for; the non-strict manager also accepts a format an authenticator sends anyway, without
      *  trusting it (no FIDO metadata: spec open question 4). */
     private static final WebAuthnManager manager = WebAuthnManager.createNonStrictWebAuthnManager(objectConverter)
+    /** A credential is stored as webauthn4j's own attested-credential-data bytes (AAGUID, credential id, COSE key). */
+    private static final AttestedCredentialDataConverter attestedConverter = new AttestedCredentialDataConverter(objectConverter)
 
     // ---- relying party (per instance) ----
 
@@ -297,10 +298,9 @@ class PasskeySupport {
         def factor = ec.entity.makeValue(TwoFactorRecords.FACTOR).setAll([userId: userId, factorTypeEnumId: TwoFactorRecords.TYPE_PASSKEY,
                 statusId: TwoFactorRecords.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary()
         factor.create()
-        byte[] coseBytes = objectConverter.cborConverter.writeValueAsBytes(attested.getCOSEKey())
         ec.entity.makeValue(CREDENTIAL).setAll([factorId: factor.factorId, userId: userId, credentialId: AuthPrimitives.b64url(credentialIdBytes),
-                credentialIdHash: credentialIdHash, publicKeyCose: AuthPrimitives.b64url(coseBytes), signCount: authData.signCount,
-                transports: (verified.transports ?: [])*.value.join(","), aaguid: attested.aaguid?.value?.toString(), name: label,
+                credentialIdHash: credentialIdHash, attestedCredentialData: AuthPrimitives.b64url(attestedConverter.convert(attested)),
+                signCount: authData.signCount, transports: (verified.transports ?: [])*.value.join(","), name: label,
                 backupEligible: authData.flagBE ? "Y" : "N", backedUp: authData.flagBS ? "Y" : "N",
                 uvInitialized: authData.flagUV ? "Y" : "N"]).create()
         TwoFactorRecords.event(ec, userId, "PASSKEY_ADDED")
@@ -387,17 +387,7 @@ class PasskeySupport {
     }
 
     private static CredentialRecordImpl credentialRecord(def credential) {
-        byte[] credentialId = AuthPrimitives.b64urlDecode((String) credential.credentialId)
-        byte[] cose = AuthPrimitives.b64urlDecode((String) credential.publicKeyCose)
-        String aaguidText = normalize(credential.aaguid)
-        byte[] aaguid = aaguidText ? new AAGUID(aaguidText).bytes : new byte[16]
-        // aaguid (16) | credential id length (2) | credential id | COSE key: the attested-credential-data layout.
-        ByteArrayOutputStream out = new ByteArrayOutputStream()
-        out.write(aaguid)
-        out.write([(credentialId.length >> 8) & 0xff, credentialId.length & 0xff] as byte[])
-        out.write(credentialId)
-        out.write(cose)
-        AttestedCredentialData attested = new AttestedCredentialDataConverter(objectConverter).convert(out.toByteArray())
+        AttestedCredentialData attested = attestedConverter.convert(AuthPrimitives.b64urlDecode((String) credential.attestedCredentialData))
         Set<AuthenticatorTransport> transports = splitTransports(credential.transports).collect { AuthenticatorTransport.create(it) } as Set
         return new CredentialRecordImpl(null, credential.uvInitialized == "Y", credential.backupEligible == "Y",
                 credential.backedUp == "Y", (credential.signCount ?: 0L) as long, attested, null, null, null, transports)

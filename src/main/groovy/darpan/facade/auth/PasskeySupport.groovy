@@ -100,15 +100,10 @@ class PasskeySupport {
      * (DARPAN_APP_BASE_URL, else the first non-* webapp_allow_origins entry). The UI's host, never the API's: the browser
      * binds a passkey to the page that made it. Null = passkeys unavailable here.
      */
-    static String rpId(def ec) {
+    private static String rpId(def ec) {
         String configured = normalize(System.getenv("DARPAN_WEBAUTHN_RP_ID")) ?: normalize(System.getProperty("darpan.webauthn.rpId"))
         if (configured) return configured.toLowerCase()
         return hostOf(TenantNotificationSupport.resolveAppBaseUrl(ec))
-    }
-
-    /** The origins a ceremony may come from (see originCandidates), or none when passkeys are unavailable. */
-    static Set<String> origins(def ec) {
-        return relyingParty(ec)?.origins ?: ([] as Set<String>)
     }
 
     /** DARPAN_WEBAUTHN_ORIGINS / darpan.webauthn.origins (comma list), else the webapp_allow_origins entries plus the app

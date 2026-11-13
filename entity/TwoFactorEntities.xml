@@ -3,8 +3,8 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <!-- DAR-BE-264. Two-factor sign-in (TOTP). Spec: wrapper docs/superpowers/specs/2026-11-13-dar-be-264-two-factor-sign-in-design.md.
          Every entity here belongs to a person, not a tenant (like PasswordResetCode): no DARPAN_ACTIVE_COMPANY_SCOPE
-         filter, every read through TenantScopedFinder.findGlobalUnscoped with a reason, and darpan.facade.auth.TwoFactorSupport
-         is the only writer. Darpan never writes moqui.security.UserAuthcFactor nor sets UserGroup.requireAuthcFactor: the
+         filter, every read through TenantScopedFinder.findGlobalUnscoped with a reason, and the darpan.facade.auth two-factor
+         classes (TwoFactorRecords, SignInChallenges, TwoFactorSupport, PasskeySupport) the only writers. Darpan never writes moqui.security.UserAuthcFactor nor sets UserGroup.requireAuthcFactor: the
          framework's own second-factor paths (no attempt limit, no replay check) stay inert. /transfer never exports these. -->
 
     <entity entity-name="TwoFactorFactor" package="darpan.auth" use="transactional" cache="never">

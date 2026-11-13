@@ -33,8 +33,9 @@ class PasskeySupportTests {
             System.setProperty("webapp_allow_origins", "http://localhost:5173,http://localhost:5174")
             assumeTrue(!System.getenv("DARPAN_WEBAUTHN_RP_ID") && !System.getenv("DARPAN_APP_BASE_URL"),
                     "the environment names the relying party: not this case")
-            assertEquals("localhost", PasskeySupport.rpId(ec))
-            assertEquals(["http://localhost:5173", "http://localhost:5174"] as Set, PasskeySupport.origins(ec))
+            PasskeySupport.RelyingParty rp = PasskeySupport.relyingParty(ec)
+            assertEquals("localhost", rp.id)
+            assertEquals(["http://localhost:5173", "http://localhost:5174"] as Set, rp.origins)
             assertTrue(PasskeySupport.available(ec))
         } finally {
             if (before == null) System.clearProperty("webapp_allow_origins") else System.setProperty("webapp_allow_origins", before)

@@ -187,6 +187,44 @@
             </if>
         </actions>
     </service>
+
+    <!-- DAR-BE-271: same exposure stance as purge#GeneratedOutputFiles (internal-only, super admin when a person runs
+         it). Deletes raw source extracts older than retentionDays and never a result file; see
+         ReconciliationOutputSupport.purgeExtractFiles for exactly what it touches. -->
+    <service verb="purge" noun="ExtractFiles" transaction="ignore" authenticate="false" allow-remote="false">
+        <description>Purge raw source extract files (and their sidecars) older than the retention period.</description>
+        <in-parameters>
+            <parameter name="retentionDays" type="Integer" default-value="7"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="retentionDays" type="Integer"/>
+            <parameter name="scannedCount" type="Integer"/>
+            <parameter name="deletedCount" type="Integer"/>
+            <parameter name="retainedCount" type="Integer"/>
+            <parameter name="foldersRemovedCount" type="Integer"/>
+            <parameter name="failedFiles"><parameter name="fileName"/><parameter name="errorMessage"/></parameter>
+            <parameter name="statusMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="currentUserId" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
+            <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                <if condition="!darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Only super-admin users may purge reconciliation extracts.')"><return/></if>
+            </if>
+            <set field="resolvedRetentionDays" from="retentionDays == null ? 7 : ((Number) retentionDays).intValue()"/>
+            <if condition="resolvedRetentionDays &lt; 1">
+                <return error="true" message="retentionDays must be 1 or greater: an extract being written must never be purged."/>
+            </if>
+            <set field="purgeResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.purgeExtractFiles(ec, resolvedRetentionDays)"/>
+            <script>context.putAll(purgeResult.subMap(['retentionDays', 'scannedCount', 'deletedCount', 'retainedCount',
+                    'foldersRemovedCount', 'failedFiles', 'statusMessage']))</script>
+            <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: currentUserId,
+                        serviceName: 'reconciliation.ReconciliationGenericServices.purge#ExtractFiles', targetType: 'ExtractFiles',
+                        targetId: purgeResult.outputLocation ?: '-', detailText: 'Purged raw extracts older than ' + resolvedRetentionDays
+                        + ' days: deleted ' + purgeResult.deletedCount + ' of ' + purgeResult.scannedCount + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            </if>
+        </actions>
+    </service>
     <!-- MACH P2 (security, crypt-key rotation runbook step 4): one-shot bulk re-encryption of all
          encrypt="true" fields under the ACTIVE entity_ds_crypt_pass. Run while the old key is still
          wired via decrypt-alt (entity_ds_crypt_pass_old); afterwards the old key can be dropped.

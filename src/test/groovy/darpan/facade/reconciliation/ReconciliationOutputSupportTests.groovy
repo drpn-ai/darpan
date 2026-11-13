@@ -268,8 +268,14 @@ class ReconciliationOutputSupportTests {
                 file1Name                : "HotWax-orders-api.json",
                 file2Name                : "SHOPIFY-orders-api.json",
         ]
+        // DAR-BE-271: a download is offered only while the extract is on disk, so the HotWax side exists and Shopify's
+        // (purged after 7 days) does not.
+        File dataManagerRoot = java.nio.file.Files.createTempDirectory("darpan-source-details").toFile()
+        File hotwaxFile = new File(dataManagerRoot, hotwaxPath)
+        hotwaxFile.parentFile.mkdirs()
+        hotwaxFile.text = "[]"
         def ec = new Expando(
-                resource: new FakeResource(),
+                resource: new FakeResource(dataManagerRoot),
                 entity  : new FakeEntity([
                         "darpan.reconciliation.ReconciliationRunResult"        : [runResult],
                         "darpan.reconciliation.ReconciliationAutomationExecution": [],
@@ -297,7 +303,9 @@ class ReconciliationOutputSupportTests {
         assertTrue(sourceDetails.files[0].canDownload as Boolean)
         assertEquals("SHOPIFY-orders-api.json", sourceDetails.files[1].fileName)
         assertEquals(shopifyPath, sourceDetails.files[1].filePath)
+        assertFalse(sourceDetails.files[1].canDownload as Boolean, "a purged extract must not be offered for download")
         assertEquals("HotWax-orders-api.json", ReconciliationOutputSupport.sourceArtifactDisplayName(ec, hotwaxPath))
+        dataManagerRoot.deleteDir()
     }
 
     @Test

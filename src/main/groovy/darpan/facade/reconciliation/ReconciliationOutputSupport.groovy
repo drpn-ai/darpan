@@ -478,6 +478,56 @@ class ReconciliationOutputSupport {
         ]
     }
 
+    /**
+     * DAR-BE-271 (Aditi 2026-11-13: raw extracts kept 7 days, for every tenant; a new run always reads fresh data).
+     * Deletes the raw source extracts and their sidecars (exchange manifest, excluded rows, abandoned .partial files)
+     * older than the cutoff, and nothing else:
+     * <ul>
+     *   <li>only under the default reconciliation-runs location, never a custom output location;</li>
+     *   <li>only inside an extract folder, {@code <runOrExecutionId>/<yyyyMMdd-HHmmssSSS>} with an optional
+     *   {@code -FILE_1}/{@code -FILE_2} and {@code -recheck} suffix (ExtractReplaySupport's layout);</li>
+     *   <li>never a generated result file ({@link OutputPathSupport#isGeneratedResultFile}, the files the 15-day
+     *   purge#GeneratedOutputFiles owns), even though a saved run writes its result into the same folder.</li>
+     * </ul>
+     * A folder left empty is removed. Database rows (RunResult, AutomationExecution, findings) are untouched; their
+     * stored extract paths simply stop resolving, which the download descriptor and replay already report in words.
+     */
+    static Map<String, Object> purgeExtractFiles(def ec, Integer retentionDays) {
+        String runsLocation = DataManagerSupport.resolveReconciliationRunsLocation(ec)
+        File runsDir = runsLocation ? ec.resource.getLocationReference(runsLocation)?.getFile() : null
+        long cutoffMillis = ec.user.nowTimestamp.getTime() - (retentionDays * 24L * 60L * 60L * 1000L)
+        int scanned = 0, deleted = 0, retained = 0, foldersRemoved = 0
+        List<Map> failed = []
+        if (runsDir != null && runsDir.isDirectory()) {
+            runsDir.listFiles()?.findAll { it.isDirectory() }?.each { File runDir ->
+                runDir.listFiles()?.findAll { it.isDirectory() && EXTRACT_FOLDER.matcher(it.name).matches() }?.each { File extractDir ->
+                    extractDir.listFiles()?.findAll { it.isFile() }?.each { File file ->
+                        if (OutputPathSupport.isGeneratedResultFile(file.name)) return
+                        scanned++
+                        if (file.lastModified() > cutoffMillis) { retained++; return }
+                        try {
+                            if (file.delete()) deleted++
+                            else failed.add([fileName: "${runDir.name}/${extractDir.name}/${file.name}".toString(), errorMessage: "Delete returned false"])
+                        } catch (Exception e) {
+                            failed.add([fileName: "${runDir.name}/${extractDir.name}/${file.name}".toString(), errorMessage: e.message ?: "Delete failed"])
+                        }
+                    }
+                    if (!extractDir.listFiles() && extractDir.delete()) foldersRemoved++
+                }
+            }
+        }
+        String statusMessage = "Extract purge complete. Scanned=${scanned}, Deleted=${deleted}, Retained=${retained}, " +
+                "FoldersRemoved=${foldersRemoved}, Failed=${failed.size()}"
+        if (failed) logger.warn("Reconciliation extract purge completed with failures: ${statusMessage}")
+        else logger.info("Reconciliation extract purge completed: ${statusMessage}")
+        return [retentionDays: retentionDays, outputLocation: runsLocation, cutoffTimestamp: cutoffMillis, scannedCount: scanned,
+                deletedCount: deleted, retainedCount: retained, foldersRemovedCount: foldersRemoved, failedFiles: failed,
+                statusMessage: statusMessage]
+    }
+
+    /** ExtractReplaySupport's extract folders: a run timestamp, then optionally -FILE_1/-FILE_2, then optionally -recheck. */
+    static final java.util.regex.Pattern EXTRACT_FOLDER = ~/^\d{8}-\d{9}(-FILE_[12])?(-recheck)?$/
+
     static Map<String, Object> purgeGeneratedOutputFiles(def ec, Integer retentionDays, String outputLocation,
             boolean usingDefaultOutputLocation) {
         def outputDirRef = ec.resource.getLocationReference(outputLocation)

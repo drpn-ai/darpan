@@ -12,6 +12,19 @@
             parameterName="retentionDays"
             parameterValue="15"/>
 
+    <!-- DAR-BE-271: raw source extracts are kept 7 days (Aditi 2026-11-13); results keep the 15-day job above. -->
+    <moqui.service.job.ServiceJob
+            jobName="purge_ReconciliationExtractFiles_daily"
+            description="Purge raw source extract files older than 7 days (never result files)."
+            serviceName="reconciliation.ReconciliationGenericServices.purge#ExtractFiles"
+            cronExpression="0 15 2 * * ?"
+            paused="N"/>
+
+    <moqui.service.job.ServiceJobParameter
+            jobName="purge_ReconciliationExtractFiles_daily"
+            parameterName="retentionDays"
+            parameterValue="7"/>
+
     <moqui.service.job.ServiceJob
             jobName="scan_ReconciliationAutomations_5m"
             description="Scan due reconciliation automations and execute scheduled windows."

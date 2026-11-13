@@ -44,7 +44,12 @@ sourceSets {
 
 // Log4J has annotation processors, disable to avoid warning
 tasks.withType(JavaCompile) { options.compilerArgs << "-proc:none" }
-tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
+tasks.withType(GroovyCompile) {
+    options.compilerArgs << "-proc:none"
+    // DAR-BE-271: the Groovy compiler runs in its own forked process with Gradle's small default heap; the test tree
+    // outgrew it on 2026-11-13 ("Java heap space" in compileTestGroovy on a 300-line test file). 2g gives headroom.
+    groovyOptions.forkOptions.memoryMaximumSize = '2g'
+}
 
 dependencies {
     implementation project(':framework')

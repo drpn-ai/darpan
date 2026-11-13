@@ -260,8 +260,19 @@ class OutputDescriptorSupport {
                 filePath        : filePath,
                 downloadFileName: fileName ?: fileNameFromPath(filePath),
                 sourceFormat    : sourceFormat,
-                canDownload     : (filePath && sourceFormat) as Boolean,
+                // DAR-BE-271: an extract is purged after 7 days while the run keeps its path, so offer the download only
+                // while the file is still there.
+                canDownload     : (filePath && sourceFormat && sourceFileExists(ec, filePath)) as Boolean,
         ].findAll { entry -> entry.value != null && entry.value != "" } as Map<String, Object>
+    }
+
+    private static boolean sourceFileExists(def ec, String dataManagerRelativePath) {
+        try {
+            File file = DataManagerSupport.resolveDataManagerFile(ec, dataManagerRelativePath, false)
+            return file != null && file.isFile()
+        } catch (Exception ignored) {
+            return false
+        }
     }
 
     protected static Map<String, Object> sourceFileDescriptorFromRunFolder(def ec, String runFolderPath, String side, String label) {

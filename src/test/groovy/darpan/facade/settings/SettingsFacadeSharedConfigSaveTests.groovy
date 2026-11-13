@@ -89,7 +89,7 @@ class SettingsFacadeSharedConfigSaveTests {
         Map<String, Object> result = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
                 nsRestletConfigId: "SHARED_ENDPOINT",
                 description      : "Member edited shared endpoint",
-                endpointUrl      : "https://member-edit.suitetalk.api.netsuite.com/restlet",
+                endpointUrl      : "https://krewe.suitetalk.api.netsuite.com/member-edited-restlet",
                 httpMethod       : "POST",
                 nsAuthConfigId   : "SHARED_AUTH",
                 headersJson      : "{}",
@@ -231,6 +231,40 @@ class SettingsFacadeSharedConfigSaveTests {
         assertTrue((Boolean) moved.ok, moved.errors?.toString())
         def row = findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "MOVE_AUTH"])
         assertEquals([otherAccount, "new-private-key"], [row.tokenUrl, row.privateKeyPem])
+    }
+
+    /** DAR-BE-258: an endpoint stays on its auth config's NetSuite account, so a peer cannot send the shared secret elsewhere. */
+    @Test
+    void anEndpointCannotLeaveItsAuthConfigsNetSuiteAccount() {
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, MEMBER)
+        Map<String, Object> elsewhere = [description: "Peer endpoint", endpointUrl: "https://3333333.suitetalk.api.netsuite.com/restlet",
+                                         httpMethod: "POST", nsAuthConfigId: "SHARED_AUTH", headersJson: "{}"]
+        String refusal = "This endpoint must stay on NetSuite account krewe, the account its auth config uses. Use an auth config for account 3333333 instead."
+
+        // BASIC, no token URL: the account is the one its endpoints already use.
+        Map<String, Object> repointed = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere + [nsRestletConfigId: "SHARED_ENDPOINT"])
+        assertEquals([refusal], (List<String>) repointed.errors, "repointing the shared endpoint to another account")
+        assertEquals("https://krewe.suitetalk.api.netsuite.com/restlet",
+                findOne("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "SHARED_ENDPOINT"]).endpointUrl)
+
+        ec.message.clearErrors()
+        Map<String, Object> added = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere)
+        assertEquals([refusal], (List<String>) added.errors, "a new endpoint bound to the shared auth config on another account")
+
+        // OAuth: the token URL names the account; hosts compare without case.
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, OWNER)
+        upsertEntityValue("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "ACCOUNT_AUTH"], [
+                nsAuthConfigId: "ACCOUNT_AUTH", companyUserGroupId: OWNER, createdByUserId: TEST_USER_ID, authType: "OAUTH2_M2M_JWT",
+                tokenUrl: "https://1234567-sb1.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token",
+                clientId: "client", certId: "cert", privateKeyPem: "stored-key", isActive: "Y"])
+        ec.message.clearErrors()
+        Map<String, Object> sameAccount = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere + [
+                nsAuthConfigId: "ACCOUNT_AUTH", endpointUrl: "https://1234567-SB1.app.netsuite.com/app/site/hosting/restlet.nl"])
+        assertTrue((Boolean) sameAccount.ok, sameAccount.errors?.toString())
+        ec.message.clearErrors()
+        Map<String, Object> otherAccount = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", elsewhere + [nsAuthConfigId: "ACCOUNT_AUTH"])
+        assertEquals(["This endpoint must stay on NetSuite account 1234567-sb1, the account its auth config uses. Use an auth config for account 3333333 instead."],
+                (List<String>) otherAccount.errors)
     }
 
     // --- helpers ------------------------------------------------------------------------------

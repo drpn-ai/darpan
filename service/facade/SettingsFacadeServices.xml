@@ -1015,6 +1015,14 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <!-- DAR-BE-258: the endpoint is sent this auth config's secret, so it stays on the auth config's
+                     NetSuite account (NsEndpointAccount). The caller already passed canActiveTenantUseConfig on the
+                     auth config above; its other endpoints are read only for their URLs. -->
+                <set field="boundEndpointUrls" from="authCfg.tokenUrl ? [] : darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'save#NsRestletConfig account check (DAR-BE-258): URLs of the endpoints already bound to an auth config the caller may use').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).list()*.endpointUrl"/>
+                <set field="accountRefusal" from="darpan.facade.settings.NsEndpointAccount.refusal(nsEndpointUrlValue, authCfg.tokenUrl as String, boundEndpointUrls)"/>
+                <if condition="accountRefusal"><message error="true">${accountRefusal}</message></if>
+            </if>
+            <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite endpoint settings.')"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; !nsRestletConfigIdValue">

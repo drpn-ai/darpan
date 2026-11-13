@@ -149,7 +149,7 @@ class WebSignInLifetimeTests {
     @DisplayName("DAR-BE-264: a key (or, with no key, a web session) from before two-factor was confirmed ends the sign-in")
     void aKeyFromBeforeTwoFactorEnds() {
         long now = System.currentTimeMillis()
-        Map factor = [userId: USER, statusId: "ACTIVE", confirmedDate: new Timestamp(now - 10 * MINUTE)]
+        Map factor = [userId: USER, factorTypeEnumId: "DrpnTfTotp", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 10 * MINUTE)]
         def oldKey = new EntityStub(keys: [key(APP_KEY, now - 20 * MINUTE, now + 40 * MINUTE)], factors: [factor])
         def oldEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now)), oldKey)
         assertTrue(AuthSessionSupport.enforceWebSignInLifetime(oldEc))
@@ -163,6 +163,19 @@ class WebSignInLifetimeTests {
         def sessionOnly = new SessionStub(creationTime: now - 20 * MINUTE)
         assertTrue(AuthSessionSupport.enforceWebSignInLifetime(ec(new RequestStub(session: sessionOnly), new EntityStub(factors: [factor]))))
         assertTrue(sessionOnly.invalidated)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-270: the key rule's date is the app's while it is on, else the earliest live passkey's")
+    void theKeyRuleDateWithPasskeys() {
+        long now = System.currentTimeMillis()
+        Map app = [userId: USER, factorTypeEnumId: "DrpnTfTotp", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 5 * MINUTE)]
+        Map pk1 = [userId: USER, factorTypeEnumId: "DrpnTfPkey", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 30 * MINUTE)]
+        Map pk2 = [userId: USER, factorTypeEnumId: "DrpnTfPkey", statusId: "ACTIVE", confirmedDate: new Timestamp(now - 10 * MINUTE)]
+        def ecWith = { List<Map> factors -> ec(new RequestStub(), new EntityStub(factors: factors)) }
+        assertEquals(app.confirmedDate, TwoFactorSupport.activeConfirmedDate(ecWith([pk1, app, pk2]), USER))
+        assertEquals(pk1.confirmedDate, TwoFactorSupport.activeConfirmedDate(ecWith([pk2, pk1]), USER), "a second passkey ends nothing")
+        assertNull(TwoFactorSupport.activeConfirmedDate(ecWith([]), USER))
     }
 
     // ---- stubs ----
@@ -214,6 +227,7 @@ class WebSignInLifetimeTests {
         private List<Map> matches() { rows.findAll { Map row -> conditions.every { k, v -> row[k]?.toString() == v?.toString() } } }
         long count() { matches().size() }
         Map one() { matches() ? matches()[0] : null }
+        List<Map> list() { matches() }
         long updateAll(Map fields) {
             List<Map> hit = matches()
             hit.each { it.putAll(fields) }

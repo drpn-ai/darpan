@@ -245,6 +245,13 @@ class CliMethodAllowlist {
             "facade.AuthFacadeServices.disable#TwoFactor",
             "facade.AuthFacadeServices.get#TwoFactorStatus",
             "facade.AuthFacadeServices.verify#SignInCode",
+            // DAR-BE-270: passkey sign-in, proof, registration and management: credentials, never on the CLI list.
+            "facade.AuthFacadeServices.begin#PasskeyProof",
+            "facade.AuthFacadeServices.begin#PasskeyRegistration",
+            "facade.AuthFacadeServices.begin#PasskeySignIn",
+            "facade.AuthFacadeServices.delete#Passkey",
+            "facade.AuthFacadeServices.finish#PasskeyRegistration",
+            "facade.AuthFacadeServices.rename#Passkey",
 
             "facade.CliAuthFacadeServices.approve#CliLogin",
             "facade.CliAuthFacadeServices.deny#CliLogin",

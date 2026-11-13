@@ -18,6 +18,11 @@ import static darpan.common.ValueSupport.normalize
  * DAR-BE-264 — two-factor sign-in (TOTP): enrolment, the sign-in challenge, recovery codes, the per-role policy, admin
  * reset and the fresh code some actions ask for. Spec: wrapper docs/superpowers/specs/2026-11-13-dar-be-264-two-factor-sign-in-design.md.
  *
+ * <p>DAR-BE-270: a person's factors are the authenticator app (the one DrpnTfTotp row, "activeFactor") and any number of
+ * passkeys (DrpnTfPkey rows, PasskeySupport). Two-factor is on while any factor is ACTIVE ("enabled"); recovery codes
+ * belong to the person, made with the first factor and deleted with the last; every fresh-proof action takes a code or a
+ * passkey assertion (freshProofProblem).
+ *
  * <p>Darpan keeps its own factor rows (darpan.auth.TwoFactorFactor) and never writes moqui.security.UserAuthcFactor, so
  * the framework's second-factor paths (unlimited guesses, no replay check, unconfirmed factors counting) have nothing to
  * match. The framework's password-only routes are closed by PasswordOnlyRouteFence instead.
@@ -65,6 +70,8 @@ class TwoFactorSupport {
 
     static final String CODE_REFUSAL = "That code didn't work."
     static final String CODE_NEEDED = "Enter the code from your authenticator app."
+    static final String PROOF_NEEDED = "Confirm with your passkey or a code from your authenticator app."
+    static final String LAST_FACTOR_REQUIRED = "Two-factor is required for your role, so your last way to sign in cannot be removed."
     static final String REQUIRED_CANNOT_TURN_OFF = "Two-factor is required for your role, so it cannot be turned off."
     static final String SETUP_EXPIRED = "Setup has expired. Start again."
     static final String NOT_ENROLLED = "Two-factor is not on for this account."
@@ -89,10 +96,11 @@ class TwoFactorSupport {
         return TenantScopedFinder.findGlobalUnscoped(ec, entityName, reason)
     }
 
+    /** The person's authenticator app (the ACTIVE DrpnTfTotp row), or null. Passkeys are PasskeySupport's. */
     static def activeFactor(def ec, String userId, boolean forUpdate = false) {
         if (!userId) return null
-        def finder = find(ec, FACTOR, "self-scoped auth: the person's active two-factor factor").condition("userId", userId)
-                .condition("statusId", ACTIVE)
+        def finder = find(ec, FACTOR, "self-scoped auth: the person's active authenticator app").condition("userId", userId)
+                .condition("factorTypeEnumId", TYPE_TOTP).condition("statusId", ACTIVE)
         if (forUpdate) finder = finder.forUpdate(true)
         return finder.useCache(false).list()?.find { true }
     }
@@ -101,7 +109,7 @@ class TwoFactorSupport {
     static def pendingFactor(def ec, String userId, boolean forUpdate = false) {
         Timestamp since = new Timestamp(ec.user.nowTimestamp.time - PENDING_LIFETIME_SECONDS * 1000L)
         return find(ec, FACTOR, "self-scoped auth: the person's two-factor setup in progress").condition("userId", userId)
-                .condition("statusId", PENDING)
+                .condition("factorTypeEnumId", TYPE_TOTP).condition("statusId", PENDING)
                 .condition("createdDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, since)
                 .orderBy("-createdDate").forUpdate(forUpdate).useCache(false).list()?.find { true }
     }
@@ -134,50 +142,71 @@ class TwoFactorSupport {
         return dates ? dates.min() : null
     }
 
+    /** The person's ACTIVE factors of either kind (one indexed read). */
+    static List activeFactors(def ec, String userId) {
+        if (!userId) return []
+        return find(ec, FACTOR, "self-scoped auth: the person's active two-factor factors").condition("userId", userId)
+                .condition("statusId", ACTIVE).useCache(false).list()
+    }
+
+    /** True while any factor (the app or a passkey) is ACTIVE. */
+    static boolean enabled(def ec, String userId) {
+        if (!userId) return false
+        return find(ec, FACTOR, "self-scoped auth: does the person have two-factor on").condition("userId", userId)
+                .condition("statusId", ACTIVE).useCache(false).count() > 0
+    }
+
     static boolean isRequiredNow(def ec, String userId) {
         Timestamp from = requiredFrom(ec, userId)
         return from != null && !from.after(ec.user.nowTimestamp)
     }
 
-    static int recoveryCodesLeft(def ec, String userId, String factorId) {
-        if (!factorId) return 0
+    /** The person's unused recovery codes (one set exists at a time, whichever factor's enrolment made it). */
+    static int recoveryCodesLeft(def ec, String userId) {
+        if (!userId) return 0
         return (int) find(ec, RECOVERY, "self-scoped auth: count the person's unused recovery codes").condition("userId", userId)
-                .condition("factorId", factorId).condition("usedDate", null).useCache(false).count()
+                .condition("usedDate", null).useCache(false).count()
     }
 
-    /** get#TwoFactorStatus: never the secret. */
+    /** get#TwoFactorStatus: never the secret, never a key or credential id. */
     static Map<String, Object> status(def ec, String userId) {
-        def factor = activeFactor(ec, userId)
+        List factors = activeFactors(ec, userId)
+        def app = factors.find { it.factorTypeEnumId == TYPE_TOTP }
         Timestamp from = requiredFrom(ec, userId)
+        List<Map> passkeys = factors.any { it.factorTypeEnumId == PasskeySupport.TYPE_PASSKEY } ? PasskeySupport.describe(ec, userId) : []
         return [
-                enabled          : factor != null,
-                confirmedDate    : factor?.confirmedDate,
-                recoveryCodesLeft: factor ? recoveryCodesLeft(ec, userId, (String) factor.factorId) : 0,
+                enabled          : !factors.isEmpty(),
+                confirmedDate    : factors*.confirmedDate.findAll { it != null }.min(),
+                recoveryCodesLeft: factors ? recoveryCodesLeft(ec, userId) : 0,
                 required         : from != null && !from.after(ec.user.nowTimestamp),
                 requiredFromDate : from,
-                codesLocked      : factor?.codesLockedDate != null,
+                codesLocked      : app?.codesLockedDate != null,
+                appEnabled       : app != null,
+                passkeys         : passkeys,
+                passkeysAvailable: PasskeySupport.available(ec),
         ]
     }
 
     /** The two fields sessionInfo carries: whether it is on, and by when it must be (only while it is not). */
     static Map<String, Object> sessionFields(def ec, String userId) {
-        boolean enabled = activeFactor(ec, userId) != null
-        return [twoFactorEnabled: enabled, twoFactorDueDate: enabled ? null : requiredFrom(ec, userId)]
+        boolean on = enabled(ec, userId)
+        return [twoFactorEnabled: on, twoFactorDueDate: on ? null : requiredFrom(ec, userId)]
     }
 
     // ---- the sign-in step ----
 
     /**
      * After the password matched: null when a session may be issued now (optional, or in the grace period), else the
-     * challenge [purpose, challengeToken, expiresInSeconds]: enter a code (an ACTIVE factor), or set up first (required,
-     * past the date, no factor).
+     * challenge [purpose, challengeToken, expiresInSeconds, methods]: enter a code or use a passkey (an ACTIVE factor;
+     * methods = "app" and/or "passkey"), or set up first (required, past the date, no factor; methods empty).
      */
     static Map<String, Object> signInStep(def ec, String userId) {
         String purpose
-        if (activeFactor(ec, userId) != null) purpose = PURPOSE_CODE
+        if (enabled(ec, userId)) purpose = PURPOSE_CODE
         else if (isRequiredNow(ec, userId)) purpose = PURPOSE_SETUP
         else return null
-        return [purpose: purpose, challengeToken: createChallenge(ec, userId, purpose), expiresInSeconds: CHALLENGE_LIFETIME_SECONDS]
+        return [purpose : purpose, challengeToken: createChallenge(ec, userId, purpose), expiresInSeconds: CHALLENGE_LIFETIME_SECONDS,
+                methods : purpose == PURPOSE_CODE ? PasskeySupport.methods(ec, userId) : []]
     }
 
     static String createChallenge(def ec, String userId, String purpose) {
@@ -214,16 +243,26 @@ class TwoFactorSupport {
     }
 
     /**
-     * verify#SignInCode's check: the challenge is claimed and the code or recovery code checked in one locked
-     * transaction of its own. Returns [ok, userId, challengeEnded, recoveryCodesLeft].
+     * verify#SignInCode's check: the challenge is claimed and the code, recovery code or passkey assertion checked in one
+     * locked transaction of its own. A passkey assertion must sign the challenge begin#PasskeySignIn last put on the row,
+     * and any attempt uses that challenge up. Returns [ok, userId, challengeEnded, recoveryCodesLeft].
      */
-    static Map<String, Object> claimSignInChallenge(def ec, Object token, Object code, Object recoveryCode) {
+    static Map<String, Object> claimSignInChallenge(def ec, Object token, Object code, Object recoveryCode,
+                                                    Object passkeyAssertion = null) {
         return (Map<String, Object>) ec.transaction.runRequireNew(null, "Could not check a sign-in code", {
             def challenge = liveChallenge(ec, token, true)
             if (challenge == null || challenge.purposeEnumId != PURPOSE_CODE) return [ok: false, challengeEnded: true]
             String userId = (String) challenge.userId
-            Map<String, Object> check = normalize(recoveryCode) ? consumeRecoveryCode(ec, userId, recoveryCode)
-                    : [ok: consumeTotp(ec, userId, code)]
+            Map<String, Object> check
+            if (normalize(passkeyAssertion)) {
+                String expected = (String) challenge.webauthnChallenge
+                challenge.webauthnChallenge = null
+                check = expected ? PasskeySupport.verifyAssertion(ec, userId, passkeyAssertion, expected) : [ok: false]
+            } else if (normalize(recoveryCode)) {
+                check = consumeRecoveryCode(ec, userId, recoveryCode)
+            } else {
+                check = [ok: consumeTotp(ec, userId, code)]
+            }
             if (check.ok) {
                 challenge.usedDate = ec.user.nowTimestamp
                 challenge.update()
@@ -277,24 +316,26 @@ class TwoFactorSupport {
             event(ec, userId, "CODE_OK")
             return true
         }
-        recordFailure(ec, factor)
+        recordFailure(ec, userId, factor)
         return false
     }
 
-    /** A recovery code: one-time, refused while codes are locked. Returns [ok, recoveryCodesLeft]. Emails the person. */
+    /** A recovery code: one-time, refused while codes are locked (the lock lives on the app's row; a person with
+     *  passkeys only has no lock: 80-bit codes, 5 per challenge and the failed-login count bound guessing). Returns
+     *  [ok, recoveryCodesLeft]. Emails the person. */
     static Map<String, Object> consumeRecoveryCode(def ec, String userId, Object recoveryCode) {
+        if (!enabled(ec, userId)) return [ok: false]
         def factor = activeFactor(ec, userId, true)
-        if (factor == null) return [ok: false]
-        if (factor.codesLockedDate != null) {
+        if (factor?.codesLockedDate != null) {
             event(ec, userId, "CODE_FAILED")
             return [ok: false]
         }
         String value = normalizeRecoveryCode(recoveryCode)
         List rows = find(ec, RECOVERY, "self-scoped auth: the person's unused recovery codes").condition("userId", userId)
-                .condition("factorId", factor.factorId).condition("usedDate", null).forUpdate(true).useCache(false).list()
+                .condition("usedDate", null).forUpdate(true).useCache(false).list()
         def match = value ? rows.find { hashMatches(value, (String) it.codeSalt, (String) it.codeHash) } : null
         if (match == null) {
-            recordFailure(ec, factor)
+            recordFailure(ec, userId, factor)
             return [ok: false]
         }
         match.usedDate = ec.user.nowTimestamp
@@ -308,8 +349,12 @@ class TwoFactorSupport {
 
     /** A wrong code: counts as a failed login (the framework's own lockout throttles it like a password guess), and 20
      *  in 24 hours lock codes until a password reset or an admin reset, with an email to the person. */
-    private static void recordFailure(def ec, def factor) {
-        String userId = (String) factor.userId
+    private static void recordFailure(def ec, String userId, def factor) {
+        if (factor == null) {
+            event(ec, userId, "CODE_FAILED")
+            AuthFacadeSupport.incrementFailedLogins(ec, userId)
+            return
+        }
         Timestamp now = ec.user.nowTimestamp
         Timestamp windowStart = (Timestamp) factor.failedWindowStart
         if (windowStart == null || now.time - windowStart.time >= LOCK_WINDOW_MILLIS) {
@@ -331,17 +376,29 @@ class TwoFactorSupport {
     }
 
     /**
-     * A fresh code from a signed-in person who has two-factor on, for actions that must not ride on a hijacked tab
-     * (approving a CLI sign-in, a /transfer export or secret handoff, new recovery codes, turning it off, an admin reset).
-     * Null when it passes (or the person has no ACTIVE factor and onlyIfEnrolled), else the refusal. Counted in its own
-     * transaction, so the caller's refusal does not roll the count back.
+     * A fresh proof from a signed-in person who has two-factor on, for actions that must not ride on a hijacked tab
+     * (approving a CLI sign-in, a /transfer export or secret handoff, new recovery codes, turning it off, an admin reset,
+     * key rotation, adding or removing a factor): a current code from the app, or (DAR-BE-270) a passkey assertion over a
+     * begin#PasskeyProof challenge. Null when it passes (or the person has no ACTIVE factor and onlyIfEnrolled), else the
+     * refusal. Checked in its own transaction, so the caller's refusal does not roll back the count or the used challenge.
      */
-    static String freshCodeProblem(def ec, Object code, boolean onlyIfEnrolled = true) {
+    static String freshProofProblem(def ec, Object code, Object passkeyAssertion, boolean onlyIfEnrolled = true) {
         long started = System.nanoTime()
         String userId = normalize(ec.user.userId)
         if (!userId) return "Sign in first."
-        if (activeFactor(ec, userId) == null) return onlyIfEnrolled ? null : NOT_ENROLLED
-        if (!normalizeTotp(code)) return CODE_NEEDED
+        List factors = activeFactors(ec, userId)
+        if (!factors) return onlyIfEnrolled ? null : NOT_ENROLLED
+        boolean hasApp = factors.any { it.factorTypeEnumId == TYPE_TOTP }
+        if (normalize(passkeyAssertion)) {
+            Map check = (Map) ec.transaction.runRequireNew(null, "Could not check a passkey", {
+                PasskeySupport.verifyAssertion(ec, userId, passkeyAssertion, null)
+            })
+            if (check.ok) return null
+            holdToFloor(started)
+            return PasskeySupport.PASSKEY_REFUSAL
+        }
+        if (!normalizeTotp(code)) return hasApp && factors.size() == 1 ? CODE_NEEDED : PROOF_NEEDED
+        if (!hasApp) return PROOF_NEEDED
         boolean ok = (boolean) ec.transaction.runRequireNew(null, "Could not check a two-factor code", {
             consumeTotp(ec, userId, code)
         })
@@ -359,7 +416,7 @@ class TwoFactorSupport {
                 .condition("userId", userId).useCache(false).one()
         Timestamp now = ec.user.nowTimestamp
         find(ec, FACTOR, "self-scoped auth: end the person's older two-factor setups").condition("userId", userId)
-                .condition("statusId", PENDING).useCache(false).list().each { row ->
+                .condition("factorTypeEnumId", TYPE_TOTP).condition("statusId", PENDING).useCache(false).list().each { row ->
             row.statusId = ENDED
             row.endedDate = now
             row.endedReason = "REPLACED"
@@ -384,8 +441,8 @@ class TwoFactorSupport {
         Long step = TotpSupport.matchStep((String) pending.secret, normalizeTotp(code), codeClock.call(), null)
         if (step == null) return [ok: false]
         Timestamp now = ec.user.nowTimestamp
-        find(ec, FACTOR, "self-scoped auth: end the person's replaced two-factor factor").condition("userId", userId)
-                .condition("statusId", ACTIVE).useCache(false).list().each { row ->
+        find(ec, FACTOR, "self-scoped auth: end the person's replaced authenticator app").condition("userId", userId)
+                .condition("factorTypeEnumId", TYPE_TOTP).condition("statusId", ACTIVE).useCache(false).list().each { row ->
             row.statusId = ENDED
             row.endedDate = now
             row.endedReason = "REPLACED"
@@ -403,14 +460,15 @@ class TwoFactorSupport {
     }
 
     /**
-     * begin#TwoFactorSetup from a signed-in session (no setup challenge): replacing an ACTIVE factor needs a current code
-     * from it, and a first setup needs the current password, so a session token alone cannot put someone else's app on
-     * the account. A wrong password counts as a failed login (its own transaction, as save#RecoveryEmail does).
+     * begin#TwoFactorSetup and begin#PasskeyRegistration from a signed-in session (no setup challenge): with two-factor on,
+     * a fresh proof from an existing factor (a code, or a passkey assertion); with none yet, the current password. So a
+     * session token alone cannot put someone else's app or passkey on the account. A wrong password counts as a failed
+     * login (its own transaction, as save#RecoveryEmail does).
      */
-    static String signedInSetupProblem(def ec, Object currentPassword, Object code) {
+    static String signedInSetupProblem(def ec, Object currentPassword, Object code, Object passkeyAssertion = null) {
         String userId = normalize(ec.user.userId)
         if (!userId) return "Sign in first."
-        if (activeFactor(ec, userId) != null) return freshCodeProblem(ec, code, false)
+        if (enabled(ec, userId)) return freshProofProblem(ec, code, passkeyAssertion, false)
         if (!currentPassword) return "Current password is required."
         Map check = AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)
         if (!check.passwordVerified) {
@@ -420,28 +478,81 @@ class TwoFactorSupport {
         return null
     }
 
-    /** create#RecoveryCodes: needs a current code; replaces every old code. */
-    static Map<String, Object> renewRecoveryCodes(def ec, Object code) {
+    /** DAR-BE-270: a passkey was the person's first factor: 10 recovery codes (returned once) and every login key ends,
+     *  CLI keys included (the caller gets a fresh key), as confirmSetup does for the app. */
+    static List<String> firstFactorOn(def ec, String userId, String factorId) {
+        List<String> codes = replaceRecoveryCodes(ec, userId, factorId)
+        endSessions(ec, userId, [])
+        event(ec, userId, "SETUP_CONFIRMED")
+        return codes
+    }
+
+    /** create#RecoveryCodes: needs a fresh proof; replaces every old code. */
+    static Map<String, Object> renewRecoveryCodes(def ec, Object code, Object passkeyAssertion = null) {
         String userId = normalize(ec.user.userId)
-        String problem = freshCodeProblem(ec, code, false)
+        String problem = freshProofProblem(ec, code, passkeyAssertion, false)
         if (problem) return [error: problem]
-        def factor = activeFactor(ec, userId)
+        def factor = activeFactor(ec, userId) ?: activeFactors(ec, userId).find { true }
         List<String> codes = replaceRecoveryCodes(ec, userId, (String) factor.factorId)
         event(ec, userId, "CODES_RENEWED")
         return [recoveryCodes: codes]
     }
 
-    /** disable#TwoFactor: an optional person, with a current code. Every other login key ends; this one carries on. */
-    static String turnOff(def ec, Object code) {
+    /**
+     * disable#TwoFactor: every factor off (an optional person), with a fresh proof; every other login key ends, this one
+     * carries on. appOnly (DAR-BE-270): remove just the authenticator app while a passkey remains, allowed for a required
+     * person too since they stay protected; with no passkey left it is the full turn-off.
+     */
+    static String turnOff(def ec, Object code, Object passkeyAssertion = null, boolean appOnly = false) {
         String userId = normalize(ec.user.userId)
-        if (activeFactor(ec, userId) == null) return NOT_ENROLLED
+        List factors = activeFactors(ec, userId)
+        if (!factors) return NOT_ENROLLED
+        boolean keepsPasskey = factors.any { it.factorTypeEnumId == PasskeySupport.TYPE_PASSKEY }
+        if (appOnly && keepsPasskey) {
+            if (!factors.any { it.factorTypeEnumId == TYPE_TOTP }) return "The authenticator app is not on for this account."
+            String problem = freshProofProblem(ec, code, passkeyAssertion, false)
+            if (problem) return problem
+            endFactor(ec, activeFactor(ec, userId, true), "USER_REMOVED")
+            event(ec, userId, "APP_REMOVED")
+            return null
+        }
         if (isRequiredNow(ec, userId)) return REQUIRED_CANNOT_TURN_OFF
-        String problem = freshCodeProblem(ec, code, false)
+        String problem = freshProofProblem(ec, code, passkeyAssertion, false)
         if (problem) return problem
-        endFactors(ec, userId, "USER_OFF")
+        turnOffAll(ec, userId, "USER_OFF")
+        return null
+    }
+
+    /** Every factor ends, recovery codes go, every other login key of the person ends (this request's carries on). */
+    static void turnOffAll(def ec, String userId, String reason) {
+        endFactors(ec, userId, reason)
         endSessions(ec, userId, CliAuthSupport.requestLoginKeyHashes(ec))
         event(ec, userId, "TURNED_OFF")
-        return null
+    }
+
+    /**
+     * delete#Passkey (DAR-BE-270): the person's own live passkey, with a fresh proof (an assertion from the passkey being
+     * removed is fine). Removing the last factor is refused when their role requires two-factor, and for an optional
+     * person turns two-factor off as disable#TwoFactor does. Returns [error] or [twoFactorEnabled].
+     */
+    static Map<String, Object> removePasskey(def ec, Object passkeyId, Object code, Object passkeyAssertion) {
+        String userId = normalize(ec.user.userId)
+        if (PasskeySupport.ownLive(ec, userId, passkeyId) == null) return [error: PasskeySupport.NOT_FOUND]
+        boolean last = activeFactors(ec, userId).size() == 1
+        if (last && isRequiredNow(ec, userId)) return [error: LAST_FACTOR_REQUIRED]
+        String problem = freshProofProblem(ec, code, passkeyAssertion, false)
+        if (problem) return [error: problem]
+        // Read again after the proof: the proof may have been this passkey, and nothing else may have changed meanwhile.
+        if (PasskeySupport.ownLive(ec, userId, passkeyId) == null) return [error: PasskeySupport.NOT_FOUND]
+        if (last) {
+            turnOffAll(ec, userId, "USER_OFF")
+            return [twoFactorEnabled: false]
+        }
+        def factor = find(ec, FACTOR, "self-scoped auth: the passkey being removed").condition("factorId", normalize(passkeyId))
+                .forUpdate(true).useCache(false).one()
+        endFactor(ec, factor, "USER_REMOVED")
+        event(ec, userId, "PASSKEY_REMOVED")
+        return [twoFactorEnabled: true]
     }
 
     /**
@@ -450,8 +561,8 @@ class TwoFactorSupport {
      * not one's own account and the reason; this checks the acting admin's own code (so they must have two-factor on),
      * and writes the evidence: AdminAuditLog, a TwoFactorEvent naming the admin, and an email to the person.
      */
-    static String adminReset(def ec, String userId, String reason, Object adminCode) {
-        String problem = freshCodeProblem(ec, adminCode, false)
+    static String adminReset(def ec, String userId, String reason, Object adminCode, Object adminPasskeyAssertion = null) {
+        String problem = freshProofProblem(ec, adminCode, adminPasskeyAssertion, false)
         if (problem == NOT_ENROLLED) return "Set up two-factor on your own account before resetting someone else's."
         if (problem) return problem
         endFactors(ec, userId, "ADMIN_RESET")
@@ -475,6 +586,15 @@ class TwoFactorSupport {
         if (wasLocked) event(ec, userId, "LOCK_CLEARED")
     }
 
+    private static void endFactor(def ec, def row, String reason) {
+        if (row == null) return
+        row.statusId = ENDED
+        row.endedDate = ec.user.nowTimestamp
+        row.endedReason = reason
+        row.update()
+    }
+
+    /** Every factor of the person (the app and every passkey) ends, and their recovery codes go. */
     private static void endFactors(def ec, String userId, String reason) {
         Timestamp now = ec.user.nowTimestamp
         find(ec, FACTOR, "self-scoped auth: end the person's two-factor factors").condition("userId", userId)
@@ -523,7 +643,7 @@ class TwoFactorSupport {
     }
 
     /**
-     * True when the key was issued before the person's ACTIVE factor was confirmed: such a key stops working (checked
+     * True when the key was issued before the person's two-factor was confirmed: such a key stops working (checked
      * by AuthSessionSupport.enforceWebSignInLifetime and CliAuthSupport.cliSessionProblem on every request). Runs per
      * request, so it is one indexed read.
      */
@@ -533,17 +653,24 @@ class TwoFactorSupport {
         return confirmed != null && ((Timestamp) keyFromDate).before(confirmed)
     }
 
+    /**
+     * The date a key must not predate: the app's confirmedDate while the app is on (replacing it ends older keys), else
+     * the earliest live passkey's (DAR-BE-270: adding a second passkey ends nothing). Null with no factor.
+     */
     static Timestamp activeConfirmedDate(def ec, String userId) {
         if (!userId) return null
-        def factor = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, FACTOR,
+        List factors = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, FACTOR,
                         "self-scoped auth: the person's two-factor confirmation date, for the login-key rule (per request)")
-                .condition("userId", userId).condition("statusId", ACTIVE).useCache(false).one()
-        return factor?.confirmedDate as Timestamp
+                .condition("userId", userId).condition("statusId", ACTIVE).useCache(false).list()
+        if (!factors) return null
+        def app = factors.find { it.factorTypeEnumId == TYPE_TOTP }
+        if (app != null) return app.confirmedDate as Timestamp
+        return factors*.confirmedDate.findAll { it != null }.min() as Timestamp
     }
 
     /** A CLI key of a person who is required and not enrolled is refused (the policy switched on after they signed in). */
     static boolean requiredButNotEnrolled(def ec, String userId) {
-        return activeFactor(ec, userId) == null && isRequiredNow(ec, userId)
+        return !enabled(ec, userId) && isRequiredNow(ec, userId)
     }
 
     // ---- policy (admin.SecurityAdminServices) ----
@@ -634,7 +761,7 @@ class TwoFactorSupport {
     }
 
     /** Through PasswordResetSupport.sendEmail (async, the seam tests record). No email on file: nothing to send. */
-    private static void notify(def ec, String userId, String templateId, Map params) {
+    static void notify(def ec, String userId, String templateId, Map params) {
         def account = find(ec, "moqui.security.UserAccount", "self-scoped auth: the email a two-factor notice goes to")
                 .condition("userId", userId).useCache(false).one()
         String email = normalize(account?.emailAddress)
@@ -687,7 +814,11 @@ class TwoFactorSupport {
     }
 
     static String sha256(String value) {
-        return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
+        return sha256Bytes(value.getBytes(StandardCharsets.UTF_8))
+    }
+
+    static String sha256Bytes(byte[] value) {
+        return MessageDigest.getInstance("SHA-256").digest(value).encodeHex().toString()
     }
 
     static void holdToFloor(long startedNanos) {

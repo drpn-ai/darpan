@@ -93,6 +93,22 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
   code) ends the factor and recovery codes and every session and CLI key, and writes `AdminAuditLog`, a
   `TwoFactorEvent` naming the admin, and an email to the person.
 
+#### Passkeys and security keys (DAR-BE-270)
+
+- WebAuthn (webauthn4j-core 0.30.3, Apache-2.0) beside the app: a person may hold the app, any number of passkeys (up to
+  10), or both; any one answers the sign-in challenge (`begin#PasskeySignIn`, then `verify#SignInCode` with
+  `passkeyAssertion`) and every fresh-proof action above (`begin#PasskeyProof`, then the action's passkey assertion
+  parameter). `userVerification` required, attestation `none`, resident keys preferred. A passkey is a
+  `TwoFactorFactor` row (`DrpnTfPkey`) plus its `PasskeyCredential` (public key and credential id, not encrypted: not
+  secrets). A signature counter that does not move forward is refused (`PASSKEY_COUNTER_REGRESSED`). A refused passkey
+  counts against the challenge only, not as a failed login. Adding one emails the person.
+- Relying party per instance: `DARPAN_WEBAUTHN_RP_ID` (the UI's host, never the API's) and `DARPAN_WEBAUTHN_ORIGINS`
+  (comma list). Unset, both come from `DARPAN_APP_BASE_URL` and `webapp_allow_origins` (https on the rpId or under it;
+  http only for localhost); nothing usable means passkeys are unavailable there and the app keeps working.
+- The last factor of a person whose role requires two-factor cannot be removed; `disable#TwoFactor` with `appOnly`
+  removes just the app while a passkey remains. Admin reset and the break-glass below end passkeys too (every
+  `TWO_FACTOR_FACTOR` row of the person). The `darpan-admin` CLI has no browser, so it stays on codes.
+
 #### Break-glass: no super admin can pass two-factor
 
 Keep at least two super admins enrolled (the policy switch refuses fewer), so one lost phone is a `reset#TwoFactor` by

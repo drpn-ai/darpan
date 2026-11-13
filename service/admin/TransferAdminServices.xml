@@ -53,7 +53,9 @@
                 to (their webhooks sealed with the credentials, never in clear). Automations an import creates start paused.
                 False (the default) sends exactly what it always has.</description></parameter>
             <parameter name="twoFactorCode"><description>DAR-BE-264. A current code from the caller's authenticator app; required
-                when they have two-factor on.</description></parameter>
+                when they have two-factor on (or twoFactorPasskeyAssertion).</description></parameter>
+            <parameter name="twoFactorPasskeyAssertion"><description>DAR-BE-270. Instead of twoFactorCode: a passkey assertion over
+                facade.AuthFacadeServices.begin#PasskeyProof's options.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="bundle" type="Map"><description>{bundleVersion, source, connections, queries, conclusionCodes,
@@ -63,7 +65,7 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <!-- DAR-BE-264: a fresh code from an exporter with two-factor on. -->
-            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshCodeProblem(ec, twoFactorCode)"/>
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, twoFactorCode, twoFactorPasskeyAssertion)"/>
             <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="bundle" from="darpan.admin.transfer.ConfigTransferExporter.bundle(ec, tenantUserGroupId, auditCodes,
                     savedRunIds, connectionRefs, sourceInstanceLabel, secretsPublicKey, false, includeAutomations as boolean)"/>
@@ -121,7 +123,9 @@
         <in-parameters>
             <parameter name="tenantUserGroupId" required="true"><description>The target tenant.</description></parameter>
             <parameter name="twoFactorCode"><description>DAR-BE-264. A current code from the caller's authenticator app; required
-                when they have two-factor on.</description></parameter>
+                when they have two-factor on (or twoFactorPasskeyAssertion).</description></parameter>
+            <parameter name="twoFactorPasskeyAssertion"><description>DAR-BE-270. Instead of twoFactorCode: a passkey assertion over
+                facade.AuthFacadeServices.begin#PasskeyProof's options.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="publicKey"><description>Base64 SPKI, for export#ConfigBundle secretsPublicKey.</description></parameter>
@@ -134,7 +138,7 @@
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <if condition="!darpan.admin.transfer.ConfigTransferExporter.requireTenant(ec, tenantUserGroupId)"><return error="true"/></if>
             <!-- DAR-BE-264: a fresh code from an operator with two-factor on. -->
-            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshCodeProblem(ec, twoFactorCode)"/>
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, twoFactorCode, twoFactorPasskeyAssertion)"/>
             <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="handoff" from="darpan.admin.transfer.SecretHandoff.begin(ec, tenantUserGroupId)"/>
             <set field="publicKey" from="handoff.publicKey"/>

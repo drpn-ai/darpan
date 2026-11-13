@@ -58,10 +58,12 @@
     <service verb="rotate" noun="EncryptedFields" allow-remote="true" transaction-timeout="600">
         <description>Re-encrypt every stored encrypted field (tenant connector credentials, two-factor secrets) with the
             current key, or with dryRun (the default) only report which key each value is on. Super admins only, with a
-            current code from their own authenticator app. A real run is refused unless an old key different from the
+            current code from their own authenticator app or (DAR-BE-270) a passkey assertion. A real run is refused unless an old key different from the
             current one is configured (entity_ds_crypt_pass_old). Writes an AdminAuditLog row with counts, never values.</description>
         <in-parameters>
-            <parameter name="adminCode" required="true"><description>A current code from the acting admin's own authenticator app.</description></parameter>
+            <parameter name="adminCode"><description>A current code from the acting admin's own authenticator app (or adminPasskeyAssertion).</description></parameter>
+            <parameter name="adminPasskeyAssertion"><description>DAR-BE-270. Instead of adminCode: a passkey assertion over
+                facade.AuthFacadeServices.begin#PasskeyProof's options.</description></parameter>
             <parameter name="dryRun" type="Boolean" default-value="true"><description>True (default): count only, write nothing.
                 False: run the sweep.</description></parameter>
         </in-parameters>
@@ -89,7 +91,7 @@
         <actions>
             <set field="ok" from="false"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.freshCodeProblem(ec, adminCode, false)"/>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, adminCode, adminPasskeyAssertion, false)"/>
             <if condition="problem == darpan.facade.auth.TwoFactorSupport.NOT_ENROLLED">
                 <return error="true" message="Set up two-factor on your own account before rotating the encryption key."/></if>
             <if condition="problem"><return error="true" message="${problem}"/></if>

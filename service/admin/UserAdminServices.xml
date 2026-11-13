@@ -190,6 +190,8 @@
                 <parameter name="twoFactor"><description>DAR-BE-264. ON, OFF, or REQUIRED_NOT_SET_UP.</description></parameter>
                 <parameter name="twoFactorConfirmedDate" type="Timestamp"><description>DAR-BE-264. When it was turned on.</description></parameter>
                 <parameter name="twoFactorRequiredFromDate" type="Timestamp"><description>DAR-BE-264. When a role of theirs requires it; empty when optional.</description></parameter>
+                <parameter name="twoFactorAppEnabled" type="Boolean"><description>DAR-BE-270. True when the authenticator app is on.</description></parameter>
+                <parameter name="twoFactorPasskeyCount" type="Integer"><description>DAR-BE-270. Live passkeys.</description></parameter>
                 <parameter name="memberships" type="List"><parameter name="membership" type="Map">
                     <parameter name="tenantUserGroupId"/><parameter name="permissionUserGroupId"/>
                     <parameter name="fromDate" type="Timestamp"/>
@@ -229,6 +231,9 @@
             <set field="userDetail.twoFactor" from="twoFactorStatus.enabled ? 'ON' : (twoFactorStatus.required ? 'REQUIRED_NOT_SET_UP' : 'OFF')"/>
             <set field="userDetail.twoFactorConfirmedDate" from="twoFactorStatus.confirmedDate"/>
             <set field="userDetail.twoFactorRequiredFromDate" from="twoFactorStatus.requiredFromDate"/>
+            <!-- DAR-BE-270: which factors, never a key or credential id. -->
+            <set field="userDetail.twoFactorAppEnabled" from="twoFactorStatus.appEnabled"/>
+            <set field="userDetail.twoFactorPasskeyCount" from="twoFactorStatus.passkeys.size()"/>
         </actions>
     </service>
 
@@ -313,14 +318,16 @@
     </service>
 
     <service verb="reset" noun="TwoFactor" allow-remote="true">
-        <description>DAR-BE-264. End a user's two-factor (lost phone and no recovery code): their authenticator and recovery
-            codes go, every session and CLI key ends, and a user whose role requires it sets up again at the next sign-in.
+        <description>DAR-BE-264. End a user's two-factor (lost phone and no recovery code): their authenticator app, passkeys
+            (DAR-BE-270) and recovery codes go, every session and CLI key ends, and a user whose role requires it sets up again at the next sign-in.
             Super admins only, never on one's own account; needs a reason and the acting admin's own current code (so they
             must have two-factor on). Writes an AdminAuditLog row, a TwoFactorEvent naming the admin, and emails the user.</description>
         <in-parameters>
             <parameter name="userId" required="true"><description>User whose two-factor resets.</description></parameter>
             <parameter name="reason" required="true"><description>Why, for the audit trail ("Two-factor reset: reason").</description></parameter>
-            <parameter name="adminCode" required="true"><description>A current code from the acting admin's own authenticator app.</description></parameter>
+            <parameter name="adminCode"><description>A current code from the acting admin's own authenticator app (or adminPasskeyAssertion).</description></parameter>
+            <parameter name="adminPasskeyAssertion"><description>DAR-BE-270. Instead of adminCode: a passkey assertion over
+                facade.AuthFacadeServices.begin#PasskeyProof's options.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when reset.</description></parameter></out-parameters>
         <actions>
@@ -331,7 +338,7 @@
             <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
                 <field-map field-name="userId"/></entity-find-one>
             <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
-            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.adminReset(ec, userId, reason.trim(), adminCode)"/>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.adminReset(ec, userId, reason.trim(), adminCode, adminPasskeyAssertion)"/>
             <if condition="problem"><return error="true" message="${problem}"/></if>
             <set field="ok" from="true"/>
         </actions>

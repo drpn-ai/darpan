@@ -55,6 +55,11 @@
             <parameter name="challengeExpiresInSeconds" type="Integer">
                 <description>DAR-BE-264. Seconds the challenge lives: 300.</description>
             </parameter>
+            <parameter name="twoFactorMethods" type="List">
+                <description>DAR-BE-270. With twoFactorRequired: what this person can answer with here, "app" (a code to
+                    verify#SignInCode) and/or "passkey" (begin#PasskeySignIn, then the assertion to verify#SignInCode).</description>
+                <parameter name="method"/>
+            </parameter>
             <parameter name="authToken" type="String">
                 <description>Explicit login-key token that darpan-ui sends on later requests through the `login_key` header.</description>
             </parameter>
@@ -121,6 +126,7 @@
             <set field="twoFactorSetupRequired" from="authResult.twoFactorSetupRequired"/>
             <set field="challengeToken" from="authResult.challengeToken"/>
             <set field="challengeExpiresInSeconds" from="authResult.challengeExpiresInSeconds"/>
+            <set field="twoFactorMethods" from="authResult.twoFactorMethods"/>
         </actions>
     </service>
 
@@ -845,7 +851,9 @@
 
     <service verb="verify" noun="SignInCode" allow-remote="true" authenticate="anonymous-all">
         <description>DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a
-            current authenticator code or a recovery code. Success answers as login#Session does (a session and its key).
+            current authenticator code, a recovery code, or (DAR-BE-270) a passkey assertion over begin#PasskeySignIn's
+            options. Success answers as login#Session does (a session and its key). A refused passkey reads "That passkey
+            didn't work.", counts against the challenge and is not a failed login.
             Every refusal is "That code didn't work."; 5 wrong codes end the challenge (challengeEnded), and each wrong code
             also counts as a failed login. A used recovery code emails the person. A refusal is a completed call with
             ok false and the reason in errors (not a JSON-RPC error), so challengeEnded reaches the caller.</description>
@@ -853,6 +861,8 @@
             <parameter name="challengeToken" required="true"><description>From login#Session.</description></parameter>
             <parameter name="code"><description>The 6-digit code from the authenticator app; spaces ignored.</description></parameter>
             <parameter name="recoveryCode"><description>Instead of code: a recovery code, xxxx-xxxx-xxxx-xxxx (case, spaces and dashes ignored). Used once.</description></parameter>
+            <parameter name="passkeyAssertion"><description>DAR-BE-270. Instead of code: JSON.stringify(credential.toJSON()) of the
+                navigator.credentials.get() result for begin#PasskeySignIn's publicKeyOptions.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
@@ -908,7 +918,7 @@
                 <description>True when the challenge can no longer be used (expired, used, 5 wrong codes): go back to the password.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.verifySignInCode(ec, challengeToken, code, recoveryCode)"/>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.verifySignInCode(ec, challengeToken, code, recoveryCode, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -932,7 +942,9 @@
         <in-parameters>
             <parameter name="challengeToken"><description>A setup challenge from login#Session; leave out when signed in.</description></parameter>
             <parameter name="currentPassword"><description>Signed in, first setup: the account's password (a wrong one counts as a failed login).</description></parameter>
-            <parameter name="code"><description>Signed in, replacing an app that is on: a current code from it.</description></parameter>
+            <parameter name="code"><description>Signed in, with two-factor on: a current code from the app.</description></parameter>
+            <parameter name="passkeyAssertion"><description>DAR-BE-270. Signed in, with two-factor on: instead of code, a passkey
+                assertion over begin#PasskeyProof's options.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
@@ -950,7 +962,7 @@
                 <description>With a challengeToken: true when it can no longer be used (expired, used, 5 wrong codes): go back to the password.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginTwoFactorSetup(ec, challengeToken, currentPassword, code)"/>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginTwoFactorSetup(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
             <set field="ok" from="authResult.ok"/>
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
@@ -1047,12 +1059,25 @@
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
-            <parameter name="enabled" type="Boolean"><description>True when an authenticator app is on.</description></parameter>
-            <parameter name="confirmedDate" type="Timestamp"><description>When it was turned on.</description></parameter>
+            <parameter name="enabled" type="Boolean"><description>True when two-factor is on: the authenticator app or a passkey.</description></parameter>
+            <parameter name="confirmedDate" type="Timestamp"><description>When it was first turned on.</description></parameter>
             <parameter name="recoveryCodesLeft" type="Integer"><description>Unused recovery codes.</description></parameter>
             <parameter name="required" type="Boolean"><description>True when a role of theirs requires it now (no "Off" action).</description></parameter>
             <parameter name="requiredFromDate" type="Timestamp"><description>When it is or becomes required; empty when optional.</description></parameter>
             <parameter name="codesLocked" type="Boolean"><description>True after 20 wrong codes in 24 hours, until a password or admin reset.</description></parameter>
+            <parameter name="appEnabled" type="Boolean"><description>DAR-BE-270. True when the authenticator app is on.</description></parameter>
+            <parameter name="passkeysAvailable" type="Boolean"><description>DAR-BE-270. False when this instance has no passkey
+                relying party configured (no add button).</description></parameter>
+            <parameter name="passkeys" type="List"><description>DAR-BE-270. The person's passkeys, oldest first.</description>
+                <parameter name="passkey" type="Map">
+                    <parameter name="passkeyId" type="String"/>
+                    <parameter name="name" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                    <parameter name="lastUsedDate" type="Timestamp"/>
+                    <parameter name="transports" type="List"><parameter name="transport"/></parameter>
+                    <parameter name="backedUp" type="Boolean"><description>A synced passkey (on more than one device).</description></parameter>
+                </parameter>
+            </parameter>
         </out-parameters>
         <actions>
             <set field="status" from="darpan.facade.auth.TwoFactorSupport.status(ec, ec.user.userId)"/>
@@ -1062,6 +1087,9 @@
             <set field="required" from="status.required"/>
             <set field="requiredFromDate" from="status.requiredFromDate"/>
             <set field="codesLocked" from="status.codesLocked"/>
+            <set field="appEnabled" from="status.appEnabled"/>
+            <set field="passkeysAvailable" from="status.passkeysAvailable"/>
+            <set field="passkeys" from="status.passkeys"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -1070,9 +1098,10 @@
 
     <service verb="create" noun="RecoveryCodes" allow-remote="true" authenticate="true">
         <description>DAR-BE-264. Ten new recovery codes for the signed-in person, replacing every old one. Needs a current
-            authenticator code.</description>
+            authenticator code or (DAR-BE-270) a passkey assertion.</description>
         <in-parameters>
-            <parameter name="code" required="true"><description>A current code from the authenticator app.</description></parameter>
+            <parameter name="code"><description>A current code from the authenticator app.</description></parameter>
+            <parameter name="passkeyAssertion"><description>DAR-BE-270. Instead of code: a passkey assertion over begin#PasskeyProof's options.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
@@ -1082,7 +1111,7 @@
                 <description>10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only.</description><parameter name="recoveryCode"/></parameter>
         </out-parameters>
         <actions>
-            <set field="renewed" from="darpan.facade.auth.TwoFactorSupport.renewRecoveryCodes(ec, code)"/>
+            <set field="renewed" from="darpan.facade.auth.TwoFactorSupport.renewRecoveryCodes(ec, code, passkeyAssertion)"/>
             <if condition="renewed.error"><return error="true" message="${renewed.error}"/></if>
             <set field="recoveryCodes" from="renewed.recoveryCodes"/>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -1092,10 +1121,15 @@
     </service>
 
     <service verb="disable" noun="TwoFactor" allow-remote="true" authenticate="true">
-        <description>DAR-BE-264. Turn two-factor off for the signed-in person, with a current code. Refused when a role of
-            theirs requires it. Every other session and CLI key ends; this one carries on.</description>
+        <description>DAR-BE-264. Turn two-factor off for the signed-in person (the app and every passkey), with a current code
+            or (DAR-BE-270) a passkey assertion. Refused when a role of theirs requires it. Every other session and CLI key
+            ends; this one carries on. With appOnly and a passkey left: removes just the authenticator app (allowed when
+            required too), sessions unchanged.</description>
         <in-parameters>
-            <parameter name="code" required="true"><description>A current code from the authenticator app.</description></parameter>
+            <parameter name="code"><description>A current code from the authenticator app.</description></parameter>
+            <parameter name="passkeyAssertion"><description>DAR-BE-270. Instead of code: a passkey assertion over begin#PasskeyProof's options.</description></parameter>
+            <parameter name="appOnly" type="Boolean" default-value="false"><description>DAR-BE-270. Remove only the
+                authenticator app, keeping the passkeys.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
@@ -1103,8 +1137,223 @@
             <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
         </out-parameters>
         <actions>
-            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.turnOff(ec, code)"/>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.turnOff(ec, code, passkeyAssertion, appOnly as boolean)"/>
             <if condition="problem"><return error="true" message="${problem}"/></if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <!-- DAR-BE-270. Passkeys and security keys (WebAuthn) as a second factor. Spec: wrapper
+         docs/superpowers/specs/2026-11-13-dar-be-270-passkeys-design.md. Options go out as JSON text (publicKeyOptions: the
+         WebAuthn L3 options JSON for PublicKeyCredential.parseCreationOptionsFromJSON / parseRequestOptionsFromJSON);
+         credentials come back as JSON text (JSON.stringify(credential.toJSON())). Refusals are completed calls with ok
+         false and the reason in errors (not JSON-RPC errors), as DAR-BE-264's. -->
+
+    <service verb="begin" noun="PasskeySignIn" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-270. Request options for a sign-in login#Session answered with twoFactorRequired and
+            twoFactorMethods containing "passkey". Each call replaces the previous challenge; send the assertion to
+            verify#SignInCode (passkeyAssertion) with the same challengeToken.</description>
+        <in-parameters>
+            <parameter name="challengeToken" required="true"><description>From login#Session.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="publicKeyOptions" type="String">
+                <description>PublicKeyCredentialRequestOptionsJSON: {challenge, rpId, timeout, allowCredentials[{type, id,
+                    transports}], userVerification: "required"}.</description></parameter>
+            <parameter name="challengeEnded" type="Boolean">
+                <description>True when the challenge can no longer be used: go back to the password.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeySignIn(ec, challengeToken)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="publicKeyOptions" from="authResult.publicKeyOptions"/>
+            <set field="challengeEnded" from="authResult.challengeEnded"/>
+        </actions>
+    </service>
+
+    <service verb="begin" noun="PasskeyProof" allow-remote="true" authenticate="true">
+        <description>DAR-BE-270. Request options for the signed-in person's passkeys, for one action that asks for a fresh
+            proof (approve#CliLogin, create#RecoveryCodes, disable#TwoFactor, begin#TwoFactorSetup,
+            begin#PasskeyRegistration, delete#Passkey, and the admin app's /transfer export and handoff, two-factor reset and
+            key rotation). The assertion is single-use and lives 5 minutes.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="publicKeyOptions" type="String">
+                <description>PublicKeyCredentialRequestOptionsJSON, as begin#PasskeySignIn.</description></parameter>
+            <parameter name="expiresInSeconds" type="Integer"><description>Seconds the challenge lives: 300.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeyProof(ec)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="publicKeyOptions" from="authResult.publicKeyOptions"/>
+            <set field="expiresInSeconds" from="authResult.expiresInSeconds"/>
+        </actions>
+    </service>
+
+    <service verb="begin" noun="PasskeyRegistration" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-270. Creation options for a new passkey. Either signed in (no two-factor yet: currentPassword;
+            with two-factor on: a code or a passkey assertion), or with a setup challengeToken from login#Session
+            (twoFactorSetupRequired). Finish within 5 minutes with finish#PasskeyRegistration. Up to 10 passkeys.</description>
+        <in-parameters>
+            <parameter name="challengeToken"><description>A setup challenge from login#Session; leave out when signed in.</description></parameter>
+            <parameter name="currentPassword"><description>Signed in, no two-factor yet: the account's password (a wrong one counts as a failed login).</description></parameter>
+            <parameter name="code"><description>Signed in, two-factor on: a current code from the app.</description></parameter>
+            <parameter name="passkeyAssertion"><description>Signed in, two-factor on: instead of code, a passkey assertion over begin#PasskeyProof's options.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="publicKeyOptions" type="String">
+                <description>PublicKeyCredentialCreationOptionsJSON: {rp{id, name}, user{id, name, displayName}, challenge,
+                    pubKeyCredParams, timeout, excludeCredentials, authenticatorSelection{residentKey: "preferred",
+                    userVerification: "required"}, attestation: "none"}.</description></parameter>
+            <parameter name="expiresInSeconds" type="Integer"><description>Seconds left to finish: 300.</description></parameter>
+            <parameter name="challengeEnded" type="Boolean">
+                <description>With a challengeToken: true when it can no longer be used: go back to the password.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginPasskeyRegistration(ec, challengeToken, currentPassword, code, passkeyAssertion)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="publicKeyOptions" from="authResult.publicKeyOptions"/>
+            <set field="expiresInSeconds" from="authResult.expiresInSeconds"/>
+            <set field="challengeEnded" from="authResult.challengeEnded"/>
+        </actions>
+    </service>
+
+    <service verb="finish" noun="PasskeyRegistration" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-270. Store the new passkey (the browser's credential for begin#PasskeyRegistration's options) and
+            email the person. When it is their first factor two-factor turns on as confirm#TwoFactorSetup does: every other
+            session and CLI key ends, the reply carries a fresh authToken (swap to it; with a setup challenge it is the
+            sign-in) and 10 recovery codes, once. An added passkey changes no session: no authToken.</description>
+        <in-parameters>
+            <parameter name="credential" required="true"><description>JSON.stringify(credential.toJSON()) of navigator.credentials.create().</description></parameter>
+            <parameter name="name"><description>The person's label, e.g. MacBook Touch ID (60 characters; default Passkey).</description></parameter>
+            <parameter name="challengeToken"><description>The setup challenge from login#Session; leave out when signed in.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="passkeyId" type="String"><description>The new passkey's id (for rename#Passkey and delete#Passkey).</description></parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when a session was issued: the first factor (swap to authToken) or a setup challenge (the sign-in).</description></parameter>
+            <parameter name="authToken" type="String">
+                <description>The login key darpan-ui sends in the `login_key` header (also set as the persistent-login cookie).</description></parameter>
+            <parameter name="authTokenType" type="String"><description>`LOGIN_KEY`.</description></parameter>
+            <parameter name="authTokenHeaderName" type="String"><description>`login_key`.</description></parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer">
+                <description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
+            <parameter name="sessionInfo" type="Map">
+                <description>As login#Session's sessionInfo.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
+                <parameter name="lastRun" type="Map">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants" type="List">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
+            </parameter>
+            <parameter name="recoveryCodes" type="List">
+                <description>First factor only: 10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only.</description><parameter name="recoveryCode"/></parameter>
+            <parameter name="challengeEnded" type="Boolean">
+                <description>With a challengeToken: true when it can no longer be used (expired, 5 refusals).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.finishPasskeyRegistration(ec, challengeToken, credential, name)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="passkeyId" from="authResult.passkeyId"/>
+            <set field="authenticated" from="authResult.authenticated"/>
+            <set field="authToken" from="authResult.authToken"/>
+            <set field="authTokenType" from="authResult.authTokenType"/>
+            <set field="authTokenHeaderName" from="authResult.authTokenHeaderName"/>
+            <set field="authTokenExpiresInSeconds" from="authResult.authTokenExpiresInSeconds"/>
+            <set field="sessionInfo" from="authResult.sessionInfo"/>
+            <set field="recoveryCodes" from="authResult.recoveryCodes"/>
+            <set field="challengeEnded" from="authResult.challengeEnded"/>
+        </actions>
+    </service>
+
+    <service verb="rename" noun="Passkey" allow-remote="true" authenticate="true">
+        <description>DAR-BE-270. Rename one of the signed-in person's passkeys (no fresh proof: a label weakens nothing).</description>
+        <in-parameters>
+            <parameter name="passkeyId" required="true"><description>From get#TwoFactorStatus passkeys.</description></parameter>
+            <parameter name="name" required="true"><description>The new label (60 characters at most).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="problem" from="darpan.facade.auth.PasskeySupport.rename(ec, passkeyId, name)"/>
+            <if condition="problem"><return error="true" message="${problem}"/></if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="Passkey" allow-remote="true" authenticate="true">
+        <description>DAR-BE-270. Remove one of the signed-in person's passkeys, with a current code or a passkey assertion
+            (it may come from the passkey being removed). Removing the last factor is refused when a role of theirs
+            requires two-factor; for anyone else it turns two-factor off as disable#TwoFactor does.</description>
+        <in-parameters>
+            <parameter name="passkeyId" required="true"><description>From get#TwoFactorStatus passkeys.</description></parameter>
+            <parameter name="code"><description>A current code from the authenticator app.</description></parameter>
+            <parameter name="passkeyAssertion"><description>Instead of code: a passkey assertion over begin#PasskeyProof's options.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="twoFactorEnabled" type="Boolean"><description>False when this was the last factor.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="removed" from="darpan.facade.auth.TwoFactorSupport.removePasskey(ec, passkeyId, code, passkeyAssertion)"/>
+            <if condition="removed.error"><return error="true" message="${removed.error}"/></if>
+            <set field="twoFactorEnabled" from="removed.twoFactorEnabled"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

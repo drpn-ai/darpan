@@ -9,13 +9,16 @@ Review each record before loading into an environment.
     <!-- Added records from data/SourceSystemConnectorSeedDataFields.xml -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].itemQuantity" label="Item quantity" fieldType="string" sequenceNum="13" description="DAR-BE-251: the order's units, its item rows' quantities summed (HotWax keeps one row per unit), read from the items by order id only when a rule reads it. Compared against Shopify itemQuantity (Item Sync: itemQuantity = itemQuantity); orderItemCount is a copy of Shopify's line count, not this."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].itemQuantity" label="Item quantity" fieldType="String" sequenceNum="12" description="DAR-BE-251: units ordered (Order.subtotalLineItemsQuantity, the sum of line quantities as ordered, before refunds or removals). Compared against HotWax itemQuantity (Item Sync: itemQuantity = itemQuantity)."/>
-    <!-- Added records from data/TwoFactorSeedData.xml (DAR-BE-264). ORDERING NOTE: EnumerationType before Enumeration;
+    <!-- Added records from data/TwoFactorSeedData.xml (DAR-BE-264, DAR-BE-270 passkeys). ORDERING NOTE: EnumerationType before Enumeration;
          policy rows by id alone (every role optional; reloading never clears a date). -->
     <moqui.basic.EnumerationType description="Two-Factor Factor Type" enumTypeId="DarpanTfFactorType"/>
     <moqui.basic.Enumeration description="Authenticator app (TOTP)" enumId="DrpnTfTotp" enumTypeId="DarpanTfFactorType"/>
+    <moqui.basic.Enumeration description="Passkey or security key (WebAuthn)" enumId="DrpnTfPkey" enumTypeId="DarpanTfFactorType"/>
     <moqui.basic.EnumerationType description="Sign-In Challenge Purpose" enumTypeId="DarpanScPurpose"/>
     <moqui.basic.Enumeration description="Enter a code" enumId="DrpnScCode" enumTypeId="DarpanScPurpose"/>
     <moqui.basic.Enumeration description="Set up two-factor first" enumId="DrpnScSetup" enumTypeId="DarpanScPurpose"/>
+    <moqui.basic.Enumeration description="Passkey proof for an action" enumId="DrpnScProof" enumTypeId="DarpanScPurpose"/>
+    <moqui.basic.Enumeration description="Passkey registration" enumId="DrpnScPkAdd" enumTypeId="DarpanScPurpose"/>
     <darpan.auth.TwoFactorRolePolicy permissionGroupId="ADMIN"/>
     <darpan.auth.TwoFactorRolePolicy permissionGroupId="DARPAN_SUPER_ADMIN"/>
     <darpan.auth.TwoFactorRolePolicy permissionGroupId="DARPAN_ADMIN"/>
@@ -32,4 +35,8 @@ Review each record before loading into an environment.
             emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Your Darpan two-factor was reset"
             fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
             bodyScreenLocation="component://darpan/screen/email/TwoFactorReset.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_2FA_PASSKEY_ADDED" description="Darpan passkey added notice"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="A passkey was added to your Darpan account"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/TwoFactorPasskeyAdded.xml"/>
 </entity-facade-xml>

@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- No copyright or license for configuration file, details here are not considered a creative work. -->
 <entity-facade-xml type="darpan-seed">
-    <!-- DAR-BE-264 — two-factor sign-in. Restated in data/upgrade-data.xml so an existing database gets them too.
+    <!-- DAR-BE-264 — two-factor sign-in (DAR-BE-270: passkeys). Restated in data/upgrade-data.xml so an existing database gets them too.
          Ids stay short (12 characters or fewer). -->
     <moqui.basic.EnumerationType description="Two-Factor Factor Type" enumTypeId="DarpanTfFactorType"/>
     <moqui.basic.Enumeration description="Authenticator app (TOTP)" enumId="DrpnTfTotp" enumTypeId="DarpanTfFactorType"/>
+    <moqui.basic.Enumeration description="Passkey or security key (WebAuthn)" enumId="DrpnTfPkey" enumTypeId="DarpanTfFactorType"/>
     <moqui.basic.EnumerationType description="Sign-In Challenge Purpose" enumTypeId="DarpanScPurpose"/>
     <moqui.basic.Enumeration description="Enter a code" enumId="DrpnScCode" enumTypeId="DarpanScPurpose"/>
     <moqui.basic.Enumeration description="Set up two-factor first" enumId="DrpnScSetup" enumTypeId="DarpanScPurpose"/>
+    <moqui.basic.Enumeration description="Passkey proof for an action" enumId="DrpnScProof" enumTypeId="DarpanScPurpose"/>
+    <moqui.basic.Enumeration description="Passkey registration" enumId="DrpnScPkAdd" enumTypeId="DarpanScPurpose"/>
 
     <!-- One row per role the policy covers, by id ALONE: every role starts optional, so a deploy changes nothing, and
          because the loader writes only the attributes given, reloading this file never clears a date an admin set. -->
@@ -29,4 +32,8 @@
             emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Your Darpan two-factor was reset"
             fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
             bodyScreenLocation="component://darpan/screen/email/TwoFactorReset.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_2FA_PASSKEY_ADDED" description="Darpan passkey added notice"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="A passkey was added to your Darpan account"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/TwoFactorPasskeyAdded.xml"/>
 </entity-facade-xml>

@@ -8,19 +8,22 @@
          framework's own second-factor paths (no attempt limit, no replay check) stay inert. /transfer never exports these. -->
 
     <entity entity-name="TwoFactorFactor" package="darpan.auth" use="transactional" cache="never">
-        <description>One authenticator (TOTP) set up by a person. At most one ACTIVE and one live PENDING row per user; a PENDING
-            row older than 15 minutes is ignored. The secret is read only by the code check.</description>
+        <description>One second factor of a person: the authenticator app (DrpnTfTotp: at most one ACTIVE and one live PENDING
+            row per user; a PENDING row older than 15 minutes is ignored; the secret is read only by the code check), or a
+            passkey (DrpnTfPkey, DAR-BE-270: one row per passkey, never PENDING, its credential in PasskeyCredential).
+            Two-factor is on while any row is ACTIVE.</description>
         <field name="factorId" type="id" is-pk="true"/>
         <field name="userId" type="id" not-null="true"/>
-        <field name="factorTypeEnumId" type="id"><description>DrpnTfTotp (WebAuthn later).</description></field>
+        <field name="factorTypeEnumId" type="id"><description>DrpnTfTotp (authenticator app) or DrpnTfPkey (passkey).</description></field>
         <field name="statusId" type="id"><description>PENDING (set up, not confirmed), ACTIVE or ENDED.</description></field>
         <field name="secret" type="text-medium" encrypt="true">
             <description>The TOTP secret, Base32. Returned once, by begin#TwoFactorSetup; never logged or returned again.</description></field>
         <field name="createdDate" type="date-time"/>
         <field name="confirmedDate" type="date-time">
-            <description>When the first right code made it ACTIVE. A login key issued before this stops working.</description></field>
+            <description>When it was turned on (the app's first right code; a passkey's registration). A login key issued
+                before the app's date, or with no app before the earliest live passkey's, stops working.</description></field>
         <field name="endedDate" type="date-time"/>
-        <field name="endedReason" type="text-short"><description>USER_OFF, ADMIN_RESET or REPLACED.</description></field>
+        <field name="endedReason" type="text-short"><description>USER_OFF, USER_REMOVED, ADMIN_RESET or REPLACED.</description></field>
         <field name="lastUsedTimeStep" type="number-integer">
             <description>The 30-second step of the last code accepted; a code is accepted only for a later step (no replay).</description></field>
         <field name="lastUsedDate" type="date-time"/>
@@ -33,6 +36,32 @@
             <key-map field-name="factorTypeEnumId" related="enumId"/>
         </relationship>
         <index name="TWOFA_FACTOR_USER"><index-field name="userId"/><index-field name="statusId"/></index>
+    </entity>
+
+    <entity entity-name="PasskeyCredential" package="darpan.auth" use="transactional" cache="never">
+        <description>DAR-BE-270. The WebAuthn credential behind a DrpnTfPkey TwoFactorFactor row (same factorId). Only a credential
+            whose factor is ACTIVE is used. Not encrypted: a public key and a credential id are not secrets. The row stays
+            after its factor ends (which authenticator, named what). Written only by darpan.facade.auth.PasskeySupport.</description>
+        <field name="factorId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="credentialId" type="text-long"><description>Base64url credential id (up to 1023 bytes).</description></field>
+        <field name="credentialIdHash" type="id-long">
+            <description>SHA-256 (hex) of the credential id bytes: the lookup and the one-live-owner check.</description></field>
+        <field name="publicKeyCose" type="text-long"><description>Base64url COSE public key, as the authenticator gave it.</description></field>
+        <field name="signCount" type="number-integer">
+            <description>The authenticator's signature counter at its last use; a counter that does not move forward is refused
+                (0 on both sides is allowed: synced passkeys report 0).</description></field>
+        <field name="transports" type="text-medium"><description>Comma list the browser reported: internal, hybrid, usb, nfc, ble.</description></field>
+        <field name="aaguid" type="text-short"><description>Authenticator model id (all zeros when the authenticator withholds it).</description></field>
+        <field name="name" type="text-medium"><description>The person's label, e.g. MacBook Touch ID (60 characters at most).</description></field>
+        <field name="backupEligible" type="text-indicator"><description>Y: a synced passkey (may be copied to other devices).</description></field>
+        <field name="backedUp" type="text-indicator"><description>Y: backed up at its last use.</description></field>
+        <field name="uvInitialized" type="text-indicator"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="darpan.auth.TwoFactorFactor" short-alias="factor"/>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="PASSKEY_CRED_HASH"><index-field name="credentialIdHash"/></index>
+        <index name="PASSKEY_CRED_USER"><index-field name="userId"/></index>
     </entity>
 
     <entity entity-name="TwoFactorRecoveryCode" package="darpan.auth" use="transactional" cache="never">
@@ -56,12 +85,18 @@
         <field name="challengeId" type="id" is-pk="true"/>
         <field name="tokenHash" type="id-long" not-null="true"><description>SHA-256 (hex) of the 32-byte random token.</description></field>
         <field name="userId" type="id" not-null="true"/>
-        <field name="purposeEnumId" type="id"><description>DrpnScCode (enter a code) or DrpnScSetup (set up first).</description></field>
+        <field name="purposeEnumId" type="id"><description>DrpnScCode (enter a code or use a passkey), DrpnScSetup (set up
+            first), DrpnScProof (a passkey proof for an action) or DrpnScPkAdd (a passkey registration). For the last two the
+            tokenHash is the SHA-256 of webauthnChallenge, so the browser's clientDataJSON names the row.</description></field>
         <field name="createdDate" type="date-time"/>
         <field name="expiresDate" type="date-time"/>
         <field name="failedAttempts" type="number-integer"/>
         <field name="usedDate" type="date-time"/>
         <field name="requestIp" type="text-short"/>
+        <field name="webauthnChallenge" type="id-long">
+            <description>DAR-BE-270. The WebAuthn challenge (base64url, 32 random bytes) a passkey must sign for this row; not a
+                secret (it is useless without the authenticator). Set by begin#PasskeySignIn, begin#PasskeyProof and
+                begin#PasskeyRegistration; any attempt uses it up.</description></field>
         <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
         <relationship type="one" title="Purpose" related="moqui.basic.Enumeration" short-alias="purpose">
             <key-map field-name="purposeEnumId" related="enumId"/>
@@ -89,7 +124,8 @@
         <field name="userId" type="id" not-null="true"/>
         <field name="eventType" type="text-short">
             <description>SETUP_STARTED, SETUP_CONFIRMED, CODE_OK, CODE_FAILED, RECOVERY_USED, CODES_RENEWED, TURNED_OFF,
-                ADMIN_RESET, CODES_LOCKED or LOCK_CLEARED.</description></field>
+                ADMIN_RESET, CODES_LOCKED or LOCK_CLEARED; DAR-BE-270: PASSKEY_ADDED, PASSKEY_OK, PASSKEY_FAILED,
+                PASSKEY_COUNTER_REGRESSED, PASSKEY_RENAMED, PASSKEY_REMOVED or APP_REMOVED.</description></field>
         <field name="byUserId" type="id"><description>Who did it, when not the person themselves (an admin reset).</description></field>
         <field name="eventDate" type="date-time"/>
         <field name="ip" type="text-short"/>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-270 email body. No bold and no links (a link in a security email is the phishing shape). -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <widgets>
+        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
+        <container><label text="Hi ${firstName}, a passkey named ${passkeyName} was added to your Darpan account on ${at}. It can now be used to sign in."/></container>
+        <container><label text="Not you? Remove it in Darpan under User Settings, change your password, and tell your Darpan administrator."/></container>
+        <container><label text="— Darpan"/></container>
+        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+    </widgets>
+</screen>

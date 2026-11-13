@@ -78,6 +78,12 @@ dependencies {
     // webapp at boot. Pin ASM >= 9.5 (9.8 = Java 25 support, matches the Jetty 12.1 line).
     implementation 'org.ow2.asm:asm:9.8'
     implementation 'com.github.saasquatch:json-schema-inferrer:0.1.5'
+    // DAR-BE-270: passkeys / security keys (WebAuthn) as a second factor (Apache-2.0). The 0.30.x line is webauthn4j's
+    // maintenance branch for Jackson 2: its jackson-databind and jackson-dataformat-cbor resolve to the framework's 2.21.2
+    // and slf4j-api to the shipped 2.0.17, so the only new jars are webauthn4j-core and jackson-dataformat-cbor. 0.31+
+    // moved to Jackson 3 (tools.jackson.*), a second Jackson major that also bumps jackson-annotations. Only
+    // darpan.facade.auth.PasskeySupport may reference it.
+    implementation 'com.webauthn4j:webauthn4j-core:0.30.3.RELEASE'
     // Connector/J 9.x per DevOps MySQL 8.0→8.4 server upgrade (9.x is compatible with both).
     // The upgrade notice named "9.7.2" but Maven Central has no such artifact — 9.7.0 is the
     // newest 9.x release (the line then jumps to Oracle's 26.x numbering). 9.x has no

@@ -4,7 +4,7 @@
         require-authentication="false">
     <widgets>
         <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
-        <container><label text="Hi ${firstName}, a Darpan administrator reset your two-factor on ${at}. Your authenticator app and recovery codes no longer work."/></container>
+        <container><label text="Hi ${firstName}, a Darpan administrator reset your two-factor on ${at}. Your authenticator app, passkeys and recovery codes no longer work."/></container>
         <container><label text="Set two-factor up again at your next sign-in."/></container>
         <container><label text="Not expecting this? Tell your Darpan administrator now."/></container>
         <container><label text="— Darpan"/></container>

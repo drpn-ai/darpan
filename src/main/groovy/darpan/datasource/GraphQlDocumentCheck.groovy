@@ -1,5 +1,6 @@
 package darpan.datasource
 
+import graphql.language.Argument
 import graphql.language.Document
 import graphql.language.Field
 import graphql.language.FragmentDefinition
@@ -9,7 +10,9 @@ import graphql.language.NonNullType
 import graphql.language.OperationDefinition
 import graphql.language.Selection
 import graphql.language.SelectionSet
+import graphql.language.StringValue
 import graphql.language.VariableDefinition
+import graphql.language.VariableReference
 import graphql.parser.Parser
 
 /**
@@ -65,6 +68,65 @@ class GraphQlDocumentCheck {
         List<String> rootFields = (op.selectionSet?.selections ?: []).findAll { it instanceof Field }
                 .collect { Field f -> f.alias ?: f.name }
         return [errors: errors, operationName: op.name, rootFields: rootFields, variables: variables]
+    }
+
+    /**
+     * DAR-BE-260. Every field a document selects, as a path of real field names (an alias is ignored, so it cannot hide
+     * a field) from its operation's root. An inline fragment or a spread fragment's type condition joins the path as
+     * "on:Type", so a caller can tell `customer { displayName }` and `... on Customer { displayName }` apart from other
+     * fields of the same name. rootArguments maps each root field to its arguments: [kind: "string", value] for a
+     * string literal, [kind: "variable", name] for a $variable. Plain lists and maps, so a component without
+     * graphql-java on its compile path can use it. Never throws: errors is non-empty when the document can't be read.
+     */
+    static Map fieldPaths(String document) {
+        if (!document?.trim()) return [errors: ["The query is empty."], paths: [], rootArguments: [:]]
+        Document doc
+        try {
+            doc = Parser.parse(document)
+        } catch (Exception e) {
+            return [errors: ["The query does not parse: ${firstLine(e.message)}".toString()], paths: [], rootArguments: [:]]
+        }
+        Map<String, FragmentDefinition> fragments = doc.getDefinitionsOfType(FragmentDefinition).collectEntries { [(it.name): it] }
+        List<List<String>> paths = []
+        Map<String, Map<String, Map>> rootArguments = [:]
+        for (OperationDefinition op : doc.getDefinitionsOfType(OperationDefinition)) {
+            for (Selection s : (op.selectionSet?.selections ?: [])) {
+                if (s instanceof Field) {
+                    Field f = (Field) s
+                    rootArguments.put(f.name, (f.arguments ?: []).collectEntries { Argument a ->
+                        def v = a.value
+                        [(a.name): v instanceof StringValue ? [kind: "string", value: ((StringValue) v).value] :
+                                v instanceof VariableReference ? [kind: "variable", name: ((VariableReference) v).name] :
+                                        [kind: "other"]]
+                    } as Map<String, Map>)
+                }
+            }
+            walkPaths(op.selectionSet, fragments, [], [] as Set<String>, paths)
+        }
+        return [errors: [], paths: paths, rootArguments: rootArguments]
+    }
+
+    private static void walkPaths(SelectionSet set, Map<String, FragmentDefinition> fragments, List<String> prefix,
+            Set<String> fragmentsOnPath, List<List<String>> paths) {
+        for (Selection s : (set?.selections ?: [])) {
+            if (s instanceof Field) {
+                Field f = (Field) s
+                List<String> path = prefix + [f.name]
+                paths << path
+                walkPaths(f.selectionSet, fragments, path, fragmentsOnPath, paths)
+            } else if (s instanceof InlineFragment) {
+                InlineFragment inline = (InlineFragment) s
+                String type = inline.typeCondition?.name
+                walkPaths(inline.selectionSet, fragments, type ? prefix + ["on:${type}".toString()] : prefix, fragmentsOnPath, paths)
+            } else if (s instanceof FragmentSpread) {
+                String name = ((FragmentSpread) s).name
+                FragmentDefinition fragment = fragments.get(name)
+                // Once per path, so a fragment that spreads itself cannot loop; a fragment reused elsewhere is walked again there.
+                if (fragment == null || fragmentsOnPath.contains(name)) continue
+                walkPaths(fragment.selectionSet, fragments, prefix + ["on:${fragment.typeCondition?.name}".toString()],
+                        fragmentsOnPath + [name] as Set<String>, paths)
+            }
+        }
     }
 
     /** Walks every selection, through fragments (each once, so a cycle cannot loop), noting refused field names. */

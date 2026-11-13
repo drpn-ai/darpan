@@ -602,6 +602,43 @@ class TwoFactorSignInSmokeTests {
         }
     }
 
+    @Test
+    @DisplayName("review M1: a setup challenge stops working once the person has a factor: begin, confirm and passkey finish refuse and spend it")
+    void aStaleSetupChallengeIsRefused() {
+        group(OTHER_ID, "DARPAN_ADMIN")
+        setPolicy("DARPAN_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
+        String token = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD]).out.challengeToken
+        Map begun = anon("begin#TwoFactorSetup", [challengeToken: token])
+        assertEquals([], begun.errors)
+
+        // Meanwhile the person turns two-factor on another way (here: a passkey row, as finish#PasskeyRegistration writes).
+        Timestamp now = new Timestamp(System.currentTimeMillis())
+        ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: PasskeySupport.TYPE_PASSKEY,
+                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now, failedCodeCount: 0]).setSequencedIdPrimary().create()
+
+        Map confirmed = anon("confirm#TwoFactorSetup", [challengeToken: token, code: code(begun.out.secret as String)])
+        assertEquals(["This sign-in has expired. Enter your password again."], confirmed.errors)
+        assertTrue(confirmed.out.challengeEnded as boolean)
+        assertNull(confirmed.out.authToken)
+        assertNull(confirmed.out.recoveryCodes)
+        assertEquals(false, TwoFactorSupport.status(ec, OTHER_ID).appEnabled, "the stale setup put no app on the account")
+        assertEquals(0, keyCount(OTHER_ID))
+        assertNotNull(ec.entity.find(TwoFactorSupport.CHALLENGE).condition("tokenHash", TwoFactorSupport.sha256(token))
+                .disableAuthz().useCache(false).one().usedDate, "the challenge is spent")
+
+        // A fresh setup challenge cannot exist for an enrolled person; one made before they enrolled is refused at begin too.
+        TwoFactorSupport.FACTOR.with { ec.entity.find(it).condition("userId", OTHER_ID).disableAuthz().deleteAll() }
+        String second = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD]).out.challengeToken
+        ec.entity.makeValue(TwoFactorSupport.FACTOR).setAll([userId: OTHER_ID, factorTypeEnumId: PasskeySupport.TYPE_PASSKEY,
+                statusId: TwoFactorSupport.ACTIVE, createdDate: now, confirmedDate: now, failedCodeCount: 0]).setSequencedIdPrimary().create()
+        Map lateBegin = anon("begin#TwoFactorSetup", [challengeToken: second])
+        assertEquals(["This sign-in has expired. Enter your password again."], lateBegin.errors)
+        assertTrue(lateBegin.out.challengeEnded as boolean)
+        assertNull(lateBegin.out.secret)
+        Map lateFinish = anon("finish#PasskeyRegistration", [challengeToken: second, credential: "{}"])
+        assertTrue(lateFinish.out.challengeEnded as boolean, "${lateFinish}")
+    }
+
     // ---- regressions and invariants ----
 
     @Test

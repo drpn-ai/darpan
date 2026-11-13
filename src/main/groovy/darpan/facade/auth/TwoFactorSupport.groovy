@@ -237,10 +237,35 @@ class TwoFactorSupport {
         return row
     }
 
-    /** A setup challenge's person, or null: what begin/confirm#TwoFactorSetup act for when no one is signed in. */
+    /**
+     * A setup challenge's person, or null: what begin/confirm#TwoFactorSetup and begin/finish#PasskeyRegistration act for
+     * when no one is signed in. A setup challenge exists to put a FIRST factor on: once the person has one (set up in
+     * another tab meanwhile), it is spent here and refused, or it would let whoever holds the password add a second factor
+     * of their own (review M1). Checked under the person lock, held to the end of the caller's transaction.
+     */
     static String setupChallengeUser(def ec, Object token) {
+        // Not locked here: a wrong setup code is counted on this row in a transaction of its own
+        // (countSetupChallengeFailure), which a lock held by the caller's transaction would block.
         def row = liveChallenge(ec, token)
-        return row != null && row.purposeEnumId == PURPOSE_SETUP ? (String) row.userId : null
+        if (row == null || row.purposeEnumId != PURPOSE_SETUP) return null
+        String userId = (String) row.userId
+        lockPerson(ec, userId)
+        if (enabled(ec, userId)) {
+            useChallenge(ec, token)
+            return null
+        }
+        return userId
+    }
+
+    /**
+     * Locks the person's UserAccount row to the end of the transaction. Turning a first factor on takes it first, so "no
+     * factor yet" read after it still holds at commit: two setups (a setup challenge and a signed-in tab) cannot both
+     * turn two-factor on. Never take it before a check that writes a failed login (that write runs in its own
+     * transaction on the same row).
+     */
+    static void lockPerson(def ec, String userId) {
+        find(ec, "moqui.security.UserAccount", "self-scoped auth: lock the person while their first factor is turned on")
+                .condition("userId", userId).forUpdate(true).useCache(false).one()
     }
 
     /**
@@ -437,6 +462,7 @@ class TwoFactorSupport {
      * gets a fresh key, see AuthFacadeSupport.issueSignedInSession). Returns [ok, recoveryCodes] or [ok: false].
      */
     static Map<String, Object> confirmSetup(def ec, String userId, Object code) {
+        lockPerson(ec, userId)
         def pending = pendingFactor(ec, userId, true)
         if (pending == null) return [ok: false, expired: true]
         Long step = TotpSupport.matchStep((String) pending.secret, normalizeTotp(code), codeClock.call(), null)

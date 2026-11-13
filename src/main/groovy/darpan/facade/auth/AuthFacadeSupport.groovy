@@ -342,6 +342,8 @@ class AuthFacadeSupport {
             result.challengeEnded = viaChallenge
             return refused(ec, result, viaChallenge ? "This sign-in has expired. Enter your password again." : "Sign in first.", false)
         }
+        // Under the person lock (setupChallengeUser took it already on that path), so "first" still holds at commit.
+        TwoFactorSupport.lockPerson(ec, userId)
         boolean first = !TwoFactorSupport.enabled(ec, userId)
         // In this transaction: a refusal (below, without undo) still commits the used-up registration challenge and the
         // refusal event; only "can no longer sign in" rolls everything back, as confirm#TwoFactorSetup does.

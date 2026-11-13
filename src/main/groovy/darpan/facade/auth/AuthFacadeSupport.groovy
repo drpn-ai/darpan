@@ -278,6 +278,26 @@ class AuthFacadeSupport {
         return result
     }
 
+    /**
+     * disable#TwoFactor: TwoFactorSupport.turnOff, and when two-factor went off altogether every sign-in of the person
+     * ended (TwoFactorSupport.endSessions), so this tab is handed a fresh key (the sign-in fields, as
+     * confirm#TwoFactorSetup answers). Removing just the app ends nothing and returns no key. [error] on a refusal.
+     */
+    static Map<String, Object> turnOffTwoFactor(def ec, Object code, Object passkeyAssertion, boolean appOnly) {
+        return reissueWhenOff(ec, TwoFactorSupport.turnOff(ec, code, passkeyAssertion, appOnly))
+    }
+
+    /** delete#Passkey: TwoFactorSupport.removePasskey; when it was the last factor, as turnOffTwoFactor. */
+    static Map<String, Object> deletePasskey(def ec, Object passkeyId, Object code, Object passkeyAssertion) {
+        return reissueWhenOff(ec, TwoFactorSupport.removePasskey(ec, passkeyId, code, passkeyAssertion))
+    }
+
+    private static Map<String, Object> reissueWhenOff(def ec, Map<String, Object> outcome) {
+        Map<String, Object> result = new LinkedHashMap<>(outcome)
+        if (!outcome.error && outcome.twoFactorEnabled == false) issueSignedInSession(ec, result)
+        return result
+    }
+
     // ---- DAR-BE-270: passkeys ----
 
     /**

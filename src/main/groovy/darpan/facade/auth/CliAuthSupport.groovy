@@ -332,12 +332,15 @@ class CliAuthSupport {
         if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) return CLI_SESSION_EXPIRED
         // DAR-BE-261: the age limit, for admins too, so an admin key issued for 30 days before the change ends at 7.
         if (CliAccess.signInExpired((Timestamp) cliSession.createdDate)) return CLI_SESSION_EXPIRED
-        // DAR-BE-264: a key of a person now required to use two-factor and not set up is refused. (A two-factor change
-        // that ends sign-ins revokes the CliSession and deletes its key: TwoFactorSupport.endSessions.)
-        if (TwoFactorSupport.requiredButNotEnrolled(ec, (String) cliSession.userId)) return CLI_TWO_FACTOR_NEEDED
         def account = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserAccount",
                         "self-scoped auth: re-check that a CLI session's account can still sign in")
                 .condition("userId", cliSession.userId).useCache(false).one()
+        // DAR-BE-264: a CLI session or key issued before a two-factor change ended the person's sign-ins (one minted while
+        // TwoFactorSupport.endSessions ran escaped its revoke), or of a person now required to use two-factor and not set
+        // up, is refused.
+        if (TwoFactorSupport.predatesSessionsEnd(cliSession.createdDate, account?.sessionsEndedDate) ||
+                TwoFactorSupport.predatesSessionsEnd(loginKey.fromDate, account?.sessionsEndedDate)) return CLI_SESSION_EXPIRED
+        if (TwoFactorSupport.requiredButNotEnrolled(ec, (String) cliSession.userId)) return CLI_TWO_FACTOR_NEEDED
         if (!canSignIn(ec, account)) return "This account can no longer sign in."
         if (!cliAccessAllowed(ec, (String) cliSession.userId)) return CLI_ACCESS_REFUSED
         return null

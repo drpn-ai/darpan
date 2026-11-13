@@ -163,12 +163,26 @@ class WebSignInLifetimeTests {
         laterEc.user.userAccount = [sessionsEndedDate: ended]
         assertFalse(AuthSessionSupport.enforceWebSignInLifetime(laterEc), "a session started after it")
 
-        // The key endSessions kept (the tab that turned two-factor off) carries its older web session on.
-        def kept = new EntityStub(keys: [key(APP_KEY, now - 30 * MINUTE, now + 30 * MINUTE)])
-        def keptEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 30 * MINUTE)), kept)
-        keptEc.user.userAccount = [sessionsEndedDate: ended]
-        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(keptEc))
-        assertEquals(USER, keptEc.user.userId)
+        // A key issued after the end (the tab's fresh key) carries its older web session on.
+        def fresh = new EntityStub(keys: [key(APP_KEY, now - 5 * MINUTE, now + 55 * MINUTE)])
+        def freshEc = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - 30 * MINUTE)), fresh)
+        freshEc.user.userAccount = [sessionsEndedDate: ended]
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(freshEc))
+        assertEquals(USER, freshEc.user.userId)
+    }
+
+    @Test
+    @DisplayName("TOCTOU: a key issued before the person's sessions were ended (minted while endSessions ran, so not deleted) is refused")
+    void aKeyFromBeforeSessionsEndedEnds() {
+        long now = System.currentTimeMillis()
+        def entity = new EntityStub(keys: [key(APP_KEY, now - 10 * MINUTE - 1, now + 50 * MINUTE)])
+        def raced = ec(new RequestStub(headers: [login_key: APP_KEY], session: new SessionStub(creationTime: now - MINUTE)), entity)
+        raced.user.userAccount = [sessionsEndedDate: new Timestamp(now - 10 * MINUTE)]
+        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(raced))
+        assertNull(raced.user.userId)
+        assertTrue(TwoFactorSupport.predatesSessionsEnd(new Timestamp(now - 1), new Timestamp(now)))
+        assertFalse(TwoFactorSupport.predatesSessionsEnd(new Timestamp(now), new Timestamp(now)), "the fresh key minted at the stamp passes")
+        assertFalse(TwoFactorSupport.predatesSessionsEnd(new Timestamp(now - 1), null), "never ended: nothing predates")
     }
 
     @Test

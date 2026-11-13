@@ -236,6 +236,28 @@ class AuthSessionSupportTests {
         assertEquals("EX_USER", user.userId)
     }
 
+    @Test
+    void cookieKeyFromBeforeSessionsEndedDoesNotRestore() {
+        // TOCTOU: a cookie key minted while a two-factor change ended the person's sign-ins survived the delete; its
+        // fromDate is before UserAccount.sessionsEndedDate, so it restores nothing.
+        long now = System.currentTimeMillis()
+        def user = new UserStub(userId: null, loginUserResult: true)
+        def loginKeyEntity = new Expando(loginKey: "hash:raced-key", userId: "EX_USER", fromDate: new Timestamp(now - 61_000L))
+        loginKeyEntity.getTimestamp = { String field -> field == "thruDate" ? new Timestamp(now + 3_600_000L) : null }
+        def entity = new EntityFacadeStub(finders: [
+            "moqui.security.UserLoginKey": new FinderStub(oneResult: loginKeyEntity),
+            "moqui.security.UserAccount" : new FinderStub(oneResult: new Expando(userId: "EX_USER", username: "test.user",
+                    sessionsEndedDate: new Timestamp(now - 60_000L))),
+        ])
+        def response = new ResponseStub()
+        def webStub = new Expando(request: new RequestStub(cookies: [new CookieStub(name: "darpan_login_key", value: "raced-key")]), response: response)
+        def ec = buildEc(user: user, web: webStub, entity: entity)
+
+        assertFalse(AuthSessionSupport.restoreAuthenticatedSession(ec))
+        assertNull(user.userId)
+        assertTrue(response.headers.any { it.value.startsWith("darpan_login_key=;") }, "the stale cookie is cleared")
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------

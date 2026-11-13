@@ -116,7 +116,8 @@ class AuthSessionSupport {
                 .condition("userId", userLoginKey.userId)
                 .one()
         String username = userAccount?.username?.toString()?.trim()
-        if (!username) {
+        // DAR-BE-264: a key issued before a two-factor change ended the person's sign-ins restores nothing.
+        if (!username || TwoFactorSupport.predatesSessionsEnd(userLoginKey.fromDate, userAccount.sessionsEndedDate)) {
             clearPersistentLoginCookie(ec)
             return false
         }
@@ -194,19 +195,21 @@ class AuthSessionSupport {
         long now = System.currentTimeMillis()
         long absoluteMillis = absoluteLifetimeMillis(ec)
         boolean ended = sessionOlderThan(request, now, absoluteMillis)
+        // DAR-BE-264: when a two-factor change last ended the person's sign-ins (TwoFactorSupport.endSessions). A key issued
+        // before it is refused (one minted while endSessions ran escaped its delete), and with no live key of the person a
+        // web session that started before it ends. From the UserAccount the framework loaded for this request: no read of
+        // its own. Live factors play no part: removing one ends nothing (review QH1).
+        Object sessionsEnded = ec.user.userAccount?.sessionsEndedDate
         boolean decided = false
         for (String hash : CliAuthSupport.requestLoginKeyHashes(ec)) {
             def key = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
                             "self-scoped auth: slide the request's own web login key (pre-auth path, no active tenant)")
                     .condition("loginKey", hash).useCache(false).one()
             if (key == null || key.userId != userId) continue
-            if (!decided && !slideWebLoginKey(ec, key, now, absoluteMillis)) ended = true
+            boolean live = !TwoFactorSupport.predatesSessionsEnd(key.fromDate, sessionsEnded) && slideWebLoginKey(ec, key, now, absoluteMillis)
+            if (!decided && !live) ended = true
             decided = true
         }
-        // DAR-BE-264: with no live key of the person, the web session alone signs the request in; one that started before
-        // a two-factor change ended the person's sign-ins (TwoFactorSupport.endSessions deleted the keys and stamped
-        // sessionsEndedDate) ends here. Live factors play no part: removing one ends nothing (review QH1).
-        Object sessionsEnded = ec.user.userAccount?.sessionsEndedDate
         if (!decided && sessionsEnded instanceof Timestamp && sessionCreatedBefore(request, ((Timestamp) sessionsEnded).time)) ended = true
         if (ended) endWebSignIn(ec, request)
         return ended

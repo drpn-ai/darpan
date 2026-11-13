@@ -83,11 +83,13 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
   accepted once (replay check). A password reset never ends or changes two-factor; it clears the code lock.
 - A fresh code is asked for when approving a CLI sign-in (`approve#CliLogin`), a `/transfer` export or secret handoff
   (`twoFactorCode`), new recovery codes, turning it off, and an admin reset (the acting admin's own code).
-- Turning a first factor on, turning two-factor off and an admin reset end the person's sign-ins: every login key (web
-  and CLI) is deleted, CLI sessions are revoked, and `UserAccount.sessionsEndedDate` is stamped, so a web session holding
-  no key (a session cookie alone) from before it ends at its next request. The confirming tab gets a fresh key; turning
-  off keeps the current one. Adding a second factor or removing one that is not the last ends nothing. A CLI key of
-  someone required and not enrolled is refused.
+- Turning a first factor on, turning two-factor off and an admin reset end the person's sign-ins:
+  `UserAccount.sessionsEndedDate` is stamped (never moves back), every login key (web and CLI) is deleted, CLI sessions
+  are revoked and approved-but-uncollected CLI sign-ins denied. On every request a key, cookie or CLI session issued
+  before the stamp is refused (so one minted while the change ran is caught), and a web session holding no key (a
+  session cookie alone) from before it ends. The tab that made the change gets a fresh key in the reply. Adding a second
+  factor or removing one that is not the last ends nothing and does not move the stamp. A CLI key of someone required
+  and not enrolled is refused.
 - The framework's password-only ways in are refused for everyone (`PasswordOnlyRouteFence`, webroot before-request):
   HTTP Basic and `authUsername`/`authPassword`/`authUserAccount` answer 401 (signed out again first), as a request
   parameter or anywhere in a JSON body (JSON-RPC params, each call of a batch, GraphQL variables), `/Login`,

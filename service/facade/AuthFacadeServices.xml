@@ -1126,8 +1126,8 @@
     <service verb="disable" noun="TwoFactor" allow-remote="true" authenticate="true">
         <description>DAR-BE-264. Turn two-factor off for the signed-in person (the app and every passkey), with a current code
             or (DAR-BE-270) a passkey assertion. Refused when a role of theirs requires it. Every other session and CLI key
-            ends; this one carries on. With appOnly and a passkey left: removes just the authenticator app (allowed when
-            required too), sessions unchanged.</description>
+            ends, this tab's key too: the reply carries a fresh one (authToken) to send from now on. With appOnly and a
+            passkey left: removes just the authenticator app (allowed when required too), sessions unchanged, no key.</description>
         <in-parameters>
             <parameter name="code"><description>A current code from the authenticator app.</description></parameter>
             <parameter name="passkeyAssertion"><description>DAR-BE-270. Instead of code: a passkey assertion over begin#PasskeyProof's options.</description></parameter>
@@ -1138,10 +1138,21 @@
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="authenticated" type="Boolean"><description>True when this tab was handed a fresh key (two-factor went off).</description></parameter>
+            <parameter name="authToken" type="String"><description>When two-factor went off: every key ended, this tab's too;
+                send this one from now on (also set as the persistent-login cookie).</description></parameter>
+            <parameter name="authTokenType" type="String"><description>`LOGIN_KEY`.</description></parameter>
+            <parameter name="authTokenHeaderName" type="String"><description>`login_key`.</description></parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer"><description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.turnOff(ec, code, passkeyAssertion, appOnly as boolean)"/>
-            <if condition="problem"><return error="true" message="${problem}"/></if>
+            <set field="outcome" from="darpan.facade.auth.AuthFacadeSupport.turnOffTwoFactor(ec, code, passkeyAssertion, appOnly as boolean)"/>
+            <if condition="outcome.error"><return error="true" message="${outcome.error}"/></if>
+            <set field="authenticated" from="outcome.authenticated"/>
+            <set field="authToken" from="outcome.authToken"/>
+            <set field="authTokenType" from="outcome.authTokenType"/>
+            <set field="authTokenHeaderName" from="outcome.authTokenHeaderName"/>
+            <set field="authTokenExpiresInSeconds" from="outcome.authTokenExpiresInSeconds"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -1341,7 +1352,8 @@
     <service verb="delete" noun="Passkey" allow-remote="true" authenticate="true">
         <description>DAR-BE-270. Remove one of the signed-in person's passkeys, with a current code or a passkey assertion
             (it may come from the passkey being removed). Removing the last factor is refused when a role of theirs
-            requires two-factor; for anyone else it turns two-factor off as disable#TwoFactor does.</description>
+            requires two-factor; for anyone else it turns two-factor off as disable#TwoFactor does (every key ends, this
+            tab gets a fresh authToken).</description>
         <in-parameters>
             <parameter name="passkeyId" required="true"><description>From get#TwoFactorStatus passkeys.</description></parameter>
             <parameter name="code"><description>A current code from the authenticator app.</description></parameter>
@@ -1352,11 +1364,22 @@
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
             <parameter name="twoFactorEnabled" type="Boolean"><description>False when this was the last factor.</description></parameter>
+            <parameter name="authenticated" type="Boolean"><description>True when this tab was handed a fresh key (two-factor went off).</description></parameter>
+            <parameter name="authToken" type="String"><description>When two-factor went off: every key ended, this tab's too;
+                send this one from now on (also set as the persistent-login cookie).</description></parameter>
+            <parameter name="authTokenType" type="String"><description>`LOGIN_KEY`.</description></parameter>
+            <parameter name="authTokenHeaderName" type="String"><description>`login_key`.</description></parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer"><description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="removed" from="darpan.facade.auth.TwoFactorSupport.removePasskey(ec, passkeyId, code, passkeyAssertion)"/>
-            <if condition="removed.error"><return error="true" message="${removed.error}"/></if>
-            <set field="twoFactorEnabled" from="removed.twoFactorEnabled"/>
+            <set field="outcome" from="darpan.facade.auth.AuthFacadeSupport.deletePasskey(ec, passkeyId, code, passkeyAssertion)"/>
+            <if condition="outcome.error"><return error="true" message="${outcome.error}"/></if>
+            <set field="twoFactorEnabled" from="outcome.twoFactorEnabled"/>
+            <set field="authenticated" from="outcome.authenticated"/>
+            <set field="authToken" from="outcome.authToken"/>
+            <set field="authTokenType" from="outcome.authTokenType"/>
+            <set field="authTokenHeaderName" from="outcome.authTokenHeaderName"/>
+            <set field="authTokenExpiresInSeconds" from="outcome.authTokenExpiresInSeconds"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

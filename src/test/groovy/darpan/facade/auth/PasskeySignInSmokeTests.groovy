@@ -380,9 +380,11 @@ class PasskeySignInSmokeTests {
         assertEquals([], finish(USERNAME, second.register(beginRegistration(USERNAME, [passkeyAssertion: proofAssertion(USERNAME, first)]))).errors)
         assertEquals(keys, keyCount(USER_ID), "adding a second passkey ends no key and mints none")
         Thread.sleep(5)
+        Object stamp = account(USER_ID).sessionsEndedDate
         String oldestId = (TwoFactorSupport.status(ec, USER_ID).passkeys as List<Map>)[0].passkeyId
         assertEquals([], signedIn(USERNAME, "delete#Passkey", [passkeyId: oldestId, passkeyAssertion: proofAssertion(USERNAME, second)]).errors)
         assertKeysStillWork(USER_ID, webKey, cliHash, "after removing the oldest passkey")
+        assertEquals(stamp, account(USER_ID).sessionsEndedDate, "adding or removing a non-last factor ends no sign-in")
 
         // The app first, then a passkey, then the app goes.
         Map begun = signedIn(OTHER_USERNAME, "begin#TwoFactorSetup", [currentPassword: PASSWORD])
@@ -393,8 +395,10 @@ class PasskeySignInSmokeTests {
         SoftwarePasskey otherKey = new SoftwarePasskey()
         assertEquals([], finish(OTHER_USERNAME, otherKey.register(beginRegistration(OTHER_USERNAME, [code: code(begun.out.secret as String)]))).errors)
         Thread.sleep(5)
+        Object otherStamp = account(OTHER_ID).sessionsEndedDate
         assertEquals([], signedIn(OTHER_USERNAME, "disable#TwoFactor", [appOnly: true, passkeyAssertion: proofAssertion(OTHER_USERNAME, otherKey)]).errors)
         assertKeysStillWork(OTHER_ID, otherWebKey, otherCliHash, "after removing the app")
+        assertEquals(otherStamp, account(OTHER_ID).sessionsEndedDate, "removing the app (appOnly) ends no sign-in")
     }
 
     /** A CLI key of the person, as approve#CliLogin leaves one: a login key and its CliSession. Returns its hash. */

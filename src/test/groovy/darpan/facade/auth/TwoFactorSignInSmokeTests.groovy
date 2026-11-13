@@ -716,6 +716,53 @@ class TwoFactorSignInSmokeTests {
         assertEquals(0, failures(), "a right password counts nothing")
     }
 
+    @Test
+    @DisplayName("TOCTOU: a key or CLI session minted just before a two-factor change ended sign-ins, but stored after, is refused")
+    void aKeyRacingEndSessionsIsRefused() {
+        group(USER_ID, "DARPAN_ADMIN") // the CLI is on for Darpan admins, so only the key rule can refuse
+        Map enrolled = enrol(USER_ID, USERNAME)
+        Timestamp ended = account(USER_ID).sessionsEndedDate as Timestamp
+        assertNotNull(ended)
+
+        // As a concurrent sign-in or CLI poll would leave it: fromDate before the stamp, row written after the delete.
+        ec.user.internalLoginUser(USERNAME)
+        String raw = ec.user.getLoginKey(1.0f)
+        ec.user.logoutUser()
+        String hash = AuthSessionSupport.hashLoginKey(ec, raw)
+        Timestamp justBefore = new Timestamp(ended.time - 1)
+        ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).disableAuthz().updateAll([fromDate: justBefore])
+        ec.entity.makeValue("darpan.auth.CliSession").setAll([loginKeyHash: hash, userId: USER_ID, createdDate: justBefore]).create()
+        def cliRow = ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", hash).disableAuthz().one()
+        assertEquals(CliAuthSupport.CLI_SESSION_EXPIRED, CliAuthSupport.cliSessionProblem(ec, hash, cliRow))
+        ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", hash).disableAuthz().deleteAll()
+        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(webEc(USER_ID, raw)), "the raced web key ends the sign-in")
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(webEc(USER_ID, enrolled.authToken as String)), "the confirm's fresh key passes")
+    }
+
+    @Test
+    @DisplayName("turning two-factor off ends every key, this tab's too, and hands this tab a fresh one; an approved, unclaimed CLI request is denied")
+    void turningOffReissuesThisTabsKey() {
+        group(USER_ID, "DARPAN_ADMIN") // the CLI is on for Darpan admins (the role stays optional)
+        String secret = enrol(USER_ID, USERNAME).secret
+        ec.user.logoutUser()
+        Map started = ec.service.sync().name("facade.CliAuthFacadeServices.start#CliLogin").parameters([hostLabel: "tf-host"]).call()
+        ec.message.clearAll()
+        assertEquals([], signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode, code: code(secret)]).errors)
+
+        ec.user.logoutUser()
+        ec.user.internalLoginUser(USERNAME)
+        String tabKey = ec.user.getLoginKey(1.0f)
+        Map off = call("facade.AuthFacadeServices.disable#TwoFactor", [code: code(secret)])
+        assertEquals([], off.errors)
+        assertTrue(off.out.authenticated as boolean)
+        assertNotNull(off.out.authToken, "this tab swaps to the fresh key")
+        assertNull(loginKey(AuthSessionSupport.hashLoginKey(ec, tabKey)), "the old one is gone with the rest")
+        assertEquals(1, keyCount(USER_ID))
+        assertFalse(AuthSessionSupport.enforceWebSignInLifetime(webEc(USER_ID, off.out.authToken as String)))
+        assertEquals("DENIED", ec.entity.find("darpan.auth.CliDeviceCode").condition("userCode", started.userCode)
+                .disableAuthz().useCache(false).one().statusId, "an approval made before the change mints no key after it")
+    }
+
     // ---- regressions and invariants ----
 
     @Test
@@ -845,6 +892,15 @@ class TwoFactorSignInSmokeTests {
             ec.message.clearAll()
         }
         return (Map) captured.reply
+    }
+
+    /** A stub web request carrying rawKey as its login_key header, over the real entity facade, signed in as userId. */
+    private def webEc(String userId, String rawKey) {
+        def request = new WebSignInLifetimeTests.RequestStub(headers: [login_key: rawKey],
+                session: new WebSignInLifetimeTests.SessionStub(creationTime: System.currentTimeMillis()))
+        def user = new WebSignInLifetimeTests.UserStub(userId: userId, userAccount: account(userId).getMap())
+        return new Expando(context: [:], web: new Expando(request: request, secureRequestParameters: [:]), user: user,
+                entity: ec.entity, factory: ec.factory, transaction: ec.transaction)
     }
 
     private List events(String userId, String type) {

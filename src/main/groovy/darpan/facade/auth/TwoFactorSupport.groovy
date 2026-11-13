@@ -484,7 +484,7 @@ class TwoFactorSupport {
         pending.lastUsedDate = now
         pending.update()
         if (first) return [ok: true, recoveryCodes: firstFactorOn(ec, userId, (String) pending.factorId)]
-        endSessions(ec, userId, [])
+        endSessions(ec, userId)
         event(ec, userId, "SETUP_CONFIRMED")
         return [ok: true]
     }
@@ -508,7 +508,7 @@ class TwoFactorSupport {
      *  ends, CLI keys included (the caller gets a fresh key). */
     static List<String> firstFactorOn(def ec, String userId, String factorId) {
         List<String> codes = replaceRecoveryCodes(ec, userId, factorId)
-        endSessions(ec, userId, [])
+        endSessions(ec, userId)
         event(ec, userId, "SETUP_CONFIRMED")
         return codes
     }
@@ -525,34 +525,36 @@ class TwoFactorSupport {
     }
 
     /**
-     * disable#TwoFactor: every factor off (an optional person), with a fresh proof; every other login key ends, this one
-     * carries on. appOnly (DAR-BE-270): remove just the authenticator app while a passkey remains, allowed for a required
-     * person too since they stay protected; with no passkey left it is the full turn-off.
+     * disable#TwoFactor: every factor off (an optional person), with a fresh proof; every sign-in ends (the caller hands
+     * this tab a fresh key). appOnly (DAR-BE-270): remove just the authenticator app while a passkey remains, allowed for
+     * a required person too since they stay protected, ending no sign-in; with no passkey left it is the full turn-off.
+     * Returns [error] or [twoFactorEnabled].
      */
-    static String turnOff(def ec, Object code, Object passkeyAssertion = null, boolean appOnly = false) {
+    static Map<String, Object> turnOff(def ec, Object code, Object passkeyAssertion = null, boolean appOnly = false) {
         String userId = normalize(ec.user.userId)
         List factors = activeFactors(ec, userId)
-        if (!factors) return NOT_ENROLLED
+        if (!factors) return [error: NOT_ENROLLED]
         boolean keepsPasskey = factors.any { it.factorTypeEnumId == PasskeySupport.TYPE_PASSKEY }
         if (appOnly && keepsPasskey) {
-            if (!factors.any { it.factorTypeEnumId == TYPE_TOTP }) return "The authenticator app is not on for this account."
+            if (!factors.any { it.factorTypeEnumId == TYPE_TOTP }) return [error: "The authenticator app is not on for this account."]
             String problem = freshProofProblem(ec, code, passkeyAssertion, false)
-            if (problem) return problem
+            if (problem) return [error: problem]
             endFactor(ec, activeFactor(ec, userId, true), "USER_REMOVED")
             event(ec, userId, "APP_REMOVED")
-            return null
+            return [twoFactorEnabled: true]
         }
-        if (isRequiredNow(ec, userId)) return REQUIRED_CANNOT_TURN_OFF
+        if (isRequiredNow(ec, userId)) return [error: REQUIRED_CANNOT_TURN_OFF]
         String problem = freshProofProblem(ec, code, passkeyAssertion, false)
-        if (problem) return problem
+        if (problem) return [error: problem]
         turnOffAll(ec, userId, "USER_OFF")
-        return null
+        return [twoFactorEnabled: false]
     }
 
-    /** Every factor ends, recovery codes go, every other login key of the person ends (this request's carries on). */
+    /** Every factor ends, recovery codes go, and every sign-in of the person ends, this request's key too: the caller
+     *  hands this tab a fresh one (AuthFacadeSupport.turnOffTwoFactor / deletePasskey). */
     static void turnOffAll(def ec, String userId, String reason) {
         endFactors(ec, userId, reason)
-        endSessions(ec, userId, CliAuthSupport.requestLoginKeyHashes(ec))
+        endSessions(ec, userId)
         event(ec, userId, "TURNED_OFF")
     }
 
@@ -592,7 +594,7 @@ class TwoFactorSupport {
         if (problem == NOT_ENROLLED) return "Set up two-factor on your own account before resetting someone else's."
         if (problem) return problem
         endFactors(ec, userId, "ADMIN_RESET")
-        endSessions(ec, userId, [])
+        endSessions(ec, userId)
         event(ec, userId, "ADMIN_RESET", normalize(ec.user.userId))
         AdminAuditSupport.record(ec, "admin.UserAdminServices.reset#TwoFactor", "User", userId,
                 "Two-factor reset: ${reason}".toString())
@@ -652,13 +654,15 @@ class TwoFactorSupport {
     // ---- sessions and keys ----
 
     /**
-     * Ends every sign-in of the person but keepHashes: their login keys (web and CLI) are deleted, their CLI sessions
-     * marked revoked, and UserAccount.sessionsEndedDate moves to now (never back), so a web session that holds no key, a
-     * session cookie alone, ends at its next request too (AuthSessionSupport.enforceWebSignInLifetime). A request that
-     * carries a kept key is decided by that key.
+     * Ends every sign-in of the person, in the caller's transaction: UserAccount.sessionsEndedDate moves to now (never
+     * back), their login keys (web and CLI) are deleted, their CLI sessions marked revoked, and a CLI sign-in they approved
+     * but the CLI has not yet collected is denied (it would mint a key after this). The stamp is the rule; the deletes are
+     * housekeeping: a key or CLI session issued before the stamp is refused on every request
+     * (AuthSessionSupport.enforceWebSignInLifetime, restoreAuthenticatedSession, CliAuthSupport.cliSessionProblem), so
+     * one minted while this ran, which the delete missed, is refused too, and so is a web session holding no key. A caller
+     * that keeps the person signed in on this request issues a fresh key afterwards (AuthFacadeSupport.issueSignedInSession).
      */
-    static void endSessions(def ec, String userId, List<String> keepHashes) {
-        List<String> keep = (keepHashes ?: []).findAll { it }
+    static void endSessions(def ec, String userId) {
         Timestamp endedAt = ec.user.nowTimestamp
         def account = find(ec, "moqui.security.UserAccount", "self-scoped auth: stamp when the person's sign-ins were ended")
                 .condition("userId", userId).useCache(false).one()
@@ -667,18 +671,24 @@ class TwoFactorSupport {
             account.sessionsEndedDate = endedAt
             account.update()
         }
-        def keys = find(ec, "moqui.security.UserLoginKey", "self-scoped auth: end the person's login keys after a two-factor change")
-                .condition("userId", userId)
-        if (keep) keys = keys.condition("loginKey", EntityCondition.NOT_IN, keep)
-        keys.deleteAll()
-        Timestamp now = ec.user.nowTimestamp
-        def cli = find(ec, "darpan.auth.CliSession", "self-scoped auth: revoke the person's CLI sessions after a two-factor change")
-                .condition("userId", userId).condition("revokedDate", null)
-        if (keep) cli = cli.condition("loginKeyHash", EntityCondition.NOT_IN, keep)
-        cli.useCache(false).list().each { row ->
-            row.revokedDate = now
+        find(ec, "moqui.security.UserLoginKey", "self-scoped auth: end the person's login keys after a two-factor change")
+                .condition("userId", userId).deleteAll()
+        find(ec, "darpan.auth.CliSession", "self-scoped auth: revoke the person's CLI sessions after a two-factor change")
+                .condition("userId", userId).condition("revokedDate", null).useCache(false).list().each { row ->
+            row.revokedDate = endedAt
             row.update()
         }
+        find(ec, "darpan.auth.CliDeviceCode", "self-scoped auth: deny the person's approved, uncollected CLI sign-ins after a two-factor change")
+                .condition("approvedByUserId", userId).condition("statusId", "APPROVED").useCache(false).list().each { row ->
+            row.statusId = "DENIED"
+            row.update()
+        }
+    }
+
+    /** True when a key or CLI session issued at issuedDate predates the person's sessionsEndedDate (both dates). Pure. */
+    static boolean predatesSessionsEnd(Object issuedDate, Object sessionsEndedDate) {
+        return issuedDate instanceof Timestamp && sessionsEndedDate instanceof Timestamp &&
+                ((Timestamp) issuedDate).before((Timestamp) sessionsEndedDate)
     }
 
     /** A CLI key of a person who is required and not enrolled is refused (the policy switched on after they signed in). */

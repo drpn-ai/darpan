@@ -490,6 +490,29 @@ class PasskeySignInSmokeTests {
     }
 
     @Test
+    @DisplayName("review QH2: a new challenge sweeps only its own person's long-expired challenges, sign-in and passkey rows alike")
+    void challengeHousekeepingIsThePersonsOwn() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        Timestamp twoDaysAgo = new Timestamp(System.currentTimeMillis() - 2 * 86_400_000L)
+        Closure stale = { String userId, String purpose ->
+            ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: TwoFactorSupport.sha256(UUID.randomUUID().toString()),
+                    purposeEnumId: purpose, createdDate: twoDaysAgo, expiresDate: twoDaysAgo, failedAttempts: 0]).setSequencedIdPrimary().create()
+        }
+        Closure count = { String userId -> ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", userId)
+                .condition("expiresDate", twoDaysAgo).disableAuthz().useCache(false).count() as int }
+        stale(USER_ID, TwoFactorSupport.PURPOSE_CODE)
+        stale(OTHER_ID, TwoFactorSupport.PURPOSE_CODE)
+
+        challenge(USERNAME)
+        assertEquals(0, count(USER_ID), "the person's own stale row went")
+        assertEquals(1, count(OTHER_ID), "nobody else's is touched by this person's sign-in")
+
+        stale(USER_ID, PasskeySupport.PURPOSE_PROOF)
+        proofAssertion(USERNAME, key)
+        assertEquals(0, count(USER_ID), "a passkey ceremony sweeps too")
+    }
+
+    @Test
     @DisplayName("every new passkey method is off the CLI list")
     void passkeyMethodsAreNotOnTheCli() {
         ["begin#PasskeyProof", "begin#PasskeyRegistration", "begin#PasskeySignIn", "delete#Passkey",

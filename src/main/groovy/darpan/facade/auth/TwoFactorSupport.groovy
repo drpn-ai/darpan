@@ -57,6 +57,8 @@ class TwoFactorSupport {
     static final List<String> POLICY_GROUP_IDS = (DARPAN_ROLE_GROUP_IDS + [TENANT_ADMIN_GROUP_ID]).asImmutable()
 
     static final int CHALLENGE_LIFETIME_SECONDS = 300
+    /** How long a challenge row stays after it expires before the person's next challenge sweeps it. */
+    static final long EXPIRED_CHALLENGE_KEEP_MILLIS = 24L * 3_600_000L
     static final int PENDING_LIFETIME_SECONDS = 900
     static final int MAX_CHALLENGE_FAILURES = 5
     static final int LOCK_AFTER_FAILURES = 20
@@ -213,10 +215,7 @@ class TwoFactorSupport {
 
     static String createChallenge(def ec, String userId, String purpose) {
         Timestamp now = ec.user.nowTimestamp
-        // Housekeeping: a challenge a day past its end is of no use to anyone.
-        find(ec, CHALLENGE, "housekeeping: sign-in challenges a day past their end")
-                .condition("expiresDate", EntityCondition.ComparisonOperator.LESS_THAN, new Timestamp(now.time - 86_400_000L))
-                .deleteAll()
+        sweepExpiredChallenges(ec, userId)
         byte[] bytes = new byte[32]
         random.nextBytes(bytes)
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
@@ -224,6 +223,17 @@ class TwoFactorSupport {
                 createdDate: now, expiresDate: new Timestamp(now.time + CHALLENGE_LIFETIME_SECONDS * 1000L),
                 failedAttempts: 0, requestIp: recordedIp(ec)]).setSequencedIdPrimary().create()
         return token
+    }
+
+    /**
+     * Housekeeping before a person's new challenge (sign-in, setup, passkey proof or registration): their own challenges
+     * EXPIRED_CHALLENGE_KEEP_MILLIS past their end go, by the indexed userId (review QH2: it deleted every user's, on the
+     * unindexed expiresDate, inside each sign-in's transaction). A day of expired rows stays for evidence.
+     */
+    static void sweepExpiredChallenges(def ec, String userId) {
+        find(ec, CHALLENGE, "housekeeping: the person's sign-in challenges a day past their end").condition("userId", userId)
+                .condition("expiresDate", EntityCondition.ComparisonOperator.LESS_THAN,
+                        new Timestamp(ec.user.nowTimestamp.time - EXPIRED_CHALLENGE_KEEP_MILLIS)).deleteAll()
     }
 
     /** The challenge for a token when it is live (not used, not expired, fewer than 5 wrong codes), else null. */

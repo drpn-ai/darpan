@@ -250,6 +250,7 @@ class PasskeySupport {
     }
 
     private static void createChallengeRow(def ec, String userId, String purpose, String challenge) {
+        TwoFactorSupport.sweepExpiredChallenges(ec, userId)
         Timestamp now = ec.user.nowTimestamp
         ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: TwoFactorSupport.sha256(challenge),
                 purposeEnumId: purpose, webauthnChallenge: challenge, createdDate: now,

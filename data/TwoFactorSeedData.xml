@@ -36,4 +36,8 @@
             emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="A passkey was added to your Darpan account"
             fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
             bodyScreenLocation="component://darpan/screen/email/TwoFactorPasskeyAdded.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_2FA_APP_ADDED" description="Darpan authenticator app set up notice"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="An authenticator app was set up for your Darpan account"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/TwoFactorAppAdded.xml"/>
 </entity-facade-xml>

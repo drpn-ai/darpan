@@ -763,6 +763,28 @@ class TwoFactorSignInSmokeTests {
                 .disableAuthz().useCache(false).one().statusId, "an approval made before the change mints no key after it")
     }
 
+    @Test
+    @DisplayName("review M2: turning the authenticator app on emails the account, as adding a passkey does")
+    void turningTheAppOnEmails() {
+        enrol(USER_ID, USERNAME)
+        List appMail = sent.findAll { it.templateId == TwoFactorSupport.TEMPLATE_APP_ADDED }
+        assertEquals(1, appMail.size(), "${sent*.templateId}")
+        assertEquals("${USERNAME}@example.com".toString(), appMail[0].to)
+        assertNotNull(appMail[0].params.at)
+        def template = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", TwoFactorSupport.TEMPLATE_APP_ADDED)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(template, "seeded")
+        ec.context.push()
+        try {
+            ec.context.putAll(appMail[0].params as Map)
+            String html = ec.screen.makeRender().rootScreen(template.bodyScreenLocation as String).webappName("webroot").renderMode("html").render()
+            assertTrue(html.contains("an authenticator app was set up for your Darpan account"), html)
+            assertFalse(html.contains("<a "), "no links in a security email")
+        } finally {
+            ec.context.pop()
+        }
+    }
+
     // ---- regressions and invariants ----
 
     @Test

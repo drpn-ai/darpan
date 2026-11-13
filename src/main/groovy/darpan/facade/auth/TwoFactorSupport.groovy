@@ -81,6 +81,7 @@ class TwoFactorSupport {
     static final String TEMPLATE_RECOVERY_USED = "DARPAN_2FA_RECOVERY_USED"
     static final String TEMPLATE_CODES_LOCKED = "DARPAN_2FA_CODES_LOCKED"
     static final String TEMPLATE_RESET = "DARPAN_2FA_RESET"
+    static final String TEMPLATE_APP_ADDED = "DARPAN_2FA_APP_ADDED"
 
     /** 32 characters, so 16 of them are exactly 80 bits; no I, O, 0 or 1 to misread. */
     static final String RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -483,6 +484,8 @@ class TwoFactorSupport {
         pending.lastUsedTimeStep = step
         pending.lastUsedDate = now
         pending.update()
+        // A factor nobody was told about is the account-takeover step: say so, as a new passkey does (review M2).
+        notify(ec, userId, TEMPLATE_APP_ADDED, [:])
         if (first) return [ok: true, recoveryCodes: firstFactorOn(ec, userId, (String) pending.factorId)]
         endSessions(ec, userId)
         event(ec, userId, "SETUP_CONFIRMED")

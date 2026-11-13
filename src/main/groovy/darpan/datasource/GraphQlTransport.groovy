@@ -1,16 +1,13 @@
 package darpan.datasource
 
+import darpan.facade.common.OutboundHttpClient
 import darpan.facade.common.OutboundHttpPolicy
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -234,17 +231,13 @@ class GraphQlTransport {
         return headers
     }
 
+    /** DAR-BE-262: through OutboundHttpClient, which connects only to addresses the outbound policy checked (no DNS rebinding). */
     private static Closure defaultSender(int readTimeoutSeconds) {
-        HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build()
         return { String url, Map headers, String body ->
             def check = OutboundHttpPolicy.validate(url)
             if (!check.ok) throw new IllegalStateException("The source URL is blocked by the outbound policy: ${check.error}")
-            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(readTimeoutSeconds))
-                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-            headers.each { k, v -> b.header(k as String, v as String) }
-            HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString())
-            return [statusCode: resp.statusCode(), body: resp.body()]
+            Map answer = OutboundHttpClient.send(OutboundHttpClient.shared(), "POST", url, headers, body, readTimeoutSeconds)
+            return [statusCode: answer.statusCode, body: answer.body]
         }
     }
 }

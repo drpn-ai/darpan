@@ -3,6 +3,7 @@ package darpan.facade.common
 import groovy.transform.CompileStatic
 
 import java.net.InetAddress
+import java.util.function.Function
 
 /**
  * Server-Side-Request-Forgery (SSRF) defense for outbound HTTPs that target
@@ -17,10 +18,10 @@ import java.net.InetAddress
  *      loopback, link-local, multicast, broadcast, or cloud-metadata range.
  *   4. Optional host allow-list (one or more suffixes) is enforced when provided.
  *
- * The DNS resolution is done once at validation time; we intentionally do NOT
- * provide a per-request DNS-pin (DNS rebinding is the remaining residual risk
- * and is documented as a known limitation — partner integrations resolve at
- * connect time too).
+ * validate() resolves the host once, best effort, when a URL is saved or about to be called. A client that resolves
+ * again at connect time can be pointed elsewhere between the two (DNS rebinding), so the connection itself must use
+ * {@link #resolveVetted}: OutboundHttpClient (DAR-BE-262) makes it the client's own DNS step, so the address checked
+ * is the address connected to, on every new connection.
  *
  * Centralizing this here means future remote-config save paths can call one
  * helper rather than copy-pasting host-check logic (which is the pattern that
@@ -300,6 +301,30 @@ class OutboundHttpPolicy {
         } catch (Exception ignored) {
             return null
         }
+    }
+
+    /**
+     * DAR-BE-262. The DNS step of a guarded connection: the host's addresses, resolved once by {@code lookup}, returned only
+     * when EVERY one passes {@link #describeUnsafeAddress}; otherwise UnknownHostException naming the address and why. The
+     * caller connects to exactly these addresses, so a second lookup cannot swap in a private or metadata address. Unlike
+     * validate(), a lookup that fails is a failure: there is nothing to connect to.
+     */
+    static List<InetAddress> resolveVetted(String host, Function<String, InetAddress[]> lookup) throws UnknownHostException {
+        String candidate = host?.trim()
+        if (!candidate) throw new UnknownHostException("No host to connect to.")
+        if (BLOCKED_HOSTNAMES.contains(candidate.toLowerCase(Locale.ROOT))) {
+            throw new UnknownHostException("${candidate} is on the outbound blocklist (cloud-metadata / loopback).".toString())
+        }
+        InetAddress literal = parseIpLiteral(candidate)
+        InetAddress[] resolved = literal != null ? [literal] as InetAddress[] : lookup.apply(candidate)
+        if (resolved == null || resolved.length == 0) throw new UnknownHostException("${candidate} did not resolve.".toString())
+        for (InetAddress addr : resolved) {
+            String reason = describeUnsafeAddress(addr)
+            if (reason != null) {
+                throw new UnknownHostException("${candidate} resolves to a non-routable address (${addr?.hostAddress}): ${reason}".toString())
+            }
+        }
+        return Arrays.asList(resolved)
     }
 
     /** Convenience: validate-or-throw IllegalArgumentException (use where caller turns into Moqui error). */

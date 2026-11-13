@@ -1,16 +1,13 @@
 package darpan.datasource
 
+import darpan.facade.common.OutboundHttpClient
 import darpan.facade.common.OutboundHttpPolicy
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -224,15 +221,11 @@ class RestJsonTransport {
         return parts ? "?" + parts.join("&") : ""
     }
 
+    /** DAR-BE-262: through OutboundHttpClient, which connects only to addresses the outbound policy checked (no DNS rebinding). */
     private static Closure defaultSender(int readTimeoutSeconds) {
-        HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NEVER).build()
         return { String method, String url, Map headers, String body ->
-            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(readTimeoutSeconds))
-            if (method == "POST") b.POST(HttpRequest.BodyPublishers.ofString(body ?: "{}", StandardCharsets.UTF_8))
-            else b.GET()
-            headers.each { k, v -> if (!(method == "GET" && k == "Content-Type")) b.header(k as String, v as String) }
-            HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString())
-            return [statusCode: resp.statusCode(), body: resp.body(), headers: resp.headers().map().collectEntries { k, v -> [(k): v ? v[0] : null] }]
+            Map sent = method == "GET" ? headers.findAll { k, v -> k != "Content-Type" } : headers
+            return OutboundHttpClient.send(OutboundHttpClient.shared(), method, url, sent, method == "POST" ? (body ?: "{}") : null, readTimeoutSeconds)
         }
     }
 }

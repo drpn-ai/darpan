@@ -80,7 +80,7 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
   `SharedConfigAccessSupport.groovy` / `SharedConfigGrantSupport.groovy` (config sharing),
   `RpcMethodFence.groovy` (`/rpc/json` dispatches only `facade.*`, `admin.*`, `gql.*`; closes
   `/rest/login`), `PaginationSupport.groovy`, `DataManagerSupport.groovy` (safe data-manager
-  paths), `OutboundHttpPolicy.groovy`, `DarpanMdcSupport.groovy` (structured log context)
+  paths), `OutboundHttpPolicy.groovy` + `OutboundHttpClient.groovy` (the guarded client: connects only to policy-checked addresses), `DarpanMdcSupport.groovy` (structured log context)
 - Admin support: `admin/` (`AdminAccessSupport` super-admin re-check, `AdminTenantSupport`,
   `AdminUserSupport`, `AdminMembershipSupport`, `AdminScheduleSupport`, `AdminAuditSupport`)
 - Migrations: `migration/` (`MigrationLedgerSupport`, `MigrationSupervisorSupport`,

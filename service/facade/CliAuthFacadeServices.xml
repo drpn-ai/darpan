@@ -189,15 +189,16 @@
             <!-- DAR-BE-195: only someone the CLI is turned on for may approve (Darpan admins until per-user grants exist). -->
             <if condition="!darpan.facade.auth.CliAuthSupport.cliAccessAllowed(ec, ec.user.userId)">
                 <return error="true" message="${darpan.facade.auth.CliAuthSupport.CLI_ACCESS_REFUSED}"/></if>
-            <!-- DAR-BE-264: a fresh code (DAR-BE-270: or passkey assertion) from an approver with two-factor on (checked in its own transaction). -->
-            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, code, passkeyAssertion)"/>
-            <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <entity-find entity-name="darpan.auth.CliDeviceCode" list="deviceRows" limit="1" for-update="true">
                 <econdition field-name="userCode" from="darpan.facade.auth.CliAuthSupport.normalizeUserCode(userCode)"/>
             </entity-find>
             <set field="deviceRow" from="deviceRows ? deviceRows[0] : null"/>
             <if condition="deviceRow == null || deviceRow.statusId != 'PENDING' || !deviceRow.expiresDate?.after(ec.user.nowTimestamp)">
                 <return error="true" message="This sign-in request has expired or was already answered. Run darpan login again."/></if>
+            <!-- DAR-BE-264: a fresh code (DAR-BE-270: or passkey assertion) from an approver with two-factor on, checked in its
+                 own transaction, and last, so a request that is no longer waiting spends no code. -->
+            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, code, passkeyAssertion)"/>
+            <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="deviceRow.statusId" value="APPROVED"/>
             <set field="deviceRow.approvedByUserId" from="ec.user.userId"/>
             <entity-update value-field="deviceRow"/>

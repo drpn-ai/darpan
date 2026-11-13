@@ -372,7 +372,7 @@ class TwoFactorSignInSmokeTests {
     }
 
     @Test
-    @DisplayName("approve#CliLogin needs a fresh code from an approver with two-factor on")
+    @DisplayName("approve#CliLogin needs a fresh code from an approver with two-factor on, checked only for a request still waiting")
     void cliApprovalNeedsACode() {
         group(USER_ID, "DARPAN_ADMIN")
         String secret = enrol(USER_ID, USERNAME).secret
@@ -385,7 +385,12 @@ class TwoFactorSignInSmokeTests {
         Map wrong = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode, code: "000000"])
         assertEquals([REFUSAL], wrong.errors)
         assertEquals(1, events(USER_ID, "CODE_FAILED").size(), "the wrong code is counted although the call rolled back")
-        Map right = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode, code: code(secret)])
+        // A request that is no longer waiting is refused before the code is checked: the code stays good.
+        String unspent = code(secret)
+        Map gone = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: "ZZZZ-ZZZZ", code: unspent])
+        assertEquals(["This sign-in request has expired or was already answered. Run darpan login again."], gone.errors)
+        assertEquals([], events(USER_ID, "CODE_OK"), "no code spent on it")
+        Map right = signedInCall(USERNAME, "facade.CliAuthFacadeServices.approve#CliLogin", [userCode: started.userCode, code: unspent])
         assertEquals([], right.errors)
         assertEquals("APPROVED", ec.entity.find("darpan.auth.CliDeviceCode").condition("userCode", started.userCode)
                 .disableAuthz().useCache(false).one().statusId)

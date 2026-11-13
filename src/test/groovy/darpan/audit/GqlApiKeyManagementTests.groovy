@@ -244,6 +244,79 @@ class GqlApiKeyManagementTests {
         }
     }
 
+    // ---- DAR-BE-267: a maximum lifetime, an owner, and an audit row per mint, disable and rotate ----
+
+    @Test
+    void aKeyMintedWithNoExpiryGetsTheMaximumLifetimeAndAnOwner() {
+        long before = System.currentTimeMillis()
+        Map minted = mint("capped agent")
+        Map key = row(minted.apiKeyId as String)
+        long lifetime = (key.expireDate as Timestamp).time - before
+        assertTrue(lifetime > 89L * 86_400_000L && lifetime <= 90L * 86_400_000L + 60_000L, "lifetime ${lifetime}ms")
+        assertEquals(ADMIN_USER, key.createdByUserId)
+        Map listed = (svc("list#ApiKeys", [:]).apiKeys as List<Map>).find { it.apiKeyId == minted.apiKeyId }
+        assertEquals(ADMIN_USER, listed.createdByUserId)
+    }
+
+    @Test
+    void aKeyCannotBeMintedOrRotatedPastTheMaximumLifetime() {
+        Map refused = svc("create#ApiKey", [clientName: "forever agent", expireDate: minutesFromNow(91L * 24 * 60)])
+        assertTrue((refused.errors as String)?.contains("at most 90 days"), "refusal: ${refused.errors}")
+        assertEquals(null, refused.apiKey, "no key is handed out on a refusal")
+        assertEquals(null, svc("create#ApiKey", [clientName: "ok agent", expireDate: minutesFromNow(89L * 24 * 60)]).errors)
+
+        Map live = mint("rotate-cap agent")
+        Map rotateRefused = svc("rotate#ApiKey", [apiKeyId: live.apiKeyId, expireDate: minutesFromNow(91L * 24 * 60)])
+        assertTrue((rotateRefused.errors as String)?.contains("at most 90 days"), "refusal: ${rotateRefused.errors}")
+        assertTrue(resolves(live.apiKey as String), "a refused rotation leaves the old key alone")
+    }
+
+    @Test
+    void anOlderKeyWithNoExpiryStillResolvesAndRotatesOntoTheMaximum() {
+        // Keys minted before DAR-BE-267 have no expiry. They are not backfilled (a migration is a separate
+        // decision), so they keep working; rotating one gives the new key the maximum lifetime.
+        Map legacy = mint("legacy agent")
+        def key = ec.entity.find("moqui.gql.GqlApiKey").condition("apiKeyId", legacy.apiKeyId).useCache(false).one()
+        key.set("expireDate", null); key.set("createdByUserId", null); key.update()
+        assertTrue(resolves(legacy.apiKey as String))
+
+        long before = System.currentTimeMillis()
+        Map rotated = svc("rotate#ApiKey", [apiKeyId: legacy.apiKeyId, graceMinutes: 5])
+        assertEquals(null, rotated.errors)
+        long lifetime = (row(rotated.newApiKeyId as String).expireDate as Timestamp).time - before
+        assertTrue(lifetime > 89L * 86_400_000L && lifetime <= 90L * 86_400_000L + 60_000L, "lifetime ${lifetime}ms")
+        assertEquals(ADMIN_USER, row(rotated.newApiKeyId as String).createdByUserId)
+    }
+
+    @Test
+    void mintDisableAndRotateEachLeaveOneAuditRowWithNoKeyMaterial() {
+        Map minted = mint("audited agent")
+        List<Map> mintRows = auditRows(minted.apiKeyId as String)
+        assertEquals(["gql.GqlAuthServices.create#ApiKey"], mintRows*.serviceName)
+        assertEquals([ADMIN_USER, "GqlApiKey"], [mintRows[0].adminUserId, mintRows[0].targetType])
+        assertTrue((mintRows[0].detailText as String).contains(TENANT))
+
+        Map rotated = svc("rotate#ApiKey", [apiKeyId: minted.apiKeyId, graceMinutes: 0])
+        assertEquals(["gql.GqlAuthServices.rotate#ApiKey"], auditRows(rotated.newApiKeyId as String)*.serviceName)
+
+        assertEquals(null, svc("disable#ApiKey", [apiKeyId: rotated.newApiKeyId]).errors)
+        assertEquals(null, svc("disable#ApiKey", [apiKeyId: rotated.newApiKeyId]).errors)
+        assertEquals(["gql.GqlAuthServices.rotate#ApiKey", "gql.GqlAuthServices.disable#ApiKey"],
+                auditRows(rotated.newApiKeyId as String)*.serviceName, "a repeat disable changes nothing and records nothing")
+
+        String everything = (auditRows(minted.apiKeyId as String) + auditRows(rotated.newApiKeyId as String)).toString()
+        [minted.apiKey, rotated.apiKey, row(minted.apiKeyId as String).keyHash, row(rotated.newApiKeyId as String).keyHash].each {
+            assertFalse(everything.contains(it as String), "no key or digest in the audit trail")
+        }
+        assertFalse(everything.contains("dgql_"))
+    }
+
+    private List<Map> auditRows(String apiKeyId) {
+        return ec.entity.find("darpan.admin.AdminAuditLog").condition("targetType", "GqlApiKey")
+                .condition("targetId", apiKeyId).orderBy("auditTimestamp").orderBy("adminAuditLogId")
+                .useCache(false).disableAuthz().list()*.getMap()
+    }
+
     @Test
     void lastUsedIsWrittenAtMostOnceAMinute() {
         Map minted = mint("busy agent")

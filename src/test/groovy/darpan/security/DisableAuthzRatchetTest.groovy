@@ -142,8 +142,8 @@ class DisableAuthzRatchetTest {
      * or in any other Darpan component grew unseen — and moving Groovy into XML actions (DAR-BE-074) would
      * have hidden the sites it moved. Same fail-mode rule: each count must equal its baseline exactly.
      * Counts are frozen at 2026-10-19; none is a known leak — the point is that growth is now visible. darpan-agent was
-     * added by DAR-BE-263 (2026-11-13). moqui-gql (a separate repo) and moqui-sftp (third-party upstream) stay outside
-     * the gate; moqui-gql is DAR-BE-267.
+     * added by DAR-BE-263 (2026-11-13), moqui-gql (its own repo) by DAR-BE-267 (2026-11-13). moqui-sftp (third-party
+     * upstream) stays outside the gate.
      */
     static final Map<String, Integer> COMPONENT_BASELINES = [
             "darpan service+screen XML .disableAuthz("            : 69,
@@ -170,6 +170,13 @@ class DisableAuthzRatchetTest {
             "darpan-agent Groovy .disableAuthz("                  : 0,
             "darpan-agent service+screen XML .disableAuthz("      : 0,
             "darpan-agent service+screen XML disable-authz=\"true\"": 0,
+            // DAR-BE-267: moqui-gql joined at its counts that day. Groovy 4 (GqlEngine): three caller-profile lookups
+            // (GqlCallerProfileMember/GqlCallerProfile, global governor config) and the query-shape check in the query
+            // log writer. XML 4: resolve#ApiKey's lookup by digest and its lastUsedDate write (anonymous realm), and
+            // GqlMonitorServices' two cross-caller reads of the query log and its stats bins.
+            "moqui-gql Groovy .disableAuthz("                     : 4,
+            "moqui-gql service+screen XML .disableAuthz("         : 4,
+            "moqui-gql service+screen XML disable-authz=\"true\"": 0,
     ]
 
     @Test
@@ -178,7 +185,7 @@ class DisableAuthzRatchetTest {
         Map<String, Integer> counts = [:]
         Map<String, List<String>> sites = [:]
 
-        ["darpan", "darpan-hotwax", "shopify-darpan", "netsuite-darpan", "database-darpan", "darpan-agent"].each { String component ->
+        ["darpan", "darpan-hotwax", "shopify-darpan", "netsuite-darpan", "database-darpan", "darpan-agent", "moqui-gql"].each { String component ->
             Path root = componentRoot.resolve(component)
             assertTrue(Files.exists(root), "Could not locate component ${component} at ${root}")
             if (component != "darpan") {

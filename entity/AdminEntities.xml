@@ -3,15 +3,16 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
     <entity entity-name="AdminAuditLog" package="darpan.admin" use="nontransactional" cache="never">
-        <description>Immutable trail of platform-admin mutations (admin.* services). One row per
-            mutation, written in the same transaction as the change itself.</description>
+        <description>Immutable trail of platform-admin mutations (admin.* services), and since DAR-BE-267 of public
+            GraphQL API key mints, rotations and disables (moqui-gql gql.GqlAuthServices, by a tenant admin or super
+            admin). One row per mutation, written in the same transaction as the change itself.</description>
         <field name="adminAuditLogId" type="id" is-pk="true"/>
         <field name="adminUserId" type="id" not-null="true">
-            <description>Operator (super admin) who performed the mutation.</description></field>
+            <description>Operator who performed the mutation: a super admin, or a tenant admin for a GqlApiKey row.</description></field>
         <field name="serviceName" type="text-medium" not-null="true">
             <description>Full admin service name that performed the mutation.</description></field>
         <field name="targetType" type="text-short" not-null="true">
-            <description>Kind of record affected: Tenant, User, or Membership.</description></field>
+            <description>Kind of record affected: Tenant, User, Membership, GqlApiKey, ...</description></field>
         <field name="targetId" type="text-medium" not-null="true">
             <description>Primary identifier of the affected record (tenant group id, user id, or composite).</description></field>
         <field name="detailText" type="text-long">

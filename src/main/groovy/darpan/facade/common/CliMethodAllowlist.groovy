@@ -338,6 +338,8 @@ class CliMethodAllowlist {
             "facade.SettingsFacadeServices.save#TenantSettings",
             "facade.SettingsFacadeServices.save#UserNotificationDefault",
 
+            // DAR-BE-275: starts an install that stores a new connection; a browser flow, not a CLI one.
+            "facade.ShopifyFacadeServices.begin#ShopifyInstall",
             "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig",
             "facade.ShopifyFacadeServices.save#ShopifyAuthConfig",
 

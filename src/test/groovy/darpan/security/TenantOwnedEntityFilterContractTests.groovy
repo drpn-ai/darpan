@@ -101,7 +101,11 @@ class TenantOwnedEntityFilterContractTests {
      * Filter rows added since the last release cut. No pack carries them yet: the next cut generates its pack from
      * the previous tag, and data/upgrade-data.xml is not hand-edited between cuts. Remove an entry once a pack ships it.
      */
-    static final Map<String, String> PENDING_NEXT_PACK = ["DARPAN_SCOPE_DATA_EXPORT_LOG": "darpan.admin.DataExportLog"].asImmutable() // DAR-BE-265; 3.0.0 shipped all 16 (DAR-BE-159/160/161/164/167/194/195/209, DAR-CLI-003)
+    // DAR-BE-265, DAR-BE-275; 3.0.0 shipped all 16 (DAR-BE-159/160/161/164/167/194/195/209, DAR-CLI-003)
+    static final Map<String, String> PENDING_NEXT_PACK = [
+            "DARPAN_SCOPE_DATA_EXPORT_LOG"      : "darpan.admin.DataExportLog",
+            "DARPAN_SCOPE_SHOPIFY_INSTALL_STATE": "darpan.shopify.ShopifyInstallState",
+    ].asImmutable()
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS).asImmutable()

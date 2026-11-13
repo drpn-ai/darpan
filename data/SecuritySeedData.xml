@@ -281,6 +281,12 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.SlackWorkspaceInstall"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-275: the callback redeems the state through findGlobalUnscoped (the token is the
+         authorization), so this filter only guards other reads. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SHOPIFY_INSTALL_STATE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.shopify.ShopifyInstallState"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <!-- Rows are stamped with the CONFIG OWNER's tenant, and a shared peer reads them too: that read
          (SourceEndpointAccessSupport.decisionsFor) is findGlobalUnscoped after the config is authorized. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_ENDPOINT_ACCESS"

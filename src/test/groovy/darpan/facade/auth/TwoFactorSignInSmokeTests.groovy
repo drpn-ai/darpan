@@ -1,6 +1,6 @@
 package darpan.facade.auth
 
-import darpan.admin.AuditLogTestSupport
+import darpan.facade.auth.support.TwoFactorTestSupport
 import darpan.facade.common.CliMethodAllowlist
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.apache.logging.log4j.Level
@@ -10,19 +10,16 @@ import org.apache.logging.log4j.core.LoggerContext
 import org.apache.logging.log4j.core.appender.AbstractAppender
 import org.apache.logging.log4j.core.config.LoggerConfig
 import org.apache.logging.log4j.core.config.Property
-import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.moqui.context.ExecutionContext
 import org.moqui.context.WebFacade
 import org.moqui.impl.context.ExecutionContextImpl
 import org.moqui.impl.service.ServiceJsonRpcDispatcher
 
-import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
@@ -34,13 +31,8 @@ import static org.junit.jupiter.api.Assertions.*
  * step (the replay check refuses a step twice); mail goes to PasswordResetSupport's recorder seams.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class TwoFactorSignInSmokeTests {
-    private ExecutionContext ec
-    private long clock = 1_800_000_000_000L
-    private Closure<Long> originalClock
-    private Closure originalSendEmail
+class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
     private Closure originalSendResetCode
-    private List<Map> sent = []
 
     private static final String USER_ID = "TF_USER"
     private static final String USERNAME = "tf.user"
@@ -57,41 +49,24 @@ class TwoFactorSignInSmokeTests {
     private static final String NEW_PASSWORD = "Tf-passw0rd-two!"
     private static final String REFUSAL = "That code didn't work."
 
-    @BeforeAll
-    void setup() {
-        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
-        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "two-factor-smoke")
-        ["SecuritySeedData.xml", "PasswordResetEmailSeedData.xml", "TwoFactorSeedData.xml"].each {
-            ec.entity.makeDataLoader().location("component://darpan/data/${it}".toString()).dummyFks(true).load()
-        }
-        ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TENANT_B, description: "TF tenant B"]).createOrUpdate()
+    TwoFactorSignInSmokeTests() {
+        super(PASSWORD)
     }
 
-    @AfterAll
-    void cleanup() {
-        ReconciliationSmokeTestSupport.cleanupMoqui(ec)
+    @BeforeAll
+    void setup() {
+        boot("two-factor-smoke")
+        ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TENANT_B, description: "TF tenant B"]).createOrUpdate()
     }
 
     @BeforeEach
     void reset() {
-        originalClock = TwoFactorSupport.codeClock
-        TwoFactorSupport.codeClock = { clock }
-        originalSendEmail = PasswordResetSupport.sendEmail
         originalSendResetCode = PasswordResetSupport.sendResetCode
-        sent = []
-        PasswordResetSupport.sendEmail = { def ecArg, String templateId, String to, Map params ->
-            sent << [templateId: templateId, to: to, params: params]
-        }
         PasswordResetSupport.sendResetCode = { def ecArg, String to, Map params ->
             sent << [templateId: PasswordResetSupport.TEMPLATE_RESET_CODE, to: to, params: params]
             return true
         }
-        ec.user.logoutUser()
-        [TwoFactorRecords.FACTOR, TwoFactorRecords.RECOVERY, SignInChallenges.CHALLENGE, "darpan.auth.CliSession",
-         "darpan.auth.CliDeviceCode", "darpan.auth.PasswordResetCode"].each { ec.entity.find(it).disableAuthz().deleteAll() }
-        AuditLogTestSupport.wipe(ec, TwoFactorRecords.EVENT)
-        AuditLogTestSupport.wipe(ec)
-        TwoFactorPolicy.POLICY_GROUP_IDS.each { setPolicy(it, null) }
+        ec.entity.find("darpan.auth.PasswordResetCode").disableAuthz().deleteAll()
         [[USER_ID, USERNAME], [OTHER_ID, OTHER_USERNAME], [SUPER_ID, SUPER_USERNAME], [SUPER2_ID, SUPER2_USERNAME],
          [TADMIN_ID, TADMIN_USERNAME]].each { upsertAccount(it[0], it[1]) }
         group(SUPER_ID, "DARPAN_SUPER_ADMIN")
@@ -102,11 +77,7 @@ class TwoFactorSignInSmokeTests {
 
     @AfterEach
     void restore() {
-        TwoFactorSupport.codeClock = originalClock
-        PasswordResetSupport.sendEmail = originalSendEmail
         PasswordResetSupport.sendResetCode = originalSendResetCode
-        ec.user.logoutUser()
-        ec.message.clearAll()
     }
 
     // ---- sign-in ----
@@ -258,6 +229,61 @@ class TwoFactorSignInSmokeTests {
         Map login = anon("login#Session", [username: USERNAME, password: NEW_PASSWORD]).out
         assertTrue(login.twoFactorRequired as boolean, "the reset does not bypass two-factor")
         assertTrue(anon("verify#SignInCode", [challengeToken: login.challengeToken, code: code(secret)]).out.authenticated as boolean)
+    }
+
+    @Test
+    @DisplayName("the 24-hour wrong-code window rolls over: wrong codes from more than a day ago stop counting towards the lock")
+    void theLockWindowRollsOver() {
+        enrol(USER_ID, USERNAME)
+        Closure wrong = { ec.transaction.runRequireNew(null, "test", { TwoFactorSupport.consumeTotp(ec, USER_ID, "000000") }) }
+        19.times(wrong)
+        def app = TwoFactorSupport.activeApp(ec, USER_ID)
+        assertEquals(19, app.failedCodeCount as int)
+        app.failedWindowStart = new Timestamp(System.currentTimeMillis() - TwoFactorSupport.LOCK_WINDOW_MILLIS - 60_000L)
+        app.update()
+        wrong()
+        app = TwoFactorSupport.activeApp(ec, USER_ID)
+        assertNull(app.codesLockedDate, "the 20th wrong code, but the first of a new window")
+        assertEquals(1, app.failedCodeCount as int)
+        18.times(wrong)
+        assertNull(TwoFactorSupport.activeApp(ec, USER_ID).codesLockedDate)
+        wrong()
+        assertNotNull(TwoFactorSupport.activeApp(ec, USER_ID).codesLockedDate, "20 within the new window lock")
+    }
+
+    @Test
+    @DisplayName("a setup confirmed more than 15 minutes after it began is refused as expired")
+    void aSetupOlderThanFifteenMinutesExpires() {
+        Map begun = signedIn(USERNAME, "begin#TwoFactorSetup", [currentPassword: PASSWORD])
+        assertEquals([], begun.errors)
+        ec.entity.find(TwoFactorRecords.FACTOR).condition("userId", USER_ID).condition("statusId", TwoFactorRecords.PENDING)
+                .disableAuthz().updateAll([createdDate: new Timestamp(System.currentTimeMillis() - (TwoFactorSupport.PENDING_LIFETIME_SECONDS + 60) * 1000L)])
+        Map late = signedIn(USERNAME, "confirm#TwoFactorSetup", [code: code(begun.out.secret as String)], false)
+        assertEquals([TwoFactorRefusal.SETUP_EXPIRED.message], late.errors)
+        assertEquals("SETUP_EXPIRED", late.out.reason)
+        assertFalse(TwoFactorRecords.enabled(ec, USER_ID))
+    }
+
+    @Test
+    @DisplayName("one right code sent with two sign-ins at once signs in only one (the replay check runs under the app row's lock)")
+    void oneCodeTwoSignInsAtOnce() {
+        String secret = enrol(USER_ID, USERNAME).secret
+        List<String> tokens = [challenge(USERNAME), challenge(USERNAME)]
+        String shared = code(secret)
+        List<Map> results = anonInParallel("facade.AuthFacadeServices.verify#SignInCode", tokens.collect { [challengeToken: it, code: shared] })
+        assertEquals(1, results.count { it.authenticated == true }, "${results.collect { [it.authenticated, it.errors] }}")
+        assertEquals(1, events(USER_ID, "CODE_OK").size())
+    }
+
+    @Test
+    @DisplayName("one recovery code sent with two sign-ins at once is used once")
+    void oneRecoveryCodeTwoSignInsAtOnce() {
+        String recovery = enrol(USER_ID, USERNAME).recoveryCodes[0]
+        List<String> tokens = [challenge(USERNAME), challenge(USERNAME)]
+        List<Map> results = anonInParallel("facade.AuthFacadeServices.verify#SignInCode", tokens.collect { [challengeToken: it, recoveryCode: recovery] })
+        assertEquals(1, results.count { it.authenticated == true }, "${results.collect { [it.authenticated, it.errors] }}")
+        assertEquals(1, events(USER_ID, "RECOVERY_USED").size())
+        assertEquals(9, TwoFactorSupport.recoveryCodesLeft(ec, USER_ID))
     }
 
     // ---- policy ----
@@ -874,53 +900,6 @@ class TwoFactorSignInSmokeTests {
         return [secret: begun.out.secret, recoveryCodes: confirmed.out.recoveryCodes, authToken: confirmed.out.authToken]
     }
 
-    /** The next step's code: the clock moves 30 seconds first, so no two calls share a step. */
-    private String code(String secret) {
-        clock += 30_000L
-        return TotpSupport.code(TotpSupport.decodeSecret(secret), TotpSupport.timeStep(clock))
-    }
-
-    private String challenge(String username) {
-        Map login = anon("login#Session", [username: username, password: PASSWORD]).out
-        assertTrue(login.twoFactorRequired as boolean, "${login}")
-        return login.challengeToken
-    }
-
-    private Map anon(String verbNoun, Map params) {
-        ec.user.logoutUser()
-        return call("facade.AuthFacadeServices.${verbNoun}".toString(), params)
-    }
-
-    private Map signedIn(String username, String verbNoun, Map params, boolean fresh = true) {
-        if (fresh || ec.user.username != username) {
-            ec.user.logoutUser()
-            assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
-        }
-        return call("facade.AuthFacadeServices.${verbNoun}".toString(), params)
-    }
-
-    private Map signedInCall(String username, String serviceName, Map params) {
-        ec.user.logoutUser()
-        assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
-        return call(serviceName, params)
-    }
-
-    private Map call(String serviceName, Map params) {
-        ec.message.clearAll()
-        Map out = [:]
-        List<String> errors = []
-        try {
-            out = ec.service.sync().name(serviceName).parameters(params).call() ?: [:]
-        } catch (Exception e) {
-            errors << e.message
-        }
-        errors.addAll(ec.message.errors)
-        // Refused two-factor steps answer in the envelope, not the MessageFacade (see rpcRefusalsCarryTheirFields).
-        if (out.ok == false) (out.errors ?: []).each { if (!(it in errors)) errors << it }
-        ec.message.clearAll()
-        return [out: out, errors: errors]
-    }
-
     /**
      * The call as /rpc/json makes it: Moqui's own ServiceJsonRpcDispatcher, with a stub web facade (the hook
      * ExecutionContextImpl.setWebFacade keeps for tests) handing it the request and catching the JSON reply.
@@ -960,46 +939,6 @@ class TwoFactorSignInSmokeTests {
         def user = new WebSignInLifetimeTests.UserStub(userId: userId, userAccount: account(userId).getMap())
         return new Expando(context: [:], web: new Expando(request: request, secureRequestParameters: [:]), user: user,
                 entity: ec.entity, factory: ec.factory, transaction: ec.transaction)
-    }
-
-    private List events(String userId, String type) {
-        return ec.entity.find(TwoFactorRecords.EVENT).condition("userId", userId).condition("eventType", type)
-                .disableAuthz().useCache(false).list()
-    }
-
-    private int keyCount(String userId) {
-        return (int) ec.entity.find("moqui.security.UserLoginKey").condition("userId", userId).disableAuthz().useCache(false).count()
-    }
-
-    private def loginKey(String hash) {
-        return ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).disableAuthz().useCache(false).one()
-    }
-
-    private def account(String userId) {
-        return ec.entity.find("moqui.security.UserAccount").condition("userId", userId).disableAuthz().useCache(false).one()
-    }
-
-    private void setPolicy(String groupId, Timestamp date) {
-        ec.entity.makeValue(TwoFactorPolicy.POLICY).setAll([permissionGroupId: groupId, requiredFromDate: date]).createOrUpdate()
-    }
-
-    private void group(String userId, String groupId) {
-        ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: groupId, userId: userId,
-                fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).createOrUpdate()
-    }
-
-    private void upsertAccount(String userId, String username) {
-        ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: userId, username: username,
-                userFullName: username, emailAddress: "${username}@example.com".toString(), disabled: "N",
-                disabledDateTime: null, requirePasswordChange: "N", hasLoggedOut: "N", successiveFailedLogins: 0,
-                currentPassword: null, passwordSalt: null]).createOrUpdate()
-        ec.entity.find("moqui.security.UserGroupMember").condition("userId", userId).disableAuthz().deleteAll()
-        ec.entity.find("moqui.security.UserLoginKey").condition("userId", userId).disableAuthz().deleteAll()
-        ec.entity.find("moqui.security.UserPasswordHistory").condition("userId", userId).disableAuthz().deleteAll()
-        ec.service.sync().name("org.moqui.impl.UserServices.update#PasswordInternal")
-                .parameters([userId: userId, newPassword: PASSWORD, newPasswordVerify: PASSWORD, requirePasswordChange: "N"]).disableAuthz().call()
-        assertFalse(ec.message.hasError(), "fixture password refused: ${ec.message.errors} ${ec.message.messages}")
-        ec.message.clearAll()
     }
 
     static class Capture extends AbstractAppender {

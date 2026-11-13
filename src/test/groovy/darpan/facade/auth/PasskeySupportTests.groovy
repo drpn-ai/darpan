@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.*
+import static org.junit.jupiter.api.Assumptions.assumeTrue
 
 /** DAR-BE-270 — the relying party's allowed origins per instance (pure). */
 class PasskeySupportTests {
@@ -30,7 +31,8 @@ class PasskeySupportTests {
         String before = System.getProperty("webapp_allow_origins")
         try {
             System.setProperty("webapp_allow_origins", "http://localhost:5173,http://localhost:5174")
-            if (System.getenv("DARPAN_WEBAUTHN_RP_ID") || System.getenv("DARPAN_APP_BASE_URL")) return // env set: not this case
+            assumeTrue(!System.getenv("DARPAN_WEBAUTHN_RP_ID") && !System.getenv("DARPAN_APP_BASE_URL"),
+                    "the environment names the relying party: not this case")
             assertEquals("localhost", PasskeySupport.rpId(ec))
             assertEquals(["http://localhost:5173", "http://localhost:5174"] as Set, PasskeySupport.origins(ec))
             assertTrue(PasskeySupport.available(ec))

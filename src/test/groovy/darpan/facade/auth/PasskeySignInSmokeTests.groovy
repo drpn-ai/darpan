@@ -1,21 +1,17 @@
 package darpan.facade.auth
 
-import darpan.admin.AuditLogTestSupport
 import darpan.facade.auth.support.SoftwarePasskey
+import darpan.facade.auth.support.TwoFactorTestSupport
 import darpan.facade.common.CliMethodAllowlist
-import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import com.webauthn4j.data.attestation.statement.COSEAlgorithmIdentifier
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.moqui.context.ExecutionContext
 
-import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.*
@@ -27,13 +23,7 @@ import static org.junit.jupiter.api.Assertions.*
  * origin/rpId and challenge replay refusals, fresh proofs, removal rules, app-only removal and admin reset.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class PasskeySignInSmokeTests {
-    private ExecutionContext ec
-    private long clock = 1_800_000_000_000L
-    private Closure<Long> originalClock
-    private Closure originalSendEmail
-    private List<Map> sent = []
-
+class PasskeySignInSmokeTests extends TwoFactorTestSupport {
     private static final String USER_ID = "PK_USER"
     private static final String USERNAME = "pk.user"
     private static final String OTHER_ID = "PK_OTHER"
@@ -43,49 +33,27 @@ class PasskeySignInSmokeTests {
     private static final String PASSWORD = "Pk-passw0rd-one!"
     private static final String REFUSAL = TwoFactorRefusal.PASSKEY.message
 
+    PasskeySignInSmokeTests() {
+        super(PASSWORD)
+    }
+
     @BeforeAll
     void setup() {
         System.setProperty("darpan.webauthn.rpId", "localhost")
         System.setProperty("darpan.webauthn.origins", "http://localhost:5173")
-        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
-        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "passkey-smoke")
-        ["SecuritySeedData.xml", "PasswordResetEmailSeedData.xml", "TwoFactorSeedData.xml"].each {
-            ec.entity.makeDataLoader().location("component://darpan/data/${it}".toString()).dummyFks(true).load()
-        }
+        boot("passkey-smoke")
     }
 
     @AfterAll
-    void cleanup() {
+    void clearRelyingParty() {
         System.clearProperty("darpan.webauthn.rpId")
         System.clearProperty("darpan.webauthn.origins")
-        ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
     @BeforeEach
     void reset() {
-        originalClock = TwoFactorSupport.codeClock
-        TwoFactorSupport.codeClock = { clock }
-        originalSendEmail = PasswordResetSupport.sendEmail
-        sent = []
-        PasswordResetSupport.sendEmail = { def ecArg, String templateId, String to, Map params ->
-            sent << [templateId: templateId, to: to, params: params]
-        }
-        ec.user.logoutUser()
-        [PasskeySupport.CREDENTIAL, TwoFactorRecords.FACTOR, TwoFactorRecords.RECOVERY, SignInChallenges.CHALLENGE,
-         "darpan.auth.CliSession", "darpan.auth.CliDeviceCode"].each { ec.entity.find(it).disableAuthz().deleteAll() }
-        AuditLogTestSupport.wipe(ec, TwoFactorRecords.EVENT)
-        AuditLogTestSupport.wipe(ec)
-        TwoFactorPolicy.POLICY_GROUP_IDS.each { setPolicy(it, null) }
         [[USER_ID, USERNAME], [OTHER_ID, OTHER_USERNAME], [SUPER_ID, SUPER_USERNAME]].each { upsertAccount(it[0], it[1]) }
         group(SUPER_ID, "DARPAN_SUPER_ADMIN")
-        ec.message.clearAll()
-    }
-
-    @AfterEach
-    void restore() {
-        TwoFactorSupport.codeClock = originalClock
-        PasswordResetSupport.sendEmail = originalSendEmail
-        ec.user.logoutUser()
         ec.message.clearAll()
     }
 
@@ -579,92 +547,7 @@ class PasskeySignInSmokeTests {
         return key.assertion(begun.out.publicKeyOptions as String)
     }
 
-    private String code(String secret) {
-        clock += 30_000L
-        return TotpSupport.code(TotpSupport.decodeSecret(secret), TotpSupport.timeStep(clock))
-    }
-
-    private String challenge(String username) {
-        Map login = anon("login#Session", [username: username, password: PASSWORD]).out
-        assertTrue(login.twoFactorRequired as boolean, "${login}")
-        return login.challengeToken
-    }
-
-    private Map anon(String verbNoun, Map params) {
-        ec.user.logoutUser()
-        return call("facade.AuthFacadeServices.${verbNoun}".toString(), params)
-    }
-
-    private Map signedIn(String username, String verbNoun, Map params, boolean fresh = true) {
-        if (fresh || ec.user.username != username) {
-            ec.user.logoutUser()
-            assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
-        }
-        return call("facade.AuthFacadeServices.${verbNoun}".toString(), params)
-    }
-
-    private Map signedInCall(String username, String serviceName, Map params) {
-        ec.user.logoutUser()
-        assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
-        return call(serviceName, params)
-    }
-
-    private Map call(String serviceName, Map params) {
-        ec.message.clearAll()
-        Map out = [:]
-        List<String> errors = []
-        try {
-            out = ec.service.sync().name(serviceName).parameters(params).call() ?: [:]
-        } catch (Exception e) {
-            errors << e.message
-        }
-        errors.addAll(ec.message.errors)
-        if (out.ok == false) (out.errors ?: []).each { if (!(it in errors)) errors << it }
-        ec.message.clearAll()
-        return [out: out, errors: errors]
-    }
-
-    private List events(String userId, String type) {
-        return ec.entity.find(TwoFactorRecords.EVENT).condition("userId", userId).condition("eventType", type)
-                .disableAuthz().useCache(false).list()
-    }
-
     private def credentialRow(String userId) {
         return ec.entity.find(PasskeySupport.CREDENTIAL).condition("userId", userId).disableAuthz().useCache(false).list()[0]
-    }
-
-    private int keyCount(String userId) {
-        return (int) ec.entity.find("moqui.security.UserLoginKey").condition("userId", userId).disableAuthz().useCache(false).count()
-    }
-
-    private def loginKey(String hash) {
-        return ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).disableAuthz().useCache(false).one()
-    }
-
-    private def account(String userId) {
-        return ec.entity.find("moqui.security.UserAccount").condition("userId", userId).disableAuthz().useCache(false).one()
-    }
-
-    private void setPolicy(String groupId, Timestamp date) {
-        ec.entity.makeValue(TwoFactorPolicy.POLICY).setAll([permissionGroupId: groupId, requiredFromDate: date]).createOrUpdate()
-    }
-
-    private void group(String userId, String groupId) {
-        ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: groupId, userId: userId,
-                fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).createOrUpdate()
-    }
-
-    private void upsertAccount(String userId, String username) {
-        ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: userId, username: username,
-                userFullName: username, emailAddress: "${username}@example.com".toString(), disabled: "N",
-                disabledDateTime: null, requirePasswordChange: "N", hasLoggedOut: "N", successiveFailedLogins: 0,
-                currentPassword: null, passwordSalt: null]).createOrUpdate()
-        ec.entity.find("moqui.security.UserGroupMember").condition("userId", userId).disableAuthz().deleteAll()
-        ec.entity.find("moqui.security.UserLoginKey").condition("userId", userId).disableAuthz().deleteAll()
-        ec.entity.find("moqui.security.UserPasswordHistory").condition("userId", userId).disableAuthz().deleteAll()
-        ec.service.sync().name("org.moqui.impl.UserServices.update#PasswordInternal")
-                .parameters([userId: userId, newPassword: PASSWORD, newPasswordVerify: PASSWORD, requirePasswordChange: "N"]).disableAuthz().call()
-        assertFalse(ec.message.hasError(), "fixture password refused: ${ec.message.errors} ${ec.message.messages}")
-        ec.message.clearAll()
     }
 }

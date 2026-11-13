@@ -421,6 +421,25 @@ class PasskeySignInSmokeTests {
     }
 
     @Test
+    @DisplayName("review QM3: adding the app to a passkey-only account keeps the recovery codes the passkey made")
+    void addingTheAppKeepsRecoveryCodes() {
+        SoftwarePasskey key = new SoftwarePasskey()
+        Map enrolled = finish(USERNAME, key.register(beginRegistration(USERNAME, [currentPassword: PASSWORD])))
+        List<String> codes = enrolled.out.recoveryCodes as List<String>
+        assertEquals(10, codes.size())
+
+        Map begun = signedIn(USERNAME, "begin#TwoFactorSetup", [passkeyAssertion: proofAssertion(USERNAME, key)])
+        assertEquals([], begun.errors)
+        Map confirmed = signedIn(USERNAME, "confirm#TwoFactorSetup", [code: code(begun.out.secret as String)], false)
+        assertEquals([], confirmed.errors)
+        assertNull(confirmed.out.recoveryCodes, "no new codes: a factor was already on")
+        assertTrue(confirmed.out.authenticated as boolean, "still answered with a fresh sign-in")
+        assertEquals(10, TwoFactorSupport.recoveryCodesLeft(ec, USER_ID))
+        assertTrue(anon("verify#SignInCode", [challengeToken: challenge(USERNAME), recoveryCode: codes[0]]).out.authenticated as boolean,
+                "the passkey's codes still sign in")
+    }
+
+    @Test
     @DisplayName("every new passkey method is off the CLI list")
     void passkeyMethodsAreNotOnTheCli() {
         ["begin#PasskeyProof", "begin#PasskeyRegistration", "begin#PasskeySignIn", "delete#Passkey",

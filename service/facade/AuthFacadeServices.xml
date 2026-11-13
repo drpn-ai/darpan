@@ -978,9 +978,10 @@
     <service verb="confirm" noun="TwoFactorSetup" allow-remote="true" authenticate="anonymous-all">
         <description>DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI
             key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken
-            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. Returns 10
-            recovery codes, once. A refusal is a completed call with ok false and the reason in errors (not a JSON-RPC
-            error), so challengeEnded reaches the caller.</description>
+            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. When no
+            factor was on before, returns 10 recovery codes, once; an app added beside a passkey or replacing the old app
+            keeps the person's codes (none returned). A refusal is a completed call with ok false and the reason in errors
+            (not a JSON-RPC error), so challengeEnded reaches the caller.</description>
         <in-parameters>
             <parameter name="code" required="true"><description>The 6-digit code the new app shows.</description></parameter>
             <parameter name="challengeToken"><description>The setup challenge from login#Session; leave out when signed in.</description></parameter>
@@ -1034,7 +1035,8 @@
                 <parameter name="twoFactorDueDate" type="Timestamp"/>
             </parameter>
             <parameter name="recoveryCodes" type="List">
-                <description>10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only.</description><parameter name="recoveryCode"/></parameter>
+                <description>10 recovery codes, xxxx-xxxx-xxxx-xxxx, when this turned two-factor on (no factor before). In
+                    this reply only.</description><parameter name="recoveryCode"/></parameter>
             <parameter name="challengeEnded" type="Boolean">
                 <description>With a challengeToken: true when it can no longer be used (expired, 5 wrong codes).</description></parameter>
         </out-parameters>

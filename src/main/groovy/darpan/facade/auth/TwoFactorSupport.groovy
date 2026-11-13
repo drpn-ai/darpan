@@ -457,9 +457,11 @@ class TwoFactorSupport {
     }
 
     /**
-     * The first right code from the new app: the pending factor becomes ACTIVE (an older ACTIVE one ends, REPLACED), 10
-     * new recovery codes replace any old ones, and every login key of the person ends, CLI keys included (the caller
-     * gets a fresh key, see AuthFacadeSupport.issueSignedInSession). Returns [ok, recoveryCodes] or [ok: false].
+     * The first right code from the new app: the pending factor becomes ACTIVE (an older ACTIVE one ends, REPLACED) and
+     * every login key of the person ends, CLI keys included (the caller gets a fresh key, see
+     * AuthFacadeSupport.issueSignedInSession). Recovery codes belong to the person: 10 are made only when no factor was on
+     * before (firstFactorOn); an app added beside a passkey, or replacing the old app, keeps the codes the person has
+     * (review QM3). Returns [ok, recoveryCodes (first factor only)] or [ok: false].
      */
     static Map<String, Object> confirmSetup(def ec, String userId, Object code) {
         lockPerson(ec, userId)
@@ -467,6 +469,7 @@ class TwoFactorSupport {
         if (pending == null) return [ok: false, expired: true]
         Long step = TotpSupport.matchStep((String) pending.secret, normalizeTotp(code), codeClock.call(), null)
         if (step == null) return [ok: false]
+        boolean first = !enabled(ec, userId)
         Timestamp now = ec.user.nowTimestamp
         find(ec, FACTOR, "self-scoped auth: end the person's replaced authenticator app").condition("userId", userId)
                 .condition("factorTypeEnumId", TYPE_TOTP).condition("statusId", ACTIVE).useCache(false).list().each { row ->
@@ -480,10 +483,10 @@ class TwoFactorSupport {
         pending.lastUsedTimeStep = step
         pending.lastUsedDate = now
         pending.update()
-        List<String> codes = replaceRecoveryCodes(ec, userId, (String) pending.factorId)
+        if (first) return [ok: true, recoveryCodes: firstFactorOn(ec, userId, (String) pending.factorId)]
         endSessions(ec, userId, [])
         event(ec, userId, "SETUP_CONFIRMED")
-        return [ok: true, recoveryCodes: codes]
+        return [ok: true]
     }
 
     /**
@@ -501,8 +504,8 @@ class TwoFactorSupport {
         return null
     }
 
-    /** DAR-BE-270: a passkey was the person's first factor: 10 recovery codes (returned once) and every login key ends,
-     *  CLI keys included (the caller gets a fresh key), as confirmSetup does for the app. */
+    /** The person's first factor (the app or a passkey) is on: 10 recovery codes (returned once) and every login key
+     *  ends, CLI keys included (the caller gets a fresh key). */
     static List<String> firstFactorOn(def ec, String userId, String factorId) {
         List<String> codes = replaceRecoveryCodes(ec, userId, factorId)
         endSessions(ec, userId, [])

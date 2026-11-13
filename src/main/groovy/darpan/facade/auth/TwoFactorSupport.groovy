@@ -3,7 +3,6 @@ package darpan.facade.auth
 import darpan.admin.AdminAuditSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
-import org.apache.commons.validator.routines.InetAddressValidator
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -51,8 +50,7 @@ class TwoFactorSupport {
     static final String ENDED = "ENDED"
 
     /** The roles the policy covers: three Darpan-wide (UserGroupMember) and tenant admin in any tenant. */
-    static final List<String> DARPAN_ROLE_GROUP_IDS = [TenantAccessSupport.ADMIN_USER_GROUP_ID,
-            TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID, TenantAccessSupport.DARPAN_ADMIN_GROUP_ID].asImmutable()
+    static final List<String> DARPAN_ROLE_GROUP_IDS = TenantAccessSupport.DARPAN_ROLE_GROUP_IDS
     static final String TENANT_ADMIN_GROUP_ID = TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID
     static final List<String> POLICY_GROUP_IDS = (DARPAN_ROLE_GROUP_IDS + [TENANT_ADMIN_GROUP_ID]).asImmutable()
 
@@ -226,10 +224,8 @@ class TwoFactorSupport {
     static String createChallenge(def ec, String userId, String purpose) {
         Timestamp now = ec.user.nowTimestamp
         sweepExpiredChallenges(ec, userId)
-        byte[] bytes = new byte[32]
-        random.nextBytes(bytes)
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-        ec.entity.makeValue(CHALLENGE).setAll([userId: userId, tokenHash: sha256(token), purposeEnumId: purpose,
+        String token = AuthPrimitives.newToken()
+        ec.entity.makeValue(CHALLENGE).setAll([userId: userId, tokenHash: AuthPrimitives.sha256Hex(token), purposeEnumId: purpose,
                 createdDate: now, expiresDate: new Timestamp(now.time + CHALLENGE_LIFETIME_SECONDS * 1000L),
                 failedAttempts: 0, requestIp: recordedIp(ec)]).setSequencedIdPrimary().create()
         return token
@@ -251,7 +247,7 @@ class TwoFactorSupport {
         String value = normalize(token)
         if (!value) return null
         def row = find(ec, CHALLENGE, "pre-auth: sign-in challenge by token hash, no session yet")
-                .condition("tokenHash", sha256(value)).forUpdate(forUpdate).useCache(false).one()
+                .condition("tokenHash", AuthPrimitives.sha256Hex(value)).forUpdate(forUpdate).useCache(false).one()
         if (row == null || row.usedDate != null) return null
         if (!((Timestamp) row.expiresDate)?.after(ec.user.nowTimestamp)) return null
         if (((row.failedAttempts ?: 0) as int) >= MAX_CHALLENGE_FAILURES) return null
@@ -847,18 +843,9 @@ class TwoFactorSupport {
 
     // ---- small helpers ----
 
-    /** The longest text form of an IP address (IPv6 with an embedded IPv4 part). */
-    static final int MAX_IP_LENGTH = 45
-
-    /**
-     * The request's client IP as challenges, events and used recovery codes store it: an IPv4 or IPv6 literal, else null.
-     * It comes from a proxy header, so it is checked rather than trusted to fit a column: an oversized or made-up value
-     * would otherwise fail the insert (and with it the sign-in step) or put text that is no address on the record.
-     */
+    /** The request's client IP as challenges, events and used recovery codes store it (AuthPrimitives.recordedIp). */
     static String recordedIp(def ec) {
-        String ip = normalize(ec.user.clientIp)
-        if (!ip || ip.length() > MAX_IP_LENGTH) return null
-        return InetAddressValidator.getInstance().isValid(ip) ? ip : null
+        return AuthPrimitives.recordedIp(ec.user.clientIp as String)
     }
 
     /** The authenticator app's label: "Darpan", or DARPAN_TOTP_ISSUER (e.g. "Darpan UAT") so instances are told apart. */
@@ -890,7 +877,7 @@ class TwoFactorSupport {
     }
 
     static String recoveryHash(String value, String salt) {
-        return sha256(salt + ":" + value)
+        return AuthPrimitives.sha256Hex(salt + ":" + value)
     }
 
     private static boolean hashMatches(String value, String salt, String expected) {
@@ -898,25 +885,7 @@ class TwoFactorSupport {
         return MessageDigest.isEqual(recoveryHash(value, salt).getBytes(StandardCharsets.UTF_8), expected.getBytes(StandardCharsets.UTF_8))
     }
 
-    static String sha256(String value) {
-        return sha256Bytes(value.getBytes(StandardCharsets.UTF_8))
-    }
-
-    static String sha256Bytes(byte[] value) {
-        return MessageDigest.getInstance("SHA-256").digest(value).encodeHex().toString()
-    }
-
     static void holdToFloor(long startedNanos) {
-        long remaining = CODE_REFUSAL_FLOOR_MILLIS - (System.nanoTime() - startedNanos).intdiv(1_000_000L)
-        if (remaining <= 0) {
-            logger.warn("Two-factor code refusal took longer than its {}ms floor; refusals may be told apart by timing",
-                    CODE_REFUSAL_FLOOR_MILLIS)
-            return
-        }
-        try {
-            Thread.sleep(remaining)
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt()
-        }
+        AuthPrimitives.holdToFloor(startedNanos, CODE_REFUSAL_FLOOR_MILLIS, "A two-factor refusal")
     }
 }

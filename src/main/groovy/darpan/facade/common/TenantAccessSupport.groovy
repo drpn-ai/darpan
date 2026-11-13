@@ -42,6 +42,10 @@ class TenantAccessSupport {
     static final String DARPAN_COMPANY_VIEW_ONLY_GROUP_ID = "DARPAN_COMPANY_VIEW_ONLY"
     static final List<String> SUPER_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_SUPER_ADMIN_GROUP_ID].asImmutable()
     static final List<String> DARPAN_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_ADMIN_GROUP_ID].asImmutable()
+    /** The Darpan-wide roles (UserGroupMember), in the order the admin app shows them: Moqui's ADMIN, super admin, Darpan
+     *  admin. DAR-ADMIN-011's user board and DAR-BE-264's two-factor policy both read these. */
+    static final List<String> DARPAN_ROLE_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_SUPER_ADMIN_GROUP_ID,
+            DARPAN_ADMIN_GROUP_ID].asImmutable()
     static final List<String> TENANT_VIEW_PERMISSION_GROUP_IDS = [
             DARPAN_TENANT_ADMIN_GROUP_ID,
             DARPAN_TENANT_USER_GROUP_ID,

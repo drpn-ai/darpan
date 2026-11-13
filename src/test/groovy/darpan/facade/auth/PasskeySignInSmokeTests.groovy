@@ -498,7 +498,7 @@ class PasskeySignInSmokeTests {
         SoftwarePasskey key = enrolPasskey(USERNAME)
         Timestamp twoDaysAgo = new Timestamp(System.currentTimeMillis() - 2 * 86_400_000L)
         Closure stale = { String userId, String purpose ->
-            ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: TwoFactorSupport.sha256(UUID.randomUUID().toString()),
+            ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: AuthPrimitives.sha256Hex(UUID.randomUUID().toString()),
                     purposeEnumId: purpose, createdDate: twoDaysAgo, expiresDate: twoDaysAgo, failedAttempts: 0]).setSequencedIdPrimary().create()
         }
         Closure count = { String userId -> ec.entity.find(TwoFactorSupport.CHALLENGE).condition("userId", userId)

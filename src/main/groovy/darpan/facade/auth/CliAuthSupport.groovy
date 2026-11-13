@@ -10,8 +10,6 @@ import org.moqui.util.StringUtilities
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.sql.Timestamp
 
@@ -42,7 +40,6 @@ class CliAuthSupport {
     static final int HOST_LABEL_MAX_LENGTH = 60
     static final int CLI_SESSION_ID_LENGTH = 12
 
-    private static final int DEVICE_CODE_BYTES = 32
     private static final int USER_CODE_TRIES = 20
     private static final SecureRandom random = new SecureRandom()
 
@@ -50,16 +47,13 @@ class CliAuthSupport {
 
     /** 32 random bytes, base64url without padding (43 characters). Only its hash is stored. */
     static String newDeviceCode() {
-        byte[] bytes = new byte[DEVICE_CODE_BYTES]
-        random.nextBytes(bytes)
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        return AuthPrimitives.newToken()
     }
 
     /** SHA-256 hex: the device code is 256 random bits, so no salt or slow hash is needed. */
     static String hashDeviceCode(Object deviceCode) {
         String value = normalize(deviceCode)
-        if (!value) return null
-        return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
+        return value ? AuthPrimitives.sha256Hex(value) : null
     }
 
     /** XXXX-XXXX from USER_CODE_ALPHABET (no vowels, no 0/1: nothing to misread, no words), unused by any row. */

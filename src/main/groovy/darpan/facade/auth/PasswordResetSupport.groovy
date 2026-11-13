@@ -127,7 +127,7 @@ class PasswordResetSupport {
         if (!verified) {
             ec.message.clearAll()
             ec.message.addError(CODE_FAILURE_MESSAGE)
-            holdToFloor(started)
+            AuthPrimitives.holdToFloor(started, REPLY_FLOOR_MILLIS, "A password reset reply")
         }
         Map<String, Object> result = [verified: verified, userAccount: verified ? account : null,
                                       resetCodeId: resetCodeId]
@@ -308,20 +308,4 @@ class PasswordResetSupport {
         return TenantScopedFinder.findGlobalUnscoped(ec, RESET_CODE_ENTITY, reason)
     }
 
-    /** Hold an anonymous reply open until REPLY_FLOOR_MILLIS, so how fast it came back says nothing about
-     *  which branch ran. Overshooting means the masking stopped working, so say so. */
-    static void holdToFloor(long startedNanos) {
-        long elapsedMillis = (System.nanoTime() - startedNanos).intdiv(1_000_000L)
-        long remainingMillis = REPLY_FLOOR_MILLIS - elapsedMillis
-        if (remainingMillis <= 0) {
-            logger.warn("Password reset reply took {}ms, past the {}ms floor — replies may again be told apart by timing",
-                    elapsedMillis, REPLY_FLOOR_MILLIS)
-            return
-        }
-        try {
-            Thread.sleep(remainingMillis)
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt()
-        }
-    }
 }

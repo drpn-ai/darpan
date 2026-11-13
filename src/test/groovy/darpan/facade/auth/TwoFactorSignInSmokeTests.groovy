@@ -622,7 +622,7 @@ class TwoFactorSignInSmokeTests {
         assertNull(confirmed.out.recoveryCodes)
         assertEquals(false, TwoFactorSupport.status(ec, OTHER_ID).appEnabled, "the stale setup put no app on the account")
         assertEquals(0, keyCount(OTHER_ID))
-        assertNotNull(ec.entity.find(TwoFactorSupport.CHALLENGE).condition("tokenHash", TwoFactorSupport.sha256(token))
+        assertNotNull(ec.entity.find(TwoFactorSupport.CHALLENGE).condition("tokenHash", AuthPrimitives.sha256Hex(token))
                 .disableAuthz().useCache(false).one().usedDate, "the challenge is spent")
 
         // A fresh setup challenge cannot exist for an enrolled person; one made before they enrolled is refused at begin too.

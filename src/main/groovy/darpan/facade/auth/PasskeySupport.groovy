@@ -27,7 +27,6 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.nio.charset.StandardCharsets
-import java.security.SecureRandom
 import java.sql.Timestamp
 
 import static darpan.common.ValueSupport.normalize
@@ -74,7 +73,6 @@ class PasskeySupport {
     static final List<COSEAlgorithmIdentifier> ALGORITHMS = [COSEAlgorithmIdentifier.ES256, COSEAlgorithmIdentifier.EdDSA,
             COSEAlgorithmIdentifier.RS256].asImmutable()
 
-    private static final SecureRandom random = new SecureRandom()
     private static final ObjectConverter objectConverter = new ObjectConverter()
     /** attestation "none" is asked for; the non-strict manager also accepts a format an authenticator sends anyway, without
      *  trusting it (no FIDO metadata: spec open question 4). */
@@ -197,7 +195,7 @@ class PasskeySupport {
             if (row == null || row.purposeEnumId != TwoFactorSupport.PURPOSE_CODE) return [challengeEnded: true]
             List<Map> passkeys = activePasskeys(ec, (String) row.userId)
             if (!passkeys) return [error: PASSKEY_REFUSAL]
-            String challenge = newChallenge()
+            String challenge = AuthPrimitives.newToken()
             row.webauthnChallenge = challenge
             row.update()
             return [publicKeyOptions: requestOptionsJson(ec, challenge, passkeys)]
@@ -211,7 +209,7 @@ class PasskeySupport {
         if (!available(ec)) return [error: UNAVAILABLE]
         List<Map> passkeys = activePasskeys(ec, userId)
         if (!passkeys) return [error: "You have no passkey on this account."]
-        String challenge = newChallenge()
+        String challenge = AuthPrimitives.newToken()
         createChallengeRow(ec, userId, PURPOSE_PROOF, challenge)
         return [publicKeyOptions: requestOptionsJson(ec, challenge, passkeys), expiresInSeconds: TwoFactorSupport.CHALLENGE_LIFETIME_SECONDS]
     }
@@ -223,7 +221,7 @@ class PasskeySupport {
         if (passkeys.size() >= MAX_PASSKEYS) return [error: TOO_MANY]
         def account = find(ec, "moqui.security.UserAccount", "self-scoped auth: the account adding a passkey")
                 .condition("userId", userId).useCache(false).one()
-        String challenge = newChallenge()
+        String challenge = AuthPrimitives.newToken()
         createChallengeRow(ec, userId, PURPOSE_ADD, challenge)
         String username = (String) account?.username ?: userId
         Map options = [
@@ -254,7 +252,7 @@ class PasskeySupport {
     private static void createChallengeRow(def ec, String userId, String purpose, String challenge) {
         TwoFactorSupport.sweepExpiredChallenges(ec, userId)
         Timestamp now = ec.user.nowTimestamp
-        ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: TwoFactorSupport.sha256(challenge),
+        ec.entity.makeValue(TwoFactorSupport.CHALLENGE).setAll([userId: userId, tokenHash: AuthPrimitives.sha256Hex(challenge),
                 purposeEnumId: purpose, webauthnChallenge: challenge, createdDate: now,
                 expiresDate: new Timestamp(now.time + TwoFactorSupport.CHALLENGE_LIFETIME_SECONDS * 1000L), failedAttempts: 0,
                 requestIp: TwoFactorSupport.recordedIp(ec)]).setSequencedIdPrimary().create()
@@ -279,7 +277,7 @@ class PasskeySupport {
             logger.info("Passkey registration refused for userId {}: unreadable credential ({})", userId, e.class.simpleName)
             return [ok: false, error: PASSKEY_REFUSAL]
         }
-        String challenge = parsed.collectedClientData?.challenge?.value ? b64(parsed.collectedClientData.challenge.value) : null
+        String challenge = parsed.collectedClientData?.challenge?.value ? AuthPrimitives.b64url(parsed.collectedClientData.challenge.value) : null
         def row = challenge ? TwoFactorSupport.liveChallenge(ec, challenge, true) : null
         if (row == null || row.purposeEnumId != PURPOSE_ADD || row.userId != userId || row.webauthnChallenge != challenge) {
             return [ok: false, error: SETUP_EXPIRED]
@@ -300,7 +298,7 @@ class PasskeySupport {
         AuthenticatorData authData = verified.attestationObject.authenticatorData
         AttestedCredentialData attested = authData.attestedCredentialData
         byte[] credentialIdBytes = attested.credentialId
-        String credentialIdHash = TwoFactorSupport.sha256Bytes(credentialIdBytes)
+        String credentialIdHash = AuthPrimitives.sha256Hex(credentialIdBytes)
         if (liveOwnerOf(ec, credentialIdHash) != null) {
             logger.info("Passkey registration refused for userId {}: credential already registered", userId)
             return [ok: false, error: ALREADY_REGISTERED]
@@ -313,8 +311,8 @@ class PasskeySupport {
                 .setSequencedIdPrimary()
         factor.create()
         byte[] coseBytes = objectConverter.cborConverter.writeValueAsBytes(attested.getCOSEKey())
-        ec.entity.makeValue(CREDENTIAL).setAll([factorId: factor.factorId, userId: userId, credentialId: b64(credentialIdBytes),
-                credentialIdHash: credentialIdHash, publicKeyCose: b64(coseBytes), signCount: authData.signCount,
+        ec.entity.makeValue(CREDENTIAL).setAll([factorId: factor.factorId, userId: userId, credentialId: AuthPrimitives.b64url(credentialIdBytes),
+                credentialIdHash: credentialIdHash, publicKeyCose: AuthPrimitives.b64url(coseBytes), signCount: authData.signCount,
                 transports: (verified.transports ?: [])*.value.join(","), aaguid: attested.aaguid?.value?.toString(), name: label,
                 backupEligible: authData.flagBE ? "Y" : "N", backedUp: authData.flagBS ? "Y" : "N",
                 uvInitialized: authData.flagUV ? "Y" : "N", createdDate: now]).create()
@@ -351,7 +349,7 @@ class PasskeySupport {
             TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
             return [ok: false]
         }
-        String presented = parsed.collectedClientData?.challenge?.value ? b64(parsed.collectedClientData.challenge.value) : null
+        String presented = parsed.collectedClientData?.challenge?.value ? AuthPrimitives.b64url(parsed.collectedClientData.challenge.value) : null
         String challenge = expectedChallenge
         if (challenge == null) {
             def row = presented ? TwoFactorSupport.liveChallenge(ec, presented, true) : null
@@ -365,9 +363,9 @@ class PasskeySupport {
         }
         byte[] credentialId = parsed.credentialId
         List<Map> passkeys = activePasskeys(ec, userId)
-        Map match = credentialId ? passkeys.find { it.credential.credentialIdHash == TwoFactorSupport.sha256Bytes(credentialId) } : null
+        Map match = credentialId ? passkeys.find { it.credential.credentialIdHash == AuthPrimitives.sha256Hex(credentialId) } : null
         byte[] handle = parsed.userHandle
-        if (match == null || (handle != null && handle.length > 0 && b64(handle) != userHandle(userId))) {
+        if (match == null || (handle != null && handle.length > 0 && AuthPrimitives.b64url(handle) != userHandle(userId))) {
             logger.info("Passkey assertion refused for userId {}: not one of their live passkeys", userId)
             TwoFactorSupport.event(ec, userId, "PASSKEY_FAILED")
             return [ok: false]
@@ -382,7 +380,7 @@ class PasskeySupport {
         }
         try {
             CredentialRecordImpl record = credentialRecord(credential)
-            List<byte[]> allowed = passkeys.collect { b64Decode((String) it.credential.credentialId) }
+            List<byte[]> allowed = passkeys.collect { AuthPrimitives.b64urlDecode((String) it.credential.credentialId) }
             manager.verify(parsed, new AuthenticationParameters(serverProperty(ec, challenge), record, allowed, true, true))
         } catch (MaliciousCounterValueException e) {
             logger.warn("Passkey {} of userId {} presented a signature counter that did not move forward (stored {}): refused; a cloned authenticator?",
@@ -405,8 +403,8 @@ class PasskeySupport {
     }
 
     private static CredentialRecordImpl credentialRecord(def credential) {
-        byte[] credentialId = b64Decode((String) credential.credentialId)
-        byte[] cose = b64Decode((String) credential.publicKeyCose)
+        byte[] credentialId = AuthPrimitives.b64urlDecode((String) credential.credentialId)
+        byte[] cose = AuthPrimitives.b64urlDecode((String) credential.publicKeyCose)
         String aaguidText = normalize(credential.aaguid)
         byte[] aaguid = aaguidText ? new AAGUID(aaguidText).bytes : new byte[16]
         // aaguid (16) | credential id length (2) | credential id | COSE key: the attested-credential-data layout.
@@ -457,7 +455,7 @@ class PasskeySupport {
     /** The opaque WebAuthn user handle: the userId's bytes, base64url (no PII; stable, so a re-registration on the same
      *  authenticator replaces its resident key). */
     static String userHandle(String userId) {
-        return b64(userId.getBytes(StandardCharsets.UTF_8))
+        return AuthPrimitives.b64url(userId.getBytes(StandardCharsets.UTF_8))
     }
 
     static String cleanName(Object name) {
@@ -470,17 +468,4 @@ class PasskeySupport {
         return value ? value.toString().split(",").collect { it.trim() }.findAll { it } : []
     }
 
-    private static String newChallenge() {
-        byte[] bytes = new byte[32]
-        random.nextBytes(bytes)
-        return b64(bytes)
-    }
-
-    static String b64(byte[] bytes) {
-        return Base64.urlEncoder.withoutPadding().encodeToString(bytes)
-    }
-
-    static byte[] b64Decode(String value) {
-        return Base64.urlDecoder.decode(value)
-    }
 }

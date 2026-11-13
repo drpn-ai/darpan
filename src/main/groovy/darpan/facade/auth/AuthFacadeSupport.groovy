@@ -479,7 +479,8 @@ class AuthFacadeSupport {
         List<String> refusals = FacadeSupport.getErrors(ec)
         if (refusals) logger.info("Login refused for username [{}]: {}", usernameValue, refusals.join(" | "))
         burnSkippedPasswordHash(ec, refusals, usernameValue, passwordValue)
-        holdRefusalToFloor(attemptStartedNanos)
+        // The floor sits LOGIN_REFUSAL_FLOOR_MILLIS above the measured cost of one hash, which both refusal paths spend.
+        AuthPrimitives.holdToFloor(attemptStartedNanos, LOGIN_REFUSAL_FLOOR_MILLIS + passwordHashCostMillis, "A refused login")
         // clearAll(), not clearErrors(): clearErrors MOVES errors into the messages list, which would hand
         // the caller the same text under a different key.
         ec.message.clearAll()
@@ -503,7 +504,7 @@ class AuthFacadeSupport {
      *  What this does NOT equalise: loginPrePassword falls through up to three entity lookups for a username
      *  it cannot find (exact, case-insensitive, then email) versus one for a hit, so lookup cost still varies
      *  by a smaller amount in the opposite direction. On SHA-256 hashing the two roughly cancel; with the
-     *  PBKDF2 hash (DAR-BE-268) the floor rides above the measured hash cost instead (holdRefusalToFloor), which
+     *  PBKDF2 hash (DAR-BE-268) the floor rides above the measured hash cost instead (collapseLoginFailure), which
      *  also covers an account still on SHA-256 until its next sign-in. A slower database would change the
      *  balance, so the residual is worth
      *  re-measuring against a production-like database rather than assumed to stay closed. The tests below
@@ -566,27 +567,6 @@ class AuthFacadeSupport {
         passwordHashCostMillis = previous == 0L ? millis : ((previous * 3L + millis).intdiv(4L) as long)
     }
 
-    /** Hold a refusal open until the floor, so whatever the decoy could not equalise has nothing to show.
-     *  The floor is LOGIN_REFUSAL_FLOOR_MILLIS above the measured cost of one hash, which both refusal paths spend.
-     *
-     *  Overshooting the floor is not an error but it does mean the masking has stopped working, so say so —
-     *  a silent regression here looks exactly like a working defence. */
-    private static void holdRefusalToFloor(long attemptStartedNanos) {
-        long elapsedMillis = (System.nanoTime() - attemptStartedNanos).intdiv(1_000_000L)
-        long floorMillis = LOGIN_REFUSAL_FLOOR_MILLIS + passwordHashCostMillis
-        long remainingMillis = floorMillis - elapsedMillis
-        if (remainingMillis <= 0) {
-            logger.warn("Refused login took {}ms, past the {}ms floor — refusals are no longer held to a " +
-                    "constant time and may again be distinguishable by how fast they return",
-                    elapsedMillis, floorMillis)
-            return
-        }
-        try {
-            Thread.sleep(remainingMillis)
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt()
-        }
-    }
 
     /** Null unless the failed login was rejected for a reason the user can clear themselves by setting a
      *  new password. See PASSWORD_CHANGE_REQUIRED_MARKER for why the message text is the signal. */

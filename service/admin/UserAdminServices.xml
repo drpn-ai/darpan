@@ -218,9 +218,9 @@
             <entity-find entity-name="moqui.security.UserGroupMember" list="roleRowList">
                 <date-filter/>
                 <econdition field-name="userId"/>
-                <econdition field-name="userGroupId" operator="in" from="darpan.admin.AdminUserSupport.DARPAN_ROLE_GROUP_IDS"/>
+                <econdition field-name="userGroupId" operator="in" from="darpan.facade.common.TenantAccessSupport.DARPAN_ROLE_GROUP_IDS"/>
             </entity-find>
-            <set field="darpanRoleList" from="darpan.admin.AdminUserSupport.DARPAN_ROLE_GROUP_IDS.findAll { it in roleRowList*.userGroupId }"/>
+            <set field="darpanRoleList" from="darpan.facade.common.TenantAccessSupport.DARPAN_ROLE_GROUP_IDS.findAll { it in roleRowList*.userGroupId }"/>
             <set field="userDetail" from="[userId: targetAccount.userId, username: targetAccount.username,
                     userFullName: targetAccount.userFullName, emailAddress: targetAccount.emailAddress,
                     disabled: targetAccount.disabled == 'Y',

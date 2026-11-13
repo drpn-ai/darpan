@@ -156,8 +156,8 @@ class CliAuthSupport {
 
     /**
      * A Moqui login key for the Darpan CLI, as UserFacadeImpl.getLoginKey issues one: 40 random characters, stored
-     * hashed in moqui.security.UserLoginKey, and the user's already-expired keys cleared out. It lives as long as the
-     * user's longest CLI sign-in lifetime (CliAccess.keyLifetimeDays: 30 days for an admin, 7 otherwise; DAR-BE-195),
+     * hashed in moqui.security.UserLoginKey, and the user's already-expired keys cleared out. It lives as long as a CLI
+     * sign-in may (CliAccess.keyLifetimeDays: CliAccess.SIGN_IN_DAYS for everyone, admins included; DAR-BE-195, DAR-BE-261),
      * read for userId, the approver: poll#CliLogin runs anonymous.
      * Returns [rawKey, hash, thruDate, expiresInSeconds]; rawKey exists nowhere else.
      */
@@ -294,9 +294,8 @@ class CliAuthSupport {
 
     /**
      * Null, or why this call may not run in its tenant (the X-Darpan-Tenant header, else the user's preferred tenant, so
-     * leaving the header off is no way round it): no live CLI grant there, or the sign-in is older than the user's role
-     * there allows. Darpan admins pass: 30 days everywhere is their key's own lifetime. Signing the session out
-     * (ownSignOutCall) passes too.
+     * leaving the header off is no way round it): no live CLI grant or no CLI role there. Darpan admins need no grant.
+     * Signing the session out (ownSignOutCall) passes too. The sign-in's age is held by cliSessionProblem, for every tenant.
      *
      * The tenant is resolved for the signed-in user, so the request must be signed in as the key's own user: a CLI key
      * carried only as the persistent-login cookie is not a login yet here (no user, so no tenant to check), and a key
@@ -308,7 +307,7 @@ class CliAuthSupport {
         if (CliAccess.isDarpanAdmin(ec, userId)) return null
         def request = ec.web?.request
         if (request != null && ownSignOutCall(RpcMethodFence.routedSegments(request), ec.web.requestParameters as Map)) return null
-        return CliAccess.tenantProblem(ec, userId, TenantAccessSupport.currentActiveTenantUserGroupId(ec), (Timestamp) cliSession.createdDate)
+        return CliAccess.tenantProblem(ec, userId, TenantAccessSupport.currentActiveTenantUserGroupId(ec))
     }
 
     /**
@@ -321,15 +320,17 @@ class CliAuthSupport {
         return !methods.isEmpty() && methods.every { it == OWN_SIGN_OUT_METHOD }
     }
 
-    private static String cliSessionProblem(def ec, String cliKeyHash, def cliSession) {
+    static final String CLI_SESSION_EXPIRED = "This CLI session has expired. Run darpan login to sign in again."
+
+    static String cliSessionProblem(def ec, String cliKeyHash, def cliSession) {
         if (cliSession == null || cliSession.revokedDate != null) return "This CLI session was signed out. Run darpan login to sign in again."
         def loginKey = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
                         "self-scoped auth: re-check a CLI key's expiry for its web session")
                 .condition("loginKey", cliKeyHash).useCache(false).one()
         Timestamp thruDate = (Timestamp) loginKey?.thruDate
-        if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) {
-            return "This CLI session has expired. Run darpan login to sign in again."
-        }
+        if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) return CLI_SESSION_EXPIRED
+        // DAR-BE-261: the age limit, for admins too, so an admin key issued for 30 days before the change ends at 7.
+        if (CliAccess.signInExpired((Timestamp) cliSession.createdDate)) return CLI_SESSION_EXPIRED
         def account = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserAccount",
                         "self-scoped auth: re-check that a CLI session's account can still sign in")
                 .condition("userId", cliSession.userId).useCache(false).one()

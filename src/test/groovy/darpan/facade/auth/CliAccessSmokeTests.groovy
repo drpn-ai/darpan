@@ -15,8 +15,8 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.*
 
 /**
- * DAR-BE-195. Who may use the CLI, where, and how long a sign-in lasts there: by role, per tenant. Tenants and users are
- * synthetic. ANN is a tenant admin in ALPHA and view-only in BETA (spec decision 5); STAFF is a Darpan admin.
+ * DAR-BE-195. Who may use the CLI, where, and how long a sign-in lasts (DAR-BE-261: 7 days for every role, admins included).
+ * Tenants and users are synthetic. ANN is a tenant admin in ALPHA and view-only in BETA (spec decision 5); STAFF is a Darpan admin.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class CliAccessSmokeTests {
@@ -85,13 +85,14 @@ class CliAccessSmokeTests {
     }
 
     @Test
-    void "a sign-in lasts by role in each tenant: 30 for a tenant admin or Darpan admin, 7 for the rest, 0 for no role"() {
-        assertEquals(30, CliAccess.lifetimeDays(ec, ANN, ALPHA))
+    void "DAR-BE-261: a sign-in lasts 7 days for every role, a tenant admin or Darpan admin no longer than the rest, 0 for no role"() {
+        assertEquals(7, CliAccess.SIGN_IN_DAYS)
+        assertEquals(7, CliAccess.lifetimeDays(ec, ANN, ALPHA), "a tenant admin: no longer than view-only")
         assertEquals(7, CliAccess.lifetimeDays(ec, ANN, BETA))
         assertEquals(0, CliAccess.lifetimeDays(ec, ANN, GAMMA), "an ended membership is no role")
         assertEquals(7, CliAccess.lifetimeDays(ec, ED, ALPHA), "editor + legacy tenant user: both 7")
         assertEquals(7, CliAccess.lifetimeDays(ec, ED, BETA), "legacy DARPAN_TENANT_USER is 7")
-        assertEquals(30, CliAccess.lifetimeDays(ec, STAFF, GAMMA), "a Darpan admin needs no membership")
+        assertEquals(7, CliAccess.lifetimeDays(ec, STAFF, GAMMA), "a Darpan admin needs no membership, and gets no longer")
     }
 
     @Test
@@ -110,49 +111,49 @@ class CliAccessSmokeTests {
     }
 
     @Test
-    void "a new key lives as long as the longest role among the tenants where the CLI is on, not where the user is admin"() {
+    void "DAR-BE-261: a new key lives 7 days wherever the CLI is on, an admin's too, none without a grant"() {
         grant("G_B", BETA, ANN)
-        assertEquals(7, CliAccess.keyLifetimeDays(ec, ANN), "admin in ALPHA, but the CLI is on only in BETA, where ANN is view-only")
+        assertEquals(7, CliAccess.keyLifetimeDays(ec, ANN), "the CLI is on only in BETA, where ANN is view-only")
         grant("G_A", ALPHA, ANN)
-        assertEquals(30, CliAccess.keyLifetimeDays(ec, ANN))
+        assertEquals(7, CliAccess.keyLifetimeDays(ec, ANN), "on in ALPHA too, where ANN is tenant admin: still 7")
         assertEquals(0, CliAccess.keyLifetimeDays(ec, ED))
-        assertEquals(30, CliAccess.keyLifetimeDays(ec, STAFF))
+        assertEquals(7, CliAccess.keyLifetimeDays(ec, STAFF), "a Darpan admin: 7, not the 30 it was")
     }
 
     @Test
-    void "each call is held to the role in its own tenant"() {
-        grant("G_A", ALPHA, ANN)
+    void "DAR-BE-261: a sign-in is too old at 7 days, whoever holds it"() {
+        assertFalse(CliAccess.signInExpired(ago(7 * DAY - HOUR)))
+        assertTrue(CliAccess.signInExpired(ago(7 * DAY)))
+        assertTrue(CliAccess.signInExpired(ago(29 * DAY)), "an admin key issued for 30 days before the change")
+        assertFalse(CliAccess.signInExpired(null))
+    }
+
+    @Test
+    void "each call is held to a live grant and a CLI role in its own tenant"() {
         grant("G_B", BETA, ANN)
-        assertNull(CliAccess.tenantProblem(ec, ANN, BETA, ago(7 * DAY - HOUR)), "view-only, just under 7 days")
-        String old = CliAccess.tenantProblem(ec, ANN, BETA, ago(7 * DAY))
-        assertEquals("This CLI sign-in is older than 7 days, the limit for your role in ${BETA} Co. Run darpan login to sign in again.".toString(), old)
-        assertNull(CliAccess.tenantProblem(ec, ANN, ALPHA, ago(29 * DAY)), "the same sign-in still answers in ALPHA")
-        assertNotNull(CliAccess.tenantProblem(ec, ANN, ALPHA, ago(30 * DAY)))
+        assertNull(CliAccess.tenantProblem(ec, ANN, BETA))
+        assertEquals("The Darpan CLI is not turned on for you in ${ALPHA} Co. A Darpan admin turns it on.".toString(),
+                CliAccess.tenantProblem(ec, ANN, ALPHA), "no grant in ALPHA")
+        grant("G_GAMMA", GAMMA, ANN)
         assertEquals("The Darpan CLI is not turned on for you in ${GAMMA} Co. A Darpan admin turns it on.".toString(),
-                CliAccess.tenantProblem(ec, ANN, GAMMA, ago(HOUR)))
-        assertNull(CliAccess.tenantProblem(ec, STAFF, GAMMA, ago(29 * DAY)), "a Darpan admin needs no grant")
-        assertNotNull(CliAccess.tenantProblem(ec, STAFF, GAMMA, ago(30 * DAY)))
+                CliAccess.tenantProblem(ec, ANN, GAMMA), "a grant, but the membership ended")
+        assertNull(CliAccess.tenantProblem(ec, STAFF, GAMMA), "a Darpan admin needs no grant")
     }
 
     @Test
-    void "a paused grant or a demotion counts on the next call"() {
+    void "a paused grant or a removed role counts on the next call"() {
         grant("G_A", ALPHA, ANN)
-        assertNull(CliAccess.tenantProblem(ec, ANN, ALPHA, ago(10 * DAY)))
+        assertNull(CliAccess.tenantProblem(ec, ANN, ALPHA))
         asSystem {
             ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", ALPHA)
                     .condition("userId", ANN).deleteAll()
         }
-        role(ALPHA, ANN, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID)
         try {
-            assertTrue(CliAccess.tenantProblem(ec, ANN, ALPHA, ago(10 * DAY))?.contains("older than 7 days"), "demoted to view-only")
+            assertTrue(CliAccess.tenantProblem(ec, ANN, ALPHA)?.contains("not turned on"), "no role left in ALPHA")
         } finally {
-            asSystem {
-                ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("tenantUserGroupId", ALPHA)
-                        .condition("userId", ANN).deleteAll()
-            }
             role(ALPHA, ANN, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID)
         }
         asSystem { ec.entity.find(CliAccess.GRANT).condition("grantId", "G_A").updateAll([statusId: "PAUSED"]) }
-        assertTrue(CliAccess.tenantProblem(ec, ANN, ALPHA, ago(HOUR))?.contains("not turned on"), "paused")
+        assertTrue(CliAccess.tenantProblem(ec, ANN, ALPHA)?.contains("not turned on"), "paused")
     }
 }

@@ -97,12 +97,16 @@ class AuthFacadeSupport {
         boolean authenticated = loggedIn && userId != null
 
         if (authenticated) {
-            issuedAuthToken = ec?.user?.getLoginKey()?.toString()?.trim()
+            // DAR-BE-261: the key starts with one idle window and slides on each request
+            // (AuthSessionSupport.enforceWebSignInLifetime), never past sign-in + the absolute lifetime.
+            issuedAuthToken = ec?.user?.getLoginKey(AuthSessionSupport.initialLoginKeyHours(ec))?.toString()?.trim()
             if (!issuedAuthToken) {
                 ec.message.addError("Unable to issue auth token")
                 logoutCurrentSessionOnly(ec)
                 authenticated = false
             } else {
+                // The absolute lifetime, not the idle window: darpan-ui drops its token at this time, so the
+                // server's sliding idle check is what ends an idle sign-in sooner.
                 authTokenExpiresInSecondsValue = resolveLoginKeyExpiresInSeconds(ec)
                 // Audit W5 #39 — augment header response with a persistent-login cookie. SPA
                 // contract (header `login_key`) is unchanged; the cookie is the side channel that
@@ -420,7 +424,7 @@ class AuthFacadeSupport {
     /** Delete every UserLoginKey row for a given userId; returns the count removed. Used by
      *  logoutAllSessions() and by change#OwnPassword to rotate every device after a password change.
      *  Audit M1.2 / M1.3 — previously logout only removed the current key and password changes
-     *  did NOT invalidate other devices, so a 6-day token on a compromised laptop kept working
+     *  did NOT invalidate other devices, so a live token on a compromised laptop kept working
      *  after the user changed their password. */
     static int deleteAllLoginKeysForUser(def ec, String userId) {
         if (!userId) return 0
@@ -521,16 +525,7 @@ class AuthFacadeSupport {
     }
 
     protected static Integer resolveLoginKeyExpiresInSeconds(def ec) {
-        try {
-            def configured = ec?.factory?.getLoginKeyExpireHours()
-            float expireHours = configured instanceof Number ?
-                    ((Number) configured).floatValue() :
-                    ((configured ?: "144") as String).toFloat()
-            return Math.max(1, Math.round(expireHours * 60.0f * 60.0f))
-        } catch (Exception e) {
-            logger.warn("Could not resolve loginKeyExpireHours; defaulting to 144 hours", e)
-            return 518400
-        }
+        return AuthSessionSupport.resolveCookieMaxAgeSeconds(ec)
     }
 
     protected static String requestAuthToken(def request) {

@@ -9,8 +9,9 @@ import java.sql.Timestamp
 
 /**
  * DAR-BE-195. Who may use the Darpan CLI, where, and for how long. A Darpan admin turns the CLI on for one user in one
- * tenant (admin.CliAccessAdminServices); Darpan admins themselves need no grant. A CLI sign-in lasts by the user's role:
- * 30 days for Darpan and tenant admins, 7 for everyone else, checked per tenant on every call (CliAuthSupport).
+ * tenant (admin.CliAccessAdminServices); Darpan admins themselves need no grant. A CLI sign-in lasts SIGN_IN_DAYS for
+ * every role (DAR-BE-261: an admin's key, the most powerful, is no longer-lived than anyone's), checked on every call
+ * (CliAuthSupport.revalidateCliWebSession).
  * Spec: wrapper docs/superpowers/specs/2026-11-10-cli-access-per-user-design.md.
  *
  * Every read names the user explicitly: poll#CliLogin, which mints the key, runs anonymous, and the per-request check
@@ -29,22 +30,18 @@ class CliAccess {
     static final String GRANT = "darpan.auth.CliAccessGrant"
     static final String EVENT = "darpan.auth.CliAccessGrantEvent"
 
-    /** Days a CLI sign-in lasts, by permission group (one day is 24 hours). The longest of a user's groups wins. */
-    static final Map<String, Integer> LIFETIME_DAYS = ([
-            (TenantAccessSupport.ADMIN_USER_GROUP_ID)              : 30,
-            (TenantAccessSupport.DARPAN_ADMIN_GROUP_ID)            : 30,
-            (TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID)      : 30,
-            (TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID)     : 30,
-            (TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)   : 7,
-            (TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID): 7,
-            (TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID)      : 7,
-    ] as LinkedHashMap<String, Integer>).asImmutable()
-    /** Darpan staff: use the CLI in every tenant they reach, with no grant, for the longest lifetime. */
+    /** Days a CLI sign-in lasts (one day is 24 hours), the same for every role: DAR-BE-261 ended the 30 days admins had. */
+    static final int SIGN_IN_DAYS = 7
+    /** The permission groups that can use the CLI in a tenant (given a grant there). */
+    static final List<String> CLI_ROLE_GROUP_IDS = [TenantAccessSupport.ADMIN_USER_GROUP_ID, TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
+                                                    TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID,
+                                                    TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
+                                                    TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID].asImmutable()
+    /** Darpan staff: use the CLI in every tenant they reach, with no grant. */
     static final List<String> DARPAN_ADMIN_GROUP_IDS = [TenantAccessSupport.ADMIN_USER_GROUP_ID, TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
                                                         TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID].asImmutable()
 
     static final String NOT_ON_IN_TENANT = "The Darpan CLI is not turned on for you in %s. A Darpan admin turns it on."
-    static final String TOO_OLD_IN_TENANT = "This CLI sign-in is older than %d days, the limit for your role in %s. Run darpan login to sign in again."
 
     private static final long DAY_MS = 86_400_000L
     private static final String WHY = "self-scoped auth: CLI access for an explicitly named user (pre-auth path, no active tenant)"
@@ -72,10 +69,16 @@ class CliAccess {
         return (row.fromDate == null || ((Timestamp) row.fromDate).time <= now) && (row.thruDate == null || ((Timestamp) row.thruDate).time > now)
     }
 
-    /** Days a CLI sign-in lasts for this user in this tenant: 30 for a Darpan admin, else the longest of their roles there; 0 for none. */
+    /** Days a CLI sign-in lasts for this user in this tenant: SIGN_IN_DAYS for a Darpan admin or a CLI role there; 0 for none. */
     static int lifetimeDays(def ec, String userId, String tenantId) {
-        if (isDarpanAdmin(ec, userId)) return 30
-        return (tenantGroups(ec, userId, tenantId).collect { LIFETIME_DAYS[it] ?: 0 }.max() ?: 0) as int
+        if (isDarpanAdmin(ec, userId)) return SIGN_IN_DAYS
+        return tenantGroups(ec, userId, tenantId).any { it in CLI_ROLE_GROUP_IDS } ? SIGN_IN_DAYS : 0
+    }
+
+    /** Whether a CLI sign-in made at signedInAt has outlived SIGN_IN_DAYS. Held on every call, admins included, so a key
+     *  issued before DAR-BE-261 with a longer end stops at the same age. */
+    static boolean signInExpired(Timestamp signedInAt) {
+        return signedInAt != null && System.currentTimeMillis() - signedInAt.time >= SIGN_IN_DAYS * DAY_MS
     }
 
     /** The user's grant in the tenant when it is ACTIVE and its window is open now; else null. */
@@ -101,22 +104,20 @@ class CliAccess {
 
     /** Days a new CLI key lives: the longest lifetime over the tenants where the user may use the CLI; 0 for none. */
     static int keyLifetimeDays(def ec, String userId) {
-        if (isDarpanAdmin(ec, userId)) return 30
+        if (isDarpanAdmin(ec, userId)) return SIGN_IN_DAYS
         return (grantedTenants(ec, userId).collect { String t -> lifetimeDays(ec, userId, t) }.max() ?: 0) as int
     }
 
     /**
-     * Null when this CLI sign-in (signed in at signedInAt) may make a call in the tenant; otherwise why not: no live grant
-     * there (Darpan admins need none), or older than the user's role there allows.
+     * Null when this user's CLI sign-in may make a call in the tenant; otherwise why not: no live grant there (Darpan
+     * admins need none), or no CLI role there. The sign-in's age is held separately, the same for every tenant
+     * (signInExpired).
      */
-    static String tenantProblem(def ec, String userId, String tenantId, Timestamp signedInAt) {
+    static String tenantProblem(def ec, String userId, String tenantId) {
         if (!userId || !tenantId) return null
-        boolean admin = isDarpanAdmin(ec, userId)
-        if (!admin && liveGrant(ec, userId, tenantId) == null) return String.format(NOT_ON_IN_TENANT, tenantLabel(ec, tenantId))
-        int days = admin ? 30 : lifetimeDays(ec, userId, tenantId)
-        if (days <= 0) return String.format(NOT_ON_IN_TENANT, tenantLabel(ec, tenantId))
-        if (signedInAt != null && System.currentTimeMillis() - signedInAt.time >= days * DAY_MS) {
-            return String.format(TOO_OLD_IN_TENANT, days, tenantLabel(ec, tenantId))
+        if (isDarpanAdmin(ec, userId)) return null
+        if (liveGrant(ec, userId, tenantId) == null || lifetimeDays(ec, userId, tenantId) <= 0) {
+            return String.format(NOT_ON_IN_TENANT, tenantLabel(ec, tenantId))
         }
         return null
     }

@@ -287,8 +287,8 @@ class CliLoginSmokeTests {
     }
 
     @Test
-    @DisplayName("DAR-BE-195: a CLI grant lets a non-admin approve; the key lives by the longest role where the CLI is on")
-    void aGrantedViewerGetsASevenDayKeyAndATenantAdminThirty() {
+    @DisplayName("DAR-BE-195, DAR-BE-261: a CLI grant lets a non-admin approve; every key lives 7 days, an admin's no longer")
+    void everyCliKeyLivesSevenDaysAdminsIncluded() {
         role(PLAIN_ID, T1, "DARPAN_COMPANY_VIEW_ONLY")
         cliGrant(PLAIN_ID, T1)
         assertEquals(7 * 86_400, signInFor(PLAIN_USERNAME).authTokenExpiresInSeconds)
@@ -298,8 +298,10 @@ class CliLoginSmokeTests {
         role(PLAIN_ID, T2, "DARPAN_TENANT_ADMIN")
         assertEquals(7 * 86_400, signInFor(PLAIN_USERNAME).authTokenExpiresInSeconds, "admin in T2, but the CLI is not on there")
         cliGrant(PLAIN_ID, T2)
-        assertEquals(30 * 86_400, signInFor(PLAIN_USERNAME).authTokenExpiresInSeconds)
-        assertEquals(30 * 86_400, signInFor(APPROVER_USERNAME).authTokenExpiresInSeconds, "a Darpan admin, no grant")
+        assertEquals(7 * 86_400, signInFor(PLAIN_USERNAME).authTokenExpiresInSeconds, "a tenant admin where the CLI is on: still 7")
+        assertEquals(7 * 86_400, signInFor(APPROVER_USERNAME).authTokenExpiresInSeconds, "a Darpan admin, no grant: 7, not 30")
+        def adminKey = ec.entity.find("moqui.security.UserLoginKey").condition("userId", APPROVER_ID).orderBy("-fromDate").disableAuthz().list()[0]
+        assertEquals(7L * 86_400_000L, ((Timestamp) adminKey.thruDate).time - ((Timestamp) adminKey.fromDate).time, "the admin's stored key too")
     }
 
     @Test
@@ -315,22 +317,57 @@ class CliLoginSmokeTests {
     }
 
     @Test
-    @DisplayName("DAR-BE-195: each call is held to the role in its own tenant, header or not; a Darpan admin passes")
-    void eachCallIsHeldToTheRoleInItsTenant() {
+    @DisplayName("DAR-BE-195: each call is held to a grant in its own tenant, header or not; a Darpan admin passes")
+    void eachCallIsHeldToTheGrantInItsTenant() {
         role(PLAIN_ID, T1, "DARPAN_TENANT_ADMIN")
         role(PLAIN_ID, T2, "DARPAN_COMPANY_VIEW_ONLY")
         cliGrant(PLAIN_ID, T1)
-        cliGrant(PLAIN_ID, T2)
-        Map eightDaysOld = [userId: PLAIN_ID, createdDate: new Timestamp(System.currentTimeMillis() - 8L * 86_400_000L)]
+        Map session = [userId: PLAIN_ID, createdDate: new Timestamp(System.currentTimeMillis() - 86_400_000L)]
         assertTrue(ec.user.internalLoginUser(PLAIN_USERNAME))
-        assertNull(TenantAccessSupport.withRequestedTenant(T1) { CliAuthSupport.tenantCallProblem(ec, eightDaysOld) })
-        String refused = TenantAccessSupport.withRequestedTenant(T2) { CliAuthSupport.tenantCallProblem(ec, eightDaysOld) }
-        assertEquals("This CLI sign-in is older than 7 days, the limit for your role in T2 Co. Run darpan login to sign in again.", refused)
+        assertNull(TenantAccessSupport.withRequestedTenant(T1) { CliAuthSupport.tenantCallProblem(ec, session) })
+        String refused = TenantAccessSupport.withRequestedTenant(T2) { CliAuthSupport.tenantCallProblem(ec, session) }
+        assertEquals("The Darpan CLI is not turned on for you in T2 Co. A Darpan admin turns it on.", refused)
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, T2)
-        assertEquals(refused, CliAuthSupport.tenantCallProblem(ec, eightDaysOld), "no header: the preferred tenant is checked")
+        assertEquals(refused, CliAuthSupport.tenantCallProblem(ec, session), "no header: the preferred tenant is checked")
         ec.user.logoutUser()
         assertTrue(ec.user.internalLoginUser(APPROVER_USERNAME))
-        assertNull(CliAuthSupport.tenantCallProblem(ec, [userId: APPROVER_ID, createdDate: eightDaysOld.createdDate]))
+        assertNull(CliAuthSupport.tenantCallProblem(ec, [userId: APPROVER_ID, createdDate: session.createdDate]))
+    }
+
+    @Test
+    @DisplayName("DAR-BE-261: a web key starts with the 60-minute idle window and slides in the database; the conf caps a web sign-in at 24 hours")
+    void aWebKeyStartsAtTheIdleWindowAndSlides() {
+        assertEquals(24.0f, ec.factory.getLoginKeyExpireHours(), "darpan's MoquiConf.xml login-key expire-hours")
+        assertTrue(ec.user.internalLoginUser(PLAIN_USERNAME))
+        String hash = AuthSessionSupport.hashLoginKey(ec, ec.user.getLoginKey(AuthSessionSupport.initialLoginKeyHours(ec)))
+        Closure<Object> reload = { ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).useCache(false).disableAuthz().one() }
+        def key = reload()
+        long signedIn = ((Timestamp) key.fromDate).time
+        assertEquals(3_600_000L, ((Timestamp) key.thruDate).time - signedIn, "issued for the idle window, not 24 hours")
+
+        long twentyMinutesOn = signedIn + 20L * 60_000L
+        assertTrue(AuthSessionSupport.slideWebLoginKey(ec, key, twentyMinutesOn, AuthSessionSupport.absoluteLifetimeMillis(ec)))
+        assertEquals(twentyMinutesOn + 3_600_000L, ((Timestamp) reload().thruDate).time, "a request 20 minutes on moves the end to an hour after it")
+        assertFalse(AuthSessionSupport.slideWebLoginKey(ec, reload(), twentyMinutesOn + 2L * 3_600_000L, AuthSessionSupport.absoluteLifetimeMillis(ec)),
+                "two idle hours later the key has run out and is not slid back")
+    }
+
+    @Test
+    @DisplayName("DAR-BE-261: a CLI session older than 7 days has expired, a Darpan admin's included, even when its key still lives")
+    void aCliSessionOlderThanSevenDaysHasExpiredAdminsIncluded() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+        assertEquals([], signedIn(APPROVER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        assertEquals("APPROVED", anon("poll#CliLogin", [deviceCode: started.deviceCode]).out.status)
+        def cliSession = ec.entity.find("darpan.auth.CliSession").condition("userId", APPROVER_ID).useCache(false).disableAuthz().one()
+        String hash = cliSession.loginKeyHash
+        assertNull(CliAuthSupport.cliSessionProblem(ec, hash, cliSession), "a fresh admin sign-in")
+
+        // An admin key issued for 30 days before the change: the key still lives, the sign-in is 8 days old.
+        long now = System.currentTimeMillis()
+        ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).disableAuthz()
+                .updateAll([fromDate: new Timestamp(now - 8L * 86_400_000L), thruDate: new Timestamp(now + 22L * 86_400_000L)])
+        cliSession.createdDate = new Timestamp(now - 8L * 86_400_000L)
+        assertEquals(CliAuthSupport.CLI_SESSION_EXPIRED, CliAuthSupport.cliSessionProblem(ec, hash, cliSession))
     }
 
     @Test

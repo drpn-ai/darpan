@@ -34,7 +34,8 @@ class AuthFacadeSupportTests {
         assertEquals("issued-token", result.authToken)
         assertEquals("LOGIN_KEY", result.authTokenType)
         assertEquals("login_key", result.authTokenHeaderName)
-        assertEquals(7200, result.authTokenExpiresInSeconds)
+        assertEquals(7200, result.authTokenExpiresInSeconds, "DAR-BE-261: the absolute lifetime, when darpan-ui drops the token")
+        assertEquals(1.0f, user.loginKeyHours, "DAR-BE-261: the key itself starts with one 60-minute idle window")
 
         Map<String, Object> sessionInfo = result.sessionInfo as Map<String, Object>
         assertEquals("EX_USER", sessionInfo.userId)
@@ -904,7 +905,14 @@ class AuthFacadeSupportTests {
             return loginUserResult
         }
 
+        Float loginKeyHours
+
         String getLoginKey() {
+            return loginKey
+        }
+
+        String getLoginKey(float expireHours) {
+            loginKeyHours = expireHours
             return loginKey
         }
 

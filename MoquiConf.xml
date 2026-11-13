@@ -12,6 +12,9 @@
                         // disable), so revoking or disabling ends it on the next call, not when the session times out.
                         String cliSessionRefusal = darpan.facade.auth.CliAuthSupport.revalidateCliWebSession(ec)
                         if (cliSessionRefusal) throw new org.moqui.context.ArtifactAuthorizationException(cliSessionRefusal)
+                        // DAR-BE-261: a web sign-in's key slides 60 idle minutes on with each request, capped at sign-in +
+                        // 24 hours (login-key below); one that has run out is signed out here, before the request runs.
+                        darpan.facade.auth.AuthSessionSupport.enforceWebSignInLifetime(ec)
                         darpan.facade.common.TenantAccessSupport.syncUserContext(ec)
                     ]]></script>
                 </actions>
@@ -33,8 +36,17 @@
                     ]]></script>
                 </actions>
             </after-login>
+            <!-- DAR-BE-261: pinned here so a framework default change cannot lengthen it; matches
+                 AuthSessionSupport.IDLE_TIMEOUT_MINUTES. -->
+            <session-config timeout="60"/>
         </webapp>
     </webapp-list>
+    <!-- DAR-BE-261: a web sign-in lasts at most 24 hours from sign-in (the framework default is 144). Its key is issued
+         for the 60-minute idle window and slid on each request, never past this (AuthSessionSupport). CLI keys keep their
+         own lifetime (CliAccess.SIGN_IN_DAYS). -->
+    <user-facade>
+        <login-key expire-hours="24"/>
+    </user-facade>
     <screen-facade>
         <screen location="component://webroot/screen/webroot/apps.xml">
             <subscreens-item name="darpan" menu-title="Darpan" menu-index="50" location="component://darpan/screen/darpan.xml"/>

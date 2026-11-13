@@ -80,7 +80,7 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 
 - Successful `login#Session` calls issue a Moqui login key and return it explicitly in the JSON-RPC result as `authToken`.
 - In header mode the frontend sends that token on later requests through the `login_key` request header; in cookie mode (`VITE_DARPAN_COOKIE_AUTH=true`) the `darpan_login_key` HttpOnly cookie carries it and requests also send the CSRF token from `/apps/darpan/csrfToken`.
-- Token lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours, exposed as `authTokenExpiresInSeconds`.
+- Token lifetime (DAR-BE-261): a sign-in ends after 60 minutes with no request, and at the latest 24 hours after sign-in. The key is issued for the 60-minute idle window and every request slides it on (`AuthSessionSupport.enforceWebSignInLifetime`, webroot before-request), never past sign-in + `user-facade/login-key@expire-hours` (24 in the darpan component's `MoquiConf.xml`). `authTokenExpiresInSeconds` reports that 24-hour absolute lifetime, which is when darpan-ui drops its token; the server ends an idle sign-in sooner. CLI keys keep their own lifetime (7 days, `CliAccess.SIGN_IN_DAYS`).
 - `get#SessionInfo` authenticates from the `login_key` header when present and does not depend on `/Login`, `moquiSessionToken`, or browser session-cookie bootstrap.
 - `save#ActiveTenant` requires an authenticated request, validates that the requested tenant belongs to the current user, persists that selection in `UserPreference`, and returns refreshed `sessionInfo`.
 - `save#UserSettings` requires an authenticated request, persists user-level display name in `UserPreference`, and returns refreshed `sessionInfo`.

@@ -94,7 +94,7 @@ class CliAccessAdminSmokeTests {
         Map second = adminOk("create#CliAccessGrant", [userId: VIEWER, tenantUserGroupId: ALPHA]).grant
         assertEquals("REVOKED", grantRow(first.grantId as String).statusId, "one grant per user and tenant")
         assertNull(second.thruDate, "no days and no thruDate: no end")
-        assertEquals(30, adminOk("create#CliAccessGrant", [userId: TADMIN, tenantUserGroupId: ALPHA]).grant.lifetimeDays)
+        assertEquals(7, adminOk("create#CliAccessGrant", [userId: TADMIN, tenantUserGroupId: ALPHA]).grant.lifetimeDays, "DAR-BE-261: a tenant admin no longer than a viewer")
         assertTrue(admin("create#CliAccessGrant", [userId: EDITOR, tenantUserGroupId: ALPHA, days: 0]).hasError as boolean, "days 0 refused")
     }
 

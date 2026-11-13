@@ -52,6 +52,17 @@ class AuthSessionSupport {
     static final String EXPIRED_COOKIE_DATE = "Thu, 01 Jan 1970 00:00:00 GMT"
 
     /**
+     * DAR-BE-261. A web sign-in ends after this many minutes with no request (sliding: each request moves the end on),
+     * and in any case once the absolute lifetime has passed since sign-in: {@code user-facade.login-key.@expire-hours},
+     * 24 in this component's MoquiConf.xml. The servlet session idles out at the same 60 minutes (webapp
+     * session-config, pinned there too).
+     */
+    static final int IDLE_TIMEOUT_MINUTES = 60
+    static final long IDLE_TIMEOUT_MILLIS = IDLE_TIMEOUT_MINUTES * 60_000L
+    /** A key's end is rewritten only when it would move by at least this much: one write a minute per active key, not one per request. */
+    static final long SLIDE_STEP_MILLIS = 60_000L
+
+    /**
      * Writes a persistent-login cookie carrying the just-issued login key. Caller passes the
      * raw (un-hashed) login key value returned by {@code ec.user.getLoginKey()}; it lands in the
      * cookie and is compared back to the {@code UserLoginKey.loginKey} column (which stores the
@@ -117,7 +128,107 @@ class AuthSessionSupport {
             logger.warn("restoreAuthenticatedSession failed for cookie token (username=${username}): ${e.message}")
         }
         if (!restored) clearPersistentLoginCookie(ec)
+        // DAR-BE-261: the restore is activity on this key, as any request is.
+        if (restored) slideWebLoginKey(ec, userLoginKey, System.currentTimeMillis(), absoluteLifetimeMillis(ec))
         return restored
+    }
+
+    // ---- DAR-BE-261: idle timeout and absolute lifetime of a web sign-in ----
+
+    /** Hours a new web login key lives before its first slide: the idle window, never past the absolute lifetime. */
+    static float initialLoginKeyHours(def ec) {
+        return Math.min(IDLE_TIMEOUT_MINUTES / 60.0f, absoluteLifetimeMillis(ec) / 3_600_000.0f)
+    }
+
+    /** The absolute lifetime of a web sign-in, in milliseconds (login-key.@expire-hours). */
+    static long absoluteLifetimeMillis(def ec) {
+        return resolveCookieMaxAgeSeconds(ec) * 1000L
+    }
+
+    /** Where a web key's end slides to at {@code nowMillis}: one idle window ahead, never past sign-in + the absolute lifetime. */
+    static Timestamp slidThruDate(Timestamp fromDate, long nowMillis, long absoluteLifetimeMillis) {
+        long idleEnd = nowMillis + IDLE_TIMEOUT_MILLIS
+        return new Timestamp(fromDate == null ? idleEnd : Math.min(idleEnd, fromDate.time + absoluteLifetimeMillis))
+    }
+
+    /**
+     * From the webroot before-request hook, after the framework has signed the request in (UserFacadeImpl.initFromHttpRequest
+     * checks a login_key header against its UserLoginKey.thruDate on every request that has no session user).
+     *
+     * Every live login key the request carries for the signed-in user slides one idle window on, capped at sign-in + the
+     * absolute lifetime, so the framework's own expiry check is the idle timeout. The sign-in is ended here (signed out of
+     * this request, web session invalidated) when the key it presents first (headers, then parameters, then the
+     * persistent-login cookie: the framework's order) has run out, or when its web session is older than the absolute
+     * lifetime: a session the framework restores without the key would otherwise outlive both.
+     *
+     * A CLI key keeps its own lifetime (CliAccess.SIGN_IN_DAYS), re-checked by CliAuthSupport.revalidateCliWebSession, so a
+     * CLI session is left alone. Returns true when the sign-in was ended.
+     */
+    static boolean enforceWebSignInLifetime(def ec) {
+        def request = ec?.web?.request
+        String userId = ec?.user?.userId?.toString()?.trim()
+        if (request == null || !userId) return false
+        if (CliAuthSupport.isCliSession(ec)) return false
+
+        long now = System.currentTimeMillis()
+        long absoluteMillis = absoluteLifetimeMillis(ec)
+        boolean ended = sessionOlderThan(request, now, absoluteMillis)
+        boolean first = true
+        for (String hash : CliAuthSupport.requestLoginKeyHashes(ec)) {
+            def key = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
+                            "self-scoped auth: slide the request's own web login key (pre-auth path, no active tenant)")
+                    .condition("loginKey", hash).useCache(false).one()
+            if (key != null && key.userId == userId && !slideWebLoginKey(ec, key, now, absoluteMillis) && first) ended = true
+            first = false
+        }
+        if (ended) endWebSignIn(ec, request)
+        return ended
+    }
+
+    /**
+     * Moves one web key's end to {@link #slidThruDate} when it differs by a step or more (shortening a key issued before
+     * DAR-BE-261 to the same rule). Returns false when the key has run out: its end was already past, or sign-in + the
+     * absolute lifetime has passed (the key is then written as ended, so the framework refuses it from the next request).
+     */
+    static boolean slideWebLoginKey(def ec, def key, long nowMillis, long absoluteLifetimeMillis) {
+        Timestamp thruDate = (Timestamp) key.thruDate
+        if (thruDate != null && thruDate.time <= nowMillis) return false
+        Timestamp slid = slidThruDate((Timestamp) key.fromDate, nowMillis, absoluteLifetimeMillis)
+        if (thruDate == null || Math.abs(slid.time - thruDate.time) >= SLIDE_STEP_MILLIS) {
+            try {
+                ec.transaction.runUseOrBegin(null, "DAR-BE-261: could not slide a web login key", {
+                    TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
+                                    "self-scoped auth: slide the request's own web login key (pre-auth path, no active tenant)")
+                            .condition("loginKey", key.loginKey).updateAll([thruDate: slid])
+                })
+            } catch (Exception e) {
+                // A failed write costs this request's slide only; the end still applies below.
+                logger.warn("Could not slide a web login key's end: ${e.message}")
+            }
+        }
+        return slid.time > nowMillis
+    }
+
+    private static boolean sessionOlderThan(def request, long nowMillis, long ageMillis) {
+        try {
+            def session = request.getSession(false)
+            return session != null && nowMillis - session.creationTime >= ageMillis
+        } catch (IllegalStateException ignored) {
+            return false // already invalidated
+        }
+    }
+
+    private static void endWebSignIn(def ec, def request) {
+        try {
+            ec.user.logoutLocal()
+        } catch (Exception e) {
+            logger.warn("Could not sign out a web session past its lifetime: ${e.message}")
+        }
+        try {
+            request.getSession(false)?.invalidate()
+        } catch (IllegalStateException ignored) {
+            // already invalidated by the logout
+        }
     }
 
     /**
@@ -150,11 +261,11 @@ class AuthSessionSupport {
     }
 
     /**
-     * Maps the configured login-key expiry (hours) into a cookie Max-Age (seconds). Defaults to
-     * 144 hours / 6 days if the factory accessor throws or returns something unparseable.
+     * Maps the configured login-key expiry (hours) — the absolute lifetime of a web sign-in (DAR-BE-261) — into a
+     * cookie Max-Age (seconds). Defaults to 24 hours if the factory accessor throws or returns something unparseable.
      */
     static Integer resolveCookieMaxAgeSeconds(def ec) {
-        float expireHours = 144.0f
+        float expireHours = 24.0f
         try {
             def configured = ec?.factory?.getLoginKeyExpireHours()
             if (configured instanceof Number) {

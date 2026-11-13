@@ -151,7 +151,9 @@ class DisableAuthzRatchetTest {
             "darpan-hotwax Groovy .disableAuthz("                 : 6,
             "darpan-hotwax service+screen XML .disableAuthz("     : 0,
             "darpan-hotwax service+screen XML disable-authz=\"true\"": 0,
-            "shopify-darpan Groovy .disableAuthz("                : 1,
+            // 2 since DAR-BE-275: ShopifyInstallSupport.withAuthzLifted, the one helper for writing a ShopifyAuthConfig row
+            // with no session (the install callback after state + HMAC; a token refresh in a scheduled run).
+            "shopify-darpan Groovy .disableAuthz("                : 2,
             "shopify-darpan service+screen XML .disableAuthz("    : 0,
             "shopify-darpan service+screen XML disable-authz=\"true\"": 0,
             // 5 since DAR-BE-111: extractNetSuiteOrders asks lookup#HotWaxOmsOrderStatuses for each page's HotWax status. A

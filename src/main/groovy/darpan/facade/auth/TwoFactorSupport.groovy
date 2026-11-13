@@ -725,9 +725,13 @@ class TwoFactorSupport {
     /**
      * update#TwoFactorPolicy: a date (required from then; in the future = grace), or clear (optional again). Turning on a
      * super-admin role (ADMIN, DARPAN_SUPER_ADMIN) needs at least two enrolled super admins, so one lost phone cannot lock
-     * the platform out (break-glass rule). Writes an AdminAuditLog row. Returns the refusal or null.
+     * the platform out (break-glass rule). The acting admin gives a fresh proof (a code or a passkey assertion), as for
+     * reset#TwoFactor (review M4): switching enforcement off for a role must not ride on a hijacked admin tab. Checked
+     * after the request itself is known to be valid, so a refused request spends no code. Writes an AdminAuditLog row.
+     * Returns the refusal or null.
      */
-    static String updatePolicy(def ec, String groupId, Timestamp requiredFromDate, boolean clear) {
+    static String updatePolicy(def ec, String groupId, Timestamp requiredFromDate, boolean clear, Object adminCode = null,
+                               Object adminPasskeyAssertion = null) {
         if (!(groupId in POLICY_GROUP_IDS)) return "${groupId ?: '(missing)'} is not a role the two-factor policy covers (${POLICY_GROUP_IDS.join(', ')}).".toString()
         if (!clear && requiredFromDate == null) return "Give requiredFromDate, or clear=true to make it optional."
         Timestamp now = ec.user.nowTimestamp
@@ -739,6 +743,9 @@ class TwoFactorSupport {
                 return "At least ${MIN_ENROLLED_SUPER_ADMINS} super admins must have two-factor on before it is required for ${groupId} (${count} do).".toString()
             }
         }
+        String problem = freshProofProblem(ec, adminCode, adminPasskeyAssertion, false)
+        if (problem == NOT_ENROLLED) return "Set up two-factor on your own account before changing the two-factor policy."
+        if (problem) return problem
         Timestamp date = clear ? null : requiredFromDate
         ec.entity.makeValue(POLICY).setAll([permissionGroupId: groupId, requiredFromDate: date,
                 lastChangedByUserId: normalize(ec.user.userId), lastChangedDate: now]).createOrUpdate()

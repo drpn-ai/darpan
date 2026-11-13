@@ -319,10 +319,10 @@ class TwoFactorSignInSmokeTests {
         Map refused = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
                 [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp])
         assertTrue(refused.errors.any { it.contains("At least 2 super admins") }, "${refused.errors}")
-        enrol(SUPER_ID, SUPER_USERNAME)
+        String superSecret = enrol(SUPER_ID, SUPER_USERNAME).secret
         enrol(SUPER2_ID, SUPER2_USERNAME)
         Map ok = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
-                [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp])
+                [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp, adminCode: code(superSecret)])
         assertEquals([], ok.errors)
         def audit = ec.entity.find("darpan.admin.AdminAuditLog").condition("targetType", "TwoFactorPolicy").disableAuthz().useCache(false).list()
         assertEquals(["DARPAN_SUPER_ADMIN"], audit*.targetId)
@@ -661,6 +661,31 @@ class TwoFactorSignInSmokeTests {
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(AuthSessionSupport)
         }
+    }
+
+    @Test
+    @DisplayName("review M4: changing the two-factor policy (setting a date or clearing it) needs the acting admin's fresh proof")
+    void policyChangeNeedsAFreshProof() {
+        Map unenrolled = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+                [permissionGroupId: "DARPAN_TENANT_ADMIN", requiredFromDate: ec.user.nowTimestamp])
+        assertEquals(["Set up two-factor on your own account before changing the two-factor policy."], unenrolled.errors)
+
+        String secret = enrol(SUPER_ID, SUPER_USERNAME).secret
+        setPolicy("DARPAN_TENANT_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
+        Map noCode = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+                [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true])
+        assertEquals([TwoFactorSupport.CODE_NEEDED], noCode.errors, "a session alone cannot switch enforcement off")
+        Map wrong = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+                [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true, adminCode: "000000"])
+        assertEquals([REFUSAL], wrong.errors)
+        assertNotNull(ec.entity.find(TwoFactorSupport.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
+                .disableAuthz().useCache(false).one().requiredFromDate, "still required after the refusals")
+
+        Map cleared = signedInAdmin(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+                [permissionGroupId: "DARPAN_TENANT_ADMIN", clear: true, adminCode: code(secret)])
+        assertEquals([], cleared.errors)
+        assertNull(ec.entity.find(TwoFactorSupport.POLICY).condition("permissionGroupId", "DARPAN_TENANT_ADMIN")
+                .disableAuthz().useCache(false).one().requiredFromDate)
     }
 
     // ---- regressions and invariants ----

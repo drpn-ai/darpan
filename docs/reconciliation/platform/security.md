@@ -75,7 +75,8 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
   never writes the framework's `moqui.security.UserAuthcFactor` and no `UserGroup` has `requireAuthcFactor=Y`.
 - Who must use it is data: `darpan.auth.TwoFactorRolePolicy` per role (`ADMIN`, `DARPAN_SUPER_ADMIN`, `DARPAN_ADMIN`,
   `DARPAN_TENANT_ADMIN` in any tenant). Every role ships optional; `admin.SecurityAdminServices.update#TwoFactorPolicy`
-  sets a date (a future date is the grace period, during which sign-in prompts) and writes an `AdminAuditLog` row.
+  sets a date (a future date is the grace period, during which sign-in prompts) or clears it, with the acting super
+  admin's own fresh code or passkey assertion (`adminCode` / `adminPasskeyAssertion`), and writes an `AdminAuditLog` row.
   Requiring it for `ADMIN` or `DARPAN_SUPER_ADMIN` is refused until at least two super admins have it on.
 - Limits: 5 wrong codes end a challenge; every wrong code is a failed login (the framework lockout: 3, then 5 minutes);
   20 wrong codes in 24 hours lock codes until a password reset or an admin reset, and the person is emailed. A code is

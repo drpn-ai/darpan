@@ -35,18 +35,22 @@
 
     <service verb="update" noun="TwoFactorPolicy" allow-remote="true">
         <description>Require two-factor for a role from a date (today or earlier: now; later: a grace period during which
-            sign-in prompts), or make it optional again (clear). Super admins only. Requiring it for ADMIN or
+            sign-in prompts), or make it optional again (clear). Super admins only, with a current code from their own
+            authenticator app or a passkey assertion (so they must have two-factor on). Requiring it for ADMIN or
             DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row.</description>
         <in-parameters>
             <parameter name="permissionGroupId" required="true"><description>ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN or DARPAN_TENANT_ADMIN.</description></parameter>
             <parameter name="requiredFromDate" type="Timestamp"><description>Required from this date. Leave out with clear.</description></parameter>
             <parameter name="clear" type="Boolean" default-value="false"><description>True makes the role optional again.</description></parameter>
+            <parameter name="adminCode"><description>A current code from the acting admin's own authenticator app (or adminPasskeyAssertion).</description></parameter>
+            <parameter name="adminPasskeyAssertion"><description>Instead of adminCode: a passkey assertion over
+                facade.AuthFacadeServices.begin#PasskeyProof's options.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when the policy was saved.</description></parameter></out-parameters>
         <actions>
             <set field="ok" from="false"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.updatePolicy(ec, permissionGroupId, requiredFromDate, clear as boolean)"/>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.updatePolicy(ec, permissionGroupId, requiredFromDate, clear as boolean, adminCode, adminPasskeyAssertion)"/>
             <if condition="problem"><return error="true" message="${problem}"/></if>
             <set field="ok" from="true"/>
         </actions>

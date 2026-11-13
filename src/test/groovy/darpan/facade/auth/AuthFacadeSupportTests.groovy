@@ -1218,6 +1218,11 @@ class AuthFacadeSupportTests {
             }
         }
 
+        /** The two-factor reads after a right password (TwoFactorSupport.enabled) count rows: none here, so no factor. */
+        long count() {
+            return list().size()
+        }
+
         int deleteAll() {
             return deleteAllResult
         }

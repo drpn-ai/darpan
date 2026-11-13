@@ -40,8 +40,13 @@ class DataManagerSupport {
                 safeToken(timestamp, formatRunTimestamp(ec)))
     }
 
-    static String resolveSchemaLocation(def ec, Object schemaName) {
-        return childLocation(childLocation(resolveDataManagerLocation(ec), SCHEMA_PATH), schemaFileName(schemaName))
+    /** DAR-BE-281: a tenant's own schema file, schemas/json/tenants/<tenant>/<name>.json; null with no tenant. */
+    static String resolveTenantSchemaLocation(def ec, Object tenantUserGroupId, Object schemaName) {
+        String tenant = normalize(tenantUserGroupId)
+        if (!tenant) return null
+        String tenantFolder = childLocation(childLocation(childLocation(resolveDataManagerLocation(ec), SCHEMA_PATH), "tenants"),
+                safeToken(tenant, "tenant"))
+        return childLocation(tenantFolder, schemaFileName(schemaName))
     }
 
     static String formatRunTimestamp(def ec) {

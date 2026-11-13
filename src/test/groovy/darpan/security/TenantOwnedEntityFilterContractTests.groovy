@@ -25,7 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class TenantOwnedEntityFilterContractTests {
 
     private static final String FILTER_SET_ID = "DARPAN_ACTIVE_COMPANY_SCOPE"
-    private static final String FILTER_MAP = "[companyUserGroupId: activeTenantUserGroupId]"
+    // DAR-BE-282: fail closed — with no active tenant the condition is an impossible value, never dropped
+    // (Moqui builds the filter with excludeNulls, so a null value would remove the condition).
+    private static final String FILTER_MAP = "[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"
 
     /** DAR-BE-076: the thirteen tenant-owned entities that had a companyUserGroupId but no filter. */
     static final Map<String, String> DAR_BE_076_FILTERS = [
@@ -101,11 +103,9 @@ class TenantOwnedEntityFilterContractTests {
      * Filter rows added since the last release cut. No pack carries them yet: the next cut generates its pack from
      * the previous tag, and data/upgrade-data.xml is not hand-edited between cuts. Remove an entry once a pack ships it.
      */
-    // DAR-BE-265, DAR-BE-275; 3.0.0 shipped all 16 (DAR-BE-159/160/161/164/167/194/195/209, DAR-CLI-003)
-    static final Map<String, String> PENDING_NEXT_PACK = [
-            "DARPAN_SCOPE_DATA_EXPORT_LOG"      : "darpan.admin.DataExportLog",
-            "DARPAN_SCOPE_SHOPIFY_INSTALL_STATE": "darpan.shopify.ShopifyInstallState",
-    ].asImmutable()
+    // 3.0.0 shipped all 16 (DAR-BE-159/160/161/164/167/194/195/209, DAR-CLI-003); DAR-BE-265/275's two went into
+    // upgrade-data.xml with DAR-BE-282, which restates every row (filterMap now fails closed)
+    static final Map<String, String> PENDING_NEXT_PACK = [:].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS).asImmutable()

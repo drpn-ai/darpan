@@ -3,6 +3,7 @@ package jsonschema.common
 import com.fasterxml.jackson.databind.ObjectMapper
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.TenantAccessSupport
 import org.moqui.context.ExecutionContext
 
 class JsonSchemaUtil {
@@ -50,39 +51,48 @@ class JsonSchemaUtil {
     }
 
     /**
-     * Loads schema text from saved schemas first, then falls back to legacy runtime schema files.
+     * Loads schema text from saved schemas first, then falls back to schema files.
+     *
+     * <p>DAR-BE-281: schema names are unique per tenant, not globally, and runs call this with authz
+     * disabled (no entity filter). So a saved schema counts only when it is the active tenant's own or
+     * shared (no tenant); the tenant's own row wins. A file is read from the tenant's own folder or from
+     * the product's runtime schemas, never from the shared data-manager folder (whose files any tenant
+     * may have written).</p>
      * @param ec ExecutionContext
      * @param id Optional jsonSchemaId
      * @param name Optional schemaName (or filename)
      * @return Schema JSON String or null if not found
      */
     static String loadSchemaText(ExecutionContext ec, Object id, Object name) {
+        String tenant = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+
         // 1. Try DB by ID
         if (id) {
             def schema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
                 .condition("jsonSchemaId", id).useCache(true).one()
-            if (schema?.schemaText) return schema.schemaText
+            if (schema?.schemaText && isOwnOrShared(schema, tenant)) return schema.schemaText
         }
         
         // 2. Try DB by Name
         def nameKey = (name ?: id)?.toString()
         if (!nameKey) return null
         
-        def schema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
-            .condition("schemaName", nameKey).useCache(true).one()
+        List namedSchemas = (ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
+            .condition("schemaName", nameKey).useCache(true).list() ?: []) as List
+        def schema = namedSchemas.find { it.schemaText && tenant && it.companyUserGroupId == tenant } ?:
+                namedSchemas.find { it.schemaText && !it.companyUserGroupId }
         if (schema?.schemaText) return schema.schemaText
 
-        // 3. Fallback to data-manager and legacy runtime schema files still referenced by seeded mappings.
+        // 3. Fallback to the tenant's own schema file, then the runtime schema files shipped with the product.
+        // The shared data-manager folder (schemas/json/<name>) is never read: any tenant's save wrote there,
+        // and a delete left the file behind, so its owner can't be known from the file.
         String safeName = cleanFileName(nameKey)
         if (!safeName) return null
 
-        String dataManagerSchemaText = loadSchemaTextFromLocation(ec, DataManagerSupport.resolveSchemaLocation(ec, safeName))
-        if (dataManagerSchemaText) return dataManagerSchemaText
+        String tenantSchemaText = loadSchemaTextFromLocation(ec, DataManagerSupport.resolveTenantSchemaLocation(ec, tenant, safeName))
+        if (tenantSchemaText) return tenantSchemaText
 
-        String legacyDataManagerText = loadSchemaTextFromLocation(ec,
-                DataManagerSupport.childLocation(DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec), DataManagerSupport.SCHEMA_PATH), safeName))
-        if (legacyDataManagerText) return legacyDataManagerText
-
+        // Shipped with the product (runtime://), so no tenant ever wrote it.
         def schemaRef = ec.resource.getLocationReference("runtime://schemas/json/${safeName}")
         if (schemaRef == null) return null
         if (schemaRef.supportsExists() && !schemaRef.getExists()) return null
@@ -91,12 +101,20 @@ class JsonSchemaUtil {
         return schemaText?.trim() ? schemaText : null
     }
 
+    protected static boolean isOwnOrShared(def schema, String tenant) {
+        String owner = schema?.companyUserGroupId?.toString()
+        return !owner || (tenant && owner == tenant)
+    }
+
+    /** DAR-BE-281: writes into the active tenant's own schema folder; with no active tenant nothing is written. */
     static String persistSchemaText(ExecutionContext ec, Object rawSchemaName, Object rawSchemaText) {
         String schemaName = ((rawSchemaName)?.toString()?.trim())
         String schemaText = rawSchemaText?.toString()
         if (!schemaName || !((schemaText)?.toString()?.trim())) return null
 
-        String location = DataManagerSupport.resolveSchemaLocation(ec, schemaName)
+        String location = DataManagerSupport.resolveTenantSchemaLocation(ec,
+                TenantAccessSupport.currentActiveTenantUserGroupId(ec), schemaName)
+        if (!location) return null
         DataManagerSupport.writeText(ec, location, schemaText)
         return location
     }

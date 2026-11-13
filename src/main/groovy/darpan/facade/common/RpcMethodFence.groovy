@@ -159,7 +159,7 @@ class RpcMethodFence {
         // A transition takes trailing path segments, so match the pair, not the exact path.
         if (hasPair(segments, "rest", "login")) return "The /rest/login endpoint is not available."
         // DAR-BE-028: Darpan has its own reset (facade.AuthFacadeServices.request#PasswordReset), so the framework's
-        // weaker one goes. /Login itself stays: the legacy super-admin /apps screens sign in through it.
+        // weaker one goes. DAR-BE-264: /Login itself now answers 404 too (darpan.facade.auth.PasswordOnlyRouteFence).
         if (hasPair(segments, "Login", "resetPassword")) return "The /Login/resetPassword endpoint is not available."
         if (!isJsonRpc(segments)) return null
 

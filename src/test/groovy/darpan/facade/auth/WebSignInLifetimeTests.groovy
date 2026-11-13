@@ -104,6 +104,20 @@ class WebSignInLifetimeTests {
     }
 
     @Test
+    @DisplayName("review: an unknown hash presented first does not shield this user's run-out key behind it")
+    void anUnknownHashFirstDoesNotShieldARunOutKey() {
+        long now = System.currentTimeMillis()
+        def entity = new EntityStub(keys: [key("someone-elses-key", now - HOUR, now + HOUR, "SOMEONE_ELSE"), key(APP_KEY, now - 3 * HOUR, now - MINUTE)])
+        def session = new SessionStub(creationTime: now - HOUR)
+        def request = new RequestStub(headers: [api_key: "not-a-key-at-all", login_key: "someone-elses-key"], session: session,
+                cookies: [new CookieStub(name: "darpan_login_key", value: APP_KEY)])
+        def stubEc = ec(request, entity)
+        assertTrue(AuthSessionSupport.enforceWebSignInLifetime(stubEc))
+        assertNull(stubEc.user.userId)
+        assertTrue(session.invalidated)
+    }
+
+    @Test
     @DisplayName("a CLI key keeps its own lifetime; another user's key and an anonymous request are left alone")
     void cliKeysOtherUsersAndAnonymousAreLeftAlone() {
         long now = System.currentTimeMillis()

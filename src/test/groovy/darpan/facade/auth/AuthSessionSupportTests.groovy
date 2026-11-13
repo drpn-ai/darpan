@@ -7,6 +7,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -165,6 +166,51 @@ class AuthSessionSupportTests {
             h.value?.contains("Max-Age=0")
         }
         assertTrue(cookieCleared, "Expired key must trigger a Set-Cookie: Max-Age=0 clear header")
+    }
+
+    // -----------------------------------------------------------------------
+    // DAR-BE-261 review: a cookie key past sign-in + 24 hours restores nothing,
+    // even while its stored thruDate (a key issued before the change) lives on
+    // -----------------------------------------------------------------------
+
+    @Test
+    void cookieKeyPastTheAbsoluteLifetimeDoesNotRestoreTheSession() {
+        def user = new UserStub(userId: null, loginUserResult: true)
+        long now = System.currentTimeMillis()
+        Timestamp signedIn = new Timestamp(now - 25L * 3_600_000L)
+        Timestamp thru = new Timestamp(now + 100L * 3_600_000L)  // a 144-hour key from before the change
+        def loginKeyEntity = new Expando(loginKey: "hash:old-cookie-key", userId: "EX_USER", fromDate: signedIn, thruDate: thru)
+        loginKeyEntity.getTimestamp = { String field -> field == "thruDate" ? thru : (field == "fromDate" ? signedIn : null) }
+        def entity = new EntityFacadeStub(finders: [
+            "moqui.security.UserLoginKey": new FinderStub(oneResult: loginKeyEntity),
+            "moqui.security.UserAccount" : new FinderStub(oneResult: new Expando(userId: "EX_USER", username: "test.user")),
+        ])
+        def response = new ResponseStub()
+        def webStub = new Expando(request: new RequestStub(cookies: [new CookieStub(name: "darpan_login_key", value: "old-cookie-key")]), response: response)
+        def ec = buildEc(user: user, web: webStub, entity: entity, factory: new FactoryStub())
+
+        assertFalse(AuthSessionSupport.restoreAuthenticatedSession(ec), "past sign-in + 24 hours: no restore")
+        assertNull(user.userId, "internalLoginUser must not have run")
+        assertTrue(response.headers.any { it.name == "Set-Cookie" && it.value.contains("Max-Age=0") }, "the stale cookie is cleared")
+    }
+
+    @Test
+    void cookieKeyPastItsIdleEndDoesNotRestoreTheSession() {
+        def user = new UserStub(userId: null, loginUserResult: true)
+        long now = System.currentTimeMillis()
+        Timestamp signedIn = new Timestamp(now - 3L * 3_600_000L)
+        Timestamp thru = new Timestamp(now - 60_000L)
+        def loginKeyEntity = new Expando(loginKey: "hash:idle-cookie-key", userId: "EX_USER", fromDate: signedIn, thruDate: thru)
+        loginKeyEntity.getTimestamp = { String field -> field == "thruDate" ? thru : (field == "fromDate" ? signedIn : null) }
+        def entity = new EntityFacadeStub(finders: [
+            "moqui.security.UserLoginKey": new FinderStub(oneResult: loginKeyEntity),
+            "moqui.security.UserAccount" : new FinderStub(oneResult: new Expando(userId: "EX_USER", username: "test.user")),
+        ])
+        def webStub = new Expando(request: new RequestStub(cookies: [new CookieStub(name: "darpan_login_key", value: "idle-cookie-key")]), response: new ResponseStub())
+        def ec = buildEc(user: user, web: webStub, entity: entity)
+
+        assertFalse(AuthSessionSupport.restoreAuthenticatedSession(ec))
+        assertNull(user.userId)
     }
 
     // -----------------------------------------------------------------------

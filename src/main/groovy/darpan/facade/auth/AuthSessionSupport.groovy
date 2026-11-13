@@ -121,6 +121,14 @@ class AuthSessionSupport {
             return false
         }
 
+        // DAR-BE-261: a key past its idle end or sign-in + the absolute lifetime restores nothing. Checked (and the
+        // restore counted as activity: the key slides) BEFORE signing in. No user is signed in here (the early return
+        // above), so there is no one to sign out: the stale cookie is cleared and the key written as ended.
+        if (!slideWebLoginKey(ec, userLoginKey, System.currentTimeMillis(), absoluteLifetimeMillis(ec))) {
+            clearPersistentLoginCookie(ec)
+            return false
+        }
+
         boolean restored = false
         try {
             restored = ec?.user?.internalLoginUser(username) as boolean
@@ -128,8 +136,6 @@ class AuthSessionSupport {
             logger.warn("restoreAuthenticatedSession failed for cookie token (username=${username}): ${e.message}")
         }
         if (!restored) clearPersistentLoginCookie(ec)
-        // DAR-BE-261: the restore is activity on this key, as any request is.
-        if (restored) slideWebLoginKey(ec, userLoginKey, System.currentTimeMillis(), absoluteLifetimeMillis(ec))
         return restored
     }
 
@@ -157,9 +163,10 @@ class AuthSessionSupport {
      *
      * Every live login key the request carries for the signed-in user slides one idle window on, capped at sign-in + the
      * absolute lifetime, so the framework's own expiry check is the idle timeout. The sign-in is ended here (signed out of
-     * this request, web session invalidated) when the key it presents first (headers, then parameters, then the
-     * persistent-login cookie: the framework's order) has run out, or when its web session is older than the absolute
-     * lifetime: a session the framework restores without the key would otherwise outlive both.
+     * this request, web session invalidated) when the first of the signed-in user's own keys it presents (headers, then
+     * parameters, then the persistent-login cookie: the framework's order; hashes that are no key, or another user's, are
+     * passed over) has run out, or when its web session is older than the absolute lifetime: a session the framework
+     * restores without the key would otherwise outlive both.
      *
      * A CLI key keeps its own lifetime (CliAccess.SIGN_IN_DAYS), re-checked by CliAuthSupport.revalidateCliWebSession, so a
      * CLI session is left alone. Returns true when the sign-in was ended.
@@ -173,13 +180,15 @@ class AuthSessionSupport {
         long now = System.currentTimeMillis()
         long absoluteMillis = absoluteLifetimeMillis(ec)
         boolean ended = sessionOlderThan(request, now, absoluteMillis)
-        boolean first = true
+        boolean decided = false
         for (String hash : CliAuthSupport.requestLoginKeyHashes(ec)) {
             def key = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
                             "self-scoped auth: slide the request's own web login key (pre-auth path, no active tenant)")
                     .condition("loginKey", hash).useCache(false).one()
-            if (key != null && key.userId == userId && !slideWebLoginKey(ec, key, now, absoluteMillis) && first) ended = true
-            first = false
+            if (key == null || key.userId != userId) continue
+            boolean live = slideWebLoginKey(ec, key, now, absoluteMillis)
+            if (!decided && !live) ended = true
+            decided = true
         }
         if (ended) endWebSignIn(ec, request)
         return ended

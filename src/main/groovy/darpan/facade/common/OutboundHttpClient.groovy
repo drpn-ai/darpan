@@ -3,7 +3,9 @@ package darpan.facade.common
 import org.eclipse.jetty.client.CompletableResponseListener
 import org.eclipse.jetty.client.ContentResponse
 import org.eclipse.jetty.client.HttpClient
+import org.eclipse.jetty.client.InputStreamResponseListener
 import org.eclipse.jetty.client.Request
+import org.eclipse.jetty.client.Response
 import org.eclipse.jetty.client.StringRequestContent
 import org.eclipse.jetty.http.HttpCookieStore
 import org.eclipse.jetty.http.HttpField
@@ -13,8 +15,10 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool
 import org.eclipse.jetty.util.thread.ScheduledExecutorScheduler
 
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.function.Function
 
 /**
@@ -29,26 +33,36 @@ import java.util.function.Function
  *
  * One shared client (thread-safe, daemon threads, started on first use) serves every transport, so it keeps NO cookies:
  * Jetty's default in-memory cookie store would replay one tenant's Set-Cookie on another tenant's call to the same host.
+ *
+ * Jetty sets the connect timeout per client, so a caller with its own connect timeout (the OMS connection probe's 5 s,
+ * an agent query's 15 s) gets the shared client for that timeout: one per distinct whole-second value.
+ * {@link #stream} hands the answer over as it arrives, for bodies too large to hold (a month of Shopify bulk JSONL).
  */
 class OutboundHttpClient {
     static final long CONNECT_TIMEOUT_MILLIS = 30_000L
     /** The largest answer read into memory: well past any page a source returns, and a bound on a hostile one. */
     static final int MAX_RESPONSE_BYTES = 256 * 1024 * 1024
 
-    private static volatile HttpClient shared
+    /** Connect timeouts are whole seconds within these bounds, so a configured value cannot multiply clients unbounded. */
+    static final long MIN_CONNECT_TIMEOUT_MILLIS = 1_000L
+    static final long MAX_CONNECT_TIMEOUT_MILLIS = 120_000L
 
-    /** The shared guarded client, started on first use. */
-    static HttpClient shared() {
-        HttpClient client = shared
-        if (client != null) return client
-        synchronized (OutboundHttpClient) {
-            if (shared == null) shared = newClient(new VettedAddressResolver())
-            return shared
-        }
+    private static final ConcurrentHashMap<Long, HttpClient> sharedByConnectTimeout = new ConcurrentHashMap<>()
+
+    /** The shared guarded client (30 s connect timeout), started on first use. */
+    static HttpClient shared() { return shared(CONNECT_TIMEOUT_MILLIS) }
+
+    /** The shared guarded client for this connect timeout (rounded up to whole seconds, 1 to 120), started on first use. */
+    static HttpClient shared(long connectTimeoutMillis) {
+        long clamped = Math.max(MIN_CONNECT_TIMEOUT_MILLIS, Math.min(MAX_CONNECT_TIMEOUT_MILLIS, connectTimeoutMillis))
+        long wholeSeconds = ((clamped + 999L).intdiv(1000L) as long) * 1000L
+        return sharedByConnectTimeout.computeIfAbsent(wholeSeconds) { Long millis -> newClient(new VettedAddressResolver(), millis) }
     }
 
     /** A started client whose DNS step is {@code resolver}. Tests pass a resolver with their own lookup. */
-    static HttpClient newClient(SocketAddressResolver resolver) {
+    static HttpClient newClient(SocketAddressResolver resolver) { return newClient(resolver, CONNECT_TIMEOUT_MILLIS) }
+
+    static HttpClient newClient(SocketAddressResolver resolver, long connectTimeoutMillis) {
         HttpClient client = new HttpClient()
         QueuedThreadPool threads = new QueuedThreadPool()
         threads.setName("darpan-outbound-http")
@@ -56,7 +70,7 @@ class OutboundHttpClient {
         client.setExecutor(threads)
         client.setScheduler(new ScheduledExecutorScheduler("darpan-outbound-http-scheduler", true))
         client.setSocketAddressResolver(resolver)
-        client.setConnectTimeout(CONNECT_TIMEOUT_MILLIS)
+        client.setConnectTimeout(connectTimeoutMillis)
         client.setFollowRedirects(false)
         // Shared across tenants: never store or replay cookies (Jetty keeps them by default; java.net.http did not).
         client.setHttpCookieStore(new HttpCookieStore.Empty())
@@ -85,6 +99,45 @@ class OutboundHttpClient {
             if (!responseHeaders.containsKey(field.name)) responseHeaders.put(field.name, field.value)
         }
         return [statusCode: response.status, body: response.contentAsString, headers: responseHeaders]
+    }
+
+    /**
+     * One call whose answer is streamed, never buffered and not size-capped: {@code consumer} gets
+     * [statusCode, headers: {name: first value}, body: InputStream] and reads as much as it wants; the stream is closed
+     * afterwards, which abandons whatever was not read. {@code idleTimeoutMillis} bounds each wait for the answer or its
+     * next bytes (a read timeout), not the whole exchange, so a large download is not cut off for taking a long time.
+     * A refused address or a failed exchange surfaces as an IOException; the consumer's own exceptions pass through.
+     */
+    static <T> T stream(HttpClient client, String method, String url, Map headers, String body, long idleTimeoutMillis,
+                        Closure<T> consumer) {
+        long idle = Math.max(1L, idleTimeoutMillis)
+        Request request = client.newRequest(url).method(method).idleTimeout(idle, TimeUnit.MILLISECONDS)
+        request.headers { fields -> (headers ?: [:]).each { k, v -> if (k != null && v != null) fields.put(k as String, v as String) } }
+        if (body != null) request.body(new StringRequestContent("application/json", body, StandardCharsets.UTF_8))
+        InputStreamResponseListener listener = new InputStreamResponseListener()
+        request.send(listener)
+        Response response
+        try {
+            // The connect is bounded by the client's connect timeout; the wait for the status line by the idle timeout.
+            response = listener.get(client.connectTimeout + idle, TimeUnit.MILLISECONDS)
+        } catch (ExecutionException e) {
+            Throwable cause = e.cause ?: e
+            if (cause instanceof IOException) throw (IOException) cause
+            throw new IOException(cause.message ?: cause.class.simpleName, cause)
+        } catch (TimeoutException e) {
+            request.abort(e)
+            throw new IOException("No answer from ${request.host} within ${client.connectTimeout + idle} ms".toString(), e)
+        }
+        Map<String, String> responseHeaders = [:]
+        for (HttpField field : response.headers) {
+            if (!responseHeaders.containsKey(field.name)) responseHeaders.put(field.name, field.value)
+        }
+        InputStream input = listener.getInputStream()
+        try {
+            return consumer.call([statusCode: response.status, headers: responseHeaders, body: input])
+        } finally {
+            input.close()
+        }
     }
 
     /** Jetty's DNS step for a guarded connection: OutboundHttpPolicy.resolveVetted, once per new connection. */

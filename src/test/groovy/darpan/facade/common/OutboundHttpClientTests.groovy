@@ -155,6 +155,133 @@ class OutboundHttpClientTests {
         }
     }
 
+    /** A loopback server that answers one request with {@code head} then streams {@code chunks} (each after {@code gapMillis}). */
+    private static Map oneShotServer(String head, List<byte[]> chunks, long gapMillis = 0L) {
+        ServerSocket server = new ServerSocket(0, 5, LOOPBACK)
+        List<String> requests = Collections.synchronizedList([])
+        Thread responder = Thread.start {
+            Socket s = server.accept()
+            try {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(s.inputStream, "ISO-8859-1"))
+                StringBuilder seen = new StringBuilder()
+                String line
+                while ((line = reader.readLine()) != null && !line.isEmpty()) seen.append(line).append("\n")
+                requests << seen.toString()
+                s.outputStream.write(head.getBytes("ISO-8859-1"))
+                s.outputStream.flush()
+                chunks.each { byte[] chunk ->
+                    if (gapMillis > 0) Thread.sleep(gapMillis)
+                    s.outputStream.write(chunk)
+                    s.outputStream.flush()
+                }
+            } catch (IOException ignored) {
+                // the client hung up early, which some tests intend
+            } finally {
+                s.close()
+            }
+        }
+        return [server: server, responder: responder, requests: requests]
+    }
+
+    private static HttpClient loopbackClient() {
+        return OutboundHttpClient.newClient({ String host, int port, Map ctx, Promise promise ->
+            promise.succeeded([new InetSocketAddress(LOOPBACK, port)])
+        } as SocketAddressResolver)
+    }
+
+    @Test
+    @DisplayName("stream: the answer arrives as an InputStream with no size cap — 260 MB, past send's 256 MB buffer limit")
+    void streamHandsOverTheBodyAsItArrives() {
+        byte[] chunk = new byte[1024 * 1024]
+        Arrays.fill(chunk, (byte) 'x')
+        int chunks = 260
+        assertTrue((long) chunk.length * chunks > OutboundHttpClient.MAX_RESPONSE_BYTES)
+        Map srv = oneShotServer("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${chunk.length * chunks}\r\nConnection: close\r\n\r\n",
+                Collections.nCopies(chunks, chunk))
+        HttpClient client = loopbackClient()
+        try {
+            String url = "http://stream.test:${(srv.server as ServerSocket).localPort}/result.jsonl".toString()
+            Map got = OutboundHttpClient.stream(client, "GET", url, [Accept: "*/*"], null, 5000L) { Map answer ->
+                long total = 0
+                byte[] buffer = new byte[64 * 1024]
+                InputStream input = (InputStream) answer.body
+                int n
+                while ((n = input.read(buffer)) >= 0) total += n
+                return [status: answer.statusCode, bytes: total, type: (answer.headers as Map)["Content-Type"]]
+            }
+            assertEquals([status: 200, bytes: (long) chunk.length * chunks, type: "application/octet-stream"], got)
+            assertTrue((srv.requests as List)[0].startsWith("GET /result.jsonl"))
+        } finally {
+            client.stop()
+            (srv.server as ServerSocket).close()
+        }
+    }
+
+    @Test
+    @DisplayName("stream: the idle timeout is a read timeout — a slow but steady answer completes, a stalled one fails as IO")
+    void streamIdleTimeoutIsAReadTimeout() {
+        List<byte[]> slow = (1..6).collect { "line ${it}\n".getBytes("UTF-8") }
+        int length = slow.sum { it.length } as int
+        Map steady = oneShotServer("HTTP/1.1 200 OK\r\nContent-Length: ${length}\r\nConnection: close\r\n\r\n", slow, 300L)
+        HttpClient client = loopbackClient()
+        try {
+            // 6 gaps of 300 ms = 1.8 s in all, past the 1 s idle timeout, but never 1 s without bytes.
+            String text = OutboundHttpClient.stream(client, "GET", "http://slow.test:${(steady.server as ServerSocket).localPort}/".toString(),
+                    [:], null, 1000L) { Map answer -> ((InputStream) answer.body).getText("UTF-8") }
+            assertEquals((1..6).collect { "line ${it}\n" }.join(""), text)
+        } finally {
+            (steady.server as ServerSocket).close()
+        }
+
+        Map stalled = oneShotServer("HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n",
+                ["partial".getBytes("UTF-8"), "never".getBytes("UTF-8")], 2500L)
+        try {
+            assertThrows(IOException) {
+                OutboundHttpClient.stream(client, "GET", "http://stall.test:${(stalled.server as ServerSocket).localPort}/".toString(),
+                        [:], null, 1000L) { Map answer -> ((InputStream) answer.body).getText("UTF-8") }
+            }
+        } finally {
+            client.stop()
+            (stalled.server as ServerSocket).close()
+        }
+    }
+
+    @Test
+    @DisplayName("stream: the consumer's own exception passes through unchanged, and an error status is handed over, not thrown")
+    void streamPassesConsumerExceptionsThrough() {
+        Map srv = oneShotServer("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\nConnection: close\r\n\r\n", ["busy".getBytes("UTF-8")])
+        HttpClient client = loopbackClient()
+        try {
+            def thrown = assertThrows(IllegalStateException) {
+                OutboundHttpClient.stream(client, "POST", "http://err.test:${(srv.server as ServerSocket).localPort}/".toString(),
+                        ["Content-Type": "application/json"], "{}", 5000L) { Map answer ->
+                    assertEquals(503, answer.statusCode)
+                    throw new IllegalStateException("consumer gave up at status ${answer.statusCode}")
+                }
+            }
+            assertEquals("consumer gave up at status 503", thrown.message)
+        } finally {
+            client.stop()
+            (srv.server as ServerSocket).close()
+        }
+    }
+
+    @Test
+    @DisplayName("a caller's connect timeout gets its own shared guarded client, rounded up to whole seconds and bounded")
+    void sharedClientsPerConnectTimeout() {
+        assertTrue(OutboundHttpClient.shared().is(OutboundHttpClient.shared(30_000L)))
+        HttpClient probe = OutboundHttpClient.shared(5_000L)
+        assertEquals(5_000L, probe.connectTimeout)
+        assertTrue(probe.is(OutboundHttpClient.shared(4_200L)), "4.2 s rounds up to the 5 s client")
+        assertEquals(1_000L, OutboundHttpClient.shared(0L).connectTimeout)
+        assertEquals(120_000L, OutboundHttpClient.shared(10_000_000L).connectTimeout)
+        [probe, OutboundHttpClient.shared(0L)].each { HttpClient c ->
+            assertTrue(c.socketAddressResolver instanceof OutboundHttpClient.VettedAddressResolver)
+            assertFalse(c.followRedirects)
+            assertTrue(c.httpCookieStore instanceof org.eclipse.jetty.http.HttpCookieStore.Empty)
+        }
+    }
+
     @Test
     @DisplayName("TLS is unchanged by the pin: certificates are verified against the URL's host name")
     void tlsHostnameVerificationStaysOn() {

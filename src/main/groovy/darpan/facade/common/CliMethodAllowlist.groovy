@@ -199,6 +199,8 @@ class CliMethodAllowlist {
 
             // DAR-BE-264: the two-factor policy and its reset are the admin app's; sign-in and credentials are never a CLI session's.
             "admin.SecurityAdminServices.get#TwoFactorPolicies",
+            // DAR-OPS-019: the field-key rotation is a super admin's, with their own two-factor code; never a CLI session's.
+            "admin.SecurityAdminServices.rotate#EncryptedFields",
             "admin.SecurityAdminServices.update#TwoFactorPolicy",
 
             "admin.TransferAdminServices.begin#SecretHandoff",

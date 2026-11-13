@@ -51,4 +51,75 @@
             <set field="ok" from="true"/>
         </actions>
     </service>
+
+    <!-- DAR-OPS-019. The field-encryption key rotation from the admin app or the darpan-admin CLI: the only way to run
+         reconciliation.ReconciliationGenericServices.rotate#EncryptedFieldValues (internal-only) since DAR-BE-264 closed
+         the Moqui tools app's sign-in. Runbook: docs/crypt-key-rotation.md. -->
+    <service verb="rotate" noun="EncryptedFields" allow-remote="true" transaction-timeout="600">
+        <description>Re-encrypt every stored encrypted field (tenant connector credentials, two-factor secrets) with the
+            current key, or with dryRun (the default) only report which key each value is on. Super admins only, with a
+            current code from their own authenticator app. A real run is refused unless an old key different from the
+            current one is configured (entity_ds_crypt_pass_old). Writes an AdminAuditLog row with counts, never values.</description>
+        <in-parameters>
+            <parameter name="adminCode" required="true"><description>A current code from the acting admin's own authenticator app.</description></parameter>
+            <parameter name="dryRun" type="Boolean" default-value="true"><description>True (default): count only, write nothing.
+                False: run the sweep.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the check (and the sweep, on a real run) ran.</description></parameter>
+            <parameter name="oldKeyConfigured" type="Boolean"><description>An old key different from the current one is wired in.</description></parameter>
+            <parameter name="rotationPending" type="Boolean"><description>Some value is still on the old key only (after the sweep, on a real run).</description></parameter>
+            <parameter name="valueCount" type="Integer"><description>Non-empty encrypted values stored.</description></parameter>
+            <parameter name="currentKeyCount" type="Integer"><description>Values the current key decrypts.</description></parameter>
+            <parameter name="oldKeyOnlyCount" type="Integer"><description>Values only the old key decrypts: the sweep rewrites them.</description></parameter>
+            <parameter name="undecryptableCount" type="Integer"><description>Values no configured key decrypts: the sweep leaves them; the tenant re-enters that credential.</description></parameter>
+            <parameter name="entities" type="List"><description>One entry per entity with encrypted fields, after the sweep on a real run.</description>
+                <parameter name="entity" type="Map">
+                    <parameter name="entityName"/>
+                    <parameter name="fields" type="List"><parameter name="field"/></parameter>
+                    <parameter name="valueCount" type="Integer"/>
+                    <parameter name="currentKey" type="Integer"/>
+                    <parameter name="oldKeyOnly" type="Integer"/>
+                    <parameter name="undecryptable" type="Integer"/>
+                </parameter>
+            </parameter>
+            <parameter name="reencryptedByEntity" type="Map"><description>Real run only: entity name to rows re-encrypted.</description></parameter>
+            <parameter name="totalRows" type="Integer"><description>Real run only: rows re-encrypted.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="problem" from="darpan.facade.auth.TwoFactorSupport.freshCodeProblem(ec, adminCode, false)"/>
+            <if condition="problem == darpan.facade.auth.TwoFactorSupport.NOT_ENROLLED">
+                <return error="true" message="Set up two-factor on your own account before rotating the encryption key."/></if>
+            <if condition="problem"><return error="true" message="${problem}"/></if>
+
+            <if condition="dryRun">
+                <set field="check" from="darpan.common.CryptRotationSupport.keyCheck(ec)"/>
+                <set field="detailText" from="'Dry run: ' + darpan.common.CryptRotationSupport.keyCheckSummary(check) + '.'"/>
+                <else>
+                    <if condition="!darpan.common.CryptRotationSupport.configuredKeys(ec).get('old')">
+                        <return error="true" message="Nothing to rotate: no old key is configured (entity_ds_crypt_pass_old is unset or the same as the current key). Wire the key being retired in (CryptPassOldSecretArn on AWS), restart, then run this again."/></if>
+                    <service-call name="reconciliation.ReconciliationGenericServices.rotate#EncryptedFieldValues" out-map="sweep"/>
+                    <if condition="ec.message.hasError()"><return/></if>
+                    <set field="reencryptedByEntity" from="sweep.reencryptedByEntity"/>
+                    <set field="totalRows" from="sweep.totalRows"/>
+                    <set field="check" from="darpan.common.CryptRotationSupport.keyCheck(ec)"/>
+                    <set field="detailText" from="'Rotation: re-encrypted ' + totalRows + ' rows across ' + reencryptedByEntity.size()
+                            + ' entities; now ' + darpan.common.CryptRotationSupport.keyCheckSummary(check) + '.'"/>
+                </else>
+            </if>
+            <set field="oldKeyConfigured" from="check.oldKeyConfigured"/>
+            <set field="rotationPending" from="check.rotationPending"/>
+            <set field="valueCount" from="check.valueCount"/>
+            <set field="currentKeyCount" from="check.currentKeyCount"/>
+            <set field="oldKeyOnlyCount" from="check.oldKeyOnlyCount"/>
+            <set field="undecryptableCount" from="check.undecryptableCount"/>
+            <set field="entities" from="check.entities"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.SecurityAdminServices.rotate#EncryptedFields', targetType: 'EncryptedFields',
+                    targetId: 'ALL', detailText: detailText, auditTimestamp: ec.user.nowTimestamp]"/>
+            <set field="ok" from="true"/>
+        </actions>
+    </service>
 </services>

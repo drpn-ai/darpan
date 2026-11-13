@@ -141,6 +141,9 @@
                                         "$ref": "#/components/schemas/GetTwoFactorPoliciesRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/RotateEncryptedFieldsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/UpdateTwoFactorPolicyRequest"
                                     },
                                     {
@@ -831,6 +834,7 @@
                                         "admin.RetentionAdminServices.dryRun#Retention": "#/components/schemas/DryRunRetentionRequest",
                                         "admin.ScheduleAdminServices.get#ScheduleBoard": "#/components/schemas/GetScheduleBoardRequest",
                                         "admin.SecurityAdminServices.get#TwoFactorPolicies": "#/components/schemas/GetTwoFactorPoliciesRequest",
+                                        "admin.SecurityAdminServices.rotate#EncryptedFields": "#/components/schemas/RotateEncryptedFieldsRequest",
                                         "admin.SecurityAdminServices.update#TwoFactorPolicy": "#/components/schemas/UpdateTwoFactorPolicyRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
@@ -1179,6 +1183,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetTwoFactorPoliciesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RotateEncryptedFieldsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateTwoFactorPolicyResponse"
@@ -5738,6 +5745,159 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetTwoFactorPoliciesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RotateEncryptedFieldsParams": {
+                "type": "object",
+                "properties": {
+                    "adminCode": {
+                        "type": "string",
+                        "description": "A current code from the acting admin's own authenticator app."
+                    },
+                    "dryRun": {
+                        "type": "boolean",
+                        "description": "True (default): count only, write nothing.\n                False: run the sweep."
+                    }
+                },
+                "required": [
+                    "adminCode"
+                ],
+                "description": "Re-encrypt every stored encrypted field (tenant connector credentials, two-factor secrets) with the\n            current key, or with dryRun (the default) only report which key each value is on. Super admins only, with a\n            current code from their own authenticator app. A real run is refused unless an old key different from the\n            current one is configured (entity_ds_crypt_pass_old). Writes an AdminAuditLog row with counts, never values."
+            },
+            "RotateEncryptedFieldsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the check (and the sweep, on a real run) ran."
+                    },
+                    "oldKeyConfigured": {
+                        "type": "boolean",
+                        "description": "An old key different from the current one is wired in."
+                    },
+                    "rotationPending": {
+                        "type": "boolean",
+                        "description": "Some value is still on the old key only (after the sweep, on a real run)."
+                    },
+                    "valueCount": {
+                        "type": "integer",
+                        "description": "Non-empty encrypted values stored."
+                    },
+                    "currentKeyCount": {
+                        "type": "integer",
+                        "description": "Values the current key decrypts."
+                    },
+                    "oldKeyOnlyCount": {
+                        "type": "integer",
+                        "description": "Values only the old key decrypts: the sweep rewrites them."
+                    },
+                    "undecryptableCount": {
+                        "type": "integer",
+                        "description": "Values no configured key decrypts: the sweep leaves them; the tenant re-enters that credential."
+                    },
+                    "entities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "entity": {
+                                    "type": "object",
+                                    "properties": {
+                                        "entityName": {
+                                            "type": "string"
+                                        },
+                                        "fields": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "valueCount": {
+                                            "type": "integer"
+                                        },
+                                        "currentKey": {
+                                            "type": "integer"
+                                        },
+                                        "oldKeyOnly": {
+                                            "type": "integer"
+                                        },
+                                        "undecryptable": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "One entry per entity with encrypted fields, after the sweep on a real run."
+                    },
+                    "reencryptedByEntity": {
+                        "type": "object",
+                        "description": "Real run only: entity name to rows re-encrypted."
+                    },
+                    "totalRows": {
+                        "type": "integer",
+                        "description": "Real run only: rows re-encrypted."
+                    }
+                }
+            },
+            "RotateEncryptedFieldsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SecurityAdminServices.rotate#EncryptedFields",
+                "x-darpan-method": "admin.SecurityAdminServices.rotate#EncryptedFields",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SecurityAdminServices.rotate#EncryptedFields"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RotateEncryptedFieldsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RotateEncryptedFieldsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SecurityAdminServices.rotate#EncryptedFields. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RotateEncryptedFieldsResult"
                     }
                 },
                 "required": [
@@ -33785,6 +33945,7 @@
         "admin.RetentionAdminServices.dryRun#Retention": "DryRunRetention",
         "admin.ScheduleAdminServices.get#ScheduleBoard": "GetScheduleBoard",
         "admin.SecurityAdminServices.get#TwoFactorPolicies": "GetTwoFactorPolicies",
+        "admin.SecurityAdminServices.rotate#EncryptedFields": "RotateEncryptedFields",
         "admin.SecurityAdminServices.update#TwoFactorPolicy": "UpdateTwoFactorPolicy",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",

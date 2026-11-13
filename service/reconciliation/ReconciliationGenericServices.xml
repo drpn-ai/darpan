@@ -191,7 +191,8 @@
          encrypt="true" fields under the ACTIVE entity_ds_crypt_pass. Run while the old key is still
          wired via decrypt-alt (entity_ds_crypt_pass_old); afterwards the old key can be dropped.
          Same exposure stance as purge#GeneratedOutputFiles: internal-only + super-admin when a user
-         is present. See docs/crypt-key-rotation.md. -->
+         is present. Remote callers go through admin.SecurityAdminServices.rotate#EncryptedFields (DAR-OPS-019: super
+         admin + own two-factor code, dry run, refuses with no old key). See docs/crypt-key-rotation.md. -->
     <service verb="rotate" noun="EncryptedFieldValues" authenticate="false" allow-remote="false">
         <description>Re-encrypt every non-null encrypt="true" field value across Darpan entities with the
             active crypt key (crypt-key rotation runbook step 4). Idempotent; safe to re-run.</description>

@@ -37,6 +37,7 @@ admin.ObserveAdminServices.get#LiveOperations
 admin.RetentionAdminServices.dryRun#Retention
 admin.ScheduleAdminServices.get#ScheduleBoard
 admin.SecurityAdminServices.get#TwoFactorPolicies
+admin.SecurityAdminServices.rotate#EncryptedFields
 admin.SecurityAdminServices.update#TwoFactorPolicy
 admin.TenantAdminServices.create#Tenant
 admin.TenantAdminServices.deactivate#Tenant

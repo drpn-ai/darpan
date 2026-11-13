@@ -5990,12 +5990,20 @@
                     "clear": {
                         "type": "boolean",
                         "description": "True makes the role optional again."
+                    },
+                    "adminCode": {
+                        "type": "string",
+                        "description": "A current code from the acting admin's own authenticator app (or adminPasskeyAssertion)."
+                    },
+                    "adminPasskeyAssertion": {
+                        "type": "string",
+                        "description": "Instead of adminCode: a passkey assertion over\n                facade.AuthFacadeServices.begin#PasskeyProof's options."
                     }
                 },
                 "required": [
                     "permissionGroupId"
                 ],
-                "description": "Require two-factor for a role from a date (today or earlier: now; later: a grace period during which\n            sign-in prompts), or make it optional again (clear). Super admins only. Requiring it for ADMIN or\n            DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row."
+                "description": "Require two-factor for a role from a date (today or earlier: now; later: a grace period during which\n            sign-in prompts), or make it optional again (clear). Super admins only, with a current code from their own\n            authenticator app or a passkey assertion (so they must have two-factor on). Requiring it for ADMIN or\n            DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row."
             },
             "UpdateTwoFactorPolicyResult": {
                 "type": "object",
@@ -10920,7 +10928,7 @@
                 "properties": {
                     
                 },
-                "description": "DAR-BE-270. Request options for the signed-in person's passkeys, for one action that asks for a fresh\n            proof (approve#CliLogin, create#RecoveryCodes, disable#TwoFactor, begin#TwoFactorSetup,\n            begin#PasskeyRegistration, delete#Passkey, and the admin app's /transfer export and handoff, two-factor reset and\n            key rotation). The assertion is single-use and lives 5 minutes."
+                "description": "DAR-BE-270. Request options for the signed-in person's passkeys, for one action that asks for a fresh\n            proof (approve#CliLogin, create#RecoveryCodes, disable#TwoFactor, begin#TwoFactorSetup,\n            begin#PasskeyRegistration, delete#Passkey, and the admin app's /transfer export and handoff, two-factor reset and\n            key rotation). The assertion is single-use and lives 5 minutes. A refusal (not signed in, passkeys unavailable,\n            no passkey) is a JSON-RPC error."
             },
             "BeginPasskeyProofResult": {
                 "type": "object",
@@ -11067,6 +11075,10 @@
                     "challengeEnded": {
                         "type": "boolean",
                         "description": "With a challengeToken: true when it can no longer be used: go back to the password."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,\n                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST."
                     }
                 }
             },
@@ -11171,6 +11183,10 @@
                     "challengeEnded": {
                         "type": "boolean",
                         "description": "True when the challenge can no longer be used: go back to the password."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,\n                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST."
                     }
                 }
             },
@@ -11296,6 +11312,10 @@
                     "challengeEnded": {
                         "type": "boolean",
                         "description": "With a challengeToken: true when it can no longer be used (expired, used, 5 wrong codes): go back to the password."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,\n                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST."
                     }
                 }
             },
@@ -11851,7 +11871,7 @@
                 "required": [
                     "code"
                 ],
-                "description": "DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI\n            key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken\n            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. Returns 10\n            recovery codes, once. A refusal is a completed call with ok false and the reason in errors (not a JSON-RPC\n            error), so challengeEnded reaches the caller."
+                "description": "DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI\n            key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken\n            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. When no\n            factor was on before, returns 10 recovery codes, once; an app added beside a passkey or replacing the old app\n            keeps the person's codes (none returned). A refusal is a completed call with ok false and the reason in errors\n            (not a JSON-RPC error), so challengeEnded reaches the caller."
             },
             "ConfirmTwoFactorSetupResult": {
                 "type": "object",
@@ -12032,11 +12052,15 @@
                         "items": {
                             "type": "string"
                         },
-                        "description": "10 recovery codes, xxxx-xxxx-xxxx-xxxx. In this reply only."
+                        "description": "10 recovery codes, xxxx-xxxx-xxxx-xxxx, when this turned two-factor on (no factor before). In\n                    this reply only."
                     },
                     "challengeEnded": {
                         "type": "boolean",
                         "description": "With a challengeToken: true when it can no longer be used (expired, 5 wrong codes)."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,\n                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST."
                     }
                 }
             },
@@ -12223,7 +12247,7 @@
                 "required": [
                     "passkeyId"
                 ],
-                "description": "DAR-BE-270. Remove one of the signed-in person's passkeys, with a current code or a passkey assertion\n            (it may come from the passkey being removed). Removing the last factor is refused when a role of theirs\n            requires two-factor; for anyone else it turns two-factor off as disable#TwoFactor does."
+                "description": "DAR-BE-270. Remove one of the signed-in person's passkeys, with a current code or a passkey assertion\n            (it may come from the passkey being removed). Removing the last factor is refused when a role of theirs\n            requires two-factor; for anyone else it turns two-factor off as disable#TwoFactor does (every key ends, this\n            tab gets a fresh authToken)."
             },
             "DeletePasskeyResult": {
                 "type": "object",
@@ -12249,6 +12273,26 @@
                     "twoFactorEnabled": {
                         "type": "boolean",
                         "description": "False when this was the last factor."
+                    },
+                    "authenticated": {
+                        "type": "boolean",
+                        "description": "True when this tab was handed a fresh key (two-factor went off)."
+                    },
+                    "authToken": {
+                        "type": "string",
+                        "description": "When two-factor went off: every key ended, this tab's too;\n                send this one from now on (also set as the persistent-login cookie)."
+                    },
+                    "authTokenType": {
+                        "type": "string",
+                        "description": "`LOGIN_KEY`."
+                    },
+                    "authTokenHeaderName": {
+                        "type": "string",
+                        "description": "`login_key`."
+                    },
+                    "authTokenExpiresInSeconds": {
+                        "type": "integer",
+                        "description": "The sign-in's absolute lifetime in seconds, as login#Session."
                     }
                 }
             },
@@ -12328,7 +12372,7 @@
                         "description": "DAR-BE-270. Remove only the\n                authenticator app, keeping the passkeys."
                     }
                 },
-                "description": "DAR-BE-264. Turn two-factor off for the signed-in person (the app and every passkey), with a current code\n            or (DAR-BE-270) a passkey assertion. Refused when a role of theirs requires it. Every other session and CLI key\n            ends; this one carries on. With appOnly and a passkey left: removes just the authenticator app (allowed when\n            required too), sessions unchanged."
+                "description": "DAR-BE-264. Turn two-factor off for the signed-in person (the app and every passkey), with a current code\n            or (DAR-BE-270) a passkey assertion. Refused when a role of theirs requires it. Every other session and CLI key\n            ends, this tab's key too: the reply carries a fresh one (authToken) to send from now on. With appOnly and a\n            passkey left: removes just the authenticator app (allowed when required too), sessions unchanged, no key."
             },
             "DisableTwoFactorResult": {
                 "type": "object",
@@ -12350,6 +12394,26 @@
                             "type": "string"
                         },
                         "description": "Why it was refused."
+                    },
+                    "authenticated": {
+                        "type": "boolean",
+                        "description": "True when this tab was handed a fresh key (two-factor went off)."
+                    },
+                    "authToken": {
+                        "type": "string",
+                        "description": "When two-factor went off: every key ended, this tab's too;\n                send this one from now on (also set as the persistent-login cookie)."
+                    },
+                    "authTokenType": {
+                        "type": "string",
+                        "description": "`LOGIN_KEY`."
+                    },
+                    "authTokenHeaderName": {
+                        "type": "string",
+                        "description": "`login_key`."
+                    },
+                    "authTokenExpiresInSeconds": {
+                        "type": "integer",
+                        "description": "The sign-in's absolute lifetime in seconds, as login#Session."
                     }
                 }
             },
@@ -12622,6 +12686,10 @@
                     "challengeEnded": {
                         "type": "boolean",
                         "description": "With a challengeToken: true when it can no longer be used (expired, 5 refusals)."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,\n                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST."
                     }
                 }
             },
@@ -13398,6 +13466,10 @@
                             }
                         },
                         "description": "Authenticated session metadata returned to darpan-ui."
+                    },
+                    "passkeysAvailable": {
+                        "type": "boolean",
+                        "description": "DAR-BE-270. With a challenge: whether this instance\n                offers passkeys (an rpId and an allowed origin), so a forced setup knows to offer one beside the app."
                     }
                 }
             },
@@ -14981,6 +15053,10 @@
                     "challengeEnded": {
                         "type": "boolean",
                         "description": "True when the challenge can no longer be used (expired, used, 5 wrong codes): go back to the password."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): CODE, PASSKEY, PROOF_NEEDED, PASSWORD, CHALLENGE_ENDED, SETUP_EXPIRED, PASSKEYS_UNAVAILABLE,\n                PASSKEY_LIMIT, PASSKEY_EXISTS, ACCOUNT_CANNOT_SIGN_IN or SIGN_IN_FIRST."
                     }
                 }
             },

@@ -495,6 +495,7 @@ SERVICE begin PasskeyRegistration
     messages.message : String
     ok : Boolean
     publicKeyOptions : String
+    reason : String
 
 SERVICE begin PasskeySignIn
   file        : AuthFacadeServices.xml
@@ -511,6 +512,7 @@ SERVICE begin PasskeySignIn
     messages.message : String
     ok : Boolean
     publicKeyOptions : String
+    reason : String
 
 SERVICE begin TwoFactorSetup
   file        : AuthFacadeServices.xml
@@ -532,6 +534,7 @@ SERVICE begin TwoFactorSetup
     ok : Boolean
     otpauthUri : String
     qrDataUri : String
+    reason : String
     secret : String
 
 SERVICE change ExpiredPassword
@@ -633,6 +636,7 @@ SERVICE confirm TwoFactorSetup
     messages : List
     messages.message : String
     ok : Boolean
+    reason : String
     recoveryCodes : List
     recoveryCodes.recoveryCode : String
     sessionInfo : Map
@@ -688,6 +692,11 @@ SERVICE delete Passkey
     passkeyAssertion : String
     passkeyId : String [required]
   OUT:
+    authToken : String
+    authTokenExpiresInSeconds : Integer
+    authTokenHeaderName : String
+    authTokenType : String
+    authenticated : Boolean
     errors : List
     errors.error : String
     messages : List
@@ -705,6 +714,11 @@ SERVICE disable TwoFactor
     code : String
     passkeyAssertion : String
   OUT:
+    authToken : String
+    authTokenExpiresInSeconds : Integer
+    authTokenHeaderName : String
+    authTokenType : String
+    authenticated : Boolean
     errors : List
     errors.error : String
     messages : List
@@ -733,6 +747,7 @@ SERVICE finish PasskeyRegistration
     messages.message : String
     ok : Boolean
     passkeyId : String
+    reason : String
     recoveryCodes : List
     recoveryCodes.recoveryCode : String
     sessionInfo : Map
@@ -853,6 +868,7 @@ SERVICE login Session
     messages : List
     messages.message : String
     ok : Boolean
+    passkeysAvailable : Boolean
     passwordChangeReason : String
     passwordChangeRequired : Boolean
     sessionInfo : Map
@@ -1123,6 +1139,7 @@ SERVICE verify SignInCode
     messages : List
     messages.message : String
     ok : Boolean
+    reason : String
     recoveryCodesLeft : Integer
     sessionInfo : Map
     sessionInfo.activeTenantLabel : String

@@ -176,19 +176,22 @@ class AuthFacadeSupport {
     /**
      * verify#SignInCode: the challenge token from login#Session with a current code or a recovery code. On success the
      * person is signed in (no second UserLoginHistory row: the password step wrote one) and the reply is login#Session's.
-     * Every refusal is "That code didn't work." held to TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS; challengeEnded says
-     * the token is spent (expired, used, 5 wrong codes), so the client goes back to the password.
+     * Every refusal is "That code didn't work." held to TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS and answered as a
+     * refusal envelope (see refused): challengeEnded says the token is spent (expired, used, 5 wrong codes), so the client
+     * goes back to the password. The wrong-code and failed-login counts are written in their own transaction
+     * (TwoFactorSupport.claimSignInChallenge), so they stand whatever happens to this one.
      */
     static Map<String, Object> verifySignInCode(def ec, Object challengeToken, Object code, Object recoveryCode) {
         long started = System.nanoTime()
         Map<String, Object> claim = TwoFactorSupport.claimSignInChallenge(ec, challengeToken, code, recoveryCode)
         Map<String, Object> result = [authenticated: false, challengeEnded: claim.challengeEnded == true]
         boolean signedIn = false
+        boolean loggedInHere = false
         if (claim.ok) {
             def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
                     "pre-auth: the account a verified sign-in challenge belongs to").condition("userId", claim.userId).one()
             if (CliAuthSupport.canSignIn(ec, account)) {
-                signedIn = ec.user.internalLoginUser((String) account.username, false) as boolean
+                signedIn = loggedInHere = ec.user.internalLoginUser((String) account.username, false) as boolean
             }
             if (signedIn) {
                 signedIn = issueSignedInSession(ec, result)
@@ -198,9 +201,9 @@ class AuthFacadeSupport {
             }
         }
         if (!signedIn) {
-            ec.message.clearAll()
-            ec.message.addError(TwoFactorSupport.CODE_REFUSAL)
             TwoFactorSupport.holdToFloor(started)
+            // A sign-in that got as far as the login but no key (issueSignedInSession logged it out) leaves nothing.
+            return refused(ec, result, TwoFactorSupport.CODE_REFUSAL, loggedInHere)
         }
         result.putAll(FacadeSupport.envelope(ec))
         return result
@@ -208,12 +211,18 @@ class AuthFacadeSupport {
 
     /**
      * begin#TwoFactorSetup: signed in (a first setup needs the current password, a replacement a current code), or with
-     * a setup challenge from login#Session. Returns the secret, the otpauth URI, the QR data URI and expiresInSeconds.
+     * a setup challenge from login#Session. Returns the secret, the otpauth URI, the QR data URI and expiresInSeconds. A
+     * refusal is a refusal envelope; through a challenge it is always a spent one (challengeEnded).
      */
     static Map<String, Object> beginTwoFactorSetup(def ec, Object challengeToken, Object currentPassword, Object code) {
+        boolean viaChallenge = normalize(challengeToken) != null
         String userId = setupSubject(ec, challengeToken, currentPassword, code)
-        Map<String, Object> result = [:]
-        if (userId) result.putAll(TwoFactorSupport.beginSetup(ec, userId))
+        if (!userId) {
+            List<String> problems = FacadeSupport.getErrors(ec)
+            return refused(ec, [challengeEnded: viaChallenge], problems ? problems[0] : "Sign in first.", false)
+        }
+        Map<String, Object> result = [challengeEnded: false]
+        result.putAll(TwoFactorSupport.beginSetup(ec, userId))
         result.putAll(FacadeSupport.envelope(ec))
         return result
     }
@@ -222,39 +231,58 @@ class AuthFacadeSupport {
      * confirm#TwoFactorSetup: the first right code from the new app turns two-factor on, ends every other login key
      * (CLI keys too) and returns the recovery codes, once. The caller is then signed in with a fresh key: through a setup
      * challenge this is the sign-in itself; from a signed-in tab the old key predates the factor and stops working, so
-     * the tab swaps to the authToken returned here.
+     * the tab swaps to the authToken returned here. A refusal is a refusal envelope (challengeEnded with a challenge).
      */
     static Map<String, Object> confirmTwoFactorSetup(def ec, Object challengeToken, Object code) {
-        Map<String, Object> result = [authenticated: false]
+        Map<String, Object> result = [authenticated: false, challengeEnded: false]
         boolean viaChallenge = normalize(challengeToken) != null
         String userId = viaChallenge ? TwoFactorSupport.setupChallengeUser(ec, challengeToken) : normalize(ec.user.userId)
         if (!userId) {
-            ec.message.addError(viaChallenge ? "This sign-in has expired. Enter your password again." : "Sign in first.")
             result.challengeEnded = viaChallenge
-            result.putAll(FacadeSupport.envelope(ec))
-            return result
+            return refused(ec, result, viaChallenge ? "This sign-in has expired. Enter your password again." : "Sign in first.", false)
         }
         Map<String, Object> confirmed = TwoFactorSupport.confirmSetup(ec, userId, code)
         if (!confirmed.ok) {
             if (viaChallenge) result.challengeEnded = TwoFactorSupport.countSetupChallengeFailure(ec, challengeToken)
-            ec.message.addError(confirmed.expired ? TwoFactorSupport.SETUP_EXPIRED : TwoFactorSupport.CODE_REFUSAL)
-            result.putAll(FacadeSupport.envelope(ec))
-            return result
+            return refused(ec, result, confirmed.expired ? TwoFactorSupport.SETUP_EXPIRED : TwoFactorSupport.CODE_REFUSAL, false)
         }
         if (viaChallenge) {
             TwoFactorSupport.useChallenge(ec, challengeToken)
             def account = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
                     "pre-auth: the account a setup challenge belongs to").condition("userId", userId).one()
             if (!CliAuthSupport.canSignIn(ec, account) || !ec.user.internalLoginUser((String) account.username, false)) {
-                ec.message.clearAll()
-                ec.message.addError("This account can no longer sign in.")
-                result.putAll(FacadeSupport.envelope(ec))
-                return result
+                // The factor was switched on and the challenge used above: neither may stand for an account that
+                // cannot sign in.
+                result.challengeEnded = true
+                return refused(ec, result, "This account can no longer sign in.", true)
             }
         }
         issueSignedInSession(ec, result)
         result.recoveryCodes = confirmed.recoveryCodes
         result.putAll(FacadeSupport.envelope(ec))
+        return result
+    }
+
+    /**
+     * A refused two-factor step, answered as a completed call: [ok: false, errors: [message], messages: []] plus the
+     * step's own fields (challengeEnded, ...). Moqui's JSON-RPC dispatcher answers any call that ends with a
+     * MessageFacade error with a bare JSON-RPC error and drops the result, so the client would never see challengeEnded;
+     * the refusal therefore travels in the envelope only and the MessageFacade is left empty. With undo (the call wrote
+     * something in this transaction that must not stand) the transaction is marked rollback-only; counts written in
+     * their own transaction (wrong codes, failed logins) are kept either way.
+     */
+    private static Map<String, Object> refused(def ec, Map<String, Object> result, String message, boolean undo) {
+        // clearAll(), not clearErrors(): clearErrors MOVES errors into the messages list.
+        ec.message.clearAll()
+        if (undo && ec.transaction.isTransactionInPlace()) {
+            ec.transaction.setRollbackOnly("Two-factor step refused: ${message}".toString(), null)
+        }
+        if (result.containsKey("authenticated")) result.authenticated = false
+        ["authToken", "authTokenType", "authTokenHeaderName", "authTokenExpiresInSeconds", "sessionInfo",
+         "recoveryCodes", "recoveryCodesLeft"].each { result.remove(it) }
+        result.ok = false
+        result.messages = []
+        result.errors = [message]
         return result
     }
 

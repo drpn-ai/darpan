@@ -18,6 +18,9 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
+import org.moqui.context.WebFacade
+import org.moqui.impl.context.ExecutionContextImpl
+import org.moqui.impl.service.ServiceJsonRpcDispatcher
 
 import java.nio.file.Path
 import java.sql.Timestamp
@@ -485,6 +488,51 @@ class TwoFactorSignInSmokeTests {
         assertTrue(anon("login#Session", [username: USERNAME, password: PASSWORD]).out.authenticated as boolean, "optional: signs in without")
     }
 
+    @Test
+    @DisplayName("over /rpc/json a refused code is a result carrying challengeEnded (not a JSON-RPC error), and it issues no session")
+    void rpcRefusalsCarryTheirFields() {
+        enrol(USER_ID, USERNAME)
+        String token = challenge(USERNAME)
+        int keysBefore = keyCount(USER_ID)
+
+        Map first = rpc("verify#SignInCode", [challengeToken: token, code: "000000"])
+        assertNull(first.error, "${first}")
+        assertEquals(7, first.id)
+        assertEquals([ok: false, errors: [REFUSAL], messages: [], authenticated: false, challengeEnded: false],
+                (first.result as Map).subMap(["ok", "errors", "messages", "authenticated", "challengeEnded"]))
+        assertNull(first.result.authToken)
+        3.times { assertFalse(rpc("verify#SignInCode", [challengeToken: token, code: "000000"]).result.challengeEnded as boolean) }
+        Map fifth = rpc("verify#SignInCode", [challengeToken: token, code: "000000"])
+        assertNull(fifth.error)
+        assertEquals(true, fifth.result.challengeEnded, "the fifth wrong code ends the challenge, and the browser sees it")
+        assertEquals([REFUSAL], fifth.result.errors)
+        assertEquals(keysBefore, keyCount(USER_ID), "no key for a refused code")
+        assertNull(ec.user.userId, "no one signed in")
+        assertEquals(5, account(USER_ID).successiveFailedLogins as int, "each wrong code still counts as a failed login")
+
+        // A setup challenge: begin with a spent token, confirm with a wrong code.
+        group(OTHER_ID, "DARPAN_ADMIN")
+        setPolicy("DARPAN_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
+        String setupToken = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD]).out.challengeToken
+        Map spent = rpc("begin#TwoFactorSetup", [challengeToken: "not-a-token"])
+        assertNull(spent.error, "${spent}")
+        assertEquals([false, ["This sign-in has expired. Enter your password again."], true],
+                [spent.result.ok, spent.result.errors, spent.result.challengeEnded])
+        Map begun = rpc("begin#TwoFactorSetup", [challengeToken: setupToken])
+        assertEquals([true, false], [begun.result.ok, begun.result.challengeEnded])
+        Map wrongSetup = rpc("confirm#TwoFactorSetup", [challengeToken: setupToken, code: "000000"])
+        assertNull(wrongSetup.error, "${wrongSetup}")
+        assertEquals([false, [REFUSAL], false, false], [wrongSetup.result.ok, wrongSetup.result.errors,
+                wrongSetup.result.challengeEnded, wrongSetup.result.authenticated])
+        assertNull(wrongSetup.result.recoveryCodes)
+        assertEquals(false, TwoFactorSupport.status(ec, OTHER_ID).enabled, "a refused confirm leaves two-factor off")
+        assertEquals(0, keyCount(OTHER_ID))
+
+        // Methods whose refusal carries no field stay JSON-RPC errors.
+        Map unknown = rpc("verify#SignInCode", [code: "000000"])
+        assertNotNull(unknown.error, "a missing required parameter is still a JSON-RPC error")
+    }
+
     // ---- regressions and invariants ----
 
     @Test
@@ -580,8 +628,31 @@ class TwoFactorSignInSmokeTests {
             errors << e.message
         }
         errors.addAll(ec.message.errors)
+        // Refused two-factor steps answer in the envelope, not the MessageFacade (see rpcRefusalsCarryTheirFields).
+        if (out.ok == false) (out.errors ?: []).each { if (!(it in errors)) errors << it }
         ec.message.clearAll()
         return [out: out, errors: errors]
+    }
+
+    /**
+     * The call as /rpc/json makes it: Moqui's own ServiceJsonRpcDispatcher, with a stub web facade (the hook
+     * ExecutionContextImpl.setWebFacade keeps for tests) handing it the request and catching the JSON reply.
+     */
+    private Map rpc(String verbNoun, Map params) {
+        ec.user.logoutUser()
+        ec.message.clearAll()
+        Map captured = [:]
+        WebFacade web = [getRequestParameters: { -> [method: "facade.AuthFacadeServices.${verbNoun}".toString(), params: params, id: 7] },
+                         sendJsonResponse    : { Object reply -> captured.reply = reply }] as WebFacade
+        ExecutionContextImpl eci = (ExecutionContextImpl) ec
+        eci.setWebFacade(web)
+        try {
+            new ServiceJsonRpcDispatcher(eci).dispatch()
+        } finally {
+            eci.@webFacade = null
+            ec.message.clearAll()
+        }
+        return (Map) captured.reply
     }
 
     private List events(String userId, String type) {

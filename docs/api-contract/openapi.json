@@ -10660,7 +10660,7 @@
                         "description": "Signed in, replacing an app that is on: a current code from it."
                     }
                 },
-                "description": "DAR-BE-264. Start setting up an authenticator app: a new secret (any earlier unfinished setup ends),\n            shown once. Either signed in (a first setup needs currentPassword; replacing an app that is on needs a current\n            code from it), or with a setup challengeToken from login#Session (twoFactorSetupRequired). Finish within 15\n            minutes with confirm#TwoFactorSetup."
+                "description": "DAR-BE-264. Start setting up an authenticator app: a new secret (any earlier unfinished setup ends),\n            shown once. Either signed in (a first setup needs currentPassword; replacing an app that is on needs a current\n            code from it), or with a setup challengeToken from login#Session (twoFactorSetupRequired). Finish within 15\n            minutes with confirm#TwoFactorSetup. A refusal is a completed call with ok false and the reason in errors (not a\n            JSON-RPC error); through a challenge it carries challengeEnded."
             },
             "BeginTwoFactorSetupResult": {
                 "type": "object",
@@ -10698,6 +10698,10 @@
                     "expiresInSeconds": {
                         "type": "integer",
                         "description": "Seconds left to confirm: 900."
+                    },
+                    "challengeEnded": {
+                        "type": "boolean",
+                        "description": "With a challengeToken: true when it can no longer be used (expired, used, 5 wrong codes): go back to the password."
                     }
                 }
             },
@@ -11253,7 +11257,7 @@
                 "required": [
                     "code"
                 ],
-                "description": "DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI\n            key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken\n            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. Returns 10\n            recovery codes, once."
+                "description": "DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI\n            key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken\n            this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. Returns 10\n            recovery codes, once. A refusal is a completed call with ok false and the reason in errors (not a JSON-RPC\n            error), so challengeEnded reaches the caller."
             },
             "ConfirmTwoFactorSetupResult": {
                 "type": "object",
@@ -13642,7 +13646,7 @@
                 "required": [
                     "challengeToken"
                 ],
-                "description": "DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a\n            current authenticator code or a recovery code. Success answers as login#Session does (a session and its key).\n            Every refusal is \"That code didn't work.\"; 5 wrong codes end the challenge (challengeEnded), and each wrong code\n            also counts as a failed login. A used recovery code emails the person."
+                "description": "DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a\n            current authenticator code or a recovery code. Success answers as login#Session does (a session and its key).\n            Every refusal is \"That code didn't work.\"; 5 wrong codes end the challenge (challengeEnded), and each wrong code\n            also counts as a failed login. A used recovery code emails the person. A refusal is a completed call with\n            ok false and the reason in errors (not a JSON-RPC error), so challengeEnded reaches the caller."
             },
             "VerifySignInCodeResult": {
                 "type": "object",

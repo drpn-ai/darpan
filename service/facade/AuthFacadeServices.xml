@@ -847,7 +847,8 @@
         <description>DAR-BE-264. Finish a sign-in login#Session answered with twoFactorRequired: the challengeToken with a
             current authenticator code or a recovery code. Success answers as login#Session does (a session and its key).
             Every refusal is "That code didn't work."; 5 wrong codes end the challenge (challengeEnded), and each wrong code
-            also counts as a failed login. A used recovery code emails the person.</description>
+            also counts as a failed login. A used recovery code emails the person. A refusal is a completed call with
+            ok false and the reason in errors (not a JSON-RPC error), so challengeEnded reaches the caller.</description>
         <in-parameters>
             <parameter name="challengeToken" required="true"><description>From login#Session.</description></parameter>
             <parameter name="code"><description>The 6-digit code from the authenticator app; spaces ignored.</description></parameter>
@@ -926,7 +927,8 @@
         <description>DAR-BE-264. Start setting up an authenticator app: a new secret (any earlier unfinished setup ends),
             shown once. Either signed in (a first setup needs currentPassword; replacing an app that is on needs a current
             code from it), or with a setup challengeToken from login#Session (twoFactorSetupRequired). Finish within 15
-            minutes with confirm#TwoFactorSetup.</description>
+            minutes with confirm#TwoFactorSetup. A refusal is a completed call with ok false and the reason in errors (not a
+            JSON-RPC error); through a challenge it carries challengeEnded.</description>
         <in-parameters>
             <parameter name="challengeToken"><description>A setup challenge from login#Session; leave out when signed in.</description></parameter>
             <parameter name="currentPassword"><description>Signed in, first setup: the account's password (a wrong one counts as a failed login).</description></parameter>
@@ -944,6 +946,8 @@
             <parameter name="qrDataUri" type="String">
                 <description>The otpauthUri as a QR code: an SVG data URI (data:image/svg+xml;base64,...) for an img src.</description></parameter>
             <parameter name="expiresInSeconds" type="Integer"><description>Seconds left to confirm: 900.</description></parameter>
+            <parameter name="challengeEnded" type="Boolean">
+                <description>With a challengeToken: true when it can no longer be used (expired, used, 5 wrong codes): go back to the password.</description></parameter>
         </out-parameters>
         <actions>
             <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.beginTwoFactorSetup(ec, challengeToken, currentPassword, code)"/>
@@ -954,6 +958,7 @@
             <set field="otpauthUri" from="authResult.otpauthUri"/>
             <set field="qrDataUri" from="authResult.qrDataUri"/>
             <set field="expiresInSeconds" from="authResult.expiresInSeconds"/>
+            <set field="challengeEnded" from="authResult.challengeEnded"/>
         </actions>
     </service>
 
@@ -961,7 +966,8 @@
         <description>DAR-BE-264. Turn two-factor on with the first code the new app shows. Every other session and every CLI
             key of the account ends, and the caller is signed in with a fresh key (authToken): with a setup challengeToken
             this is the sign-in; from a signed-in tab the old key stops working, so the tab swaps to this one. Returns 10
-            recovery codes, once.</description>
+            recovery codes, once. A refusal is a completed call with ok false and the reason in errors (not a JSON-RPC
+            error), so challengeEnded reaches the caller.</description>
         <in-parameters>
             <parameter name="code" required="true"><description>The 6-digit code the new app shows.</description></parameter>
             <parameter name="challengeToken"><description>The setup challenge from login#Session; leave out when signed in.</description></parameter>

@@ -444,6 +444,52 @@ class PasskeySignInSmokeTests {
     }
 
     @Test
+    @DisplayName("review L5: a required person's last factor is re-checked after the proof, so two removals at once cannot take both")
+    void lastFactorIsRecheckedAfterTheProof() {
+        SoftwarePasskey first = enrolPasskey(USERNAME)
+        SoftwarePasskey second = new SoftwarePasskey()
+        assertEquals([], finish(USERNAME, second.register(beginRegistration(USERNAME, [passkeyAssertion: proofAssertion(USERNAME, first)]))).errors)
+        group(USER_ID, "DARPAN_ADMIN")
+        setPolicy("DARPAN_ADMIN", new Timestamp(System.currentTimeMillis() - 1000L))
+        List<String> ids = (TwoFactorSupport.status(ec, USER_ID).passkeys as List<Map>)*.passkeyId as List<String>
+        String proof = proofAssertion(USERNAME, first)
+
+        // While this removal proves itself, another one (of the other passkey) commits: as two tabs pressing Remove at once.
+        Closure concurrentRemoval = { String factorId ->
+            ec.entity.find(TwoFactorSupport.FACTOR).condition("factorId", factorId).disableAuthz().updateAll([statusId: TwoFactorSupport.ENDED])
+        }
+        TwoFactorSupport.metaClass.static.freshProofProblem = { def ecArg, Object c, Object a, boolean onlyIfEnrolled ->
+            concurrentRemoval(ids[1])
+            return null
+        }
+        try {
+            Map refused = signedIn(USERNAME, "delete#Passkey", [passkeyId: ids[0], passkeyAssertion: proof])
+            assertEquals([TwoFactorSupport.LAST_FACTOR_REQUIRED], refused.errors)
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(TwoFactorSupport)
+        }
+        assertTrue(TwoFactorSupport.enabled(ec, USER_ID), "the required person keeps a factor")
+
+        // The same for the app: app-only removal while the last passkey goes.
+        String secret = enrolApp(OTHER_USERNAME)
+        SoftwarePasskey otherKey = new SoftwarePasskey()
+        assertEquals([], finish(OTHER_USERNAME, otherKey.register(beginRegistration(OTHER_USERNAME, [code: code(secret)]))).errors)
+        group(OTHER_ID, "DARPAN_ADMIN")
+        String otherPasskeyId = (TwoFactorSupport.status(ec, OTHER_ID).passkeys as List<Map>)[0].passkeyId
+        TwoFactorSupport.metaClass.static.freshProofProblem = { def ecArg, Object c, Object a, boolean onlyIfEnrolled ->
+            concurrentRemoval(otherPasskeyId)
+            return null
+        }
+        try {
+            Map refusedApp = signedIn(OTHER_USERNAME, "disable#TwoFactor", [appOnly: true, code: code(secret)])
+            assertEquals([TwoFactorSupport.REQUIRED_CANNOT_TURN_OFF], refusedApp.errors)
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(TwoFactorSupport)
+        }
+        assertTrue(TwoFactorSupport.status(ec, OTHER_ID).appEnabled as boolean, "the app stays")
+    }
+
+    @Test
     @DisplayName("every new passkey method is off the CLI list")
     void passkeyMethodsAreNotOnTheCli() {
         ["begin#PasskeyProof", "begin#PasskeyRegistration", "begin#PasskeySignIn", "delete#Passkey",

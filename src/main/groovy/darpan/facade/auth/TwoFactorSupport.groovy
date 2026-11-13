@@ -259,10 +259,12 @@ class TwoFactorSupport {
     }
 
     /**
-     * Locks the person's UserAccount row to the end of the transaction. Turning a first factor on takes it first, so "no
-     * factor yet" read after it still holds at commit: two setups (a setup challenge and a signed-in tab) cannot both
-     * turn two-factor on. Never take it before a check that writes a failed login (that write runs in its own
-     * transaction on the same row).
+     * Locks the person's UserAccount row to the end of the transaction: every change that decides on the person's live
+     * factors takes it, so what it read still holds at commit. Turning a first factor on ("no factor yet": a setup
+     * challenge and a signed-in tab cannot both turn two-factor on) and removing one ("not the last": two removals cannot
+     * both go). One lock per person rather than the factor rows: a new factor is an insert no row lock would stop, and
+     * endSessions writes this row anyway. Never take it before a check that writes a failed login (that write runs in its
+     * own transaction on the same row).
      */
     static void lockPerson(def ec, String userId) {
         find(ec, "moqui.security.UserAccount", "self-scoped auth: lock the person while their first factor is turned on")
@@ -535,22 +537,34 @@ class TwoFactorSupport {
      */
     static Map<String, Object> turnOff(def ec, Object code, Object passkeyAssertion = null, boolean appOnly = false) {
         String userId = normalize(ec.user.userId)
-        List factors = activeFactors(ec, userId)
-        if (!factors) return [error: NOT_ENROLLED]
-        boolean keepsPasskey = factors.any { it.factorTypeEnumId == PasskeySupport.TYPE_PASSKEY }
-        if (appOnly && keepsPasskey) {
-            if (!factors.any { it.factorTypeEnumId == TYPE_TOTP }) return [error: "The authenticator app is not on for this account."]
-            String problem = freshProofProblem(ec, code, passkeyAssertion, false)
-            if (problem) return [error: problem]
+        // First a refusal that spends no proof; the same rules are decided again after it, under the person lock.
+        String refusal = turnOffRefusal(ec, userId, appOnly)
+        if (refusal) return [error: refusal]
+        String problem = freshProofProblem(ec, code, passkeyAssertion, false)
+        if (problem) return [error: problem]
+        // Another removal may have committed while the proof was checked (two tabs at once): with the person locked, what
+        // is live now decides, so a required person can never be left with no factor (review L5).
+        lockPerson(ec, userId)
+        refusal = turnOffRefusal(ec, userId, appOnly)
+        if (refusal) return [error: refusal]
+        if (appOnly && activeFactors(ec, userId).any { it.factorTypeEnumId == PasskeySupport.TYPE_PASSKEY }) {
             endFactor(ec, activeFactor(ec, userId, true), "USER_REMOVED")
             event(ec, userId, "APP_REMOVED")
             return [twoFactorEnabled: true]
         }
-        if (isRequiredNow(ec, userId)) return [error: REQUIRED_CANNOT_TURN_OFF]
-        String problem = freshProofProblem(ec, code, passkeyAssertion, false)
-        if (problem) return [error: problem]
         turnOffAll(ec, userId, "USER_OFF")
         return [twoFactorEnabled: false]
+    }
+
+    /** Why disable#TwoFactor cannot go ahead for what is live now, or null. appOnly with a passkey staying removes just
+     *  the app (allowed when required); otherwise it is the full turn-off, refused when required. */
+    private static String turnOffRefusal(def ec, String userId, boolean appOnly) {
+        List factors = activeFactors(ec, userId)
+        if (!factors) return NOT_ENROLLED
+        if (appOnly && factors.any { it.factorTypeEnumId == PasskeySupport.TYPE_PASSKEY }) {
+            return factors.any { it.factorTypeEnumId == TYPE_TOTP } ? null : "The authenticator app is not on for this account."
+        }
+        return isRequiredNow(ec, userId) ? REQUIRED_CANNOT_TURN_OFF : null
     }
 
     /** Every factor ends, recovery codes go, and every sign-in of the person ends, this request's key too: the caller
@@ -569,12 +583,15 @@ class TwoFactorSupport {
     static Map<String, Object> removePasskey(def ec, Object passkeyId, Object code, Object passkeyAssertion) {
         String userId = normalize(ec.user.userId)
         if (PasskeySupport.ownLive(ec, userId, passkeyId) == null) return [error: PasskeySupport.NOT_FOUND]
-        boolean last = activeFactors(ec, userId).size() == 1
-        if (last && isRequiredNow(ec, userId)) return [error: LAST_FACTOR_REQUIRED]
+        if (activeFactors(ec, userId).size() == 1 && isRequiredNow(ec, userId)) return [error: LAST_FACTOR_REQUIRED]
         String problem = freshProofProblem(ec, code, passkeyAssertion, false)
         if (problem) return [error: problem]
-        // Read again after the proof: the proof may have been this passkey, and nothing else may have changed meanwhile.
+        // Decided again under the person lock after the proof: the proof may have been this passkey, and another removal
+        // may have committed meanwhile (two tabs at once), which would otherwise leave a required person with none (review L5).
+        lockPerson(ec, userId)
         if (PasskeySupport.ownLive(ec, userId, passkeyId) == null) return [error: PasskeySupport.NOT_FOUND]
+        boolean last = activeFactors(ec, userId).size() == 1
+        if (last && isRequiredNow(ec, userId)) return [error: LAST_FACTOR_REQUIRED]
         if (last) {
             turnOffAll(ec, userId, "USER_OFF")
             return [twoFactorEnabled: false]

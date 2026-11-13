@@ -39,6 +39,8 @@ admin.ScheduleAdminServices.get#ScheduleBoard
 admin.SecurityAdminServices.get#TwoFactorPolicies
 admin.SecurityAdminServices.rotate#EncryptedFields
 admin.SecurityAdminServices.update#TwoFactorPolicy
+admin.ShopifyAppAdminServices.list#ShopifyApps
+admin.ShopifyAppAdminServices.save#ShopifyApp
 admin.TenantAdminServices.create#Tenant
 admin.TenantAdminServices.deactivate#Tenant
 admin.TenantAdminServices.get#TenantDetail
@@ -234,6 +236,7 @@ facade.SettingsFacadeServices.save#TenantChatSpace
 facade.SettingsFacadeServices.save#TenantSettings
 facade.SettingsFacadeServices.save#UserNotificationDefault
 facade.SettingsFacadeServices.test#SourceConnection
+facade.ShopifyFacadeServices.begin#ShopifyInstall
 facade.ShopifyFacadeServices.delete#ShopifyAuthConfig
 facade.ShopifyFacadeServices.get#ShopifyAuthConfig
 facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema

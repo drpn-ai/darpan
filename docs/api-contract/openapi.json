@@ -147,6 +147,12 @@
                                         "$ref": "#/components/schemas/UpdateTwoFactorPolicyRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ListShopifyAppsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveShopifyAppRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CreateTenantRequest"
                                     },
                                     {
@@ -732,6 +738,9 @@
                                         "$ref": "#/components/schemas/TestSourceConnectionRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/BeginShopifyInstallRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteShopifyAuthConfigRequest"
                                     },
                                     {
@@ -854,6 +863,8 @@
                                         "admin.SecurityAdminServices.get#TwoFactorPolicies": "#/components/schemas/GetTwoFactorPoliciesRequest",
                                         "admin.SecurityAdminServices.rotate#EncryptedFields": "#/components/schemas/RotateEncryptedFieldsRequest",
                                         "admin.SecurityAdminServices.update#TwoFactorPolicy": "#/components/schemas/UpdateTwoFactorPolicyRequest",
+                                        "admin.ShopifyAppAdminServices.list#ShopifyApps": "#/components/schemas/ListShopifyAppsRequest",
+                                        "admin.ShopifyAppAdminServices.save#ShopifyApp": "#/components/schemas/SaveShopifyAppRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
                                         "admin.TenantAdminServices.get#TenantDetail": "#/components/schemas/GetTenantDetailRequest",
@@ -1049,6 +1060,7 @@
                                         "facade.SettingsFacadeServices.save#TenantSettings": "#/components/schemas/SaveTenantSettingsRequest",
                                         "facade.SettingsFacadeServices.save#UserNotificationDefault": "#/components/schemas/SaveUserNotificationDefaultRequest",
                                         "facade.SettingsFacadeServices.test#SourceConnection": "#/components/schemas/TestSourceConnectionRequest",
+                                        "facade.ShopifyFacadeServices.begin#ShopifyInstall": "#/components/schemas/BeginShopifyInstallRequest",
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "#/components/schemas/GetShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema": "#/components/schemas/GetShopifyGraphqlSchemaRequest",
@@ -1213,6 +1225,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateTwoFactorPolicyResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListShopifyAppsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveShopifyAppResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/CreateTenantResponse"
@@ -1798,6 +1816,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/TestSourceConnectionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/BeginShopifyInstallResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteShopifyAuthConfigResponse"
@@ -6038,6 +6059,194 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateTwoFactorPolicyResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListShopifyAppsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Every Darpan Shopify app, without its client secret."
+            },
+            "ListShopifyAppsResult": {
+                "type": "object",
+                "properties": {
+                    "shopifyApps": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "ListShopifyAppsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ShopifyAppAdminServices.list#ShopifyApps",
+                "x-darpan-method": "admin.ShopifyAppAdminServices.list#ShopifyApps",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ShopifyAppAdminServices.list#ShopifyApps"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListShopifyAppsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListShopifyAppsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ShopifyAppAdminServices.list#ShopifyApps. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListShopifyAppsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveShopifyAppParams": {
+                "type": "object",
+                "properties": {
+                    "shopifyAppId": {
+                        "type": "string",
+                        "description": "Empty creates a new app."
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "distribution": {
+                        "type": "string",
+                        "description": "CUSTOM or PUBLIC."
+                    },
+                    "shopDomain": {
+                        "type": "string",
+                        "description": "CUSTOM only: the store the app is for."
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "CUSTOM only: the one tenant allowed to install it."
+                    },
+                    "clientId": {
+                        "type": "string"
+                    },
+                    "clientSecret": {
+                        "type": "string",
+                        "description": "Required when creating; never returned."
+                    },
+                    "scopes": {
+                        "type": "string",
+                        "description": "Comma-separated, such as read_orders,read_returns,read_all_orders."
+                    },
+                    "isActive": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "distribution"
+                ],
+                "description": "Creates or updates a Darpan Shopify app. On update, an empty clientId, clientSecret or scopes\n            keeps the stored value. One active CUSTOM app per store and one active PUBLIC app."
+            },
+            "SaveShopifyAppResult": {
+                "type": "object",
+                "properties": {
+                    "shopifyApp": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveShopifyAppRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ShopifyAppAdminServices.save#ShopifyApp",
+                "x-darpan-method": "admin.ShopifyAppAdminServices.save#ShopifyApp",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ShopifyAppAdminServices.save#ShopifyApp"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveShopifyAppParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveShopifyAppResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ShopifyAppAdminServices.save#ShopifyApp. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveShopifyAppResult"
                     }
                 },
                 "required": [
@@ -32055,6 +32264,101 @@
                     "result"
                 ]
             },
+            "BeginShopifyInstallParams": {
+                "type": "object",
+                "properties": {
+                    "shopDomain": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "shopDomain"
+                ],
+                "description": "Start installing Darpan's Shopify app on a store for the active tenant: mint a\n            single-use state and return the Shopify authorize URL the browser should be sent to. Does not\n            contact Shopify. The install creates its own connection; existing connections are untouched."
+            },
+            "BeginShopifyInstallResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "authorizeUrl": {
+                        "type": "string"
+                    }
+                }
+            },
+            "BeginShopifyInstallRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ShopifyFacadeServices.begin#ShopifyInstall",
+                "x-darpan-method": "facade.ShopifyFacadeServices.begin#ShopifyInstall",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ShopifyFacadeServices.begin#ShopifyInstall"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/BeginShopifyInstallParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "BeginShopifyInstallResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ShopifyFacadeServices.begin#ShopifyInstall. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/BeginShopifyInstallResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteShopifyAuthConfigParams": {
                 "type": "object",
                 "properties": {
@@ -34898,6 +35202,8 @@
         "admin.SecurityAdminServices.get#TwoFactorPolicies": "GetTwoFactorPolicies",
         "admin.SecurityAdminServices.rotate#EncryptedFields": "RotateEncryptedFields",
         "admin.SecurityAdminServices.update#TwoFactorPolicy": "UpdateTwoFactorPolicy",
+        "admin.ShopifyAppAdminServices.list#ShopifyApps": "ListShopifyApps",
+        "admin.ShopifyAppAdminServices.save#ShopifyApp": "SaveShopifyApp",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",
         "admin.TenantAdminServices.get#TenantDetail": "GetTenantDetail",
@@ -35093,6 +35399,7 @@
         "facade.SettingsFacadeServices.save#TenantSettings": "SaveTenantSettings",
         "facade.SettingsFacadeServices.save#UserNotificationDefault": "SaveUserNotificationDefault",
         "facade.SettingsFacadeServices.test#SourceConnection": "TestSourceConnection",
+        "facade.ShopifyFacadeServices.begin#ShopifyInstall": "BeginShopifyInstall",
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",
         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "GetShopifyAuthConfig",
         "facade.ShopifyFacadeServices.get#ShopifyGraphqlSchema": "GetShopifyGraphqlSchema",

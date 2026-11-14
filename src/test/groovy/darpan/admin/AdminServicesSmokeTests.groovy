@@ -722,12 +722,12 @@ class AdminServicesSmokeTests {
 
         Map disabled = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
                 [userId: DORMANT_ID, tenantUserGroupId: ALPHA])
-        assertEquals(["${DORMANT_ID} is disabled.".toString()], disabled.errors)
+        assertEquals(["admsvc.dormant is disabled."], disabled.errors)
 
         upsert("moqui.security.UserAccount", [userId: PLAIN_ID, emailAddress: "  "])
         Map noEmail = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
                 [userId: PLAIN_ID, tenantUserGroupId: ALPHA])
-        assertEquals(["${PLAIN_ID} has no email address.".toString()], noEmail.errors)
+        assertEquals(["${PLAIN_USERNAME} has no email address.".toString()], noEmail.errors)
 
         assertEquals([], sent)
         assertNoAudit()

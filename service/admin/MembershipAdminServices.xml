@@ -88,8 +88,9 @@
             <entity-find-one entity-name="moqui.security.UserAccount" value-field="memberAccount">
                 <field-map field-name="userId"/></entity-find-one>
             <if condition="memberAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
-            <if condition="memberAccount.disabled == 'Y'"><return error="true" message="${userId} is disabled."/></if>
-            <if condition="!memberAccount.emailAddress?.trim()"><return error="true" message="${userId} has no email address."/></if>
+            <!-- By username: the admin app shows these beside the member's name. -->
+            <if condition="memberAccount.disabled == 'Y'"><return error="true" message="${memberAccount.username} is disabled."/></if>
+            <if condition="!memberAccount.emailAddress?.trim()"><return error="true" message="${memberAccount.username} has no email address."/></if>
             <entity-find entity-name="darpan.auth.TenantUserPermissionGroupMember" list="activePermissionRows">
                 <econdition field-name="tenantUserGroupId"/><econdition field-name="userId"/>
                 <econdition field-name="thruDate" from="null"/></entity-find>

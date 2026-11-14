@@ -555,7 +555,8 @@ class AuditAutomationSupport {
                     (recordId != key && (row.data || !ids) ? key : null)
             Map evidence = ((row.systems ?: []) as List).find { it instanceof Map && it.side == side } as Map
             own << [systemEnumId: systemEnumId,
-                    recordType  : recordType ?: "record",
+                    // A check that names no record type (an agent's new check) shows the side's key: order_name -> "Order name".
+                    recordType  : recordType ?: AuditAutomationSupport.keyRecordType(readField(source, "primaryIdExpression")) ?: "record",
                     recordId    : recordId,
                     internalId  : internalId == recordId ? null : internalId,
                     recordStatus: normalize(evidence?.state),
@@ -657,9 +658,36 @@ class AuditAutomationSupport {
                        conclusion: normalize(row.conclusionLabel), file1Value: AuditAutomationSupport.valueText(check, row.file1Value),
                        file2Value: AuditAutomationSupport.valueText(check, row.file2Value)])
         String filled = AuditReportAssembler.fillTemplate(check.headlineTemplate as String, values)
-        String text = filled ?: "${AuditReportAssembler.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
+        String text = filled ?: AuditAutomationSupport.mismatchHeadline(values, records) ?:
+                "${AuditReportAssembler.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
         text = text.replaceAll(/\s+/, " ").trim().replaceAll(/\.+$/, "")
         return text.length() > 120 ? text.take(119).trim() + "…" : text
+    }
+
+    /** A side's key field as a record type (order_name -> orderName, which the page shows as "Order name"); null for a
+     * path or a composite key, so those keep "record". */
+    static String keyRecordType(Object primaryIdExpression) {
+        String key = normalize(primaryIdExpression?.toString())
+        if (!key || !(key ==~ /[A-Za-z][A-Za-z0-9_]*/)) return null
+        List<String> parts = key.split("_").findAll { it }
+        return parts.first() + parts.drop(1).collect { it.capitalize() }.join("")
+    }
+
+    /** The page's name for a system (HotWax for the OMS), from a record's system or endpoint id (OMS_GQL is HotWax). */
+    static final Map<String, String> SYSTEM_NAMES = [OMS: "HotWax", NETSUITE: "NetSuite", SHOPIFY: "Shopify"].asImmutable()
+
+    /**
+     * A mismatch's default headline when the check has no template: each system with its own value, in the run's side
+     * order ("ACME-1120: Billed in HotWax, Pending Billing in NetSuite"), instead of the engine's "Field comparison failed:
+     * billing_status = billing_status". Null unless the row is a mismatch with both values and a record from each side.
+     */
+    static String mismatchHeadline(Map<String, String> values, List<Map> records) {
+        if (values.type != "FIELD_MISMATCH" || !values.file1Value || !values.file2Value) return null
+        List<String> systems = (records ?: []).findAll { it.systemEnumId }.collect { Map r ->
+            String root = rootSystem(r.systemEnumId as String); SYSTEM_NAMES[root] ?: root
+        }.unique()
+        if (systems.size() < 2) return null
+        return "${values.recordKey}: ${values.file1Value} in ${systems[0]}, ${values.file2Value} in ${systems[1]}".toString()
     }
 
     static String conclusionEnumId(def ec, String code) {

@@ -6,6 +6,7 @@ import org.kie.api.KieServices
 import org.kie.api.builder.KieBuilder
 import org.kie.api.builder.KieFileSystem
 import org.kie.api.builder.Message
+import org.kie.api.builder.ReleaseId
 import org.kie.api.runtime.KieContainer
 import org.kie.api.runtime.KieSession
 import org.moqui.entity.EntityValue
@@ -360,22 +361,8 @@ class RuleEngineSupport {
             Thread.currentThread().setContextClassLoader(drlClassLoader)
 
             KieServices ks = KieServices.Factory.get()
-            KieFileSystem kfs = ks.newKieFileSystem()
-            String drlPath = "src/main/resources/${packageName.replace('.', '/')}/${sanitizedRuleSetId}.drl"
-            kfs.write(drlPath, drlText)
-
-            KieBuilder kb = ks.newKieBuilder(kfs)
-            kb.buildAll()
-
-            if (kb.getResults().hasMessages(Message.Level.ERROR)) {
-                List<String> errors = (kb.getResults().getMessages(Message.Level.ERROR) ?: [])
-                        .collect { Message m -> m?.text ?: m?.toString() }
-                        .findAll { it }
-                String errSummary = errors ? errors.join(" | ") : kb.getResults().toString()
-                throw new IllegalArgumentException("Drools build errors for ${ruleSetId}: ${errSummary}")
-            }
-
-            container = ks.newKieContainer(kb.getKieModule().getReleaseId(), drlClassLoader)
+            ReleaseId releaseId = buildRuleModule(ks, ruleSetId, signature, packageName, drlText)
+            container = ks.newKieContainer(releaseId, drlClassLoader)
         } finally {
             Thread.currentThread().setContextClassLoader(prevTccl)
         }
@@ -394,6 +381,33 @@ class RuleEngineSupport {
                 ruleCount: rules.size(),
                 warnings : warnings
         ]
+    }
+
+    /**
+     * DAR-BE-289. Builds one rule set's DRL into the KieRepository under a release id of ITS OWN (the rule set and its rule
+     * signature) and answers that id. Without a pom every KieFileSystem builds under Drools' one default release id, so
+     * newKieContainer(kb.getKieModule().getReleaseId()) returned whichever module was built LAST: two runs compiling at
+     * once (an audit's automations run in parallel) took each other's rules — a totals run executing the payments
+     * run's comparison, or a run firing nothing because the rules it got name fields its rows do not have.
+     */
+    static ReleaseId buildRuleModule(KieServices ks, String ruleSetId, String signature, String packageName, String drlText) {
+        String artifact = sanitizePackagePart(ruleSetId)
+        String version = "1.0.0-" + MessageDigest.getInstance("SHA-256").digest((signature ?: "").getBytes("UTF-8"))
+                .encodeHex().toString().take(16)
+        ReleaseId releaseId = ks.newReleaseId("darpan.rules", artifact, version)
+        KieFileSystem kfs = ks.newKieFileSystem()
+        kfs.generateAndWritePomXML(releaseId)
+        kfs.write("src/main/resources/${packageName.replace('.', '/')}/${artifact}.drl", drlText)
+        KieBuilder kb = ks.newKieBuilder(kfs)
+        kb.buildAll()
+        if (kb.getResults().hasMessages(Message.Level.ERROR)) {
+            List<String> errors = (kb.getResults().getMessages(Message.Level.ERROR) ?: [])
+                    .collect { Message m -> m?.text ?: m?.toString() }
+                    .findAll { it }
+            String errSummary = errors ? errors.join(" | ") : kb.getResults().toString()
+            throw new IllegalArgumentException("Drools build errors for ${ruleSetId}: ${errSummary}")
+        }
+        return releaseId
     }
 
     private static List fetchActiveRules(def ec, String ruleSetId) {

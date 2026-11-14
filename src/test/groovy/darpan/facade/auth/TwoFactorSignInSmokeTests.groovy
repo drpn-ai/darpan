@@ -10,6 +10,7 @@ import org.apache.logging.log4j.core.LoggerContext
 import org.apache.logging.log4j.core.appender.AbstractAppender
 import org.apache.logging.log4j.core.config.LoggerConfig
 import org.apache.logging.log4j.core.config.Property
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -55,8 +56,18 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
 
     @BeforeAll
     void setup() {
+        // The same relying party the passkey tests name, so passkey-dependent refusals (begin#PasskeyProof) do not hang
+        // on whether this JVM's Moqui conf happens to carry webapp_allow_origins (MoquiDevConf does; CI's conf does not).
+        System.setProperty("darpan.webauthn.rpId", "localhost")
+        System.setProperty("darpan.webauthn.origins", "http://localhost:5173")
         boot("two-factor-smoke")
         ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TENANT_B, description: "TF tenant B"]).createOrUpdate()
+    }
+
+    @AfterAll
+    void clearRelyingParty() {
+        System.clearProperty("darpan.webauthn.rpId")
+        System.clearProperty("darpan.webauthn.origins")
     }
 
     @BeforeEach

@@ -9,6 +9,11 @@ Review each record before loading into an environment.
     <!-- Added records from data/SourceSystemConnectorSeedDataFields.xml -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].itemQuantity" label="Item quantity" fieldType="string" sequenceNum="13" description="DAR-BE-251: the order's units, its item rows' quantities summed (HotWax keeps one row per unit), read from the items by order id only when a rule reads it. Compared against Shopify itemQuantity (Item Sync: itemQuantity = itemQuantity); orderItemCount is a copy of Shopify's line count, not this."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].itemQuantity" label="Item quantity" fieldType="String" sequenceNum="12" description="DAR-BE-251: units ordered (Order.subtotalLineItemsQuantity, the sum of line quantities as ordered, before refunds or removals). Compared against HotWax itemQuantity (Item Sync: itemQuantity = itemQuantity)."/>
+    <!-- Added records from data/TenantWelcomeEmailSeedData.xml (DAR-BE-290). SYSTEM EmailServer already exists (2.1.0). -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_TENANT_WELCOME" description="Darpan tenant welcome"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="You're in: ${tenantLabel} on Darpan"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/TenantWelcome.xml"/>
     <!-- Added records from data/TwoFactorSeedData.xml (DAR-BE-264, DAR-BE-270 passkeys). ORDERING NOTE: EnumerationType before Enumeration;
          policy rows by id alone (every role optional; reloading never clears a date). -->
     <moqui.basic.EnumerationType description="Two-Factor Factor Type" enumTypeId="DarpanTfFactorType"/>

@@ -24,6 +24,7 @@ admin.KnowledgeAdminServices.search#Knowledge
 admin.KnowledgeAdminServices.store#KnowledgeEntry
 admin.MembershipAdminServices.add#TenantMember
 admin.MembershipAdminServices.remove#TenantMember
+admin.MembershipAdminServices.send#TenantWelcome
 admin.MembershipAdminServices.update#TenantMemberRole
 admin.MigrationAdminServices.dryRun#Migration
 admin.MigrationAdminServices.dryRun#PendingMigrations

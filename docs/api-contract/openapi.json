@@ -102,6 +102,9 @@
                                         "$ref": "#/components/schemas/RemoveTenantMemberRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/SendTenantWelcomeRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/UpdateTenantMemberRoleRequest"
                                     },
                                     {
@@ -848,6 +851,7 @@
                                         "admin.KnowledgeAdminServices.store#KnowledgeEntry": "#/components/schemas/StoreKnowledgeEntryRequest",
                                         "admin.MembershipAdminServices.add#TenantMember": "#/components/schemas/AddTenantMemberRequest",
                                         "admin.MembershipAdminServices.remove#TenantMember": "#/components/schemas/RemoveTenantMemberRequest",
+                                        "admin.MembershipAdminServices.send#TenantWelcome": "#/components/schemas/SendTenantWelcomeRequest",
                                         "admin.MembershipAdminServices.update#TenantMemberRole": "#/components/schemas/UpdateTenantMemberRoleRequest",
                                         "admin.MigrationAdminServices.dryRun#Migration": "#/components/schemas/DryRunMigrationRequest",
                                         "admin.MigrationAdminServices.dryRun#PendingMigrations": "#/components/schemas/DryRunPendingMigrationsRequest",
@@ -1180,6 +1184,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/RemoveTenantMemberResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SendTenantWelcomeResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateTenantMemberRoleResponse"
@@ -4187,6 +4194,10 @@
                     "permissionUserGroupId": {
                         "type": "string",
                         "description": "One of the assignable tenant roles\n                (DARPAN_TENANT_ADMIN, DARPAN_TENANT_USER, DARPAN_COMPANY_EDITOR, DARPAN_COMPANY_VIEW_ONLY)."
+                    },
+                    "sendWelcome": {
+                        "type": "boolean",
+                        "description": "DAR-BE-290. Queue the tenant welcome\n                email (DARPAN_TENANT_WELCOME) after the grant. Skipped, without failing the grant, when the account\n                has no email address or is disabled."
                     }
                 },
                 "required": [
@@ -4202,6 +4213,10 @@
                     "ok": {
                         "type": "boolean",
                         "description": "True when the member was added."
+                    },
+                    "welcomeQueued": {
+                        "type": "boolean",
+                        "description": "True when the welcome email was queued."
                     }
                 }
             },
@@ -4345,6 +4360,97 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/RemoveTenantMemberResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SendTenantWelcomeParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "Member to email."
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant they are a member of."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "tenantUserGroupId"
+                ],
+                "description": "DAR-BE-290. Send the tenant welcome email (DARPAN_TENANT_WELCOME, from the SYSTEM email server) to a\n            current member of a tenant: which tenant, their role, their username and where to sign in. Never a\n            password. add#TenantMember already sends it on a grant; this is the re-send, and the backfill for members\n            granted before it existed. Queued async: ok means queued, not delivered (a failed send is an EmailMessage\n            that never reaches ES_SENT)."
+            },
+            "SendTenantWelcomeResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the email was queued."
+                    },
+                    "emailAddress": {
+                        "type": "string",
+                        "description": "Where it was sent."
+                    }
+                }
+            },
+            "SendTenantWelcomeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MembershipAdminServices.send#TenantWelcome",
+                "x-darpan-method": "admin.MembershipAdminServices.send#TenantWelcome",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MembershipAdminServices.send#TenantWelcome"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SendTenantWelcomeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SendTenantWelcomeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MembershipAdminServices.send#TenantWelcome. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SendTenantWelcomeResult"
                     }
                 },
                 "required": [
@@ -35263,6 +35369,7 @@
         "admin.KnowledgeAdminServices.store#KnowledgeEntry": "StoreKnowledgeEntry",
         "admin.MembershipAdminServices.add#TenantMember": "AddTenantMember",
         "admin.MembershipAdminServices.remove#TenantMember": "RemoveTenantMember",
+        "admin.MembershipAdminServices.send#TenantWelcome": "SendTenantWelcome",
         "admin.MembershipAdminServices.update#TenantMemberRole": "UpdateTenantMemberRole",
         "admin.MigrationAdminServices.dryRun#Migration": "DryRunMigration",
         "admin.MigrationAdminServices.dryRun#PendingMigrations": "DryRunPendingMigrations",

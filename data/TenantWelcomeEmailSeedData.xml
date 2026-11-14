@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<entity-facade-xml type="darpan-seed">
+    <!-- DAR-BE-290 — the tenant welcome email, sent when a user is granted a tenant (admin add#TenantMember) or re-sent
+         with admin send#TenantWelcome. From support@drpn.ai like the other Darpan mail (PasswordResetEmailSeedData.xml
+         seeds the SYSTEM EmailServer row this FKs, and loads first). The subject is expanded with the body parameters
+         (firstName, username, tenantLabel, rolePhrase, appBaseUrl). -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_TENANT_WELCOME" description="Darpan tenant welcome"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="You're in: ${tenantLabel} on Darpan"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/TenantWelcome.xml"/>
+</entity-facade-xml>

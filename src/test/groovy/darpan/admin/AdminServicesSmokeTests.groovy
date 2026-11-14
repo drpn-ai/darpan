@@ -1,8 +1,10 @@
 package darpan.admin
 
+import darpan.facade.auth.PasswordResetSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -72,11 +74,14 @@ class AdminServicesSmokeTests {
             "admin.MembershipAdminServices.add#TenantMember",
             "admin.MembershipAdminServices.update#TenantMemberRole",
             "admin.MembershipAdminServices.remove#TenantMember",
+            "admin.MembershipAdminServices.send#TenantWelcome",
             "admin.UserAdminServices.add#DarpanAdmin",
             "admin.UserAdminServices.remove#DarpanAdmin",
     ]
 
     private int uniqueCounter = 0
+    private Closure originalSendEmail
+    private List<Map> sent = Collections.synchronizedList([])
 
     @BeforeAll
     void setup() {
@@ -89,11 +94,30 @@ class AdminServicesSmokeTests {
                 .location("component://darpan/data/SecuritySeedData.xml")
                 .dummyFks(true)
                 .load()
+        // DAR-BE-290: the SYSTEM EmailServer row (PasswordReset seed) first, then the welcome template that FKs it.
+        ["PasswordResetEmailSeedData.xml", "TenantWelcomeEmailSeedData.xml"].each { String file ->
+            ec.entity.makeDataLoader().location("component://darpan/data/${file}").dummyFks(true).load()
+        }
     }
 
     @AfterAll
     void cleanup() {
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
+    }
+
+    /** Mail never leaves the JVM: PasswordResetSupport.sendEmail is the seam the welcome email goes through. */
+    @BeforeEach
+    void recordMail() {
+        originalSendEmail = PasswordResetSupport.sendEmail
+        sent.clear()
+        PasswordResetSupport.sendEmail = { def ecArg, String templateId, String to, Map params ->
+            sent << [templateId: templateId, to: to, params: params]
+        }
+    }
+
+    @AfterEach
+    void restoreMail() {
+        PasswordResetSupport.sendEmail = originalSendEmail
     }
 
     @BeforeEach
@@ -587,7 +611,126 @@ class AdminServicesSmokeTests {
         assertEquals(groupRows[0].fromDate, permissionRows[0].fromDate,
                 "both rows must share one fromDate so history stays joinable")
         assertAudit("admin.MembershipAdminServices.add#TenantMember", "Membership", "${DELTA}:${PLAIN_ID}",
-                "Added ${PLAIN_ID} to ${DELTA} as DARPAN_COMPANY_EDITOR.")
+                "Added ${PLAIN_ID} to ${DELTA} as DARPAN_COMPANY_EDITOR. Welcome email queued.")
+        assertEquals(true, out.result.welcomeQueued)
+        assertEquals(1, sent.size(), "one welcome email per grant")
+        assertEquals(AdminMembershipSupport.TEMPLATE_TENANT_WELCOME, sent[0].templateId)
+        assertEquals("admsvc.plain@example.com", sent[0].to)
+        assertEquals("Plain", sent[0].params.firstName)
+        assertEquals(PLAIN_USERNAME, sent[0].params.username)
+        assertEquals("beta lower", sent[0].params.tenantLabel)
+        assertEquals("as an Editor", sent[0].params.rolePhrase)
+        assertTrue(sent[0].params.containsKey("appBaseUrl"))
+        assertFalse(sent[0].params.values().any { it?.toString()?.contains(STRONG_PASSWORD) }, "never a password")
+    }
+
+    @Test
+    void addTenantMemberSendsNoWelcomeWhenToldNotToOrWhenTheAccountCannotReceiveIt() {
+        Map quiet = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: PLAIN_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_USER", sendWelcome: false])
+        assertNoErrors(quiet)
+        assertEquals(true, quiet.result.ok)
+        assertEquals(false, quiet.result.welcomeQueued)
+        assertAudit("admin.MembershipAdminServices.add#TenantMember", "Membership", "${DELTA}:${PLAIN_ID}",
+                "Added ${PLAIN_ID} to ${DELTA} as DARPAN_TENANT_USER.")
+
+        // A disabled account, and one with no email address, still get the grant; the email is skipped, not an error.
+        upsert("moqui.security.UserAccount", [userId: TARGET_ID, emailAddress: null])
+        Map dormant = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: DORMANT_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_COMPANY_VIEW_ONLY"])
+        Map noEmail = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: TARGET_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_COMPANY_VIEW_ONLY"])
+        [dormant, noEmail].each { Map out ->
+            assertNoErrors(out)
+            assertEquals(true, out.result.ok)
+            assertEquals(false, out.result.welcomeQueued)
+        }
+        assertEquals(1, activePermissionRows(DORMANT_ID, DELTA).size())
+        assertEquals(1, activePermissionRows(TARGET_ID, DELTA).size())
+        assertEquals([], sent)
+    }
+
+    @Test
+    void sendTenantWelcomeEmailsACurrentMemberTheirRoleAndAuditsIt() {
+        Map out = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: TARGET_ID, tenantUserGroupId: ALPHA])
+
+        assertNoErrors(out)
+        assertEquals(true, out.result.ok)
+        assertEquals("admsvc.target@example.com", out.result.emailAddress)
+        assertEquals(1, sent.size())
+        assertEquals(AdminMembershipSupport.TEMPLATE_TENANT_WELCOME, sent[0].templateId)
+        assertEquals("admsvc.target@example.com", sent[0].to)
+        assertEquals("Target", sent[0].params.firstName)
+        assertEquals("Alpha Co", sent[0].params.tenantLabel)
+        // The active role, not the expired view-only row ALPHA also holds for this user.
+        assertEquals("as a User", sent[0].params.rolePhrase)
+        assertAudit("admin.MembershipAdminServices.send#TenantWelcome", "Membership", "${ALPHA}:${TARGET_ID}",
+                "Welcome email for ${ALPHA} queued to admsvc.target@example.com.")
+    }
+
+    @Test
+    void welcomeTemplateComesFromSupportAndItsSubjectNamesTheTenant() {
+        def template = ec.entity.find("moqui.basic.email.EmailTemplate")
+                .condition("emailTemplateId", AdminMembershipSupport.TEMPLATE_TENANT_WELCOME).disableAuthz().one()
+        assertNotNull(template)
+        assertEquals("SYSTEM", template.emailServerId)
+        assertEquals(System.getenv("DARPAN_MAIL_FROM") ?: "support@drpn.ai", ec.resource.expand((String) template.fromAddress, ""))
+        assertEquals("Darpan", template.fromName)
+        ec.context.push()
+        try {
+            ec.context.put("tenantLabel", "Malbon")
+            assertEquals("You're in: Malbon on Darpan", ec.resource.expand((String) template.subject, ""))
+        } finally {
+            ec.context.pop()
+        }
+    }
+
+    @Test
+    void welcomeBodySaysWhereToSignInAndFallsBackWhenTheInstanceHasNoAppAddress() {
+        Map params = [firstName: "Rakshit", username: "rakshit.singh", tenantLabel: "Malbon", rolePhrase: "as a User"]
+        String html = renderBody("component://darpan/screen/email/TenantWelcome.xml", params + [appBaseUrl: "https://app.drpn.ai"])
+        assertTrue(html.contains("Hi Rakshit,"), html)
+        assertTrue(html.contains("You now have access to Malbon on Darpan, as a User."), html)
+        assertTrue(html.contains("Sign in at https://app.drpn.ai with your Darpan username (rakshit.singh)"), html)
+        assertTrue(html.contains("Questions? Just reply."), html)
+        assertFalse(html.contains("<b>") || html.contains("<strong>") || html.contains("href"), html)
+
+        String bare = renderBody("component://darpan/screen/email/TenantWelcome.xml", params + [appBaseUrl: null])
+        assertTrue(bare.contains("Sign in to Darpan with your username (rakshit.singh)"), bare)
+        assertFalse(bare.contains("Sign in at"), bare)
+    }
+
+    @Test
+    void sendTenantWelcomeRefusalsSendNothing() {
+        Map notMember = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: PLAIN_ID, tenantUserGroupId: DELTA])
+        assertEquals(["${PLAIN_ID} is not a member of ${DELTA}.".toString()], notMember.errors)
+        assertNotEquals(true, notMember.result?.ok)
+
+        Map deactivated = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: TARGET_ID, tenantUserGroupId: BRAVO])
+        assertEquals(["Tenant ${BRAVO} is deactivated.".toString()], deactivated.errors)
+
+        Map notTenant = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: TARGET_ID, tenantUserGroupId: "DARPAN_USER"])
+        assertEquals(["Tenant DARPAN_USER was not found."], notTenant.errors)
+
+        Map unknownUser = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: "NOPE", tenantUserGroupId: ALPHA])
+        assertEquals(["User NOPE was not found."], unknownUser.errors)
+
+        Map disabled = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: DORMANT_ID, tenantUserGroupId: ALPHA])
+        assertEquals(["${DORMANT_ID} is disabled.".toString()], disabled.errors)
+
+        upsert("moqui.security.UserAccount", [userId: PLAIN_ID, emailAddress: "  "])
+        Map noEmail = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: PLAIN_ID, tenantUserGroupId: ALPHA])
+        assertEquals(["${PLAIN_ID} has no email address.".toString()], noEmail.errors)
+
+        assertEquals([], sent)
+        assertNoAudit()
     }
 
     @Test
@@ -618,6 +761,7 @@ class AdminServicesSmokeTests {
         assertEquals([], activeGroupRows(PLAIN_ID, BRAVO))
         assertEquals(["DARPAN_TENANT_USER"], activePermissionRows(TARGET_ID, ALPHA)*.permissionUserGroupId)
         assertNoAudit()
+        assertEquals([], sent)
     }
 
     @Test
@@ -730,6 +874,7 @@ class AdminServicesSmokeTests {
                 "admin.MembershipAdminServices.add#TenantMember"   : [userId: PLAIN_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_ADMIN"],
                 "admin.MembershipAdminServices.update#TenantMemberRole": [userId: TARGET_ID, tenantUserGroupId: ALPHA, permissionUserGroupId: "DARPAN_TENANT_ADMIN"],
                 "admin.MembershipAdminServices.remove#TenantMember": [userId: TARGET_ID, tenantUserGroupId: ALPHA],
+                "admin.MembershipAdminServices.send#TenantWelcome" : [userId: TARGET_ID, tenantUserGroupId: ALPHA],
                 // A tenant admin promoting themselves, and demoting the only super admin.
                 "admin.UserAdminServices.add#DarpanAdmin"          : [userId: PLAIN_ID, darpanRoleId: "DARPAN_SUPER_ADMIN"],
                 "admin.UserAdminServices.remove#DarpanAdmin"       : [userId: SUPER_ID],
@@ -761,6 +906,7 @@ class AdminServicesSmokeTests {
         assertEquals([], activeGroupRows(PLAIN_ID, "DARPAN_SUPER_ADMIN"))
         assertEquals(1, activeGroupRows(SUPER_ID, "DARPAN_SUPER_ADMIN").size())
         assertNoAudit()
+        assertEquals([], sent, "a refused call sends no email")
     }
 
     // ---------------------------------------------------------------- Darpan admins (DAR-ADMIN-011)
@@ -990,6 +1136,16 @@ class AdminServicesSmokeTests {
     private String uniqueUsername() {
         // Deliberately NOT admsvc.*: created users persist across tests and must not join the list search.
         return "newuser.${System.currentTimeMillis()}.${uniqueCounter++}".toString()
+    }
+
+    private String renderBody(String location, Map params) {
+        ec.context.push()
+        try {
+            ec.context.putAll(params)
+            return ec.screen.makeRender().rootScreen(location).webappName("webroot").renderMode("html").render()
+        } finally {
+            ec.context.pop()
+        }
     }
 
     private void upsert(String entityName, Map fields) {

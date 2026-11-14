@@ -10,10 +10,17 @@
             <parameter name="tenantUserGroupId" required="true"><description>Target tenant.</description></parameter>
             <parameter name="permissionUserGroupId" required="true"><description>One of the assignable tenant roles
                 (DARPAN_TENANT_ADMIN, DARPAN_TENANT_USER, DARPAN_COMPANY_EDITOR, DARPAN_COMPANY_VIEW_ONLY).</description></parameter>
+            <parameter name="sendWelcome" type="Boolean" default="true"><description>DAR-BE-290. Queue the tenant welcome
+                email (DARPAN_TENANT_WELCOME) after the grant. Skipped, without failing the grant, when the account
+                has no email address or is disabled.</description></parameter>
         </in-parameters>
-        <out-parameters><parameter name="ok" type="Boolean"><description>True when the member was added.</description></parameter></out-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the member was added.</description></parameter>
+            <parameter name="welcomeQueued" type="Boolean"><description>True when the welcome email was queued.</description></parameter>
+        </out-parameters>
         <actions>
             <set field="ok" from="false"/>
+            <set field="welcomeQueued" from="false"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <if condition="!(permissionUserGroupId in darpan.admin.AdminMembershipSupport.ASSIGNABLE_TENANT_ROLES)">
                 <return error="true" message="${permissionUserGroupId ?: '(missing)'} is not an assignable tenant role."/></if>
@@ -42,9 +49,58 @@
                     in-map="[userGroupId: tenantUserGroupId, userId: userId, fromDate: fromDate]"/>
             <service-call name="create#darpan.auth.TenantUserPermissionGroupMember" in-map="[tenantUserGroupId: tenantUserGroupId,
                     userId: userId, permissionUserGroupId: permissionUserGroupId, fromDate: fromDate]"/>
+            <!-- The welcome rides in this grant's one audit row; send#TenantWelcome audits only a stand-alone send. -->
+            <set field="welcomeQueued" from="sendWelcome != false &amp;&amp; memberAccount.emailAddress?.trim() as boolean &amp;&amp; memberAccount.disabled != 'Y'"/>
             <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
                     serviceName: 'admin.MembershipAdminServices.add#TenantMember', targetType: 'Membership', targetId: tenantUserGroupId + ':' + userId,
-                    detailText: 'Added ' + userId + ' to ' + tenantUserGroupId + ' as ' + permissionUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+                    detailText: 'Added ' + userId + ' to ' + tenantUserGroupId + ' as ' + permissionUserGroupId + '.' +
+                        (welcomeQueued ? ' Welcome email queued.' : ''), auditTimestamp: ec.user.nowTimestamp]"/>
+            <!-- Last, after every write: the send is async, so it must not go out for a grant that then fails. -->
+            <if condition="welcomeQueued"><script>darpan.admin.AdminMembershipSupport.queueWelcome(ec, memberAccount, tenantGroup, permissionUserGroupId)</script></if>
+        </actions>
+    </service>
+
+    <service verb="send" noun="TenantWelcome" allow-remote="true">
+        <description>DAR-BE-290. Send the tenant welcome email (DARPAN_TENANT_WELCOME, from the SYSTEM email server) to a
+            current member of a tenant: which tenant, their role, their username and where to sign in. Never a
+            password. add#TenantMember already sends it on a grant; this is the re-send, and the backfill for members
+            granted before it existed. Queued async: ok means queued, not delivered (a failed send is an EmailMessage
+            that never reaches ES_SENT).</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>Member to email.</description></parameter>
+            <parameter name="tenantUserGroupId" required="true"><description>Tenant they are a member of.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the email was queued.</description></parameter>
+            <parameter name="emailAddress"><description>Where it was sent.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup">
+                <field-map field-name="userGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                <return error="true" message="Tenant ${tenantUserGroupId ?: '(missing)'} was not found."/></if>
+            <entity-find-one entity-name="darpan.auth.TenantSetting" value-field="tenantSetting">
+                <field-map field-name="companyUserGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantSetting?.disabled == 'Y'">
+                <return error="true" message="Tenant ${tenantUserGroupId} is deactivated."/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="memberAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="memberAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <if condition="memberAccount.disabled == 'Y'"><return error="true" message="${userId} is disabled."/></if>
+            <if condition="!memberAccount.emailAddress?.trim()"><return error="true" message="${userId} has no email address."/></if>
+            <entity-find entity-name="darpan.auth.TenantUserPermissionGroupMember" list="activePermissionRows">
+                <econdition field-name="tenantUserGroupId"/><econdition field-name="userId"/>
+                <econdition field-name="thruDate" from="null"/></entity-find>
+            <if condition="!activePermissionRows">
+                <return error="true" message="${userId} is not a member of ${tenantUserGroupId}."/></if>
+            <set field="ok" from="true"/>
+            <set field="emailAddress" from="memberAccount.emailAddress.trim()"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.MembershipAdminServices.send#TenantWelcome', targetType: 'Membership', targetId: tenantUserGroupId + ':' + userId,
+                    detailText: 'Welcome email for ' + tenantUserGroupId + ' queued to ' + emailAddress + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+            <script>darpan.admin.AdminMembershipSupport.queueWelcome(ec, memberAccount, tenantGroup, activePermissionRows[0].permissionUserGroupId)</script>
         </actions>
     </service>
 

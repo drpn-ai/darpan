@@ -180,7 +180,14 @@ class AuditChangeLevers {
                  findings: ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
                          .condition("statementId", st.statementId).useCache(false).count()] as Map
             }
-            if (kind == "ADD_CHECK") state.checks = checksOfAudit(ec, tenantId, audit)
+            if (kind == "ADD_CHECK") {
+                state.checks = checksOfAudit(ec, tenantId, audit)
+                // DAR-BE-287. A check code is unique per tenant: the codes other audits use, so a new check never collides.
+                Set<String> own = ((List<Map>) state.checks).collect { it.id as String } as Set<String>
+                state.otherCheckCodes = ec.entity.find("darpan.audit.AuditCheck").condition("companyUserGroupId", tenantId)
+                        .selectField("checkCode").useCache(false).list()*.checkCode.collect { it as String }
+                        .findAll { it && !(it in own) }.unique().sort()
+            }
         }
         return state
     }
@@ -359,7 +366,7 @@ class AuditChangeLevers {
                 state.add = [text: text, category: after.category as String, weight: (after.weight ?: "derived") as String]
                 break
             case "ADD_CHECK":
-                String checkCode = checkCodeOf(after)
+                String checkCode = checkCodeOf(after, state)
                 List<Map> auditChecks = (List<Map>) state.checks
                 if (auditChecks.any { Map c -> c.id == checkCode }) throw new IllegalArgumentException(NO_CHANGE_CHECK_MESSAGE)
                 String statementCode = after.statementCode as String
@@ -434,7 +441,7 @@ class AuditChangeLevers {
                 return [text: text, statement: added == null ? null : pick(added, ["id", "text", "active"])]
             case "ADD_CHECK":
                 // The check is found by its code (a duplicate is refused at merge): null before the add, its run after it.
-                String checkCode = checkCodeOf(after)
+                String checkCode = checkCodeOf(after, state)
                 Map addedCheck = ((List<Map>) state.checks).find { Map c -> c.id == checkCode }
                 return [id: checkCode, check: addedCheck == null ? null : pick(addedCheck, ["id", "savedRunId"])]
             case "STATEMENT_EDIT":
@@ -741,13 +748,27 @@ class AuditChangeLevers {
         }
     }
 
-    /** The check's code: a revert's own id, else the proposal's label as lower-case words joined by hyphens. */
-    static String checkCodeOf(Map after) {
-        String label = (normalize(after.get("label")) ?: "").toLowerCase(Locale.ROOT)
-        String slug = label.replaceAll("[^a-z0-9]+", "-").replaceAll("^-+", "").take(60).replaceAll("-+\$", "")
-        String code = normalize(after.get("id")) ?: slug
-        if (!code) throw new IllegalArgumentException("after.label needs letters or digits to make a check id from")
+    /**
+     * The check's code: a revert's own id, else the proposal's label as lower-case words joined by hyphens. DAR-BE-287: a code
+     * is unique per tenant, so when another audit already uses it (state.otherCheckCodes) the audit's code is added, then -2,
+     * -3; the same state always gives the same code, so plan, apply and the after-state find agree.
+     */
+    static String checkCodeOf(Map after, Map state = null) {
+        String own = normalize(after.get("id"))
+        if (own) return own
+        String slug = slugOf(after.get("label"))
+        if (!slug) throw new IllegalArgumentException("after.label needs letters or digits to make a check id from")
+        Set<String> taken = ((List) (state?.otherCheckCodes ?: [])).collect { it as String } as Set<String>
+        if (!(slug in taken)) return slug
+        String base = slugOf("${slug} ${state?.audit ?: 'audit'}")
+        String code = base
+        for (int n = 2; code in taken; n++) code = "${base.take(56)}-${n}".toString()
         return code
+    }
+
+    private static String slugOf(Object text) {
+        String label = (normalize(text) ?: "").toLowerCase(Locale.ROOT)
+        return label.replaceAll("[^a-z0-9]+", "-").replaceAll("^-+", "").take(60).replaceAll("-+\$", "")
     }
 
     private static Map pick(Map m, List<String> keys) {

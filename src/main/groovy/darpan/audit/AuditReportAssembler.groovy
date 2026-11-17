@@ -836,6 +836,7 @@ class AuditReportAssembler {
         Map actual = f.actualAmount == null ? null : money(f.actualAmount as BigDecimal, currency) + [source: f.actualSource]
         def conclusion = f.conclusionEnumId ? ec.entity.find("moqui.basic.Enumeration").condition("enumId", f.conclusionEnumId).useCache(true).one() : null
         Map<String, String> fill = templateValues(f, recordRows)
+        Map<String, String> recordFields = recordFieldValues(recordRows)
         String fixWhere = check.fixWhereEnumId ? systemKey(check.fixWhereEnumId as String) : (records ? records.keySet().first() as String : null)
 
         Timestamp lastChecked = (f.lastCheckedStamp ?: events.with { it ? it.last().eventStamp : null }) as Timestamp
@@ -871,14 +872,14 @@ class AuditReportAssembler {
                         fix      : [
                                 owner        : check.fixOwner ?: "Not assigned yet",
                                 where        : fixWhere,
-                                action       : causeFixOf(ec, tenantId, check, f.conclusionEnumId as String, evidenceChecks, fill) ?:
-                                        fillTemplate(check.fixActionTemplate as String, fill) ?:
+                                action       : causeFixOf(ec, tenantId, check, f.conclusionEnumId as String, evidenceChecks, fill, recordFields) ?:
+                                        fillTemplate(check.fixActionTemplate as String, recordFields + fill) ?:
                                         "Correct the record so that the check no longer reports it: ${f.headline}.".toString(),
                                 verify       : [
                                         by        : VERIFY_BY,
                                         // The check's schedule arrives with DAR-BE-092 (automation linked to the check).
                                         nextCheck : null,
-                                        passesWhen: fillTemplate(check.passesWhenTemplate as String, fill) ?:
+                                        passesWhen: fillTemplate(check.passesWhenTemplate as String, recordFields + fill) ?:
                                                 "The check looks at ${displayKey(f.recordKey as String)} and no longer reports it.".toString()],
                                 darpanChanges: DARPAN_CHANGES],
                         history  : events.collect { Map e ->
@@ -937,7 +938,7 @@ class AuditReportAssembler {
      * shows on every finding it explains.
      */
     static String causeFixOf(def ec, String tenantId, Map check, String conclusionEnumId, List<Map> evidenceChecks,
-                                     Map<String, String> values) {
+                                     Map<String, String> values, Map<String, String> recordFields = [:]) {
         if (!conclusionEnumId || !check.savedRunId) return null
         List scopeIds = tenantRows(ec, "darpan.rule.RuleSetCompareScope", tenantId).condition("ruleSetId", check.savedRunId)
                 .list()*.compareScopeId
@@ -948,21 +949,36 @@ class AuditReportAssembler {
         if (rule == null) return null
         List<Map> conditions = tenantRows(ec, "darpan.rule.RuleSetConclusionCondition", tenantId)
                 .condition("compareScopeId", rule.compareScopeId).list()*.getMap()
-        return causeFix(rule.fixActionTemplate as String, conditions, evidenceChecks, values)
+        return causeFix(rule.fixActionTemplate as String, conditions, evidenceChecks, values, recordFields)
     }
 
     /**
      * The cause's fix filled: the check's values plus each of the scope's condition fields, valued from the finding's
      * evidence by the condition's checkLabel (the evidence is what those conditions read). Pure.
      */
-    static String causeFix(String template, List<Map> conditions, List<Map> evidenceChecks, Map<String, String> values) {
+    static String causeFix(String template, List<Map> conditions, List<Map> evidenceChecks, Map<String, String> values,
+                           Map<String, String> recordFields = [:]) {
         Map<String, String> byLabel = evidenceChecks.collectEntries { [(it.label): it.checkValue] }
         Map<String, String> fields = [:]
         conditions.each { Map c ->
             String value = byLabel[c.checkLabel] as String
             if (c.fieldExpression && value != null) fields.putIfAbsent(c.fieldExpression as String, value)
         }
-        return fillTemplate(template, fields + values)
+        return fillTemplate(template, recordFields + fields + values)
+    }
+
+    /**
+     * DAR-BE-294. The scalar fields of the finding's stored records (AuditFindingRecord.recordData), first record first:
+     * the lowest-ranked fill for a fix or passes-when placeholder, so {orderName} fills without a condition reading it.
+     */
+    static Map<String, String> recordFieldValues(List<Map> recordRows) {
+        Map<String, String> out = [:]
+        recordRows.each { Map r ->
+            recordData(r.recordData)?.each { k, v ->
+                if (v != null && !(v instanceof Map) && !(v instanceof Collection)) out.putIfAbsent(k as String, v.toString())
+            }
+        }
+        return out
     }
 
     // ---------------------------------------------------------------------------------------------------------

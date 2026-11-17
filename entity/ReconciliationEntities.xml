@@ -1184,7 +1184,8 @@
             <description>DAR-BE-190. The record field holding the OMS order item seq id (on SALES_LINES, the template's
                 orderLineId: custcol_hc_order_line_id). With it the record gets omsItemStatusId, that item's HotWax
                 statusId (NOT_IN_OMS: no item of the order; NO_SUCH_ITEM: the order lacks this one), instead of
-                omsStatusId. Needs omsStatusKeyField.</description>
+                omsStatusId. DAR-BE-294: an approved line also gets its own ship group (omsItemShipGroupSeqId), where
+                HotWax holds it (omsItemFacilityId) and how it ships (omsItemShipmentMethodTypeId). Needs omsStatusKeyField.</description>
         </field>
         <field name="omsShipGroupsField" type="text-short">
             <description>DAR-BE-245. The record field holding the order's NetSuite fulfillments by location

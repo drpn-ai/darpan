@@ -2174,12 +2174,9 @@
             <parameter name="reconciliationExecutionId"/>
         </out-parameters>
         <actions>
-            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for runs.')"/>
-            <!-- Final review I1: every question runs the pipeline, which needs WRITE access; refuse here, not
+            <!-- Every question runs run#SavedRunDiff, which needs the same run access (DAR-BE-292); refused here, not
                  question by question after an execution id was already handed back. -->
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for runs.')"/>
-            </if>
+            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for runs.')"/>
             <!-- Final review I3: archived, switched off, no questions, no window: refused before going async. -->
             <if condition="!ec.message.hasError()">
                 <script>darpan.reconciliation.flowchart.RunFlowchartSupport.validateRunnable(ec, reconciliationId, windowStartDate, windowEndDate)</script>

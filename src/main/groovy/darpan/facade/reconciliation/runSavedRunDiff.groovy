@@ -123,7 +123,7 @@ if ((requestedFile1SystemEnumId && !requestedFile2SystemEnumId) || (!requestedFi
 boolean systemTenantRunValue = ec.context.get("systemTenantRun") == true &&
         !TenantAccessSupport.currentUserId(ec) && TenantAccessSupport.activeSystemTenantUserGroupId()
 if (!ec.message.hasError() && !systemTenantRunValue) {
-    TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for reconciliation runs.")
+    TenantAccessSupport.requireActiveTenantRunAccess(ec, "Your active tenant only has view access for reconciliation runs.")
 }
 
 // DAR-BE-163: a retry of a failed run reuses the sides it finished reading (extractApiSource below) and runs over that

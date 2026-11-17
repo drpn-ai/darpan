@@ -44,7 +44,7 @@ if (!ec.message.hasError()) {
 }
 
 if (!ec.message.hasError()) {
-    TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for reconciliation runs.")
+    TenantAccessSupport.requireActiveTenantRunAccess(ec, "Your active tenant only has view access for reconciliation runs.")
 }
 
 if (!ec.message.hasError()) {

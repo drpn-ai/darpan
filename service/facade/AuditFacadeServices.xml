@@ -109,7 +109,7 @@
             <parameter name="submitted" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for audits.')"/>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for audits.')"/>
             <if condition="ec.message.hasError()"><return error="true"/></if>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
@@ -442,7 +442,7 @@
                 <parameter name="run" type="Map"/></parameter>
         </out-parameters>
         <actions>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for running audits.')"/>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for running audits.')"/>
             <if condition="!ec.message.hasError()">
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>

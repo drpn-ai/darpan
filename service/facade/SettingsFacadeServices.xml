@@ -557,7 +557,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for SFTP settings.')"/>
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for SFTP settings.')"/>
             </if>
             <!-- DAR-BE-080: a stored password or key is reused only while the server is the same. When the host or port
                  moved, NO stored secret is carried over (not even the other kind than the one sent), so a moved server
@@ -725,7 +725,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite auth settings.')"/>
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for NetSuite auth settings.')"/>
             </if>
             <!-- DAR-BE-255 (as DAR-BE-080 for SFTP, database and HotWax): a stored password, token or private key is reused
                  only while the token URL is the same. The token URL names the NetSuite account, and its allow-list admits
@@ -821,7 +821,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite auth settings.')"/>
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for NetSuite auth settings.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <!-- Counted past the tenant filter on purpose: a user anywhere is a reason to refuse, and the
@@ -1076,7 +1076,7 @@
                 <if condition="accountDecision.error"><message error="true">${accountDecision.error}</message></if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite endpoint settings.')"/>
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for NetSuite endpoint settings.')"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; !nsRestletConfigIdValue">
                 <set field="nsRestletConfigIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.NsRestletConfig', 'nsRestletConfigId')"/>

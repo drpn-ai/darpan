@@ -779,6 +779,29 @@ class SavedRunsFacadeSmokeTests {
         assertTrue((runResult.errors ?: []).join(" ").contains("view access"))
     }
 
+    // DAR-BE-292 (Aditi's permissions sheet): running a saved run is the run tier's, so a tenant user runs one too.
+    @Test
+    void tenantUserCanRunSavedRuns() {
+        seedPermissionGroup(TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID, "Can view tenant pages, upload files, and run reconciliation")
+        replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID)
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
+
+        Map<String, Object> runResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId: "OrderIdSchemaMap",
+                        file1Name : "orders-1.csv",
+                        file1Text : "order_id\nA100\n",
+                        file2Name : "orders-2.csv",
+                        file2Text : "order_id\nA200\n",
+                        hasHeader : true,
+                ])
+                .disableAuthz()
+                .call()
+
+        assertEquals(true, runResult.ok, (runResult.errors ?: []).toString())
+    }
+
     @Test
     void csvRunKeepsCompareScopeIdsWithinEntityLengthAndUsesCsvSuffix() {
         Map<String, Object> createResult = ec.service.sync()

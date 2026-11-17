@@ -76,8 +76,8 @@ class AuditChangePlanner {
         Map provenance = AgentProvenance.check(kind, after, humanTexts(ec, tenantId, conversationId), openContext(ec, tenantId, conversation),
                 AuditChangeLevers.configValues(kind, current))
         row.setAll([provenanceStatus: provenance.status, blockedIds: fittedList((List<String>) provenance.blockedIds)])
-        // R27: anyone in the tenant may chat, but only an editor's session runs the validating save; a viewer's proposal
-        // waits as a DRAFT for an editor to plan from the app.
+        // R27: only an editor's session runs the validating save. Since DAR-BE-292 only editors reach the agent
+        // (send#AgentTurn refuses everyone else), so the DRAFT branch below is a guard for an in-JVM caller, not a path.
         if (noPrimaryId) {
             ec.message.clearErrors()
             row.setAll([status: "INVALID", statusMessage: AuditChangeLevers.NO_PRIMARY_ID_MESSAGE, planHash: null])

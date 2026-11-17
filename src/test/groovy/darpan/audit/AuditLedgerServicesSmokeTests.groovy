@@ -205,6 +205,30 @@ class AuditLedgerServicesSmokeTests {
         assertEquals(["AUDFS_FIXED", "CONC_TEST_EXPLAINED", closedAt], [row(bare).stateEnumId, row(bare).conclusionEnumId, row(bare).closedStamp])
     }
 
+    /**
+     * DAR-BE-294 (gorjana R10 read every NetSuite line, 2026-11-17): a run explains ~110k examined lines as expected. Naming
+     * every explained key in one query broke the close (H2: "Invalid value 107431 for parameter index"), so nothing closed.
+     */
+    @Test
+    void aRunThatExplainsAHundredThousandRecordsStillClosesAndExplains() {
+        insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Conclusion"])
+        insert("moqui.basic.Enumeration", [enumId: "CONC_TEST_NOT_OPEN", enumTypeId: "DarpanConclusion", description: "Not open in NetSuite"])
+        String open = (record(CHECK, "2026-11-09", [finding("R4", "BIG-OPEN")]).findingIds as List)[0]
+        String bare = (record(CHECK, "2026-11-09", [finding("R4", "BIG-BARE")]).findingIds as List)[0]
+        close(CHECK, "2026-11-10", "AUDCS_RAN", ["BIG-BARE"])
+        Map why = [conclusionEnumId: "CONC_TEST_NOT_OPEN", diagnosisText: "Not open in NetSuite"]
+        Map explanations = (1..120000).collectEntries { ["LINE-${it}".toString(), why] }
+        explanations["BIG-OPEN"] = why
+        explanations["BIG-BARE"] = why
+        Map out = ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: GORJANA, checkId: CHECK,
+                reportDate: Date.valueOf("2026-11-17"), checkStamp: Timestamp.valueOf("2026-11-17 09:30:00"), checkStatusEnumId: "AUDCS_RAN",
+                examinedRecordKeys: explanations.keySet() as List, reportedRecordKeys: [], explanations: explanations]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals([open], out.closedFindingIds)
+        assertEquals(["AUDFS_FIXED", "CONC_TEST_NOT_OPEN"], [row(open).stateEnumId, row(open).conclusionEnumId])
+        assertEquals("CONC_TEST_NOT_OPEN", row(bare).conclusionEnumId, "closed earlier with no reason: takes this run's")
+    }
+
     @Test
     void recordsStoreTheRootSystemAndTheEvidenceIsKept() {
         Map f = finding("R4", "EVID-1") + [expectedAmount: "160.23", actualAmount: "160.22", currencyUomId: "USD",

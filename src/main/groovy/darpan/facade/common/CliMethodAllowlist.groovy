@@ -172,6 +172,7 @@ class CliMethodAllowlist {
 
             "admin.MembershipAdminServices.add#TenantMember",
             "admin.MembershipAdminServices.remove#TenantMember",
+            "admin.MembershipAdminServices.send#TenantWelcome",
             "admin.MembershipAdminServices.update#TenantMemberRole",
 
             "admin.MigrationAdminServices.dryRun#Migration",

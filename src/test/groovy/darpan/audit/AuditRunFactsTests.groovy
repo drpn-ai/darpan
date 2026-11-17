@@ -99,7 +99,8 @@ class AuditRunFactsTests {
         List buttons = widgets[2].buttonList.buttons as List
         assertEquals(1, buttons.size())
         assertEquals("Open the report", buttons[0].text)
-        assertEquals("${BASE}/audits/month-close?period=2026-11&date=2026-11-10".toString(), buttons[0].onClick.openLink.url)
+        // DAR-BE-293: the link names its tenant, last, as a run link does, so the app switches into it.
+        assertEquals("${BASE}/audits/month-close?period=2026-11&date=2026-11-10&tenantId=GORJANA".toString(), buttons[0].onClick.openLink.url)
 
         Map withWords = AuditRunMessage.card(facts, [headline: "Thirty <orders> wait on a cause."], null)
         List<Map> w = ((withWords.cardsV2 as List<Map>)[0].card.sections as List<Map>)[0].widgets as List<Map>
@@ -115,7 +116,7 @@ class AuditRunFactsTests {
         assertTrue(html.contains("ACT ON FIRST"))
         assertTrue(html.contains(">Issue the credit memo</div>"), "no writer: the cause's own fix")
         assertTrue(html.contains("gorjana-month-close-2026-11-R10.csv"))
-        assertTrue(html.contains("${BASE}/audits/month-close?period=2026-11&amp;date=2026-11-10&amp;statement=R10".toString()))
+        assertTrue(html.contains("${BASE}/audits/month-close?period=2026-11&amp;date=2026-11-10&amp;statement=R10&amp;tenantId=GORJANA".toString()))
         assertTrue(html.contains("M201 #GOR201, M202 #GOR202"), "ids under 25 listed")
         assertTrue(html.contains("No cause named yet"), "Unexplained reads as no cause yet")
         assertFalse(html.contains("font-weight"), "no bold")

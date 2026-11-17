@@ -37,7 +37,11 @@ class AuditRunMessage {
     static String reportUrl(String base, Map facts, String rule = null) {
         if (!base || !facts.audit?.id || !facts.date) return null
         String url = "${base}/audits/${enc(facts.audit.id as String)}?period=${enc(facts.period as String)}&date=${facts.date}"
-        return rule ? "${url}&statement=${enc(rule)}".toString() : url.toString()
+        if (rule) url = "${url}&statement=${enc(rule)}"
+        // DAR-BE-293: the reader may be working in another tenant, and the app switches only into a tenant the link
+        // names (router's tenantId guard), as a run link does; last, so the other parameters keep their places.
+        String tenant = facts.tenant?.id as String
+        return (tenant ? "${url}&tenantId=${enc(tenant)}" : url).toString()
     }
 
     /** <tenant id lower>-<audit code>-<period>-<rule>.csv */

@@ -255,7 +255,10 @@ class AuditDigestSupport {
         Map head = (report?.report ?: [:]) as Map
         String code = head.audit instanceof Map ? (head.audit as Map).id : null
         if (!base || !code || !head.date) return null
-        return "${base}/audits/${URLEncoder.encode(code, 'UTF-8')}?date=${head.date}".toString()
+        String tenant = head.tenant instanceof Map ? (head.tenant as Map).id : null
+        // DAR-BE-293: names its tenant, as a run link does, so the app switches into it.
+        String url = "${base}/audits/${URLEncoder.encode(code, 'UTF-8')}?date=${head.date}"
+        return (tenant ? "${url}&tenantId=${URLEncoder.encode(tenant, 'UTF-8')}" : url).toString()
     }
 
     static ZoneId tenantZone(def ec, String tenantId) {

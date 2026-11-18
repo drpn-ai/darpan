@@ -137,6 +137,30 @@ class AgentAccessSmokeTests {
     }
 
     @Test
+    void "an ended Darpan admin role ends AI access, and an open one restores it"() {
+        // DAR-BE-296 review focus: the date filter must really apply (real entity engine, not a stub).
+        String admin = "AAS_ENDED_ADMIN"
+        asSystem {
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_ADMIN", description: "Darpan admin"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: admin, username: "aas.ended.admin", disabled: "N"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_ADMIN", userId: admin,
+                    fromDate: inHours(-2), thruDate: new java.sql.Timestamp(System.currentTimeMillis() - 1000L)]).createOrUpdate()
+        }
+        try {
+            assertEquals(false, AgentAccess.isDarpanAdminUser(ec, admin), "an ended role is not an admin role")
+            assertEquals(AgentAccess.NOT_GRANTED, AgentAccess.access(ec, "GORJANA", admin).state)
+            asSystem { ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).updateAll([thruDate: null]) }
+            assertEquals(true, AgentAccess.isDarpanAdminUser(ec, admin), "an open role is an admin role")
+            assertEquals(AgentAccess.LIVE, AgentAccess.access(ec, "GORJANA", admin).state)
+        } finally {
+            asSystem {
+                ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).deleteAll()
+                ec.entity.find("moqui.security.UserAccount").condition("userId", admin).deleteAll()
+            }
+        }
+    }
+
+    @Test
     void "a grant whose thruDate has passed is EXPIRED"() {
         grant("G_OLD", ALPHA, ANN, [fromDate: inHours(-48), thruDate: inHours(-24)])
         Map a = AgentAccess.access(ec, ALPHA, ANN)

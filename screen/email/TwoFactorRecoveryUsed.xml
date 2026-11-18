@@ -8,8 +8,8 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Make new recovery codes', 'guides/two-factor#manage-your-factors'], ['Lost your phone or passkey', 'guides/two-factor#lost-your-phone-or-passkey']])"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Make new recovery codes', 'guides/two-factor#manage-your-factors'], ['Lost your phone or passkey', 'guides/two-factor#lost-your-phone-or-passkey']])"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Make new recovery codes', 'guides/two-factor#manage-your-factors'], ['Trouble signing in', 'troubleshooting/login-and-session#two-factor']])"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Make new recovery codes', 'guides/two-factor#manage-your-factors'], ['Trouble signing in', 'troubleshooting/login-and-session#two-factor']])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>

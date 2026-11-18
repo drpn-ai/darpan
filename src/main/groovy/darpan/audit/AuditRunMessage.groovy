@@ -27,7 +27,7 @@ class AuditRunMessage {
     private static final String NO_CAUSE = "No cause named yet"
     /** The user guide pages a run update points to (DAR-BE-298). */
     private static final List<List<String>> GUIDES = [["Resolve a finding", "guides/audits#resolve-a-finding"],
-                                                      ["How findings close", "guides/audits#how-findings-close"]]
+                                                      ["A finding stays open after a fix", "troubleshooting/audits#a-finding-stays-open-after-you-fixed-it"]]
 
     /** "Gorjana Month close, 1–10 November: 42 open findings". */
     static String subject(Map facts) {

@@ -89,6 +89,7 @@ class EmailTemplatesRenderTests {
             assertThrows(IllegalArgumentException) { EmailFrame.guides([["Bad", bad]]) }
         }
         assertThrows(IllegalArgumentException) { EmailFrame.guides([]) }
+        assertThrows(IllegalArgumentException) { EmailFrame.guides([["A", "guides/two-factor#sign-in"], ["B", "guides/two-factor#set-it-up"]]) }
         assertThrows(IllegalArgumentException) { EmailFrame.guides([["a", "a"], ["b", "b"], ["c", "c"]]) }
     }
 

@@ -5,8 +5,8 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Set up two-factor', 'guides/two-factor#set-it-up'], ['Who has to use it', 'guides/two-factor#who-has-to-use-it']])"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Set up two-factor', 'guides/two-factor#set-it-up'], ['Who has to use it', 'guides/two-factor#who-has-to-use-it']])"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Set up two-factor', 'guides/two-factor#set-it-up'], ['Who requires two-factor', 'guides/manage-users-and-access#require-two-factor']])"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Set up two-factor', 'guides/two-factor#set-it-up'], ['Who requires two-factor', 'guides/manage-users-and-access#require-two-factor']])"/>
         <set field="isPast" from="past == true || past == 'true'"/>
     </actions>
     <widgets>

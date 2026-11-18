@@ -58,7 +58,8 @@ ${eyebrow(eyebrowText, 0)}<div style="height:14px;line-height:14px;font-size:1px
     private static final String LINK = "color:${INK};text-decoration:underline;text-decoration-color:${LINE};text-underline-offset:3px;"
 
     /**
-     * DAR-BE-298 (Aditi 2026-11-18: "include 1-2 user guide links always"): the email's guide links, after the
+     * DAR-BE-298 (Aditi 2026-11-18: "include 1-2 user guide links always", "dont send the same link twice in one
+     * email": two links are two different pages, whatever their anchors): the email's guide links, after the
      * sign-off. guides is [[label, page path], ...], one or two of them; each shows its address beside it, so a reader
      * sees where it goes before clicking, and the path is a docs.drpn.ai page (never a sign-in or action page).
      */
@@ -82,6 +83,10 @@ ${eyebrow(eyebrowText, 0)}<div style="height:14px;line-height:14px;font-size:1px
             if (g?.size() != 2 || !g[0] || !(g[1] ==~ /[a-z0-9\-\/]+(#[a-z0-9\-]+)?/)) {
                 throw new IllegalArgumentException("A guide link is [label, docs page path], e.g. ['Two-factor sign-in', 'guides/two-factor']: ${g}")
             }
+        }
+        List<String> pages = guides.collect { (it[1] as String).split('#')[0] }
+        if (pages.unique(false).size() != pages.size()) {
+            throw new IllegalArgumentException("Two guide links to the same page (${pages}); an email links each page once")
         }
         return guides
     }

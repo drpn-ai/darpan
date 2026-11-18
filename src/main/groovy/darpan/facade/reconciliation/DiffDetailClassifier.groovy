@@ -194,8 +194,9 @@ class DiffDetailClassifier {
     }
 
     /**
-     * DAR-BE-299: {@code rules} are the run's Rule rows; a rule with a name (DAR-BE-210) shows that name as its
-     * detail instead of the formula. A difference's ruleId is the DRL rule name, matched as RuleDiffSupport.fieldTally does.
+     * DAR-BE-299: {@code rules} are the run's Rule rows; a rule with a name (DAR-BE-210) is shown by that name alone
+     * (label = name, detail = ''), an unnamed one as "Rule N" over its formula. A difference's ruleId is the DRL rule
+     * name, matched as RuleDiffSupport.fieldTally does.
      */
     static List<Map> buildRuleOptions(List<Map> rows, List rules = null) {
         Map<String, Object> ruleByKey = reconciliation.rule.RuleDiffSupport.ruleLookup(rules)
@@ -232,11 +233,11 @@ class DiffDetailClassifier {
         }
         int index = 0
         ruleEntries.values().each { Map entry ->
+            String ruleName = normalizeText(ruleByKey.get(normalizeText(entry.ruleId))?.ruleName)
             options.add([
                     key       : entry.key,
-                    label     : resolveRuleOptionLabel((String) entry.ruleId, index + 1),
-                    detail    : normalizeText(ruleByKey.get(normalizeText(entry.ruleId))?.ruleName) ?:
-                            entry.detail ?: humanizeRuleIdentifier((String) entry.ruleId),
+                    label     : ruleName ?: resolveRuleOptionLabel((String) entry.ruleId, index + 1),
+                    detail    : ruleName ? '' : (entry.detail ?: humanizeRuleIdentifier((String) entry.ruleId)),
                     count     : entry.count,
                     bucketKeys: BUCKET_ORDER.findAll { String bucket -> ((Set) entry.bucketKeys).contains(bucket) },
             ])

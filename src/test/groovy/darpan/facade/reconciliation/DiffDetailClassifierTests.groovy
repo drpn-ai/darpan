@@ -151,8 +151,8 @@ class DiffDetailClassifierTests {
         assertEquals(1, options[2].count)
     }
 
-    // DAR-BE-299: the picker names a rule by the name it was given, matched by ruleId or by the DRL rule name its
-    // stored logic declares (a rule saved before it had an id); an unnamed rule keeps its formula.
+    // DAR-BE-299: the picker shows a named rule by its name alone, matched by ruleId or by the DRL rule name its
+    // stored logic declares (a rule saved before it had an id); an unnamed rule stays "Rule N" over its formula.
     @Test
     void ruleOptionsShowTheRuleNameOverTheFormula() {
         List<Map> rows = [
@@ -168,10 +168,8 @@ class DiffDetailClassifierTests {
 
         List<Map> options = DiffDetailClassifier.buildRuleOptions(rows, rules)
 
-        assertEquals(["Rule 3", "Rule 1", "Rule 4"], options*.label)
-        assertEquals("Quantity Sync", options[0].detail)
-        assertEquals("Fulfillment Sync", options[1].detail)
-        assertEquals("${F1} total = ${F2} total".toString(), options[2].detail)
+        assertEquals(["Quantity Sync", "Fulfillment Sync", "Rule 4"], options*.label)
+        assertEquals(["", "", "${F1} total = ${F2} total".toString()], options*.detail)
     }
 
     // --- effective summary ---

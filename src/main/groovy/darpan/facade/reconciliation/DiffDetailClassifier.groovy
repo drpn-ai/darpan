@@ -193,7 +193,12 @@ class DiffDetailClassifier {
         return counts
     }
 
-    static List<Map> buildRuleOptions(List<Map> rows) {
+    /**
+     * DAR-BE-299: {@code rules} are the run's Rule rows; a rule with a name (DAR-BE-210) shows that name as its
+     * detail instead of the formula. A difference's ruleId is the DRL rule name, matched as RuleDiffSupport.fieldTally does.
+     */
+    static List<Map> buildRuleOptions(List<Map> rows, List rules = null) {
+        Map<String, Object> ruleByKey = reconciliation.rule.RuleDiffSupport.ruleLookup(rules)
         List<Map> baseRows = rows.findAll { it.ruleFilterKey == BASE_RULE_FILTER_KEY }
         Map<String, Map> ruleEntries = new LinkedHashMap<>()
         rows.each { Map row ->
@@ -230,7 +235,8 @@ class DiffDetailClassifier {
             options.add([
                     key       : entry.key,
                     label     : resolveRuleOptionLabel((String) entry.ruleId, index + 1),
-                    detail    : entry.detail ?: humanizeRuleIdentifier((String) entry.ruleId),
+                    detail    : normalizeText(ruleByKey.get(normalizeText(entry.ruleId))?.ruleName) ?:
+                            entry.detail ?: humanizeRuleIdentifier((String) entry.ruleId),
                     count     : entry.count,
                     bucketKeys: BUCKET_ORDER.findAll { String bucket -> ((Set) entry.bucketKeys).contains(bucket) },
             ])
@@ -295,7 +301,8 @@ class DiffDetailClassifier {
      */
     static Map buildDifferencesPage(Map document, String file1Label, String file2Label,
                                     List<String> requestedBuckets, String ruleFilterKey, String search,
-                                    int pageIndex, int pageSize, boolean includeFacets, String conclusionCode = null) {
+                                    int pageIndex, int pageSize, boolean includeFacets, String conclusionCode = null,
+                                    List rules = null) {
         List rawDifferences = (document?.get('differences') instanceof List) ? (List) document.get('differences') : []
 
         List<Map> classified = new ArrayList<>(rawDifferences.size())
@@ -340,7 +347,7 @@ class DiffDetailClassifier {
         ]
         if (includeFacets) {
             result.put('bucketCounts', buildBucketCounts(classified))
-            result.put('ruleOptions', buildRuleOptions(classified))
+            result.put('ruleOptions', buildRuleOptions(classified, rules))
             result.put('conclusionCounts', buildConclusionCounts(classified))
         }
         return result

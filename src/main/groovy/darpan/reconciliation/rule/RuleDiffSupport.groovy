@@ -305,7 +305,7 @@ class RuleDiffSupport {
     private static final java.util.regex.Pattern DRL_RULE_NAME = ~/(?m)^\s*rule\s+"((?:[^"\\]|\\.)*)"/
 
     /** ruleId and every DRL rule name a Rule's ruleLogic declares, each to its Rule row. */
-    private static Map<String, Object> ruleLookup(List rules) {
+    static Map<String, Object> ruleLookup(List rules) {
         Map<String, Object> byKey = [:]
         (rules ?: []).each { Object rule ->
             if (rule == null) return

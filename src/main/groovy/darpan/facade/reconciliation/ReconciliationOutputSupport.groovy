@@ -396,9 +396,15 @@ class ReconciliationOutputSupport {
                 String searchValue = normalize(search)
                 String ruleKey = normalize(ruleFilterKey) ?: DiffDetailClassifier.ALL_RULE_FILTER_KEY
 
+                def artifactRunResult = resolveRunResultForArtifactPath(ec, fileNameValue)
+                // DAR-BE-299: the rule picker names each rule; the run's rules are read tenant-scoped (a run that is
+                // not the active tenant's, or whose rules are gone, yields none and the picker keeps the formula).
+                List runRules = wantFacets && artifactRunResult?.savedRunId ?
+                        ReconciliationSavedRunSupport.collectRuleRows(ec, artifactRunResult.savedRunId) : []
+
                 Map<String, Object> page = DiffDetailClassifier.buildDifferencesPage(
                         document, file1Label, file2Label, bucketList, ruleKey, searchValue,
-                        requestedPageIndex, requestedPageSize, wantFacets, normalize(conclusionCode))
+                        requestedPageIndex, requestedPageSize, wantFacets, normalize(conclusionCode), runRules)
                 Map<String, Object> summary = DiffDetailClassifier.buildEffectiveSummary(document, file1Label, file2Label)
 
                 Map<String, Object> outputFile = [
@@ -422,7 +428,6 @@ class ReconciliationOutputSupport {
                 // guess at all. Shipping it alongside the string also repairs every run ALREADY on
                 // disk, which re-stamping the files going forward can never do. Tenant access was
                 // enforced by canAccessGeneratedOutputFile above, so this read is already gated.
-                def artifactRunResult = resolveRunResultForArtifactPath(ec, fileNameValue)
                 Object runResultCreatedDate = OutputDescriptorSupport.timestampValue(artifactRunResult?.createdDate)
                 if (runResultCreatedDate != null) {
                     metadata = new LinkedHashMap<String, Object>(metadata)

@@ -151,6 +151,29 @@ class DiffDetailClassifierTests {
         assertEquals(1, options[2].count)
     }
 
+    // DAR-BE-299: the picker names a rule by the name it was given, matched by ruleId or by the DRL rule name its
+    // stored logic declares (a rule saved before it had an id); an unnamed rule keeps its formula.
+    @Test
+    void ruleOptionsShowTheRuleNameOverTheFormula() {
+        List<Map> rows = [
+                DiffDetailClassifier.classifyRow([diffType: "VALUE_MISMATCH", ruleId: "RULE_3", field: "itemQuantity = itemQuantity"], 0, F1, F2),
+                DiffDetailClassifier.classifyRow([diffType: "VALUE_MISMATCH", ruleId: "FIELD_COMPARISON_1", field: "isFulfilled = isCompleted"], 1, F1, F2),
+                DiffDetailClassifier.classifyRow([diffType: "VALUE_MISMATCH", ruleId: "RULE_4", field: "total = total"], 2, F1, F2),
+        ]
+        List rules = [
+                [ruleId: "RULE_3", ruleName: "Quantity Sync"],
+                [ruleId: "100231", ruleName: "Fulfillment Sync", ruleLogic: 'rule "FIELD_COMPARISON_1"\nwhen\nthen\nend'],
+                [ruleId: "RULE_4", ruleName: "  "],
+        ]
+
+        List<Map> options = DiffDetailClassifier.buildRuleOptions(rows, rules)
+
+        assertEquals(["Rule 3", "Rule 1", "Rule 4"], options*.label)
+        assertEquals("Quantity Sync", options[0].detail)
+        assertEquals("Fulfillment Sync", options[1].detail)
+        assertEquals("${F1} total = ${F2} total".toString(), options[2].detail)
+    }
+
     // --- effective summary ---
 
     @Test

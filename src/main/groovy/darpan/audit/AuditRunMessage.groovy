@@ -230,7 +230,7 @@ ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
         boolean empty = (value ?: 0) as int == 0
         String border = empty ? "1px dashed ${LINE}" : attention ? "1px solid ${INK}" : "1px solid ${LINE}"
         return "<td style=\"padding:14px 16px;background:${empty ? '#ffffff' : TILE};border:${border};border-radius:8px;width:33%;\">" +
-                "<div style=\"${F}font-size:11px;color:${MUTED};letter-spacing:.06em;text-transform:uppercase;\">${label}</div>" +
+                "<div style=\"${F}font-size:11px;color:${MUTED};letter-spacing:.06em;text-transform:uppercase;\">${esc(label)}</div>" +
                 "<div style=\"${F}font-size:26px;line-height:1.2;letter-spacing:-.015em;color:${empty ? DIM : INK};margin-top:4px;\">${value}</div></td>"
     }
 

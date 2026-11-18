@@ -92,8 +92,8 @@ class DisableAuthzRatchetTest {
      */
     // 15 since DAR-BE-116: AutomationExecutionSupport.startParallelSourceExtract's worker mirrors the run thread's authz
     // state (disables only when the caller already has it disabled), so side 2 reads the connector registry as side 1 does.
-    // 16 since DAR-BE-303: EmailCopy.applySubject writes the validated subject edit with authz off (an anonymous password-reset
-    // send may not update an EmailTemplate); one site, restored in finally, no tenant data touched.
+    // 16 since DAR-BE-303: EmailCopy.unguarded: anonymous reads of EmailCopyBlock config rows and the validated subject write
+    // (an anonymous password-reset send has no authz on them); one site, restored in finally, no tenant data touched.
     static final int BASELINE = 16
 
     /**

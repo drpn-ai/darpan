@@ -262,6 +262,23 @@ class EmailTemplatesRenderTests {
     }
 
     @Test
+    void markupWrittenStraightToARowNeverReachesTheEmailOrChat() {
+        try {
+            setCopy("DARPAN_AUDIT_RUN", "tile.open", "<b>x</b>")
+            String html = render("AuditRun", AUDIT_RUN.AuditRunFull, "html")
+            assertFalse(html.contains("<b>x</b>") || html.contains("&lt;b&gt;x"), "the default goes, not the markup")
+            assertTrue(html.contains("text-transform:uppercase;\">Open</div>"), html)
+            setCopy("DARPAN_AUDIT_DIGEST", "list.oldest", "<users/all>")
+            String text = digest(digestVariants().DigestDaily)
+            assertFalse(text.contains("<users/all>"), text)
+            assertTrue(text.contains("\nOldest open\n"), text)
+        } finally {
+            setCopy("DARPAN_AUDIT_RUN", "tile.open", null)
+            setCopy("DARPAN_AUDIT_DIGEST", "list.oldest", null)
+        }
+    }
+
+    @Test
     void everyBlockTheAuditBuildersReadIsSeeded() {
         [["src/main/groovy/darpan/audit/AuditRunMessage.groovy", "DARPAN_AUDIT_RUN"],
          ["src/main/groovy/darpan/audit/AuditDigestSupport.groovy", "DARPAN_AUDIT_DIGEST"]].each { List f ->
@@ -341,6 +358,9 @@ class EmailTemplatesRenderTests {
             assertNull(EmailCopy.problem(r.getString("emailTemplateId"), r.getString("blockId"), r.getString("defaultText")),
                     "${r.emailTemplateId}/${r.blockId}")
         }
+        rows.each { r -> assertFalse(((r.getString("defaultText") ?: "") =~ /[<>]/).find(), "${r.emailTemplateId}/${r.blockId} carries markup") }
+        assertNotNull(EmailCopy.problem("T", "note", "<b>x</b>"))
+        assertNotNull(EmailCopy.problem("T", "note", "hi <users/all>"))
         assertNotNull(EmailCopy.problem("T", "note", "see https://x.example"))
         assertNotNull(EmailCopy.problem("T", "note", "see www.x"))
         assertNotNull(EmailCopy.problem("T", "smile", "Wow!"))

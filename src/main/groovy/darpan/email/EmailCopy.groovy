@@ -85,6 +85,9 @@ class EmailCopy {
      */
     static String problem(String emailTemplateId, String blockId, String text) {
         if (!text?.trim()) return "The text is empty"
+        // Every render path checks this, not only the save: a row written another way (data load, transfer) never injects markup
+        // (or a chat mention such as <users/all>) into an email or the chat text.
+        if (text =~ /[<>]/) return "Plain words only: no < or > (no markup)"
         if (blockId == GUIDES) return null
         String outside = SLOT.matcher(text).replaceAll(" ")
         if (outside =~ URL_LIKE) return "The text carries a web address or host; links go only through the user guide block"
@@ -102,7 +105,6 @@ class EmailCopy {
         String why = problem(emailTemplateId, blockId, text)
         if (why != null) return why
         if (text.length() > MAX_CHARS) return "The text is longer than ${MAX_CHARS} characters"
-        if (text =~ /[<>]/) return "Plain words only: no < or > (no markup)"
         Set<String> unknown = variables(text) - templateVariables(ec, emailTemplateId)
         if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: this email does not have it"
         if (blockId == GUIDES) {

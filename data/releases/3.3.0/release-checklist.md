@@ -5,13 +5,11 @@ Prepared 2026-11-18, 20:30 to 21:05 IST. Nothing pushed, tagged, deployed or pub
 ## Backlog prework
 
 - Included backlog item IDs (`roadmap/BACKLOG.md`): DAR-BE-303, DAR-BE-304, DAR-BE-305, DAR-BE-306, DAR-BE-307,
-  DAR-BE-313 (all ready-to-ship, pushed by 20:24 IST), DAR-BE-315 (added by Aditi the same evening, being built), and
+  DAR-BE-313 (all ready-to-ship, pushed by 20:24 IST), DAR-BE-315 (added by Aditi the same evening; committed and
+  approved as `dc80d9e9`, under the release commits), and
   the app riders on `main`: DAR-UI-120 to 129 and 131, with DAR-UI-123's backend methods (darpan 25af1bc2).
-- Open release issues: 2
-  1. DAR-BE-315 landed as `dc80d9e9` while this pack was prepared (no data, contract, service or entity change); the
-     release-metadata commit sits on top of it. The controller confirms 315 is final and sets the darpan head in the
-     cut script, which holds a placeholder and refuses to run until then.
-  2. The darpan-docs guides for the reworked settings pages name labels the app no longer shows (`docs-impact.md`,
+- Open release issues: 1
+  1. The darpan-docs guides for the reworked settings pages name labels the app no longer shows (`docs-impact.md`,
      "Owed"); Aditi decides: a docs pass before the cut, or a named follow-up after it.
 - Scope changes recorded: Aditi chose one 3.3.0 for the six DAR-BE items (2026-11-18 19:35 IST) and added DAR-BE-315
   (20:3x IST).
@@ -46,7 +44,10 @@ Prepared 2026-11-18, 20:30 to 21:05 IST. Nothing pushed, tagged, deployed or pub
 - The working copy's `data/upgrade-data.xml` = the release file + the DAR-ADMIN-012 block before the closing tag; the
   release commit carries only the release file.
 - `release_preflight.py validate` (`v3.2.1..6cc1a6ac` and `v3.2.1..dc80d9e9`): every check passes except the
-  open-issues line above (proved by validating a copy with that line at 0: "passed validation"). After DAR-BE-315, re-run in a
+  open-issues line above (proved by validating a copy with that line at 0: "passed validation").
+- Re-generated at 21:2x IST in a clean worktree of the release commit `d9e41958` (on top of DAR-BE-315's
+  `dc80d9e9`): the same 1,948 records; the only difference from the committed file is the hand-moved job parameter
+  row and its ORDERING NOTE. DAR-BE-315 changed no `data/` file. After DAR-BE-315, re-run in a
   clean worktree of the final head: `release_preflight.py validate --version 3.3.0 --backend-repo <wt>
   --backend-previous-ref v3.2.1 --backend-current-ref HEAD`; it compares the pack's records with the seed diff, so it
   fails if 315 changed seed data.
@@ -80,6 +81,10 @@ Prepared 2026-11-18, 20:30 to 21:05 IST. Nothing pushed, tagged, deployed or pub
   `noAdminMethodIsAllowed` asserts every admin method is excluded); all 301 release-contract methods are placed in
   the allowlist (checked). The test classes were compiled from the shared working tree, which holds DAR-BE-315's
   in-progress email files.
+- Email and sign-in, JDK 21, `--rerun`, under the gradle lock (21:28 to 21:29 IST, released), on the final tree
+  (`d9e41958` + the uncommitted DAR-ADMIN-012 files, none of them email or auth code), result XMLs 21:29:12:
+  PasswordResetServicesSmokeTests 34/34, TwoFactorReminderSmokeTests 9/9, EmailTemplatesRenderTests 26/26. The
+  transient "fixture password refused" failure an earlier run saw did not reproduce.
 - darpan-ui: `npm run type-check` exit 0; vitest `contractDrift` + `registryContract` 20/20; `npm run
   mascot:seed:check` pass.
 - darpan-admin-ui, on a clean worktree of the committed tree + the version line: `npm run type-check` exit 0;
@@ -87,13 +92,14 @@ Prepared 2026-11-18, 20:30 to 21:05 IST. Nothing pushed, tagged, deployed or pub
 - Deploy pins: `verify_release_pins.py` (pre-tag, 20:46 IST): exit 1 only because `v3.3.0` (darpan), `v0.4.0`
   (darpan-agent) and docker-config `v3.3.0` are not on the remotes yet; every other pin resolves, and `DARPAN_REF`
   equals `component.xml`'s 3.3.0. It must re-run after the tags are pushed (the cut script does).
-- Not run: the full suites (focused-tests rule); DAR-BE-315's own tests (its lane runs them); loading the upgrade file
+- Not run: the full suites (focused-tests rule); loading the upgrade file
   into an empty database; any browser check; the SDL against prod.
 
 ## Approval
 
 - Release owner sign-off: pending Aditi.
-- Cut/tag blocked until this checklist is fully complete: yes. Expected heads: darpan = after DAR-BE-315 (placeholder);
+- Cut/tag blocked until this checklist is fully complete: yes. Expected heads: darpan = the pack-results commit on top of `d9e41958` (the
+  cut script names it);
   darpan-agent `d7ad806`, darpan-ui `2a7348b`, darpan-docker-config `81c3551`, darpan-admin-ui `3694444`, darpan-docs
   `1e05972`, darpan-developers `4edb896`. Cut script:
   `/private/tmp/claude-501/-Users-aditipatel-sandbox-darpan-master/c9cb16fa-b46a-4600-99fb-9fc3d0fa68f8/scratchpad/cut-3.3.0.sh`.

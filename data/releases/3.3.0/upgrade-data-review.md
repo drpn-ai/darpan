@@ -8,7 +8,8 @@
   `data/upgrade-data.xml` carries another session's uncommitted DAR-ADMIN-012 rows and an untracked seed file for
   them. The generated file holds none of them (a case-insensitive grep for that feature's name finds 0 lines).
 - DAR-BE-315 (`dc80d9e9`) landed after this generation and changes no `data/` file, so the seed diff and this file
-  are unchanged (validate passes against `v3.2.1..dc80d9e9`). The controller re-runs it on the final head.
+  are unchanged: validate passes against `v3.2.1..dc80d9e9`, and generate re-run on a clean worktree of the release
+  commit `d9e41958` gives the same 1,948 records.
 - Generic source data files are the source of truth; no record here is hand-written.
 
 ## Candidate records

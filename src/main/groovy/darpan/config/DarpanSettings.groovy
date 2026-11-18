@@ -46,6 +46,8 @@ class DarpanSettings {
 
     private static volatile Snapshot snapshot
     private static volatile Map<String, SettingDefinition> catalogCache
+    private static volatile Closure<List<ClassLoader>> loaderSource
+    private static final String CORE_KEY = 'darpan.reconciliation.automation.maxConcurrentExecutions'
     private static final AtomicBoolean reloading = new AtomicBoolean(false)
     private static final AtomicLong expireCount = new AtomicLong(0)
     private static final Set<String> warned = ConcurrentHashMap.newKeySet()
@@ -77,21 +79,40 @@ class DarpanSettings {
         Map<String, SettingDefinition> cached = catalogCache
         if (cached != null) return cached
         synchronized (DarpanSettings) {
-            if (catalogCache == null) catalogCache = loadCatalog()
-            return catalogCache
+            if (catalogCache != null) return catalogCache
+            Map<String, SettingDefinition> loaded = loadCatalog()
+            // A catalog without the core darpan file (a thread that cannot see it) is served but never kept: the next read retries.
+            if (loaded.containsKey(CORE_KEY)) catalogCache = loaded
+            else warnOnce('nocore', "Settings catalog has no core darpan entries ({} found); will retry on the next read", loaded.size())
+            return loaded
         }
+    }
+
+    /** The loaders that can see catalog files: this class's own (the component jar) and the thread's context loader. */
+    private static List<ClassLoader> catalogLoaders() {
+        if (loaderSource != null) return loaderSource.call()
+        List<ClassLoader> out = [DarpanSettings.classLoader]
+        ClassLoader ctx = Thread.currentThread().contextClassLoader
+        if (ctx != null && !out.contains(ctx)) out.add(ctx)
+        return out
     }
 
     private static Map<String, SettingDefinition> loadCatalog() {
         Map<String, SettingDefinition> all = new LinkedHashMap<>()
         Map<String, String> from = [:]
         try {
-            ClassLoader cl = Thread.currentThread().contextClassLoader ?: DarpanSettings.classLoader
-            Enumeration<URL> urls = cl.getResources(CATALOG_RESOURCE)
-            while (urls.hasMoreElements()) {
+            Set<String> seen = new HashSet<>()
+            List<URL> found = new ArrayList<>()
+            for (ClassLoader cl : catalogLoaders()) {
+                Enumeration<URL> e = cl.getResources(CATALOG_RESOURCE)
+                while (e.hasMoreElements()) {
+                    URL u = e.nextElement()
+                    if (seen.add(u.toString())) found.add(u)
+                }
+            }
+            for (URL url : found) {
                 String source = null
                 try {
-                    URL url = urls.nextElement()
                     source = url.toString()
                     Map<String, SettingDefinition> part = url.openStream().withCloseable { parseCatalog(it.getText('UTF-8'), source) }
                     part.each { String k, SettingDefinition d ->
@@ -374,6 +395,7 @@ class DarpanSettings {
         clock = { -> System.currentTimeMillis() }
         snapshot = null
         catalogCache = null
+        loaderSource = null
         warned.clear()
         reloading.set(false)
     }

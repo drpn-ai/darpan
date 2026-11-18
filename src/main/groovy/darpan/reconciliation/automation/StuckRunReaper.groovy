@@ -24,7 +24,7 @@ import java.sql.Timestamp
  *     scanner's duplicate check returns true and skips the same window forever.
  *
  * The reaper runs as a Moqui ServiceJob (see ReconciliationJobSeedData.xml) every 10 minutes,
- * sweeping rows whose lastUpdatedStamp is older than the reaperStaleMinutes setting (120 min unless edited).
+ * sweeping rows whose lastUpdatedStamp is older than the reaperStaleMinutes setting.
  * Each transition writes a status message so operators can audit which runs were reaped.
  */
 @CompileStatic

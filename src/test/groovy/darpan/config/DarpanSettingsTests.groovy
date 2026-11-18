@@ -193,6 +193,20 @@ class DarpanSettingsTests {
         return dir
     }
 
+    @Test void aCatalogWithoutTheCoreFileIsNeverCached() {
+        DarpanSettings.resetForTest()
+        DarpanSettings.clock = { -> now }
+        DarpanSettings.rowLoader = { -> loads++; [:] as Map<String, Map> }
+        try {
+            DarpanSettings.loaderSource = { -> [new URLClassLoader([] as URL[], (ClassLoader) null)] }
+            assertFalse(DarpanSettings.catalog().containsKey(MAX), 'a loader that cannot see the core file')
+            DarpanSettings.loaderSource = null
+            assertEquals(8, DarpanSettings.intValue(MAX), 'the next read retries and finds the core catalog')
+        } finally {
+            DarpanSettings.resetForTest()
+        }
+    }
+
     @Test void aMalformedOrDuplicateCatalogNeverBreaksReads() {
         Path bad = catalogDir('{ not json')
         Path dup = catalogDir('{"settings":[{"key":"' + MAX + '","type":"INT","area":"Runs","unit":"runs","description":"x","defaultValue":"3","min":1,"max":32},' +

@@ -134,8 +134,8 @@ The Shopify extractor normalizes GraphQL order GIDs to numeric `legacyResourceId
 Scheduled executions run the same verification passes as a manual run (`VERIFY_MISSING`, and
 `VERIFY_EXCHANGE` / `VERIFY_RETURNS` where the scope calls for them), so a scheduled run and a
 manual run of the same window report the same differences. The missing-diff pass on the scheduled
-path is on unless the `darpan.reconciliation.automation.verifyMissingDiffs` JVM property is
-`false`. See [reconciliation-flow](../reconciliation-flow.md#4a-verification-passes).
+path is on unless the `darpan.reconciliation.automation.verifyMissingDiffs` setting (admin app
+Settings) is `false`. See [reconciliation-flow](../reconciliation-flow.md#4a-verification-passes).
 
 ## SFTP File Mode
 

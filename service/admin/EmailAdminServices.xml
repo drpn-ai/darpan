@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-303. List, show, preview, edit and reset the words of the emails Darpan sends, for Darpan admins (super admins).
+  admin.* and therefore inside the DARPAN_ADMIN_API fence; each service checks super admin again first. The work is
+  darpan.admin.EmailAdminSupport; the words are EmailCopyBlock rows read through darpan.email.EmailCopy, the subject is
+  the template's `subject` row applied by service/EmailCopy.secas.xml. An edit or a preview that breaks a rule is refused
+  with the reason and nothing is saved; edits and resets write AdminAuditLog rows. Preview renders through the real
+  screen with the draft in place and saves nothing.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="EmailTemplates" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>Every email Darpan sends: id, description, the subject sends use, how many blocks carry a production edit.</description>
+        <out-parameters>
+            <parameter name="templates" type="List"><description>[{emailTemplateId, description, subject, editedBlockCount,
+                subjectEdited}] by emailTemplateId.</description><parameter name="template" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="templates" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="templates" from="darpan.admin.EmailAdminSupport.list(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="EmailTemplate" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>One email: its subject and the shipped subject, every block with its shipped words, the production edit
+            (null when none) and the variables an edit may use, and the sample the preview renders.</description>
+        <in-parameters>
+            <parameter name="emailTemplateId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="description"/>
+            <parameter name="subject"><description>The subject sends use: the edit, else the shipped one.</description></parameter>
+            <parameter name="defaultSubject"/>
+            <parameter name="subjectEdited" type="Boolean"/>
+            <parameter name="subjectVariables" type="List"><description>The ${variables} the subject may use.</description></parameter>
+            <parameter name="blocks" type="List"><description>[{blockId, defaultText, copyText, variables, lastChangedByUserId,
+                lastChangedDate}] by blockId. The guides block is lines of `Label|docs page path`.</description><parameter name="block" type="Map"/></parameter>
+            <parameter name="branches" type="List"><description>Sample branches the preview takes, empty when the email has one shape.</description></parameter>
+            <parameter name="sample" type="Map"><description>The default branch's sample parameters.</description></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="shown" from="darpan.admin.EmailAdminSupport.show(ec, emailTemplateId)"/>
+            <if condition="shown.error"><return error="true" message="${shown.error}"/></if>
+            <set field="description" from="shown.description"/>
+            <set field="subject" from="shown.subject"/>
+            <set field="defaultSubject" from="shown.defaultSubject"/>
+            <set field="subjectEdited" from="shown.subjectEdited"/>
+            <set field="subjectVariables" from="shown.subjectVariables"/>
+            <set field="blocks" from="shown.blocks"/>
+            <set field="branches" from="shown.branches"/>
+            <set field="sample" from="shown.sample"/>
+        </actions>
+    </service>
+
+    <service verb="preview" noun="EmailTemplate" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>Renders the email as a send does (the real screen, sample parameters) with a draft subject and draft blocks
+            standing in for the stored words. The draft goes through the same rules as an edit and is never saved.</description>
+        <in-parameters>
+            <parameter name="emailTemplateId" required="true"/>
+            <parameter name="subject"><description>Draft subject; absent: the current one.</description></parameter>
+            <parameter name="blocks" type="Map"><description>Draft text by blockId; blocks not named render as stored.</description></parameter>
+            <parameter name="branch"><description>Sample branch from get#EmailTemplate branches; blank: the first.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="html"/>
+            <parameter name="text"/>
+            <parameter name="subject"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="rendered" from="darpan.admin.EmailAdminSupport.preview(ec, emailTemplateId, subject, blocks, branch)"/>
+            <if condition="rendered.error"><return error="true" message="${rendered.error}"/></if>
+            <set field="html" from="rendered.html"/>
+            <set field="text" from="rendered.text"/>
+            <set field="subject" from="rendered.subject"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="EmailTemplate" allow-remote="true" authenticate="true">
+        <description>Saves production edits to an email's subject and blocks, all or nothing. Refused, with the reason and nothing
+            saved: empty text, markup, over 2,000 characters, a variable the email does not have, a web address, a guides
+            line EmailFrame does not accept, an unknown block. Writes an AdminAuditLog row.</description>
+        <in-parameters>
+            <parameter name="emailTemplateId" required="true"/>
+            <parameter name="subject"/>
+            <parameter name="blocks" type="Map"><description>New text by blockId.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="updated" type="List"><description>The block ids saved (and `subject`).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="updated" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="saved" from="darpan.admin.EmailAdminSupport.update(ec, emailTemplateId, subject, blocks)"/>
+            <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
+            <set field="updated" from="saved.updated"/>
+        </actions>
+    </service>
+
+    <service verb="reset" noun="EmailTemplate" allow-remote="true" authenticate="true">
+        <description>Puts the shipped words back. Named blockIds and/or subject true reset just those; neither given resets
+            every block and the subject. Writes an AdminAuditLog row.</description>
+        <in-parameters>
+            <parameter name="emailTemplateId" required="true"/>
+            <parameter name="blockIds" type="List"/>
+            <parameter name="subject" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reset" type="List"><description>What had an edit and went back (block ids, `subject`).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="reset" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="done" from="darpan.admin.EmailAdminSupport.reset(ec, emailTemplateId, blockIds, subject)"/>
+            <if condition="done.error"><return error="true" message="${done.error}"/></if>
+            <set field="reset" from="done.reset"/>
+        </actions>
+    </service>
+</services>

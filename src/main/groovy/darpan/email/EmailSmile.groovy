@@ -29,6 +29,7 @@ class EmailSmile {
 
     /** The line for this send: the model's when it passes {@link #ok}, else fallback. Never throws. */
     static String line(def ec, String key, String fallback) {
+        if (EmailCopy.previewing()) return fallback
         Map<String, Object> shared = ec.context.getSharedMap()
         String memo = MEMO + key
         if (shared.containsKey(memo)) return shared.get(memo) as String

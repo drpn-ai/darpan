@@ -22,6 +22,34 @@ class EmailCopy {
     private static final Pattern SLOT = Pattern.compile(/\$\{([^}]*)\}/)
 
     static final String GUIDES = "guides"
+    /** The subject's own row in EmailCopyBlock (blockId `subject`): created by the first edit, never seeded, never read by a screen. */
+    static final String SUBJECT = "subject"
+    static final int MAX_CHARS = 2000
+    static final int MAX_SUBJECT_CHARS = 200
+
+    private static final ThreadLocal<Map<String, String>> DRAFT = new ThreadLocal<>()
+
+    /**
+     * Preview: runs body with `templateId/blockId -> text` standing in for those blocks' production edits, on this thread
+     * only, and always clears them. Nothing is saved. Screens read through text()/guides() exactly as in a real send, so
+     * the preview is the real render path with a draft in place of the stored edit.
+     */
+    static <T> T withDraft(Map<String, String> draft, Closure<T> body) {
+        Map<String, String> before = DRAFT.get()
+        DRAFT.set(draft)
+        try { return body.call() } finally {
+            if (before == null) DRAFT.remove() else DRAFT.set(before)
+        }
+    }
+
+    /** True while a preview renders: the live agent line is not asked for (the draft's own words show). */
+    static boolean previewing() { return DRAFT.get() != null }
+
+    private static String draftOr(String emailTemplateId, String blockId, String stored) {
+        Map<String, String> draft = DRAFT.get()
+        String key = emailTemplateId + "/" + blockId
+        return draft != null && draft.containsKey(key) ? draft.get(key) : stored
+    }
 
     /** The block's words with its variables filled in: the edit when it is valid, else the default. Never throws. */
     static String text(def ec, String emailTemplateId, String blockId, Map vars) {
@@ -31,7 +59,7 @@ class EmailCopy {
             if (defaultText == null) return ""
             Set<String> allowed = templateVariables(ec, emailTemplateId)
             allowed.addAll(variables(defaultText))
-            String edit = row?.getString("copyText")
+            String edit = draftOr(emailTemplateId, blockId, row?.getString("copyText"))
             if (edit?.trim()) {
                 try {
                     String why = problem(emailTemplateId, blockId, edit)
@@ -64,13 +92,86 @@ class EmailCopy {
         return null
     }
 
+    /**
+     * Why this text may not be saved as the block's edit, or null: problem() plus the save rules. At most 2,000
+     * characters, no `<` or `>`, only variables the template has (templateVariables), and for the guides block lines
+     * of `Label|page` that EmailFrame.guides accepts. The subject has its own rules (subjectProblem). Pure but for reads.
+     */
+    static String editProblem(def ec, String emailTemplateId, String blockId, String text) {
+        if (blockId == SUBJECT) return subjectProblem(ec, emailTemplateId, text)
+        String why = problem(emailTemplateId, blockId, text)
+        if (why != null) return why
+        if (text.length() > MAX_CHARS) return "The text is longer than ${MAX_CHARS} characters"
+        if (text =~ /[<>]/) return "Plain words only: no < or > (no markup)"
+        Set<String> unknown = variables(text) - templateVariables(ec, emailTemplateId)
+        if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: this email does not have it"
+        if (blockId == GUIDES) {
+            try { EmailFrame.guides(parseGuides(text)) } catch (IllegalArgumentException e) { return "Guide links: " + e.message }
+        }
+        return null
+    }
+
+    /**
+     * Why this subject may not be saved, or null. The subject is expanded by Moqui as a Groovy string, so the rules are
+     * strict: one line of at most 200 characters, no markup, no web address, no `$` or backslash outside `${name}` slots,
+     * and only the slots the shipped default subject has.
+     */
+    static String subjectProblem(def ec, String emailTemplateId, String text) {
+        String defaultSubject = defaultSubject(ec, emailTemplateId)
+        if (defaultSubject == null) return "Unknown email ${emailTemplateId}"
+        if (!text?.trim()) return "The subject is empty"
+        if (text.length() > MAX_SUBJECT_CHARS) return "The subject is longer than ${MAX_SUBJECT_CHARS} characters"
+        if (text =~ /[\r\n<>\\]/) return "The subject is one plain line: no line breaks, < > or backslash"
+        String outside = SLOT.matcher(text).replaceAll(" ")
+        if (outside.contains('$')) return "A \$ in the subject must start a \${variable}"
+        if (outside =~ URL_LIKE) return "The subject carries a web address or host"
+        Set<String> unknown = variables(text) - variables(defaultSubject)
+        if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: the shipped subject does not have it"
+        return null
+    }
+
+    /** The subject the release ships for a template (from the seed files that define its EmailTemplate row), or null. */
+    static String defaultSubject(def ec, String emailTemplateId) { return seedSubjects(ec).get(emailTemplateId) }
+
+    /** The subject sends use: a valid edit (the `subject` row's copyText), else the shipped default. Null for an unknown template. */
+    static String effectiveSubject(def ec, String emailTemplateId) {
+        String defaultSubject = defaultSubject(ec, emailTemplateId)
+        if (defaultSubject == null) return null
+        String edit = row(ec, emailTemplateId, SUBJECT)?.getString("copyText")
+        if (edit?.trim() && subjectProblem(ec, emailTemplateId, edit) == null) return edit
+        return defaultSubject
+    }
+
+    /**
+     * Before every send (service/EmailCopy.secas.xml): when the template has a valid subject edit, EmailTemplate.subject
+     * is set to it. A release's seed or upgrade-data reload rewrites EmailTemplate.subject to the shipped default; the
+     * edit lives in its own EmailCopyBlock row that no release touches, so the next send puts it back. Never throws.
+     */
+    static void applySubject(def ec, String emailTemplateId) {
+        try {
+            String edit = row(ec, emailTemplateId, SUBJECT)?.getString("copyText")
+            if (!edit?.trim()) return
+            if (subjectProblem(ec, emailTemplateId, edit) != null) {
+                logOnce(emailTemplateId, SUBJECT, "the subject edit is not usable; the template's subject goes")
+                return
+            }
+            def template = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", emailTemplateId).useCache(false).one()
+            if (template != null && template.getString("subject") != edit) {
+                template.set("subject", edit)
+                template.update()
+            }
+        } catch (Throwable t) {
+            logOnce(emailTemplateId, SUBJECT, "applying the subject edit failed: ${t.class.simpleName} ${t.message}")
+        }
+    }
+
     /** Every ${variable} any block of the template uses: what an edit to any block of it may use. Rows and seed file. */
     static Set<String> templateVariables(def ec, String emailTemplateId) {
         Set<String> names = new LinkedHashSet<>()
-        seedDefaults(ec).each { String key, String text -> if (key.startsWith(emailTemplateId + "/")) names.addAll(variables(text)) }
+        seedDefaults(ec).each { String key, String text -> if (key.startsWith(emailTemplateId + "/") && !key.endsWith("/" + SUBJECT)) names.addAll(variables(text)) }
         try {
             ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", emailTemplateId).useCache(false).list()
-                    .each { names.addAll(variables(it.getString("defaultText"))) }
+                    .each { if (it.getString("blockId") != SUBJECT) names.addAll(variables(it.getString("defaultText"))) }
         } catch (Throwable t) {
             logOnce(emailTemplateId, "*", "variables read failed: ${t.message}")
         }
@@ -87,7 +188,7 @@ class EmailCopy {
             def row = row(ec, emailTemplateId, GUIDES)
             String defaultText = defaultOf(ec, row, emailTemplateId, GUIDES)
             if (defaultText == null) return []
-            String edit = row?.getString("copyText")
+            String edit = draftOr(emailTemplateId, GUIDES, row?.getString("copyText"))
             if (edit?.trim()) {
                 try {
                     List<List<String>> parsed = parseGuides(edit)
@@ -196,7 +297,34 @@ class EmailCopy {
         return found
     }
 
-    private static def row(def ec, String emailTemplateId, String blockId) {
+    private static final List<String> SUBJECT_SEED_FILES = ["PasswordResetEmailSeedData", "TwoFactorSeedData",
+            "TenantWelcomeEmailSeedData", "AuditDigestEmailSeedData"]
+    private static volatile Map<String, String> seedSubjectsCache
+
+    /** emailTemplateId -> the subject its seed file ships. */
+    static Map<String, String> seedSubjects(def ec) {
+        Map<String, String> cached = seedSubjectsCache
+        if (cached != null) return cached
+        Map<String, String> found = new HashMap<>()
+        SUBJECT_SEED_FILES.each { String file ->
+            try {
+                ec.resource.getLocationReference("component://darpan/data/${file}.xml".toString()).openStream().withCloseable { InputStream is ->
+                    new XmlSlurper().parse(is).children().each { node ->
+                        if (node.name() == "moqui.basic.email.EmailTemplate") found.put(node.@emailTemplateId.text(), node.@subject.text())
+                    }
+                }
+            } catch (Throwable t) {
+                logOnce("*", "*", "could not read data/${file}.xml: ${t.message}")
+            }
+        }
+        if (found.size() >= SUBJECT_SEED_FILES.size()) seedSubjectsCache = found
+        return found
+    }
+
+    /** emailTemplateId/blockId -> shipped default text, every block the seed has. */
+    static Map<String, String> seedBlockDefaults(def ec) { return seedDefaults(ec) }
+
+    static def row(def ec, String emailTemplateId, String blockId) {
         try {
             return ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", emailTemplateId)
                     .condition("blockId", blockId).useCache(false).one()

@@ -16,6 +16,11 @@ admin.CliAccessAdminServices.pause#CliAccessGrant
 admin.CliAccessAdminServices.revoke#CliAccessGrant
 admin.CliAccessAdminServices.unpause#CliAccessGrant
 admin.CliAccessAdminServices.update#CliAccessGrant
+admin.EmailAdminServices.get#EmailTemplate
+admin.EmailAdminServices.get#EmailTemplates
+admin.EmailAdminServices.preview#EmailTemplate
+admin.EmailAdminServices.reset#EmailTemplate
+admin.EmailAdminServices.update#EmailTemplate
 admin.KnowledgeAdminServices.get#KnowledgeEntry
 admin.KnowledgeAdminServices.get#KnowledgeForReview
 admin.KnowledgeAdminServices.get#KnowledgeIdentifiers

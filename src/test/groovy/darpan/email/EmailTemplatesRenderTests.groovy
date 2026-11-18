@@ -24,24 +24,9 @@ class EmailTemplatesRenderTests {
     private ExecutionContext ec
     private Path previews
 
-    private static final String AT = "18 Nov 2026 at 10:53 IST"
-    /** Screen -> sample parameters. Security notices: no link of any kind, not even a stylesheet. */
-    private static final Map<String, Map> SECURITY = [
-            PasswordResetCode    : [firstName: "Riya", code: "042117", expiresMinutes: 15],
-            PasswordChanged      : [firstName: "Riya", changedAt: AT],
-            RecoveryEmailSet     : [firstName: "Riya", isOldAddress: false],
-            TwoFactorPasskeyAdded: [firstName: "Riya", passkeyName: "Work laptop", at: AT],
-            TwoFactorAppAdded    : [firstName: "Riya", at: AT],
-            TwoFactorRecoveryUsed: [firstName: "Riya", at: AT, recoveryCodesLeft: 7],
-            TwoFactorReset       : [firstName: "Riya", at: AT],
-            TwoFactorCodesLocked : [firstName: "Riya", at: AT],
-            TwoFactorReminder    : [firstName: "Riya", requiredDate: "2 December 2026", appUrl: "https://app.drpn.ai", past: false],
-    ]
-    private static final Map<String, Map> OTHER = [
-            TenantWelcome: [firstName: "Riya", tenantLabel: "Malbon", rolePhrase: "as an Editor", username: "riya.k",
-                            appBaseUrl: "https://app.drpn.ai"],
-            AuditDigest  : [digestText: "Gorjana · Month close\nOpen 5 · New 2 · Fixed 1"],
-    ]
+    private static final String AT = EmailSamples.AT
+    private static final Map<String, Map> SECURITY = EmailSamples.SECURITY
+    private static final Map<String, Map> OTHER = EmailSamples.OTHER
 
     @BeforeAll
     void setup() {
@@ -56,7 +41,7 @@ class EmailTemplatesRenderTests {
 
     @Test
     void everyNoticeWearsTheFrameAndKeepsTheRules() {
-        (SECURITY + OTHER).each { String screen, Map params ->
+        (SECURITY + OTHER - [AuditRun: OTHER.AuditRun]).each { String screen, Map params ->
             String html = render(screen, params, "html")
             Files.writeString(previews.resolve("${screen}.html"), html)
             assertTrue(html.contains('class="dp-card"'), "${screen}: inside EmailFrame\n${html}")

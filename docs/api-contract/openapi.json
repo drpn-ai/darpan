@@ -78,6 +78,21 @@
                                         "$ref": "#/components/schemas/UpdateCliAccessGrantRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetEmailTemplateRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetEmailTemplatesRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/PreviewEmailTemplateRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResetEmailTemplateRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateEmailTemplateRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetKnowledgeEntryRequest"
                                     },
                                     {
@@ -849,6 +864,11 @@
                                         "admin.CliAccessAdminServices.revoke#CliAccessGrant": "#/components/schemas/RevokeCliAccessGrantRequest",
                                         "admin.CliAccessAdminServices.unpause#CliAccessGrant": "#/components/schemas/UnpauseCliAccessGrantRequest",
                                         "admin.CliAccessAdminServices.update#CliAccessGrant": "#/components/schemas/UpdateCliAccessGrantRequest",
+                                        "admin.EmailAdminServices.get#EmailTemplate": "#/components/schemas/GetEmailTemplateRequest",
+                                        "admin.EmailAdminServices.get#EmailTemplates": "#/components/schemas/GetEmailTemplatesRequest",
+                                        "admin.EmailAdminServices.preview#EmailTemplate": "#/components/schemas/PreviewEmailTemplateRequest",
+                                        "admin.EmailAdminServices.reset#EmailTemplate": "#/components/schemas/ResetEmailTemplateRequest",
+                                        "admin.EmailAdminServices.update#EmailTemplate": "#/components/schemas/UpdateEmailTemplateRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "#/components/schemas/GetKnowledgeEntryRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "#/components/schemas/GetKnowledgeForReviewRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "#/components/schemas/GetKnowledgeIdentifiersRequest",
@@ -1168,6 +1188,21 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateCliAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetEmailTemplateResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetEmailTemplatesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PreviewEmailTemplateResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ResetEmailTemplateResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateEmailTemplateResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetKnowledgeEntryResponse"
@@ -3649,6 +3684,484 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateCliAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetEmailTemplateParams": {
+                "type": "object",
+                "properties": {
+                    "emailTemplateId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "emailTemplateId"
+                ],
+                "description": "One email: its subject and the shipped subject, every block with its shipped words, the production edit\n            (null when none) and the variables an edit may use, and the sample the preview renders."
+            },
+            "GetEmailTemplateResult": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "The subject sends use: the edit, else the shipped one."
+                    },
+                    "defaultSubject": {
+                        "type": "string"
+                    },
+                    "subjectEdited": {
+                        "type": "boolean"
+                    },
+                    "subjectVariables": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "The ${variables} the subject may use."
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "[{blockId, defaultText, copyText, variables, lastChangedByUserId,\n                lastChangedDate}] by blockId. The guides block is lines of `Label|docs page path`."
+                    },
+                    "branches": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "Sample branches the preview takes, empty when the email has one shape."
+                    },
+                    "sample": {
+                        "type": "object",
+                        "description": "The default branch's sample parameters."
+                    }
+                }
+            },
+            "GetEmailTemplateRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.EmailAdminServices.get#EmailTemplate",
+                "x-darpan-method": "admin.EmailAdminServices.get#EmailTemplate",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.EmailAdminServices.get#EmailTemplate"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetEmailTemplateParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetEmailTemplateResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.EmailAdminServices.get#EmailTemplate. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetEmailTemplateResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetEmailTemplatesParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Every email Darpan sends: id, description, the subject sends use, how many blocks carry a production edit."
+            },
+            "GetEmailTemplatesResult": {
+                "type": "object",
+                "properties": {
+                    "templates": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "[{emailTemplateId, description, subject, editedBlockCount,\n                subjectEdited}] by emailTemplateId."
+                    }
+                }
+            },
+            "GetEmailTemplatesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.EmailAdminServices.get#EmailTemplates",
+                "x-darpan-method": "admin.EmailAdminServices.get#EmailTemplates",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.EmailAdminServices.get#EmailTemplates"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetEmailTemplatesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetEmailTemplatesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.EmailAdminServices.get#EmailTemplates. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetEmailTemplatesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "PreviewEmailTemplateParams": {
+                "type": "object",
+                "properties": {
+                    "emailTemplateId": {
+                        "type": "string"
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Draft subject; absent: the current one."
+                    },
+                    "blocks": {
+                        "type": "object",
+                        "description": "Draft text by blockId; blocks not named render as stored."
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Sample branch from get#EmailTemplate branches; blank: the first."
+                    }
+                },
+                "required": [
+                    "emailTemplateId"
+                ],
+                "description": "Renders the email as a send does (the real screen, sample parameters) with a draft subject and draft blocks\n            standing in for the stored words. The draft goes through the same rules as an edit and is never saved."
+            },
+            "PreviewEmailTemplateResult": {
+                "type": "object",
+                "properties": {
+                    "html": {
+                        "type": "string"
+                    },
+                    "text": {
+                        "type": "string"
+                    },
+                    "subject": {
+                        "type": "string"
+                    }
+                }
+            },
+            "PreviewEmailTemplateRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.EmailAdminServices.preview#EmailTemplate",
+                "x-darpan-method": "admin.EmailAdminServices.preview#EmailTemplate",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.EmailAdminServices.preview#EmailTemplate"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PreviewEmailTemplateParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PreviewEmailTemplateResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.EmailAdminServices.preview#EmailTemplate. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PreviewEmailTemplateResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ResetEmailTemplateParams": {
+                "type": "object",
+                "properties": {
+                    "emailTemplateId": {
+                        "type": "string"
+                    },
+                    "blockIds": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "subject": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "emailTemplateId"
+                ],
+                "description": "Puts the shipped words back. Named blockIds and/or subject true reset just those; neither given resets\n            every block and the subject. Writes an AdminAuditLog row."
+            },
+            "ResetEmailTemplateResult": {
+                "type": "object",
+                "properties": {
+                    "reset": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "What had an edit and went back (block ids, `subject`)."
+                    }
+                }
+            },
+            "ResetEmailTemplateRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.EmailAdminServices.reset#EmailTemplate",
+                "x-darpan-method": "admin.EmailAdminServices.reset#EmailTemplate",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.EmailAdminServices.reset#EmailTemplate"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ResetEmailTemplateParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ResetEmailTemplateResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.EmailAdminServices.reset#EmailTemplate. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ResetEmailTemplateResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateEmailTemplateParams": {
+                "type": "object",
+                "properties": {
+                    "emailTemplateId": {
+                        "type": "string"
+                    },
+                    "subject": {
+                        "type": "string"
+                    },
+                    "blocks": {
+                        "type": "object",
+                        "description": "New text by blockId."
+                    }
+                },
+                "required": [
+                    "emailTemplateId"
+                ],
+                "description": "Saves production edits to an email's subject and blocks, all or nothing. Refused, with the reason and nothing\n            saved: empty text, markup, over 2,000 characters, a variable the email does not have, a web address, a guides\n            line EmailFrame does not accept, an unknown block. Writes an AdminAuditLog row."
+            },
+            "UpdateEmailTemplateResult": {
+                "type": "object",
+                "properties": {
+                    "updated": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "The block ids saved (and `subject`)."
+                    }
+                }
+            },
+            "UpdateEmailTemplateRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.EmailAdminServices.update#EmailTemplate",
+                "x-darpan-method": "admin.EmailAdminServices.update#EmailTemplate",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.EmailAdminServices.update#EmailTemplate"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateEmailTemplateParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateEmailTemplateResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.EmailAdminServices.update#EmailTemplate. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateEmailTemplateResult"
                     }
                 },
                 "required": [
@@ -35749,6 +36262,11 @@
         "admin.CliAccessAdminServices.revoke#CliAccessGrant": "RevokeCliAccessGrant",
         "admin.CliAccessAdminServices.unpause#CliAccessGrant": "UnpauseCliAccessGrant",
         "admin.CliAccessAdminServices.update#CliAccessGrant": "UpdateCliAccessGrant",
+        "admin.EmailAdminServices.get#EmailTemplate": "GetEmailTemplate",
+        "admin.EmailAdminServices.get#EmailTemplates": "GetEmailTemplates",
+        "admin.EmailAdminServices.preview#EmailTemplate": "PreviewEmailTemplate",
+        "admin.EmailAdminServices.reset#EmailTemplate": "ResetEmailTemplate",
+        "admin.EmailAdminServices.update#EmailTemplate": "UpdateEmailTemplate",
         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "GetKnowledgeEntry",
         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "GetKnowledgeForReview",
         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "GetKnowledgeIdentifiers",

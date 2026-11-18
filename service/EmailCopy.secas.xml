@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-303. A production edit of an email's subject lives in its own EmailCopyBlock row (blockId `subject`), because a
+  release's seed or upgrade-data reload rewrites moqui.basic.email.EmailTemplate.subject. Before every send the edit is put
+  back on the template, so a release never undoes it. applySubject never throws and does nothing when there is no edit.
+-->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="EmailCopySubject" service="org.moqui.impl.EmailServices.send#EmailTemplate" when="pre-service">
+        <actions><script>darpan.email.EmailCopy.applySubject(ec, emailTemplateId)</script></actions>
+    </seca>
+</secas>

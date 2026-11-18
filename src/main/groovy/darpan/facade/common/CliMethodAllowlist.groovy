@@ -163,6 +163,14 @@ class CliMethodAllowlist {
             // DAR-BE-215: what one finding's audit tells the embedded agent; the agent reads it, not a CLI session.
             "facade.AgentReadFacadeServices.get#AgentAuditScope",
 
+            // DAR-BE-303: the words and subjects of Darpan's own emails are edited by a super admin in the admin app (and the
+            // darpan-admin CLI), never by a tenant CLI session; the getters and the preview stay out with the writers.
+            "admin.EmailAdminServices.get#EmailTemplate",
+            "admin.EmailAdminServices.get#EmailTemplates",
+            "admin.EmailAdminServices.preview#EmailTemplate",
+            "admin.EmailAdminServices.reset#EmailTemplate",
+            "admin.EmailAdminServices.update#EmailTemplate",
+
             "admin.KnowledgeAdminServices.get#KnowledgeEntry",
             "admin.KnowledgeAdminServices.get#KnowledgeForReview",
             "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers",

@@ -1,5 +1,6 @@
 package darpan.content
 
+import darpan.admin.AuditLogTestSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -24,6 +25,11 @@ class AppContentServicesSmokeTests {
     private ExecutionContext ec
     private static final String USER_ID = "APPCONT_USER"
     private static final String USERNAME = "appcont.user"
+    private static final String SUPER_ID = "APPCONT_SUPER"
+    private static final String SUPER = "appcont.super"
+    private static final String TADMIN_ID = "APPCONT_TADMIN"
+    private static final String TADMIN = "appcont.tadmin"
+    private static final String A = "admin.AppContentAdminServices."
     private static final String GLOSSARY = "MASCOT_GLOSSARY"
     private static final String HINT = "MASCOT_HINT"
     private static final Timestamp T1 = Timestamp.valueOf("2026-11-18 10:00:00")
@@ -47,6 +53,13 @@ class AppContentServicesSmokeTests {
                 userFullName: "Content User", emailAddress: "appcont@example.com", disabled: "N", requirePasswordChange: "N"]).createOrUpdate()
         ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_USER", userId: USER_ID,
                 fromDate: Timestamp.valueOf("2026-01-01 00:00:00")]).create()
+        [[SUPER_ID, SUPER, "DARPAN_SUPER_ADMIN"], [TADMIN_ID, TADMIN, "DARPAN_TENANT_ADMIN"]].each { id, name, group ->
+            ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: id, username: name, userFullName: name,
+                    emailAddress: "${name}@example.com", disabled: "N", requirePasswordChange: "N"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: group, userId: id,
+                    fromDate: Timestamp.valueOf("2026-01-01 00:00:00")]).create()
+        }
+        AuditLogTestSupport.wipe(ec, "darpan.admin.AdminAuditLog")
         ec.message.clearErrors()
     }
 
@@ -63,7 +76,7 @@ class AppContentServicesSmokeTests {
                 } catch (Throwable e) {
                     holder.denied = e
                 }
-                holder.errors = new ArrayList<String>(tec.message.errors)
+                holder.errors = new ArrayList<String>(tec.message.errors) + (tec.message.validationErrors*.message ?: [])
                 holder.hasError = tec.message.hasError()
             } catch (Throwable t) {
                 holder.failure = t
@@ -258,5 +271,250 @@ class AppContentServicesSmokeTests {
         Map out = callAs(null, "facade.AppContentFacadeServices.get#AppContent", [:])
         assertTrue(out.denied != null || out.hasError as boolean, "an anonymous call must not read: ${out}")
         assertNull(out.result?.entries, "and must not return entries")
+    }
+
+    // ---- DAR-BE-313 Task 3: admin services ----
+
+    private Map adm(String method, Map params, String username = SUPER) { return callAs(username, A + method, params) }
+
+    private Map admOk(String method, Map params) {
+        Map out = adm(method, params)
+        assertNull(out.denied, "denied: ${out.denied}")
+        assertFalse(out.hasError as boolean, "errors: ${out.errors}")
+        return out.result as Map
+    }
+
+    private List<Map> audit() {
+        return ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().orderBy("auditTimestamp").list().collect { new LinkedHashMap(it.getMap()) }
+    }
+
+    private Map firstAnchoredSeedHint() {
+        return new LinkedHashMap(ec.entity.find("darpan.content.AppContentEntry").condition("contentKind", HINT)
+                .condition("conditionKind", "ANCHOR_PRESENT").disableAuthz().orderBy("contentKey").list().first().getMap())
+    }
+
+    @Test
+    void vocabularyListsKnownRoutesAndAnchors() {
+        loadSeed()
+        Map out = admOk("get#AppContentVocabulary", [:])
+        List<Map> routes = out.routes as List<Map>
+        assertTrue(routes.size() > 20)
+        Map seedHint = firstAnchoredSeedHint()
+        Map r = routes.find { it.routeName == seedHint.routeName }
+        assertNotNull(r)
+        assertTrue((r.routePath as String).startsWith("/"))
+        assertTrue((r.anchors as List).contains(seedHint.anchorTestId))
+        assertEquals(["ALWAYS", "ANCHOR_PRESENT"], out.conditionKinds)
+        assertEquals([renderedMax: 200, hintMax: 160, aliasMax: 60, aliasesMax: 10, patternMax: 60, wildcardsMax: 2], out.limits)
+    }
+
+    @Test
+    void aNewHintOnAKnownRouteIsServed() {
+        loadSeed()
+        Map out = admOk("create#AppContentEntry", [kind: HINT, slug: "download-tip", body: "Download the file to keep a copy.",
+                routeName: "reconciliation-run-result", conditionKind: "ANCHOR_PRESENT", anchorTestId: "run-result-download", sequence: 15])
+        assertEquals("admin:download-tip", out.key)
+        assertEquals([], out.problems)
+        assertTrue((out.whereShown as String).contains("when run-result-download is on the page"), "${out.whereShown}")
+        assertTrue((out.whereShown as String) ==~ /.*position \d+ of \d+.*/, "${out.whereShown}")
+        Map served = (read().entries as List<Map>).find { it.key == "admin:download-tip" }
+        assertNotNull(served)
+        assertEquals("ADMIN", served.source)
+        assertEquals(15, served.sequence)
+        assertEquals("reconciliation-run-result", served.routeName)
+        assertEquals(SUPER_ID, row(HINT, "admin:download-tip").createdByUserId)
+    }
+
+    @Test
+    void createRefusesAnUnknownRouteConditionOrAnchor() {
+        loadSeed()
+        Map seedHint = firstAnchoredSeedHint()
+        long before = ec.entity.find("darpan.content.AppContentEntry").disableAuthz().count()
+        [[routeName: "no-such-route", conditionKind: "ALWAYS"], [routeName: seedHint.routeName, conditionKind: "SOMETIMES"],
+         [routeName: seedHint.routeName, conditionKind: "ANCHOR_PRESENT", anchorTestId: "no-such-anchor"]].each { Map bad ->
+            Map out = admOk("create#AppContentEntry", [kind: HINT, slug: "bad-tip", body: "A tip.", sequence: 5] + bad)
+            assertFalse((out.problems as List).isEmpty(), "must be refused: ${bad}")
+            assertNull(out.whereShown)
+        }
+        assertEquals(before, ec.entity.find("darpan.content.AppContentEntry").disableAuthz().count())
+        assertEquals([], audit())
+    }
+
+    @Test
+    void createRefusesAMalformedAliasOrPattern() {
+        loadSeed()
+        long before = ec.entity.find("darpan.content.AppContentEntry").disableAuthz().count()
+        [[aliases: ["a|b"]], [aliases: [""]], [matchPattern: "nostar"], [matchPattern: "a*b*c*d"],
+         [aliases: ["differences"]], [matchPattern: "differ*"]].each { Map bad ->
+            Map out = admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "bad-term", title: "Bad", body: "is bad."] + bad)
+            assertFalse((out.problems as List).isEmpty(), "must be refused: ${bad}")
+        }
+        assertEquals(before, ec.entity.find("darpan.content.AppContentEntry").disableAuthz().count())
+        // markup never reaches the rules: the service engine's own HTML check refuses it first
+        assertTrue(adm("create#AppContentEntry", [kind: GLOSSARY, slug: "html", title: "Html", body: "is html.", aliases: ["<b>x</b>"]]).hasError as boolean)
+        assertNull(row(GLOSSARY, "admin:html"))
+        assertTrue((admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "x y", title: "Bad", body: "is bad.", aliases: ["zzz one"]]).problems as List).any { it.toString().contains("key") })
+    }
+
+    @Test
+    void dryRunSavesNothingAndPreviewsWhereShown() {
+        loadSeed()
+        Map out = admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "dry-term", title: "Dry term", body: "is dry.",
+                aliases: ["dry label", "wet label"], dryRun: true])
+        assertEquals([], out.problems)
+        assertEquals("admin:dry-term", out.key)
+        assertTrue((out.whereShown as String).startsWith("answers labels: dry label"), "${out.whereShown}")
+        assertNull(row(GLOSSARY, "admin:dry-term"))
+        assertEquals([], audit())
+        // update dry run too
+        Map own = row(GLOSSARY, "differenceCount")
+        Map up = admOk("update#AppContentEntry", [kind: GLOSSARY, key: "differenceCount", title: "Zzz", dryRun: true])
+        assertEquals([], up.problems)
+        assertNull(row(GLOSSARY, "differenceCount").title)
+        assertEquals(own.defaultTitle, row(GLOSSARY, "differenceCount").defaultTitle)
+        assertEquals([], audit())
+    }
+
+    @Test
+    void aNewGlossaryTermAndActionAreServed() {
+        loadSeed()
+        Map g = admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "pace-count", title: "Pace count", body: "is how many ran.",
+                aliases: ["pace count", "pace tally"], matchPattern: "pace * total"])
+        assertEquals([], g.problems)
+        assertTrue((g.whereShown as String).startsWith("answers labels:"), "${g.whereShown}")
+        Map a = admOk("create#AppContentEntry", [kind: "MASCOT_ACTION", slug: "pace-now", title: "Pace now", body: "starts a pace run.", aliases: ["pace now"]])
+        assertEquals([], a.problems)
+        assertTrue((a.whereShown as String).startsWith("answers controls named"), "${a.whereShown}")
+        List<Map> entries = read().entries as List<Map>
+        Map term = entries.find { it.key == "admin:pace-count" }
+        assertEquals(["pace count", "pace tally"], term.aliases)
+        assertEquals("pace * total", term.matchPattern)
+        assertNotNull(entries.find { it.key == "admin:pace-now" && it.kind == "MASCOT_ACTION" })
+        // the same key twice is refused
+        assertTrue((admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "pace-count", title: "Pace count", body: "is again.", aliases: ["zzz again"]]).problems as List).any { it.toString().contains("exists") })
+    }
+
+    @Test
+    void updateCannotRebindASeedRow() {
+        loadSeed()
+        Map seedHint = firstAnchoredSeedHint()
+        Map out = admOk("update#AppContentEntry", [kind: HINT, key: seedHint.contentKey, routeName: "hub", sequence: 1])
+        assertFalse((out.problems as List).isEmpty())
+        Map after = row(HINT, seedHint.contentKey as String)
+        assertEquals(seedHint.routeName, after.routeName)
+        assertEquals(seedHint.sequence, after.sequence)
+        assertEquals([], audit())
+        // an ADMIN row may be rebound
+        admOk("create#AppContentEntry", [kind: HINT, slug: "move-me", body: "Move me.", routeName: "hub", conditionKind: "ALWAYS", sequence: 15])
+        Map moved = admOk("update#AppContentEntry", [kind: HINT, key: "admin:move-me", routeName: seedHint.routeName, conditionKind: "ANCHOR_PRESENT", anchorTestId: seedHint.anchorTestId, sequence: 16])
+        assertEquals([], moved.problems)
+        assertEquals(seedHint.routeName, row(HINT, "admin:move-me").routeName)
+    }
+
+    @Test
+    void hideASeedRowThenReset() {
+        loadSeed()
+        Map dflt = row(GLOSSARY, "differenceCount")
+        Map out = admOk("update#AppContentEntry", [kind: GLOSSARY, key: "differenceCount", title: "Another title", body: dflt.defaultBody, hidden: true, aliases: ["diff total"]])
+        assertEquals([], out.problems)
+        Map r = row(GLOSSARY, "differenceCount")
+        assertEquals("Another title", r.title)
+        assertNull(r.body, "a body equal to its default is stored as null")
+        assertEquals("Y", r.hidden)
+        assertEquals("diff total", r.aliases)
+        assertEquals(true, (read().entries as List<Map>).find { it.key == "differenceCount" }.hidden)
+        // title equal to default clears it
+        admOk("update#AppContentEntry", [kind: GLOSSARY, key: "differenceCount", title: dflt.defaultTitle])
+        assertNull(row(GLOSSARY, "differenceCount").title)
+
+        Map rs = admOk("reset#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
+        assertEquals([], rs.problems ?: [])
+        Map back = row(GLOSSARY, "differenceCount")
+        assertTrue(back.title == null && back.body == null && back.aliases == null && back.hidden == null, "${back}")
+        assertEquals([], read().entries)
+        assertEquals(dflt.defaultBody, back.defaultBody)
+        // reset of an ADMIN row is refused
+        admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "mine", title: "Mine", body: "is mine.", aliases: ["zzz mine"]])
+        assertTrue(adm("reset#AppContentEntry", [kind: GLOSSARY, key: "admin:mine"]).hasError as boolean)
+    }
+
+    @Test
+    void deleteRefusesASeedRowButTakesAdminAndRetiredRows() {
+        loadSeed()
+        Map out = adm("delete#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
+        assertTrue(out.hasError as boolean)
+        assertTrue((out.errors as List).any { it.toString().contains("hide it instead") }, "${out.errors}")
+        assertNotNull(row(GLOSSARY, "differenceCount"))
+        admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "gone", title: "Gone", body: "is gone.", aliases: ["zzz gone"]])
+        admOk("delete#AppContentEntry", [kind: GLOSSARY, key: "admin:gone"])
+        assertNull(row(GLOSSARY, "admin:gone"))
+        // a seed row a later release dropped is retired and may be deleted
+        ec.entity.find("darpan.content.AppContentEntry").condition("contentKind", GLOSSARY).condition("contentKey", "differenceCount").disableAuthz().one()
+                .setAll([seedMark: "0000000000000000"]).update()
+        admOk("delete#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
+        assertNull(row(GLOSSARY, "differenceCount"))
+        assertTrue(adm("delete#AppContentEntry", [kind: GLOSSARY, key: "admin:nope"]).hasError as boolean)
+    }
+
+    @Test
+    void theListFlagsRetiredAndShadowedRows() {
+        loadSeed()
+        admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "shadow", title: "Shadow", body: "is shadow.", aliases: ["zzz shadow"]])
+        Map list = admOk("list#AppContent", [:])
+        assertTrue((list.entries as List).size() > 500)
+        Map one = (list.entries as List<Map>).find { it.key == "admin:shadow" }
+        assertEquals("ADMIN", one.source)
+        assertEquals(false, one.retired)
+        assertNull(one.shadowedBy)
+        // a release later answers the same label: the ADMIN row is shadowed by it
+        Map seed = row(GLOSSARY, "differenceCount")
+        ec.entity.find("darpan.content.AppContentEntry").condition("contentKind", GLOSSARY).condition("contentKey", "differenceCount").disableAuthz().one()
+                .setAll([matchLabels: seed.matchLabels + "|zzz shadow"]).update()
+        Map after = (admOk("list#AppContent", [kind: GLOSSARY, source: "ADMIN"]).entries as List<Map>).find { it.key == "admin:shadow" }
+        assertEquals("differenceCount", after.shadowedBy)
+        assertTrue((admOk("list#AppContent", [kind: GLOSSARY, source: "ADMIN"]).entries as List<Map>).every { it.source == "ADMIN" })
+        assertEquals(["admin:shadow"], (admOk("list#AppContent", [words: "SHADOW", editedOnly: true]).entries as List<Map>)*.key)
+        ec.entity.find("darpan.content.AppContentEntry").condition("contentKind", GLOSSARY).condition("contentKey", "differenceCount").disableAuthz().one()
+                .setAll([seedMark: "0000000000000000"]).update()
+        Map ret = (admOk("list#AppContent", [kind: GLOSSARY, words: "differenceCount"]).entries as List<Map>).find { it.key == "differenceCount" }
+        assertEquals(true, ret.retired)
+    }
+
+    @Test
+    void everyWriteIsAudited() {
+        loadSeed()
+        admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "audited", title: "Audited", body: "is audited.", aliases: ["zzz audited"]])
+        admOk("update#AppContentEntry", [kind: GLOSSARY, key: "admin:audited", body: "is audited twice."])
+        admOk("update#AppContentEntry", [kind: GLOSSARY, key: "differenceCount", hidden: true])
+        admOk("reset#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
+        admOk("delete#AppContentEntry", [kind: GLOSSARY, key: "admin:audited"])
+        List<Map> rows = audit()
+        assertEquals([A + "create#AppContentEntry", A + "update#AppContentEntry", A + "update#AppContentEntry", A + "reset#AppContentEntry", A + "delete#AppContentEntry"], rows*.serviceName)
+        assertTrue(rows.every { it.adminUserId == SUPER_ID && it.targetType == "AppContentEntry" })
+        assertEquals("MASCOT_GLOSSARY:admin:audited", rows[0].targetId)
+        assertTrue((rows[1].detailText as String).contains("body") && (rows[1].detailText as String).contains("->"), "${rows[1].detailText}")
+        assertTrue((rows[2].detailText as String).contains("hidden"), "${rows[2].detailText}")
+        // a reset with nothing edited, a refused call and a dry run write no row
+        admOk("reset#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
+        adm("delete#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
+        admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "dry", title: "Dry", body: "is dry.", aliases: ["zzz dry"], dryRun: true])
+        assertEquals(5, audit().size())
+    }
+
+    @Test
+    void aTenantAdminIsRefused() {
+        loadSeed()
+        ["get#AppContentVocabulary": [:], "list#AppContent": [:],
+         "create#AppContentEntry": [kind: GLOSSARY, slug: "no", title: "No", body: "is no.", aliases: ["zzz no"]],
+         "update#AppContentEntry": [kind: GLOSSARY, key: "differenceCount", hidden: true],
+         "reset#AppContentEntry": [kind: GLOSSARY, key: "differenceCount"],
+         "delete#AppContentEntry": [kind: GLOSSARY, key: "differenceCount"]].each { String m, Map p ->
+            Map out = adm(m, p, TADMIN)
+            assertTrue(out.denied != null || out.hasError as boolean, "${m} must refuse a tenant admin")
+            assertNull(out.result?.entries)
+        }
+        assertNull(row(GLOSSARY, "admin:no"))
+        assertNull(row(GLOSSARY, "differenceCount").hidden)
+        assertEquals([], audit())
     }
 }

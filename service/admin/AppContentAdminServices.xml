@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-313. List, create, edit, hide, reset and delete the mascot's entries (AppContentEntry: hints, glossary terms and
+  control actions), for Darpan admins (super admins). admin.* and therefore inside the DARPAN_ADMIN_API fence; each service
+  checks super admin again first, and the entity reads run as that super admin under the inherited authz. No fresh two-factor
+  code: super-admin sign-in is enough, every write is audit-logged (AdminAuditLog, `kind key: field: old -> new`). An edit that
+  breaks a rule is returned as `problems` with nothing saved; dryRun runs every rule and previews `whereShown` and saves
+  nothing. The rules are darpan.content.AppContentRules; the decisions are darpan.content.AppContentAdminSupport.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="AppContentVocabulary" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>What an entry may be bound to: every route with its path and anchors (data-testids), the condition kinds, and
+            the limits the rules enforce.</description>
+        <out-parameters>
+            <parameter name="routes" type="List"><parameter name="route" type="Map"/></parameter>
+            <parameter name="conditionKinds" type="List"/>
+            <parameter name="limits" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="routes" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="vocabulary" from="darpan.content.AppContentAdminSupport.vocabulary(ec)"/>
+            <set field="routes" from="vocabulary.routes"/>
+            <set field="conditionKinds" from="vocabulary.conditionKinds"/>
+            <set field="limits" from="vocabulary.limits"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="AppContent" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>Every entry, full rows. retired is a seed entry a later release dropped (not served, deletable). shadowedBy
+            names the SEED entry that now answers an ADMIN entry's label after a release. edited is an admin entry or a seed entry
+            with an edit.</description>
+        <in-parameters>
+            <parameter name="kind"><description>MASCOT_GLOSSARY, MASCOT_ACTION or MASCOT_HINT.</description></parameter>
+            <parameter name="words"><description>Case-insensitive text found in the key, words, aliases or pattern.</description></parameter>
+            <parameter name="source"><description>SEED or ADMIN.</description></parameter>
+            <parameter name="editedOnly" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="entries" type="List"><parameter name="entry" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="entries" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="entries" from="darpan.content.AppContentAdminSupport.list(ec, [kind: kind, words: words, source: source, editedOnly: editedOnly])"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="AppContentEntry" allow-remote="true" authenticate="true">
+        <description>Makes a new ADMIN entry with the key `admin:` + slug. Every rule runs; any problem (or dryRun) saves nothing.
+            whereShown previews where the mascot will say it. Writes an AdminAuditLog row.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"/>
+            <parameter name="slug" required="true"/>
+            <parameter name="title"/>
+            <parameter name="body" required="true"/>
+            <parameter name="aliases" type="List"><parameter name="alias"/></parameter>
+            <parameter name="matchPattern"/>
+            <parameter name="routeName"/>
+            <parameter name="conditionKind"/>
+            <parameter name="anchorTestId"/>
+            <parameter name="sequence" type="Integer"/>
+            <parameter name="dryRun" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="key"/>
+            <parameter name="problems" type="List"><parameter name="problem"/></parameter>
+            <parameter name="whereShown"/>
+            <parameter name="saved" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="problems" from="[]"/>
+            <set field="saved" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="prepared" from="darpan.content.AppContentAdminSupport.prepareCreate(ec, context)"/>
+            <set field="key" from="prepared.key"/>
+            <set field="problems" from="prepared.problems"/>
+            <set field="whereShown" from="prepared.whereShown"/>
+            <if condition="problems || dryRun"><return/></if>
+            <script>prepared.fields.createdByUserId = ec.user.userId; prepared.fields.lastChangedByUserId = ec.user.userId; prepared.fields.lastChangedDate = ec.user.nowTimestamp</script>
+            <service-call name="create#darpan.content.AppContentEntry" in-map="prepared.fields"/>
+            <script>darpan.admin.AdminAuditSupport.record(ec, "admin.AppContentAdminServices.create#AppContentEntry", "AppContentEntry", kind + ":" + key, prepared.detail)</script>
+            <set field="saved" from="true"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="AppContentEntry" allow-remote="true" authenticate="true">
+        <description>Edits an entry; a parameter left out is unchanged. A SEED entry takes only title, body, aliases and hidden (a
+            title or body equal to its default is stored as none); the binding (matchPattern, route, condition, anchor, sequence)
+            is for ADMIN entries. Every rule runs; any problem (or dryRun) saves nothing. Writes an AdminAuditLog row naming each
+            changed field, old -> new; nothing changed writes none.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"/>
+            <parameter name="key" required="true"/>
+            <parameter name="title"/>
+            <parameter name="body"/>
+            <parameter name="aliases" type="List"><parameter name="alias"/></parameter>
+            <parameter name="hidden" type="Boolean"/>
+            <parameter name="matchPattern"/>
+            <parameter name="routeName"/>
+            <parameter name="conditionKind"/>
+            <parameter name="anchorTestId"/>
+            <parameter name="sequence" type="Integer"/>
+            <parameter name="dryRun" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="key"/>
+            <parameter name="problems" type="List"><parameter name="problem"/></parameter>
+            <parameter name="whereShown"/>
+            <parameter name="saved" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="problems" from="[]"/>
+            <set field="saved" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="prepared" from="darpan.content.AppContentAdminSupport.prepareUpdate(ec, context)"/>
+            <if condition="prepared.error"><return error="true" message="${prepared.error}"/></if>
+            <set field="problems" from="prepared.problems"/>
+            <set field="whereShown" from="prepared.whereShown"/>
+            <if condition="problems || dryRun || !prepared.fields"><return/></if>
+            <script>prepared.fields.lastChangedByUserId = ec.user.userId; prepared.fields.lastChangedDate = ec.user.nowTimestamp</script>
+            <script>ec.entity.makeValue("darpan.content.AppContentEntry").setAll([contentKind: kind, contentKey: key]).setFields(prepared.fields, true, null, false).update()</script>
+            <script>darpan.admin.AdminAuditSupport.record(ec, "admin.AppContentAdminServices.update#AppContentEntry", "AppContentEntry", kind + ":" + key, prepared.detail)</script>
+            <set field="saved" from="true"/>
+        </actions>
+    </service>
+
+    <service verb="reset" noun="AppContentEntry" allow-remote="true" authenticate="true">
+        <description>SEED entries only: clears the edits (title, body, aliases, hidden) so the entry follows the release again.
+            An ADMIN entry has no default and is refused. Nothing edited: nothing changes and no audit row. Writes an AdminAuditLog
+            row.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"/>
+            <parameter name="key" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="saved" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="prepared" from="darpan.content.AppContentAdminSupport.prepareReset(ec, kind, key)"/>
+            <if condition="prepared.error"><return error="true" message="${prepared.error}"/></if>
+            <if condition="!prepared.fields"><return/></if>
+            <script>prepared.fields.lastChangedByUserId = ec.user.userId; prepared.fields.lastChangedDate = ec.user.nowTimestamp</script>
+            <script>ec.entity.makeValue("darpan.content.AppContentEntry").setAll([contentKind: kind, contentKey: key]).setFields(prepared.fields, true, null, false).update()</script>
+            <script>darpan.admin.AdminAuditSupport.record(ec, "admin.AppContentAdminServices.reset#AppContentEntry", "AppContentEntry", kind + ":" + key, prepared.detail)</script>
+            <set field="saved" from="true"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="AppContentEntry" allow-remote="true" authenticate="true">
+        <description>Deletes an ADMIN entry, or a SEED entry a later release dropped (retired). A live SEED entry is refused:
+            hide it instead, or reset it. Writes an AdminAuditLog row.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"/>
+            <parameter name="key" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="saved" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="prepared" from="darpan.content.AppContentAdminSupport.prepareDelete(ec, kind, key)"/>
+            <if condition="prepared.error"><return error="true" message="${prepared.error}"/></if>
+            <service-call name="delete#darpan.content.AppContentEntry" in-map="[contentKind: kind, contentKey: key]"/>
+            <script>darpan.admin.AdminAuditSupport.record(ec, "admin.AppContentAdminServices.delete#AppContentEntry", "AppContentEntry", kind + ":" + key, prepared.detail)</script>
+            <set field="saved" from="true"/>
+        </actions>
+    </service>
+</services>

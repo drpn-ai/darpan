@@ -7,6 +7,12 @@ admin.AgentAccessAdminServices.unpause#AgentAccessGrant
 admin.AgentAccessAdminServices.update#AgentAccessGrant
 admin.AgentTicketAdminServices.list#AllBrainChangeTickets
 admin.AgentTicketAdminServices.update#BrainChangeTicket
+admin.AppContentAdminServices.create#AppContentEntry
+admin.AppContentAdminServices.delete#AppContentEntry
+admin.AppContentAdminServices.get#AppContentVocabulary
+admin.AppContentAdminServices.list#AppContent
+admin.AppContentAdminServices.reset#AppContentEntry
+admin.AppContentAdminServices.update#AppContentEntry
 admin.CliAccessAdminServices.approve#CliAccessRequest
 admin.CliAccessAdminServices.create#CliAccessGrant
 admin.CliAccessAdminServices.decline#CliAccessRequest

@@ -51,6 +51,24 @@
                                         "$ref": "#/components/schemas/UpdateBrainChangeTicketRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/CreateAppContentEntryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DeleteAppContentEntryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAppContentVocabularyRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListAppContentRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResetAppContentEntryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAppContentEntryRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ApproveCliAccessRequestRequest"
                                     },
                                     {
@@ -897,6 +915,12 @@
                                         "admin.AgentAccessAdminServices.update#AgentAccessGrant": "#/components/schemas/UpdateAgentAccessGrantRequest",
                                         "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "#/components/schemas/ListAllBrainChangeTicketsRequest",
                                         "admin.AgentTicketAdminServices.update#BrainChangeTicket": "#/components/schemas/UpdateBrainChangeTicketRequest",
+                                        "admin.AppContentAdminServices.create#AppContentEntry": "#/components/schemas/CreateAppContentEntryRequest",
+                                        "admin.AppContentAdminServices.delete#AppContentEntry": "#/components/schemas/DeleteAppContentEntryRequest",
+                                        "admin.AppContentAdminServices.get#AppContentVocabulary": "#/components/schemas/GetAppContentVocabularyRequest",
+                                        "admin.AppContentAdminServices.list#AppContent": "#/components/schemas/ListAppContentRequest",
+                                        "admin.AppContentAdminServices.reset#AppContentEntry": "#/components/schemas/ResetAppContentEntryRequest",
+                                        "admin.AppContentAdminServices.update#AppContentEntry": "#/components/schemas/UpdateAppContentEntryRequest",
                                         "admin.CliAccessAdminServices.approve#CliAccessRequest": "#/components/schemas/ApproveCliAccessRequestRequest",
                                         "admin.CliAccessAdminServices.create#CliAccessGrant": "#/components/schemas/CreateCliAccessGrantRequest",
                                         "admin.CliAccessAdminServices.decline#CliAccessRequest": "#/components/schemas/DeclineCliAccessRequestRequest",
@@ -1217,6 +1241,24 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateBrainChangeTicketResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/CreateAppContentEntryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeleteAppContentEntryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAppContentVocabularyResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListAppContentResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ResetAppContentEntryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAppContentEntryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ApproveCliAccessRequestResponse"
@@ -2961,6 +3003,611 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateBrainChangeTicketResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "CreateAppContentEntryParams": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "slug": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "body": {
+                        "type": "string"
+                    },
+                    "aliases": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "matchPattern": {
+                        "type": "string"
+                    },
+                    "routeName": {
+                        "type": "string"
+                    },
+                    "conditionKind": {
+                        "type": "string"
+                    },
+                    "anchorTestId": {
+                        "type": "string"
+                    },
+                    "sequence": {
+                        "type": "integer"
+                    },
+                    "dryRun": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "slug",
+                    "body"
+                ],
+                "description": "Makes a new ADMIN entry with the key `admin:` + slug. Every rule runs; any problem (or dryRun) saves nothing.\n            whereShown previews where the mascot will say it. Writes an AdminAuditLog row."
+            },
+            "CreateAppContentEntryResult": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "problems": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "whereShown": {
+                        "type": "string"
+                    },
+                    "saved": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "CreateAppContentEntryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AppContentAdminServices.create#AppContentEntry",
+                "x-darpan-method": "admin.AppContentAdminServices.create#AppContentEntry",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AppContentAdminServices.create#AppContentEntry"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateAppContentEntryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateAppContentEntryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AppContentAdminServices.create#AppContentEntry. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateAppContentEntryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DeleteAppContentEntryParams": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "key": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "key"
+                ],
+                "description": "Deletes an ADMIN entry, or a SEED entry a later release dropped (retired). A live SEED entry is refused:\n            hide it instead, or reset it. Writes an AdminAuditLog row."
+            },
+            "DeleteAppContentEntryResult": {
+                "type": "object",
+                "properties": {
+                    "saved": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "DeleteAppContentEntryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AppContentAdminServices.delete#AppContentEntry",
+                "x-darpan-method": "admin.AppContentAdminServices.delete#AppContentEntry",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AppContentAdminServices.delete#AppContentEntry"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteAppContentEntryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteAppContentEntryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AppContentAdminServices.delete#AppContentEntry. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteAppContentEntryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAppContentVocabularyParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "What an entry may be bound to: every route with its path and anchors (data-testids), the condition kinds, and\n            the limits the rules enforce."
+            },
+            "GetAppContentVocabularyResult": {
+                "type": "object",
+                "properties": {
+                    "routes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    },
+                    "conditionKinds": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "limits": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAppContentVocabularyRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AppContentAdminServices.get#AppContentVocabulary",
+                "x-darpan-method": "admin.AppContentAdminServices.get#AppContentVocabulary",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AppContentAdminServices.get#AppContentVocabulary"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAppContentVocabularyParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAppContentVocabularyResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AppContentAdminServices.get#AppContentVocabulary. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAppContentVocabularyResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListAppContentParams": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "MASCOT_GLOSSARY, MASCOT_ACTION or MASCOT_HINT."
+                    },
+                    "words": {
+                        "type": "string",
+                        "description": "Case-insensitive text found in the key, words, aliases or pattern."
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "SEED or ADMIN."
+                    },
+                    "editedOnly": {
+                        "type": "boolean"
+                    }
+                },
+                "description": "Every entry, full rows. retired is a seed entry a later release dropped (not served, deletable). shadowedBy\n            names the SEED entry that now answers an ADMIN entry's label after a release. edited is an admin entry or a seed entry\n            with an edit."
+            },
+            "ListAppContentResult": {
+                "type": "object",
+                "properties": {
+                    "entries": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "ListAppContentRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AppContentAdminServices.list#AppContent",
+                "x-darpan-method": "admin.AppContentAdminServices.list#AppContent",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AppContentAdminServices.list#AppContent"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListAppContentParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListAppContentResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AppContentAdminServices.list#AppContent. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListAppContentResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ResetAppContentEntryParams": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "key": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "key"
+                ],
+                "description": "SEED entries only: clears the edits (title, body, aliases, hidden) so the entry follows the release again.\n            An ADMIN entry has no default and is refused. Nothing edited: nothing changes and no audit row. Writes an AdminAuditLog\n            row."
+            },
+            "ResetAppContentEntryResult": {
+                "type": "object",
+                "properties": {
+                    "saved": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "ResetAppContentEntryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AppContentAdminServices.reset#AppContentEntry",
+                "x-darpan-method": "admin.AppContentAdminServices.reset#AppContentEntry",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AppContentAdminServices.reset#AppContentEntry"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ResetAppContentEntryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ResetAppContentEntryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AppContentAdminServices.reset#AppContentEntry. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ResetAppContentEntryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAppContentEntryParams": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "body": {
+                        "type": "string"
+                    },
+                    "aliases": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "hidden": {
+                        "type": "boolean"
+                    },
+                    "matchPattern": {
+                        "type": "string"
+                    },
+                    "routeName": {
+                        "type": "string"
+                    },
+                    "conditionKind": {
+                        "type": "string"
+                    },
+                    "anchorTestId": {
+                        "type": "string"
+                    },
+                    "sequence": {
+                        "type": "integer"
+                    },
+                    "dryRun": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "key"
+                ],
+                "description": "Edits an entry; a parameter left out is unchanged. A SEED entry takes only title, body, aliases and hidden (a\n            title or body equal to its default is stored as none); the binding (matchPattern, route, condition, anchor, sequence)\n            is for ADMIN entries. Every rule runs; any problem (or dryRun) saves nothing. Writes an AdminAuditLog row naming each\n            changed field, old -> new; nothing changed writes none."
+            },
+            "UpdateAppContentEntryResult": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "problems": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "whereShown": {
+                        "type": "string"
+                    },
+                    "saved": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "UpdateAppContentEntryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AppContentAdminServices.update#AppContentEntry",
+                "x-darpan-method": "admin.AppContentAdminServices.update#AppContentEntry",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AppContentAdminServices.update#AppContentEntry"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAppContentEntryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAppContentEntryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AppContentAdminServices.update#AppContentEntry. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAppContentEntryResult"
                     }
                 },
                 "required": [
@@ -37743,6 +38390,12 @@
         "admin.AgentAccessAdminServices.update#AgentAccessGrant": "UpdateAgentAccessGrant",
         "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "ListAllBrainChangeTickets",
         "admin.AgentTicketAdminServices.update#BrainChangeTicket": "UpdateBrainChangeTicket",
+        "admin.AppContentAdminServices.create#AppContentEntry": "CreateAppContentEntry",
+        "admin.AppContentAdminServices.delete#AppContentEntry": "DeleteAppContentEntry",
+        "admin.AppContentAdminServices.get#AppContentVocabulary": "GetAppContentVocabulary",
+        "admin.AppContentAdminServices.list#AppContent": "ListAppContent",
+        "admin.AppContentAdminServices.reset#AppContentEntry": "ResetAppContentEntry",
+        "admin.AppContentAdminServices.update#AppContentEntry": "UpdateAppContentEntry",
         "admin.CliAccessAdminServices.approve#CliAccessRequest": "ApproveCliAccessRequest",
         "admin.CliAccessAdminServices.create#CliAccessGrant": "CreateCliAccessGrant",
         "admin.CliAccessAdminServices.decline#CliAccessRequest": "DeclineCliAccessRequest",

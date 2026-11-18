@@ -134,6 +134,13 @@ class CliMethodAllowlist {
             "admin.AgentAccessAdminServices.update#AgentAccessGrant",
             "admin.AgentTicketAdminServices.list#AllBrainChangeTickets",
             "admin.AgentTicketAdminServices.update#BrainChangeTicket",
+            // DAR-BE-313: the mascot's entries are edited by a super admin in the admin app; a tenant's CLI token never writes them.
+            "admin.AppContentAdminServices.create#AppContentEntry",
+            "admin.AppContentAdminServices.delete#AppContentEntry",
+            "admin.AppContentAdminServices.get#AppContentVocabulary",
+            "admin.AppContentAdminServices.list#AppContent",
+            "admin.AppContentAdminServices.reset#AppContentEntry",
+            "admin.AppContentAdminServices.update#AppContentEntry",
             // DAR-BE-195: a CLI session never manages CLI access.
             "admin.CliAccessAdminServices.create#CliAccessGrant",
             "admin.CliAccessAdminServices.list#CliAccessGrants",

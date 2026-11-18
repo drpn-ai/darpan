@@ -146,7 +146,8 @@ class AppContentServicesSmokeTests {
         Map admin = entries.find { it.key == "admin:hub-tip" }
         assertEquals(15, admin.sequence)
         assertEquals("ADMIN", admin.source)
-        assertEquals(T2.toInstant().toString(), out.version)
+        assertTrue(out.version ==~ /[0-9a-f]{16}/, "a hash of what is served: ${out.version}")
+        assertEquals(out.version, read().version, "stable across reads")
         assertTrue(entries.every { it.kind && it.key && it.source })
     }
 
@@ -350,9 +351,11 @@ class AppContentServicesSmokeTests {
             assertFalse((out.problems as List).isEmpty(), "must be refused: ${bad}")
         }
         assertEquals(before, ec.entity.find("darpan.content.AppContentEntry").disableAuthz().count())
-        // markup never reaches the rules: the service engine's own HTML check refuses it first
-        assertTrue(adm("create#AppContentEntry", [kind: GLOSSARY, slug: "html", title: "Html", body: "is html.", aliases: ["<b>x</b>"]]).hasError as boolean)
+        // markup reaches the rules (allow-html) and comes back in problems like every other refusal
+        Map html = admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "html", title: "Html", body: "is <b>html</b>.", aliases: ["<b>x</b>"], matchPattern: "a<b>*zzzz"])
+        assertTrue((html.problems as List).any { it.toString().contains("cannot contain < or >") }, "${html.problems}")
         assertNull(row(GLOSSARY, "admin:html"))
+        assertTrue((admOk("update#AppContentEntry", [kind: GLOSSARY, key: "differenceCount", title: "<i>x</i>", aliases: ["<b>x</b>"]]).problems as List).any { it.toString().contains("<") })
         assertTrue((admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "x y", title: "Bad", body: "is bad.", aliases: ["zzz one"]]).problems as List).any { it.toString().contains("key") })
     }
 
@@ -494,6 +497,7 @@ class AppContentServicesSmokeTests {
         assertEquals("MASCOT_GLOSSARY:admin:audited", rows[0].targetId)
         assertTrue((rows[1].detailText as String).contains("body") && (rows[1].detailText as String).contains("->"), "${rows[1].detailText}")
         assertTrue((rows[2].detailText as String).contains("hidden"), "${rows[2].detailText}")
+        assertTrue((rows[4].detailText as String).contains("aliases: zzz audited") && (rows[4].detailText as String).contains("body: is audited twice."), "${rows[4].detailText}")
         // a reset with nothing edited, a refused call and a dry run write no row
         admOk("reset#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
         adm("delete#AppContentEntry", [kind: GLOSSARY, key: "differenceCount"])
@@ -516,5 +520,29 @@ class AppContentServicesSmokeTests {
         assertNull(row(GLOSSARY, "admin:no"))
         assertNull(row(GLOSSARY, "differenceCount").hidden)
         assertEquals([], audit())
+    }
+
+    @Test
+    void theVersionChangesOnEveryServedChange() {
+        loadSeed()
+        edit(GLOSSARY, "differenceCount", [title: "Edited title", lastChangedDate: T1])
+        createAdmin(GLOSSARY, "admin:v-old", [title: "Old", body: "is old.", aliases: "zzz old", lastChangedDate: T1])
+        createAdmin(GLOSSARY, "admin:v-new", [title: "New", body: "is new.", aliases: "zzz new", lastChangedDate: T2])
+        String v0 = read().version
+        // delete a row that is not the newest: the version still changes
+        admOk("delete#AppContentEntry", [kind: GLOSSARY, key: "admin:v-old"])
+        String v1 = read().version
+        assertNotEquals(v0, v1)
+        // delete the newest: not back to an earlier value
+        admOk("delete#AppContentEntry", [kind: GLOSSARY, key: "admin:v-new"])
+        String v2 = read().version
+        assertNotEquals(v1, v2)
+        assertNotEquals(v0, v2)
+        // a seed load that retires the edited seed row changes it
+        String v1seed = new File(ReconciliationSmokeTestSupport.resolveBackendRoot().toFile(), "runtime/component/darpan/data/AppContentSeedData.xml").text
+        String mark = (v1seed =~ /seedId="CURRENT" seedMark="([0-9a-f]+)"/)[0][1]
+        ec.entity.makeDataLoader().xmlText(v1seed.replace(mark, "ffffffffffffffff").readLines().findAll { !it.contains('contentKey="differenceCount"') }.join("\n")).dummyFks(true).load()
+        assertNull(read().version, "nothing is served any more")
+        assertNotEquals(v2, read().version)
     }
 }

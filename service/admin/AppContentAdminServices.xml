@@ -50,14 +50,14 @@
 
     <service verb="create" noun="AppContentEntry" allow-remote="true" authenticate="true">
         <description>Makes a new ADMIN entry with the key `admin:` + slug. Every rule runs; any problem (or dryRun) saves nothing.
-            whereShown previews where the mascot will say it. Writes an AdminAuditLog row.</description>
+            whereShown previews where the mascot will say it. The caller reads `problems` and `saved`: non-empty problems means nothing was saved, and dryRun never saves. Markup characters are refused by the rules in `problems`, not as a service error. Writes an AdminAuditLog row.</description>
         <in-parameters>
             <parameter name="kind" required="true"/>
             <parameter name="slug" required="true"/>
-            <parameter name="title"/>
-            <parameter name="body" required="true"/>
-            <parameter name="aliases" type="List"><parameter name="alias"/></parameter>
-            <parameter name="matchPattern"/>
+            <parameter name="title" allow-html="any"/>
+            <parameter name="body" required="true" allow-html="any"/>
+            <parameter name="aliases" type="List" allow-html="any"><parameter name="alias" allow-html="any"/></parameter>
+            <parameter name="matchPattern" allow-html="any"/>
             <parameter name="routeName"/>
             <parameter name="conditionKind"/>
             <parameter name="anchorTestId"/>
@@ -90,15 +90,15 @@
         <description>Edits an entry; a parameter left out is unchanged. A SEED entry takes only title, body, aliases and hidden (a
             title or body equal to its default is stored as none); the binding (matchPattern, route, condition, anchor, sequence)
             is for ADMIN entries. Every rule runs; any problem (or dryRun) saves nothing. Writes an AdminAuditLog row naming each
-            changed field, old -> new; nothing changed writes none.</description>
+            changed field, old -> new; nothing changed writes none. The caller reads `problems` and `saved`: non-empty problems means nothing was saved, and dryRun never saves. Markup characters are refused by the rules in `problems`, not as a service error.</description>
         <in-parameters>
             <parameter name="kind" required="true"/>
             <parameter name="key" required="true"/>
-            <parameter name="title"/>
-            <parameter name="body"/>
-            <parameter name="aliases" type="List"><parameter name="alias"/></parameter>
+            <parameter name="title" allow-html="any"/>
+            <parameter name="body" allow-html="any"/>
+            <parameter name="aliases" type="List" allow-html="any"><parameter name="alias" allow-html="any"/></parameter>
             <parameter name="hidden" type="Boolean"/>
-            <parameter name="matchPattern"/>
+            <parameter name="matchPattern" allow-html="any"/>
             <parameter name="routeName"/>
             <parameter name="conditionKind"/>
             <parameter name="anchorTestId"/>

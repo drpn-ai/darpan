@@ -7,7 +7,7 @@
          bundled registries stay the app's first answer and its offline fallback. -->
     <service verb="get" noun="AppContent" authz-action="view" allow-remote="true" authenticate="true">
         <description>The mascot entries an admin has edited, hidden or created: every SEED row with a title, body, alias or
-            hidden edit, and every ADMIN row. Fields that are not set are omitted. version is the latest lastChangedDate.</description>
+            hidden edit, and every ADMIN row. Fields that are not set are omitted. version is a stable hash of the entries returned, so it changes on every create, edit, reset, delete or seed retirement that changes what is served (null when nothing is served).</description>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
@@ -53,8 +53,7 @@
                     <script>entries.add(entry)</script>
                 </if>
             </iterate>
-            <set field="latest" from="rowList.findAll { it.lastChangedDate != null }.collect { it.lastChangedDate as java.sql.Timestamp }.max()"/>
-            <set field="version" from="latest != null ? latest.toInstant().toString() : null"/>
+            <set field="version" from="entries ? java.security.MessageDigest.getInstance('SHA-256').digest(entries.toString().getBytes('UTF-8')).encodeHex().toString().take(16) : null"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

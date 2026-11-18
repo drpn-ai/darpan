@@ -13,7 +13,6 @@ import groovy.transform.CompileDynamic
 @CompileDynamic
 class AppContentAdminSupport {
     static final String ENTRY = "darpan.content.AppContentEntry"
-    static final int DETAIL_VALUE_MAX = 60
     static final List<String> EDITABLE = ["title", "body", "aliases", "hidden", "matchPattern", "routeName", "conditionKind", "anchorTestId", "sequence"]
 
     static Map limits() {
@@ -34,10 +33,8 @@ class AppContentAdminSupport {
 
     private static String str(def v) { return v == null ? "" : v.toString() }
 
-    private static String clip(def v) {
-        String s = v == null || str(v).isEmpty() ? "-" : str(v)
-        return s.length() > DETAIL_VALUE_MAX ? s.take(DETAIL_VALUE_MAX) + "..." : s
-    }
+    /** The full value (detailText is text-long), "-" when empty: a write can be reconstructed from its audit row. */
+    private static String clip(def v) { return v == null || str(v).isEmpty() ? "-" : str(v) }
 
     private static String joinAliases(def aliases) {
         List<String> n = AppContentRules.normalizedAliases(aliases)
@@ -164,7 +161,8 @@ class AppContentAdminSupport {
         if (str(row.source) == AppContentRules.SEED && !AppContentRules.retired(row, AppContentRules.currentSeedMark(ec))) {
             return [error: "${key} is a seed entry: hide it instead (or reset it to its default).".toString()]
         }
-        String detail = "deleted ${kind} ${key}: title: ${clip(row.title ?: row.defaultTitle)}; body: ${clip(row.body ?: row.defaultBody)}".toString()
+        String detail = "deleted ${kind} ${key}: ".toString() + ["title", "body", "aliases", "matchPattern", "hidden", "routeName", "conditionKind", "anchorTestId", "sequence"]
+                .collect { String f -> "${f}: ${clip(row.get(f) != null ? row.get(f) : (f == 'title' ? row.defaultTitle : f == 'body' ? row.defaultBody : null))}".toString() }.join("; ")
         return [key: key, detail: detail]
     }
 

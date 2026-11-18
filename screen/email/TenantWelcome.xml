@@ -8,6 +8,7 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · WELCOME')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;(Usually with coffee.)&quot;)"/>
         <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Quickstart', 'quickstart'], ['Find your way around', 'getting-started/ask-darpan-navigation']])"/>
         <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Quickstart', 'quickstart'], ['Find your way around', 'getting-started/ask-darpan-navigation']])"/>
     </actions>
@@ -20,7 +21,7 @@
             <widgets><container style="dp-p"><label text="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></widgets>
             <fail-widgets><container style="dp-p"><label text="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></fail-widgets>
         </section>
-        <container style="dp-note"><label text="Questions? Just reply. A real person reads this (usually with coffee)."/></container>
+        <container style="dp-note"><label text="Questions? Just reply. A real person reads this. ${smile}"/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>

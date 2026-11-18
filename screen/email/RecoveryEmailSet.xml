@@ -8,6 +8,7 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · ACCOUNT')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="smile" from="isOldAddress ? darpan.email.EmailSmile.line(ec, &quot;DARPAN_RECOVERY_EMAIL_SET_OLD&quot;, &quot;It had a good run.&quot;) : darpan.email.EmailSmile.line(ec, &quot;DARPAN_RECOVERY_EMAIL_SET_NEW&quot;, &quot;(Future you says thanks.)&quot;)"/>
         <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Forgot password', 'troubleshooting/login-and-session#forgot-password']])"/>
         <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Forgot password', 'troubleshooting/login-and-session#forgot-password']])"/>
     </actions>
@@ -15,8 +16,8 @@
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <container style="dp-p"><label text="Hi ${firstName},"/></container>
         <section name="RecoveryAddressSide" condition="isOldAddress">
-            <widgets><container style="dp-p"><label text="This inbox is off spare-key duty. Reset codes go to your new address now. It had a good run."/></container></widgets>
-            <fail-widgets><container style="dp-p"><label text="Done. This inbox is now your spare key to Darpan. (Future you says thanks.)"/></container></fail-widgets>
+            <widgets><container style="dp-p"><label text="This inbox is off spare-key duty. Reset codes go to your new address now. ${smile}"/></container></widgets>
+            <fail-widgets><container style="dp-p"><label text="Done. This inbox is now your spare key to Darpan. ${smile}"/></container></fail-widgets>
         </section>
         <container style="dp-note"><label text="Not you? Ignore this email and tell your administrator."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>

@@ -104,6 +104,21 @@ class EmailTemplatesRenderTests {
     }
 
     @Test
+    void aSmileIsOneShortPlainLineOrTheTemplatesOwn() {
+        ["Spare keys: the unsung heroes.", "Clean slate.", "(Future you says thanks.)", "Don't get attached."].each {
+            assertTrue(EmailSmile.ok(it), it)
+        }
+        ["", null, "Line one\nline two", "Your code is 042117.", "Visit https://evil.example", "Click here to keep your account",
+         "Reply with your password", "Wow!", "A line that rambles on and on well past the eighty characters an email smile gets",
+         "<b>bold</b>", "write to x@y.co"].each { assertFalse(EmailSmile.ok(it), String.valueOf(it)) }
+
+        // No agent answers in this JVM (the deployment switch is off): every template sends its own line.
+        assertTrue(render("TwoFactorPasskeyAdded", SECURITY.TwoFactorPasskeyAdded, "html").contains("Look at you, going passwordless."))
+        assertTrue(render("PasswordResetCode", SECURITY.PasswordResetCode, "html").contains("Forgot your Darpan password? Fair. Month-end does that."))
+        assertTrue(render("TwoFactorRecoveryUsed", SECURITY.TwoFactorRecoveryUsed, "text").contains("Phone in the other bag? Happens."))
+    }
+
+    @Test
     void aPasskeyNameIsText() {
         String html = render("TwoFactorPasskeyAdded", [firstName: "Riya", passkeyName: "<img src=x>", at: AT], "html")
         assertFalse(html.contains("<img src=x>"), html)

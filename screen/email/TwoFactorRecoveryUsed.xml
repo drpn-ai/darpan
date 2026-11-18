@@ -8,13 +8,14 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_2FA_RECOVERY_USED&quot;, &quot;Phone in the other bag? Happens.&quot;)"/>
         <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Make new recovery codes', 'guides/two-factor#manage-your-factors'], ['Trouble signing in', 'troubleshooting/login-and-session#two-factor']])"/>
         <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Make new recovery codes', 'guides/two-factor#manage-your-factors'], ['Trouble signing in', 'troubleshooting/login-and-session#two-factor']])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <container style="dp-p"><label text="Hi ${firstName},"/></container>
-        <container style="dp-p"><label text="A recovery code got you into Darpan on ${at}. Phone in the other bag? Happens."/></container>
+        <container style="dp-p"><label text="A recovery code got you into Darpan on ${at}. ${smile}"/></container>
         <container style="dp-p"><label text="${recoveryCodesLeft} left. Make fresh ones in User Settings before you run dry."/></container>
         <container style="dp-note"><label text="Not you? Change your password now and tell your Darpan administrator."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>

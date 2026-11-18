@@ -1,15 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Candidate release-scoped upgrade data for Darpan 3.2.0.
-Generated from backend compare range: v3.1.0..HEAD
+Candidate release-scoped upgrade data for Darpan 3.2.1.
+Generated from backend compare range: v3.2.0..HEAD
 Records must also live in generic source data files under runtime/component/darpan/data/.
 Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- Modified records from data/SecuritySeedData.xml -->
-    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_USER" description="Can view tenant pages, upload files, run audits, saved runs and reconciliations, resolve findings, and add, edit or delete connections for associated tenants" groupTypeEnumId="UgtDarpanPermission"/>
-    <!-- Added records from data/TwoFactorSeedData.xml -->
-    <darpan.auth.TwoFactorRolePolicy permissionGroupId="EVERYONE"/>
-    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_2FA_REMINDER" description="Darpan two-factor setup reminder" emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${subjectLine}" fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan" bodyScreenLocation="component://darpan/screen/email/TwoFactorReminder.xml"/>
-    <moqui.service.job.ServiceJob jobName="send_TwoFactorReminders_daily" description="Remind everyone two-factor is required for, who has not set up a method, on the 7/3/1/0-days-before then weekly cadence." serviceName="auth.TwoFactorServices.send#TwoFactorReminders" cronExpression="0 0 15 * * ?" paused="N"/>
+    <!-- No added or modified candidate records were detected between the compared refs. -->
 </entity-facade-xml>

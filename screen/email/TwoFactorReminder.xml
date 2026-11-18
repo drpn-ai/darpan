@@ -5,15 +5,16 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="copyGreetingBefore" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;greeting.before&quot;, [firstName: firstName, requiredDate: requiredDate])"/>
-        <set field="copyGreetingAfter" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;greeting.after&quot;, [firstName: firstName])"/>
-        <set field="copyBody" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;body&quot;, [appUrl: appUrl])"/>
-        <set field="copyNextBefore" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;next.before&quot;, [requiredDate: requiredDate])"/>
-        <set field="copyNextAfter" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;next.after&quot;, [:])"/>
-        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;note&quot;, [:])"/>
+        <set field="copyVars" from="[firstName: firstName, requiredDate: requiredDate, appUrl: appUrl]"/>
+        <set field="copyGreetingBefore" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;greeting.before&quot;, copyVars)"/>
+        <set field="copyGreetingAfter" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;greeting.after&quot;, copyVars)"/>
+        <set field="copyBody" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;body&quot;, copyVars)"/>
+        <set field="copyNextBefore" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;next.before&quot;, copyVars)"/>
+        <set field="copyNextAfter" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;next.after&quot;, copyVars)"/>
+        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_REMINDER&quot;, &quot;note&quot;, copyVars)"/>
         <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_2FA_REMINDER&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides(guideLinks)"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText(guideLinks)"/>
+        <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
+        <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
         <set field="isPast" from="past == true || past == 'true'"/>
     </actions>
     <widgets>

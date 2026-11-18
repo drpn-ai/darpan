@@ -181,13 +181,59 @@ class EmailTemplatesRenderTests {
             String html = render("PasswordChanged", SECURITY.PasswordChanged, "html")
             assertTrue(html.contains("Changed on 18 Nov 2026 at 10:53 IST. New password, who dis?"), html)
             assertFalse(html.contains("signed out on the way"), html)
-            // a variable the default does not use is refused at render too: the default goes
+            // any variable the template provides is allowed in any of its blocks
             setCopy("DARPAN_PASSWORD_CHANGED", "note", 'Not you, ${firstName}?')
+            assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("Not you, Riya?"))
+            // a variable the template does not have: the default goes
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", 'Not you, ${nope}?')
             assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("Not you? Tell your Darpan administrator now."))
         } finally {
             setCopy("DARPAN_PASSWORD_CHANGED", "body", null)
             setCopy("DARPAN_PASSWORD_CHANGED", "note", null)
         }
+    }
+
+    @Test
+    void anEditNeverCarriesAWebAddress() {
+        try {
+            ["Not you? Go to https://evil.example/reset", "Not you? www.evil.example", "Not you? Open evil.example.com now", "Not you? mail me at x.io"].each { String bad ->
+                setCopy("DARPAN_PASSWORD_CHANGED", "note", bad)
+                String html = render("PasswordChanged", SECURITY.PasswordChanged, "html")
+                assertFalse(html.contains("evil.example") || html.contains("x.io"), bad)
+                assertTrue(html.contains("Not you? Tell your Darpan administrator now."), bad)
+            }
+            setCopy("DARPAN_PASSWORD_CHANGED", "smile", "Click here today")
+            assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("New password, who dis?"))
+        } finally {
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", null)
+            setCopy("DARPAN_PASSWORD_CHANGED", "smile", null)
+        }
+    }
+
+    @Test
+    void noSeededDefaultCarriesAWebAddress() {
+        def rows = ec.entity.find("darpan.email.EmailCopyBlock").list()
+        assertTrue(rows.size() > 50, "seed rows loaded")
+        rows.each { r ->
+            assertNull(EmailCopy.problem(r.getString("emailTemplateId"), r.getString("blockId"), r.getString("defaultText")),
+                    "${r.emailTemplateId}/${r.blockId}")
+        }
+        assertNotNull(EmailCopy.problem("T", "note", "see https://x.example"))
+        assertNotNull(EmailCopy.problem("T", "note", "see www.x"))
+        assertNotNull(EmailCopy.problem("T", "smile", "Wow!"))
+        assertNull(EmailCopy.problem("T", "note", 'Open \${appUrl} in your browser.'))
+    }
+
+    @Test
+    void aMissingBlockOrAFailingReadNeverStopsASend() {
+        assertEquals("", EmailCopy.text(ec, "DARPAN_NOPE", "body", [:]))
+        assertEquals([], EmailCopy.guides(ec, "DARPAN_NOPE"))
+        assertEquals("", EmailCopy.guidesHtml([]))
+        assertEquals("", EmailCopy.guidesText([]))
+        assertEquals("", EmailCopy.guidesHtml([["Bad", "https://evil.example"]]))
+        def broken = [entity: [find: { String n -> throw new IllegalStateException("db down") }], resource: ec.resource]
+        assertEquals("Not you? Tell your Darpan administrator now.", EmailCopy.text(broken, "DARPAN_PASSWORD_CHANGED", "note", [:]))
+        assertEquals(2, EmailCopy.guides(broken, "DARPAN_PASSWORD_CHANGED").size())
     }
 
     @Test

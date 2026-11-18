@@ -8,14 +8,16 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · ACCOUNT')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="smile" from="isOldAddress ? darpan.email.EmailSmile.line(ec, &quot;DARPAN_RECOVERY_EMAIL_SET_OLD&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;smile.old&quot;, [:])) : darpan.email.EmailSmile.line(ec, &quot;DARPAN_RECOVERY_EMAIL_SET_NEW&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;smile.new&quot;, [:]))"/>
-        <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;greeting&quot;, [firstName: firstName])"/>
-        <set field="copyBodyOld" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;body.old&quot;, [smile: smile])"/>
-        <set field="copyBodyNew" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;body.new&quot;, [smile: smile])"/>
-        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;note&quot;, [:])"/>
+        <set field="copyVars" from="[firstName: firstName]"/>
+        <set field="smile" from="isOldAddress ? darpan.email.EmailSmile.line(ec, &quot;DARPAN_RECOVERY_EMAIL_SET_OLD&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;smile.old&quot;, copyVars)) : darpan.email.EmailSmile.line(ec, &quot;DARPAN_RECOVERY_EMAIL_SET_NEW&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;smile.new&quot;, copyVars))"/>
+        <set field="copyVars" from="copyVars + [smile: smile]"/>
+        <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;greeting&quot;, copyVars)"/>
+        <set field="copyBodyOld" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;body.old&quot;, copyVars)"/>
+        <set field="copyBodyNew" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;body.new&quot;, copyVars)"/>
+        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;, &quot;note&quot;, copyVars)"/>
         <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_RECOVERY_EMAIL_SET&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides(guideLinks)"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText(guideLinks)"/>
+        <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
+        <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>

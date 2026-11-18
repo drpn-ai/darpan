@@ -135,6 +135,9 @@ class TenantOwnedEntityFilterContractTests {
             // DAR-BE-306: platform configuration about a tenant, written by super admins, read by the retention sweep.
             "darpan.retention.TenantRetentionPeriod"               : "super-admin retention override keyed by the tenant; the sweep reads it " +
                     "through findGlobalUnscoped with an explicit tenantUserGroupId, and no tenant user ever reads it",
+            // DAR-BE-307: the agent's per-tenant daily cap override, same shape.
+            "darpan.agent.AgentTenantCap"                          : "super-admin daily cap override keyed by the tenant; AgentConfig loads every row " +
+                    "through findGlobalUnscoped and answers by an explicit tenantUserGroupId, and no tenant user ever reads it",
     ].asImmutable()
 
     private static Path componentRoot() {

@@ -3499,7 +3499,7 @@
             "UpdateAgentTextResult": {
                 "type": "object",
                 "properties": {
-                    "text": {
+                    "agentText": {
                         "type": "object"
                     }
                 }

@@ -41,7 +41,10 @@
                 <if condition="paramRow">
                     <set field="liveValue" from="paramRow.parameterValue?.trim()"/>
                     <set field="dropRow" from="true"/>
-                    <if condition="liveValue &amp;&amp; liveValue.isInteger() &amp;&amp; (liveValue as int) != mv.shipped">
+                    <if condition="liveValue &amp;&amp; !liveValue.isInteger()">
+                        <set field="dropRow" from="false"/>
+                        <script>messages.add(mv.jobName + ' ' + mv.parameterName + ' ' + liveValue + ' left in place: not a whole number of days')</script>
+                    <else-if condition="liveValue &amp;&amp; (liveValue as int) != mv.shipped">
                         <set field="settingProblem" from="darpan.config.DarpanSettings.problem(mv.settingKey, liveValue)"/>
                         <entity-find-one entity-name="darpan.config.DarpanSetting" value-field="settingRow" cache="false">
                             <field-map field-name="settingKey" from="mv.settingKey"/></entity-find-one>
@@ -57,6 +60,7 @@
                                 <script>darpan.admin.SettingAdminSupport.save(ec, mv.settingKey, liveValue, 'moved from the ' + mv.jobName + ' job parameter (DAR-BE-306)', serviceLabel)</script>
                             </if>
                         </else></if>
+                    </else-if>
                     <else>
                         <script>messages.add(mv.jobName + ' ' + mv.parameterName + ' ' + (liveValue ?: '(blank)') + ' dropped: not an edit of the shipped ' + mv.shipped)</script>
                     </else></if>

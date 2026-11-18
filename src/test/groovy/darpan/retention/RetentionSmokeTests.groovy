@@ -70,6 +70,7 @@ class RetentionSmokeTests {
         clearProperties()
         asSystem {
             WIPE.each { ec.entity.find(it).deleteAll() }
+            ec.entity.find("darpan.retention.TenantRetentionPeriod").deleteAll()
             [A, B].each { String t -> seedTenant(t) }
         }
         AuditLogTestSupport.wipe(ec)
@@ -96,6 +97,21 @@ class RetentionSmokeTests {
         assertEquals(RetentionSupport.KEEP_FOREVER, table(out, RetentionSupport.AUDIT_FINDING).status)
         assertEquals(RetentionSupport.KEEP_FOREVER, table(out, RetentionSupport.AGENT_QUERY_LOG).status)
         assertEquals(before, snapshot())
+    }
+
+    @Test
+    void "a tenant row written outside the service with a period under one day keeps that tenant's rows"() {
+        setSetting("darpan.retention.auditFinding.days", "30")
+        asSystem {
+            // what a data load or a DB console could leave: zero and negative days would put the cutoff at or after now
+            ec.entity.makeValue("darpan.retention.TenantRetentionPeriod").setAll([tenantUserGroupId: A, tableKey: RetentionSupport.AUDIT_FINDING, periodDays: 0]).create()
+            ec.entity.makeValue("darpan.retention.TenantRetentionPeriod").setAll([tenantUserGroupId: B, tableKey: RetentionSupport.AUDIT_FINDING, periodDays: -5]).create()
+        }
+        Map before = snapshot()
+        Map out = run("run#Retention", [:])
+        assertEquals(before, snapshot(), "nothing is deleted for either tenant, today's rows included")
+        assertEquals([(A): null, (B): null], table(out, RetentionSupport.AUDIT_FINDING).byTenantPeriod)
+        assertEquals(0L, table(out, RetentionSupport.AUDIT_FINDING).rows)
     }
 
     @Test

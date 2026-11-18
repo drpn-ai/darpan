@@ -77,7 +77,7 @@ class RetentionSupport {
             TenantScopedFinder.findGlobalUnscoped(ec, TENANT_PERIOD_ENTITY, PERIOD_REASON).condition("tenantUserGroupId", tenantId.trim())
                     .useCache(false).list().each { row ->
                 storedTables << (row.tableKey as String)
-                stored[row.tableKey as String] = row.periodDays == null ? null : (row.periodDays as Integer)
+                stored[row.tableKey as String] = storedDays(tenantId.trim(), row.tableKey as String, row.periodDays)
             }
         }
         Map<String, Map> out = [:]
@@ -109,6 +109,24 @@ class RetentionSupport {
                           source: tenantHasOwn ? TENANT : INSTANCE, overridden: whatIf]
         }
         return out
+    }
+
+    private static final Set<String> warnedStored = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * A tenant row written outside the service (data load, DB console) may hold a period the service would refuse. A value outside
+     * 1 to 3650 days must never reach the cutoff maths (0 or less puts the cutoff at or after now and deletes today's rows too):
+     * it counts as keep forever, with one WARN per tenant, table and value.
+     */
+    private static Integer storedDays(String tenantId, String table, Object raw) {
+        if (raw == null) return null
+        long days = (raw as Number).longValue()
+        if (days >= RetentionPeriodRules.MIN_DAYS && days <= RetentionPeriodRules.MAX_DAYS) return days as int
+        if (warnedStored.size() < 1000 && warnedStored.add(tenantId + "|" + table + "|" + days)) {
+            logger.warn("Retention: tenant {} table {} has a stored period of {} days (valid is {} to {}); keeping the table forever for it",
+                    tenantId, table, days, RetentionPeriodRules.MIN_DAYS, RetentionPeriodRules.MAX_DAYS)
+        }
+        return null
     }
 
     static int batchSize() { return DarpanSettings.intValue(BATCH_SIZE_SETTING) }

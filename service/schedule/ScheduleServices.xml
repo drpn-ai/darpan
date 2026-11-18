@@ -106,8 +106,12 @@
             <set field="target" from="org.moqui.util.MClassLoader.getCommonClass(type)"/>
             <set field="isBoolean" from="type in ['Boolean', 'boolean', 'java.lang.Boolean']"/>
             <set field="converted" from="(text &amp;&amp; target != null &amp;&amp; !isBoolean) ? org.moqui.util.ObjectUtilities.basicConvert(text, type) : null"/>
+            <!-- a parameter a setting owns: the job editor must not become a second home that overrides it (DAR-BE-306) -->
+            <set field="settingOwned" from="['reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles:retentionDays': 'darpan.purge.generatedOutput.days',
+                    'reconciliation.ReconciliationGenericServices.purge#ExtractFiles:retentionDays': 'darpan.purge.extract.days'].get(serviceName + ':' + parameterName)"/>
             <set field="problem" from="sd == null ? ('The service ' + serviceName + ' is not defined.')
                     : paramNode == null ? (parameterName + ' is not a parameter of ' + serviceName + '; it takes ' + (sd.getInParameterNames().sort(false, { it }).join(', ') ?: 'none') + '.')
+                    : settingOwned != null ? (parameterName + ' is a setting, not a job parameter. Set it in Settings (' + settingOwned + ').')
                     : !text ? (parameterName + ' is blank; reset it to its default instead.')
                     : (isBoolean &amp;&amp; !(text.toLowerCase() in ['true', 'false', 'y', 'n'])) ? (parameterName + ' must be true, false, Y or N; ' + text + ' is not.')
                     : (target != null &amp;&amp; !isBoolean &amp;&amp; !target.isInstance(converted)) ? (parameterName + ' must be ' + type + '; ' + text + ' is not.')

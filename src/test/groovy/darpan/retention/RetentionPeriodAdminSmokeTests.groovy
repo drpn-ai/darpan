@@ -59,6 +59,7 @@ class RetentionPeriodAdminSmokeTests {
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/PasswordResetEmailSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, *(JOB_SEEDS + [APPLY]))
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")   // run status enums for the run-result rows
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         asSystem {
             [A, B, C].each { String t ->
@@ -77,11 +78,13 @@ class RetentionPeriodAdminSmokeTests {
             ec.entity.find("darpan.config.DarpanSetting").deleteAll()
             ec.entity.find("darpan.retention.TenantRetentionPeriod").deleteAll()
             ec.entity.find("darpan.agent.AgentQueryLog").deleteAll()
+            ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("companyUserGroupId", org.moqui.entity.EntityCondition.IN, [A, B, C]).deleteAll()
             ec.entity.find("moqui.service.job.ServiceJobParameter").condition("parameterName", "retentionDays").deleteAll()
             ec.entity.find("moqui.service.job.ServiceJobParameter").condition("parameterName", "staleMinutes").deleteAll()
             setJobPaused("Y")
             [A, B, C].each { String t ->
                 [5, 20, 50].each { int age -> queryLog("${t}_Q${age}".toString(), t, age) }
+                [20, 50].each { int age -> runResult("${t}_RR${age}".toString(), t, age) }
             }
         }
         DarpanSettings.expire()
@@ -111,11 +114,19 @@ class RetentionPeriodAdminSmokeTests {
     @Test
     void tenantPeriodsWinAndStayInTheirTenant() {
         setSetting(QL_KEY, "30")
+        setSetting("darpan.retention.runResult.days", "30")
         asSystem {
             tenantPeriod(A, 10)
             tenantPeriod(B, null)   // keep forever, whatever the instance says
+            // the other table has different tenant rows, so a bug that ignores tableKey shows: A keeps run results forever
+            // while its query-log period is 10, B's run results go at 10 while its query logs are forever
+            tenantPeriod(A, null, RetentionSupport.RUN_RESULT)
+            tenantPeriod(B, 10, RetentionSupport.RUN_RESULT)
         }
         Map out = runAsJob("run#Retention", [:])
+        assertEquals(["${A}_RR20".toString(), "${A}_RR50".toString()], runIds(A), "A keeps run results forever")
+        assertEquals([], runIds(B), "B's run results go at 10 days")
+        assertEquals(["${C}_RR20".toString()], runIds(C), "C follows the instance's 30 days")
         assertEquals(["${A}_Q5".toString()], logIds(A), "A's own 10 days: the 20 and 50 day rows go")
         assertEquals(["${B}_Q20".toString(), "${B}_Q5".toString(), "${B}_Q50".toString()], logIds(B), "B keeps forever: nothing goes")
         assertEquals(["${C}_Q20".toString(), "${C}_Q5".toString()], logIds(C), "C follows the instance's 30 days: only the 50 day row goes")
@@ -255,7 +266,7 @@ class RetentionPeriodAdminSmokeTests {
         }
         // 3 fixture rows (one per tenant) + 120 are older than 30 days
         Map none = svc("update#RetentionPeriods", [periods: [(QUERY_LOG): 30]])
-        assertTrue(none.errors.any { it.contains("Preview first") }, "${none.errors}")
+        assertTrue(none.errors.any { it.contains("Preview first: making a period shorter") }, "${none.errors}")
         assertEquals(400, DarpanSettings.optionalIntValue(QL_KEY))
         Map low = svc("update#RetentionPeriods", [periods: [(QUERY_LOG): 30], previewedRows: 5L])
         assertTrue(low.errors.any { it.contains("The numbers changed since your preview; preview again.") }, "${low.errors}")
@@ -347,6 +358,18 @@ class RetentionPeriodAdminSmokeTests {
         assertEquals(45, DarpanSettings.optionalIntValue(QL_KEY))
     }
 
+    @Test
+    void theJobEditorLeavesAPurgePeriodToSettings() {
+        [[EXTRACTS, "darpan.purge.extract.days"], [GENERATED, "darpan.purge.generatedOutput.days"]].each { String job, String key ->
+            [0, 5].each { Object v ->
+                Map out = svc("admin.ScheduleAdminServices.update#ServiceJob", [jobName: job, parameters: [retentionDays: v]])
+                assertTrue(out.errors.any { it.contains("Set it in Settings (${key})") }, "${job} ${v}: ${out.errors}")
+            }
+        }
+        assertEquals(0L, count("moqui.service.job.ServiceJobParameter", [parameterName: ["retentionDays"]]))
+        assertEquals([], auditRows())
+    }
+
     // ------------------------------------------------------------------ the migration
 
     @Test
@@ -391,6 +414,16 @@ class RetentionPeriodAdminSmokeTests {
         assertTrue((out.messages as List<String>).any { it.contains("left in place") }, "${out.messages}")
     }
 
+    @Test
+    void aParameterThatIsNotAWholeNumberIsLeftInPlaceAndReported() {
+        asSystem { jobParam(GENERATED, "retentionDays", "10.0") }
+        Map out = migrate(false)
+        assertEquals(0, out.rowsUpdated)
+        assertEquals(1L, count("moqui.service.job.ServiceJobParameter", [parameterName: ["retentionDays"]]))
+        assertEquals(0, count("darpan.config.DarpanSetting"))
+        assertTrue((out.messages as List<String>).any { it.contains("left in place: not a whole number") }, "${out.messages}")
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private Map migrate(boolean dryRun) {
@@ -413,8 +446,17 @@ class RetentionPeriodAdminSmokeTests {
                 createdDate: new Timestamp(System.currentTimeMillis() - ageDays * DAY)]).createOrUpdate()
     }
 
-    private void tenantPeriod(String tenant, Integer days) {
-        ec.entity.makeValue("darpan.retention.TenantRetentionPeriod").setAll([tenantUserGroupId: tenant, tableKey: QUERY_LOG, periodDays: days]).createOrUpdate()
+    private void tenantPeriod(String tenant, Integer days, String table = QUERY_LOG) {
+        ec.entity.makeValue("darpan.retention.TenantRetentionPeriod").setAll([tenantUserGroupId: tenant, tableKey: table, periodDays: days]).createOrUpdate()
+    }
+
+    private void runResult(String id, String tenant, int ageDays) {
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult").setAll([reconciliationRunResultId: id, companyUserGroupId: tenant,
+                statusEnumId: "AUT_STAT_SUCCESS", createdDate: new Timestamp(System.currentTimeMillis() - ageDays * DAY)]).createOrUpdate()
+    }
+
+    private List<String> runIds(String tenant) {
+        return asSystem { ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("companyUserGroupId", tenant).orderBy("reconciliationRunResultId").useCache(false).list()*.reconciliationRunResultId }
     }
 
     private void setSetting(String key, String value) {

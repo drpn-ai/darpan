@@ -136,7 +136,7 @@
                         in-map="tenantId ? [tenantUserGroupId: tenantId, tenantPeriodDays: plan.whatIf] : [periodDays: plan.whatIf]"/>
                 <if condition="ec.message.hasError()"><return/></if>
                 <set field="actualRows" from="(preview.tables ?: []).sum { it.rows ?: 0L } ?: 0L"/>
-                <set field="previewProblem" from="darpan.schedule.JobScheduleRules.previewProblem(previewedRows, actualRows as long)"/>
+                <set field="previewProblem" from="darpan.schedule.JobScheduleRules.previewProblem(previewedRows, actualRows as long, 'making a period shorter (or ending keep-forever)')"/>
                 <if condition="previewProblem"><return error="true" message="${previewProblem}"/></if>
                 <set field="previewNote" from="'preview showed ' + previewedRows + ' rows, today\'s dry run counts ' + actualRows"/>
             </if>
@@ -170,13 +170,22 @@
                 <script>darpan.admin.AdminAuditSupport.record(ec, "admin.RetentionAdminServices.update#RetentionPeriods", "TenantRetentionPeriod", tenantId,
                         plan.summary + (previewNote ? ' (' + previewNote + ')' : ''))</script>
             <else>
+                <!-- every check is done above; each table below commits in its own transaction (the settings store's way), so a database failure
+                     part-way leaves the earlier tables saved: say which, instead of a bare error -->
+                <set field="savedTables" from="[]"/>
                 <iterate list="plan.changes" entry="chg">
-                    <if condition="chg.mode == 'forever'">
-                        <script>darpan.admin.SettingAdminSupport.remove(ec, chg.key, "admin.RetentionAdminServices.update#RetentionPeriods")</script>
-                    <else>
-                        <script>darpan.admin.SettingAdminSupport.save(ec, chg.key, chg.after.toString(), previewNote,
-                                "admin.RetentionAdminServices.update#RetentionPeriods")</script>
-                    </else></if>
+                    <script>try {
+                            if (chg.mode == 'forever') darpan.admin.SettingAdminSupport.remove(ec, chg.key, "admin.RetentionAdminServices.update#RetentionPeriods")
+                            else darpan.admin.SettingAdminSupport.save(ec, chg.key, chg.after.toString(), previewNote, "admin.RetentionAdminServices.update#RetentionPeriods")
+                            if (ec.message.hasError()) throw new IllegalStateException(ec.message.errorsString)
+                            savedTables.add(chg.table)
+                        } catch (Exception e) {
+                            ec.message.clearErrors()
+                            ec.message.addError('Saving ' + chg.table + ' failed (' + e.message + '). Saved before it: ' + (savedTables ? savedTables.join(', ') : 'none') +
+                                    '. Not saved: ' + plan.changes.collect { it.table }.findAll { !savedTables.contains(it) }.join(', ') + '. Check with get#RetentionPeriods and retry.')
+                            return
+                        }</script>
+                    <if condition="ec.message.hasError()"><return/></if>
                 </iterate>
             </else></if>
             <if condition="ec.message.hasError()"><return/></if>

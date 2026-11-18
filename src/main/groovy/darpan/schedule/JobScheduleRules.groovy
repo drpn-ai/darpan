@@ -129,7 +129,12 @@ class JobScheduleRules {
      * (whichever is more). A count that fell is fine: less would be deleted than was approved.
      */
     static String previewProblem(Long previewedRows, long actualRows) {
-        if (previewedRows == null) return "Preview first: resuming this job deletes data, so send the row count the preview showed (previewedRows)."
+        return previewProblem(previewedRows, actualRows, "resuming this job")
+    }
+
+    /** As above; `action` names what needs the preview in the refusal ("resuming this job", "making a period shorter"). */
+    static String previewProblem(Long previewedRows, long actualRows, String action) {
+        if (previewedRows == null) return "Preview first: ${action} deletes data, so send the row count the preview showed (previewedRows).".toString()
         if (previewedRows < 0) return "previewedRows cannot be negative."
         long allowed = Math.max(TOLERANCE_FLOOR_ROWS, (previewedRows * TOLERANCE_FRACTION).longValue())
         if (actualRows > previewedRows + allowed) return "The numbers changed since your preview; preview again."

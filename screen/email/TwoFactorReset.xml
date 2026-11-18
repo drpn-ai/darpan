@@ -8,16 +8,21 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_2FA_RESET&quot;, &quot;Clean slate.&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Set up two-factor again', 'guides/two-factor#set-it-up']])"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Set up two-factor again', 'guides/two-factor#set-it-up']])"/>
+        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_2FA_RESET&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_RESET&quot;, &quot;smile&quot;, [:]))"/>
+        <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_RESET&quot;, &quot;greeting&quot;, [firstName: firstName])"/>
+        <set field="copyBody" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_RESET&quot;, &quot;body&quot;, [smile: smile, at: at])"/>
+        <set field="copyNext" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_RESET&quot;, &quot;next&quot;, [:])"/>
+        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_RESET&quot;, &quot;note&quot;, [:])"/>
+        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_2FA_RESET&quot;)"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides(guideLinks)"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText(guideLinks)"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
-        <container style="dp-p"><label text="Hi ${firstName},"/></container>
-        <container style="dp-p"><label text="${smile} A Darpan administrator reset your two-factor on ${at}. Your old app, passkeys and codes have handed in their badges."/></container>
-        <container style="dp-p"><label text="Set up a new one at your next sign-in. It takes a minute."/></container>
-        <container style="dp-note"><label text="Not expecting this? Tell your Darpan administrator now."/></container>
+        <container style="dp-p"><label text="${copyGreeting}"/></container>
+        <container style="dp-p"><label text="${copyBody}"/></container>
+        <container style="dp-p"><label text="${copyNext}"/></container>
+        <container style="dp-note"><label text="${copyNote}"/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>

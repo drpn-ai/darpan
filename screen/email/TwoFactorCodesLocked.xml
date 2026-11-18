@@ -8,15 +8,20 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Forgot password', 'troubleshooting/login-and-session#forgot-password'], ['Two-factor sign-in', 'guides/two-factor']])"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Forgot password', 'troubleshooting/login-and-session#forgot-password'], ['Two-factor sign-in', 'guides/two-factor']])"/>
+        <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_CODES_LOCKED&quot;, &quot;greeting&quot;, [firstName: firstName])"/>
+        <set field="copyBody" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_CODES_LOCKED&quot;, &quot;body&quot;, [at: at])"/>
+        <set field="copyNext" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_CODES_LOCKED&quot;, &quot;next&quot;, [:])"/>
+        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_2FA_CODES_LOCKED&quot;, &quot;note&quot;, [:])"/>
+        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_2FA_CODES_LOCKED&quot;)"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides(guideLinks)"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText(guideLinks)"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
-        <container style="dp-p"><label text="Hi ${firstName},"/></container>
-        <container style="dp-p"><label text="Someone has your Darpan password. They kept trying it without your code until ${at}."/></container>
-        <container style="dp-p"><label text="Your code held. They didn't get in. Codes are locked on your account until the password changes."/></container>
-        <container style="dp-note"><label text="Reset your password now, and tell your Darpan administrator."/></container>
+        <container style="dp-p"><label text="${copyGreeting}"/></container>
+        <container style="dp-p"><label text="${copyBody}"/></container>
+        <container style="dp-p"><label text="${copyNext}"/></container>
+        <container style="dp-note"><label text="${copyNote}"/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>

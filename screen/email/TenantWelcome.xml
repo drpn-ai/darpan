@@ -8,20 +8,27 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · WELCOME')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;(Usually with coffee.)&quot;)"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Quickstart', 'quickstart'], ['Find your way around', 'getting-started/ask-darpan-navigation']])"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Quickstart', 'quickstart'], ['Find your way around', 'getting-started/ask-darpan-navigation']])"/>
+        <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_TENANT_WELCOME&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;smile&quot;, [:]))"/>
+        <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;greeting&quot;, [firstName: firstName])"/>
+        <set field="copyBody" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;body&quot;, [tenantLabel: tenantLabel, rolePhrase: rolePhrase])"/>
+        <set field="copyNext" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;next&quot;, [:])"/>
+        <set field="copySigninWith" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;signin.with&quot;, [appBaseUrl: appBaseUrl, username: username, tenantLabel: tenantLabel])"/>
+        <set field="copySigninWithout" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;signin.without&quot;, [username: username, tenantLabel: tenantLabel])"/>
+        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;note&quot;, [smile: smile])"/>
+        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_TENANT_WELCOME&quot;)"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides(guideLinks)"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText(guideLinks)"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
-        <container style="dp-p"><label text="Hi ${firstName},"/></container>
-        <container style="dp-p"><label text="You now have access to ${tenantLabel} on Darpan, ${rolePhrase}."/></container>
-        <container style="dp-p"><label text="Your systems each keep their own books. Darpan reads them all and tells you where they don't line up."/></container>
+        <container style="dp-p"><label text="${copyGreeting}"/></container>
+        <container style="dp-p"><label text="${copyBody}"/></container>
+        <container style="dp-p"><label text="${copyNext}"/></container>
         <section name="SignInWhere" condition="appBaseUrl">
-            <widgets><container style="dp-p"><label text="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></widgets>
-            <fail-widgets><container style="dp-p"><label text="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></fail-widgets>
+            <widgets><container style="dp-p"><label text="${copySigninWith}"/></container></widgets>
+            <fail-widgets><container style="dp-p"><label text="${copySigninWithout}"/></container></fail-widgets>
         </section>
-        <container style="dp-note"><label text="Questions? Just reply. A real person reads this. ${smile}"/></container>
+        <container style="dp-note"><label text="${copyNote}"/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>

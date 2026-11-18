@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<entity-facade-xml type="darpan-seed">
+    <!-- DAR-BE-303 — the words of the Darpan emails, one row per block per template (screen/email/*.xml reads them through
+         darpan.email.EmailCopy.text). The seed sets defaultText ONLY: the loader writes just the attributes given, so a
+         release never overwrites an edit (copyText). Block id = area[.branch]; the `guides` block is lines of `Label|docs page path`.
+         The audit run email (DARPAN_AUDIT_RUN) has no row: its words are built in AuditRunMessage. -->
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="body" defaultText="Forgot your Darpan password? ${smile} Here's your way back in:"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="next" defaultText="It works for ${expiresMinutes} minutes, then it turns back into a pumpkin."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="note" defaultText="Didn't ask for this? Ignore it. Your password stays exactly as it is."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="smile" defaultText="Fair. Month-end does that."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="guides" defaultText="Forgot password|troubleshooting/login-and-session#forgot-password&#10;Two-factor sign-in|guides/two-factor"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_CHANGED" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_CHANGED" blockId="body" defaultText="${smile} It changed on ${changedAt}, and every other device got signed out on the way."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_CHANGED" blockId="note" defaultText="Not you? Tell your Darpan administrator now."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_CHANGED" blockId="smile" defaultText="New password, who dis?"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_CHANGED" blockId="guides" defaultText="Lockouts and session length|troubleshooting/login-and-session#lockouts-and-session-length&#10;Two-factor sign-in|guides/two-factor"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_RECOVERY_EMAIL_SET" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_RECOVERY_EMAIL_SET" blockId="body.old" defaultText="This inbox is off spare-key duty. Reset codes go to your new address now. ${smile}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_RECOVERY_EMAIL_SET" blockId="body.new" defaultText="Done. This inbox is now your spare key to Darpan. ${smile}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_RECOVERY_EMAIL_SET" blockId="note" defaultText="Not you? Ignore this email and tell your administrator."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_RECOVERY_EMAIL_SET" blockId="smile.old" defaultText="It had a good run."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_RECOVERY_EMAIL_SET" blockId="smile.new" defaultText="(Future you says thanks.)"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_RECOVERY_EMAIL_SET" blockId="guides" defaultText="Forgot password|troubleshooting/login-and-session#forgot-password"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="body" defaultText="You now have access to ${tenantLabel} on Darpan, ${rolePhrase}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="next" defaultText="Your systems each keep their own books. Darpan reads them all and tells you where they don't line up."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="signin.with" defaultText="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="signin.without" defaultText="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="note" defaultText="Questions? Just reply. A real person reads this. ${smile}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="smile" defaultText="(Usually with coffee.)"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="guides" defaultText="Quickstart|quickstart&#10;Find your way around|getting-started/ask-darpan-navigation"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_APP_ADDED" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_APP_ADDED" blockId="body" defaultText="Your authenticator app and Darpan are officially a pair (since ${at}). A new code every 30 seconds. ${smile}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_APP_ADDED" blockId="note" defaultText="Not you? Change your password and tell your Darpan administrator, who can reset your two-factor."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_APP_ADDED" blockId="smile" defaultText="Don't get attached."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_APP_ADDED" blockId="guides" defaultText="Signing in with two-factor|guides/two-factor#sign-in&#10;Trouble signing in|troubleshooting/login-and-session#two-factor"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_CODES_LOCKED" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_CODES_LOCKED" blockId="body" defaultText="Someone has your Darpan password. They kept trying it without your code until ${at}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_CODES_LOCKED" blockId="next" defaultText="Your code held. They didn't get in. Codes are locked on your account until the password changes."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_CODES_LOCKED" blockId="note" defaultText="Reset your password now, and tell your Darpan administrator."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_CODES_LOCKED" blockId="guides" defaultText="Forgot password|troubleshooting/login-and-session#forgot-password&#10;Two-factor sign-in|guides/two-factor"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_PASSKEY_ADDED" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_PASSKEY_ADDED" blockId="body" defaultText="${smile} &quot;${passkeyName}&quot; can now sign you in to Darpan with a touch or a glance (added ${at})."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_PASSKEY_ADDED" blockId="note" defaultText="Not you? Remove it in Darpan under User Settings, change your password, and tell your Darpan administrator."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_PASSKEY_ADDED" blockId="smile" defaultText="Look at you, going passwordless."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_PASSKEY_ADDED" blockId="guides" defaultText="Manage your passkeys and app|guides/two-factor#manage-your-factors&#10;Trouble signing in|troubleshooting/login-and-session#two-factor"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RECOVERY_USED" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RECOVERY_USED" blockId="body" defaultText="A recovery code got you into Darpan on ${at}. ${smile}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RECOVERY_USED" blockId="next" defaultText="${recoveryCodesLeft} left. Make fresh ones in User Settings before you run dry."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RECOVERY_USED" blockId="note" defaultText="Not you? Change your password now and tell your Darpan administrator."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RECOVERY_USED" blockId="smile" defaultText="Phone in the other bag? Happens."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RECOVERY_USED" blockId="guides" defaultText="Make new recovery codes|guides/two-factor#manage-your-factors&#10;Trouble signing in|troubleshooting/login-and-session#two-factor"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RESET" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RESET" blockId="body" defaultText="${smile} A Darpan administrator reset your two-factor on ${at}. Your old app, passkeys and codes have handed in their badges."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RESET" blockId="next" defaultText="Set up a new one at your next sign-in. It takes a minute."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RESET" blockId="note" defaultText="Not expecting this? Tell your Darpan administrator now."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RESET" blockId="smile" defaultText="Clean slate."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_RESET" blockId="guides" defaultText="Set up two-factor again|guides/two-factor#set-it-up"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="greeting.before" defaultText="Hi ${firstName}, two-factor sign-in becomes required for Darpan on ${requiredDate}. Worth doing now, before month-end gets busy."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="greeting.after" defaultText="Hi ${firstName}, Darpan now needs a second step when you sign in, and yours isn't set up yet. Worth doing now, before month-end gets busy."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="body" defaultText="Two-factor sign-in means a code from an authenticator app, or a passkey, on top of your password. Set one up in User Settings, under Two-factor, at ${appUrl}. It takes about a minute, which is less time than the kettle."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="next.before" defaultText="From ${requiredDate}, Darpan will ask you to set it up when you sign in, so it can't catch you out."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="next.after" defaultText="Darpan will ask you to set it up the next time you sign in, so it can't catch you out."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="note" defaultText="You'll keep getting this reminder until a method is set up. Questions? Ask your Darpan administrator."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="guides" defaultText="Set up two-factor|guides/two-factor#set-it-up&#10;Who requires two-factor|guides/manage-users-and-access#require-two-factor"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page&#10;When an audit misbehaves|troubleshooting/audits"/>
+</entity-facade-xml>

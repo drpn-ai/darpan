@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-303 (Aditi 2026-11-18: data-focused work must be editable in production without a deploy). The words of the
+         Darpan emails live in rows, so a one-line wording fix is an edit, not a release. The layout (EmailFrame, containers,
+         sections, sign-off) stays in screen/email/*.xml; the screens read their sentences through darpan.email.EmailCopy.text.
+         Darpan-internal configuration, not tenant data: no companyUserGroupId, never under the active-tenant filter. -->
+
+    <entity entity-name="EmailCopyBlock" package="darpan.email" use="configuration" cache="never">
+        <description>One block of an email's words (a sentence, the not-you line, the guide links) for one EmailTemplate.
+            Block ids are `area[.branch]`: greeting, body, next, note, smile, guides, each with an optional branch
+            (greeting.before, body.old). defaultText is what the release ships (the seed load sets it and nothing else, so a
+            release never overwrites an edit); copyText is the production edit, empty when none. A render uses copyText when
+            it parses and only uses variables defaultText uses, else defaultText.</description>
+        <field name="emailTemplateId" type="id" is-pk="true"/>
+        <field name="blockId" type="id" is-pk="true"/>
+        <field name="defaultText" type="text-long"><description>Plain words with ${variable} slots; today's words, as released.
+            The `guides` block is lines of `Label|docs page path`.</description></field>
+        <field name="copyText" type="text-long"><description>The production edit; empty means the default is used.</description></field>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+        <relationship type="one-nofk" related="moqui.basic.email.EmailTemplate"/>
+    </entity>
+</entities>

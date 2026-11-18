@@ -46,6 +46,7 @@ class EmailTemplatesRenderTests {
     @BeforeAll
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "email-templates-render")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/EmailCopySeedData.xml")
         previews = Path.of("build", "email-previews")
         Files.createDirectories(previews)
     }
@@ -132,6 +133,100 @@ class EmailTemplatesRenderTests {
         assertEquals("17 Nov 2026 at 21:23 PST", EmailFrame.when(at, "America/Los_Angeles"))
         assertEquals("18 Nov 2026 at 05:23 UTC", EmailFrame.when(at, null))
         assertEquals("18 Nov 2026 at 05:23 UTC", EmailFrame.when(at, "Not/AZone"))
+    }
+
+    /** DAR-BE-303: name -> [screen, sample params]; src/test/resources/email-golden/<name>.html|text hold what each rendered
+     *  before the words moved into EmailCopyBlock rows (the reminder's first line is the approved new default). */
+    private static final Map<String, List> GOLDEN = [
+            PasswordResetCode      : ["PasswordResetCode", SECURITY.PasswordResetCode],
+            PasswordChanged        : ["PasswordChanged", SECURITY.PasswordChanged],
+            RecoveryEmailSetNew    : ["RecoveryEmailSet", SECURITY.RecoveryEmailSet],
+            RecoveryEmailSetOld    : ["RecoveryEmailSet", SECURITY.RecoveryEmailSet + [isOldAddress: true]],
+            TwoFactorPasskeyAdded  : ["TwoFactorPasskeyAdded", SECURITY.TwoFactorPasskeyAdded],
+            TwoFactorAppAdded      : ["TwoFactorAppAdded", SECURITY.TwoFactorAppAdded],
+            TwoFactorRecoveryUsed  : ["TwoFactorRecoveryUsed", SECURITY.TwoFactorRecoveryUsed],
+            TwoFactorReset         : ["TwoFactorReset", SECURITY.TwoFactorReset],
+            TwoFactorCodesLocked   : ["TwoFactorCodesLocked", SECURITY.TwoFactorCodesLocked],
+            TwoFactorReminderBefore: ["TwoFactorReminder", SECURITY.TwoFactorReminder],
+            TwoFactorReminderAfter : ["TwoFactorReminder", SECURITY.TwoFactorReminder + [past: true]],
+            TenantWelcomeUrl       : ["TenantWelcome", OTHER.TenantWelcome],
+            TenantWelcomeNoUrl     : ["TenantWelcome", OTHER.TenantWelcome - [appBaseUrl: "https://app.drpn.ai"]],
+            AuditDigest            : ["AuditDigest", OTHER.AuditDigest],
+    ]
+
+    @Test
+    void everyTemplateRendersAsBefore() {
+        GOLDEN.each { String name, List v ->
+            ["html", "text"].each { String mode ->
+                String expected = Files.readString(Path.of("src/test/resources/email-golden/${name}.${mode}"))
+                assertEquals(expected, render(v[0] as String, v[1] as Map, mode), "${name} ${mode}")
+            }
+        }
+    }
+
+    private String copyText(String templateId, String blockId) {
+        return ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", templateId).condition("blockId", blockId).one().getString("copyText")
+    }
+
+    private void setCopy(String templateId, String blockId, String copyText) {
+        def row = ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", templateId).condition("blockId", blockId).one()
+        row.set("copyText", copyText)
+        row.update()
+    }
+
+    @Test
+    void aProductionEditIsUsed() {
+        try {
+            setCopy("DARPAN_PASSWORD_CHANGED", "body", 'Changed on ${changedAt}. ${smile}')
+            String html = render("PasswordChanged", SECURITY.PasswordChanged, "html")
+            assertTrue(html.contains("Changed on 18 Nov 2026 at 10:53 IST. New password, who dis?"), html)
+            assertFalse(html.contains("signed out on the way"), html)
+            // a variable the default does not use is refused at render too: the default goes
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", 'Not you, ${firstName}?')
+            assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("Not you? Tell your Darpan administrator now."))
+        } finally {
+            setCopy("DARPAN_PASSWORD_CHANGED", "body", null)
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", null)
+        }
+    }
+
+    @Test
+    void aBrokenEditFallsBackToTheDefault() {
+        try {
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", "Not you? \${nope}")
+            assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("Not you? Tell your Darpan administrator now."))
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", "   ")
+            assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("Not you? Tell your Darpan administrator now."))
+            // a guides edit that EmailFrame refuses (an outside address) keeps the default links; a valid edit is used
+            setCopy("DARPAN_PASSWORD_CHANGED", "guides", "Evil|https://evil.example/x")
+            String html = render("PasswordChanged", SECURITY.PasswordChanged, "html")
+            assertFalse(html.contains("evil.example"), html)
+            assertTrue(html.contains("https://docs.drpn.ai/guides/two-factor"), html)
+            setCopy("DARPAN_PASSWORD_CHANGED", "guides", "Just one|guides/two-factor")
+            assertEquals(1, (render("PasswordChanged", SECURITY.PasswordChanged, "html") =~ /href="/).count)
+        } finally {
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", null)
+            setCopy("DARPAN_PASSWORD_CHANGED", "guides", null)
+        }
+    }
+
+    @Test
+    void everyBlockAScreenReadsIsSeeded() {
+        int reads = 0
+        new File("screen/email").listFiles().findAll { it.name.endsWith(".xml") }.each { File f ->
+            String x = f.text
+            (x =~ /EmailCopy\.text\(ec, &quot;([A-Z0-9_]+)&quot;, &quot;([a-z.]+)&quot;/).each { List m ->
+                reads++
+                assertNotNull(ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", m[1]).condition("blockId", m[2]).one(),
+                        "${f.name}: no seed row for ${m[1]}/${m[2]}")
+            }
+            (x =~ /EmailCopy\.guides\(ec, &quot;([A-Z0-9_]+)&quot;/).each { List m ->
+                reads++
+                assertNotNull(ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", m[1]).condition("blockId", "guides").one(),
+                        "${f.name}: no guides row for ${m[1]}")
+            }
+        }
+        assertTrue(reads > 50, "the scan found the reads (${reads})")
     }
 
     private String render(String screen, Map params, String mode) {

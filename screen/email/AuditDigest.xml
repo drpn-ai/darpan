@@ -6,8 +6,9 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · AUDIT DIGEST')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
-        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Read the audit page', 'guides/audits#read-the-audit-page'], ['When an audit misbehaves', 'troubleshooting/audits']])"/>
-        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Read the audit page', 'guides/audits#read-the-audit-page'], ['When an audit misbehaves', 'troubleshooting/audits']])"/>
+        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_AUDIT_DIGEST&quot;)"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides(guideLinks)"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText(guideLinks)"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>

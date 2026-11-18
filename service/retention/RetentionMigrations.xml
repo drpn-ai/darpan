@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-306. Registered migration RETIRED_JOB_PARAMETERS (data/MigrationRegistrySeedData.xml). Job parameters that a setting replaced
+  are moved or dropped from the live ServiceJobParameter rows: seed loads are upserts and never delete, and a live row would keep
+  overriding the setting (the purge services read their period from the parameter first). Not remote: the supervisor runs it with
+  authz disabled, over every tenant's data only in the sense that these rows are instance-wide.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="move" noun="PurgeJobRetentionParameters" authenticate="false" allow-remote="false">
+        <description>One-time. For each nightly purge job, a live retentionDays parameter that differs from what the job shipped (15 days
+            for generated output, 7 for raw extracts) is a production edit: its value is written to the darpan.purge.* setting (unless
+            that setting already has a value, which then wins), and the parameter row is deleted so the setting is the one home of the
+            period. A row equal to the shipped value is just deleted. Also deletes the stuck-run reaper job's retired staleMinutes
+            parameter (the reaperStaleMinutes setting replaced it in DAR-BE-304; the row is ignored). A parameter that is not a valid
+            period for its setting is reported and left. Idempotent: a second run finds no rows and changes nothing. Dry run counts
+            and reports; it writes nothing.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="serviceLabel" value="retention.RetentionMigrations.move#PurgeJobRetentionParameters"/>
+            <set field="messages" from="[]"/>
+            <set field="rowsUpdated" from="0"/>
+            <set field="moves" from="[[jobName: 'purge_ReconciliationGeneratedFiles_daily', parameterName: 'retentionDays',
+                        settingKey: 'darpan.purge.generatedOutput.days', shipped: 15],
+                    [jobName: 'purge_ReconciliationExtractFiles_daily', parameterName: 'retentionDays',
+                        settingKey: 'darpan.purge.extract.days', shipped: 7]]"/>
+            <iterate list="moves" entry="mv">
+                <entity-find-one entity-name="moqui.service.job.ServiceJobParameter" value-field="paramRow" cache="false" for-update="true">
+                    <field-map field-name="jobName" from="mv.jobName"/>
+                    <field-map field-name="parameterName" from="mv.parameterName"/>
+                </entity-find-one>
+                <if condition="paramRow">
+                    <set field="liveValue" from="paramRow.parameterValue?.trim()"/>
+                    <set field="dropRow" from="true"/>
+                    <if condition="liveValue &amp;&amp; liveValue.isInteger() &amp;&amp; (liveValue as int) != mv.shipped">
+                        <set field="settingProblem" from="darpan.config.DarpanSettings.problem(mv.settingKey, liveValue)"/>
+                        <entity-find-one entity-name="darpan.config.DarpanSetting" value-field="settingRow" cache="false">
+                            <field-map field-name="settingKey" from="mv.settingKey"/></entity-find-one>
+                        <if condition="settingProblem">
+                            <set field="dropRow" from="false"/>
+                            <script>messages.add(mv.jobName + ' ' + mv.parameterName + ' ' + liveValue + ' left in place: ' + settingProblem)</script>
+                        <else-if condition="settingRow">
+                            <script>messages.add(mv.jobName + ' ' + mv.parameterName + ' ' + liveValue + ' dropped: ' + mv.settingKey + ' already holds ' + settingRow.settingValue)</script>
+                        </else-if>
+                        <else>
+                            <script>messages.add((dryRun ? 'Would set ' : 'Set ') + mv.settingKey + ' to ' + liveValue + ' (from ' + mv.jobName + ')')</script>
+                            <if condition="!dryRun">
+                                <script>darpan.admin.SettingAdminSupport.save(ec, mv.settingKey, liveValue, 'moved from the ' + mv.jobName + ' job parameter (DAR-BE-306)', serviceLabel)</script>
+                            </if>
+                        </else></if>
+                    <else>
+                        <script>messages.add(mv.jobName + ' ' + mv.parameterName + ' ' + (liveValue ?: '(blank)') + ' dropped: not an edit of the shipped ' + mv.shipped)</script>
+                    </else></if>
+                    <if condition="dropRow">
+                        <if condition="!dryRun"><entity-delete value-field="paramRow"/></if>
+                        <set field="rowsUpdated" from="rowsUpdated + 1"/>
+                    </if>
+                </if>
+            </iterate>
+
+            <entity-find-one entity-name="moqui.service.job.ServiceJobParameter" value-field="staleRow" cache="false" for-update="true">
+                <field-map field-name="jobName" value="sweep_StuckReconciliationRuns_10m"/>
+                <field-map field-name="parameterName" value="staleMinutes"/>
+            </entity-find-one>
+            <if condition="staleRow">
+                <script>messages.add((dryRun ? 'Would delete' : 'Deleted') + ' sweep_StuckReconciliationRuns_10m staleMinutes ' + staleRow.parameterValue + ' (retired: the reaperStaleMinutes setting replaced it)')</script>
+                <if condition="!dryRun"><entity-delete value-field="staleRow"/></if>
+                <set field="rowsUpdated" from="rowsUpdated + 1"/>
+            </if>
+
+            <set field="messages" from="[(dryRun ? 'Would change ' : 'Changed ') + rowsUpdated + ' job parameter row(s).'] + messages"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="errors" from="ec.message.errors ?: []"/>
+        </actions>
+    </service>
+</services>

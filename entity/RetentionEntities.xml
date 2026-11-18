@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-306. A tenant's own retention period for one table, over the instance period (the darpan.retention.<table>.days
+         settings). Super admins write it through admin.RetentionAdminServices.update#RetentionPeriods (which carries the
+         preview guard); the retention sweep reads it with an explicit tenantUserGroupId condition. No
+         DARPAN_ACTIVE_COMPANY_SCOPE filter: the rows are platform configuration about a tenant, never read as the tenant, so
+         the key is tenantUserGroupId (like ConfigTenantAccess), not companyUserGroupId; TenantOwnedEntityFilterContractTests.EXCLUDED says so. No row = the instance period. -->
+
+    <entity entity-name="TenantRetentionPeriod" package="darpan.retention" use="configuration" cache="never">
+        <description>One tenant's retention period for one table. periodDays empty means keep this tenant's rows forever,
+            whatever the instance period is; no row means the tenant follows the instance period.</description>
+        <field name="tenantUserGroupId" type="id" is-pk="true"><description>The tenant (a company UserGroup).</description></field>
+        <field name="tableKey" type="id" is-pk="true">
+            <description>AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE or AGENT_QUERY_LOG.</description></field>
+        <field name="periodDays" type="number-integer"><description>Days to keep; empty = keep forever.</description></field>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+        <relationship type="one" related="moqui.security.UserGroup">
+            <key-map field-name="tenantUserGroupId" related="userGroupId"/></relationship>
+    </entity>
+</entities>

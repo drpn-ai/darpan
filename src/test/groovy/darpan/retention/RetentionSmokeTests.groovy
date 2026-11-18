@@ -1,6 +1,7 @@
 package darpan.retention
 
 import darpan.admin.AuditLogTestSupport
+import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -87,13 +88,13 @@ class RetentionSmokeTests {
     }
 
     @Test
-    void "a period that is not a whole number of at least one day is reported and keeps the table"() {
-        System.setProperty("darpan.retention.auditFinding.days", "0")
-        System.setProperty("darpan.retention.agentQueryLog.days", "ninety")
+    void "a stored period that is not a whole number of days from 1 to 3650 is ignored and keeps the table"() {
+        setSetting("darpan.retention.auditFinding.days", "0")
+        setSetting("darpan.retention.agentQueryLog.days", "ninety")
         Map before = snapshot()
         Map out = run("run#Retention", [:])
-        assertEquals(RetentionSupport.INVALID_PERIOD, table(out, RetentionSupport.AUDIT_FINDING).status)
-        assertEquals(RetentionSupport.INVALID_PERIOD, table(out, RetentionSupport.AGENT_QUERY_LOG).status)
+        assertEquals(RetentionSupport.KEEP_FOREVER, table(out, RetentionSupport.AUDIT_FINDING).status)
+        assertEquals(RetentionSupport.KEEP_FOREVER, table(out, RetentionSupport.AGENT_QUERY_LOG).status)
         assertEquals(before, snapshot())
     }
 
@@ -123,7 +124,7 @@ class RetentionSmokeTests {
 
     @Test
     void "a set period deletes only that table's older rows and never another tenant's"() {
-        System.setProperty("darpan.retention.auditFinding.days", "30")
+        setSetting("darpan.retention.auditFinding.days", "30")
         Map before = snapshot()
         Map out = run("run#Retention", [tenantUserGroupId: A])
 
@@ -146,10 +147,10 @@ class RetentionSmokeTests {
 
     @Test
     void "run results, transcripts and query logs expire by their own rules, in batches"() {
-        System.setProperty("darpan.retention.runResult.days", "30")
-        System.setProperty("darpan.retention.agentMessage.days", "30")
-        System.setProperty("darpan.retention.agentQueryLog.days", "30")
-        System.setProperty("darpan.retention.batchSize", "1")
+        setSetting("darpan.retention.runResult.days", "30")
+        setSetting("darpan.retention.agentMessage.days", "30")
+        setSetting("darpan.retention.agentQueryLog.days", "30")
+        setSetting("darpan.retention.batchSize", "1")
         Map out = run("run#Retention", [:])
 
         assertEquals(2L, table(out, RetentionSupport.RUN_RESULT).rows)
@@ -241,7 +242,7 @@ class RetentionSmokeTests {
 
     @Test
     void "a signed-in user who is not a Darpan admin cannot run retention"() {
-        System.setProperty("darpan.retention.auditFinding.days", "30")
+        setSetting("darpan.retention.auditFinding.days", "30")
         Map before = snapshot()
         ec.message.clearErrors()
         ec.service.sync().name("retention.RetentionServices.run#Retention").parameters([:]).disableAuthz().call()
@@ -266,8 +267,19 @@ class RetentionSmokeTests {
 
     private long auditRowCount() { asSystem { ec.entity.find("darpan.admin.AdminAuditLog").useCache(false).count() } }
 
-    private static void clearProperties() {
-        (RetentionSupport.PERIOD_PROPERTIES.values() + [RetentionSupport.BATCH_SIZE_PROPERTY]).each { System.clearProperty(it) }
+    /** A production value, the way the admin services leave it: a DarpanSetting row, live at once. */
+    private void setSetting(String key, String value) {
+        asSystem { ec.entity.makeValue("darpan.config.DarpanSetting").setAll([settingKey: key, settingValue: value]).createOrUpdate() }
+        DarpanSettings.expire()
+    }
+
+    private void clearProperties() {
+        asSystem {
+            (RetentionSupport.TABLE_SETTINGS.values() + [RetentionSupport.BATCH_SIZE_SETTING]).each {
+                ec.entity.find("darpan.config.DarpanSetting").condition("settingKey", it).deleteAll()
+            }
+        }
+        DarpanSettings.expire()
     }
 
     private <T> T asSystem(Closure<T> work) {

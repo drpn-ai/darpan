@@ -132,6 +132,9 @@ class TenantOwnedEntityFilterContractTests {
                     "(documented in SecuritySeedData.xml)",
             "darpan.reconciliation.RunDataDocument"                : "child of ReconciliationRun, no tenant column",
             "darpan.reconciliation.RunSystemInstance"              : "child of ReconciliationRun, no tenant column",
+            // DAR-BE-306: platform configuration about a tenant, written by super admins, read by the retention sweep.
+            "darpan.retention.TenantRetentionPeriod"               : "super-admin retention override keyed by the tenant; the sweep reads it " +
+                    "through findGlobalUnscoped with an explicit tenantUserGroupId, and no tenant user ever reads it",
     ].asImmutable()
 
     private static Path componentRoot() {

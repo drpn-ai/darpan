@@ -63,7 +63,7 @@ class ScheduleJobDefaultsSmokeTests {
         assertEquals("retention.RetentionServices.dryRun#Retention",
                 ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", "run_DataRetention_daily").one().resumePreviewService)
         List<EntityValue> params = asSystem { ec.entity.find("moqui.service.job.ServiceJobParameter").condition("defaultValue", org.moqui.entity.EntityCondition.NOT_EQUAL, null).list() }
-        assertEquals(3, params.size())
+        assertEquals(1, params.size(), "the scan limit; the purge periods are settings (DAR-BE-306)")
         params.each { assertEquals(it.defaultValue, it.parameterValue, it.parameterName) }
     }
 

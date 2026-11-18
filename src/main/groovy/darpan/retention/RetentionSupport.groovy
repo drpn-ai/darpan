@@ -1,6 +1,7 @@
 package darpan.retention
 
 import darpan.admin.AdminAuditSupport
+import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import groovy.transform.CompileDynamic
@@ -12,11 +13,15 @@ import java.sql.Date
 import java.sql.Timestamp
 
 /**
- * DAR-BE-266. Deletes rows older than a per-table retention period, one tenant at a time, in small batches.
+ * DAR-BE-266, DAR-BE-306. Deletes rows older than a per-table retention period, one tenant at a time, in small batches.
  *
- * <p><strong>Off until configured.</strong> Each table's period is a system property (the deployment's other limits
- * are too, e.g. darpan.reconciliation.automation.maxRetryCount). Unset, blank, not a whole number, or below 1 means
- * keep forever, so a deploy deletes nothing until a period is set (DAR-OPS-017 decision 7).</p>
+ * <p><strong>Off until configured.</strong> Each table's instance period is an optional setting
+ * ({@code darpan.retention.<table>.days}, edited in production through admin.RetentionAdminServices). Unset means keep
+ * forever, so a deploy deletes nothing until a period is set (DAR-OPS-017 decision 7).</p>
+ *
+ * <p><strong>Per tenant.</strong> A tenant may carry its own period for a table (TenantRetentionPeriod): its days, or
+ * "forever" (an empty periodDays), and it wins over the instance period for that tenant's rows only. No row follows the
+ * instance period.</p>
  *
  * <p><strong>Tenant-safe.</strong> A sweep runs as the scheduler, with no active tenant, so every read is a
  * {@code findGlobalUnscoped} with an explicit {@code companyUserGroupId} condition for the one tenant being swept, and
@@ -37,84 +42,121 @@ class RetentionSupport {
     static final String AGENT_MESSAGE = "AGENT_MESSAGE"
     static final String AGENT_QUERY_LOG = "AGENT_QUERY_LOG"
 
-    /** Table key to its system property; the property's value is the period in days. */
-    static final Map<String, String> PERIOD_PROPERTIES = [
+    /** Table key to the setting that holds its instance period in days (optional: unset = keep forever). */
+    static final Map<String, String> TABLE_SETTINGS = [
             (AUDIT_FINDING)  : "darpan.retention.auditFinding.days",
             (RUN_RESULT)     : "darpan.retention.runResult.days",
             (AGENT_MESSAGE)  : "darpan.retention.agentMessage.days",
             (AGENT_QUERY_LOG): "darpan.retention.agentQueryLog.days",
     ].asImmutable()
-    static final String BATCH_SIZE_PROPERTY = "darpan.retention.batchSize"
-    static final int DEFAULT_BATCH_SIZE = 500
+    static final String BATCH_SIZE_SETTING = "darpan.retention.batchSize"
+    static final String TENANT_PERIOD_ENTITY = "darpan.retention.TenantRetentionPeriod"
 
     static final String KEEP_FOREVER = "KEEP_FOREVER"
-    static final String INVALID_PERIOD = "INVALID_PERIOD"
     static final String DRY_RUN = "DRY_RUN"
     static final String DELETED = "DELETED"
+    static final String TENANT = "TENANT"
+    static final String INSTANCE = "INSTANCE"
 
     private static final String REASON = "retention sweep (DAR-BE-266): system job, explicit companyUserGroupId condition for the tenant swept"
+    private static final String PERIOD_REASON = "retention sweep (DAR-BE-306): the tenant's own period rows, explicit tenantUserGroupId condition"
     private static final long DAY_MILLIS = 86_400_000L
     private static final List<String> UNFINISHED_RUN_STATUSES = ["AUT_STAT_PENDING", "AUT_STAT_RUNNING"]
 
     /**
-     * The period for each table as configured now, or as the dry run's override says. Each entry:
-     * [table, property, periodDays (Integer or null), status KEEP_FOREVER | INVALID_PERIOD | null (set), rawValue].
+     * The period of each table for one tenant (or, with no tenantId, for the instance): the tenant's own row when it has one,
+     * else the instance setting. {@code instanceOverrides} and {@code tenantOverrides} are a dry run's what-ifs by table key
+     * (days, "forever", and for a tenant "inherit"); a tenant override wins over the tenant's stored row. Each entry:
+     * [table, property (the instance setting key), periodDays (Integer, null = keep forever), status KEEP_FOREVER | null,
+     * source TENANT | INSTANCE, overridden (the instance value is a what-if)].
      */
-    static Map<String, Map> periods(Map overrides = null) {
+    static Map<String, Map> periods(def ec, String tenantId, Map instanceOverrides = null, Map tenantOverrides = null) {
+        Map<String, Integer> stored = [:]
+        Set<String> storedTables = [] as Set
+        if (tenantId?.trim()) {
+            TenantScopedFinder.findGlobalUnscoped(ec, TENANT_PERIOD_ENTITY, PERIOD_REASON).condition("tenantUserGroupId", tenantId.trim())
+                    .useCache(false).list().each { row ->
+                storedTables << (row.tableKey as String)
+                stored[row.tableKey as String] = row.periodDays == null ? null : (row.periodDays as Integer)
+            }
+        }
         Map<String, Map> out = [:]
-        PERIOD_PROPERTIES.each { String table, String property ->
-            boolean overridden = overrides != null && overrides.containsKey(table)
-            Object raw = overridden ? overrides.get(table) : System.getProperty(property)
-            String text = raw?.toString()?.trim()
-            Integer days = (text && text.isInteger()) ? text.toInteger() : null
-            String status = !text ? KEEP_FOREVER : (days == null || days < 1 ? INVALID_PERIOD : null)
-            out[table] = [table: table, property: property, rawValue: text, periodDays: status ? null : days, status: status,
-                          overridden: overridden]
+        TABLE_SETTINGS.each { String table, String setting ->
+            boolean tenantHasOwn = false
+            Integer days = null
+            if (tenantId?.trim()) {
+                if (tenantOverrides != null && tenantOverrides.containsKey(table)) {
+                    Map p = RetentionPeriodRules.parse(table, tenantOverrides.get(table), true)
+                    if (p.error) throw new IllegalArgumentException(p.error as String)
+                    if (!p.inherit) { tenantHasOwn = true; days = p.days as Integer }
+                } else if (storedTables.contains(table)) {
+                    tenantHasOwn = true
+                    days = stored[table]
+                }
+            }
+            boolean whatIf = false
+            if (!tenantHasOwn) {
+                if (instanceOverrides != null && instanceOverrides.containsKey(table)) {
+                    Map p = RetentionPeriodRules.parse(table, instanceOverrides.get(table), false)
+                    if (p.error) throw new IllegalArgumentException(p.error as String)
+                    days = p.days as Integer
+                    whatIf = true
+                } else {
+                    days = DarpanSettings.optionalIntValue(setting)
+                }
+            }
+            out[table] = [table: table, property: setting, periodDays: days, status: days == null ? KEEP_FOREVER : null,
+                          source: tenantHasOwn ? TENANT : INSTANCE, overridden: whatIf]
         }
         return out
     }
 
-    static int batchSize() {
-        String text = System.getProperty(BATCH_SIZE_PROPERTY)?.trim()
-        return text?.isInteger() && text.toInteger() > 0 ? Math.min(text.toInteger(), 5000) : DEFAULT_BATCH_SIZE
-    }
+    static int batchSize() { return DarpanSettings.intValue(BATCH_SIZE_SETTING) }
 
     /**
-     * Counts (dryRun) or deletes what each table's period expires, for one tenant or every tenant.
-     * A dry run may override periods by table key (e.g. [AUDIT_FINDING: 395]) to preview a period before setting it;
-     * a real run only ever uses the configured ones.
+     * Counts (dryRun) or deletes what each table's period expires, for one tenant or every tenant, each tenant under its own
+     * effective period. A dry run may override the instance periods by table key (e.g. [AUDIT_FINDING: 395]) and, for one
+     * tenant, that tenant's (tenantPeriodOverrides, needs tenantId) to preview a period before setting it; a real run only
+     * ever uses the stored ones.
      */
-    static Map run(def ec, String tenantId, boolean dryRun, Map periodOverrides = null) {
-        if (!dryRun && periodOverrides) throw new IllegalArgumentException("A real retention run uses the configured periods only")
-        Map<String, Map> configured = periods(dryRun ? periodOverrides : null)
+    static Map run(def ec, String tenantId, boolean dryRun, Map periodOverrides = null, Map tenantPeriodOverrides = null) {
+        if (!dryRun && (periodOverrides || tenantPeriodOverrides)) throw new IllegalArgumentException("A real retention run uses the stored periods only")
+        if (tenantPeriodOverrides && !tenantId?.trim()) throw new IllegalArgumentException("tenantPeriodDays needs a tenantUserGroupId")
+        Map<String, Map> instance = periods(ec, null, periodOverrides)
         List<String> tenants = tenantId?.trim() ? [tenantId.trim()] : allTenants(ec)
+        Map<String, Map<String, Map>> effective = tenants.collectEntries { String t ->
+            [(t): periods(ec, t, periodOverrides, t == tenantId?.trim() ? tenantPeriodOverrides : null)]
+        }
         Timestamp now = new Timestamp(System.currentTimeMillis())
         int batch = batchSize()
         List<Map> tables = []
-        configured.values().each { Map p ->
+        instance.values().each { Map p ->
             Map row = new LinkedHashMap(p)
+            row.remove("source")
             row.rows = 0L
             row.dependentRows = [:]
             row.byTenant = [:]
-            if (p.periodDays == null) {
-                tables << row
-                return
-            }
-            Timestamp cutoff = new Timestamp(now.time - ((p.periodDays as long) * DAY_MILLIS))
-            row.cutoff = cutoff
-            row.status = dryRun ? DRY_RUN : DELETED
+            row.byTenantPeriod = [:]
+            if (p.periodDays != null) row.cutoff = new Timestamp(now.time - ((p.periodDays as long) * DAY_MILLIS))
+            boolean anyPeriod = p.periodDays != null
             tenants.each { String t ->
+                Map eff = effective[t][p.table as String]
+                if (eff.source == TENANT) row.byTenantPeriod[t] = eff.periodDays
+                if (eff.periodDays == null) return
+                anyPeriod = true
+                Timestamp cutoff = new Timestamp(now.time - ((eff.periodDays as long) * DAY_MILLIS))
                 Map counts = sweep(ec, p.table as String, t, cutoff, dryRun, batch)
                 long n = counts.remove("_rows") as long
                 if (n > 0) row.byTenant[t] = n
                 row.rows = (row.rows as long) + n
                 counts.each { String entity, Object c -> row.dependentRows[entity] = ((row.dependentRows[entity] ?: 0L) as long) + (c as long) }
             }
+            if (anyPeriod) row.status = dryRun ? DRY_RUN : DELETED
             tables << row
         }
-        boolean anySet = tables.any { it.periodDays != null }
+        boolean anySet = tables.any { it.status != KEEP_FOREVER }
         if (!dryRun && anySet) {
-            String summary = tables.collect { "${it.table} ${it.periodDays ?: 'forever'}${it.periodDays ? 'd' : ''}: ${it.rows}" }.join("; ")
+            String summary = tables.collect { "${it.table} ${it.periodDays ?: 'forever'}${it.periodDays ? 'd' : ''}${it.byTenantPeriod ? " (+${it.byTenantPeriod.size()} tenant period(s))" : ''}: ${it.rows}" }.join("; ")
             AdminAuditSupport.recordRun(ec, "retention.RetentionServices.run#Retention", "Retention", tenantId?.trim() ?: "ALL",
                     "Retention run over ${tenants.size()} tenant(s), batch ${batch}: ${summary}.".toString())
         }

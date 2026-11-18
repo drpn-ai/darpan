@@ -200,6 +200,8 @@ class CliMethodAllowlist {
 
             // DAR-BE-266: the retention preview is a Darpan admin's, in the admin app.
             "admin.RetentionAdminServices.dryRun#Retention",
+            "admin.RetentionAdminServices.get#RetentionPeriods",
+            "admin.RetentionAdminServices.update#RetentionPeriods",
 
             "admin.ObserveAdminServices.get#AdminSessionInfo",
             "admin.ObserveAdminServices.get#LiveOperations",

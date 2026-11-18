@@ -22,6 +22,8 @@ class SettingAdminSupport {
     static final int NOTE_MAX = 255
 
     static Map update(def ec, String settingKey, String value, String note) {
+        String refused = managedRefusal(settingKey)
+        if (refused != null) return [error: refused]
         String text = value?.trim()
         String problem = DarpanSettings.problem(settingKey, text)
         if (problem != null) return [error: problem]
@@ -29,26 +31,71 @@ class SettingAdminSupport {
         if (cleanNote != null && cleanNote.length() > NOTE_MAX) {
             return [error: "The note is ${cleanNote.length()} characters; the most is ${NOTE_MAX}.".toString()]
         }
+        save(ec, settingKey, text, cleanNote, "admin.SettingAdminServices.update#Setting")
+        if (ec.message.hasError()) return [error: ec.message.errorsString]
+        return [setting: DarpanSettings.describe(settingKey)]
+    }
+
+    /**
+     * Saves a value and its audit row in a transaction of its own that commits here, then makes it live on this node. The caller
+     * has validated the value and checked super admin. Saving writes no check of the key's managedBy: the service that manages
+     * the key (retention) writes through here, the generic editor does not (update, reset). The audit row reads
+     * `key: old effective -> new (note)`. expireAfterCommit waits for the CALLER's commit, so inside a larger transaction the
+     * setting this call returns (and every read on this node) would still be the old value; committing first lets us expire at
+     * once. The price: a caller's larger transaction does not contain this write, so a later failure there does not undo it.
+     */
+    static void save(def ec, String settingKey, String text, String cleanNote, String serviceName) {
         String before = DarpanSettings.describe(settingKey).effectiveValue
         String audit = "${settingKey}: ${before} -> ${text}${cleanNote ? " (${cleanNote})" : ""}".toString()
-        // Saved and audited in a transaction of its own that commits here. expireAfterCommit waits for the CALLER's
-        // commit, so inside a larger transaction the setting this call returns (and every read on this node) would still
-        // be the old value; committing first lets us expire at once. The price: a caller's larger transaction does not
-        // contain this write, so a later failure there does not undo it.
         ec.transaction.runRequireNew(null, "Could not save setting ${settingKey}", {
             ec.service.sync().name("store#" + ENTITY).parameters([settingKey: settingKey, settingValue: text, note: cleanNote,
                     lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp]).requireNewTransaction(false).call()
-            AdminAuditSupport.record(ec, "admin.SettingAdminServices.update#Setting", "DarpanSetting", settingKey, audit)
+            record(ec, serviceName, settingKey, audit)
         })
-        if (ec.message.hasError()) return [error: ec.message.errorsString]
         DarpanSettings.expire()
         DarpanSettings.expireAfterCommit(ec)
-        return [setting: DarpanSettings.describe(settingKey)]
+    }
+
+    /**
+     * Deletes the production value (and audits it) so the key follows its JVM property or default again; no row, nothing
+     * changes. Same transaction and managedBy stance as save. Returns what is in force afterwards, as text (null: nothing).
+     */
+    static String remove(def ec, String settingKey, String serviceName) {
+        def row = ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).one()
+        if (row == null) return DarpanSettings.describe(settingKey).effectiveValue
+        Map d = DarpanSettings.describe(settingKey)
+        def sd = DarpanSettings.catalog().get(settingKey)
+        String prop = d.propertyValue
+        boolean byProperty = prop != null && DarpanSettings.parse(sd, prop) != null
+        String after = byProperty ? prop : d.defaultValue
+        String audit = "${settingKey}: ${d.effectiveValue} -> ${byProperty ? "property" : "default"} ${after}".toString()
+        ec.transaction.runRequireNew(null, "Could not reset setting ${settingKey}", {
+            ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).forUpdate(true).one()?.delete()
+            record(ec, serviceName, settingKey, audit)
+        })
+        DarpanSettings.expire()
+        DarpanSettings.expireAfterCommit(ec)
+        return after
+    }
+
+    private static void record(def ec, String serviceName, String settingKey, String audit) {
+        // A system caller (a migration) has no user: its row names the system user, as a run's does.
+        if (ec.user.userId) AdminAuditSupport.record(ec, serviceName, "DarpanSetting", settingKey, audit)
+        else AdminAuditSupport.recordRun(ec, serviceName, "DarpanSetting", settingKey, audit)
+    }
+
+    /** Why the generic editor will not touch this key, or null when it may: a managed key is edited only where its guard lives. */
+    static String managedRefusal(String settingKey) {
+        String owner = DarpanSettings.catalog().get(settingKey)?.managedBy
+        if (owner == null) return null
+        return "${settingKey} is managed by ${owner}: set it on the Schedule page (Retention), where a shorter period needs a fresh preview.".toString()
     }
 
     static Map reset(def ec, String settingKey) {
         def sd = DarpanSettings.catalog().get(settingKey)
         if (sd == null) return [error: "No setting ${settingKey}.".toString()]
+        String refused = managedRefusal(settingKey)
+        if (refused != null) return [error: refused]
         def row = ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).one()
         if (row != null) {
             Map d = DarpanSettings.describe(settingKey)
@@ -58,14 +105,8 @@ class SettingAdminSupport {
             String after = byProperty ? prop : d.defaultValue
             String problem = orderProblem(sd, after)
             if (problem != null) return [error: problem]
-            String audit = "${settingKey}: ${d.effectiveValue} -> ${byProperty ? "property" : "default"} ${after}".toString()
-            ec.transaction.runRequireNew(null, "Could not reset setting ${settingKey}", {
-                ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).forUpdate(true).one()?.delete()
-                AdminAuditSupport.record(ec, "admin.SettingAdminServices.reset#Setting", "DarpanSetting", settingKey, audit)
-            })
+            remove(ec, settingKey, "admin.SettingAdminServices.reset#Setting")
             if (ec.message.hasError()) return [error: ec.message.errorsString]
-            DarpanSettings.expire()
-            DarpanSettings.expireAfterCommit(ec)
         }
         return [setting: DarpanSettings.describe(settingKey)]
     }

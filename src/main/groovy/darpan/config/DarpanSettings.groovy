@@ -27,7 +27,7 @@ class DarpanSettings {
     static final String ENTITY = 'darpan.config.DarpanSetting'
     static final String CATALOG_RESOURCE = 'darpan/settings-catalog.json'
     static final long REFRESH_MILLIS = 30_000L
-    private static final List<String> AREA_ORDER = ['Runs', 'Run health', 'Two-factor', 'Agent']
+    private static final List<String> AREA_ORDER = ['Runs', 'Run health', 'Two-factor', 'Agent', 'Retention']
     private static final String WHY = 'instance settings: tenant-neutral tunables'
 
     /** Seam: row map by key ([settingValue, note, lastChangedByUserId, lastChangedDate]); null means no rows. */
@@ -54,7 +54,15 @@ class DarpanSettings {
 
     // ------------------------------------------------------------------ typed reads
 
-    static int intValue(String key) { return (int) read(key, 'INT') }
+    static int intValue(String key) {
+        if (definition(key).optional) throw new IllegalArgumentException("Setting ${key} may be unset; read it with optionalIntValue".toString())
+        return (int) read(key, 'INT')
+    }
+    /** An optional INT setting: null when nothing sets it (the feature is off, e.g. keep forever). */
+    static Integer optionalIntValue(String key) {
+        if (!definition(key).optional) throw new IllegalArgumentException("Setting ${key} always has a value; read it with intValue".toString())
+        return (Integer) read(key, 'INT')
+    }
     static boolean booleanValue(String key) { return (boolean) read(key, 'BOOLEAN') }
     static BigDecimal decimalValue(String key) { return (BigDecimal) read(key, 'DECIMAL') }
     static List<Integer> intListValue(String key) { return (List<Integer>) read(key, 'INT_LIST') }
@@ -147,7 +155,7 @@ class DarpanSettings {
                         min: m.min == null ? null : new BigDecimal(m.min.toString()),
                         max: m.max == null ? null : new BigDecimal(m.max.toString()),
                         maxItems: m.maxItems == null ? null : ((Number) m.maxItems).intValue(),
-                        lessThan: m.lessThan)
+                        lessThan: m.lessThan, optional: m.optional == true, managedBy: m.managedBy)
             } catch (Exception e) {
                 warnOnce('entry|' + source + '|' + m.key, "Skipping malformed setting {} in {}: {}", m.key, source, e.toString())
                 continue
@@ -156,6 +164,12 @@ class DarpanSettings {
                 warnOnce('entry|' + source + '|' + m.key, "Skipping malformed setting {} in {}", m.key, source)
             } else if (out.containsKey(d.key)) {
                 warnOnce('entry|' + source + '|' + d.key, "Setting {} twice in {}; keeping the first", d.key, source)
+            } else if (d.optional && d.defaultValue == null) {
+                if (d.type != 'INT') {
+                    warnOnce('entry|' + source + '|' + d.key, "Skipping setting {} in {}: only an INT setting may be optional", d.key, source)
+                } else {
+                    out.put(d.key, d)
+                }
             } else if (parse(d, d.defaultValue) == null) {
                 warnOnce('entry|' + source + '|' + d.key, "Skipping setting {} in {}: its default '{}' is not valid", d.key, source, d.defaultValue)
             } else {
@@ -247,7 +261,7 @@ class DarpanSettings {
     }
 
     private static String render(Object value) {
-        return value instanceof List ? ((List) value).join(',') : value.toString()
+        return value == null ? null : (value instanceof List ? ((List) value).join(',') : value.toString())
     }
 
     // ------------------------------------------------------------------ snapshot
@@ -331,6 +345,7 @@ class DarpanSettings {
         return [
                 key: d.key, type: d.type, area: d.area, unit: d.unit, description: d.description,
                 defaultValue: d.defaultValue, min: d.min, max: d.max, maxItems: d.maxItems, lessThan: d.lessThan,
+                optional: d.optional, managedBy: d.managedBy,
                 propertyValue: System.getProperty(key), rowValue: row?.settingValue?.toString(),
                 effectiveValue: render(r.value), source: r.source,
                 note: row?.note, lastChangedByUserId: row?.lastChangedByUserId, lastChangedDate: row?.lastChangedDate]
@@ -356,6 +371,7 @@ class DarpanSettings {
     static String problem(String key, String text) {
         SettingDefinition d = key == null ? null : catalog().get(key)
         if (d == null) return "Unknown setting: ${key}".toString()
+        if (d.optional && (text == null || text.trim().isEmpty())) return null
         Object v = parse(d, text)
         if (v == null) return "${key}: '${text}' is not ${expectation(d)}".toString()
         if (d.lessThan != null) {

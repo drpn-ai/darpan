@@ -153,6 +153,12 @@
                                         "$ref": "#/components/schemas/DryRunRetentionRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetRetentionPeriodsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateRetentionPeriodsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetScheduleBoardRequest"
                                     },
                                     {
@@ -922,6 +928,8 @@
                                         "admin.ObserveAdminServices.get#AdminSessionInfo": "#/components/schemas/GetAdminSessionInfoRequest",
                                         "admin.ObserveAdminServices.get#LiveOperations": "#/components/schemas/GetLiveOperationsRequest",
                                         "admin.RetentionAdminServices.dryRun#Retention": "#/components/schemas/DryRunRetentionRequest",
+                                        "admin.RetentionAdminServices.get#RetentionPeriods": "#/components/schemas/GetRetentionPeriodsRequest",
+                                        "admin.RetentionAdminServices.update#RetentionPeriods": "#/components/schemas/UpdateRetentionPeriodsRequest",
                                         "admin.ScheduleAdminServices.get#ScheduleBoard": "#/components/schemas/GetScheduleBoardRequest",
                                         "admin.ScheduleAdminServices.get#ServiceJobs": "#/components/schemas/GetServiceJobsRequest",
                                         "admin.ScheduleAdminServices.preview#JobSchedule": "#/components/schemas/PreviewJobScheduleRequest",
@@ -1307,6 +1315,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/DryRunRetentionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetRetentionPeriodsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateRetentionPeriodsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetScheduleBoardResponse"
@@ -6154,7 +6168,11 @@
                     },
                     "periodDays": {
                         "type": "object",
-                        "description": "Optional preview periods in days by table key (AUDIT_FINDING,\n                RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the configured ones."
+                        "description": "Optional preview of the instance periods in days (or forever) by table key\n                (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the stored ones."
+                    },
+                    "tenantPeriodDays": {
+                        "type": "object",
+                        "description": "Optional preview of one tenant's own periods by table key (days,\n                forever or inherit); needs tenantUserGroupId and covers that tenant only."
                     }
                 },
                 "description": "Counts the rows each table's retention period would delete now, per table and tenant. Deletes nothing."
@@ -6180,7 +6198,7 @@
                             "type": "string",
                             "description": "Moqui type Map"
                         },
-                        "description": "One entry per table: table, property, periodDays (blank: keep\n                forever), status (KEEP_FOREVER, INVALID_PERIOD, DRY_RUN), cutoff, rows, dependentRows, byTenant."
+                        "description": "One entry per table: table, property, periodDays (the instance period; blank:\n                keep forever), status (KEEP_FOREVER, DRY_RUN), cutoff, rows, dependentRows, byTenant, byTenantPeriod {tenant: days, blank\n                for forever} for tenants with a period of their own."
                     }
                 }
             },
@@ -6237,6 +6255,190 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/DryRunRetentionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetRetentionPeriodsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "The retention periods in force: per table the instance period (days, blank = keep forever, and where it comes from:\n            ROW, PROPERTY or DEFAULT), every tenant's own period (blank = that tenant keeps the table forever), the nightly purge days,\n            the delete batch size, and whether the retention job is paused. A table with no period and no tenant override is kept forever."
+            },
+            "GetRetentionPeriodsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "retention": {
+                        "type": "object",
+                        "description": "instance [{table, settingKey, periodDays, source}], tenants\n                [{tenantUserGroupId, table, periodDays, lastChangedByUserId, lastChangedDate}], generatedOutputDays, extractDays,\n                batchSize, jobName, jobPaused (Y or N)."
+                    }
+                }
+            },
+            "GetRetentionPeriodsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.RetentionAdminServices.get#RetentionPeriods",
+                "x-darpan-method": "admin.RetentionAdminServices.get#RetentionPeriods",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.RetentionAdminServices.get#RetentionPeriods"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetRetentionPeriodsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetRetentionPeriodsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.RetentionAdminServices.get#RetentionPeriods. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetRetentionPeriodsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateRetentionPeriodsParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The tenant to set periods for; blank sets the instance periods."
+                    },
+                    "periods": {
+                        "type": "object",
+                        "description": "Table key to days, forever or inherit."
+                    },
+                    "previewedRows": {
+                        "type": "integer",
+                        "description": "Rows the preview showed; needed to shorten a period while the retention job runs."
+                    }
+                },
+                "required": [
+                    "periods"
+                ],
+                "description": "Sets, for the instance or for one tenant, how long each table keeps its rows. periods maps a table key\n            (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG) to a whole number of days from 1 to 3650, to forever, or (a\n            tenant only) to inherit (drop the tenant's own period and follow the instance's). A tenant's own period, including forever,\n            wins over the instance period for that tenant's rows only. Refused as a whole, with the reason and nothing saved: an\n            unknown table, a value that is not one of those, inherit at instance level, an unknown tenant, forever at instance level\n            while a JVM property pins the period. A table whose period does not change is skipped. While the retention job is running\n            (not paused), a change that keeps rows for less time (a shorter period, or forever to days) needs previewedRows, the total\n            dryRun#Retention showed for the same change: the preview is run again and the change is refused when today's count is more\n            than 100 rows or 5% above it. Lengthening, and any change while the job is paused, needs no preview. Instance periods go\n            through the settings store (one AdminAuditLog row per table, `key: old -> new (note)`); a tenant's go to its own\n            TenantRetentionPeriod rows (one AdminAuditLog row for the call: `TABLE: before -> after`)."
+            },
+            "UpdateRetentionPeriodsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "changed": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "The tables that changed: table, mode (days, forever, inherit), before, after (effective days)."
+                    },
+                    "previewNote": {
+                        "type": "string",
+                        "description": "What the preview guard compared, when it ran."
+                    },
+                    "retention": {
+                        "type": "object",
+                        "description": "As get#RetentionPeriods, after the change."
+                    }
+                }
+            },
+            "UpdateRetentionPeriodsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.RetentionAdminServices.update#RetentionPeriods",
+                "x-darpan-method": "admin.RetentionAdminServices.update#RetentionPeriods",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.RetentionAdminServices.update#RetentionPeriods"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateRetentionPeriodsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateRetentionPeriodsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.RetentionAdminServices.update#RetentionPeriods. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateRetentionPeriodsResult"
                     }
                 },
                 "required": [
@@ -37431,6 +37633,8 @@
         "admin.ObserveAdminServices.get#AdminSessionInfo": "GetAdminSessionInfo",
         "admin.ObserveAdminServices.get#LiveOperations": "GetLiveOperations",
         "admin.RetentionAdminServices.dryRun#Retention": "DryRunRetention",
+        "admin.RetentionAdminServices.get#RetentionPeriods": "GetRetentionPeriods",
+        "admin.RetentionAdminServices.update#RetentionPeriods": "UpdateRetentionPeriods",
         "admin.ScheduleAdminServices.get#ScheduleBoard": "GetScheduleBoard",
         "admin.ScheduleAdminServices.get#ServiceJobs": "GetServiceJobs",
         "admin.ScheduleAdminServices.preview#JobSchedule": "PreviewJobSchedule",

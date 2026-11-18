@@ -83,4 +83,11 @@
                 endpoint), so an endpoint on another account is refused and detaching or deleting endpoints cannot reset it
                 (DAR-BE-258). Endpoints on other accounts are reported, not changed. Idempotent."/>
 
+    <darpan.migration.DarpanMigration migrationId="RETIRED_JOB_PARAMETERS" componentName="darpan"
+            serviceName="retention.RetentionMigrations.move#PurgeJobRetentionParameters"
+            sequenceNum="130" supportsDryRun="Y" enabled="Y"
+            description="Move each nightly purge job's edited retentionDays parameter into its darpan.purge.* setting and delete
+                the row, and delete the stuck-run reaper job's retired staleMinutes parameter (DAR-BE-306, DAR-BE-304). Seed loads
+                never delete, and a live parameter row would keep overriding the setting. Idempotent."/>
+
 </entity-facade-xml>

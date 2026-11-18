@@ -21,4 +21,11 @@ class SettingDefinition {
     Integer maxItems
     /** Key of another setting whose effective value this one must stay strictly below. */
     String lessThan
+    /** True when the setting may have no value at all (null default): unset means the feature is off, e.g. keep forever. */
+    Boolean optional
+    /**
+     * Names the admin service that owns writes to this key (e.g. retention). The generic settings editor refuses a managed
+     * key and points there, because that service carries a guard the generic editor cannot (a fresh preview).
+     */
+    String managedBy
 }

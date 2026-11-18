@@ -2,28 +2,19 @@
 <entity-facade-xml type="darpan-seed">
     <moqui.service.job.ServiceJob
             jobName="purge_ReconciliationGeneratedFiles_daily"
-            description="Purge generated reconciliation output files older than retention policy."
+            description="Purge generated reconciliation output files older than the generated-output retention setting."
             serviceName="reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles"
             defaultCronExpression="0 0 2 * * ?"
             defaultPaused="N" minIntervalMinutes="360"/>
 
-    <moqui.service.job.ServiceJobParameter
-            jobName="purge_ReconciliationGeneratedFiles_daily"
-            parameterName="retentionDays"
-            defaultValue="15"/>
-
-    <!-- DAR-BE-271: raw source extracts are kept 7 days (Aditi 2026-11-13); results keep the 15-day job above. -->
+    <!-- DAR-BE-271: raw source extracts are kept 7 days (Aditi 2026-11-13); results keep the 15-day job above. Both periods are the
+         darpan.purge.* settings (DAR-BE-306), so neither job seeds a retentionDays parameter. -->
     <moqui.service.job.ServiceJob
             jobName="purge_ReconciliationExtractFiles_daily"
-            description="Purge raw source extract files older than 7 days (never result files)."
+            description="Purge raw source extract files older than the extract retention setting (never result files)."
             serviceName="reconciliation.ReconciliationGenericServices.purge#ExtractFiles"
             defaultCronExpression="0 15 2 * * ?"
             defaultPaused="N" minIntervalMinutes="360"/>
-
-    <moqui.service.job.ServiceJobParameter
-            jobName="purge_ReconciliationExtractFiles_daily"
-            parameterName="retentionDays"
-            defaultValue="7"/>
 
     <moqui.service.job.ServiceJob
             jobName="scan_ReconciliationAutomations_5m"

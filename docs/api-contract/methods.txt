@@ -41,6 +41,8 @@ admin.MigrationAdminServices.set#MigrationEnabled
 admin.ObserveAdminServices.get#AdminSessionInfo
 admin.ObserveAdminServices.get#LiveOperations
 admin.RetentionAdminServices.dryRun#Retention
+admin.RetentionAdminServices.get#RetentionPeriods
+admin.RetentionAdminServices.update#RetentionPeriods
 admin.ScheduleAdminServices.get#ScheduleBoard
 admin.ScheduleAdminServices.get#ServiceJobs
 admin.ScheduleAdminServices.preview#JobSchedule

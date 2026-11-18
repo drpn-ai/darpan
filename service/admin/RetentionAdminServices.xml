@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  DAR-BE-266. The remote preview of retention for Darpan admins (super admins): what each table's period would delete now,
-  per table and tenant. admin.* and therefore inside the DARPAN_ADMIN_API fence; the service checks super admin again.
-  Read-only, so it writes no AdminAuditLog row. Deleting stays with the scheduled job (run_DataRetention_daily, seeded
-  paused) over retention.RetentionServices.run#Retention.
+  DAR-BE-266, DAR-BE-306. Retention for Darpan admins (super admins): the preview of what each table's period would delete now,
+  per table and tenant, and the periods themselves (instance settings and per-tenant overrides), read and edited in production
+  without a deploy. admin.* and therefore inside the DARPAN_ADMIN_API fence; each service checks super admin again. No fresh
+  two-factor code, every write is audit-logged. Deleting stays with the scheduled job (run_DataRetention_daily, seeded paused)
+  over retention.RetentionServices.run#Retention; making a period shorter while that job is running needs a fresh preview.
 -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
@@ -12,26 +13,176 @@
         <description>Counts the rows each table's retention period would delete now, per table and tenant. Deletes nothing.</description>
         <in-parameters>
             <parameter name="tenantUserGroupId"><description>One tenant; blank covers every tenant.</description></parameter>
-            <parameter name="periodDays" type="Map"><description>Optional preview periods in days by table key (AUDIT_FINDING,
-                RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the configured ones.</description></parameter>
+            <parameter name="periodDays" type="Map"><description>Optional preview of the instance periods in days (or forever) by table key
+                (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the stored ones.</description></parameter>
+            <parameter name="tenantPeriodDays" type="Map"><description>Optional preview of one tenant's own periods by table key (days,
+                forever or inherit); needs tenantUserGroupId and covers that tenant only.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the preview ran.</description></parameter>
             <parameter name="tenantCount" type="Integer"><description>Tenants covered.</description></parameter>
             <parameter name="batchSize" type="Integer"><description>Rows per delete transaction a run would use.</description></parameter>
-            <parameter name="tables" type="List"><description>One entry per table: table, property, periodDays (blank: keep
-                forever), status (KEEP_FOREVER, INVALID_PERIOD, DRY_RUN), cutoff, rows, dependentRows, byTenant.</description>
+            <parameter name="tables" type="List"><description>One entry per table: table, property, periodDays (the instance period; blank:
+                keep forever), status (KEEP_FOREVER, DRY_RUN), cutoff, rows, dependentRows, byTenant, byTenantPeriod {tenant: days, blank
+                for forever} for tenants with a period of their own.</description>
                 <parameter name="table" type="Map"/></parameter>
         </out-parameters>
         <actions>
             <set field="ok" from="false"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <service-call name="retention.RetentionServices.dryRun#Retention" out-map="preview"
-                    in-map="[tenantUserGroupId: tenantUserGroupId, periodDays: periodDays]"/>
+                    in-map="[tenantUserGroupId: tenantUserGroupId, periodDays: periodDays, tenantPeriodDays: tenantPeriodDays]"/>
             <set field="tenantCount" from="preview?.tenantCount"/>
             <set field="batchSize" from="preview?.batchSize"/>
             <set field="tables" from="preview?.tables"/>
             <set field="ok" from="!ec.message.hasError()"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="RetentionPeriods" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>The retention periods in force: per table the instance period (days, blank = keep forever, and where it comes from:
+            ROW, PROPERTY or DEFAULT), every tenant's own period (blank = that tenant keeps the table forever), the nightly purge days,
+            the delete batch size, and whether the retention job is paused. A table with no period and no tenant override is kept forever.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="retention" type="Map"><description>instance [{table, settingKey, periodDays, source}], tenants
+                [{tenantUserGroupId, table, periodDays, lastChangedByUserId, lastChangedDate}], generatedOutputDays, extractDays,
+                batchSize, jobName, jobPaused (Y or N).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="instanceNow" from="darpan.retention.RetentionSupport.periods(ec, null)"/>
+            <set field="instanceList" from="instanceNow.values().collect { [table: it.table, settingKey: it.property, periodDays: it.periodDays,
+                    source: darpan.config.DarpanSettings.describe(it.property).source] }"/>
+            <entity-find entity-name="darpan.retention.TenantRetentionPeriod" list="overrideRows">
+                <order-by field-name="tenantUserGroupId"/><order-by field-name="tableKey"/>
+            </entity-find>
+            <set field="tenantList" from="overrideRows.collect { [tenantUserGroupId: it.tenantUserGroupId, table: it.tableKey, periodDays: it.periodDays,
+                    lastChangedByUserId: it.lastChangedByUserId, lastChangedDate: it.lastChangedDate] }"/>
+            <entity-find-one entity-name="moqui.service.job.ServiceJob" value-field="retentionJob" cache="false">
+                <field-map field-name="jobName" value="run_DataRetention_daily"/></entity-find-one>
+            <set field="retention" from="[instance: instanceList, tenants: tenantList,
+                    generatedOutputDays: darpan.config.DarpanSettings.intValue('darpan.purge.generatedOutput.days'),
+                    extractDays: darpan.config.DarpanSettings.intValue('darpan.purge.extract.days'),
+                    batchSize: darpan.retention.RetentionSupport.batchSize(), jobName: 'run_DataRetention_daily',
+                    jobPaused: retentionJob?.paused ?: 'N']"/>
+            <set field="ok" from="true"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="RetentionPeriods" allow-remote="true" authenticate="true">
+        <description>Sets, for the instance or for one tenant, how long each table keeps its rows. periods maps a table key
+            (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG) to a whole number of days from 1 to 3650, to forever, or (a
+            tenant only) to inherit (drop the tenant's own period and follow the instance's). A tenant's own period, including forever,
+            wins over the instance period for that tenant's rows only. Refused as a whole, with the reason and nothing saved: an
+            unknown table, a value that is not one of those, inherit at instance level, an unknown tenant, forever at instance level
+            while a JVM property pins the period. A table whose period does not change is skipped. While the retention job is running
+            (not paused), a change that keeps rows for less time (a shorter period, or forever to days) needs previewedRows, the total
+            dryRun#Retention showed for the same change: the preview is run again and the change is refused when today's count is more
+            than 100 rows or 5% above it. Lengthening, and any change while the job is paused, needs no preview. Instance periods go
+            through the settings store (one AdminAuditLog row per table, `key: old -> new (note)`); a tenant's go to its own
+            TenantRetentionPeriod rows (one AdminAuditLog row for the call: `TABLE: before -> after`).</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId"><description>The tenant to set periods for; blank sets the instance periods.</description></parameter>
+            <parameter name="periods" type="Map" required="true"><description>Table key to days, forever or inherit.</description></parameter>
+            <parameter name="previewedRows" type="Long"><description>Rows the preview showed; needed to shorten a period while the retention job runs.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="changed" type="List"><description>The tables that changed: table, mode (days, forever, inherit), before, after (effective days).</description>
+                <parameter name="change" type="Map"/></parameter>
+            <parameter name="previewNote"><description>What the preview guard compared, when it ran.</description></parameter>
+            <parameter name="retention" type="Map"><description>As get#RetentionPeriods, after the change.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="tenantId" from="tenantUserGroupId?.trim() ?: null"/>
+            <if condition="!periods"><return error="true" message="Nothing to change: send periods, for example [AUDIT_FINDING: 90]."/></if>
+            <if condition="tenantId">
+                <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup" cache="false">
+                    <field-map field-name="userGroupId" from="tenantId"/></entity-find-one>
+                <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                    <return error="true" message="No tenant ${tenantId}."/></if>
+            </if>
+
+            <!-- plan: every check first, so a refusal has saved nothing -->
+            <set field="instanceNow" from="darpan.retention.RetentionSupport.periods(ec, null)"/>
+            <set field="current" from="tenantId ? darpan.retention.RetentionSupport.periods(ec, tenantId) : instanceNow"/>
+            <set field="plan" from="darpan.retention.RetentionPeriodRules.plan(tenantId != null, current, instanceNow, periods)"/>
+            <if condition="plan.error"><return error="true" message="${plan.error}"/></if>
+            <set field="changed" from="plan.changes"/>
+            <if condition="!plan.changes">
+                <service-call name="admin.RetentionAdminServices.get#RetentionPeriods" out-map="got"/>
+                <set field="retention" from="got.retention"/>
+                <set field="ok" from="true"/>
+                <return/>
+            </if>
+            <if condition="!tenantId">
+                <iterate list="plan.changes" entry="chg">
+                    <if condition="chg.mode == 'forever'">
+                        <set field="pinned" from="darpan.config.DarpanSettings.describe(chg.key).propertyValue"/>
+                        <if condition="pinned != null &amp;&amp; darpan.config.DarpanSettings.problem(chg.key, pinned) == null">
+                            <return error="true" message="${chg.table} is pinned to ${pinned} days by the JVM property ${chg.key}; remove the property to keep it forever."/></if>
+                    </if>
+                </iterate>
+            </if>
+            <set field="previewNote" from="null"/>
+            <entity-find-one entity-name="moqui.service.job.ServiceJob" value-field="retentionJob" cache="false">
+                <field-map field-name="jobName" value="run_DataRetention_daily"/></entity-find-one>
+            <if condition="plan.deletesMore &amp;&amp; retentionJob != null &amp;&amp; (retentionJob.paused ?: 'N') != 'Y'">
+                <service-call name="retention.RetentionServices.dryRun#Retention" out-map="preview"
+                        in-map="tenantId ? [tenantUserGroupId: tenantId, tenantPeriodDays: plan.whatIf] : [periodDays: plan.whatIf]"/>
+                <if condition="ec.message.hasError()"><return/></if>
+                <set field="actualRows" from="(preview.tables ?: []).sum { it.rows ?: 0L } ?: 0L"/>
+                <set field="previewProblem" from="darpan.schedule.JobScheduleRules.previewProblem(previewedRows, actualRows as long)"/>
+                <if condition="previewProblem"><return error="true" message="${previewProblem}"/></if>
+                <set field="previewNote" from="'preview showed ' + previewedRows + ' rows, today\'s dry run counts ' + actualRows"/>
+            </if>
+
+            <!-- write -->
+            <if condition="tenantId">
+                <iterate list="plan.changes" entry="chg">
+                    <entity-find-one entity-name="darpan.retention.TenantRetentionPeriod" value-field="periodRow" cache="false" for-update="true">
+                        <field-map field-name="tenantUserGroupId" from="tenantId"/>
+                        <field-map field-name="tableKey" from="chg.table"/>
+                    </entity-find-one>
+                    <if condition="chg.mode == 'inherit'">
+                        <if condition="periodRow"><entity-delete value-field="periodRow"/></if>
+                    <else>
+                        <if condition="!periodRow">
+                            <entity-make-value entity-name="darpan.retention.TenantRetentionPeriod" value-field="periodRow"/>
+                            <set field="periodRow.tenantUserGroupId" from="tenantId"/>
+                            <set field="periodRow.tableKey" from="chg.table"/>
+                            <set field="periodRow.periodDays" from="chg.after"/>
+                            <set field="periodRow.lastChangedByUserId" from="ec.user.userId"/>
+                            <set field="periodRow.lastChangedDate" from="ec.user.nowTimestamp"/>
+                            <entity-create value-field="periodRow"/>
+                        <else>
+                            <set field="periodRow.periodDays" from="chg.after"/>
+                            <set field="periodRow.lastChangedByUserId" from="ec.user.userId"/>
+                            <set field="periodRow.lastChangedDate" from="ec.user.nowTimestamp"/>
+                            <entity-update value-field="periodRow"/>
+                        </else></if>
+                    </else></if>
+                </iterate>
+                <script>darpan.admin.AdminAuditSupport.record(ec, "admin.RetentionAdminServices.update#RetentionPeriods", "TenantRetentionPeriod", tenantId,
+                        plan.summary + (previewNote ? ' (' + previewNote + ')' : ''))</script>
+            <else>
+                <iterate list="plan.changes" entry="chg">
+                    <if condition="chg.mode == 'forever'">
+                        <script>darpan.admin.SettingAdminSupport.remove(ec, chg.key, "admin.RetentionAdminServices.update#RetentionPeriods")</script>
+                    <else>
+                        <script>darpan.admin.SettingAdminSupport.save(ec, chg.key, chg.after.toString(), previewNote,
+                                "admin.RetentionAdminServices.update#RetentionPeriods")</script>
+                    </else></if>
+                </iterate>
+            </else></if>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="admin.RetentionAdminServices.get#RetentionPeriods" out-map="got"/>
+            <set field="retention" from="got.retention"/>
+            <set field="ok" from="true"/>
         </actions>
     </service>
 </services>

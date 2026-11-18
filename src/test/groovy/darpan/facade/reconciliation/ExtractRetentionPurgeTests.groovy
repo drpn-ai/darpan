@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.config.DarpanSettings
 import darpan.facade.common.DataManagerSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -75,6 +76,32 @@ class ExtractRetentionPurgeTests {
         assertTrue(new File(runsDir, "RS_PURGE_T2/20261101-101010404").exists(), "a folder still holding a result stays")
         assertTrue(((Number) result.deletedCount).intValue() >= 7, String.valueOf(result.statusMessage))
         assertTrue(((List) result.failedFiles).isEmpty(), String.valueOf(result.failedFiles))
+    }
+
+    @Test
+    void withNoParameterTheJobReadsTheSettingNotALiteral() {
+        long day = 86400000L
+        File fourDays = extractFile("PURGE_T4/20261114-101010101/oms-orders-4.json", System.currentTimeMillis() - 4L * day)
+        File oneDay = extractFile("PURGE_T4/20261117-101010101/oms-orders-5.json", System.currentTimeMillis() - 1L * day)
+
+        // no setting: the shipped 7 days keeps a 4 day old extract
+        ec.service.sync().name("reconciliation.ReconciliationGenericServices.purge#ExtractFiles").parameters([:]).disableAuthz().call()
+        assertTrue(fourDays.exists(), "default 7 days keeps a 4 day old extract")
+
+        // an edit to the setting is live without a deploy: 3 days takes the 4 day old one and not the 1 day old one
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.makeValue("darpan.config.DarpanSetting").setAll([settingKey: "darpan.purge.extract.days", settingValue: "3"]).createOrUpdate()
+            DarpanSettings.expire()
+            Map out = (Map) ec.service.sync().name("reconciliation.ReconciliationGenericServices.purge#ExtractFiles").parameters([:]).disableAuthz().call()
+            assertEquals(3, out.retentionDays)
+            assertFalse(fourDays.exists(), "the setting says 3 days")
+            assertTrue(oneDay.exists())
+        } finally {
+            ec.entity.find("darpan.config.DarpanSetting").condition("settingKey", "darpan.purge.extract.days").deleteAll()
+            DarpanSettings.expire()
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
     }
 
     @Test

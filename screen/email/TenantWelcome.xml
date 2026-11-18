@@ -13,6 +13,7 @@
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <container style="dp-p"><label text="Hi ${firstName},"/></container>
         <container style="dp-p"><label text="You now have access to ${tenantLabel} on Darpan, ${rolePhrase}."/></container>
+        <container style="dp-p"><label text="Your systems have been keeping secrets from each other. Darpan is where they compare notes."/></container>
         <section name="SignInWhere" condition="appBaseUrl">
             <widgets><container style="dp-p"><label text="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></widgets>
             <fail-widgets><container style="dp-p"><label text="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></fail-widgets>

@@ -16,7 +16,7 @@
         </widgets><fail-widgets>
             <container style="dp-p"><label text="Hi ${firstName}, Darpan now needs a second step when you sign in, and yours isn't set up yet. Better to sort it before month-end does it for you."/></container>
         </fail-widgets></section>
-        <container style="dp-p"><label text="Two-factor sign-in means a code from an authenticator app, or a passkey, on top of your password. Set one up in User Settings, under Two-factor, at ${appUrl}. It takes about a minute."/></container>
+        <container style="dp-p"><label text="Two-factor sign-in means a code from an authenticator app, or a passkey, on top of your password. Set one up in User Settings, under Two-factor, at ${appUrl}. It takes about a minute, which is less time than the kettle."/></container>
         <section name="BeforeDateNext" condition="!isPast"><widgets>
             <container style="dp-p"><label text="From ${requiredDate}, Darpan will ask you to set it up when you sign in, so it can't catch you out."/></container>
         </widgets><fail-widgets>

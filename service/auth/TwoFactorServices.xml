@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-297. Internal two-factor services (no allow-remote): the scheduled reminder. The job send_TwoFactorReminders_daily
+  (data/TwoFactorSeedData.xml) calls send#TwoFactorReminders; the rules (who, when, the cadence) are TwoFactorPolicy.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="send" noun="TwoFactorReminders" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Emails everyone two-factor is required for (or will be) who has no active factor, on the reminder
+            cadence (first time, then 7, 3, 1 and 0 days before the date, then weekly), and records a REMINDER_SENT event
+            for each. Nobody without an email on file, and no permanently disabled account, is reminded.</description>
+        <out-parameters>
+            <parameter name="remindersSent" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="remindersSent" from="darpan.facade.auth.TwoFactorPolicy.sendReminders(ec)"/>
+            <log level="info" message="Two-factor reminders sent: ${remindersSent}"/>
+        </actions>
+    </service>
+</services>

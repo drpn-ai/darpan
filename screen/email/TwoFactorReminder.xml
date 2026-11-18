@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-297 email body: the daily reminder to set up two-factor. No bold. No code or password. The address is written as text (no link in a security email). Copy follows the darpan-email skill. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <actions>
+        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
+        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="isPast" from="past == true || past == 'true'"/>
+    </actions>
+    <widgets>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
+        <section name="BeforeDate" condition="!isPast"><widgets>
+            <container style="dp-p"><label text="Hi ${firstName}, two-factor sign-in becomes required for Darpan on ${requiredDate}. Better to sort it before month-end does it for you."/></container>
+        </widgets><fail-widgets>
+            <container style="dp-p"><label text="Hi ${firstName}, Darpan now needs a second step when you sign in, and yours isn't set up yet. Better to sort it before month-end does it for you."/></container>
+        </fail-widgets></section>
+        <container style="dp-p"><label text="Two-factor sign-in means a code from an authenticator app, or a passkey, on top of your password. Set one up in User Settings, under Two-factor, at ${appUrl}. It takes about a minute."/></container>
+        <section name="BeforeDateNext" condition="!isPast"><widgets>
+            <container style="dp-p"><label text="From ${requiredDate}, Darpan will ask you to set it up when you sign in, so it can't catch you out."/></container>
+        </widgets><fail-widgets>
+            <container style="dp-p"><label text="Darpan will ask you to set it up the next time you sign in, so it can't catch you out."/></container>
+        </fail-widgets></section>
+        <container style="dp-note"><label text="You'll keep getting this reminder until a method is set up. Questions? Ask your Darpan administrator."/></container>
+        <container style="dp-sign"><label text="— Darpan"/></container>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
+    </widgets>
+</screen>

@@ -41,4 +41,11 @@
             emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="An authenticator app was set up for your Darpan account"
             fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
             bodyScreenLocation="component://darpan/screen/email/TwoFactorAppAdded.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_2FA_REMINDER" description="Darpan two-factor setup reminder"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${subjectLine}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/TwoFactorReminder.xml"/>
+    <!-- DAR-BE-297: daily at 15:00 server time; reminds anyone the EVERYONE (or a role) policy covers who has no factor yet. -->
+    <moqui.service.job.ServiceJob jobName="send_TwoFactorReminders_daily" description="Remind everyone two-factor is required for, who has not set up a method, on the 7/3/1/0-days-before then weekly cadence."
+            serviceName="auth.TwoFactorServices.send#TwoFactorReminders" cronExpression="0 0 15 * * ?" paused="N"/>
 </entity-facade-xml>

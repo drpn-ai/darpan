@@ -4,6 +4,10 @@ import darpan.facade.common.TenantAccessSupport
 import org.moqui.entity.EntityCondition
 
 import java.sql.Timestamp
+import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 /**
  * DAR-BE-264 — who must use two-factor, and from when: the per-role TwoFactorRolePolicy rows (a date = required from then,
@@ -117,6 +121,69 @@ class TwoFactorPolicy {
                     .useCache(false).list()*.userId as List<String>)
         }
         return found.toList()
+    }
+
+    // ---- reminders (DAR-BE-297) ----
+
+    static final String REMINDER_SENT = "REMINDER_SENT"
+    private static final String REMINDER_ZONE = "America/Los_Angeles"
+
+    /**
+     * Whether today's reminder is due, in calendar days (UTC): never sent; or 7, 3, 1 or 0 days before the date; or the date
+     * has passed and a week has gone by since the last one. Never twice on one day. Pure.
+     */
+    static boolean reminderDue(Timestamp requiredFrom, Timestamp now, Timestamp lastSent) {
+        if (requiredFrom == null || now == null) return false
+        if (lastSent == null) return true
+        LocalDate today = now.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
+        LocalDate last = lastSent.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
+        if (!last.isBefore(today)) return false
+        long daysLeft = ChronoUnit.DAYS.between(today, requiredFrom.toInstant().atZone(ZoneOffset.UTC).toLocalDate())
+        if (daysLeft < 0) return ChronoUnit.DAYS.between(last, today) >= 7
+        return daysLeft in [7L, 3L, 1L, 0L]
+    }
+
+    /**
+     * The daily job: everyone the policy covers, without an ACTIVE factor, whose reminder is due, is sent
+     * DARPAN_2FA_REMINDER and gets a REMINDER_SENT event. No email on file: nothing is sent and no event is written (so the
+     * person is tried again the day an address is added). Returns how many were sent.
+     */
+    static int sendReminders(def ec) {
+        Timestamp now = ec.user.nowTimestamp
+        List<String> covered = coveredPeople(ec, now)
+        int sent = 0
+        for (int i = 0; i < covered.size(); i += 500) {
+            List<String> chunk = covered.subList(i, Math.min(i + 500, covered.size()))
+            Set<String> enrolled = TwoFactorRecords.find(ec, TwoFactorRecords.FACTOR, "admin: who has a two-factor factor, for the reminders")
+                    .condition("userId", EntityCondition.IN, chunk).condition("statusId", TwoFactorRecords.ACTIVE).useCache(false)
+                    .list()*.userId as Set<String>
+            Map<String, Timestamp> lastSent = [:]
+            TwoFactorRecords.find(ec, TwoFactorRecords.EVENT, "admin: when each person was last reminded about two-factor")
+                    .condition("userId", EntityCondition.IN, chunk).condition("eventType", REMINDER_SENT).useCache(false).list().each {
+                Timestamp at = it.eventDate as Timestamp
+                if (at != null && (lastSent[it.userId as String] == null || at.after(lastSent[it.userId as String]))) lastSent[it.userId as String] = at
+            }
+            for (String userId in chunk) {
+                if (userId in enrolled) continue
+                Timestamp from = requiredFrom(ec, userId)
+                if (from == null || !reminderDue(from, now, lastSent[userId])) continue
+                def account = TwoFactorRecords.find(ec, "moqui.security.UserAccount", "self-scoped auth: the person a two-factor reminder goes to")
+                        .condition("userId", userId).useCache(false).one()
+                if (!(account?.emailAddress as String)?.trim()) continue
+                String zone = account.timeZone as String
+                TimeZone tz = TimeZone.getTimeZone(zone && TimeZone.getAvailableIDs().contains(zone) ? zone : REMINDER_ZONE)
+                SimpleDateFormat fmt = new SimpleDateFormat("d MMMM yyyy", Locale.ENGLISH)
+                fmt.setTimeZone(tz)
+                String requiredDate = fmt.format(from)
+                boolean past = !from.after(now)
+                TwoFactorRecords.notify(ec, userId, TwoFactorSupport.TEMPLATE_REMINDER, [requiredDate: requiredDate,
+                        appUrl: CliAuthSupport.appBaseUrl(ec), past: past,
+                        subjectLine: past ? "Two-factor sign-in is now required for Darpan" : "Set up two-factor sign-in for Darpan by ${requiredDate}".toString()])
+                TwoFactorRecords.event(ec, userId, REMINDER_SENT)
+                sent++
+            }
+        }
+        return sent
     }
 
     // ---- reads ----

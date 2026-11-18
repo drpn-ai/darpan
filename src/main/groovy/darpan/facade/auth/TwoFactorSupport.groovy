@@ -48,6 +48,7 @@ class TwoFactorSupport {
     static final String TEMPLATE_CODES_LOCKED = "DARPAN_2FA_CODES_LOCKED"
     static final String TEMPLATE_RESET = "DARPAN_2FA_RESET"
     static final String TEMPLATE_APP_ADDED = "DARPAN_2FA_APP_ADDED"
+    static final String TEMPLATE_REMINDER = "DARPAN_2FA_REMINDER"
 
     /** 32 characters, so 16 of them are exactly 80 bits; no I, O, 0 or 1 to misread. */
     static final String RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"

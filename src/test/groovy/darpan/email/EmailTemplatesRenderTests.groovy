@@ -35,6 +35,7 @@ class EmailTemplatesRenderTests {
             TwoFactorRecoveryUsed: [firstName: "Riya", at: AT, recoveryCodesLeft: 7],
             TwoFactorReset       : [firstName: "Riya", at: AT],
             TwoFactorCodesLocked : [firstName: "Riya", at: AT],
+            TwoFactorReminder    : [firstName: "Riya", requiredDate: "2 December 2026", appUrl: "https://app.drpn.ai", past: false],
     ]
     private static final Map<String, Map> OTHER = [
             TenantWelcome: [firstName: "Riya", tenantLabel: "Malbon", rolePhrase: "as an Editor", username: "riya.k",

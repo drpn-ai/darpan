@@ -883,7 +883,7 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         try {
             ec.context.putAll(appMail[0].params as Map)
             String html = ec.screen.makeRender().rootScreen(template.bodyScreenLocation as String).webappName("webroot").renderMode("html").render()
-            assertTrue(html.contains("an authenticator app was set up for your Darpan account"), html)
+            assertTrue(html.contains("an authenticator app is now paired with your Darpan account"), html)
             assertFalse(html.contains("<a "), "no links in a security email")
         } finally {
             ec.context.pop()

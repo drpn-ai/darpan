@@ -172,6 +172,11 @@ class CliMethodAllowlist {
             "admin.EmailAdminServices.preview#EmailTemplate",
             "admin.EmailAdminServices.reset#EmailTemplate",
             "admin.EmailAdminServices.update#EmailTemplate",
+            // DAR-BE-304: instance settings are admin app only.
+            "admin.SettingAdminServices.get#Setting",
+            "admin.SettingAdminServices.get#Settings",
+            "admin.SettingAdminServices.reset#Setting",
+            "admin.SettingAdminServices.update#Setting",
 
             "admin.KnowledgeAdminServices.get#KnowledgeEntry",
             "admin.KnowledgeAdminServices.get#KnowledgeForReview",

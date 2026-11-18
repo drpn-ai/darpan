@@ -165,6 +165,18 @@
                                         "$ref": "#/components/schemas/UpdateTwoFactorPolicyRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetSettingRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetSettingsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResetSettingRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateSettingRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListShopifyAppsRequest"
                                     },
                                     {
@@ -902,6 +914,10 @@
                                         "admin.SecurityAdminServices.get#TwoFactorPolicies": "#/components/schemas/GetTwoFactorPoliciesRequest",
                                         "admin.SecurityAdminServices.rotate#EncryptedFields": "#/components/schemas/RotateEncryptedFieldsRequest",
                                         "admin.SecurityAdminServices.update#TwoFactorPolicy": "#/components/schemas/UpdateTwoFactorPolicyRequest",
+                                        "admin.SettingAdminServices.get#Setting": "#/components/schemas/GetSettingRequest",
+                                        "admin.SettingAdminServices.get#Settings": "#/components/schemas/GetSettingsRequest",
+                                        "admin.SettingAdminServices.reset#Setting": "#/components/schemas/ResetSettingRequest",
+                                        "admin.SettingAdminServices.update#Setting": "#/components/schemas/UpdateSettingRequest",
                                         "admin.ShopifyAppAdminServices.list#ShopifyApps": "#/components/schemas/ListShopifyAppsRequest",
                                         "admin.ShopifyAppAdminServices.save#ShopifyApp": "#/components/schemas/SaveShopifyAppRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
@@ -1287,6 +1303,18 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateTwoFactorPolicyResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetSettingResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetSettingsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ResetSettingResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateSettingResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListShopifyAppsResponse"
@@ -6721,6 +6749,333 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateTwoFactorPolicyResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetSettingParams": {
+                "type": "object",
+                "properties": {
+                    "settingKey": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "settingKey"
+                ],
+                "description": "One setting, as get#Settings lists it. An unknown key is an error."
+            },
+            "GetSettingResult": {
+                "type": "object",
+                "properties": {
+                    "setting": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetSettingRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SettingAdminServices.get#Setting",
+                "x-darpan-method": "admin.SettingAdminServices.get#Setting",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SettingAdminServices.get#Setting"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetSettingParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetSettingResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SettingAdminServices.get#Setting. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetSettingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetSettingsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Every setting by area then catalog order: key, type, area, unit, description, defaultValue, min, max,\n            maxItems, lessThan, propertyValue, rowValue, effectiveValue, source (ROW, PROPERTY or DEFAULT), note,\n            lastChangedByUserId, lastChangedDate."
+            },
+            "GetSettingsResult": {
+                "type": "object",
+                "properties": {
+                    "settings": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "GetSettingsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SettingAdminServices.get#Settings",
+                "x-darpan-method": "admin.SettingAdminServices.get#Settings",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SettingAdminServices.get#Settings"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetSettingsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetSettingsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SettingAdminServices.get#Settings. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetSettingsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ResetSettingParams": {
+                "type": "object",
+                "properties": {
+                    "settingKey": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "settingKey"
+                ],
+                "description": "Deletes the production value so the setting follows its JVM property or default again. No row: nothing\n            changes and no audit row. Writes an AdminAuditLog row (`key: old effective -> default X`)."
+            },
+            "ResetSettingResult": {
+                "type": "object",
+                "properties": {
+                    "setting": {
+                        "type": "object"
+                    }
+                }
+            },
+            "ResetSettingRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SettingAdminServices.reset#Setting",
+                "x-darpan-method": "admin.SettingAdminServices.reset#Setting",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SettingAdminServices.reset#Setting"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ResetSettingParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ResetSettingResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SettingAdminServices.reset#Setting. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ResetSettingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateSettingParams": {
+                "type": "object",
+                "properties": {
+                    "settingKey": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "string"
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Why (optional)."
+                    }
+                },
+                "required": [
+                    "settingKey",
+                    "value"
+                ],
+                "description": "Saves a production value for a setting, pinning it over the default. Refused, with the reason and nothing\n            saved: an unknown key, a value of the wrong kind or outside its range, one that breaks a rule against another\n            setting. Writes an AdminAuditLog row (`key: old effective -> new (note)`)."
+            },
+            "UpdateSettingResult": {
+                "type": "object",
+                "properties": {
+                    "setting": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateSettingRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.SettingAdminServices.update#Setting",
+                "x-darpan-method": "admin.SettingAdminServices.update#Setting",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.SettingAdminServices.update#Setting"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateSettingParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateSettingResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.SettingAdminServices.update#Setting. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateSettingResult"
                     }
                 },
                 "required": [
@@ -36684,6 +37039,10 @@
         "admin.SecurityAdminServices.get#TwoFactorPolicies": "GetTwoFactorPolicies",
         "admin.SecurityAdminServices.rotate#EncryptedFields": "RotateEncryptedFields",
         "admin.SecurityAdminServices.update#TwoFactorPolicy": "UpdateTwoFactorPolicy",
+        "admin.SettingAdminServices.get#Setting": "GetSetting",
+        "admin.SettingAdminServices.get#Settings": "GetSettings",
+        "admin.SettingAdminServices.reset#Setting": "ResetSetting",
+        "admin.SettingAdminServices.update#Setting": "UpdateSetting",
         "admin.ShopifyAppAdminServices.list#ShopifyApps": "ListShopifyApps",
         "admin.ShopifyAppAdminServices.save#ShopifyApp": "SaveShopifyApp",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",

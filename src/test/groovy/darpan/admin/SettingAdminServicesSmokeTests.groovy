@@ -1,0 +1,212 @@
+package darpan.admin
+
+import darpan.config.DarpanSettings
+import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
+import org.moqui.Moqui
+import org.moqui.context.ArtifactAuthorizationException
+import org.moqui.context.ExecutionContext
+
+import java.sql.Timestamp
+
+import static org.junit.jupiter.api.Assertions.*
+
+/**
+ * DAR-BE-304: admin.SettingAdminServices through the real service engine, authz ON, as a real DARPAN_SUPER_ADMIN on a thread
+ * of its own. Edge cases: a save is live the moment the call returns, a refused value saves nothing, reset follows the default
+ * again, the silent-vs-reaper rule holds for both keys through the service, a JVM property shows as its own source, and only
+ * a super admin gets in.
+ */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class SettingAdminServicesSmokeTests {
+    private ExecutionContext ec
+
+    private static final String SUPER_ID = "SETSVC_SUPER"
+    private static final String SUPER = "setsvc.super"
+    private static final String TENANT_ID = "SETSVC_TENANT"
+    private static final String TENANT = "setsvc.tenant"
+    private static final String PLAIN_ID = "SETSVC_PLAIN"
+    private static final String PLAIN = "setsvc.plain"
+    private static final String S = "admin.SettingAdminServices."
+    private static final String MAX = "darpan.reconciliation.automation.maxConcurrentExecutions"
+    private static final String SILENT = "darpan.reconciliation.runHealth.silentAnyStageMinutes"
+    private static final String REAPER = "darpan.reconciliation.runHealth.reaperStaleMinutes"
+
+    @BeforeAll
+    void setup() {
+        ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "setting-admin-services")
+        ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
+    }
+
+    @AfterAll
+    void cleanup() { ReconciliationSmokeTestSupport.cleanupMoqui(ec) }
+
+    @BeforeEach
+    void resetFixtures() {
+        ec.entity.find("darpan.config.DarpanSetting").disableAuthz().list().each { it.delete() }
+        DarpanSettings.expire()
+        AuditLogTestSupport.wipe(ec, "darpan.admin.AdminAuditLog")
+        [[SUPER_ID, SUPER], [TENANT_ID, TENANT], [PLAIN_ID, PLAIN]].each { id, name ->
+            ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: id, username: name, userFullName: name,
+                    emailAddress: "${name}@example.com", disabled: "N", requirePasswordChange: "N"]).createOrUpdate()
+        }
+        [[SUPER_ID, "DARPAN_SUPER_ADMIN"], [TENANT_ID, "DARPAN_TENANT_ADMIN"]].each { id, group ->
+            if (!ec.entity.find("moqui.security.UserGroupMember").condition([userGroupId: group, userId: id])
+                    .disableAuthz().useCache(false).count()) {
+                ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: group, userId: id,
+                        fromDate: Timestamp.valueOf("2026-01-01 00:00:00")]).create()
+            }
+        }
+        ec.message.clearErrors()
+    }
+
+    @AfterEach
+    void clearProps() {
+        [MAX, SILENT, REAPER].each { System.clearProperty(it) }
+        DarpanSettings.expire()
+    }
+
+    @Test
+    void theListIsEveryCatalogKeyAtItsDefault() {
+        List<Map> all = ok(svc("get#Settings", [:])).result.settings
+        assertEquals(DarpanSettings.catalog().keySet(), all*.key.toSet())
+        Map max = all.find { it.key == MAX }
+        assertEquals("DEFAULT", max.source)
+        assertTrue(all*.source.every { it in ["DEFAULT", "PROPERTY"] }, "no row exists yet")
+        assertEquals("8", max.effectiveValue)
+        assertNull(max.rowValue)
+        assertEquals(MAX, ok(svc("get#Setting", [settingKey: MAX])).result.setting.key)
+        assertTrue(svc("get#Setting", [settingKey: "darpan.nope"]).errors.any { it.contains("No setting darpan.nope.") })
+    }
+
+    @Test
+    void anEditIsLiveWhenTheCallReturnsAuditedAndResetFollowsTheDefault() {
+        Map out = ok(svc("update#Setting", [settingKey: MAX, value: " 4 ", note: "load test"])).result.setting
+        assertEquals("ROW", out.source)
+        assertEquals("4", out.rowValue)
+        assertEquals("load test", out.note)
+        assertEquals(SUPER_ID, out.lastChangedByUserId)
+        assertEquals(4, AutomationExecutionSupport.maxConcurrentExecutions(), "no restart, no wait")
+        assertEquals(["${MAX}: 8 -> 4 (load test)".toString()], auditRows()*.detailText)
+        assertEquals("DarpanSetting", auditRows()[0].targetType)
+        assertEquals(MAX, auditRows()[0].targetId)
+        assertEquals(S + "update#Setting", auditRows()[0].serviceName)
+
+        // saving the default's value still pins it as a row
+        ok(svc("update#Setting", [settingKey: MAX, value: "8"]))
+        assertEquals("ROW", ok(svc("get#Setting", [settingKey: MAX])).result.setting.source)
+        assertEquals("${MAX}: 4 -> 8".toString(), auditRows()[1].detailText)
+
+        Map reset = ok(svc("reset#Setting", [settingKey: MAX])).result.setting
+        assertEquals("DEFAULT", reset.source)
+        assertNull(reset.rowValue)
+        assertEquals(8, AutomationExecutionSupport.maxConcurrentExecutions())
+        assertEquals("${MAX}: 8 -> default 8".toString(), auditRows()[2].detailText)
+        assertEquals(S + "reset#Setting", auditRows()[2].serviceName)
+
+        // nothing to reset: ok, no audit row
+        ok(svc("reset#Setting", [settingKey: MAX]))
+        assertEquals(3, auditRows().size())
+        assertTrue(svc("reset#Setting", [settingKey: "darpan.nope"]).errors.any { it.contains("No setting") })
+    }
+
+    @Test
+    void aRefusedValueSavesNothingAndSaysWhy() {
+        ["0", "abc", "", "33"].each { String v ->
+            Map out = svc("update#Setting", [settingKey: MAX, value: v])
+            assertTrue(out.hasError, "'${v}' must be refused")
+            if (v) assertTrue(out.errors.any { it.contains(MAX) }, "${out.errors}")
+        }
+        assertTrue(svc("update#Setting", [settingKey: "darpan.nope", value: "1"]).errors.any { it.contains("Unknown setting") })
+        assertEquals(0, ec.entity.find("darpan.config.DarpanSetting").disableAuthz().useCache(false).count())
+        assertEquals([], auditRows())
+        assertEquals(8, AutomationExecutionSupport.maxConcurrentExecutions())
+    }
+
+    @Test
+    void silentAnyStageMustStayBelowTheReaperInBothDirections() {
+        // reaper default 120, silent default 90
+        Map tooHigh = svc("update#Setting", [settingKey: SILENT, value: "120"])
+        assertTrue(tooHigh.errors.any { it.contains("must stay below ${REAPER}".toString()) }, "${tooHigh.errors}")
+        Map tooLow = svc("update#Setting", [settingKey: REAPER, value: "90"])
+        assertTrue(tooLow.errors.any { it.contains("must stay above ${SILENT}".toString()) }, "${tooLow.errors}")
+        assertEquals(0, ec.entity.find("darpan.config.DarpanSetting").disableAuthz().useCache(false).count())
+        assertEquals([], auditRows())
+        // raising the reaper first then the silent value is how it is done
+        ok(svc("update#Setting", [settingKey: REAPER, value: "240"]))
+        ok(svc("update#Setting", [settingKey: SILENT, value: "200"]))
+        assertEquals("200", ok(svc("get#Setting", [settingKey: SILENT])).result.setting.effectiveValue)
+    }
+
+    @Test
+    void aJvmPropertyShowsAsItsOwnSourceAndARowBeatsIt() {
+        System.setProperty(MAX, "6")
+        DarpanSettings.expire()
+        Map s = ok(svc("get#Setting", [settingKey: MAX])).result.setting
+        assertEquals("PROPERTY", s.source)
+        assertEquals("6", s.propertyValue)
+        assertEquals("6", s.effectiveValue)
+        ok(svc("update#Setting", [settingKey: MAX, value: "3"]))
+        Map row = ok(svc("get#Setting", [settingKey: MAX])).result.setting
+        assertEquals("ROW", row.source)
+        assertEquals("6", row.propertyValue)
+        assertEquals("${MAX}: 6 -> 3".toString(), auditRows()[0].detailText)
+        ok(svc("reset#Setting", [settingKey: MAX]))
+        assertEquals("${MAX}: 3 -> default 8".toString(), auditRows()[1].detailText)
+        assertEquals("PROPERTY", ok(svc("get#Setting", [settingKey: MAX])).result.setting.source)
+    }
+
+    @Test
+    void onlyASuperAdminGetsIn() {
+        ["get#Settings": [:], "get#Setting": [settingKey: MAX], "update#Setting": [settingKey: MAX, value: "2"],
+         "reset#Setting": [settingKey: MAX]].each { String method, Map params ->
+            [PLAIN, TENANT].each { String who ->
+                Map out = svc(method, params, who)
+                assertTrue(out.authzDenied != null || out.hasError, "${method} must refuse ${who}")
+            }
+        }
+        assertEquals(0, ec.entity.find("darpan.config.DarpanSetting").disableAuthz().useCache(false).count())
+        assertEquals([], auditRows())
+    }
+
+    private List auditRows() {
+        return ec.entity.find("darpan.admin.AdminAuditLog").orderBy("auditTimestamp").disableAuthz().useCache(false).list()
+    }
+
+    private Map svc(String method, Map params, String username = SUPER) {
+        Map holder = [:]
+        Thread worker = new Thread({
+            ExecutionContext tec = Moqui.getExecutionContextFactory().getExecutionContext()
+            try {
+                if (!tec.user.internalLoginUser(username)) throw new IllegalStateException("could not log in ${username}")
+                try {
+                    holder.result = tec.service.sync().name(S + method).parameters(new LinkedHashMap(params)).call()
+                } catch (ArtifactAuthorizationException e) {
+                    holder.authzDenied = e
+                }
+                holder.errors = new ArrayList<String>(tec.message.errors) + (tec.message.validationErrors*.message ?: [])
+                holder.hasError = tec.message.hasError()
+            } catch (Throwable t) {
+                holder.failure = t
+            } finally {
+                tec.destroy()
+            }
+        } as Runnable, "setting-admin-smoke")
+        worker.start()
+        worker.join()
+        if (holder.failure) throw (Throwable) holder.failure
+        return holder
+    }
+
+    private static Map ok(Map out) {
+        assertNull(out.authzDenied, "unexpected authz denial: ${out.authzDenied}")
+        assertFalse(out.hasError as boolean, "unexpected errors: ${out.errors}")
+        return out
+    }
+}

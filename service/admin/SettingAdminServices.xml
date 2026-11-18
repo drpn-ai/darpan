@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-304. List, show, edit and reset Darpan's instance settings (the DarpanSetting rows read through
+  darpan.config.DarpanSettings), for Darpan admins (super admins). admin.* and therefore inside the DARPAN_ADMIN_API fence;
+  each service checks super admin again first. No fresh two-factor code: super-admin sign-in is enough, every write is
+  audit-logged. An edit that breaks a rule is refused with the reason and nothing is saved. The saving node sees the edit
+  right after commit; other nodes within 30 seconds. The work is darpan.admin.SettingAdminSupport.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="Settings" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>Every setting by area then catalog order: key, type, area, unit, description, defaultValue, min, max,
+            maxItems, lessThan, propertyValue, rowValue, effectiveValue, source (ROW, PROPERTY or DEFAULT), note,
+            lastChangedByUserId, lastChangedDate.</description>
+        <out-parameters>
+            <parameter name="settings" type="List"><parameter name="setting" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="settings" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="settings" from="darpan.config.DarpanSettings.describeAll()"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Setting" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
+        <description>One setting, as get#Settings lists it. An unknown key is an error.</description>
+        <in-parameters>
+            <parameter name="settingKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="setting" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="shown" from="darpan.admin.SettingAdminSupport.show(ec, settingKey)"/>
+            <if condition="shown.error"><return error="true" message="${shown.error}"/></if>
+            <set field="setting" from="shown.setting"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="Setting" allow-remote="true" authenticate="true">
+        <description>Saves a production value for a setting, pinning it over the default. Refused, with the reason and nothing
+            saved: an unknown key, a value of the wrong kind or outside its range, one that breaks a rule against another
+            setting. Writes an AdminAuditLog row (`key: old effective -> new (note)`).</description>
+        <in-parameters>
+            <parameter name="settingKey" required="true"/>
+            <parameter name="value" required="true"/>
+            <parameter name="note"><description>Why (optional).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="setting" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="saved" from="darpan.admin.SettingAdminSupport.update(ec, settingKey, value, note)"/>
+            <if condition="saved.error"><return error="true" message="${saved.error}"/></if>
+            <set field="setting" from="saved.setting"/>
+        </actions>
+    </service>
+
+    <service verb="reset" noun="Setting" allow-remote="true" authenticate="true">
+        <description>Deletes the production value so the setting follows its JVM property or default again. No row: nothing
+            changes and no audit row. Writes an AdminAuditLog row (`key: old effective -> default X`).</description>
+        <in-parameters>
+            <parameter name="settingKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="setting" type="Map"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="done" from="darpan.admin.SettingAdminSupport.reset(ec, settingKey)"/>
+            <if condition="done.error"><return error="true" message="${done.error}"/></if>
+            <set field="setting" from="done.setting"/>
+        </actions>
+    </service>
+</services>

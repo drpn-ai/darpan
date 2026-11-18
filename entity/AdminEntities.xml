@@ -19,7 +19,7 @@
         <field name="targetType" type="text-short" not-null="true">
             <description>Kind of record affected, e.g. Tenant, User, Membership, AgentAccessGrant, CliAccessGrant,
                 CliAccessRequest, Migration, DataSourceDefinition, EncryptedFields, GeneratedOutputFiles, Retention,
-                GqlApiKey.</description></field>
+                GqlApiKey, DarpanSetting (the setting key).</description></field>
         <field name="targetId" type="text-medium" not-null="true">
             <description>Primary identifier of the affected record (tenant group id, user id, or composite).</description></field>
         <field name="detailText" type="text-long">

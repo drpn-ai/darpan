@@ -45,6 +45,10 @@ admin.ScheduleAdminServices.get#ScheduleBoard
 admin.SecurityAdminServices.get#TwoFactorPolicies
 admin.SecurityAdminServices.rotate#EncryptedFields
 admin.SecurityAdminServices.update#TwoFactorPolicy
+admin.SettingAdminServices.get#Setting
+admin.SettingAdminServices.get#Settings
+admin.SettingAdminServices.reset#Setting
+admin.SettingAdminServices.update#Setting
 admin.ShopifyAppAdminServices.list#ShopifyApps
 admin.ShopifyAppAdminServices.save#ShopifyApp
 admin.TenantAdminServices.create#Tenant

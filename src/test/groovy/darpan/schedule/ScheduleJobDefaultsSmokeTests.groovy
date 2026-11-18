@@ -106,22 +106,29 @@ class ScheduleJobDefaultsSmokeTests {
 
     @Test
     void seedRowsNeverStateLiveColumns() {
+        // allow-list over every loaded type (seed, seed-initial, install, ext*, darpan-seed...); only fixtures are skipped
         int checked = 0
         dataFiles().each { File f ->
             def doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(f)
-            if (doc.documentElement.getAttribute("type") != "darpan-seed") return
-            def jobs = doc.getElementsByTagName("moqui.service.job.ServiceJob")
-            (0..<jobs.length).each { int i ->
-                def e = jobs.item(i)
-                checked++
-                ["cronExpression", "paused"].each { assertFalse(e.hasAttribute(it), "${f.name}: ServiceJob ${e.getAttribute('jobName')} states ${it}") }
-            }
-            def params = doc.getElementsByTagName("moqui.service.job.ServiceJobParameter")
-            (0..<params.length).each { int i ->
-                assertFalse(params.item(i).hasAttribute("parameterValue"), "${f.name}: ServiceJobParameter states parameterValue")
-            }
+            if (doc.documentElement.getAttribute("type").endsWith("fixture")) return
+            checked += checkAttributes(f, doc, "moqui.service.job.ServiceJob") { String a ->
+                a in ["jobName", "description", "serviceName", "minIntervalMinutes", "resumePreviewService"] || a.startsWith("default") }
+            checkAttributes(f, doc, "moqui.service.job.ServiceJobParameter") { String a ->
+                a in ["jobName", "parameterName", "defaultValue"] }
         }
         assertTrue(checked >= 10, "expected the job seeds to be scanned, saw ${checked}")
+    }
+
+    private static int checkAttributes(File f, def doc, String element, Closure<Boolean> allowed) {
+        def nodes = doc.getElementsByTagName(element)
+        for (int i = 0; i < nodes.length; i++) {
+            def attrs = nodes.item(i).attributes
+            for (int j = 0; j < attrs.length; j++) {
+                String a = attrs.item(j).nodeName
+                assertTrue(allowed.call(a), "${f.name}: ${element} states ${a}; seeds state defaults only")
+            }
+        }
+        return nodes.length
     }
 
     @Test

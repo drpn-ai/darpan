@@ -329,7 +329,8 @@ class AutomationEntityContractTests {
         }
         assertNotNull(job, "Missing reconciliation automation scanner job")
         assertEquals("reconciliation.ReconciliationAutomationServices.scan#DueAutomations", attr(job, "serviceName"))
-        assertEquals("0 0/5 * * * ?", attr(job, "cronExpression"))
+        // DAR-BE-305: the current seed states the default; the released 2.0.3 payload still states the live column
+        assertEquals("0 0/5 * * * ?", attr(job, "defaultCronExpression") ?: attr(job, "cronExpression"))
     }
 
     private static void assertShopifyGraphqlOrdersRemote(def root, String label) {

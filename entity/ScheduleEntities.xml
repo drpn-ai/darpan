@@ -19,13 +19,20 @@
             <description>A service that counts what the job would delete; resuming the job needs a fresh preview of it.</description></field>
         <field name="editedByUserId" type="id"/>
         <field name="editedDate" type="date-time">
-            <description>When production last edited the cron, pause state or a parameter. Empty = follow the shipped defaults.</description></field>
+            <description>When production last edited the cron, pause state or a parameter. Empty = follow the shipped defaults.
+                Only the admin schedule services set it: an edit made in Moqui Tools' ServiceJob screen leaves it empty, so the
+                next deploy reverts that edit.</description></field>
+        <relationship type="one-nofk" title="EditedBy" related="moqui.security.UserAccount" short-alias="editedBy">
+            <key-map field-name="editedByUserId" related="userId"/></relationship>
     </extend-entity>
 
     <extend-entity entity-name="ServiceJobParameter" package="moqui.service.job">
         <field name="defaultValue" type="text-medium">
             <description>The shipped value; the live parameterValue follows it until someone edits the parameter.</description></field>
         <field name="editedByUserId" type="id"/>
-        <field name="editedDate" type="date-time"/>
+        <field name="editedDate" type="date-time">
+            <description>When production last edited this value; empty = the value follows defaultValue.</description></field>
+        <relationship type="one-nofk" title="EditedBy" related="moqui.security.UserAccount" short-alias="editedBy">
+            <key-map field-name="editedByUserId" related="userId"/></relationship>
     </extend-entity>
 </entities>

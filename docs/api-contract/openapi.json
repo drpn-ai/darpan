@@ -11051,7 +11051,7 @@
                         "description": "Optional: the username or email typed first."
                     }
                 },
-                "description": "DAR-BE-301. Start a sign-in with a passkey alone (no password). Request options for\n            navigator.credentials.get() and a challengeToken for finish#PasskeyFirstSignIn. With a username, allowCredentials\n            lists that account's passkeys; with none (or one that names no account with a passkey) it is empty and the\n            browser offers its own passkeys for this site. The answer has the same keys either way and never says whether\n            the username exists. At most 10 begins a minute from one address (TOO_MANY_ATTEMPTS)."
+                "description": "DAR-BE-301. Start a sign-in with a passkey alone (no password). Request options for\n            navigator.credentials.get() and a challengeToken for finish#PasskeyFirstSignIn. With a username, allowCredentials\n            lists that account's passkeys, and for a username that names no account with a passkey one decoy credential\n            (the same for the same username, which no authenticator holds); with no username it is empty and the browser\n            offers its own passkeys for this site. The answer never says whether the username exists. At most 10 begins a minute from one address (TOO_MANY_ATTEMPTS)."
             },
             "BeginPasskeyFirstSignInResult": {
                 "type": "object",
@@ -12746,7 +12746,7 @@
                     },
                     "reason": {
                         "type": "string",
-                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): PASSKEY_REFUSED, CANNOT_SIGN_IN or PASSKEYS_UNAVAILABLE."
+                        "description": "With ok false: why, as a code the client switches on (never\n                the message text): PASSKEY_REFUSED, ACCOUNT_CANNOT_SIGN_IN, PASSWORD_CHANGE_REQUIRED (the password must\n                be changed first: sign in with it) or PASSKEYS_UNAVAILABLE."
                     },
                     "authenticated": {
                         "type": "boolean",

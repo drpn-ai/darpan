@@ -126,9 +126,10 @@ class TwoFactorFacadeSupport {
     /**
      * DAR-BE-301 begin#PasskeyFirstSignIn: sign in with a passkey alone, no password. Request options (publicKeyOptions,
      * JSON text) and the challengeToken finish#PasskeyFirstSignIn takes (300 s, one attempt). Anonymous, so the answer
-     * names no one: an unknown or passkey-less username gets the same keys as a known one, with empty allowCredentials,
-     * and every begin is held to TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS so the work done for a known username does not
-     * show in the time either. Refusals (PASSKEYS_UNAVAILABLE, TOO_MANY_ATTEMPTS) travel in the refusal envelope.
+     * names no one: an unknown or passkey-less username gets the same keys as a known one, with one decoy credential in
+     * allowCredentials (PasskeySupport.decoyCredentialId), and every begin is held to
+     * TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS, after its writes have committed, so the work done for a known username
+     * does not show in the time either. Refusals (PASSKEYS_UNAVAILABLE, TOO_MANY_ATTEMPTS) travel in the refusal envelope.
      */
     static Map<String, Object> beginPasskeyFirstSignIn(def ec, Object username) {
         long started = System.nanoTime()
@@ -147,7 +148,8 @@ class TwoFactorFacadeSupport {
      * is signed in exactly as a completed verify#SignInCode signs them in (the account checks, a new servlet session, the
      * same answer), with a UserLoginHistory row (no password step wrote one) and a PASSKEY_FIRST_SIGN_IN event. Every
      * refusal is held to the floor and answered in the envelope: PASSKEY_REFUSED (expired, used, unknown or refused
-     * passkey, another account's passkey on a username's challenge), CANNOT_SIGN_IN, PASSKEYS_UNAVAILABLE.
+     * passkey, another account's passkey on a username's challenge), ACCOUNT_CANNOT_SIGN_IN, PASSWORD_CHANGE_REQUIRED (the
+     * password must change first: sign in with it), PASSKEYS_UNAVAILABLE.
      */
     static Map<String, Object> finishPasskeyFirstSignIn(def ec, Object challengeToken, Object passkeyAssertion) {
         long started = System.nanoTime()
@@ -159,7 +161,10 @@ class TwoFactorFacadeSupport {
         } else {
             String userId = PasskeySupport.claimFirstSignIn(ec, challengeToken, passkeyAssertion)
             if (userId && !signInAs(ec, userId, true)) {
-                refusal = TwoFactorRefusal.PASSKEY_FIRST_CANNOT_SIGN_IN
+                // The framework's sign-in still refuses an account whose password must change ([PWDCHG]) or has expired
+                // ([PWDTIM]); that person is sent to the password, which leads to setting a new one.
+                refusal = AuthFacadeSupport.resolvePasswordChangeReason(ec) != null
+                        ? TwoFactorRefusal.PASSWORD_CHANGE_REQUIRED : TwoFactorRefusal.CANNOT_SIGN_IN
             } else if (userId && AuthFacadeSupport.issueSignedInSession(ec, result)) {
                 TwoFactorRecords.event(ec, userId, "PASSKEY_FIRST_SIGN_IN")
                 result.putAll(FacadeSupport.envelope(ec))

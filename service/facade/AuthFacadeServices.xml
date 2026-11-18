@@ -1223,9 +1223,9 @@
     <service verb="begin" noun="PasskeyFirstSignIn" allow-remote="true" authenticate="anonymous-all">
         <description>DAR-BE-301. Start a sign-in with a passkey alone (no password). Request options for
             navigator.credentials.get() and a challengeToken for finish#PasskeyFirstSignIn. With a username, allowCredentials
-            lists that account's passkeys; with none (or one that names no account with a passkey) it is empty and the
-            browser offers its own passkeys for this site. The answer has the same keys either way and never says whether
-            the username exists. At most 10 begins a minute from one address (TOO_MANY_ATTEMPTS).</description>
+            lists that account's passkeys, and for a username that names no account with a passkey one decoy credential
+            (the same for the same username, which no authenticator holds); with no username it is empty and the browser
+            offers its own passkeys for this site. The answer never says whether the username exists. At most 10 begins a minute from one address (TOO_MANY_ATTEMPTS).</description>
         <in-parameters>
             <parameter name="username"><description>Optional: the username or email typed first.</description></parameter>
         </in-parameters>
@@ -1268,7 +1268,8 @@
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
             <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
-                the message text): PASSKEY_REFUSED, CANNOT_SIGN_IN or PASSKEYS_UNAVAILABLE.</description></parameter>
+                the message text): PASSKEY_REFUSED, ACCOUNT_CANNOT_SIGN_IN, PASSWORD_CHANGE_REQUIRED (the password must
+                be changed first: sign in with it) or PASSKEYS_UNAVAILABLE.</description></parameter>
             <parameter name="authenticated" type="Boolean">
                 <description>True when a session was issued.</description></parameter>
             <parameter name="authToken" type="String">

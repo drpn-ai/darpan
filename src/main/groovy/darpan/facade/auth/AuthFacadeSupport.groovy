@@ -304,7 +304,7 @@ class AuthFacadeSupport {
 
     /** Null unless the failed login was rejected for a reason the user can clear themselves by setting a
      *  new password. See PASSWORD_CHANGE_REQUIRED_MARKER for why the message text is the signal. */
-    private static String resolvePasswordChangeReason(def ec) {
+    static String resolvePasswordChangeReason(def ec) {
         List<String> errors = FacadeSupport.getErrors(ec)
         if (errors.any { it?.contains(PASSWORD_CHANGE_REQUIRED_MARKER) }) return PASSWORD_CHANGE_REQUIRED_REASON
         if (errors.any { it?.contains(PASSWORD_EXPIRED_MARKER) }) return PASSWORD_EXPIRED_REASON

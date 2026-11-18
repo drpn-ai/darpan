@@ -106,8 +106,8 @@
         <description>DAR-BE-301. A sign-in with a passkey alone, no password: begin#PasskeyFirstSignIn makes the row and
             finish#PasskeyFirstSignIn uses it. Anonymous until the passkey names the person, so it has no userId (and
             SignInChallenge, whose userId is NOT NULL, cannot hold it). Only the token's SHA-256 is stored. Lives 5 minutes,
-            any finish uses it up (one attempt per token), swept a day past its end; the rows one address made in the last
-            minute are the begin limit. Written only by darpan.facade.auth.PasskeySupport.</description>
+            any finish uses it up (one attempt per token), swept a day past its end (by the indexed expiresDate, in a short
+            transaction of its own); the rows one address made in the last minute are the begin limit. Written only by darpan.facade.auth.PasskeySupport.</description>
         <field name="challengeId" type="id" is-pk="true"/>
         <field name="tokenHash" type="id-long" not-null="true"><description>SHA-256 (hex) of the 32-byte random token.</description></field>
         <field name="webauthnChallenge" type="id-long">
@@ -121,6 +121,7 @@
         <field name="requestIp" type="text-short"><description>The client address the begin limit counts by ("unknown" when none).</description></field>
         <index name="PKSI_CHAL_TOKEN" unique="true"><index-field name="tokenHash"/></index>
         <index name="PKSI_CHAL_IP"><index-field name="requestIp"/><index-field name="createdDate"/></index>
+        <index name="PKSI_CHAL_EXPIRES"><index-field name="expiresDate"/></index>
     </entity>
 
     <entity entity-name="TwoFactorRolePolicy" package="darpan.auth" use="configuration" cache="never">

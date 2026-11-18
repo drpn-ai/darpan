@@ -21,9 +21,12 @@ import com.webauthn4j.verifier.exception.MaliciousCounterValueException
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.json.JsonOutput
 import org.moqui.entity.EntityCondition
+import org.moqui.util.SystemBinding
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import java.nio.charset.StandardCharsets
 import java.sql.Timestamp
 
@@ -51,6 +54,10 @@ class PasskeySupport {
     static final int FIRST_SIGN_IN_BEGINS_PER_MINUTE = 10
     static final int USERNAME_HINT_MAX_LENGTH = 255
     private static final String ACCOUNT = "moqui.security.UserAccount"
+    /** A decoy descriptor's transports: what a platform passkey reports most often. */
+    static final String DECOY_TRANSPORTS = "internal,hybrid"
+    private static final String DECOY_KEY_LABEL = "darpan-passkey-first-sign-in-decoy-v1"
+    private static final byte[] FALLBACK_DECOY_KEY = randomKey()
 
     static final int MAX_PASSKEYS = 10
     static final int NAME_MAX_LENGTH = 60
@@ -380,11 +387,16 @@ class PasskeySupport {
     /**
      * begin#PasskeyFirstSignIn: a new PasskeySignInChallenge row (the token's hash, a fresh WebAuthn challenge, the username
      * as typed) and request options with userVerification required, so one gesture is the passkey and the person's
-     * biometric or PIN. allowCredentials lists the live passkeys of the account the username names; with no username, or
-     * one that names nobody or a person with no passkey, it is empty (the browser offers its own discoverable passkeys) and
-     * the answer has the same shape. Returns [challengeToken, publicKeyOptions, expiresInSeconds] or [refusal]:
-     * PASSKEYS_UNAVAILABLE, or TOO_MANY_ATTEMPTS once FIRST_SIGN_IN_BEGINS_PER_MINUTE begins came from this address in the
-     * last minute (counted from the stored rows, as CliAuthSupport.overStartLimit, so a restart does not reset it).
+     * biometric or PIN. With no username allowCredentials is empty (the browser offers its own discoverable passkeys). With
+     * one, it lists the live passkeys of the account the username names; for a username that names nobody, or a person with
+     * no live passkey, it holds one decoy descriptor (decoyCredentialId: the same for the same username, unlike any real
+     * id), so the answer never says whether the account exists or has a passkey. Returns [challengeToken,
+     * publicKeyOptions, expiresInSeconds] or [refusal]: PASSKEYS_UNAVAILABLE, or TOO_MANY_ATTEMPTS once
+     * FIRST_SIGN_IN_BEGINS_PER_MINUTE begins came from this address in the last minute (counted from the stored rows, as
+     * CliAuthSupport.overStartLimit, so a restart does not reset it).
+     *
+     * <p>Every write is a short transaction of its own (the sweep of rows a day past their end, by the indexed
+     * expiresDate; the new row), so no lock is held while the caller holds the answer to the timing floor.
      */
     static Map<String, Object> firstSignInOptions(def ec, Object username) {
         RelyingParty rp = relyingParty(ec)
@@ -396,19 +408,57 @@ class PasskeySupport {
                 .condition("createdDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, new Timestamp(now.time - 60_000L))
                 .useCache(false).count()
         if (recent >= FIRST_SIGN_IN_BEGINS_PER_MINUTE) return [refusal: TwoFactorRefusal.TOO_MANY_ATTEMPTS]
-        TwoFactorRecords.find(ec, FIRST_SIGN_IN_CHALLENGE, "housekeeping: passkey-first sign-in challenges a day past their end")
-                .condition("expiresDate", EntityCondition.ComparisonOperator.LESS_THAN, new Timestamp(now.time - SignInChallenges.EXPIRED_KEEP_MILLIS))
-                .deleteAll()
+        ec.transaction.runRequireNew(null, "Could not sweep passkey sign-in challenges", {
+            TwoFactorRecords.find(ec, FIRST_SIGN_IN_CHALLENGE, "housekeeping: passkey-first sign-in challenges a day past their end")
+                    .condition("expiresDate", EntityCondition.ComparisonOperator.LESS_THAN, new Timestamp(now.time - SignInChallenges.EXPIRED_KEEP_MILLIS))
+                    .deleteAll()
+        })
 
         String hint = usernameHint(username)
         List<Map> passkeys = hint ? activePasskeys(ec, (String) accountNamed(ec, hint)?.userId) : []
+        if (hint && !passkeys) passkeys = [[credential: [credentialId: decoyCredentialId(ec, hint), transports: DECOY_TRANSPORTS]]]
         String token = AuthPrimitives.newToken()
         String challenge = AuthPrimitives.newToken()
-        ec.entity.makeValue(FIRST_SIGN_IN_CHALLENGE).setAll([tokenHash: AuthPrimitives.sha256Hex(token), webauthnChallenge: challenge,
-                usernameHint: hint, createdDate: now, expiresDate: new Timestamp(now.time + SignInChallenges.LIFETIME_SECONDS * 1000L),
-                requestIp: address]).setSequencedIdPrimary().create()
+        ec.transaction.runRequireNew(null, "Could not start a passkey sign-in", {
+            ec.entity.makeValue(FIRST_SIGN_IN_CHALLENGE).setAll([tokenHash: AuthPrimitives.sha256Hex(token), webauthnChallenge: challenge,
+                    usernameHint: hint, createdDate: now, expiresDate: new Timestamp(now.time + SignInChallenges.LIFETIME_SECONDS * 1000L),
+                    requestIp: address]).setSequencedIdPrimary().create()
+        })
         return [challengeToken: token, publicKeyOptions: requestOptionsJson(rp, challenge, passkeys),
                 expiresInSeconds: SignInChallenges.LIFETIME_SECONDS]
+    }
+
+    /**
+     * The decoy credential id begin#PasskeyFirstSignIn lists for a username with no live passkey: HMAC-SHA256 of the
+     * username (trimmed, lower case, as the case-insensitive lookup treats it) under a key derived from this instance's
+     * entity crypt-pass (the secret encrypted fields use), base64url: 32 bytes, as many authenticators' ids are. Stable
+     * for a username (two begins look alike), different per username, and not a credential anyone holds, so a finish
+     * with it is refused like any unknown passkey.
+     */
+    static String decoyCredentialId(def ec, String username) {
+        Mac mac = Mac.getInstance("HmacSHA256")
+        mac.init(new SecretKeySpec(decoyKey(ec), "HmacSHA256"))
+        return AuthPrimitives.b64url(mac.doFinal(username.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)))
+    }
+
+    private static byte[] randomKey() {
+        byte[] key = new byte[32]
+        new java.security.SecureRandom().nextBytes(key)
+        return key
+    }
+
+    /** HMAC-SHA256(crypt-pass, DECOY_KEY_LABEL): the decoy key, never the crypt-pass itself. With no crypt-pass configured
+     *  (encrypted fields would not work either) a random key made once per JVM, so decoys stay stable until a restart. */
+    private static byte[] decoyKey(def ec) {
+        String raw = ec?.factory?.getConfXmlRoot()?.first("entity-facade")?.attribute("crypt-pass")
+        String pass = raw?.contains('${') ? SystemBinding.expand(raw) : raw
+        if (!pass?.trim() || pass.contains('${')) {
+            logger.warn("No entity crypt-pass configured: passkey sign-in decoys use a per-JVM random key")
+            return FALLBACK_DECOY_KEY
+        }
+        Mac mac = Mac.getInstance("HmacSHA256")
+        mac.init(new SecretKeySpec(pass.getBytes(StandardCharsets.UTF_8), "HmacSHA256"))
+        return mac.doFinal(DECOY_KEY_LABEL.getBytes(StandardCharsets.UTF_8))
     }
 
     /**

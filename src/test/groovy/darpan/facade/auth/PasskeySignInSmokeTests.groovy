@@ -577,27 +577,49 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
     }
 
     @Test
-    @DisplayName("DAR-BE-301: an unknown or passkey-less username gets the same answer as a known one (no enumeration), held to the floor")
+    @DisplayName("DAR-BE-301: an unknown or passkey-less username gets one stable decoy credential, shaped like a real one (no enumeration), held to the floor")
     void anUnknownUsernameGetsTheSameShape() {
-        enrolPasskey(USERNAME)
-        Map answers = [known: USERNAME, unknown: "nobody.at.all", passkeyless: OTHER_USERNAME].collectEntries { String label, String username ->
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        Closure<Map> begin = { String username ->
             long started = System.nanoTime()
             Map begun = anon("begin#PasskeyFirstSignIn", [username: username])
             long tookMillis = (System.nanoTime() - started).intdiv(1_000_000L)
-            assertTrue(tookMillis >= TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS, "${label} begin held to the floor: ${tookMillis} ms")
-            [(label): begun]
+            assertTrue(tookMillis >= TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS, "${username} begin held to the floor: ${tookMillis} ms")
+            assertEquals([], begun.errors, username)
+            assertEquals(true, begun.out.ok, username)
+            assertNotNull(begun.out.challengeToken, username)
+            return begun
         }
+        Closure<List<Map>> allowed = { Map begun ->
+            (List<Map>) new JsonSlurper().parseText(begun.out.publicKeyOptions as String).allowCredentials
+        }
+        Map known = begin(USERNAME)
+        assertEquals([key.id], allowed(known)*.id, "a known username with a passkey: its real ids")
+
+        Map answers = [unknown: "nobody.at.all", passkeyless: OTHER_USERNAME, otherUnknown: "someone.else"]
+                .collectEntries { String label, String username -> [(label): begin(username)] }
         answers.each { String label, Map begun ->
-            assertEquals([], begun.errors, label)
-            assertEquals(true, begun.out.ok, label)
-            assertNotNull(begun.out.challengeToken, label)
-            assertEquals(answers.known.out.keySet(), begun.out.keySet(), "${label}: the same keys")
-            assertEquals(((Map) new JsonSlurper().parseText(answers.known.out.publicKeyOptions as String)).keySet(),
+            assertEquals(known.out.keySet(), begun.out.keySet(), "${label}: the same keys")
+            assertEquals(((Map) new JsonSlurper().parseText(known.out.publicKeyOptions as String)).keySet(),
                     ((Map) new JsonSlurper().parseText(begun.out.publicKeyOptions as String)).keySet(), "${label}: the same option keys")
+            List<Map> decoys = allowed(begun)
+            assertEquals(1, decoys.size(), "${label}: one descriptor, as a person with one passkey")
+            assertEquals(allowed(known)[0].keySet(), decoys[0].keySet(), "${label}: the descriptor's keys")
+            assertEquals("public-key", decoys[0].type)
+            assertEquals(["internal", "hybrid"], decoys[0].transports)
+            assertEquals(43, (decoys[0].id as String).length(), "${label}: 32 bytes, base64url")
+            assertNotEquals(key.id, decoys[0].id, "${label}: never a real id")
         }
-        ["unknown", "passkeyless"].each {
-            assertEquals([], new JsonSlurper().parseText(answers[it].out.publicKeyOptions as String).allowCredentials, it)
-        }
+        assertEquals(allowed(answers.unknown), allowed(begin("nobody.at.all")), "the same username gets the same decoy")
+        assertEquals(allowed(answers.unknown), allowed(begin("Nobody.At.All")), "case does not change it (the lookup ignores case)")
+        assertNotEquals(allowed(answers.unknown), allowed(answers.otherUnknown), "different usernames, different decoys")
+        assertNotEquals(allowed(answers.unknown), allowed(answers.passkeyless))
+        Set<String> realIds = ec.entity.find(PasskeySupport.CREDENTIAL).disableAuthz().useCache(false).list()*.credentialId as Set
+        answers.values().each { assertFalse(allowed(it)[0].id in realIds) }
+
+        // A decoy cannot finish: it is no one's passkey.
+        assertEquals([FIRST_REFUSAL], anon("finish#PasskeyFirstSignIn", [challengeToken: answers.unknown.out.challengeToken,
+                passkeyAssertion: key.assertion(answers.unknown.out.publicKeyOptions as String)]).errors)
     }
 
     @Test
@@ -670,12 +692,49 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
         Map finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
                 passkeyAssertion: key.assertion(begun.out.publicKeyOptions as String)])
         assertEquals([TwoFactorRefusal.CANNOT_SIGN_IN.message], finished.errors)
-        assertEquals("CANNOT_SIGN_IN", finished.out.reason)
+        assertEquals("ACCOUNT_CANNOT_SIGN_IN", finished.out.reason)
         assertEquals(false, finished.out.ok)
         assertNotEquals(true, finished.out.authenticated)
         assertNull(finished.out.authToken)
         assertNull(ec.user.userId)
         assertEquals(0, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301 review: a password that must change, or has expired, sends the person to the password; no session")
+    void aPasswordChangeSendsThePersonToThePassword() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        [[requirePasswordChange: "Y"], [passwordSetDate: new Timestamp(System.currentTimeMillis() - 1000L * 86_400_000L)]].each { Map change ->
+            ec.entity.find("moqui.security.UserAccount").condition("userId", USER_ID).disableAuthz().updateAll(change)
+            Map begun = anon("begin#PasskeyFirstSignIn", [:])
+            Map finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
+                    passkeyAssertion: key.assertion(begun.out.publicKeyOptions as String)])
+            assertEquals(["Sign in with your password once to set a new one."], finished.errors, "${change.keySet()}")
+            assertEquals("PASSWORD_CHANGE_REQUIRED", finished.out.reason)
+            assertEquals(false, finished.out.ok)
+            assertNotEquals(true, finished.out.authenticated)
+            assertNull(finished.out.authToken)
+            assertNull(ec.user.userId)
+            ec.entity.find("moqui.security.UserAccount").condition("userId", USER_ID).disableAuthz()
+                    .updateAll([requirePasswordChange: "N", passwordSetDate: ec.user.nowTimestamp])
+        }
+        assertEquals(0, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301 review: a begin sweeps rows a day past their end, and only those")
+    void beginSweepsDayOldRows() {
+        Timestamp twoDaysAgo = new Timestamp(System.currentTimeMillis() - 2 * 86_400_000L)
+        Timestamp anHourAgo = new Timestamp(System.currentTimeMillis() - 3_600_000L)
+        [twoDaysAgo, anHourAgo].each { Timestamp when ->
+            ec.entity.makeValue(PasskeySupport.FIRST_SIGN_IN_CHALLENGE).setAll([tokenHash: AuthPrimitives.sha256Hex(UUID.randomUUID().toString()),
+                    createdDate: when, expiresDate: when, requestIp: "203.0.113.9"]).setSequencedIdPrimary().create()
+        }
+        assertEquals([], anon("begin#PasskeyFirstSignIn", [:]).errors)
+        Closure<Long> rows = { Timestamp when -> ec.entity.find(PasskeySupport.FIRST_SIGN_IN_CHALLENGE).condition("expiresDate", when)
+                .disableAuthz().useCache(false).count() }
+        assertEquals(0L, rows(twoDaysAgo), "a day past its end: swept")
+        assertEquals(1L, rows(anHourAgo), "expired an hour ago: kept as evidence")
     }
 
     @Test

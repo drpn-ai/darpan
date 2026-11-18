@@ -1,0 +1,22 @@
+{
+  "settings": [
+    {"key": "darpan.reconciliation.automation.maxConcurrentExecutions", "type": "INT", "area": "Runs", "unit": "runs", "description": "Most runs the instance executes at once; the rest wait.", "defaultValue": "8", "min": 1, "max": 32},
+    {"key": "darpan.reconciliation.automation.maxConcurrentExecutionsPerTenant", "type": "INT", "area": "Runs", "unit": "runs", "description": "Most runs one tenant executes at once (never above the instance cap).", "defaultValue": "5", "min": 1, "max": 32},
+    {"key": "darpan.reconciliation.automation.holdAtHeapPercent", "type": "INT", "area": "Runs", "unit": "percent", "description": "Heap use at or above which new runs wait instead of starting.", "defaultValue": "85", "min": 50, "max": 100},
+    {"key": "darpan.reconciliation.automation.maxWaitingPerTenant", "type": "INT", "area": "Runs", "unit": "runs", "description": "Most runs one tenant may have waiting before new ones are refused.", "defaultValue": "50", "min": 1, "max": 500},
+    {"key": "darpan.reconciliation.automation.maxRetryCount", "type": "INT", "area": "Runs", "unit": "count", "description": "Retries of a failed automation run when the automation sets none of its own.", "defaultValue": "3", "min": 0, "max": 10},
+    {"key": "darpan.reconciliation.automation.retryBackoffBaseMinutes", "type": "INT", "area": "Runs", "unit": "minutes", "description": "Wait before the first retry; each retry waits twice as long.", "defaultValue": "5", "min": 1, "max": 240},
+    {"key": "darpan.reconciliation.automation.retryBackoffCapMinutes", "type": "INT", "area": "Runs", "unit": "minutes", "description": "Longest wait between retries (never below the base).", "defaultValue": "60", "min": 1, "max": 1440},
+    {"key": "darpan.reconciliation.automation.maxWindowSpanDays", "type": "INT", "area": "Runs", "unit": "days", "description": "Widest date window one run may cover; a safety ceiling.", "defaultValue": "3660", "min": 366, "max": 3660},
+    {"key": "darpan.reconciliation.automation.parallelSourceExtracts", "type": "BOOLEAN", "area": "Runs", "unit": "switch", "description": "Extract the two sides of a run at the same time.", "defaultValue": "true"},
+    {"key": "darpan.reconciliation.automation.verifyMissingDiffs", "type": "BOOLEAN", "area": "Runs", "unit": "switch", "description": "Re-check each missing record against its source before reporting it.", "defaultValue": "true"},
+    {"key": "darpan.reconciliation.runHealth.reaperStaleMinutes", "type": "INT", "area": "Run health", "unit": "minutes", "description": "A run with no progress for this long is ended as stuck.", "defaultValue": "120", "min": 30, "max": 1440},
+    {"key": "darpan.reconciliation.runHealth.silentAnyStageMinutes", "type": "INT", "area": "Run health", "unit": "minutes", "description": "A run silent in any stage this long shows as stuck; must stay below the reaper time.", "defaultValue": "90", "min": 5, "max": 1440, "lessThan": "darpan.reconciliation.runHealth.reaperStaleMinutes"},
+    {"key": "darpan.reconciliation.runHealth.silentExtractMinutes", "type": "INT", "area": "Run health", "unit": "minutes", "description": "A run silent in the extract stage this long shows as stuck.", "defaultValue": "15", "min": 1, "max": 1440},
+    {"key": "darpan.reconciliation.runHealth.slowFactor", "type": "INT", "area": "Run health", "unit": "factor", "description": "A run is slow when it takes this many times its usual duration.", "defaultValue": "2", "min": 1, "max": 20},
+    {"key": "darpan.reconciliation.runHealth.slowFloorMinutes", "type": "INT", "area": "Run health", "unit": "minutes", "description": "A run is never called slow before it has run this long.", "defaultValue": "15", "min": 1, "max": 1440},
+    {"key": "darpan.reconciliation.runHealth.cancelGraceMinutes", "type": "INT", "area": "Run health", "unit": "minutes", "description": "Time a cancelled run gets to stop before it shows as stuck.", "defaultValue": "5", "min": 1, "max": 120},
+    {"key": "darpan.twoFactor.reminderDaysBefore", "type": "INT_LIST", "area": "Two-factor", "unit": "days", "description": "Days before a two-factor deadline on which a reminder goes out.", "defaultValue": "7,3,1,0", "min": 0, "max": 90, "maxItems": 10},
+    {"key": "darpan.twoFactor.reminderRepeatDays", "type": "INT", "area": "Two-factor", "unit": "days", "description": "Days between reminders once the deadline has passed.", "defaultValue": "7", "min": 1, "max": 90}
+  ]
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-304. Operational tunables a super admin edits in production. Instance-wide, not per tenant: no
+         DARPAN_ACTIVE_COMPANY_SCOPE filter; every read goes through DarpanSettings (TenantScopedFinder.findGlobalUnscopedPerRequest)
+         and the admin.SettingAdminServices are the only writers. No seed rows: a key with no row uses its catalog default
+         (darpan/settings-catalog.json in the component that owns the key). -->
+
+    <entity entity-name="DarpanSetting" package="darpan.config" use="configuration" cache="never">
+        <description>One production edit of a setting. Only edited keys have a row; the default lives in the catalog
+            (darpan/settings-catalog.json), not here. Reads go through darpan.config.DarpanSettings: row, then the JVM
+            system property of the same key, then the catalog default; a row that fails the catalog's type or range is ignored.</description>
+        <field name="settingKey" type="id-long" is-pk="true"/>
+        <field name="settingValue" type="text-medium" not-null="true">
+            <description>The value as text: a number, true/false, or a comma-separated list of numbers.</description></field>
+        <field name="note" type="text-medium"><description>Why it was changed (optional).</description></field>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
+</entities>

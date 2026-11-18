@@ -29,6 +29,8 @@
             </entity-find>
             <iterate list="jobList" entry="job">
                 <set field="wantPaused" from="job.defaultPaused ?: 'N'"/>
+                <!-- a job that deletes and needs a preview to resume is never resumed by the all-jobs sweep (a seed load); a reset names its job, after its own preview check -->
+                <if condition="!jobName &amp;&amp; job.resumePreviewService &amp;&amp; job.paused == 'Y'"><set field="wantPaused" from="'Y'"/></if>
                 <if condition="job.cronExpression != job.defaultCronExpression || job.paused != wantPaused">
                     <set field="job.cronExpression" from="job.defaultCronExpression"/>
                     <set field="job.paused" from="wantPaused"/>
@@ -109,8 +111,11 @@
             <!-- a parameter a setting owns: the job editor must not become a second home that overrides it (DAR-BE-306) -->
             <set field="settingOwned" from="['reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles:retentionDays': 'darpan.purge.generatedOutput.days',
                     'reconciliation.ReconciliationGenericServices.purge#ExtractFiles:retentionDays': 'darpan.purge.extract.days'].get(serviceName + ':' + parameterName)"/>
+            <!-- the purge's output folder is fixed too: changing it would redirect a nightly delete with no preview -->
+            <set field="fixedHere" from="serviceName == 'reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles' &amp;&amp; parameterName == 'outputLocation'"/>
             <set field="problem" from="sd == null ? ('The service ' + serviceName + ' is not defined.')
                     : paramNode == null ? (parameterName + ' is not a parameter of ' + serviceName + '; it takes ' + (sd.getInParameterNames().sort(false, { it }).join(', ') ?: 'none') + '.')
+                    : fixedHere ? (parameterName + ' of ' + serviceName + ' is not editable here.')
                     : settingOwned != null ? (parameterName + ' is a setting, not a job parameter. Set it in Settings (' + settingOwned + ').')
                     : !text ? (parameterName + ' is blank; reset it to its default instead.')
                     : (isBoolean &amp;&amp; !(text.toLowerCase() in ['true', 'false', 'y', 'n'])) ? (parameterName + ' must be true, false, Y or N; ' + text + ' is not.')

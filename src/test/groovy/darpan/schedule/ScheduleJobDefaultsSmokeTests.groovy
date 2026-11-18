@@ -90,6 +90,18 @@ class ScheduleJobDefaultsSmokeTests {
     }
 
     @Test
+    void aSeedLoadNeverResumesADeletingJob() {
+        String retention = "run_DataRetention_daily"
+        asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: retention, defaultPaused: "N"]).update() }
+        try {
+            asSystem { ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call() }
+            assertEquals("Y", ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", retention).one().paused)
+        } finally {
+            asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: retention, defaultPaused: "Y"]).update() }
+        }
+    }
+
+    @Test
     void aChangedDefaultReachesAnUneditedJob() {
         String job = "sweep_RuleChildTenantStamps_hourly"
         asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: job, defaultCronExpression: "0 0 5 * * ?"]).update() }

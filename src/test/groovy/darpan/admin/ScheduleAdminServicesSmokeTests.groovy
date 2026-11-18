@@ -255,6 +255,17 @@ class ScheduleAdminServicesSmokeTests {
     }
 
     @Test
+    void thePurgeFolderAndPeriodAreNotJobParameters() {
+        String service = "reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles"
+        ["outputLocation": "not editable here", "retentionDays": "is a setting"].each { String name, String why ->
+            Map out = [:]
+            asSystem { out = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
+                    .parameters([serviceName: service, parameterName: name, value: "x"]).call() }
+            assertTrue((out.problem as String)?.contains(why), "${name}: ${out.problem}")
+        }
+    }
+
+    @Test
     void aBooleanParameterTakesOnlyTrueFalseYOrN() {
         String service = "reconciliation.ReconciliationGenericServices.reconcile#GenericFiles"
         Closure<String> problem = { String v ->

@@ -1,8 +1,10 @@
 package darpan.reconciliation.automation
 
+import darpan.schedule.JobScheduleRules
 import groovy.transform.CompileDynamic
 
 import java.sql.Timestamp
+import java.time.Instant
 
 /**
  * Projects an automation's schedule forward across a window, for the admin schedule board.
@@ -13,9 +15,6 @@ import java.sql.Timestamp
  */
 @CompileDynamic
 class SchedulePlanner {
-
-    /** Period of the scan_ReconciliationAutomations_5m ServiceJob cron, "0 0/5 * * * ?". */
-    static final int SCAN_TICK_SECONDS = 300
 
     /**
      * Fire times at or before {@code to}, starting from the first fire at or after {@code from}.
@@ -38,18 +37,18 @@ class SchedulePlanner {
     }
 
     /**
-     * The moment the scanner would actually SUBMIT a fire due at {@code fireTime}.
+     * The moment the scanner would actually SUBMIT a fire due at {@code fireTime}: the first run of the scan job's cron at or
+     * after it.
      *
-     * scan#DueAutomations is a ServiceJob on "0 0/5 * * * ?" (data/ReconciliationJobSeedData.xml),
-     * so nothing is submitted between ticks: an automation due at 15:02 waits for 15:05. The board
-     * shows this rather than the raw due time, so a deployment window is judged against when work
-     * really starts.
+     * scan#DueAutomations is the ServiceJob scan_ReconciliationAutomations_5m, and nothing is submitted between its runs, so an
+     * automation due at 15:02 on a "0 0/5 * * * ?" scan waits for 15:05. The cron is production data (DAR-BE-305), so the caller
+     * passes the live one. The board shows this rather than the raw due time, so a deployment window is judged against when
+     * work really starts. Null when there is no fire, or no scan cron (the scan job is paused: nothing is submitted).
      */
-    static Timestamp submitsAt(Timestamp fireTime) {
-        if (fireTime == null) return null
-        long tickMillis = SCAN_TICK_SECONDS * 1000L
-        long remainder = fireTime.time % tickMillis
-        return remainder == 0 ? fireTime : new Timestamp(fireTime.time + (tickMillis - remainder))
+    static Timestamp submitsAt(Timestamp fireTime, String scanCron) {
+        if (fireTime == null || !scanCron?.trim()) return null
+        Instant run = JobScheduleRules.firstRunAtOrAfter(scanCron, fireTime.toInstant())
+        return run == null ? null : Timestamp.from(run)
     }
 
     private static Timestamp seedFireTime(Map automation, Timestamp from) {

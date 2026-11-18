@@ -42,6 +42,10 @@ admin.ObserveAdminServices.get#AdminSessionInfo
 admin.ObserveAdminServices.get#LiveOperations
 admin.RetentionAdminServices.dryRun#Retention
 admin.ScheduleAdminServices.get#ScheduleBoard
+admin.ScheduleAdminServices.get#ServiceJobs
+admin.ScheduleAdminServices.preview#JobSchedule
+admin.ScheduleAdminServices.reset#ServiceJob
+admin.ScheduleAdminServices.update#ServiceJob
 admin.SecurityAdminServices.get#TwoFactorPolicies
 admin.SecurityAdminServices.rotate#EncryptedFields
 admin.SecurityAdminServices.update#TwoFactorPolicy

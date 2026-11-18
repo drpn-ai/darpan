@@ -141,9 +141,33 @@ class AdminScheduleSupportTests {
         assertEquals(["gorjana"], board.inFlight*.tenantLabel)
     }
 
+    @Test
+    void submitsAtFollowsTheLiveScanCronAndIsEmptyWhileTheScanIsPaused() {
+        Map automation = [automationId: "AUT_A", automationName: "Orders vs OMS", companyUserGroupId: "GORJANA",
+                          scheduleExpr: "0 2 15 * * ?", windowTimeZone: "UTC", isActive: "Y", nextScheduledFireTime: ts("2026-09-01T15:02:00Z")]
+        Map finders = ["darpan.reconciliation.ReconciliationAutomation": new FinderStub(listResult: [automation]),
+                       "moqui.security.UserGroup": new FinderStub(listResult: [[userGroupId: "GORJANA", description: "gorjana"]]),
+                       "moqui.service.job.ServiceJob": new FinderStub(oneResult: [jobName: AdminScheduleSupport.SCAN_JOB,
+                               cronExpression: "0 0/10 * * * ?", paused: "N"])]
+        Map board = AdminScheduleSupport.getScheduleBoard(superAdminEc(finders), 1, ts("2026-09-01T15:00:00Z"))
+        assertEquals([ts("2026-09-01T15:10:00Z")], board.fires*.submitsAt)
+        assertEquals("0 0/10 * * * ?", board.scanCron)
+        assertEquals(false, board.scanPaused)
+
+        finders["moqui.service.job.ServiceJob"] = new FinderStub(oneResult: [jobName: AdminScheduleSupport.SCAN_JOB,
+                cronExpression: "0 0/10 * * * ?", paused: "Y"])
+        Map paused = AdminScheduleSupport.getScheduleBoard(superAdminEc(finders), 1, ts("2026-09-01T15:00:00Z"))
+        assertEquals([null], paused.fires*.submitsAt)
+        assertEquals([null], paused.fires*.concurrentAtTick)
+        assertEquals(true, paused.scanPaused)
+        assertNull(paused.scanCron)
+    }
+
     // ---- stubs (each admin test class carries its own, matching AdminTenantSupportTests) ----
 
     private def superAdminEc(Map finders) {
+        finders["moqui.service.job.ServiceJob"] = finders["moqui.service.job.ServiceJob"] ?:
+                new FinderStub(oneResult: [jobName: AdminScheduleSupport.SCAN_JOB, cronExpression: "0 0/5 * * * ?", paused: "N"])
         finders["moqui.security.UserGroupMember"] = finders["moqui.security.UserGroupMember"] ?:
                 new FinderStub(oneResult: [userGroupId: "DARPAN_SUPER_ADMIN", userId: "ADMIN_USER"])
         return executionContext(

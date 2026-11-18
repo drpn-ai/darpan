@@ -205,6 +205,11 @@ class CliMethodAllowlist {
             "admin.ObserveAdminServices.get#LiveOperations",
 
             "admin.ScheduleAdminServices.get#ScheduleBoard",
+            // DAR-BE-305: a Darpan admin's, in the admin app: scheduled jobs are edited there, not by a tenant's CLI token.
+            "admin.ScheduleAdminServices.get#ServiceJobs",
+            "admin.ScheduleAdminServices.preview#JobSchedule",
+            "admin.ScheduleAdminServices.reset#ServiceJob",
+            "admin.ScheduleAdminServices.update#ServiceJob",
 
             "admin.TenantAdminServices.create#Tenant",
             "admin.TenantAdminServices.deactivate#Tenant",

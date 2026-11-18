@@ -156,6 +156,18 @@
                                         "$ref": "#/components/schemas/GetScheduleBoardRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetServiceJobsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/PreviewJobScheduleRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResetServiceJobRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateServiceJobRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetTwoFactorPoliciesRequest"
                                     },
                                     {
@@ -911,6 +923,10 @@
                                         "admin.ObserveAdminServices.get#LiveOperations": "#/components/schemas/GetLiveOperationsRequest",
                                         "admin.RetentionAdminServices.dryRun#Retention": "#/components/schemas/DryRunRetentionRequest",
                                         "admin.ScheduleAdminServices.get#ScheduleBoard": "#/components/schemas/GetScheduleBoardRequest",
+                                        "admin.ScheduleAdminServices.get#ServiceJobs": "#/components/schemas/GetServiceJobsRequest",
+                                        "admin.ScheduleAdminServices.preview#JobSchedule": "#/components/schemas/PreviewJobScheduleRequest",
+                                        "admin.ScheduleAdminServices.reset#ServiceJob": "#/components/schemas/ResetServiceJobRequest",
+                                        "admin.ScheduleAdminServices.update#ServiceJob": "#/components/schemas/UpdateServiceJobRequest",
                                         "admin.SecurityAdminServices.get#TwoFactorPolicies": "#/components/schemas/GetTwoFactorPoliciesRequest",
                                         "admin.SecurityAdminServices.rotate#EncryptedFields": "#/components/schemas/RotateEncryptedFieldsRequest",
                                         "admin.SecurityAdminServices.update#TwoFactorPolicy": "#/components/schemas/UpdateTwoFactorPolicyRequest",
@@ -1294,6 +1310,18 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetScheduleBoardResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetServiceJobsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PreviewJobScheduleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ResetServiceJobResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateServiceJobResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetTwoFactorPoliciesResponse"
@@ -6224,7 +6252,7 @@
                         "description": "How far forward to project. Defaults to 24 hours."
                     }
                 },
-                "description": "Every tenant's scheduled automations on one instance-wide timeline, ordered by the\n            moment the scheduler will actually submit them, for deployment and load management.\n\n            Only the first fire per automation is authoritative \u2014 it is the stored nextScheduledFireTime\n            the scanner owns. Later entries are projected from scheduleExpr and assume the automation is\n            not paused, edited, or deferred by the concurrency cap before it gets there.\n\n            Fire times are absolute instants; submitsAt snaps each one up to the next\n            scan_ReconciliationAutomations_5m tick (\"0 0/5 * * * ?\"), because nothing is submitted\n            between ticks. concurrentAtTick counts the fires sharing a tick, to be read against\n            inFlightCap (darpan.reconciliation.automation.maxConcurrentExecutions)."
+                "description": "Every tenant's scheduled automations on one instance-wide timeline, ordered by the\n            moment the scheduler will actually submit them, for deployment and load management.\n\n            Only the first fire per automation is authoritative \u2014 it is the stored nextScheduledFireTime\n            the scanner owns. Later entries are projected from scheduleExpr and assume the automation is\n            not paused, edited, or deferred by the concurrency cap before it gets there.\n\n            Fire times are absolute instants; submitsAt snaps each one up to the next run of the live cron of\n            scan_ReconciliationAutomations_5m (scanCron, default \"0 0/5 * * * ?\", editable with update#ServiceJob), because\n            nothing is submitted between runs. While that job is paused (scanPaused) nothing is submitted: submitsAt and\n            concurrentAtTick are empty. concurrentAtTick counts the fires sharing a run, to be read against\n            inFlightCap (darpan.reconciliation.automation.maxConcurrentExecutions)."
             },
             "GetScheduleBoardResult": {
                 "type": "object",
@@ -6245,6 +6273,13 @@
                             },
                             "horizonHours": {
                                 "type": "integer"
+                            },
+                            "scanCron": {
+                                "type": "string",
+                                "description": "Live cron of the scan job; empty while it is paused."
+                            },
+                            "scanPaused": {
+                                "type": "boolean"
                             },
                             "inFlightCap": {
                                 "type": "integer",
@@ -6328,6 +6363,367 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetScheduleBoardResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetServiceJobsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Every scheduled job: jobName, description, serviceName, cronExpression, paused (Y/N), defaultCronExpression,\n            defaultPaused, minIntervalMinutes (the smallest gap an edited cron may leave), editable (Darpan's own jobs),\n            edited, editedByUserId, editedDate, nextRuns (the next 3, UTC), lastRun {startTime, endTime, hasError} from the newest\n            run, resumeNeedsPreview (resuming it deletes data: update#ServiceJob then needs previewedRows) and parameters\n            [{parameterName, value, defaultValue, edited, type}]."
+            },
+            "GetServiceJobsResult": {
+                "type": "object",
+                "properties": {
+                    "jobs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "GetServiceJobsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ScheduleAdminServices.get#ServiceJobs",
+                "x-darpan-method": "admin.ScheduleAdminServices.get#ServiceJobs",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ScheduleAdminServices.get#ServiceJobs"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetServiceJobsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetServiceJobsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ScheduleAdminServices.get#ServiceJobs. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetServiceJobsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "PreviewJobScheduleParams": {
+                "type": "object",
+                "properties": {
+                    "jobName": {
+                        "type": "string"
+                    },
+                    "cronExpression": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "jobName",
+                    "cronExpression"
+                ],
+                "description": "Checks a cron for a job without saving anything: problem (empty when fine; names the job's floor when the cron\n            runs more often than it allows, or says it never runs), the next 5 runs (UTC) and the smallest gap in minutes\n            between runs. Quartz cron: six fields (seconds first), at most 120 characters, must run within 400 days."
+            },
+            "PreviewJobScheduleResult": {
+                "type": "object",
+                "properties": {
+                    "problem": {
+                        "type": "string"
+                    },
+                    "nextRuns": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "smallestGapMinutes": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "PreviewJobScheduleRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ScheduleAdminServices.preview#JobSchedule",
+                "x-darpan-method": "admin.ScheduleAdminServices.preview#JobSchedule",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ScheduleAdminServices.preview#JobSchedule"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PreviewJobScheduleParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PreviewJobScheduleResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ScheduleAdminServices.preview#JobSchedule. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PreviewJobScheduleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ResetServiceJobParams": {
+                "type": "object",
+                "properties": {
+                    "jobName": {
+                        "type": "string"
+                    },
+                    "parameterNames": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "Parameters to reset; omit to reset everything."
+                    },
+                    "previewedRows": {
+                        "type": "integer",
+                        "description": "Rows the preview showed; needed when the reset resumes a job that deletes."
+                    }
+                },
+                "required": [
+                    "jobName"
+                ],
+                "description": "Puts a Darpan job back on its shipped defaults. With no parameterNames: the cron and pause state go back to the\n            shipped ones, every parameter edited here goes back to its default (a parameter with no default is deleted), and the\n            job follows the defaults on every later deploy again. With parameterNames: only those parameters (the cron and pause\n            state stay edited). A reset that resumes a job with resumePreviewService needs previewedRows, as update#ServiceJob does.\n            A job already on its defaults changes nothing and writes no audit row. Writes one AdminAuditLog row naming each\n            change."
+            },
+            "ResetServiceJobResult": {
+                "type": "object",
+                "properties": {
+                    "job": {
+                        "type": "object",
+                        "description": "The job as get#ServiceJobs lists it, after the reset."
+                    }
+                }
+            },
+            "ResetServiceJobRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ScheduleAdminServices.reset#ServiceJob",
+                "x-darpan-method": "admin.ScheduleAdminServices.reset#ServiceJob",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ScheduleAdminServices.reset#ServiceJob"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ResetServiceJobParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ResetServiceJobResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ScheduleAdminServices.reset#ServiceJob. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ResetServiceJobResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateServiceJobParams": {
+                "type": "object",
+                "properties": {
+                    "jobName": {
+                        "type": "string"
+                    },
+                    "cronExpression": {
+                        "type": "string",
+                        "description": "Quartz cron; never blank (pause the job instead)."
+                    },
+                    "paused": {
+                        "type": "string",
+                        "description": "Y or N."
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "Parameter name to its new value; each must be an in-parameter of the job's service."
+                    },
+                    "previewedRows": {
+                        "type": "integer",
+                        "description": "Rows the preview showed; needed to resume a job that deletes."
+                    }
+                },
+                "required": [
+                    "jobName"
+                ],
+                "description": "Edits a Darpan job: its cron, its pause state, its parameters, in one call; refused as a whole, with the reason and\n            nothing saved, when any part is wrong. Refused: a job that is not Darpan's, a cron that does not parse, is blank,\n            over 120 characters, never runs within 400 days or leaves a gap under the job's minIntervalMinutes, paused other than Y or N,\n            a parameter the job's service does not take, a blank value or one that does not convert to the parameter's type.\n            Resuming (Y to N) a job with resumePreviewService (retention) needs previewedRows, the total the preview showed: the\n            preview is run again and the resume is refused when today's count is more than 100 rows or 5% above it. Pausing needs\n            no preview. A value equal to the live one is not a change; no change writes no audit row. Writes one AdminAuditLog row\n            (`cron: a -> b; paused: Y -> N (preview showed N rows, today's dry run counts M); name: a -> b`)."
+            },
+            "UpdateServiceJobResult": {
+                "type": "object",
+                "properties": {
+                    "job": {
+                        "type": "object",
+                        "description": "The job as get#ServiceJobs lists it, after the edit."
+                    }
+                }
+            },
+            "UpdateServiceJobRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ScheduleAdminServices.update#ServiceJob",
+                "x-darpan-method": "admin.ScheduleAdminServices.update#ServiceJob",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ScheduleAdminServices.update#ServiceJob"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateServiceJobParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateServiceJobResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ScheduleAdminServices.update#ServiceJob. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateServiceJobResult"
                     }
                 },
                 "required": [
@@ -37036,6 +37432,10 @@
         "admin.ObserveAdminServices.get#LiveOperations": "GetLiveOperations",
         "admin.RetentionAdminServices.dryRun#Retention": "DryRunRetention",
         "admin.ScheduleAdminServices.get#ScheduleBoard": "GetScheduleBoard",
+        "admin.ScheduleAdminServices.get#ServiceJobs": "GetServiceJobs",
+        "admin.ScheduleAdminServices.preview#JobSchedule": "PreviewJobSchedule",
+        "admin.ScheduleAdminServices.reset#ServiceJob": "ResetServiceJob",
+        "admin.ScheduleAdminServices.update#ServiceJob": "UpdateServiceJob",
         "admin.SecurityAdminServices.get#TwoFactorPolicies": "GetTwoFactorPolicies",
         "admin.SecurityAdminServices.rotate#EncryptedFields": "RotateEncryptedFields",
         "admin.SecurityAdminServices.update#TwoFactorPolicy": "UpdateTwoFactorPolicy",

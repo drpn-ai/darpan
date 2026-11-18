@@ -6,6 +6,7 @@ import java.sql.Timestamp
 import java.time.Instant
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertNull
 
 /**
  * Projection of an automation's schedule forward across a window, for the admin schedule board.
@@ -33,10 +34,12 @@ class SchedulePlannerTests {
 
     @Test
     void submitsAtTheNextScanTickWhenTheFireTimeIsOffGrid() {
-        // scan_ReconciliationAutomations_5m runs "0 0/5 * * * ?" (ReconciliationJobSeedData.xml),
+        // scan_ReconciliationAutomations_5m runs "0 0/5 * * * ?" by default (ReconciliationJobSeedData.xml),
         // so an automation due at 15:02 is not submitted until the 15:05 tick. Rendering 15:02 on
         // the board would sell operators a minute-precision the scheduler does not have.
-        assertEquals(ts("2026-09-01T15:05:00Z"), SchedulePlanner.submitsAt(ts("2026-09-01T15:02:00Z")))
+        assertEquals(ts("2026-09-01T15:05:00Z"), SchedulePlanner.submitsAt(ts("2026-09-01T15:02:00Z"), "0 0/5 * * * ?"))
+        assertEquals(ts("2026-09-01T15:05:00Z"), SchedulePlanner.submitsAt(ts("2026-09-01T15:05:00Z"), "0 0/5 * * * ?"))
+        assertNull(SchedulePlanner.submitsAt(ts("2026-09-01T15:02:00Z"), null), "a paused scan submits nothing")
     }
 
     @Test

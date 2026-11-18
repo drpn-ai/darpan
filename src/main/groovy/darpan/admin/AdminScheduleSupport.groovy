@@ -19,6 +19,9 @@ class AdminScheduleSupport {
 
     static final int DEFAULT_HORIZON_HOURS = 24
 
+    /** The ServiceJob whose cron decides when a due automation is submitted. */
+    static final String SCAN_JOB = "scan_ReconciliationAutomations_5m"
+
     /** Per-automation projection cap, so a PT1M schedule cannot flood the payload. */
     static final int MAX_FIRES_PER_AUTOMATION = 500
 
@@ -37,11 +40,12 @@ class AdminScheduleSupport {
                 .collect { toAutomationMap(it) }
                 .groupBy { it.isActive != "N" }
 
+        String scanCron = liveScanCron(ec)
         List<Map<String, Object>> fires = []
         (byActive[true] ?: []).each { Map automation ->
             SchedulePlanner.projectFireTimes(automation, now, to, MAX_FIRES_PER_AUTOMATION)
                     .each { Timestamp fireTime ->
-                        fires << fireEntry(automation, tenantLabels, fireTime)
+                        fires << fireEntry(automation, tenantLabels, fireTime, scanCron)
                     }
         }
         fires.sort { it.fireTime }
@@ -52,6 +56,8 @@ class AdminScheduleSupport {
         }.sort { it.automationName }
 
         return [generatedAt : now,
+                scanCron    : scanCron,
+                scanPaused  : scanCron == null,
                 horizonHours: hours,
                 inFlight    : inFlightExecutions(ec, tenantLabels, namesByAutomationId(byActive)),
                 inFlightCap : AutomationExecutionSupport.maxConcurrentExecutions(),
@@ -95,15 +101,16 @@ class AdminScheduleSupport {
      * where the scheduler actually sees a burst of three.
      */
     private static void stampTickConcurrency(List<Map<String, Object>> fires) {
-        Map<Timestamp, Integer> countsByTick = fires.countBy { it.submitsAt }
-        fires.each { Map<String, Object> fire -> fire.concurrentAtTick = countsByTick[fire.submitsAt] }
+        Map<Timestamp, Integer> countsByTick = fires.findAll { it.submitsAt != null }.countBy { it.submitsAt }
+        fires.each { Map<String, Object> fire -> fire.concurrentAtTick = fire.submitsAt == null ? null : countsByTick[fire.submitsAt] }
     }
 
-    private static Map<String, Object> fireEntry(Map automation, Map<String, String> tenantLabels, Timestamp fireTime) {
+    private static Map<String, Object> fireEntry(Map automation, Map<String, String> tenantLabels, Timestamp fireTime,
+                                                    String scanCron) {
         String tenantId = automation.companyUserGroupId
         return [
                 fireTime         : fireTime,
-                submitsAt        : SchedulePlanner.submitsAt(fireTime),
+                submitsAt        : SchedulePlanner.submitsAt(fireTime, scanCron),
                 automationId     : automation.automationId,
                 automationName   : automation.automationName,
                 tenantUserGroupId: tenantId,
@@ -111,6 +118,16 @@ class AdminScheduleSupport {
                 scheduleExpr     : automation.scheduleExpr,
                 windowTimeZone   : automation.windowTimeZone ?: "UTC",
         ]
+    }
+
+    /**
+     * The live cron of the job that submits due automations, read once per board; null when that job is paused or missing,
+     * because then nothing is submitted and no moment can be promised.
+     */
+    private static String liveScanCron(def ec) {
+        def job = ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", SCAN_JOB).useCache(false).one()
+        if (job == null || (job.get("paused") != null && job.get("paused") != "N")) return null
+        return job.get("cronExpression")?.toString()?.trim() ?: null
     }
 
     private static List allAutomations(def ec) {

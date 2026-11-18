@@ -15,7 +15,7 @@ Repo `darpan-docs` (commit b0c72a4).
 
 - SDL compared against: none: no schema change in 3.2.1; prod re-check after deploy.
 - SDL snapshot refreshed and pages regenerated: none: schema unchanged.
-- `graphql/changelog.mdx` entry: none: schema unchanged.
+- GraphQL changelog entry: none: schema unchanged.
 - Hand-written GraphQL pages: none: no GraphQL behaviour changed.
 
 ## Service catalog and public OpenAPI

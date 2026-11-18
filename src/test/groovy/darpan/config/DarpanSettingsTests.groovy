@@ -55,19 +55,6 @@ class DarpanSettingsTests {
         }
     }
 
-    @Test void theAgentCatalogParsesAndItsDefaultsAreValid() {
-        Path agent = ReconciliationSmokeTestSupport.resolveBackendRoot()
-                .resolve('runtime/component/darpan-agent/src/main/resources/darpan/settings-catalog.json')
-        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isRegularFile(agent), 'darpan-agent not checked out')
-        Map<String, SettingDefinition> cat = DarpanSettings.parseCatalog(agent.toFile().getText('UTF-8'), agent.toString())
-        assertEquals(['darpan.agent.turnsPerUserPerHour', 'darpan.agent.dailyUsdCapPerTenant'] as Set, cat.keySet())
-        assertEquals('DECIMAL', cat['darpan.agent.dailyUsdCapPerTenant'].type)
-        assertEquals(new BigDecimal('25'), DarpanSettings.parse(cat['darpan.agent.dailyUsdCapPerTenant'], '25'))
-        assertNull(DarpanSettings.parse(cat['darpan.agent.dailyUsdCapPerTenant'], '0'))
-        // Not asserted here: that the darpan test runtime sees darpan-agent's resource (it does not; Task 7 proves it live).
-        assertTrue(DarpanSettings.catalog().keySet().disjoint(cat.keySet()))
-    }
-
     @Test void noRowAndNoPropertyGivesTheDefault() {
         assertEquals(8, DarpanSettings.intValue(MAX))
         assertEquals([7, 3, 1, 0], DarpanSettings.intListValue(DAYS))

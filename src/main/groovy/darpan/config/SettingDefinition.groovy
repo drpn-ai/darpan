@@ -12,7 +12,7 @@ class SettingDefinition {
     /** INT, BOOLEAN, DECIMAL or INT_LIST. */
     String type
     String area
-    /** minutes, days, percent, count, runs, usd, factor or switch. */
+    /** minutes, days, percent, count, runs, usd, factor, switch, ms, tokens or chars. */
     String unit
     String description
     String defaultValue

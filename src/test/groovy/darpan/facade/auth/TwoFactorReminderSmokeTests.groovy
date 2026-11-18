@@ -53,6 +53,16 @@ class TwoFactorReminderSmokeTests extends TwoFactorTestSupport {
     private static Timestamp d(String iso) { Timestamp.from(Instant.parse(iso + "T15:00:00Z")) }
 
     @Test
+    @DisplayName("reminderDue: a shorter cadence from the settings")
+    void aShorterCadenceFromSettings() {
+        Timestamp dec2 = d("2026-12-02")
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-11-18"), d("2026-11-01"), [14, 0], 3), "14 days left")
+        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-11-25"), d("2026-11-18"), [14, 0], 3), "7 days left")
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-08"), d("2026-12-05"), [14, 0], 3), "3 days after the last")
+        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-12-07"), d("2026-12-05"), [14, 0], 3), "2 days after the last")
+    }
+
+    @Test
     @DisplayName("reminderDue: first, 7/3/1/0 days before, weekly after, never twice in a day")
     void reminderDueCadence() {
         Timestamp dec2 = d("2026-12-02")

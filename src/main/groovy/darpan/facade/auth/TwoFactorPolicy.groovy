@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
 import org.moqui.entity.EntityCondition
 
@@ -134,18 +135,18 @@ class TwoFactorPolicy {
     static final String REMINDER_SENT = "REMINDER_SENT"
 
     /**
-     * Whether today's reminder is due, in calendar days (UTC): never sent; or 7, 3, 1 or 0 days before the date; or the date
-     * has passed and a week has gone by since the last one. Never twice on one day. Pure.
+     * Whether today's reminder is due, in calendar days (UTC): never sent; or one of daysBefore (settings: 7, 3, 1, 0) days before the date; or the date
+     * has passed and repeatDays have gone by since the last one. Never twice on one day. Pure.
      */
-    static boolean reminderDue(Timestamp requiredFrom, Timestamp now, Timestamp lastSent) {
+    static boolean reminderDue(Timestamp requiredFrom, Timestamp now, Timestamp lastSent, List<Integer> daysBefore = [7, 3, 1, 0], int repeatDays = 7) {
         if (requiredFrom == null || now == null) return false
         if (lastSent == null) return true
         LocalDate today = now.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
         LocalDate last = lastSent.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
         if (!last.isBefore(today)) return false
         long daysLeft = ChronoUnit.DAYS.between(today, requiredFrom.toInstant().atZone(ZoneOffset.UTC).toLocalDate())
-        if (daysLeft < 0) return ChronoUnit.DAYS.between(last, today) >= 7
-        return daysLeft in [7L, 3L, 1L, 0L]
+        if (daysLeft < 0) return ChronoUnit.DAYS.between(last, today) >= repeatDays
+        return daysLeft in daysBefore.collect { it as long }
     }
 
     /**
@@ -158,6 +159,8 @@ class TwoFactorPolicy {
         // No dated policy: nobody is owed a reminder, so skip the member, factor and event reads.
         if (datedRoles(ec, false).isEmpty()) return 0
         List<String> covered = coveredPeople(ec, now)
+        List<Integer> daysBefore = DarpanSettings.intListValue('darpan.twoFactor.reminderDaysBefore')
+        int repeatDays = DarpanSettings.intValue('darpan.twoFactor.reminderRepeatDays')
         int sent = 0
         for (int i = 0; i < covered.size(); i += 500) {
             List<String> chunk = covered.subList(i, Math.min(i + 500, covered.size()))
@@ -173,7 +176,7 @@ class TwoFactorPolicy {
             for (String userId in chunk) {
                 if (userId in enrolled) continue
                 Timestamp from = requiredFrom(ec, userId)
-                if (from == null || !reminderDue(from, now, lastSent[userId])) continue
+                if (from == null || !reminderDue(from, now, lastSent[userId], daysBefore, repeatDays)) continue
                 def account = TwoFactorRecords.find(ec, "moqui.security.UserAccount", "self-scoped auth: the person a two-factor reminder goes to")
                         .condition("userId", userId).useCache(false).one()
                 if (!(account?.emailAddress as String)?.trim()) continue

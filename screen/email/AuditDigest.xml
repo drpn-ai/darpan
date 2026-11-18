@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-102 email body: the digest's text as it goes to chat, one block, escaped. Plain on purpose: no bold. -->
+<!-- DAR-BE-102 email body: the digest's text as it goes to chat, one block, escaped. Plain on purpose: no bold.
+     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
+    <actions>
+        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · AUDIT DIGEST')"/>
+        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+    </actions>
     <widgets>
-        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
-        <label text="${digestText}" type="pre"/>
-        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
+        <label text="${digestText}" type="pre" style="dp-pre"/>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
     </widgets>
 </screen>

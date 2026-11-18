@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-028 email body; copy voiced in DAR-BE-139 (Aditi: "it doesnt need to be so dry"). No bold, and no
-     links, because a link in a reset email is the phishing shape users should learn to distrust, and a code needs
-     none. The "not you" line stays plain: that is the security instruction. -->
+<!-- DAR-BE-028 email body; copy voiced in DAR-BE-139. No bold and no links (a link in a security email is the phishing shape). The not-you line stays plain: it is the security instruction.
+     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
+    <actions>
+        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · ACCOUNT')"/>
+        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+    </actions>
     <widgets>
-        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <section name="RecoveryAddressSide" condition="isOldAddress">
-            <widgets><container><label text="Hi ${firstName}, this inbox is no longer your spare key to Darpan. Password reset codes go to your new address from now on."/></container></widgets>
-            <fail-widgets><container><label text="Hi ${firstName}, done. This inbox is now your spare key to Darpan. Forget your password, and the reset code lands here."/></container></fail-widgets>
+            <widgets><container style="dp-p"><label text="Hi ${firstName}, this inbox is no longer your spare key to Darpan. Password reset codes go to your new address from now on."/></container></widgets>
+            <fail-widgets><container style="dp-p"><label text="Hi ${firstName}, done. This inbox is now your spare key to Darpan. Forget your password, and the reset code lands here."/></container></fail-widgets>
         </section>
-        <container><label text="Not you? Ignore this email and tell your administrator."/></container>
-        <container><label text="— Darpan"/></container>
-        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+        <container style="dp-note"><label text="Not you? Ignore this email and tell your administrator."/></container>
+        <container style="dp-sign"><label text="— Darpan"/></container>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
     </widgets>
 </screen>

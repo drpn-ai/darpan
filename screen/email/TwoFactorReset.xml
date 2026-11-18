@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-264 email body. No bold and no links (a link in a security email is the phishing shape). -->
+<!-- DAR-BE-264 email body. No bold and no links (a link in a security email is the phishing shape). The not-you line stays plain: it is the security instruction.
+     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
+    <actions>
+        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
+        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+    </actions>
     <widgets>
-        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
-        <container><label text="Hi ${firstName}, a Darpan administrator reset your two-factor on ${at}. Your authenticator app, passkeys and recovery codes no longer work."/></container>
-        <container><label text="Set two-factor up again at your next sign-in."/></container>
-        <container><label text="Not expecting this? Tell your Darpan administrator now."/></container>
-        <container><label text="— Darpan"/></container>
-        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
+        <container style="dp-p"><label text="Hi ${firstName}, fresh start: a Darpan administrator reset your two-factor on ${at}."/></container>
+        <container style="dp-p"><label text="Your authenticator app, passkeys and recovery codes have all retired. Darpan walks you through setting it up again at your next sign-in."/></container>
+        <container style="dp-note"><label text="Not expecting this? Tell your Darpan administrator now."/></container>
+        <container style="dp-sign"><label text="— Darpan"/></container>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
     </widgets>
 </screen>

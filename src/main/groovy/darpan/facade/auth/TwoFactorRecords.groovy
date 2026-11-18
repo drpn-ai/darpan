@@ -95,7 +95,7 @@ class TwoFactorRecords {
         if (!email) return
         try {
             PasswordResetSupport.sendEmail.call(ec, templateId, email,
-                    [firstName: PasswordResetSupport.firstName(account), at: ec.l10n.format(ec.user.nowTimestamp, null)] + params)
+                    [firstName: PasswordResetSupport.firstName(account), at: darpan.email.EmailFrame.when(ec.user.nowTimestamp, account.timeZone as String)] + params)
         } catch (Exception e) {
             logger.warn("Could not send two-factor notice {} to userId {}: {}", templateId, userId, e.message)
         }

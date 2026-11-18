@@ -1,5 +1,7 @@
 package darpan.audit
 
+import darpan.email.EmailFrame
+
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.time.format.TextStyle
@@ -17,10 +19,10 @@ import java.time.format.TextStyle
 class AuditRunMessage {
     /** Chat card colours (Google Chat renders these in its own UI). */
     static final String RED = "#b3261e", AMBER = "#9a6700", GREEN = "#1e7e34"
-    /** Email: darpan-ui light theme, --text, --text-soft, --text-muted, --text-dim, --border, --border-soft, --surface-2, --accent. */
-    private static final String INK = "#141414", SOFT = "#383838", MUTED = "#5f5f5f", DIM = "#7f7f7f",
-                                LINE = "#d4d4d4", LINE_SOFT = "#e1e1e1", TILE = "#f5f5f5", ACCENT = "#1c1c1c"
-    private static final String F = "font-family:'IBM Plex Mono',SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;"
+    /** Email: the theme every Darpan email shares (EmailFrame, DAR-BE-298). */
+    private static final String INK = EmailFrame.INK, SOFT = EmailFrame.SOFT, MUTED = EmailFrame.MUTED, DIM = EmailFrame.DIM,
+                                LINE = EmailFrame.LINE, LINE_SOFT = EmailFrame.LINE_SOFT, TILE = EmailFrame.TILE, ACCENT = EmailFrame.ACCENT
+    private static final String F = EmailFrame.F
     private static final String LINK = "color:${INK};text-decoration:underline;text-decoration-color:${LINE};text-underline-offset:3px;"
     private static final String NO_CAUSE = "No cause named yet"
 
@@ -116,7 +118,7 @@ class AuditRunMessage {
             String ruleUrl = reportUrl(base, facts, r.id as String)
             String link = ruleUrl ? " · <a href=\"${esc(ruleUrl)}\" style=\"${LINK}\">open ${esc(r.id)} in Darpan</a>" : ""
             blocks << "<div style=\"margin-top:20px;padding:16px 18px;border:1px solid ${LINE};border-radius:10px;\">" <<
-                    eyebrow("${esc(r.id)} · ${r.open} OPEN · ${r.newToday} NEW", 0) <<
+                    EmailFrame.eyebrow("${r.id} · ${r.open} OPEN · ${r.newToday} NEW", 0) <<
                     "<div style=\"${F}font-size:15px;line-height:1.45;letter-spacing:-.01em;color:${INK};margin:4px 0 10px;\">${esc(firstSentence(r.text as String))}</div>" <<
                     "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;\">${items}</table>" <<
                     "<div style=\"${F}font-size:12px;color:${MUTED};margin-top:10px;padding-top:10px;border-top:1px dashed ${LINE};\">All ${r.open} in ${esc(csvName(facts, r.id as String))}${link}</div></div>"
@@ -125,30 +127,22 @@ class AuditRunMessage {
         List<String> notRun = rulesNotRun(facts)
         String warn = notRun ? "<p style=\"${F}font-size:13px;line-height:1.5;color:${INK};margin:14px 0 0;padding:10px 12px;border:1px solid ${INK};border-radius:8px;\">" +
                 "${esc(notRun.join(', '))} did not run on this morning.</p>" : ""
-        String actSection = act ? eyebrow("ACT ON FIRST", 28) +
+        String actSection = act ? EmailFrame.eyebrow("ACT ON FIRST", 28) +
                 "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin-top:8px;border-collapse:collapse;\">${act}</table>" : ""
         String button = url ? "<div style=\"margin-top:28px;\"><a href=\"${esc(url)}\" style=\"${F}display:inline-block;background:${ACCENT};color:#ffffff;" +
                 "border:1px solid ${ACCENT};font-size:13px;padding:11px 20px;border-radius:8px;text-decoration:none;\">Open the report in Darpan</a></div>" : ""
-        return """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&amp;display=swap" rel="stylesheet">
-<title>${esc(subject(facts))}</title></head>
-<body style="margin:0;background:${TILE};">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${TILE};padding:28px 12px;"><tr><td align="center">
-<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid ${LINE};border-radius:10px;"><tr><td style="padding:28px 28px 30px;">
-${eyebrow("DARPAN · AUDIT", 0)}
-<div style="${F}font-size:20px;line-height:1.35;letter-spacing:-.015em;color:${INK};margin-top:8px;">${esc(title(facts))}</div>
+        return """${EmailFrame.open("DARPAN · AUDIT", subject(facts), true)}<div style="${F}font-size:20px;line-height:1.35;letter-spacing:-.015em;color:${INK};">${esc(title(facts))}</div>
 <div style="${F}font-size:13px;color:${MUTED};margin-top:4px;">${esc(subtitle(facts))}</div>
 ${headline}${warn}
 <table role="presentation" cellpadding="0" cellspacing="8" style="width:100%;margin:18px -8px 0;border-collapse:separate;"><tr>
 ${tile("Open", t.open, true)}${tile("New", t.newToday, false)}${tile("Fixed", t.fixedToday, false)}</tr></table>
 ${actSection}
-${eyebrow("RULES", 28)}
+${EmailFrame.eyebrow("RULES", 28)}
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-top:8px;border-collapse:collapse;">${rows}</table>
 ${blocks}
 ${button}
 <p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns).</p>
-</td></tr></table></td></tr></table></body></html>""".toString()
+${EmailFrame.close()}""".toString()
     }
 
     /** The plain-text part: the same content, line by line. */
@@ -229,10 +223,6 @@ ${button}
                 "<div style=\"${F}font-size:26px;line-height:1.2;letter-spacing:-.015em;color:${empty ? DIM : INK};margin-top:4px;\">${value}</div></td>"
     }
 
-    /** The app's eyebrow label: small, muted, widely tracked caps. */
-    private static String eyebrow(String text, int marginTop) {
-        return "<div style=\"${F}font-size:11px;color:${MUTED};letter-spacing:.13em;text-transform:uppercase;margin-top:${marginTop}px;\">${text}</div>"
-    }
 
     private static String enc(String value) { return URLEncoder.encode(value ?: "", "UTF-8") }
 

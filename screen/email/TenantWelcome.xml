@@ -1,18 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-290 email body; copy approved by Aditi 2026-11-14 ("plain + warm"). No bold. The sign-in address is plain
-     text, not a link, like the other Darpan mail. Never a password: a new user's temporary password reaches the admin. -->
+<!-- DAR-BE-290 email body; copy approved by Aditi 2026-11-14 ("plain + warm"). No bold. The sign-in address is plain text, not a link. Never a password: a new user's temporary password reaches the admin.
+     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
+    <actions>
+        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · WELCOME')"/>
+        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+    </actions>
     <widgets>
-        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
-        <container><label text="Hi ${firstName},"/></container>
-        <container><label text="You now have access to ${tenantLabel} on Darpan, ${rolePhrase}."/></container>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
+        <container style="dp-p"><label text="Hi ${firstName},"/></container>
+        <container style="dp-p"><label text="You now have access to ${tenantLabel} on Darpan, ${rolePhrase}."/></container>
         <section name="SignInWhere" condition="appBaseUrl">
-            <widgets><container><label text="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></widgets>
-            <fail-widgets><container><label text="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></fail-widgets>
+            <widgets><container style="dp-p"><label text="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></widgets>
+            <fail-widgets><container style="dp-p"><label text="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></fail-widgets>
         </section>
-        <container><label text="Questions? Just reply. A person reads this inbox."/></container>
-        <container><label text="— Darpan"/></container>
-        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+        <container style="dp-note"><label text="Questions? Just reply. A person reads this inbox."/></container>
+        <container style="dp-sign"><label text="— Darpan"/></container>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
     </widgets>
 </screen>

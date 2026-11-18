@@ -170,7 +170,7 @@ class PasswordResetSupport {
             // clears the code lock: the password an attacker held is now dead.
             TwoFactorSupport.clearCodeLock(ec, userId)
             sendEmail(ec, TEMPLATE_PASSWORD_CHANGED, (String) account.emailAddress,
-                    [firstName: firstName(account), changedAt: ec.l10n.format(now, null)])
+                    [firstName: firstName(account), changedAt: darpan.email.EmailFrame.when(now, account.timeZone as String)])
             logger.info("Password reset completed for {}", logSubject(account))
             return [passwordUpdated: true] + FacadeSupport.envelope(ec)
         }

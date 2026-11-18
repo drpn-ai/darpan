@@ -19,7 +19,7 @@
             description="Can view, run, create, update, and delete data for associated tenants"
             groupTypeEnumId="UgtDarpanPermission"/>
     <moqui.security.UserGroup userGroupId="DARPAN_TENANT_USER"
-            description="Can view tenant pages, upload files, and run reconciliation for associated tenants"
+            description="Can view tenant pages, upload files, run audits, saved runs and reconciliations, resolve findings, and add, edit or delete connections for associated tenants"
             groupTypeEnumId="UgtDarpanPermission"/>
     <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_EDITOR"
             description="Can create, update, run, and delete tenant-scoped Darpan data"

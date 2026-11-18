@@ -782,7 +782,7 @@ class SavedRunsFacadeSmokeTests {
     // DAR-BE-292 (Aditi's permissions sheet): running a saved run is the run tier's, so a tenant user runs one too.
     @Test
     void tenantUserCanRunSavedRuns() {
-        seedPermissionGroup(TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID, "Can view tenant pages, upload files, and run reconciliation")
+        seedPermissionGroup(TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID, "Can view tenant pages, upload files, run audits, saved runs and reconciliations, resolve findings, and add, edit or delete connections for associated tenants")
         replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID)
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
 

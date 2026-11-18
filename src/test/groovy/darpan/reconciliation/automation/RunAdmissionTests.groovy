@@ -199,4 +199,56 @@ class RunAdmissionTests {
         RunAdmission admission = admission(new HandExecutor(), 3, 10)
         assertEquals(3, admission.snapshot().perTenantCap)
     }
+
+    /** Review Focus 3 (DAR-BE-304): a super admin lowers the cap while runs are going; they are never touched. */
+    @Test
+    void loweringTheCapMidFlightOnlyHoldsNewStarts() {
+        HandExecutor executor = new HandExecutor()
+        int cap = 3
+        RunAdmission admission = new RunAdmission({ -> cap }, { -> 5 }, { -> 85 }, { -> null }, executor, { -> 50 })
+        ["a1", "a2", "a3"].each { admission.submit("A", it, work(it)) }
+        assertEquals(3, executor.started.size())
+
+        cap = 1
+        assertEquals(3, admission.snapshot().running)
+        assertEquals(1, admission.snapshot().cap)
+        Map fourth = admission.submit("A", "a4", work("a4"))
+        assertEquals(true, fourth.queued)
+
+        executor.finish(0)
+        assertEquals(3, executor.started.size(), "two still running, above the new cap of 1: the 4th keeps waiting")
+        executor.finish(1)
+        assertEquals(3, executor.started.size(), "one running is at the cap of 1: still waiting")
+        executor.finish(2)
+        assertEquals(4, executor.started.size(), "nothing running: the 4th starts")
+        assertEquals(["a1", "a2", "a3"], log)
+    }
+
+    @Test
+    void raisingTheCapStartsWaitingRunsAtTheNextDrain() {
+        HandExecutor executor = new HandExecutor()
+        int cap = 1
+        RunAdmission admission = new RunAdmission({ -> cap }, { -> 5 }, { -> 85 }, { -> null }, executor, { -> 50 })
+        admission.submit("A", "a1", work("a1"))
+        admission.submit("A", "a2", work("a2"))
+        admission.submit("A", "a3", work("a3"))
+        assertEquals(1, executor.started.size())
+
+        cap = 3
+        admission.drain()
+        assertEquals(3, executor.started.size())
+    }
+
+    @Test
+    void snapshotReportsTheLiveCaps() {
+        int cap = 4, perTenant = 2, holdAt = 90, maxWaiting = 7
+        RunAdmission admission = new RunAdmission({ -> cap }, { -> perTenant }, { -> holdAt }, { -> null },
+                new HandExecutor(), { -> maxWaiting })
+        Map first = admission.snapshot()
+        assertEquals([4, 2, 90, 7], [first.cap, first.perTenantCap, first.holdAtHeapPercent, first.maxWaitingPerTenant])
+        cap = 1; perTenant = 9; holdAt = 70; maxWaiting = 3
+        Map second = admission.snapshot()
+        assertEquals([1, 1, 70, 3], [second.cap, second.perTenantCap, second.holdAtHeapPercent, second.maxWaitingPerTenant],
+                "the per-tenant share never exceeds the live instance cap")
+    }
 }

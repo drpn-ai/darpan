@@ -56,7 +56,7 @@ class AdminLiveOperationsSupport {
         }
         Map<String, Object> system = guarded("system", unavailable, null) { systemReader.call(ec) }
 
-        int cap = AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS
+        int cap = AutomationExecutionSupport.maxConcurrentExecutions()
         List<Map> warnings = LiveOperationsRules.runWarnings(running) +
                 // DAR-ADMIN-009: a failure a later success of the same run superseded is history, not a warning.
                 LiveOperationsRules.failureWarnings(failures.findAll { it.recoveredAt == null }, FAILURE_WINDOW_HOURS) +

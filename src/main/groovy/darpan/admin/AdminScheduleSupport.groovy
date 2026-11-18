@@ -54,7 +54,7 @@ class AdminScheduleSupport {
         return [generatedAt : now,
                 horizonHours: hours,
                 inFlight    : inFlightExecutions(ec, tenantLabels, namesByAutomationId(byActive)),
-                inFlightCap : AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS,
+                inFlightCap : AutomationExecutionSupport.maxConcurrentExecutions(),
                 fires       : fires,
                 paused      : paused]
     }

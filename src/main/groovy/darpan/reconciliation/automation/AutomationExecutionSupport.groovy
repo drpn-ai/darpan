@@ -3,6 +3,7 @@ package darpan.reconciliation.automation
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 
 import darpan.audit.AuditAutomationSupport
+import darpan.config.DarpanSettings
 import darpan.audit.AuditRecheckSupport
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
@@ -64,20 +65,20 @@ class AutomationExecutionSupport {
     // scan" and "concurrent at all" were the same number. The scan is fire-and-forget now, so the bound
     // is measured against executions already RUNNING; a tick that would exceed it defers the remaining
     // due automations to the next tick rather than stampeding Moqui's worker pool (bounded at 32+
-    // threads, far above the Spark concurrency this cap exists to allow). Override via the system
-    // property for tenants with heavier scheduler/Spark capacity.
+    // threads, far above the Spark concurrency this cap exists to allow). A super admin edits it in the admin
+    // app Settings (darpan.reconciliation.automation.maxConcurrentExecutions) for tenants with heavier capacity.
     // DAR-BE-143: 4 -> 8, with each tenant held to 5 of them (RunAdmission), so a second tenant's audit runs beside the
     // first (gorjana's play already ran its 5 automations at once, unbounded); play now counts against it too.
-    static final int MAX_CONCURRENT_EXECUTIONS =
-            (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "8").isInteger() ?
-                    (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "8").toInteger() : 8
+    static int maxConcurrentExecutions() {
+        return DarpanSettings.intValue("darpan.reconciliation.automation.maxConcurrentExecutions")
+    }
     // Security (HIGH gap 2, reworked 2026-06-30): hard DoS sanity ceiling on the resolved window span,
     // SEPARATE from the per-automation `maxWindowDays` operational default (entity default=28). This
     // ceiling exists only to stop the 1970->9999 (~2.9M-day) explosion; it must never reject a real
-    // window, so it is deliberately huge (10 years). Operators can tune it via the system property.
-    static final int MAX_WINDOW_SPAN_DAYS =
-            (System.getProperty("darpan.reconciliation.automation.maxWindowSpanDays") ?: "3660").isInteger() ?
-                    Math.max(1, (System.getProperty("darpan.reconciliation.automation.maxWindowSpanDays") ?: "3660").toInteger()) : 3660
+    // window, so it is deliberately huge (10 years). Tunable in the admin app Settings (maxWindowSpanDays).
+    static int maxWindowSpanDays() {
+        return DarpanSettings.intValue("darpan.reconciliation.automation.maxWindowSpanDays")
+    }
     /**
      * Fallback for {@code ReconciliationAutomation.splitWindowDays} when the row carries no usable
      * value, kept equal to that field's entity default (entity/ReconciliationEntities.xml). A window
@@ -132,9 +133,9 @@ class AutomationExecutionSupport {
      * nothing to time out against. The 60s ceiling belongs to the request path and was fixed
      * 2026-08-05.
      *
-     * A system property rather than an entity field on purpose: a kill switch must be flippable on a
+     * A setting (admin app Settings, or the system property of the same name) rather than an entity field on purpose: a kill switch must be flippable on a
      * sick instance without an entity migration, a contract regeneration and a UI change (the same
-     * reason maxRetryCount and the retry backoffs are properties here). It is deliberately NOT
+     * reason maxRetryCount and the retry backoffs are settings here). It is deliberately NOT
      * per-tenant or per-automation configuration — "which automations tell the truth" is not a
      * setting anyone should be able to hold wrong.
      *
@@ -145,12 +146,15 @@ class AutomationExecutionSupport {
      */
     static final String VERIFY_MISSING_DIFFS_PROPERTY = "darpan.reconciliation.automation.verifyMissingDiffs"
 
-    static final int MAX_RETRY_COUNT_DEFAULT =
-            Math.max(0, (System.getProperty("darpan.reconciliation.automation.maxRetryCount") ?: "3").toInteger())
-    static final long RETRY_BACKOFF_BASE_MINUTES =
-            Math.max(1L, (System.getProperty("darpan.reconciliation.automation.retryBackoffBaseMinutes") ?: "5").toLong())
-    static final long RETRY_BACKOFF_CAP_MINUTES =
-            Math.max(RETRY_BACKOFF_BASE_MINUTES, (System.getProperty("darpan.reconciliation.automation.retryBackoffCapMinutes") ?: "60").toLong())
+    static int defaultMaxRetryCount() {
+        return DarpanSettings.intValue("darpan.reconciliation.automation.maxRetryCount")
+    }
+    static long retryBackoffBaseMinutes() {
+        return DarpanSettings.intValue("darpan.reconciliation.automation.retryBackoffBaseMinutes")
+    }
+    static long retryBackoffCapMinutes() {
+        return Math.max(retryBackoffBaseMinutes(), (long) DarpanSettings.intValue("darpan.reconciliation.automation.retryBackoffCapMinutes"))
+    }
     // Lower-cased substrings that mark a failure as permanent (config/fence/validation) — a retry cannot
     // fix these, so they go straight to FAILED instead of being requeued.
     private static final List<String> PERMANENT_FAILURE_MARKERS = [
@@ -384,7 +388,7 @@ class AutomationExecutionSupport {
      * when switched off (as the test tasks do).
      */
     static boolean parallelSourceExtractsOn() {
-        return !"false".equalsIgnoreCase(System.getProperty(PARALLEL_SOURCE_EXTRACTS_PROPERTY) ?: "true")
+        return DarpanSettings.booleanValue(PARALLEL_SOURCE_EXTRACTS_PROPERTY)
     }
 
     protected static Future<Map<String, Object>> startParallelSourceExtract(def ec, def automation, def source,
@@ -1112,7 +1116,7 @@ class AutomationExecutionSupport {
         int capDeferredCount = deferredResults.count { Map<String, Object> entry -> !entry.containsKey("submitResult") } as int
         if (capDeferredCount > 0) {
             logger.warn("Automation scan deferred {} due automation(s) to the next tick: {} execution(s) already in flight (cap {}), admission {}",
-                    capDeferredCount, inFlightCount, MAX_CONCURRENT_EXECUTIONS, runAdmission.snapshot())
+                    capDeferredCount, inFlightCount, maxConcurrentExecutions(), runAdmission.snapshot())
         }
 
         return [
@@ -1127,12 +1131,12 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * How many more executions this tick may enqueue: {@link #MAX_CONCURRENT_EXECUTIONS} minus the
+     * How many more executions this tick may enqueue: {@link #maxConcurrentExecutions} minus the
      * executions already RUNNING. Stale RUNNING rows (crashed JVM, killed container) cannot wedge the
      * scheduler forever — sweep#StuckReconciliationRuns reaps them to FAILED on its own 10-minute cron.
      */
     protected static int remainingSubmissionBudget(int inFlightCount) {
-        int cap = MAX_CONCURRENT_EXECUTIONS > 0 ? MAX_CONCURRENT_EXECUTIONS : 1
+        int cap = Math.max(1, maxConcurrentExecutions())
         return Math.max(0, cap - inFlightCount)
     }
 
@@ -1255,7 +1259,7 @@ class AutomationExecutionSupport {
 
     protected static int resolveMaxRetryCount(def execution) {
         Integer configured = normalizeInt(readField(execution, "maxRetryCount"))
-        return configured != null ? configured : MAX_RETRY_COUNT_DEFAULT
+        return configured != null ? configured : defaultMaxRetryCount()
     }
 
     /**
@@ -1380,7 +1384,7 @@ class AutomationExecutionSupport {
      * exactly the silent disagreement between the two run paths that flipping the default ends.</p>
      */
     static boolean isMissingDiffVerificationEnabled() {
-        return !"false".equalsIgnoreCase(System.getProperty(VERIFY_MISSING_DIFFS_PROPERTY) ?: "true")
+        return DarpanSettings.booleanValue(VERIFY_MISSING_DIFFS_PROPERTY)
     }
 
     /**
@@ -1740,7 +1744,7 @@ class AutomationExecutionSupport {
     protected static long retryBackoffMillis(int attempt) {
         int a = Math.max(1, attempt)
         int shift = Math.min(a - 1, 20)
-        long minutes = Math.min(RETRY_BACKOFF_BASE_MINUTES * (1L << shift), RETRY_BACKOFF_CAP_MINUTES)
+        long minutes = Math.min(retryBackoffBaseMinutes() * (1L << shift), retryBackoffCapMinutes())
         return minutes * 60_000L
     }
 
@@ -1842,11 +1846,12 @@ class AutomationExecutionSupport {
         // (WINDOW_PREVIOUS_MONTH / LAST_MONTHS=1 on a 30/31-day month, ordinary CUSTOM month ranges)
         // exceeds 28 and would be wrongly refused. The DoS guard must NEVER reject a legitimate window,
         // so it uses a separate, deliberately huge sanity ceiling (10 years) that only the attack
-        // pathological ranges can breach. Operators can tune it via the server property below.
+        // pathological ranges can breach. Operators can tune it in the admin app Settings (maxWindowSpanDays).
         long __spanDays = ChronoUnit.DAYS.between(windowStart, windowEnd)
-        if (__spanDays > MAX_WINDOW_SPAN_DAYS) {
+        int __maxSpanDays = maxWindowSpanDays()
+        if (__spanDays > __maxSpanDays) {
             throw new IllegalArgumentException(
-                    "Automation window span (${__spanDays} days) exceeds the maximum of ${MAX_WINDOW_SPAN_DAYS} days.")
+                    "Automation window span (${__spanDays} days) exceeds the maximum of ${__maxSpanDays} days.")
         }
 
         Timestamp parentStart = Timestamp.from(windowStart.toInstant())

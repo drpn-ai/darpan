@@ -171,7 +171,7 @@ class AdminLiveOperationsSupportTests {
         assertNull(live.system)
         assertEquals(["system"], live.unavailable*.source)
         assertEquals("no MXBean", live.unavailable[0].reason)
-        assertEquals(AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS, live.slots.cap)
+        assertEquals(AutomationExecutionSupport.maxConcurrentExecutions(), live.slots.cap)
     }
 
     @Test

@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.admin.SystemLoadReader
+import darpan.config.DarpanSettings
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -36,17 +37,17 @@ class RunAdmission {
 
     private static final Logger logger = LoggerFactory.getLogger(RunAdmission)
 
-    static final String PER_TENANT_PROPERTY = "darpan.reconciliation.automation.maxConcurrentExecutionsPerTenant"
-    static final String HOLD_HEAP_PROPERTY = "darpan.reconciliation.automation.holdAtHeapPercent"
-    static final String MAX_WAITING_PROPERTY = "darpan.reconciliation.automation.maxWaitingPerTenant"
-    static final int DEFAULT_PER_TENANT = 5
-    static final int DEFAULT_HOLD_AT_HEAP_PERCENT = 85
-    static final int DEFAULT_MAX_WAITING_PER_TENANT = 50
+    // Every number below is a setting (admin app Settings, DAR-BE-304), read afresh at each decision: an edit takes
+    // effect within 30 s with no restart. Lowering the cap never stops a running run; new starts wait for room.
+    private static final String CAP_KEY = "darpan.reconciliation.automation.maxConcurrentExecutions"
+    private static final String PER_TENANT_KEY = "darpan.reconciliation.automation.maxConcurrentExecutionsPerTenant"
+    private static final String HOLD_HEAP_KEY = "darpan.reconciliation.automation.holdAtHeapPercent"
+    private static final String MAX_WAITING_KEY = "darpan.reconciliation.automation.maxWaitingPerTenant"
 
-    static final RunAdmission SHARED = new RunAdmission(AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS,
-            intProperty(PER_TENANT_PROPERTY, DEFAULT_PER_TENANT), intProperty(HOLD_HEAP_PROPERTY, DEFAULT_HOLD_AT_HEAP_PERCENT),
-            { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
-            intProperty(MAX_WAITING_PROPERTY, DEFAULT_MAX_WAITING_PER_TENANT))
+    static final RunAdmission SHARED = new RunAdmission(
+            { -> DarpanSettings.intValue(CAP_KEY) }, { -> DarpanSettings.intValue(PER_TENANT_KEY) },
+            { -> DarpanSettings.intValue(HOLD_HEAP_KEY) }, { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
+            { -> DarpanSettings.intValue(MAX_WAITING_KEY) })
 
     private static class Waiting {
         String tenantId
@@ -56,12 +57,12 @@ class RunAdmission {
         String error
     }
 
-    private final int cap
-    private final int perTenantCap
-    private final int holdAtHeapPercent
+    private final Closure<Integer> capSupplier
+    private final Closure<Integer> perTenantCapSupplier
+    private final Closure<Integer> holdAtHeapPercentSupplier
     private final Closure<Integer> heapPercent
     private final Executor executor
-    private final int maxWaitingPerTenant
+    private final Closure<Integer> maxWaitingPerTenantSupplier
     /** Waiting runs per tenant, tenants in the order they first waited. */
     private final LinkedHashMap<String, ArrayDeque<Waiting>> waiting = new LinkedHashMap<>()
     private final Map<String, Integer> runningByTenant = [:]
@@ -70,15 +71,30 @@ class RunAdmission {
     private int running = 0
     private String lastStarted = null
 
-    RunAdmission(int cap, int perTenantCap, int holdAtHeapPercent, Closure<Integer> heapPercent, Executor executor,
-                 int maxWaitingPerTenant = DEFAULT_MAX_WAITING_PER_TENANT) {
-        this.cap = Math.max(1, cap)
-        this.perTenantCap = Math.max(1, Math.min(perTenantCap, this.cap))
-        this.holdAtHeapPercent = holdAtHeapPercent
+    RunAdmission(Closure<Integer> cap, Closure<Integer> perTenantCap, Closure<Integer> holdAtHeapPercent,
+                 Closure<Integer> heapPercent, Executor executor, Closure<Integer> maxWaitingPerTenant) {
+        this.capSupplier = cap
+        this.perTenantCapSupplier = perTenantCap
+        this.holdAtHeapPercentSupplier = holdAtHeapPercent
         this.heapPercent = heapPercent
         this.executor = executor
-        this.maxWaitingPerTenant = Math.max(1, maxWaitingPerTenant)
+        this.maxWaitingPerTenantSupplier = maxWaitingPerTenant
     }
+
+    /** Fixed numbers, for tests; the waiting limit is the setting. */
+    RunAdmission(int cap, int perTenantCap, int holdAtHeapPercent, Closure<Integer> heapPercent, Executor executor) {
+        this({ -> cap }, { -> perTenantCap }, { -> holdAtHeapPercent }, heapPercent, executor,
+                { -> DarpanSettings.intValue(MAX_WAITING_KEY) })
+    }
+
+    RunAdmission(int cap, int perTenantCap, int holdAtHeapPercent, Closure<Integer> heapPercent, Executor executor,
+                 int maxWaitingPerTenant) {
+        this({ -> cap }, { -> perTenantCap }, { -> holdAtHeapPercent }, heapPercent, executor, { -> maxWaitingPerTenant })
+    }
+
+    private int cap() { return Math.max(1, capSupplier.call()) }
+    private int perTenantCap(int cap) { return Math.max(1, Math.min(perTenantCapSupplier.call(), cap)) }
+    private int maxWaiting() { return Math.max(1, maxWaitingPerTenantSupplier.call()) }
 
     /**
      * Starts the work now, or keeps it waiting for a slot. Answers submitted (false only when the start was refused),
@@ -87,7 +103,7 @@ class RunAdmission {
     synchronized Map<String, Object> submit(String tenantId, String label, Runnable work) {
         Waiting entry = new Waiting(tenantId: tenantKey(tenantId), label: label, work: work)
         int alreadyWaiting = waiting[entry.tenantId]?.size() ?: 0
-        if (alreadyWaiting >= maxWaitingPerTenant) {
+        if (alreadyWaiting >= maxWaiting()) {
             return [submitted: false, queued: false, error: ("This tenant already has ${alreadyWaiting} runs waiting for a slot; " +
                     "try again once some have started.").toString()]
         }
@@ -108,12 +124,13 @@ class RunAdmission {
     synchronized boolean canStartNow(String tenantId) {
         String key = tenantKey(tenantId)
         int tenantLoad = (runningByTenant[key] ?: 0) + (waiting[key]?.size() ?: 0)
-        return running < cap && tenantLoad < perTenantCap && !held()
+        int cap = cap()
+        return running < cap && tenantLoad < perTenantCap(cap) && !held()
     }
 
     /** Starts every waiting run there is room for, tenants in turn. Called on submit, on finish, and by each scan tick. */
     synchronized void drain() {
-        while (running < cap && !held()) {
+        while (running < cap() && !held()) {
             Waiting next = nextEligible()
             if (next == null) return
             start(next)
@@ -126,8 +143,9 @@ class RunAdmission {
         Map<String, Map<String, Integer>> byTenant = tenants.collectEntries { String t ->
             [(t): [running: runningByTenant[t] ?: 0, queued: waiting[t]?.size() ?: 0]]
         }
-        return [running      : running, queued: waitingTotal(), cap: cap, perTenantCap: perTenantCap,
-                holdAtHeapPercent: holdAtHeapPercent, maxWaitingPerTenant: maxWaitingPerTenant, heldForMemory: running > 0 && heapAtOrAbove(), byTenant: byTenant]
+        int cap = cap()
+        return [running      : running, queued: waitingTotal(), cap: cap, perTenantCap: perTenantCap(cap),
+                holdAtHeapPercent: holdAtHeapPercentSupplier.call(), maxWaitingPerTenant: maxWaiting(), heldForMemory: running > 0 && heapAtOrAbove(), byTenant: byTenant]
     }
 
     /**
@@ -143,6 +161,7 @@ class RunAdmission {
     private Waiting nextEligible() {
         List<String> tenants = new ArrayList<String>(waiting.keySet())
         if (!tenants) return null
+        int perTenantCap = perTenantCap(cap())
         int after = lastStarted != null ? tenants.indexOf(lastStarted) : -1
         for (int i = 1; i <= tenants.size(); i++) {
             String tenant = tenants[(after + i) % tenants.size()]
@@ -198,17 +217,12 @@ class RunAdmission {
     private boolean heapAtOrAbove() {
         Integer percent
         try { percent = heapPercent.call() } catch (Throwable ignored) { percent = null }
-        return percent != null && percent >= holdAtHeapPercent
+        return percent != null && percent >= holdAtHeapPercentSupplier.call()
     }
 
     private int waitingTotal() { return (int) (waiting.values().sum { it.size() } ?: 0) }
 
     private static String tenantKey(String tenantId) { return tenantId ?: "_none" }
-
-    private static int intProperty(String name, int fallback) {
-        String value = System.getProperty(name)
-        return value?.isInteger() ? value.toInteger() : fallback
-    }
 
     private static Executor runPool() {
         AtomicInteger count = new AtomicInteger()

@@ -262,7 +262,7 @@ class AutomationExecutionSupportTests {
             ])
             throw new AssertionError("Expected IllegalArgumentException for a multi-million-day window span")
         } catch (IllegalArgumentException expected) {
-            assertTrue(expected.message.contains("exceeds the maximum of ${AutomationExecutionSupport.MAX_WINDOW_SPAN_DAYS}"),
+            assertTrue(expected.message.contains("exceeds the maximum of ${AutomationExecutionSupport.maxWindowSpanDays()}"),
                     "Unexpected message: ${expected.message}")
         }
     }
@@ -2585,7 +2585,7 @@ class AutomationExecutionSupportTests {
         // the scan counts RUNNING executions and defers rather than stampeding the driver.
         FakeEc ec = fakeEc()
         addDueAutomation(ec, "AUTO_DEFERRED", timestamp("2026-05-01T09:00:00Z"))
-        (1..AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS).each { int index ->
+        (1..AutomationExecutionSupport.maxConcurrentExecutions()).each { int index ->
             ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
                     automationExecutionId: "EXEC_INFLIGHT_${index}".toString(),
                     automationId         : "AUTO_OTHER_${index}".toString(),
@@ -2639,7 +2639,7 @@ class AutomationExecutionSupportTests {
         // next 5-minute tick picks the same window up.
         FakeEc ec = fakeEc()
         addDueAutomation(ec, "AUTO_DEFERRED", timestamp("2026-05-01T09:00:00Z"))
-        List<FakeValue> inFlight = (1..AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS).collect { int index ->
+        List<FakeValue> inFlight = (1..AutomationExecutionSupport.maxConcurrentExecutions()).collect { int index ->
             ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
                     automationExecutionId: "EXEC_INFLIGHT_${index}".toString(),
                     automationId         : "AUTO_OTHER_${index}".toString(),

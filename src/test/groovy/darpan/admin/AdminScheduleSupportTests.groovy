@@ -112,7 +112,7 @@ class AdminScheduleSupportTests {
 
         assertEquals([ts("2026-09-01T15:05:00Z")] * 3, board.fires*.submitsAt)
         assertEquals([3, 3, 3], board.fires*.concurrentAtTick)
-        assertEquals(AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS, board.inFlightCap)  // DAR-BE-143 raised it 4 -> 8
+        assertEquals(AutomationExecutionSupport.maxConcurrentExecutions(), board.inFlightCap)  // DAR-BE-143 raised it 4 -> 8
     }
 
     @Test

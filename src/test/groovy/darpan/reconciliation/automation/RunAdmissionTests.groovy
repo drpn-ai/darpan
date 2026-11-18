@@ -251,4 +251,40 @@ class RunAdmissionTests {
         assertEquals([1, 1, 70, 3], [second.cap, second.perTenantCap, second.holdAtHeapPercent, second.maxWaitingPerTenant],
                 "the per-tenant share never exceeds the live instance cap")
     }
+
+    /** A slow settings reload (the 30-second refresh hits the database) must not hold the admission lock. */
+    @Test
+    void aBlockedSettingsReadDoesNotBlockOtherCallers() {
+        HandExecutor executor = new HandExecutor()
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1)
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1)
+        boolean blockReader = false
+        RunAdmission admission = new RunAdmission({ ->
+            if (blockReader && Thread.currentThread().name == "slow-reader") { entered.countDown(); release.await() }
+            return 4
+        }, { -> 4 }, { -> 85 }, { -> null }, executor, { -> 50 })
+        admission.submit("A", "a1", work("a1"))
+        blockReader = true
+
+        Thread reader = new Thread({ -> admission.submit("B", "b1", work("b1")) } as Runnable, "slow-reader")
+        reader.daemon = true
+        reader.start()
+        try {
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "the reader reached the settings read")
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {
+                assertEquals(1, pool.submit({ -> admission.snapshot().running } as java.util.concurrent.Callable<Integer>)
+                        .get(3, java.util.concurrent.TimeUnit.SECONDS))
+                assertTrue(pool.submit({ -> admission.busy("a1") } as java.util.concurrent.Callable<Boolean>)
+                        .get(3, java.util.concurrent.TimeUnit.SECONDS))
+                pool.submit({ -> executor.finish(0) } as Runnable).get(3, java.util.concurrent.TimeUnit.SECONDS)
+            } finally {
+                pool.shutdownNow()
+            }
+        } finally {
+            release.countDown()
+            reader.join(5000)
+        }
+        assertEquals(2, executor.started.size(), "the blocked submit started once its read returned")
+    }
 }

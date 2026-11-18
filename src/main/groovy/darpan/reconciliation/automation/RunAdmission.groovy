@@ -92,23 +92,46 @@ class RunAdmission {
         this({ -> cap }, { -> perTenantCap }, { -> holdAtHeapPercent }, heapPercent, executor, { -> maxWaitingPerTenant })
     }
 
-    private int cap() { return Math.max(1, capSupplier.call()) }
-    private int perTenantCap(int cap) { return Math.max(1, Math.min(perTenantCapSupplier.call(), cap)) }
-    private int maxWaiting() { return Math.max(1, maxWaitingPerTenantSupplier.call()) }
+    /** One consistent set of limits for one decision. */
+    private static final class Limits {
+        final int cap
+        final int perTenantCap
+        final int holdAtHeapPercent
+        final int maxWaiting
+        Limits(int cap, int perTenantCap, int holdAtHeapPercent, int maxWaiting) {
+            this.cap = cap; this.perTenantCap = perTenantCap
+            this.holdAtHeapPercent = holdAtHeapPercent; this.maxWaiting = maxWaiting
+        }
+    }
+
+    /**
+     * Reads the settings. Always called BEFORE taking this lock: the first read after the 30-second expiry reloads from
+     * the database, and a slow database must not stall submit, drain, snapshot or a finishing run's release.
+     */
+    private Limits limits() {
+        int cap = Math.max(1, capSupplier.call())
+        return new Limits(cap, Math.max(1, Math.min(perTenantCapSupplier.call(), cap)), holdAtHeapPercentSupplier.call(),
+                Math.max(1, maxWaitingPerTenantSupplier.call()))
+    }
 
     /**
      * Starts the work now, or keeps it waiting for a slot. Answers submitted (false only when the start was refused),
      * queued and, when queued, position (1 = next of the instance's waiting runs).
      */
-    synchronized Map<String, Object> submit(String tenantId, String label, Runnable work) {
+    Map<String, Object> submit(String tenantId, String label, Runnable work) {
+        Limits l = limits()
+        synchronized (this) { return submitLocked(l, tenantId, label, work) }
+    }
+
+    private Map<String, Object> submitLocked(Limits l, String tenantId, String label, Runnable work) {
         Waiting entry = new Waiting(tenantId: tenantKey(tenantId), label: label, work: work)
         int alreadyWaiting = waiting[entry.tenantId]?.size() ?: 0
-        if (alreadyWaiting >= maxWaiting()) {
+        if (alreadyWaiting >= l.maxWaiting) {
             return [submitted: false, queued: false, error: ("This tenant already has ${alreadyWaiting} runs waiting for a slot; " +
                     "try again once some have started.").toString()]
         }
         waiting.computeIfAbsent(entry.tenantId, { new ArrayDeque<Waiting>() }).addLast(entry)
-        drain()
+        drainLocked(l)
         if (entry.error) return [submitted: false, queued: false, error: entry.error]
         if (entry.started) return [submitted: true, queued: false]
         int position = waitingTotal()
@@ -121,31 +144,44 @@ class RunAdmission {
      * waits only because its own tenant is at its share, so it cannot take the free slot, and counting them would let one
      * tenant's queue defer every other tenant's runs (security review 2026-10-27). The scan drains before asking.
      */
-    synchronized boolean canStartNow(String tenantId) {
+    boolean canStartNow(String tenantId) {
+        Limits l = limits()
+        synchronized (this) { return canStartNowLocked(l, tenantId) }
+    }
+
+    private boolean canStartNowLocked(Limits l, String tenantId) {
         String key = tenantKey(tenantId)
         int tenantLoad = (runningByTenant[key] ?: 0) + (waiting[key]?.size() ?: 0)
-        int cap = cap()
-        return running < cap && tenantLoad < perTenantCap(cap) && !held()
+        return running < l.cap && tenantLoad < l.perTenantCap && !held(l)
     }
 
     /** Starts every waiting run there is room for, tenants in turn. Called on submit, on finish, and by each scan tick. */
-    synchronized void drain() {
-        while (running < cap() && !held()) {
-            Waiting next = nextEligible()
+    void drain() {
+        Limits l = limits()
+        synchronized (this) { drainLocked(l) }
+    }
+
+    private void drainLocked(Limits l) {
+        while (running < l.cap && !held(l)) {
+            Waiting next = nextEligible(l)
             if (next == null) return
             start(next)
         }
     }
 
-    synchronized Map<String, Object> snapshot() {
+    Map<String, Object> snapshot() {
+        Limits l = limits()
+        synchronized (this) { return snapshotLocked(l) }
+    }
+
+    private Map<String, Object> snapshotLocked(Limits l) {
         Set<String> tenants = new TreeSet<String>(runningByTenant.keySet())
         tenants.addAll(waiting.keySet())
         Map<String, Map<String, Integer>> byTenant = tenants.collectEntries { String t ->
             [(t): [running: runningByTenant[t] ?: 0, queued: waiting[t]?.size() ?: 0]]
         }
-        int cap = cap()
-        return [running      : running, queued: waitingTotal(), cap: cap, perTenantCap: perTenantCap(cap),
-                holdAtHeapPercent: holdAtHeapPercentSupplier.call(), maxWaitingPerTenant: maxWaiting(), heldForMemory: running > 0 && heapAtOrAbove(), byTenant: byTenant]
+        return [running      : running, queued: waitingTotal(), cap: l.cap, perTenantCap: l.perTenantCap,
+                holdAtHeapPercent: l.holdAtHeapPercent, maxWaitingPerTenant: l.maxWaiting, heldForMemory: running > 0 && heapAtOrAbove(l), byTenant: byTenant]
     }
 
     /**
@@ -158,19 +194,18 @@ class RunAdmission {
         return (runningByLabel[label] ?: 0) > 0 || waiting.values().any { ArrayDeque<Waiting> lane -> lane.any { it.label == label } }
     }
 
-    private Waiting nextEligible() {
+    private Waiting nextEligible(Limits l) {
         List<String> tenants = new ArrayList<String>(waiting.keySet())
         if (!tenants) return null
-        int perTenantCap = perTenantCap(cap())
         int after = lastStarted != null ? tenants.indexOf(lastStarted) : -1
         for (int i = 1; i <= tenants.size(); i++) {
             String tenant = tenants[(after + i) % tenants.size()]
-            if ((runningByTenant[tenant] ?: 0) < perTenantCap) return waiting[tenant].peekFirst()
+            if ((runningByTenant[tenant] ?: 0) < l.perTenantCap) return waiting[tenant].peekFirst()
         }
         return null
     }
 
-    private void start(Waiting entry) {
+    private void start(Waiting entry) {  // caller holds the lock
         ArrayDeque<Waiting> lane = waiting[entry.tenantId]
         lane.removeFirst()
         if (lane.isEmpty()) waiting.remove(entry.tenantId)
@@ -194,9 +229,10 @@ class RunAdmission {
         } catch (Throwable t) {
             logger.error("Automation execution {} ended with an error: {}", entry.label, t.message ?: t.toString())
         } finally {
+            Limits l = limits()
             synchronized (this) {
                 release(entry)
-                drain()
+                drainLocked(l)
             }
         }
     }
@@ -212,12 +248,12 @@ class RunAdmission {
     }
 
     /** Memory holds new starts only while something is running; with nothing running one start is always allowed. */
-    private boolean held() { return running > 0 && heapAtOrAbove() }
+    private boolean held(Limits l) { return running > 0 && heapAtOrAbove(l) }
 
-    private boolean heapAtOrAbove() {
+    private boolean heapAtOrAbove(Limits l) {
         Integer percent
         try { percent = heapPercent.call() } catch (Throwable ignored) { percent = null }
-        return percent != null && percent >= holdAtHeapPercentSupplier.call()
+        return percent != null && percent >= l.holdAtHeapPercent
     }
 
     private int waitingTotal() { return (int) (waiting.values().sum { it.size() } ?: 0) }

@@ -84,6 +84,19 @@ class RunSettingsSmokeTests {
         assertTrue(refused.message.contains("maximum of 3660"), refused.message)
     }
 
+    @Test
+    void aWindowCeilingRowTakesEffectWithNoRestart() {
+        Map automation = [relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_CUSTOM, windowTimeZone: "UTC", maxWindowDays: 28]
+        saveRow("darpan.reconciliation.automation.maxWindowSpanDays", "400")
+        assertNotNull(AutomationExecutionSupport.resolveWindows(automation, [
+                windowStartDate: ts("2025-01-01T00:00:00Z"), windowEndDate: ts("2026-01-26T00:00:00Z")]))   // 390 days
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
+            AutomationExecutionSupport.resolveWindows(automation, [
+                    windowStartDate: ts("2025-01-01T00:00:00Z"), windowEndDate: ts("2026-02-07T00:00:00Z")])   // 402 days
+        }
+        assertTrue(refused.message.contains("maximum of 400"), refused.message)
+    }
+
     private static Timestamp ts(String iso) { return Timestamp.from(Instant.parse(iso)) }
 
     private <T> T asSystem(Closure<T> work) {

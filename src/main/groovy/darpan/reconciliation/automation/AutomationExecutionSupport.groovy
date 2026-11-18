@@ -75,7 +75,7 @@ class AutomationExecutionSupport {
     // Security (HIGH gap 2, reworked 2026-06-30): hard DoS sanity ceiling on the resolved window span,
     // SEPARATE from the per-automation `maxWindowDays` operational default (entity default=28). This
     // ceiling exists only to stop the 1970->9999 (~2.9M-day) explosion; it must never reject a real
-    // window, so it is deliberately huge (10 years). Tunable in the admin app Settings (maxWindowSpanDays).
+    // window, so it is deliberately huge (10 years). Tunable in the admin app Settings (darpan.reconciliation.automation.maxWindowSpanDays).
     static int maxWindowSpanDays() {
         return DarpanSettings.intValue("darpan.reconciliation.automation.maxWindowSpanDays")
     }
@@ -318,7 +318,7 @@ class AutomationExecutionSupport {
         return [automationId: automationId, executionResults: executionResults]
     }
 
-    /** DAR-BE-116: off with -Ddarpan.reconciliation.automation.parallelSourceExtracts=false. */
+    /** DAR-BE-116: off in the admin app Settings (darpan.reconciliation.automation.parallelSourceExtracts), or with the system property of that name. */
     static final String PARALLEL_SOURCE_EXTRACTS_PROPERTY = "darpan.reconciliation.automation.parallelSourceExtracts"
     private static final java.util.concurrent.ExecutorService SIDE_EXTRACT_POOL = java.util.concurrent.Executors.newFixedThreadPool(8, { Runnable r ->
         Thread t = new Thread(r, "automation-side2-extract"); t.daemon = true; t
@@ -1846,7 +1846,7 @@ class AutomationExecutionSupport {
         // (WINDOW_PREVIOUS_MONTH / LAST_MONTHS=1 on a 30/31-day month, ordinary CUSTOM month ranges)
         // exceeds 28 and would be wrongly refused. The DoS guard must NEVER reject a legitimate window,
         // so it uses a separate, deliberately huge sanity ceiling (10 years) that only the attack
-        // pathological ranges can breach. Operators can tune it in the admin app Settings (maxWindowSpanDays).
+        // pathological ranges can breach. Operators can tune it in the admin app Settings (darpan.reconciliation.automation.maxWindowSpanDays).
         long __spanDays = ChronoUnit.DAYS.between(windowStart, windowEnd)
         int __maxSpanDays = maxWindowSpanDays()
         if (__spanDays > __maxSpanDays) {

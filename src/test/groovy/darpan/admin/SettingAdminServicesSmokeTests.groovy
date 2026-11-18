@@ -168,6 +168,19 @@ class SettingAdminServicesSmokeTests {
     }
 
     @Test
+    void resettingAnOnOffOrListSettingIsNotReadAsANumber() {
+        String flag = "darpan.reconciliation.automation.verifyMissingDiffs"
+        String list = "darpan.twoFactor.reminderDaysBefore"
+        ok(svc("update#Setting", [settingKey: flag, value: "false"]))
+        ok(svc("update#Setting", [settingKey: list, value: "5,2"]))
+        assertEquals("DEFAULT", ok(svc("reset#Setting", [settingKey: flag])).result.setting.source)
+        assertEquals("DEFAULT", ok(svc("reset#Setting", [settingKey: list])).result.setting.source)
+        assertEquals(0, ec.entity.find("darpan.config.DarpanSetting").disableAuthz().useCache(false).count())
+        assertEquals(["${flag}: false -> default true".toString(), "${list}: 5,2 -> default 7,3,1,0".toString()],
+                auditRows()*.detailText.findAll { it.contains("default") })
+    }
+
+    @Test
     void aJvmPropertyShowsAsItsOwnSourceAndARowBeatsIt() {
         System.setProperty(MAX, "6")
         DarpanSettings.expire()

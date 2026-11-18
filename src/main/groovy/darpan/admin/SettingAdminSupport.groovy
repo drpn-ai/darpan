@@ -72,6 +72,8 @@ class SettingAdminSupport {
 
     /** Null when `after` as this key's value keeps every lessThan pair in order; otherwise why not, naming the other key. */
     private static String orderProblem(def sd, String after) {
+        List above = DarpanSettings.catalog().values().findAll { it.lessThan == sd.key }
+        if (sd.lessThan == null && above.isEmpty()) return null // on/off and list settings are not ordered against anything
         BigDecimal v = new BigDecimal(after)
         if (sd.lessThan != null) {
             String other = DarpanSettings.describe(sd.lessThan).effectiveValue
@@ -79,10 +81,10 @@ class SettingAdminSupport {
                 return "Resetting ${sd.key} would put it at ${after}, not below ${sd.lessThan} (${other}). Reset ${sd.lessThan} first, or lower ${sd.key} below ${other}.".toString()
             }
         }
-        for (def above : DarpanSettings.catalog().values().findAll { it.lessThan == sd.key }) {
-            String low = DarpanSettings.describe(above.key).effectiveValue
+        for (def a : above) {
+            String low = DarpanSettings.describe(a.key).effectiveValue
             if (!(new BigDecimal(low) < v)) {
-                return "Resetting ${sd.key} would put it at ${after}, not above ${above.key} (${low}). Reset ${above.key} first, or lower it below ${after}.".toString()
+                return "Resetting ${sd.key} would put it at ${after}, not above ${a.key} (${low}). Reset ${a.key} first, or lower it below ${after}.".toString()
             }
         }
         return null

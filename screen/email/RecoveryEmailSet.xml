@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- DAR-BE-028 recovery email set: the old address and the new one each get their side.
      DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email) and the VOICE_GUIDE.md voice (Aditi
-     2026-11-18: "there still is no personality here"); the darpan-email skill holds the rules. No bold. The only
+     2026-11-18: "there still is no personality here" / "keep it short still... but making the user smile"); the darpan-email skill holds the rules. No bold. The only
      links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
@@ -15,14 +15,8 @@
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <container style="dp-p"><label text="Hi ${firstName},"/></container>
         <section name="RecoveryAddressSide" condition="isOldAddress">
-            <widgets>
-                <container style="dp-p"><label text="This inbox is officially off spare-key duty. Password reset codes go to your new address from now on."/></container>
-                <container style="dp-p"><label text="No hard feelings. It had a good run."/></container>
-            </widgets>
-            <fail-widgets>
-                <container style="dp-p"><label text="Done. This inbox is now your spare key to Darpan."/></container>
-                <container style="dp-p"><label text="Forget your password some Tuesday, and the reset code lands right here. (Future you says thanks.)"/></container>
-            </fail-widgets>
+            <widgets><container style="dp-p"><label text="This inbox is off spare-key duty. Reset codes go to your new address now. It had a good run."/></container></widgets>
+            <fail-widgets><container style="dp-p"><label text="Done. This inbox is now your spare key to Darpan. (Future you says thanks.)"/></container></fail-widgets>
         </section>
         <container style="dp-note"><label text="Not you? Ignore this email and tell your administrator."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>

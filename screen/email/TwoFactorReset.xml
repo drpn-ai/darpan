@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- DAR-BE-264 two-factor reset by an administrator.
      DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email) and the VOICE_GUIDE.md voice (Aditi
-     2026-11-18: "there still is no personality here"); the darpan-email skill holds the rules. No bold. The only
+     2026-11-18: "there still is no personality here" / "keep it short still... but making the user smile"); the darpan-email skill holds the rules. No bold. The only
      links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
@@ -14,8 +14,8 @@
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <container style="dp-p"><label text="Hi ${firstName},"/></container>
-        <container style="dp-p"><label text="Clean slate. A Darpan administrator reset your two-factor on ${at}."/></container>
-        <container style="dp-p"><label text="Your authenticator app, passkeys and recovery codes have all handed in their badges. Next time you sign in, Darpan walks you through setting up a new one. About a minute. Less than a kettle."/></container>
+        <container style="dp-p"><label text="Clean slate. A Darpan administrator reset your two-factor on ${at}. Your old app, passkeys and codes have handed in their badges."/></container>
+        <container style="dp-p"><label text="Set up a new one at your next sign-in. It takes a minute."/></container>
         <container style="dp-note"><label text="Not expecting this? Tell your Darpan administrator now."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>

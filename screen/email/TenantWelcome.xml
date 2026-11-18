@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- DAR-BE-290 tenant welcome. The sign-in address is plain text. Never a password: a new user's temporary password reaches the admin.
      DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email) and the VOICE_GUIDE.md voice (Aditi
-     2026-11-18: "there still is no personality here"); the darpan-email skill holds the rules. No bold. The only
+     2026-11-18: "there still is no personality here" / "keep it short still... but making the user smile"); the darpan-email skill holds the rules. No bold. The only
      links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
@@ -15,12 +15,12 @@
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <container style="dp-p"><label text="Hi ${firstName},"/></container>
         <container style="dp-p"><label text="You now have access to ${tenantLabel} on Darpan, ${rolePhrase}."/></container>
-        <container style="dp-p"><label text="Here's the deal: your systems have been quietly drifting apart on orders, payments and returns. Nobody's fault. They each keep their own books. Darpan checks them against each other and hands you the short list of what doesn't line up."/></container>
+        <container style="dp-p"><label text="Your systems each keep their own books. Darpan reads them all and tells you where they don't line up."/></container>
         <section name="SignInWhere" condition="appBaseUrl">
             <widgets><container style="dp-p"><label text="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></widgets>
             <fail-widgets><container style="dp-p"><label text="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/></container></fail-widgets>
         </section>
-        <container style="dp-note"><label text="Questions? Just reply. A real person reads this inbox (usually with coffee)."/></container>
+        <container style="dp-note"><label text="Questions? Just reply. A real person reads this (usually with coffee)."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>

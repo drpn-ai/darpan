@@ -5,6 +5,6 @@
             jobName="scan_TenantScriptDeployments_5m"
             description="Run tenant script deployments that are due and deliver their text."
             serviceName="script.TenantScriptServices.scan#DueScriptDeployments"
-            cronExpression="0 0/5 * * * ?"
-            paused="N"/>
+            defaultCronExpression="0 0/5 * * * ?"
+            defaultPaused="N" minIntervalMinutes="1"/>
 </entity-facade-xml>

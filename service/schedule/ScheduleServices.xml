@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-305. Scheduled jobs as data. Seed files state each job's shipped defaults (ServiceJob.defaultCronExpression,
+  defaultPaused, ServiceJobParameter.defaultValue); this service applies them to the live columns, only where
+  nobody edited the row. It is the single element of data/zzScheduleJobDefaultsApply.xml, the last data file of every
+  seed load.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="apply" noun="JobDefaults" authenticate="false" allow-remote="false">
+        <description>Sets cronExpression and paused from the shipped defaults on every Darpan job nobody edited, and
+            parameterValue from defaultValue on every unedited parameter. Rows whose live value already equals the default
+            are left alone and not counted.</description>
+        <out-parameters>
+            <parameter name="jobsUpdated" type="Integer"/>
+            <parameter name="parametersUpdated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="jobsUpdated" from="0"/>
+            <set field="parametersUpdated" from="0"/>
+            <entity-find entity-name="moqui.service.job.ServiceJob" list="jobList" cache="false">
+                <econdition field-name="defaultCronExpression" operator="is-not-null"/>
+                <econdition field-name="editedDate" operator="is-null"/>
+            </entity-find>
+            <iterate list="jobList" entry="job">
+                <set field="wantPaused" from="job.defaultPaused ?: 'N'"/>
+                <if condition="job.cronExpression != job.defaultCronExpression || job.paused != wantPaused">
+                    <set field="job.cronExpression" from="job.defaultCronExpression"/>
+                    <set field="job.paused" from="wantPaused"/>
+                    <entity-update value-field="job"/>
+                    <set field="jobsUpdated" from="jobsUpdated + 1"/>
+                </if>
+            </iterate>
+            <entity-find entity-name="moqui.service.job.ServiceJobParameter" list="paramList" cache="false">
+                <econdition field-name="defaultValue" operator="is-not-null"/>
+                <econdition field-name="editedDate" operator="is-null"/>
+            </entity-find>
+            <iterate list="paramList" entry="param">
+                <if condition="param.parameterValue != param.defaultValue">
+                    <set field="param.parameterValue" from="param.defaultValue"/>
+                    <entity-update value-field="param"/>
+                    <set field="parametersUpdated" from="parametersUpdated + 1"/>
+                </if>
+            </iterate>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-305. Applies the shipped job defaults (cron, pause, parameters) to every job nobody edited.
+     THE NAME MUST SORT AFTER EVERY OTHER data/*.xml, data/upgrade-data.xml included: Moqui's data loader walks a
+     component's data directory in a TreeMap (file-name order), so this file's call runs after all job seed rows of the
+     same load, fresh or upgrade. ScheduleJobDefaultsSmokeTests.applyFileLoadsLast guards the name. -->
+<entity-facade-xml type="darpan-seed">
+    <schedule.ScheduleServices.apply-JobDefaults/>
+</entity-facade-xml>

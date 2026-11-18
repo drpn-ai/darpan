@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-305. A scheduled job's cron, pause state and parameters are production data, edited from the admin app
+         without a deploy. Seed rows therefore state only identity and the shipped DEFAULTS (default*); they never write
+         cronExpression, paused or parameterValue, so the upsert every deploy runs cannot undo an edit. The service
+         schedule.ScheduleServices.apply#JobDefaults, called by the last data file of every seed load, copies a default onto
+         the live column only for a row nobody edited (editedDate empty). A changed shipped default thus reaches every
+         unedited job on the next deploy; an edited job keeps its edit until it is reset. -->
+
+    <extend-entity entity-name="ServiceJob" package="moqui.service.job">
+        <field name="defaultCronExpression" type="text-short">
+            <description>The shipped Quartz cron. Only Darpan's own jobs have one; a job without it is never edited here.</description></field>
+        <field name="defaultPaused" type="text-indicator">
+            <description>The shipped pause state (Y/N); blank reads as N.</description></field>
+        <field name="minIntervalMinutes" type="number-integer">
+            <description>The smallest gap, in minutes, any edited cron may leave between two runs; blank reads as 1.</description></field>
+        <field name="resumePreviewService" type="text-medium">
+            <description>A service that counts what the job would delete; resuming the job needs a fresh preview of it.</description></field>
+        <field name="editedByUserId" type="id"/>
+        <field name="editedDate" type="date-time">
+            <description>When production last edited the cron, pause state or a parameter. Empty = follow the shipped defaults.</description></field>
+    </extend-entity>
+
+    <extend-entity entity-name="ServiceJobParameter" package="moqui.service.job">
+        <field name="defaultValue" type="text-medium">
+            <description>The shipped value; the live parameterValue follows it until someone edits the parameter.</description></field>
+        <field name="editedByUserId" type="id"/>
+        <field name="editedDate" type="date-time"/>
+    </extend-entity>
+</entities>

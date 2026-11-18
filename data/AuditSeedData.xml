@@ -80,5 +80,5 @@
     <moqui.service.job.ServiceJob jobName="send_AuditDigests_15m"
             description="Send the audit run digests that are due."
             serviceName="audit.AuditDigestServices.send#DueAuditDigests"
-            cronExpression="0 0/15 * * * ?" paused="N"/>
+            defaultCronExpression="0 0/15 * * * ?" defaultPaused="N" minIntervalMinutes="5"/>
 </entity-facade-xml>

@@ -4,38 +4,38 @@
             jobName="purge_ReconciliationGeneratedFiles_daily"
             description="Purge generated reconciliation output files older than retention policy."
             serviceName="reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles"
-            cronExpression="0 0 2 * * ?"
-            paused="N"/>
+            defaultCronExpression="0 0 2 * * ?"
+            defaultPaused="N" minIntervalMinutes="360"/>
 
     <moqui.service.job.ServiceJobParameter
             jobName="purge_ReconciliationGeneratedFiles_daily"
             parameterName="retentionDays"
-            parameterValue="15"/>
+            defaultValue="15"/>
 
     <!-- DAR-BE-271: raw source extracts are kept 7 days (Aditi 2026-11-13); results keep the 15-day job above. -->
     <moqui.service.job.ServiceJob
             jobName="purge_ReconciliationExtractFiles_daily"
             description="Purge raw source extract files older than 7 days (never result files)."
             serviceName="reconciliation.ReconciliationGenericServices.purge#ExtractFiles"
-            cronExpression="0 15 2 * * ?"
-            paused="N"/>
+            defaultCronExpression="0 15 2 * * ?"
+            defaultPaused="N" minIntervalMinutes="360"/>
 
     <moqui.service.job.ServiceJobParameter
             jobName="purge_ReconciliationExtractFiles_daily"
             parameterName="retentionDays"
-            parameterValue="7"/>
+            defaultValue="7"/>
 
     <moqui.service.job.ServiceJob
             jobName="scan_ReconciliationAutomations_5m"
             description="Scan due reconciliation automations and execute scheduled windows."
             serviceName="reconciliation.ReconciliationAutomationServices.scan#DueAutomations"
-            cronExpression="0 0/5 * * * ?"
-            paused="N"/>
+            defaultCronExpression="0 0/5 * * * ?"
+            defaultPaused="N" minIntervalMinutes="1"/>
 
     <moqui.service.job.ServiceJobParameter
             jobName="scan_ReconciliationAutomations_5m"
             parameterName="limit"
-            parameterValue="100"/>
+            defaultValue="100"/>
 
     <!-- Audit H2.5 / H3.3: stuck-RUNNING reaper. Every 10 minutes, flip stale RUNNING/PENDING
          reconciliation rows to FAILED so the UI stops blocking re-triggers and the scanner stops
@@ -44,8 +44,8 @@
             jobName="sweep_StuckReconciliationRuns_10m"
             description="Reap reconciliation runs / automation executions wedged in RUNNING after crash."
             serviceName="reconciliation.ReconciliationAutomationServices.sweep#StuckReconciliationRuns"
-            cronExpression="0 0/10 * * * ?"
-            paused="N"/>
+            defaultCronExpression="0 0/10 * * * ?"
+            defaultPaused="N" minIntervalMinutes="5"/>
 
     <!-- MACH P1: backfill denormalized tenant stamps on Rule children; idempotent no-op after
          the first pass (NULL-stamp query walks the tenant index and finds nothing). -->
@@ -53,8 +53,8 @@
             jobName="sweep_RuleChildTenantStamps_hourly"
             description="Backfill companyUserGroupId on Rule/RuleSetCompareScope/RuleSetCompareSource from the parent RuleSet."
             serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
-            cronExpression="0 15 * * * ?"
-            paused="N"/>
+            defaultCronExpression="0 15 * * * ?"
+            defaultPaused="N" minIntervalMinutes="15"/>
 
     <!-- DAR-BE-266: per-table retention. Seeded PAUSED, and every period (darpan.retention.<table>.days) is unset by
          default, which keeps the table forever: resuming the job deletes nothing until a period is set. -->
@@ -62,6 +62,6 @@
             jobName="run_DataRetention_daily"
             description="Delete audit findings, run results, AI transcripts and agent query logs older than their configured retention periods."
             serviceName="retention.RetentionServices.run#Retention"
-            cronExpression="0 30 3 * * ?"
-            paused="Y"/>
+            defaultCronExpression="0 30 3 * * ?"
+            defaultPaused="Y" minIntervalMinutes="360" resumePreviewService="retention.RetentionServices.dryRun#Retention"/>
 </entity-facade-xml>

@@ -27,7 +27,7 @@ class TwoFactorPolicy {
     /**
      * When two-factor is required for this person: the earliest requiredFromDate among their roles (a live
      * UserGroupMember row in ADMIN, DARPAN_SUPER_ADMIN or DARPAN_ADMIN, or tenant admin in ANY tenant: a factor belongs
-     * to the person, not the tenant; or, for EVERYONE, any membership or Darpan role on an enabled account). Null when no role of theirs has a date (optional). Runs on every request
+     * to the person, not the tenant; or, for EVERYONE, any membership or Darpan role; a temporary lockout does not lift it). Null when no role of theirs has a date (optional). Runs on every request
      * (sessionInfo, the CLI key check): the policy first, so while no role has a date (the shipped state) that is the only read.
      */
     static Timestamp requiredFrom(def ec, String userId) {
@@ -101,16 +101,27 @@ class TwoFactorPolicy {
 
     /**
      * DAR-BE-297: the userIds the EVERYONE policy covers: an in-force tenant membership (any permission group, any tenant) or
-     * an in-force Darpan-wide role, on an account that is not disabled (a null flag counts as enabled). Reads every member:
-     * for reminders and the admin board, never the per-request path (that asks about the one user, rolesByUser).
+     * an in-force Darpan-wide role, minus PERMANENTLY disabled accounts (disabled=Y with no disabledDateTime, the same reading
+     * as PasswordResetSupport.lockedOut / CliAuthSupport.canSignIn). A temporary lockout (disabled=Y with a disabledDateTime)
+     * is still covered: it lifts by itself and the person signs in again. Reads every member: for reminders and the admin
+     * report, never the per-request path (that asks about the one user, rolesByUser, and never consults the flag: sign-in
+     * already refuses a disabled account).
      */
     static List<String> coveredPeople(def ec, Timestamp now) {
-        return coveredAmong(ec, null, now, false) as List<String>
+        Set<String> found = coveredAmong(ec, null, now, false)
+        List<String> candidates = found.toList()
+        for (int i = 0; i < candidates.size(); i += 500) {
+            List<String> chunk = candidates.subList(i, Math.min(i + 500, candidates.size()))
+            found.removeAll(TwoFactorRecords.find(ec, "moqui.security.UserAccount", "admin: permanently disabled accounts, for the two-factor policy covering everyone")
+                    .condition("userId", EntityCondition.IN, chunk).condition("disabled", "Y").condition("disabledDateTime", null)
+                    .useCache(false).list()*.userId as List<String>)
+        }
+        return found.toList()
     }
 
     // ---- reads ----
 
-    /** The covered people among userIds (null: all): a membership read and a role read, then the disabled accounts out. */
+    /** The people among userIds (null: all) with a membership or a Darpan role: two reads. Never consults UserAccount.disabled. */
     private static Set<String> coveredAmong(def ec, Collection<String> userIds, Timestamp now, boolean perRequest) {
         Closure finder = { String entity, String reason ->
             perRequest ? TwoFactorRecords.findPerRequest(ec, entity, reason) : TwoFactorRecords.find(ec, entity, reason)
@@ -123,12 +134,6 @@ class TwoFactorPolicy {
         if (userIds != null) roles.condition("userId", EntityCondition.IN, userIds)
         found.addAll(roles.condition("userGroupId", EntityCondition.IN, TenantAccessSupport.DARPAN_ROLE_GROUP_IDS)
                 .conditionDate("fromDate", "thruDate", now).useCache(false).list()*.userId as List<String>)
-        List<String> candidates = found.toList()
-        for (int i = 0; i < candidates.size(); i += 500) {
-            List<String> chunk = candidates.subList(i, Math.min(i + 500, candidates.size()))
-            found.removeAll(finder("moqui.security.UserAccount", "self-scoped auth: disabled accounts, for the two-factor policy covering everyone")
-                    .condition("userId", EntityCondition.IN, chunk).condition("disabled", "Y").useCache(false).list()*.userId as List<String>)
-        }
         return found
     }
 

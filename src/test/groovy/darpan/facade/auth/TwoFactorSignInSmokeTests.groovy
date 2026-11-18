@@ -389,13 +389,16 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         assertTrue(login.twoFactorSetupRequired as boolean)
         assertTrue(USER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
 
-        // a disabled account is not covered
-        account(USER_ID).set("disabled", "Y").update()
+        // a temporary lockout (disabled=Y with a disabledDateTime) is still covered, per request and in the list
+        account(USER_ID).set("disabled", "Y").set("disabledDateTime", new Timestamp(System.currentTimeMillis() - 3_600_000L)).update()
         try {
+            assertNotNull(TwoFactorPolicy.requiredFrom(ec, USER_ID))
+            assertTrue(USER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
+            // a permanently disabled account (no disabledDateTime) leaves the list
+            account(USER_ID).set("disabledDateTime", null).update()
             assertFalse(USER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
-            assertNull(TwoFactorPolicy.requiredFrom(ec, USER_ID))
         } finally {
-            account(USER_ID).set("disabled", "N").update()
+            account(USER_ID).set("disabled", "N").set("disabledDateTime", null).update()
         }
     }
 
@@ -880,7 +883,7 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         try {
             ec.context.putAll(appMail[0].params as Map)
             String html = ec.screen.makeRender().rootScreen(template.bodyScreenLocation as String).webappName("webroot").renderMode("html").render()
-            assertTrue(html.contains("an authenticator app was set up for your Darpan account"), html)
+            assertTrue(html.contains("an authenticator app is now paired with your Darpan account"), html)
             assertFalse(html.contains("<a "), "no links in a security email")
         } finally {
             ec.context.pop()

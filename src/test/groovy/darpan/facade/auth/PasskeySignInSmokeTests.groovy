@@ -54,6 +54,7 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
     void reset() {
         [[USER_ID, USERNAME], [OTHER_ID, OTHER_USERNAME], [SUPER_ID, SUPER_USERNAME]].each { upsertAccount(it[0], it[1]) }
         group(SUPER_ID, "DARPAN_SUPER_ADMIN")
+        ec.entity.find(PasskeySupport.FIRST_SIGN_IN_CHALLENGE).disableAuthz().deleteAll()
         ec.message.clearAll()
     }
 
@@ -505,11 +506,190 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
     @DisplayName("every new passkey method is off the CLI list")
     void passkeyMethodsAreNotOnTheCli() {
         ["begin#PasskeyProof", "begin#PasskeyRegistration", "begin#PasskeySignIn", "delete#Passkey",
-         "finish#PasskeyRegistration", "rename#Passkey"].each {
+         "finish#PasskeyRegistration", "rename#Passkey", "begin#PasskeyFirstSignIn", "finish#PasskeyFirstSignIn"].each {
             String name = "facade.AuthFacadeServices.${it}".toString()
             assertTrue(name in CliMethodAllowlist.EXCLUDED, name)
             assertFalse(name in CliMethodAllowlist.ALLOWED, name)
         }
+    }
+
+    // ---- sign in with a passkey alone (DAR-BE-301) ----
+
+    private static final String FIRST_REFUSAL = "That passkey did not sign you in."
+
+    @Test
+    @DisplayName("DAR-BE-301: a passkey alone signs in with no username: empty allowCredentials, the user handle names the person, a new session, an event")
+    void passkeyFirstSignInWithoutAUsername() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        Map begun = anon("begin#PasskeyFirstSignIn", [:])
+        assertEquals([], begun.errors)
+        assertEquals(true, begun.out.ok)
+        assertNotNull(begun.out.challengeToken)
+        assertEquals(300, begun.out.expiresInSeconds)
+        Map options = (Map) new JsonSlurper().parseText(begun.out.publicKeyOptions as String)
+        assertEquals([], options.allowCredentials, "discoverable: the browser offers the person's own passkeys")
+        assertEquals("required", options.userVerification)
+        assertEquals("localhost", options.rpId)
+        assertNotEquals(begun.out.challengeToken, options.challenge, "the token the client holds is not the WebAuthn challenge")
+
+        String assertion = key.assertion(begun.out.publicKeyOptions as String)
+        assertEquals(PasskeySupport.userHandle(USER_ID), new JsonSlurper().parseText(assertion).response.userHandle)
+        List<String> newSessions = []
+        AuthSessionSupport.metaClass.static.signInOnNewSession = { def ecArg, String username, boolean saveHistory ->
+            newSessions << username
+            return ecArg.user.internalLoginUser(username, saveHistory)
+        }
+        Map finished
+        try {
+            finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken, passkeyAssertion: assertion])
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(AuthSessionSupport)
+        }
+        assertEquals([], finished.errors)
+        assertEquals(true, finished.out.ok)
+        assertTrue(finished.out.authenticated as boolean)
+        assertNotNull(finished.out.authToken)
+        assertEquals("LOGIN_KEY", finished.out.authTokenType)
+        assertEquals("login_key", finished.out.authTokenHeaderName)
+        assertNotNull(finished.out.authTokenExpiresInSeconds)
+        assertEquals(USER_ID, finished.out.sessionInfo.userId)
+        assertEquals([USERNAME], newSessions, "signed in on a new servlet session")
+        assertEquals(USER_ID, ec.user.userId)
+        assertEquals(1, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+        assertEquals(key.counter, credentialRow(USER_ID).signCount as long, "the counter is saved")
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301: with a username, begin lists that person's passkeys and the finish signs them in")
+    void passkeyFirstSignInWithAUsername() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        enrolPasskey(OTHER_USERNAME)
+        Map begun = anon("begin#PasskeyFirstSignIn", [username: USERNAME])
+        assertEquals([], begun.errors)
+        Map options = (Map) new JsonSlurper().parseText(begun.out.publicKeyOptions as String)
+        assertEquals([key.id], (options.allowCredentials as List<Map>)*.id)
+        Map finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
+                passkeyAssertion: key.assertion(begun.out.publicKeyOptions as String)])
+        assertEquals([], finished.errors)
+        assertTrue(finished.out.authenticated as boolean)
+        assertEquals(USER_ID, finished.out.sessionInfo.userId)
+        assertEquals(1, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301: an unknown or passkey-less username gets the same answer as a known one (no enumeration), held to the floor")
+    void anUnknownUsernameGetsTheSameShape() {
+        enrolPasskey(USERNAME)
+        Map answers = [known: USERNAME, unknown: "nobody.at.all", passkeyless: OTHER_USERNAME].collectEntries { String label, String username ->
+            long started = System.nanoTime()
+            Map begun = anon("begin#PasskeyFirstSignIn", [username: username])
+            long tookMillis = (System.nanoTime() - started).intdiv(1_000_000L)
+            assertTrue(tookMillis >= TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS, "${label} begin held to the floor: ${tookMillis} ms")
+            [(label): begun]
+        }
+        answers.each { String label, Map begun ->
+            assertEquals([], begun.errors, label)
+            assertEquals(true, begun.out.ok, label)
+            assertNotNull(begun.out.challengeToken, label)
+            assertEquals(answers.known.out.keySet(), begun.out.keySet(), "${label}: the same keys")
+            assertEquals(((Map) new JsonSlurper().parseText(answers.known.out.publicKeyOptions as String)).keySet(),
+                    ((Map) new JsonSlurper().parseText(begun.out.publicKeyOptions as String)).keySet(), "${label}: the same option keys")
+        }
+        ["unknown", "passkeyless"].each {
+            assertEquals([], new JsonSlurper().parseText(answers[it].out.publicKeyOptions as String).allowCredentials, it)
+        }
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301: a challenge is used once, a refused finish uses it too")
+    void aChallengeIsUsedOnce() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        Map begun = anon("begin#PasskeyFirstSignIn", [:])
+        String assertion = key.assertion(begun.out.publicKeyOptions as String)
+        assertTrue(anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken, passkeyAssertion: assertion]).out.authenticated as boolean)
+        Map replay = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken, passkeyAssertion: assertion])
+        assertEquals([FIRST_REFUSAL], replay.errors)
+        assertEquals(false, replay.out.ok)
+        assertEquals("PASSKEY_REFUSED", replay.out.reason)
+        assertNotEquals(true, replay.out.authenticated)
+        assertNull(replay.out.authToken)
+
+        // A refused finish spends the token: no second try on it, even with a good assertion.
+        Map second = anon("begin#PasskeyFirstSignIn", [:])
+        Map wrongOrigin = anon("finish#PasskeyFirstSignIn", [challengeToken: second.out.challengeToken,
+                passkeyAssertion: key.assertion(second.out.publicKeyOptions as String, [origin: "https://evil.example"])])
+        assertEquals([FIRST_REFUSAL], wrongOrigin.errors)
+        Map retry = anon("finish#PasskeyFirstSignIn", [challengeToken: second.out.challengeToken,
+                passkeyAssertion: key.assertion(second.out.publicKeyOptions as String)])
+        assertEquals([FIRST_REFUSAL], retry.errors, "the token was used by the refused finish")
+        assertEquals(1, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+        assertEquals(0, account(USER_ID).successiveFailedLogins as int, "a refused passkey is not a failed login")
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301: an expired challenge is refused")
+    void anExpiredChallengeIsRefused() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        Map begun = anon("begin#PasskeyFirstSignIn", [:])
+        ec.entity.find(PasskeySupport.FIRST_SIGN_IN_CHALLENGE).condition("tokenHash", AuthPrimitives.sha256Hex(begun.out.challengeToken as String))
+                .disableAuthz().updateAll([expiresDate: new Timestamp(System.currentTimeMillis() - 1000L)])
+        Map finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
+                passkeyAssertion: key.assertion(begun.out.publicKeyOptions as String)])
+        assertEquals([FIRST_REFUSAL], finished.errors)
+        assertEquals("PASSKEY_REFUSED", finished.out.reason)
+        assertNull(ec.user.userId)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301: another person's passkey cannot finish a challenge begun for a username")
+    void anotherAccountsPasskeyCannotFinishAUsernameChallenge() {
+        enrolPasskey(USERNAME)
+        SoftwarePasskey otherKey = enrolPasskey(OTHER_USERNAME)
+        Map begun = anon("begin#PasskeyFirstSignIn", [username: USERNAME])
+        Map crossed = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
+                passkeyAssertion: otherKey.assertion(begun.out.publicKeyOptions as String)])
+        assertEquals([FIRST_REFUSAL], crossed.errors)
+        assertEquals("PASSKEY_REFUSED", crossed.out.reason)
+        assertNull(ec.user.userId)
+        assertEquals(0, events(OTHER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+        assertEquals(0, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+
+        // An unknown username's challenge can never be finished.
+        Map unknown = anon("begin#PasskeyFirstSignIn", [username: "nobody.at.all"])
+        assertEquals([FIRST_REFUSAL], anon("finish#PasskeyFirstSignIn", [challengeToken: unknown.out.challengeToken,
+                passkeyAssertion: otherKey.assertion(unknown.out.publicKeyOptions as String)]).errors)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301: a permanently disabled account cannot sign in with its passkey")
+    void aDisabledAccountCannotSignIn() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        ec.entity.find("moqui.security.UserAccount").condition("userId", USER_ID).disableAuthz()
+                .updateAll([disabled: "Y", disabledDateTime: null])
+        Map begun = anon("begin#PasskeyFirstSignIn", [:])
+        Map finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
+                passkeyAssertion: key.assertion(begun.out.publicKeyOptions as String)])
+        assertEquals([TwoFactorRefusal.CANNOT_SIGN_IN.message], finished.errors)
+        assertEquals("CANNOT_SIGN_IN", finished.out.reason)
+        assertEquals(false, finished.out.ok)
+        assertNotEquals(true, finished.out.authenticated)
+        assertNull(finished.out.authToken)
+        assertNull(ec.user.userId)
+        assertEquals(0, events(USER_ID, "PASSKEY_FIRST_SIGN_IN").size())
+    }
+
+    @Test
+    @DisplayName("DAR-BE-301: begin is limited to 10 a minute from one address")
+    void beginIsRateLimitedPerAddress() {
+        10.times { assertEquals([], anon("begin#PasskeyFirstSignIn", [:]).errors, "begin ${it + 1}") }
+        Map limited = anon("begin#PasskeyFirstSignIn", [username: USERNAME])
+        assertEquals(false, limited.out.ok)
+        assertEquals("TOO_MANY_ATTEMPTS", limited.out.reason)
+        assertEquals(1, limited.errors.size())
+        assertNull(limited.out.challengeToken)
+        assertNull(limited.out.publicKeyOptions)
+        assertEquals(10, ec.entity.find(PasskeySupport.FIRST_SIGN_IN_CHALLENGE).disableAuthz().useCache(false).count(),
+                "a refused begin stores nothing")
     }
 
     // ---- helpers ----

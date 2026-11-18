@@ -256,6 +256,9 @@ class CliMethodAllowlist {
             "facade.AuthFacadeServices.delete#Passkey",
             "facade.AuthFacadeServices.finish#PasskeyRegistration",
             "facade.AuthFacadeServices.rename#Passkey",
+            // DAR-BE-301: browser sign-in with a passkey alone; a CLI session signs in through start/poll#CliLogin.
+            "facade.AuthFacadeServices.begin#PasskeyFirstSignIn",
+            "facade.AuthFacadeServices.finish#PasskeyFirstSignIn",
 
             "facade.CliAuthFacadeServices.approve#CliLogin",
             "facade.CliAuthFacadeServices.deny#CliLogin",

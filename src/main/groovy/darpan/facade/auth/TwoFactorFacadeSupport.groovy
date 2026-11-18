@@ -124,6 +124,56 @@ class TwoFactorFacadeSupport {
     }
 
     /**
+     * DAR-BE-301 begin#PasskeyFirstSignIn: sign in with a passkey alone, no password. Request options (publicKeyOptions,
+     * JSON text) and the challengeToken finish#PasskeyFirstSignIn takes (300 s, one attempt). Anonymous, so the answer
+     * names no one: an unknown or passkey-less username gets the same keys as a known one, with empty allowCredentials,
+     * and every begin is held to TwoFactorSupport.CODE_REFUSAL_FLOOR_MILLIS so the work done for a known username does not
+     * show in the time either. Refusals (PASSKEYS_UNAVAILABLE, TOO_MANY_ATTEMPTS) travel in the refusal envelope.
+     */
+    static Map<String, Object> beginPasskeyFirstSignIn(def ec, Object username) {
+        long started = System.nanoTime()
+        Map<String, Object> begun = PasskeySupport.firstSignInOptions(ec, username)
+        TwoFactorSupport.holdToFloor(started)
+        if (begun.refusal) return refused(ec, [:], (TwoFactorRefusal) begun.refusal, false)
+        Map<String, Object> result = [challengeToken: begun.challengeToken, publicKeyOptions: begun.publicKeyOptions,
+                                      expiresInSeconds: begun.expiresInSeconds]
+        result.putAll(FacadeSupport.envelope(ec))
+        return result
+    }
+
+    /**
+     * DAR-BE-301 finish#PasskeyFirstSignIn: the challengeToken from begin#PasskeyFirstSignIn and the browser's assertion.
+     * The token is spent by this call whatever happens (PasskeySupport.claimFirstSignIn); the passkey names the person, who
+     * is signed in exactly as a completed verify#SignInCode signs them in (the account checks, a new servlet session, the
+     * same answer), with a UserLoginHistory row (no password step wrote one) and a PASSKEY_FIRST_SIGN_IN event. Every
+     * refusal is held to the floor and answered in the envelope: PASSKEY_REFUSED (expired, used, unknown or refused
+     * passkey, another account's passkey on a username's challenge), CANNOT_SIGN_IN, PASSKEYS_UNAVAILABLE.
+     */
+    static Map<String, Object> finishPasskeyFirstSignIn(def ec, Object challengeToken, Object passkeyAssertion) {
+        long started = System.nanoTime()
+        Map<String, Object> result = [authenticated: false]
+        TwoFactorRefusal refusal = TwoFactorRefusal.PASSKEY_REFUSED
+        boolean undo = false
+        if (!PasskeySupport.available(ec)) {
+            refusal = TwoFactorRefusal.PASSKEYS_UNAVAILABLE
+        } else {
+            String userId = PasskeySupport.claimFirstSignIn(ec, challengeToken, passkeyAssertion)
+            if (userId && !signInAs(ec, userId, true)) {
+                refusal = TwoFactorRefusal.PASSKEY_FIRST_CANNOT_SIGN_IN
+            } else if (userId && AuthFacadeSupport.issueSignedInSession(ec, result)) {
+                TwoFactorRecords.event(ec, userId, "PASSKEY_FIRST_SIGN_IN")
+                result.putAll(FacadeSupport.envelope(ec))
+                return result
+            } else if (userId) {
+                // Signed in but no key (issueSignedInSession signed the request out again): nothing it wrote may stand.
+                undo = true
+            }
+        }
+        TwoFactorSupport.holdToFloor(started)
+        return refused(ec, result, refusal, undo)
+    }
+
+    /**
      * begin#PasskeyRegistration: creation options for the person, after the same check begin#TwoFactorSetup makes (a
      * setup challenge; signed in: the current password with no factor yet, else a fresh proof).
      */
@@ -201,12 +251,13 @@ class TwoFactorFacadeSupport {
 
     /**
      * The person behind a verified challenge, signed in on a new servlet session (review M3), when the account can still
-     * sign in (not disabled, locked out or terminated: CliAuthSupport.canSignIn). False otherwise.
+     * sign in (not disabled, locked out or terminated: CliAuthSupport.canSignIn). False otherwise. saveHistory writes the
+     * framework's UserLoginHistory row: only when no password step wrote one (a passkey alone, DAR-BE-301).
      */
-    private static boolean signInAs(def ec, String userId) {
+    private static boolean signInAs(def ec, String userId, boolean saveHistory = false) {
         def account = TwoFactorRecords.find(ec, "moqui.security.UserAccount", "pre-auth: the account a verified challenge belongs to")
                 .condition("userId", userId).useCache(false).one()
-        return CliAuthSupport.canSignIn(ec, account) && AuthSessionSupport.signInOnNewSession(ec, (String) account.username, false)
+        return CliAuthSupport.canSignIn(ec, account) && AuthSessionSupport.signInOnNewSession(ec, (String) account.username, saveHistory)
     }
 
     /** A setup that turned a factor on for an account that cannot sign in: refused, and nothing it wrote stands (the

@@ -87,6 +87,7 @@ facade.AuditFacadeServices.run#Audit
 facade.AuditFacadeServices.save#AuditCheck
 facade.AuditFacadeServices.save#AuditSettings
 facade.AuditFacadeServices.verify#AuditFinding
+facade.AuthFacadeServices.begin#PasskeyFirstSignIn
 facade.AuthFacadeServices.begin#PasskeyProof
 facade.AuthFacadeServices.begin#PasskeyRegistration
 facade.AuthFacadeServices.begin#PasskeySignIn
@@ -98,6 +99,7 @@ facade.AuthFacadeServices.confirm#TwoFactorSetup
 facade.AuthFacadeServices.create#RecoveryCodes
 facade.AuthFacadeServices.delete#Passkey
 facade.AuthFacadeServices.disable#TwoFactor
+facade.AuthFacadeServices.finish#PasskeyFirstSignIn
 facade.AuthFacadeServices.finish#PasskeyRegistration
 facade.AuthFacadeServices.get#PasswordResetStatus
 facade.AuthFacadeServices.get#SessionInfo

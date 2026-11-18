@@ -1215,6 +1215,120 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-301. Sign in with a passkey alone, no password: begin#PasskeyFirstSignIn, then finish#PasskeyFirstSignIn.
+         Passkeys are registered with userVerification required, so one gesture is the passkey and the person's biometric
+         or PIN. Anonymous: begin names no one (the same answer for any username), begin is limited per address, and a
+         token is good for one finish within 300 seconds. Refusals are completed calls (ok false, errors, reason). -->
+
+    <service verb="begin" noun="PasskeyFirstSignIn" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-301. Start a sign-in with a passkey alone (no password). Request options for
+            navigator.credentials.get() and a challengeToken for finish#PasskeyFirstSignIn. With a username, allowCredentials
+            lists that account's passkeys; with none (or one that names no account with a passkey) it is empty and the
+            browser offers its own passkeys for this site. The answer has the same keys either way and never says whether
+            the username exists. At most 10 begins a minute from one address (TOO_MANY_ATTEMPTS).</description>
+        <in-parameters>
+            <parameter name="username"><description>Optional: the username or email typed first.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): PASSKEYS_UNAVAILABLE or TOO_MANY_ATTEMPTS.</description></parameter>
+            <parameter name="challengeToken" type="String">
+                <description>For finish#PasskeyFirstSignIn: held in page memory only, good for one finish.</description></parameter>
+            <parameter name="publicKeyOptions" type="String">
+                <description>PublicKeyCredentialRequestOptionsJSON: {challenge, rpId, timeout, allowCredentials[{type, id,
+                    transports}], userVerification: "required"}.</description></parameter>
+            <parameter name="expiresInSeconds" type="Integer"><description>Seconds the challengeToken lives: 300.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.beginPasskeyFirstSignIn(ec, username)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
+            <set field="challengeToken" from="authResult.challengeToken"/>
+            <set field="publicKeyOptions" from="authResult.publicKeyOptions"/>
+            <set field="expiresInSeconds" from="authResult.expiresInSeconds"/>
+        </actions>
+    </service>
+
+    <service verb="finish" noun="PasskeyFirstSignIn" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-301. Finish a sign-in with a passkey alone: begin#PasskeyFirstSignIn's challengeToken and the
+            assertion. Success answers as a completed verify#SignInCode does (a session and its key). The token is used by
+            this call whatever happens: after any refusal, start again with begin#PasskeyFirstSignIn.</description>
+        <in-parameters>
+            <parameter name="challengeToken" required="true"><description>From begin#PasskeyFirstSignIn.</description></parameter>
+            <parameter name="passkeyAssertion"><description>JSON.stringify(credential.toJSON()) of the
+                navigator.credentials.get() result for begin#PasskeyFirstSignIn's publicKeyOptions.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
+            <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><description>Why it was refused.</description><parameter name="error"/></parameter>
+            <parameter name="reason" type="String"><description>With ok false: why, as a code the client switches on (never
+                the message text): PASSKEY_REFUSED, CANNOT_SIGN_IN or PASSKEYS_UNAVAILABLE.</description></parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when a session was issued.</description></parameter>
+            <parameter name="authToken" type="String">
+                <description>The login key darpan-ui sends in the `login_key` header (also set as the persistent-login cookie).</description></parameter>
+            <parameter name="authTokenType" type="String"><description>`LOGIN_KEY`.</description></parameter>
+            <parameter name="authTokenHeaderName" type="String"><description>`login_key`.</description></parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer">
+                <description>The sign-in's absolute lifetime in seconds, as login#Session.</description></parameter>
+            <parameter name="sessionInfo" type="Map">
+                <description>As login#Session's sessionInfo.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
+                <parameter name="lastRun" type="Map">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants" type="List">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"><parameter name="permissionGroupId"/></parameter>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+                <parameter name="twoFactorEnabled" type="Boolean"/>
+                <parameter name="twoFactorDueDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.TwoFactorFacadeSupport.finishPasskeyFirstSignIn(ec, challengeToken, passkeyAssertion)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="reason" from="authResult.reason"/>
+            <set field="authenticated" from="authResult.authenticated"/>
+            <set field="authToken" from="authResult.authToken"/>
+            <set field="authTokenType" from="authResult.authTokenType"/>
+            <set field="authTokenHeaderName" from="authResult.authTokenHeaderName"/>
+            <set field="authTokenExpiresInSeconds" from="authResult.authTokenExpiresInSeconds"/>
+            <set field="sessionInfo" from="authResult.sessionInfo"/>
+        </actions>
+    </service>
+
     <service verb="begin" noun="PasskeyProof" allow-remote="true" authenticate="true">
         <description>DAR-BE-270. Request options for the signed-in person's passkeys, for one action that asks for a fresh
             proof (approve#CliLogin, create#RecoveryCodes, disable#TwoFactor, begin#TwoFactorSetup,

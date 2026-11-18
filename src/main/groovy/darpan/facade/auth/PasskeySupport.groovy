@@ -46,6 +46,11 @@ class PasskeySupport {
     private static final Logger logger = LoggerFactory.getLogger(PasskeySupport.class)
 
     static final String CREDENTIAL = "darpan.auth.PasskeyCredential"
+    /** DAR-BE-301: the rows of a sign-in with a passkey alone (begin/finish#PasskeyFirstSignIn). */
+    static final String FIRST_SIGN_IN_CHALLENGE = "darpan.auth.PasskeySignInChallenge"
+    static final int FIRST_SIGN_IN_BEGINS_PER_MINUTE = 10
+    static final int USERNAME_HINT_MAX_LENGTH = 255
+    private static final String ACCOUNT = "moqui.security.UserAccount"
 
     static final int MAX_PASSKEYS = 10
     static final int NAME_MAX_LENGTH = 60
@@ -368,6 +373,114 @@ class PasskeySupport {
         factor.update()
         TwoFactorRecords.event(ec, userId, "PASSKEY_OK")
         return true
+    }
+
+    // ---- a passkey alone (DAR-BE-301) ----
+
+    /**
+     * begin#PasskeyFirstSignIn: a new PasskeySignInChallenge row (the token's hash, a fresh WebAuthn challenge, the username
+     * as typed) and request options with userVerification required, so one gesture is the passkey and the person's
+     * biometric or PIN. allowCredentials lists the live passkeys of the account the username names; with no username, or
+     * one that names nobody or a person with no passkey, it is empty (the browser offers its own discoverable passkeys) and
+     * the answer has the same shape. Returns [challengeToken, publicKeyOptions, expiresInSeconds] or [refusal]:
+     * PASSKEYS_UNAVAILABLE, or TOO_MANY_ATTEMPTS once FIRST_SIGN_IN_BEGINS_PER_MINUTE begins came from this address in the
+     * last minute (counted from the stored rows, as CliAuthSupport.overStartLimit, so a restart does not reset it).
+     */
+    static Map<String, Object> firstSignInOptions(def ec, Object username) {
+        RelyingParty rp = relyingParty(ec)
+        if (rp == null) return [refusal: TwoFactorRefusal.PASSKEYS_UNAVAILABLE]
+        Timestamp now = ec.user.nowTimestamp
+        String address = CliAuthSupport.requestAddress(ec)
+        long recent = TwoFactorRecords.find(ec, FIRST_SIGN_IN_CHALLENGE, "rate limit: passkey-first sign-in begins per client address")
+                .condition("requestIp", address)
+                .condition("createdDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, new Timestamp(now.time - 60_000L))
+                .useCache(false).count()
+        if (recent >= FIRST_SIGN_IN_BEGINS_PER_MINUTE) return [refusal: TwoFactorRefusal.TOO_MANY_ATTEMPTS]
+        TwoFactorRecords.find(ec, FIRST_SIGN_IN_CHALLENGE, "housekeeping: passkey-first sign-in challenges a day past their end")
+                .condition("expiresDate", EntityCondition.ComparisonOperator.LESS_THAN, new Timestamp(now.time - SignInChallenges.EXPIRED_KEEP_MILLIS))
+                .deleteAll()
+
+        String hint = usernameHint(username)
+        List<Map> passkeys = hint ? activePasskeys(ec, (String) accountNamed(ec, hint)?.userId) : []
+        String token = AuthPrimitives.newToken()
+        String challenge = AuthPrimitives.newToken()
+        ec.entity.makeValue(FIRST_SIGN_IN_CHALLENGE).setAll([tokenHash: AuthPrimitives.sha256Hex(token), webauthnChallenge: challenge,
+                usernameHint: hint, createdDate: now, expiresDate: new Timestamp(now.time + SignInChallenges.LIFETIME_SECONDS * 1000L),
+                requestIp: address]).setSequencedIdPrimary().create()
+        return [challengeToken: token, publicKeyOptions: requestOptionsJson(rp, challenge, passkeys),
+                expiresInSeconds: SignInChallenges.LIFETIME_SECONDS]
+    }
+
+    /**
+     * finish#PasskeyFirstSignIn's check: the person the assertion signs in, or null. The token's row is claimed first, in a
+     * transaction of its own: locked, live (unused, unexpired) and used up there, so every attempt spends the token even
+     * when what follows refuses or rolls back. Then, in another: the assertion's credential must be a live passkey (its
+     * owner is who it is checked for), of the account the row's usernameHint names when there is one, and verifyAssertion
+     * must pass against the row's challenge (user verified, counter, PASSKEY_OK / PASSKEY_FAILED events).
+     */
+    static String claimFirstSignIn(def ec, Object token, Object assertionJson) {
+        String value = normalize(token)
+        if (!value || relyingParty(ec) == null) return null
+        Map claimed = (Map) ec.transaction.runRequireNew(null, "Could not claim a passkey sign-in", {
+            def row = TwoFactorRecords.find(ec, FIRST_SIGN_IN_CHALLENGE, "pre-auth: passkey-first sign-in challenge by token hash, no session yet")
+                    .condition("tokenHash", AuthPrimitives.sha256Hex(value)).forUpdate(true).useCache(false).one()
+            if (row == null || row.usedDate != null || !((Timestamp) row.expiresDate)?.after(ec.user.nowTimestamp)) return null
+            row.usedDate = ec.user.nowTimestamp
+            row.update()
+            return [challenge: row.webauthnChallenge, usernameHint: row.usernameHint]
+        })
+        if (claimed == null || !claimed.challenge) return null
+        return (String) ec.transaction.runRequireNew(null, "Could not check a passkey sign-in", {
+            String ownerId = firstSignInOwner(ec, assertionJson)
+            if (ownerId == null) return null
+            if (claimed.usernameHint && accountNamed(ec, (String) claimed.usernameHint)?.userId != ownerId) {
+                logger.info("Passkey-first sign-in refused for userId {}: not the account the username named", ownerId)
+                refuse(ec, ownerId)
+                return null
+            }
+            return verifyAssertion(ec, ownerId, assertionJson, (String) claimed.challenge) ? ownerId : null
+        })
+    }
+
+    /** Who an assertion claims to be: the owner of the live passkey its credential id names (one live owner per credential
+     *  id), or null. Not yet verified: verifyAssertion checks the signature against that person's passkeys. */
+    static String firstSignInOwner(def ec, Object assertionJson) {
+        String json = normalize(assertionJson)
+        if (!json) return null
+        byte[] credentialId
+        try {
+            credentialId = manager.parseAuthenticationResponseJSON(json).credentialId
+        } catch (Exception e) {
+            logger.info("Passkey-first sign-in refused: unreadable assertion ({})", e.class.simpleName)
+            return null
+        }
+        return credentialId ? (String) liveOwnerOf(ec, AuthPrimitives.sha256Hex(credentialId))?.userId : null
+    }
+
+    /**
+     * The account a typed username names, found as the framework's password sign-in finds it
+     * (MoquiShiroRealm.loginPrePassword): the username, else the username ignoring case, else the email address ignoring
+     * case. Null when nothing matches, or more than one account does.
+     */
+    static def accountNamed(def ec, String username) {
+        if (!username) return null
+        def exact = TwoFactorRecords.find(ec, ACCOUNT, "pre-auth: the account a typed username names")
+                .condition("username", username).useCache(false).one()
+        if (exact != null) return exact
+        for (String field in ["username", "emailAddress"]) {
+            List found = TwoFactorRecords.find(ec, ACCOUNT, "pre-auth: the account a typed username names, ignoring case")
+                    .condition(ec.entity.conditionFactory.makeCondition(field, EntityCondition.ComparisonOperator.EQUALS, username).ignoreCase())
+                    .useCache(false).limit(2).list()
+            if (found) return found.size() == 1 ? found[0] : null
+        }
+        return null
+    }
+
+    /** The username as typed, trimmed, at most USERNAME_HINT_MAX_LENGTH characters (the stored column; a username or
+     *  email is never longer), or null. */
+    static String usernameHint(Object username) {
+        String value = normalize(username)
+        return value && value.length() > USERNAME_HINT_MAX_LENGTH ? value.substring(0, USERNAME_HINT_MAX_LENGTH) : value
     }
 
     /** A refused assertion: the PASSKEY_FAILED event, and false. */

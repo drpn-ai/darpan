@@ -25,6 +25,10 @@ enum TwoFactorRefusal {
     PASSKEY_EXISTS("That passkey is already registered.", "PASSKEY_EXISTS"),
     CANNOT_SIGN_IN("This account can no longer sign in.", "ACCOUNT_CANNOT_SIGN_IN"),
     SIGN_IN_FIRST("Sign in first.", "SIGN_IN_FIRST"),
+    // DAR-BE-301: begin/finish#PasskeyFirstSignIn (a passkey alone, no password) answer with their own reason codes.
+    PASSKEY_REFUSED("That passkey did not sign you in.", "PASSKEY_REFUSED"),
+    TOO_MANY_ATTEMPTS("Too many sign-in requests from this address. Wait a minute and try again.", "TOO_MANY_ATTEMPTS"),
+    PASSKEY_FIRST_CANNOT_SIGN_IN("This account can no longer sign in.", "CANNOT_SIGN_IN"),
 
     NOT_ENROLLED("Two-factor is not on for this account.", null),
     APP_NOT_ON("The authenticator app is not on for this account.", null),

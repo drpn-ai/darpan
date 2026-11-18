@@ -33,7 +33,7 @@ class EmailAdminSupport {
     static Map show(def ec, String emailTemplateId) {
         def template = template(ec, emailTemplateId)
         if (template == null) return [error: "No such email ${emailTemplateId}".toString()]
-        List<String> variables = new ArrayList<String>(EmailCopy.templateVariables(ec, emailTemplateId)).sort()
+        List<String> wide = new ArrayList<String>(EmailCopy.templateVariables(ec, emailTemplateId)).sort()
         Map<String, Object> byId = [:]
         EmailCopy.seedBlockDefaults(ec).each { String key, String text ->
             if (key.startsWith(emailTemplateId + "/")) byId.put(key.substring(emailTemplateId.length() + 1), [defaultText: text])
@@ -50,6 +50,9 @@ class EmailAdminSupport {
         }
         List<Map> blocks = byId.keySet().sort().collect { String blockId ->
             Map b = byId.get(blockId)
+            // The audit emails and subject blocks pass each block only its own variables; a screen passes its whole set.
+            List<String> variables = EmailCopy.ownVariablesOnly(emailTemplateId, blockId) ?
+                    new ArrayList<String>(EmailCopy.variables(b.defaultText as String)).sort() : wide
             [blockId: blockId, defaultText: b.defaultText, copyText: b.copyText?.trim() ? b.copyText : null, variables: variables,
              lastChangedByUserId: b.lastChangedByUserId, lastChangedDate: b.lastChangedDate]
         }
@@ -82,13 +85,29 @@ class EmailAdminSupport {
         try {
             ec.context.putAll(params)
             EmailCopy.withDraft(draft) {
+                params = withBuiltSubject(ec, emailTemplateId, params)
+                ec.context.putAll(params)
                 ["html", "text"].each { String mode ->
                     out.put(mode, ec.screen.makeRender().rootScreen(location).webappName(webapp).renderMode(mode).render())
                 }
+                out.subject = EmailCopy.previewSubject(ec, emailTemplateId, subjectText, params)
             }
-            out.subject = EmailCopy.previewSubject(ec, emailTemplateId, subjectText, params)
         } finally {
             ec.context.pop()
+        }
+        return out
+    }
+
+    /**
+     * The sample parameters with the subject line the sender builds from its subject blocks (the reminder's subjectLine, the
+     * audit run's runSubject), read through the draft: so a preview shows an edit of those blocks the way a send would.
+     */
+    private static Map withBuiltSubject(def ec, String emailTemplateId, Map params) {
+        Map out = new LinkedHashMap(params)
+        if (emailTemplateId == "DARPAN_2FA_REMINDER") {
+            out.subjectLine = EmailCopy.text(ec, emailTemplateId, params.past ? "subject.after" : "subject.before", [requiredDate: params.requiredDate])
+        } else if (emailTemplateId == darpan.audit.AuditRunMessage.TEMPLATE && params.runFacts instanceof Map) {
+            out.runSubject = darpan.audit.AuditRunMessage.subject(params.runFacts as Map, new darpan.email.EmailCopyReader(ec, emailTemplateId))
         }
         return out
     }
@@ -101,19 +120,22 @@ class EmailAdminSupport {
         String problem = draftProblem(ec, emailTemplateId, subject, blocks)
         if (problem != null) return [error: problem]
         List<String> changed = []
+        List<String> details = []
         (blocks ?: [:]).each { k, v ->
             String blockId = k as String
-            setCopy(ec, emailTemplateId, blockId, String.valueOf(v))
+            boolean edited = setCopy(ec, emailTemplateId, blockId, String.valueOf(v))
             changed << blockId
+            details << auditLine(blockId, edited ? String.valueOf(v) : null)
         }
         if (subject != null) {
-            setCopy(ec, emailTemplateId, EmailCopy.SUBJECT, subject)
+            boolean edited = setCopy(ec, emailTemplateId, EmailCopy.SUBJECT, subject)
             template.set("subject", subject)
             template.update()
             changed << EmailCopy.SUBJECT
+            details << auditLine(EmailCopy.SUBJECT, edited ? subject : null)
         }
         AdminAuditSupport.record(ec, "admin.EmailAdminServices.update#EmailTemplate", "EmailTemplate", emailTemplateId,
-                "Edited ${changed.join(', ')}".toString())
+                "Edited ${changed.join(', ')}: ${details.join('; ')}".toString())
         return [updated: changed]
     }
 
@@ -185,7 +207,20 @@ class EmailAdminSupport {
         return ids
     }
 
-    private static void setCopy(def ec, String emailTemplateId, String blockId, String copyText) {
+    private static final int AUDIT_TEXT_CHARS = 500
+
+    /** `blockId = "new words"` (cut at 500 characters), or `blockId = shipped words` when the edit equals the shipped ones. */
+    private static String auditLine(String blockId, String text) {
+        if (text == null) return "${blockId} = (the shipped words)".toString()
+        String shown = text.length() > AUDIT_TEXT_CHARS ? text.substring(0, AUDIT_TEXT_CHARS) + "…" : text
+        return "${blockId} = \"${shown}\"".toString()
+    }
+
+    /**
+     * Sets a block's edit; an edit equal to the shipped words is stored as no edit (null), so it never pins old words against
+     * a later release. Returns true when an edit is stored.
+     */
+    private static boolean setCopy(def ec, String emailTemplateId, String blockId, String copyText) {
         def r = row(ec, emailTemplateId, blockId)
         if (r == null) {
             String shipped = blockId == EmailCopy.SUBJECT ? EmailCopy.defaultSubject(ec, emailTemplateId)
@@ -194,10 +229,13 @@ class EmailAdminSupport {
             r.setAll([emailTemplateId: emailTemplateId, blockId: blockId, defaultText: shipped ?: ""])
             r.create()
         }
+        String shippedWords = r.getString("defaultText")
+        if (copyText != null && copyText == shippedWords) copyText = null
         r.set("copyText", copyText)
         r.set("lastChangedByUserId", ec.user.userId)
         r.set("lastChangedDate", ec.user.nowTimestamp)
         r.update()
+        return copyText != null
     }
 
     private static String screenOf(def template) {

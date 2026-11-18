@@ -112,7 +112,7 @@ class AuditRunFactsTests {
     @Test
     void theEmailCarriesEveryDetailAndFallsBackToEachCausesOwnFix() {
         Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> cause == RMA ? "Issue the credit memo {creditMemo}" : null }
-        assertEquals("Gorjana Month close, 1–10 November: 57 open findings", AuditRunMessage.subject(facts))
+        assertEquals("Gorjana Month close, 1–10 November: 57 open findings", AuditRunMessage.subject(facts, darpan.email.SeedCopy.reader("DARPAN_AUDIT_RUN")))
         String html = AuditRunMessage.emailHtml(facts, [:], BASE, COPY)
         assertTrue(html.contains("ACT ON FIRST"))
         assertTrue(html.contains(">Issue the credit memo</div>"), "no writer: the cause's own fix")

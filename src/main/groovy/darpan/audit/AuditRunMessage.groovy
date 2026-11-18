@@ -34,8 +34,9 @@ class AuditRunMessage {
     static final String TEMPLATE = "DARPAN_AUDIT_RUN"
 
     /** "Gorjana Month close, 1–10 November: 42 open findings". */
-    static String subject(Map facts) {
-        return "${facts.tenant?.name} ${facts.audit?.name}, ${span(facts.window as Map)}: ${totals(facts).open} open findings".toString()
+    static String subject(Map facts, EmailCopyReader copy) {
+        return copy.text("subject.run", [tenantName: facts.tenant?.name, auditName: facts.audit?.name, span: span(facts.window as Map),
+                                         open: totals(facts).open])
     }
 
     static String title(Map facts) { return "${facts.tenant?.name} · ${facts.audit?.name}".toString() }
@@ -142,7 +143,7 @@ class AuditRunMessage {
                 "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin-top:8px;border-collapse:collapse;\">${act}</table>" : ""
         String button = url ? "<div style=\"margin-top:28px;\"><a href=\"${esc(url)}\" style=\"${F}display:inline-block;background:${ACCENT};color:#ffffff;" +
                 "border:1px solid ${ACCENT};font-size:13px;padding:11px 20px;border-radius:8px;text-decoration:none;\">${esc(copy.text('button'))}</a></div>" : ""
-        return """${EmailFrame.open("DARPAN · AUDIT", subject(facts), true)}<div style="${F}font-size:20px;line-height:1.35;letter-spacing:-.015em;color:${INK};">${esc(title(facts))}</div>
+        return """${EmailFrame.open("DARPAN · AUDIT", subject(facts, copy), true)}<div style="${F}font-size:20px;line-height:1.35;letter-spacing:-.015em;color:${INK};">${esc(title(facts))}</div>
 <div style="${F}font-size:13px;color:${MUTED};margin-top:4px;">${esc(subtitle(facts, copy))}</div>
 ${headline}${warn}
 <table role="presentation" cellpadding="0" cellspacing="8" style="width:100%;margin:18px -8px 0;border-collapse:separate;"><tr>

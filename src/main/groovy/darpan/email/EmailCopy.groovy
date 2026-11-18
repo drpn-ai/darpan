@@ -51,20 +51,48 @@ class EmailCopy {
         return draft != null && draft.containsKey(key) ? draft.get(key) : stored
     }
 
+    /** Templates whose blocks are each built by code with only their own variables (AuditRunMessage, AuditDigestSupport). */
+    static final Set<String> OWN_VARIABLE_TEMPLATES = ["DARPAN_AUDIT_RUN", "DARPAN_AUDIT_DIGEST"] as Set<String>
+    /** Prefix of the blocks that code turns into an email subject (DARPAN_2FA_REMINDER subject.before, DARPAN_AUDIT_RUN subject.run). */
+    static final String SUBJECT_BLOCK_PREFIX = "subject."
+
+    static boolean isSubjectBlock(String blockId) { return blockId != null && blockId.startsWith(SUBJECT_BLOCK_PREFIX) }
+
+    /** True when a block may use only the variables its own shipped words use (audit emails, subject blocks), not the whole template's. */
+    static boolean ownVariablesOnly(String emailTemplateId, String blockId) {
+        return OWN_VARIABLE_TEMPLATES.contains(emailTemplateId) || isSubjectBlock(blockId)
+    }
+
+    /** The variables an edit of this block may use: its own default's (audit emails, subject blocks), else every one the template has. */
+    static Set<String> blockVariables(def ec, String emailTemplateId, String blockId) {
+        if (ownVariablesOnly(emailTemplateId, blockId)) {
+            String defaultText = defaultOf(ec, row(ec, emailTemplateId, blockId), emailTemplateId, blockId)
+            return new LinkedHashSet<String>(variables(defaultText))
+        }
+        return templateVariables(ec, emailTemplateId)
+    }
+
     /** The block's words with its variables filled in: the edit when it is valid, else the default. Never throws. */
     static String text(def ec, String emailTemplateId, String blockId, Map vars) {
         try {
             def row = row(ec, emailTemplateId, blockId)
             String defaultText = defaultOf(ec, row, emailTemplateId, blockId)
             if (defaultText == null) return ""
-            Set<String> allowed = templateVariables(ec, emailTemplateId)
+            Set<String> allowed = new LinkedHashSet<String>(blockVariables(ec, emailTemplateId, blockId))
             allowed.addAll(variables(defaultText))
             String edit = draftOr(emailTemplateId, blockId, row?.getString("copyText"))
             if (edit?.trim()) {
                 try {
                     String why = problem(emailTemplateId, blockId, edit)
                     if (why != null) throw new IllegalArgumentException(why)
-                    return apply(edit, vars, allowed)
+                    // An edit may use a variable this caller does not pass (the whole template's set is allowed on a screen, but a
+                    // builder passes each block only its own): the words would render with a hole, so the default goes instead.
+                    Set<String> lacking = variables(edit).findAll { String name -> !(vars ?: [:]).containsKey(name.split("\\.")[0]) } as Set<String>
+                    if (lacking) {
+                        logOnce(emailTemplateId, blockId, "the edit uses ${lacking.collect { '${' + it + '}' }.join(', ')}, which this email does not pass for this block; the default goes")
+                    } else {
+                        return apply(edit, vars, allowed)
+                    }
                 } catch (Throwable t) {
                     logger.warn("Email copy {}/{}: the edit is not usable ({}); the default goes", emailTemplateId, blockId, t.message)
                 }
@@ -76,7 +104,8 @@ class EmailCopy {
         }
     }
 
-    private static final String URL_LIKE = /(?i)(:\/\/|www\.|\b[a-z0-9-]+\.(ai|com|io|net|org|co|app|dev|xyz|in|us|uk)\b)/
+    /** A web address, a host of any ending, or an e-mail address, anywhere outside a ${...} slot (a mail client auto-links all of them). */
+    private static final String URL_LIKE = /(?i)(:\/\/|www\.|@|\b[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}\b)/
 
     /**
      * Why this text may not be saved as the block's edit, or null. Pure. Copy is words only: outside its ${...} slots it
@@ -89,8 +118,13 @@ class EmailCopy {
         // (or a chat mention such as <users/all>) into an email or the chat text.
         if (text =~ /[<>]/) return "Plain words only: no < or > (no markup)"
         if (blockId == GUIDES) return null
-        String outside = SLOT.matcher(text).replaceAll(" ")
+        // A slot becomes a letter, so `${x}.ru` is read as the host it would render as.
+        String outside = SLOT.matcher(text).replaceAll("x")
         if (outside =~ URL_LIKE) return "The text carries a web address or host; links go only through the user guide block"
+        if (isSubjectBlock(blockId)) {
+            String shape = subjectShapeProblem(text)
+            if (shape != null) return shape
+        }
         if (blockId?.startsWith("smile") && !EmailSmile.ok(text)) return "A smile line is one short plain line (no digits, address, markup or \"!\")"
         return null
     }
@@ -105,11 +139,26 @@ class EmailCopy {
         String why = problem(emailTemplateId, blockId, text)
         if (why != null) return why
         if (text.length() > MAX_CHARS) return "The text is longer than ${MAX_CHARS} characters"
-        Set<String> unknown = variables(text) - templateVariables(ec, emailTemplateId)
-        if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: this email does not have it"
+        if (isSubjectBlock(blockId) && text.length() > MAX_SUBJECT_CHARS) return "The subject text is longer than ${MAX_SUBJECT_CHARS} characters"
         if (blockId == GUIDES) {
-            try { EmailFrame.guides(parseGuides(text)) } catch (IllegalArgumentException e) { return "Guide links: " + e.message }
+            try {
+                List<List<String>> parsed = parseGuides(text)
+                parsed.each { List<String> link -> String bad = guideLabelProblem(link[0]); if (bad != null) throw new IllegalArgumentException(bad) }
+                EmailFrame.guides(parsed)
+            } catch (IllegalArgumentException e) { return "Guide links: " + e.message }
+            return null
         }
+        Set<String> unknown = variables(text) - blockVariables(ec, emailTemplateId, blockId)
+        if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: this ${ownVariablesOnly(emailTemplateId, blockId) ? 'block' : 'email'} does not have it"
+        return null
+    }
+
+    /** Why this guide link label may not be used, or null: a label is plain words, never a variable, a host or an address. Pure. */
+    static String guideLabelProblem(String label) {
+        if (!label?.trim()) return "A guide label is empty"
+        if (SLOT.matcher(label).find()) return "A guide label takes no variables: ${label}"
+        if (label =~ /[<>]/) return "A guide label is plain words: no < or >"
+        if (label =~ URL_LIKE) return "A guide label carries a web address or host: ${label}"
         return null
     }
 
@@ -128,13 +177,23 @@ class EmailCopy {
         if (defaultSubject == null) return "Unknown email ${emailTemplateId}"
         if (!text?.trim()) return "The subject is empty"
         if (text.length() > MAX_SUBJECT_CHARS) return "The subject is longer than ${MAX_SUBJECT_CHARS} characters"
-        String outside = SUBJECT_SLOT.matcher(text).replaceAll(" ")
+        String shape = subjectShapeProblem(text)
+        if (shape != null) return shape
+        Set<String> unknown = variables(text) - variables(defaultSubject)
+        if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: the shipped subject does not have it"
+        return null
+    }
+
+    /**
+     * Why this text may not be a subject (or a subject block), or null: outside `${name}` slots only the allowlisted plain
+     * characters, and no host or address. Pure. Shared by the subject edit and the subject blocks code builds a subject from.
+     */
+    static String subjectShapeProblem(String text) {
+        String outside = SUBJECT_SLOT.matcher(text).replaceAll("x")
         if (!SUBJECT_PLAIN.matcher(outside).matches()) {
             return 'The subject may use letters, digits, spaces and basic punctuation, and variables written as ${name}.'
         }
         if (outside =~ URL_LIKE) return "The subject carries a web address or host"
-        Set<String> unknown = variables(text) - variables(defaultSubject)
-        if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: the shipped subject does not have it"
         return null
     }
 
@@ -216,6 +275,7 @@ class EmailCopy {
             if (edit?.trim()) {
                 try {
                     List<List<String>> parsed = parseGuides(edit)
+                    parsed.each { List<String> link -> String bad = guideLabelProblem(link[0]); if (bad != null) throw new IllegalArgumentException(bad) }
                     EmailFrame.guides(parsed)
                     return parsed
                 } catch (Throwable t) {

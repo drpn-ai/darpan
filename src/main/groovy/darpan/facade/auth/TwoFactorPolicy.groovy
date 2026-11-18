@@ -184,7 +184,8 @@ class TwoFactorPolicy {
                 boolean past = !from.after(now)
                 TwoFactorRecords.notify(ec, userId, TwoFactorSupport.TEMPLATE_REMINDER, [requiredDate: requiredDate,
                         appUrl: CliAuthSupport.appBaseUrl(ec), past: past,
-                        subjectLine: past ? "Two-factor sign-in is now required for Darpan" : "Set up two-factor sign-in for Darpan by ${requiredDate}".toString()])
+                        // The subject's words are copy blocks (DAR-BE-303), so an edit in production changes them without a release.
+                        subjectLine: darpan.email.EmailCopy.text(ec, TwoFactorSupport.TEMPLATE_REMINDER, past ? "subject.after" : "subject.before", [requiredDate: requiredDate])])
                 TwoFactorRecords.event(ec, userId, REMINDER_SENT)
                 sent++
             }

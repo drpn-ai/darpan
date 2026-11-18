@@ -147,7 +147,7 @@ class AuditRunUpdateSupport {
         EmailCopyReader copy = new EmailCopyReader(ec, AuditRunMessage.TEMPLATE)
         return [facts      : facts,
                 words      : words,
-                subject    : AuditRunMessage.subject(facts),
+                subject    : AuditRunMessage.subject(facts, copy),
                 html       : AuditRunMessage.emailHtml(facts, words, base, copy),
                 text       : AuditRunMessage.emailText(facts, words, base, copy),
                 card       : AuditRunMessage.card(facts, words, base, copy),

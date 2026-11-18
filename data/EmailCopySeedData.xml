@@ -4,6 +4,7 @@
     <!-- DAR-BE-303 — the words of the Darpan emails, one row per block per template (screen/email/*.xml reads them through
          darpan.email.EmailCopy.text). The seed sets defaultText ONLY: the loader writes just the attributes given, so a
          release never overwrites an edit (copyText). Block id = area[.branch]; the `guides` block is lines of `Label|docs page path`.
+         The `subject.*` blocks (DARPAN_2FA_REMINDER, DARPAN_AUDIT_RUN) are the words code builds an email subject from; they follow the subject's plain-text rules.
          The audit run email (DARPAN_AUDIT_RUN) and the digest build their body in Groovy (AuditRunMessage, AuditDigestSupport):
          the same rows, read there through EmailCopyReader; finding rows, counts and the report link stay code. -->
 
@@ -75,8 +76,11 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="next.before" defaultText="From ${requiredDate}, Darpan will ask you to set it up when you sign in, so it can't catch you out."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="next.after" defaultText="Darpan will ask you to set it up the next time you sign in, so it can't catch you out."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="note" defaultText="You'll keep getting this reminder until a method is set up. Questions? Ask your Darpan administrator."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="subject.before" defaultText="Set up two-factor sign-in for Darpan by ${requiredDate}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="subject.after" defaultText="Two-factor sign-in is now required for Darpan"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="guides" defaultText="Set up two-factor|guides/two-factor#set-it-up&#10;Who requires two-factor|guides/manage-users-and-access#require-two-factor"/>
 
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="subject.run" defaultText="${tenantName} ${auditName}, ${span}: ${open} open findings"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="subtitle" defaultText="Run of ${date} · ${span}"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.open" defaultText="Open"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.new" defaultText="New"/>

@@ -365,6 +365,107 @@ class EmailTemplatesRenderTests {
         assertNotNull(EmailCopy.problem("T", "note", "see www.x"))
         assertNotNull(EmailCopy.problem("T", "smile", "Wow!"))
         assertNull(EmailCopy.problem("T", "note", 'Open \${appUrl} in your browser.'))
+        // the guide labels (and the paths) of every shipped guides block, and every subject block, pass their own rules
+        rows.findAll { it.getString("blockId") == EmailCopy.GUIDES }.each { r ->
+            List<List<String>> links = EmailCopy.parseGuides(r.getString("defaultText"))
+            links.each { assertNull(EmailCopy.guideLabelProblem(it[0]), "${r.emailTemplateId}: ${it[0]}") }
+            assertNull(EmailCopy.editProblem(ec, r.getString("emailTemplateId"), EmailCopy.GUIDES, r.getString("defaultText")), r.getString("emailTemplateId"))
+        }
+        rows.findAll { EmailCopy.isSubjectBlock(it.getString("blockId")) }.each { r ->
+            assertNull(EmailCopy.editProblem(ec, r.getString("emailTemplateId"), r.getString("blockId"), r.getString("defaultText")), r.getString("blockId"))
+        }
+        // every shipped block is a valid edit of itself (the save rules, not only the render rules)
+        rows.each { r ->
+            assertNull(EmailCopy.editProblem(ec, r.getString("emailTemplateId"), r.getString("blockId"), r.getString("defaultText")),
+                    "${r.emailTemplateId}/${r.blockId}")
+        }
+    }
+
+    /** DAR-BE-303 final review I1: a block may use only what the code that reads it passes; otherwise the default goes. */
+    @Test
+    void anEditUsingAVariableItsBlockIsNotPassedIsRefusedAndRendersTheDefault() {
+        String why = EmailCopy.editProblem(ec, "DARPAN_AUDIT_RUN", "rule.clean", 'clean ${open}')
+        assertTrue(why != null && why.contains('Unknown variable ${open}'), why)
+        assertNull(EmailCopy.editProblem(ec, "DARPAN_AUDIT_RUN", "rule.open", '${open} to fix'))
+        assertNotNull(EmailCopy.editProblem(ec, "DARPAN_AUDIT_RUN", "rule.open", '${open} of ${file}'), "file is rule.all's, not rule.open's")
+        assertNotNull(EmailCopy.editProblem(ec, "DARPAN_AUDIT_DIGEST", "none", 'Nothing open (${open}).'))
+        try {
+            // written straight to the row (a data load, a transfer): still the default, never "clean "
+            setCopy("DARPAN_AUDIT_RUN", "rule.clean", 'clean ${open}')
+            assertEquals("clean", EmailCopy.text(ec, "DARPAN_AUDIT_RUN", "rule.clean", [:]))
+            assertEquals("clean", new EmailCopyReader(ec, "DARPAN_AUDIT_RUN").text("rule.clean"))
+            assertTrue(render("AuditRun", AUDIT_RUN.AuditRunFull, "html").contains(">clean</td>"))
+            // a screen block the sender names a variable for but does not pass (no `smile` for the smile block itself)
+            setCopy("DARPAN_PASSWORD_CHANGED", "smile", '${smile}')
+            assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("New password, who dis?"))
+            // an edit whose variables ARE passed still applies
+            setCopy("DARPAN_AUDIT_RUN", "rule.open", '${open} to fix')
+            assertTrue(render("AuditRun", AUDIT_RUN.AuditRunFull, "html").contains("1 to fix"))
+        } finally {
+            setCopy("DARPAN_AUDIT_RUN", "rule.clean", null)
+            setCopy("DARPAN_AUDIT_RUN", "rule.open", null)
+            setCopy("DARPAN_PASSWORD_CHANGED", "smile", null)
+        }
+    }
+
+    /** I2: a host of any ending, or an address, written to a row never renders; a guide label gets the same rules. */
+    @Test
+    void noHostOrAddressRendersFromABlockOrAGuideLabel() {
+        try {
+            ["Not you? bit.ly/x", "Not you? evil.ru", "Not you? darpan-login.help", "Not you? login.darpan.support", "Not you? x@evil.ru"].each { String bad ->
+                setCopy("DARPAN_PASSWORD_CHANGED", "note", bad)
+                String html = render("PasswordChanged", SECURITY.PasswordChanged, "html")
+                assertTrue(html.contains("Not you? Tell your Darpan administrator now."), bad)
+            }
+            ["Evil evil.ru|guides/two-factor", "bit.ly/x|guides/two-factor", 'Hi ${firstName}|guides/two-factor', "a@b.co|guides/two-factor"].each { String bad ->
+                setCopy("DARPAN_PASSWORD_CHANGED", "guides", bad)
+                String html = render("PasswordChanged", SECURITY.PasswordChanged, "html")
+                assertFalse(html.contains("evil.ru") || html.contains("bit.ly") || html.contains("b.co"), bad)
+                assertTrue(html.contains("Lockouts and session length") && html.contains("Two-factor sign-in"), "the default links: ${bad}")
+            }
+        } finally {
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", null)
+            setCopy("DARPAN_PASSWORD_CHANGED", "guides", null)
+        }
+    }
+
+    /** I3: the subject words code builds are copy blocks; they follow the subject rules at render too. */
+    @Test
+    void theSubjectBlocksCodeBuildsFromAreEditableAndPlain() {
+        assertEquals("Set up two-factor sign-in for Darpan by 2 December 2026", EmailCopy.text(ec, "DARPAN_2FA_REMINDER", "subject.before", [requiredDate: "2 December 2026"]))
+        assertEquals("Two-factor sign-in is now required for Darpan", EmailCopy.text(ec, "DARPAN_2FA_REMINDER", "subject.after", [requiredDate: "2 December 2026"]))
+        assertEquals("Gorjana Month close, 1–10 November: 57 open findings",
+                AuditRunMessage.subject(AuditEmailSamples.runFacts(), new EmailCopyReader(ec, "DARPAN_AUDIT_RUN")))
+        try {
+            setCopy("DARPAN_2FA_REMINDER", "subject.before", 'Two-factor by ${requiredDate}, please')
+            assertEquals("Two-factor by 2 December 2026, please", EmailCopy.text(ec, "DARPAN_2FA_REMINDER", "subject.before", [requiredDate: "2 December 2026"]))
+            setCopy("DARPAN_AUDIT_RUN", "subject.run", '${open} open in ${auditName} for ${tenantName}')
+            assertEquals("57 open in Month close for Gorjana", AuditRunMessage.subject(AuditEmailSamples.runFacts(), new EmailCopyReader(ec, "DARPAN_AUDIT_RUN")))
+            // a quote, a breakout, a host, a variable the block was not given: refused at save, the default at render
+            ['Say "hi" ${requiredDate}', 'x ${requiredDate} ${ec.entity}', "Go to bit.ly/x ${'$'}{requiredDate}", 'Hi ${firstName}', 'Hi `id`', 'a\nb'].each { String bad ->
+                assertNotNull(EmailCopy.editProblem(ec, "DARPAN_2FA_REMINDER", "subject.before", bad), bad)
+                setCopy("DARPAN_2FA_REMINDER", "subject.before", bad)
+                assertEquals("Set up two-factor sign-in for Darpan by 2 December 2026",
+                        EmailCopy.text(ec, "DARPAN_2FA_REMINDER", "subject.before", [requiredDate: "2 December 2026"]), bad)
+            }
+            assertNotNull(EmailCopy.editProblem(ec, "DARPAN_2FA_REMINDER", "subject.before", "x" * 201))
+        } finally {
+            setCopy("DARPAN_2FA_REMINDER", "subject.before", null)
+            setCopy("DARPAN_AUDIT_RUN", "subject.run", null)
+        }
+    }
+
+    /** M1: a release's seed reload writes defaultText only and leaves a production edit alone. */
+    @Test
+    void aSeedReloadKeepsAnEdit() {
+        try {
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", "Not you? Say so.")
+            ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/EmailCopySeedData.xml")
+            assertEquals("Not you? Say so.", copyText("DARPAN_PASSWORD_CHANGED", "note"))
+            assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("Not you? Say so."))
+        } finally {
+            setCopy("DARPAN_PASSWORD_CHANGED", "note", null)
+        }
     }
 
     @Test

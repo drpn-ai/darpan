@@ -1,5 +1,6 @@
 package darpan.facade.auth
 
+import darpan.admin.AuditLogTestSupport
 import darpan.facade.auth.support.TwoFactorTestSupport
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -96,6 +97,29 @@ class TwoFactorReminderSmokeTests extends TwoFactorTestSupport {
         assertNotNull(mail, "${sent}")
         assertEquals("2 December 2026", mail.params.requiredDate)
         assertTrue((mail.params.subjectLine as String).endsWith("by 2 December 2026") || mail.params.past == true, "${mail.params}")
+    }
+
+    @Test
+    @DisplayName("the reminder's subject words are copy blocks: shipped by default, an edit is sent, a breakout falls back")
+    void theSubjectLineIsACopyBlock() {
+        setPolicy(TwoFactorPolicy.EVERYONE, Timestamp.from(Instant.parse("2026-12-02T00:00:00Z")))
+        assertEquals([], call(JOB, [:]).errors)
+        assertEquals("Set up two-factor sign-in for Darpan by 2 December 2026", sent.find { it.to == "tfr.nofactor@example.com" }.params.subjectLine)
+        def block = ec.entity.makeValue("darpan.email.EmailCopyBlock").setAll([emailTemplateId: TwoFactorSupport.TEMPLATE_REMINDER, blockId: "subject.before",
+                defaultText: 'Set up two-factor sign-in for Darpan by ${requiredDate}']).createOrUpdate()
+        try {
+            Map<String, String> cases = ['Two-factor by ${requiredDate}, please': "Two-factor by 2 December 2026, please",
+                                         'Say "hi" ${requiredDate}': "Set up two-factor sign-in for Darpan by 2 December 2026"]
+            for (Map.Entry<String, String> c : cases.entrySet()) {
+                block.set("copyText", c.key).update()
+                AuditLogTestSupport.wipe(ec, TwoFactorRecords.EVENT)
+                sent.clear()
+                assertEquals([], call(JOB, [:]).errors)
+                assertEquals(c.value, sent.find { it.to == "tfr.nofactor@example.com" }.params.subjectLine, c.key)
+            }
+        } finally {
+            block.set("copyText", null).update()
+        }
     }
 
     @Test

@@ -120,7 +120,7 @@ class EmailAdminServicesSmokeTests {
         assertTrue(svc("preview#EmailTemplate", [emailTemplateId: CHANGED, blocks: [note: "see https://evil.example"]]).errors.any { it.contains("web address") })
         Map after = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER", branch: "after"])).result
         assertTrue((after.html as String).contains("now needs a second step"), after.html)
-        assertEquals("Set up two-factor before 2 December 2026", after.subject)
+        assertEquals("Two-factor sign-in is now required for Darpan", after.subject, "the subject a send builds from the subject.after block")
         assertTrue(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER", branch: "nope"]).errors.any { it.contains("No such sample branch") })
         Map welcome = ok(svc("preview#EmailTemplate", [emailTemplateId: WELCOME, subject: 'Hello ${tenantLabel}'])).result
         assertEquals("Hello Malbon", welcome.subject)
@@ -199,6 +199,75 @@ class EmailAdminServicesSmokeTests {
         assertNull(EmailCopy.row(ec, CHANGED, "subject"))
         assertEquals([], auditRows())
         assertTrue(render("PasswordChanged", EmailSamples.SECURITY.PasswordChanged).contains("Not you? Tell your Darpan administrator now."))
+    }
+
+    // ---------------------------------------------------------------- final review (DAR-BE-303)
+
+    @Test
+    void anAuditBlockMayUseOnlyItsOwnVariablesAndAScreenBlockTheWholeTemplates() {
+        Map run = ok(svc("get#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN"])).result
+        Closure<List> varsOf = { Map shown, String id -> (shown.blocks as List<Map>).find { it.blockId == id }.variables }
+        assertEquals([], varsOf(run, "rule.clean"))
+        assertEquals(["open"], varsOf(run, "rule.open"))
+        assertEquals(["file", "open"], varsOf(run, "rule.all"))
+        assertTrue(varsOf(ok(svc("get#EmailTemplate", [emailTemplateId: CHANGED])).result, "note").containsAll(["changedAt", "firstName"]))
+        List<String> why = svc("update#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: ["rule.clean": 'clean ${open}']]).errors as List<String>
+        assertTrue(why[0].contains('Unknown variable ${open}'), "${why}")
+        assertNull(row("DARPAN_AUDIT_RUN", "rule.clean")?.copyText)
+        assertTrue((svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: ["rule.clean": 'clean ${open}']]).errors as List<String>)[0].contains("Unknown variable"))
+    }
+
+    @Test
+    void aHostOrAddressOfAnyEndingIsRefusedInBlocksAndGuideLabels() {
+        Closure<String> refused = { Map blocks -> (svc("update#EmailTemplate", [emailTemplateId: CHANGED, blocks: blocks]).errors as List<String>)[0] }
+        ["bit.ly/x", "evil.ru", "darpan-login.help", "login.darpan.support", "x@evil.ru"].each { String bad ->
+            assertTrue(refused([note: "Not you? ${bad}"]).contains("web address"), bad)
+            assertTrue(refused([guides: "${bad}|guides/two-factor"]).contains("Guide links"), bad)
+        }
+        assertTrue(refused([guides: 'Hi ${firstName}|guides/two-factor']).contains("no variables"))
+        ["Not you, e.g. today? U.S. team, 1.5 hours, 9 a.m. Sign in."].each { ok(svc("update#EmailTemplate", [emailTemplateId: CHANGED, blocks: [note: it]])) }
+        assertEquals("Not you, e.g. today? U.S. team, 1.5 hours, 9 a.m. Sign in.", row(CHANGED, "note").copyText)
+    }
+
+    @Test
+    void theSubjectBlocksCodeBuildsFromAreEditedPreviewedAndPlain() {
+        Map shown = ok(svc("get#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER"])).result
+        Map before = (shown.blocks as List<Map>).find { it.blockId == "subject.before" }
+        assertEquals(["requiredDate"], before.variables)
+        assertEquals("Set up two-factor sign-in for Darpan by \${requiredDate}", before.defaultText)
+        assertTrue((svc("update#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER", blocks: ["subject.before": 'Say "hi" ${requiredDate}']])
+                .errors as List<String>)[0].contains("subject"))
+        assertTrue((svc("update#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER", blocks: ["subject.before": 'Hi ${firstName}']])
+                .errors as List<String>)[0].contains("Unknown variable"))
+        assertNull(row("DARPAN_2FA_REMINDER", "subject.before")?.copyText)
+
+        Map out = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER", blocks: ["subject.before": 'Two-factor by ${requiredDate}']])).result
+        assertEquals("Two-factor by 2 December 2026", out.subject)
+        ok(svc("update#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER", blocks: ["subject.after": "Two-factor is required now"]]))
+        Map after = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_2FA_REMINDER", branch: "after"])).result
+        assertEquals("Two-factor is required now", after.subject)
+        assertEquals("Two-factor is required now", EmailCopy.text(ec, "DARPAN_2FA_REMINDER", "subject.after", [requiredDate: "x"]))
+        Map run = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: ["subject.run": '${open} open in ${auditName}']])).result
+        assertEquals("57 open in Month close", run.subject)
+    }
+
+    @Test
+    void theAuditLogKeepsTheNewTextAndAnEditEqualToTheShippedWordsIsNoEdit() {
+        String longText = "Not you? " + ("word " * 200)
+        ok(svc("update#EmailTemplate", [emailTemplateId: CHANGED, subject: "Heads up, password changed",
+                blocks: [note: 'Not you, ${firstName}? Say so.', body: longText.take(900)]]))
+        String detail = auditRows()[0].detailText
+        assertTrue(detail.contains('note = "Not you, ${firstName}? Say so."'), detail)
+        assertTrue(detail.contains('subject = "Heads up, password changed"'), detail)
+        assertTrue(detail.contains('body = "' + longText.take(500)) && !detail.contains(longText.take(501)), "cut at 500 characters: ${detail}")
+
+        // text equal to the shipped words stores no edit, so a later release's words are not pinned
+        String shipped = row(CHANGED, "note").defaultText
+        ok(svc("update#EmailTemplate", [emailTemplateId: CHANGED, blocks: [note: shipped], subject: "Your Darpan password was changed"]))
+        assertNull(row(CHANGED, "note").copyText)
+        assertNull(row(CHANGED, "subject").copyText)
+        assertTrue(auditRows().last().detailText.contains("(the shipped words)"), auditRows().last().detailText)
+        assertEquals(1, ok(svc("get#EmailTemplates", [:])).result.templates.find { it.emailTemplateId == CHANGED }.editedBlockCount, "only body is still an edit")
     }
 
     // ---------------------------------------------------------------- reset

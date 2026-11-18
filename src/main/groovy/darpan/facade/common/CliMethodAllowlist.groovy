@@ -90,6 +90,8 @@ class CliMethodAllowlist {
             "facade.SearchFacadeServices.search#NavigationTargets",
 
             "facade.SettingsFacadeServices.get#LlmSettings",
+            // DAR-UI-123: writes nothing; its spaces carry no webhook URL.
+            "facade.SettingsFacadeServices.get#NotificationRoutes",
             "facade.SettingsFacadeServices.get#TenantSettings",
             "facade.SettingsFacadeServices.get#UserNotificationDefault",
             "facade.SettingsFacadeServices.list#EnumOptions",
@@ -352,6 +354,9 @@ class CliMethodAllowlist {
             "facade.SettingsFacadeServices.save#TenantChatSpace",
             "facade.SettingsFacadeServices.save#TenantSettings",
             "facade.SettingsFacadeServices.save#UserNotificationDefault",
+            // DAR-UI-123: moves where a source posts; posts a test message into a tenant's chat.
+            "facade.SettingsFacadeServices.send#ChatSpaceTest",
+            "facade.SettingsFacadeServices.set#NotificationRoute",
 
             // DAR-BE-275: starts an install that stores a new connection; a browser flow, not a CLI one.
             "facade.ShopifyFacadeServices.begin#ShopifyInstall",

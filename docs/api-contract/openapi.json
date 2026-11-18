@@ -717,6 +717,9 @@
                                         "$ref": "#/components/schemas/GetLlmSettingsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetNotificationRoutesRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetTenantSettingsRequest"
                                     },
                                     {
@@ -757,6 +760,12 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveUserNotificationDefaultRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SendChatSpaceTestRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SetNotificationRouteRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/TestSourceConnectionRequest"
@@ -1077,6 +1086,7 @@
                                         "facade.SettingsFacadeServices.delete#NsAuthConfig": "#/components/schemas/DeleteNsAuthConfigRequest",
                                         "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.get#LlmSettings": "#/components/schemas/GetLlmSettingsRequest",
+                                        "facade.SettingsFacadeServices.get#NotificationRoutes": "#/components/schemas/GetNotificationRoutesRequest",
                                         "facade.SettingsFacadeServices.get#TenantSettings": "#/components/schemas/GetTenantSettingsRequest",
                                         "facade.SettingsFacadeServices.get#UserNotificationDefault": "#/components/schemas/GetUserNotificationDefaultRequest",
                                         "facade.SettingsFacadeServices.list#EnumOptions": "#/components/schemas/ListEnumOptionsRequest",
@@ -1091,6 +1101,8 @@
                                         "facade.SettingsFacadeServices.save#TenantChatSpace": "#/components/schemas/SaveTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.save#TenantSettings": "#/components/schemas/SaveTenantSettingsRequest",
                                         "facade.SettingsFacadeServices.save#UserNotificationDefault": "#/components/schemas/SaveUserNotificationDefaultRequest",
+                                        "facade.SettingsFacadeServices.send#ChatSpaceTest": "#/components/schemas/SendChatSpaceTestRequest",
+                                        "facade.SettingsFacadeServices.set#NotificationRoute": "#/components/schemas/SetNotificationRouteRequest",
                                         "facade.SettingsFacadeServices.test#SourceConnection": "#/components/schemas/TestSourceConnectionRequest",
                                         "facade.ShopifyFacadeServices.begin#ShopifyInstall": "#/components/schemas/BeginShopifyInstallRequest",
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
@@ -1829,6 +1841,9 @@
                                             "$ref": "#/components/schemas/GetLlmSettingsResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetNotificationRoutesResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetTenantSettingsResponse"
                                         },
                                         {
@@ -1869,6 +1884,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveUserNotificationDefaultResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SendChatSpaceTestResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SetNotificationRouteResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/TestSourceConnectionResponse"
@@ -31227,6 +31248,160 @@
                     "result"
                 ]
             },
+            "GetNotificationRoutesParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-UI-123. The active tenant's chat spaces and, for each thing that posts to chat, the one space it\n            posts to: the streaks messages, each audit's run update, each automation (paused ones too, archived ones not)\n            and each deployed script. Notify-me subscriptions and each user's default space are personal and not listed."
+            },
+            "GetNotificationRoutesResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "spaces": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "chatSpaceId": {
+                                    "type": "string"
+                                },
+                                "spaceName": {
+                                    "type": "string"
+                                },
+                                "chatProviderEnumId": {
+                                    "type": "string"
+                                },
+                                "chatProviderLabel": {
+                                    "type": "string"
+                                },
+                                "slackChannelName": {
+                                    "type": "string"
+                                },
+                                "deliveryMode": {
+                                    "type": "string"
+                                },
+                                "webhookConfigured": {
+                                    "type": "boolean"
+                                },
+                                "isActive": {
+                                    "type": "string",
+                                    "description": "Y or N."
+                                }
+                            }
+                        },
+                        "description": "The tenant's chat spaces by name, switched off ones too, as list#TenantChatSpaces shapes them but\n                    without the webhook URL."
+                    },
+                    "routes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sourceType": {
+                                    "type": "string",
+                                    "description": "STREAKS, AUDIT_UPDATE, AUTOMATION or SCRIPT."
+                                },
+                                "sourceId": {
+                                    "type": "string",
+                                    "description": "Null for STREAKS; the audit's code for AUDIT_UPDATE; the automationId\n                    for AUTOMATION; the tenantScriptDeploymentId for SCRIPT (a script deployed twice is two rows)."
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "\"Streaks\", \"(audit name) update\", the automation's name, or the\n                    script's name."
+                                },
+                                "when": {
+                                    "type": "string",
+                                    "description": "\"Daily HH:mm\" for an automation or script on a daily schedule, \"After\n                    each run\" for an audit update; null otherwise."
+                                },
+                                "paused": {
+                                    "type": "boolean",
+                                    "description": "The automation or script is not on its schedule, or the\n                    audit's run update is off. Always false for STREAKS."
+                                },
+                                "chatSpaceId": {
+                                    "type": "string",
+                                    "description": "The space it posts to as stored (it may since have been switched\n                    off: see spaces[].isActive); null posts nowhere."
+                                }
+                            }
+                        },
+                        "description": "Streaks first, then each audit's update by audit name, each automation by name, each deployed\n                    script by when it was deployed."
+                    }
+                }
+            },
+            "GetNotificationRoutesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.get#NotificationRoutes",
+                "x-darpan-method": "facade.SettingsFacadeServices.get#NotificationRoutes",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.get#NotificationRoutes"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetNotificationRoutesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetNotificationRoutesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.get#NotificationRoutes. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetNotificationRoutesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetTenantSettingsParams": {
                 "type": "object",
                 "properties": {
@@ -33177,6 +33352,224 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveUserNotificationDefaultResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SendChatSpaceTestParams": {
+                "type": "object",
+                "properties": {
+                    "chatSpaceId": {
+                        "type": "string",
+                        "description": "The tenant's chat space, switched on."
+                    }
+                },
+                "required": [
+                    "chatSpaceId"
+                ],
+                "description": "DAR-UI-123. Posts one short test message to one of the active tenant's chat spaces, the way run\n            notifications are delivered (Google Chat or Slack webhook, or the Slack bot). Answers ok, or why the space did\n            not take it in plain words. Needs edit access to the tenant, as editing a space does."
+            },
+            "SendChatSpaceTestResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "SendChatSpaceTestRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.send#ChatSpaceTest",
+                "x-darpan-method": "facade.SettingsFacadeServices.send#ChatSpaceTest",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.send#ChatSpaceTest"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SendChatSpaceTestParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SendChatSpaceTestResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.send#ChatSpaceTest. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SendChatSpaceTestResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SetNotificationRouteParams": {
+                "type": "object",
+                "properties": {
+                    "sourceType": {
+                        "type": "string",
+                        "description": "STREAKS, AUDIT_UPDATE, AUTOMATION or SCRIPT."
+                    },
+                    "sourceId": {
+                        "type": "string",
+                        "description": "Blank for STREAKS; the audit's code for AUDIT_UPDATE; the automationId for\n                AUTOMATION; the tenantScriptDeploymentId for SCRIPT."
+                    },
+                    "chatSpaceId": {
+                        "type": "string",
+                        "description": "The space to post to; blank posts nowhere (refused for SCRIPT)."
+                    }
+                },
+                "required": [
+                    "sourceType"
+                ],
+                "description": "DAR-UI-123. Moves one thing that posts to chat to another of the active tenant's spaces, or to none.\n            Writes only that source's space field, nothing else on it. The space must be the tenant's and switched on; the\n            automation, audit or deployment must be the tenant's. Needs edit access to the tenant, and for an audit's update\n            tenant admin rights as well (as save#AuditSettings asks for its runEmail). A deployed script always posts\n            somewhere: to stop it, turn its schedule off on the Scripts page."
+            },
+            "SetNotificationRouteResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "route": {
+                        "type": "object",
+                        "properties": {
+                            "sourceType": {
+                                "type": "string"
+                            },
+                            "sourceId": {
+                                "type": "string"
+                            },
+                            "label": {
+                                "type": "string"
+                            },
+                            "when": {
+                                "type": "string"
+                            },
+                            "paused": {
+                                "type": "boolean"
+                            },
+                            "chatSpaceId": {
+                                "type": "string"
+                            }
+                        },
+                        "description": "The route as saved, as get#NotificationRoutes lists it; absent when refused."
+                    }
+                }
+            },
+            "SetNotificationRouteRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.set#NotificationRoute",
+                "x-darpan-method": "facade.SettingsFacadeServices.set#NotificationRoute",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.set#NotificationRoute"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SetNotificationRouteParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SetNotificationRouteResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.set#NotificationRoute. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SetNotificationRouteResult"
                     }
                 },
                 "required": [
@@ -36475,6 +36868,7 @@
         "facade.SettingsFacadeServices.delete#NsAuthConfig": "DeleteNsAuthConfig",
         "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",
         "facade.SettingsFacadeServices.get#LlmSettings": "GetLlmSettings",
+        "facade.SettingsFacadeServices.get#NotificationRoutes": "GetNotificationRoutes",
         "facade.SettingsFacadeServices.get#TenantSettings": "GetTenantSettings",
         "facade.SettingsFacadeServices.get#UserNotificationDefault": "GetUserNotificationDefault",
         "facade.SettingsFacadeServices.list#EnumOptions": "ListEnumOptions",
@@ -36489,6 +36883,8 @@
         "facade.SettingsFacadeServices.save#TenantChatSpace": "SaveTenantChatSpace",
         "facade.SettingsFacadeServices.save#TenantSettings": "SaveTenantSettings",
         "facade.SettingsFacadeServices.save#UserNotificationDefault": "SaveUserNotificationDefault",
+        "facade.SettingsFacadeServices.send#ChatSpaceTest": "SendChatSpaceTest",
+        "facade.SettingsFacadeServices.set#NotificationRoute": "SetNotificationRoute",
         "facade.SettingsFacadeServices.test#SourceConnection": "TestSourceConnection",
         "facade.ShopifyFacadeServices.begin#ShopifyInstall": "BeginShopifyInstall",
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",

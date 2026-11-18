@@ -229,6 +229,7 @@ facade.SearchFacadeServices.search#NavigationTargets
 facade.SettingsFacadeServices.delete#NsAuthConfig
 facade.SettingsFacadeServices.delete#TenantChatSpace
 facade.SettingsFacadeServices.get#LlmSettings
+facade.SettingsFacadeServices.get#NotificationRoutes
 facade.SettingsFacadeServices.get#TenantSettings
 facade.SettingsFacadeServices.get#UserNotificationDefault
 facade.SettingsFacadeServices.list#EnumOptions
@@ -243,6 +244,8 @@ facade.SettingsFacadeServices.save#SftpServer
 facade.SettingsFacadeServices.save#TenantChatSpace
 facade.SettingsFacadeServices.save#TenantSettings
 facade.SettingsFacadeServices.save#UserNotificationDefault
+facade.SettingsFacadeServices.send#ChatSpaceTest
+facade.SettingsFacadeServices.set#NotificationRoute
 facade.SettingsFacadeServices.test#SourceConnection
 facade.ShopifyFacadeServices.begin#ShopifyInstall
 facade.ShopifyFacadeServices.delete#ShopifyAuthConfig

@@ -2,6 +2,10 @@ package darpan.facade.settings
 
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.notification.TenantNotificationSupport
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
+import java.net.http.HttpTimeoutException
 
 /**
  * Shaping and validation for the tenant chat-space facade, shared by list#TenantChatSpaces and
@@ -12,6 +16,14 @@ import darpan.reconciliation.notification.TenantNotificationSupport
  * is now something the UI's generated types are pinned to.
  */
 class ChatSpaceFacadeSupport {
+    private static final Logger logger = LoggerFactory.getLogger(ChatSpaceFacadeSupport.class)
+
+    /** DAR-UI-123. What send#ChatSpaceTest posts: one line, so it reads the same in Google Chat and Slack. */
+    static final String TEST_MESSAGE = "Test message from Darpan. This space is connected."
+
+    /** DAR-UI-123. The fields of a chat space the notification grid shows; never its webhook URL. */
+    static final List<String> ROUTE_SPACE_FIELDS = ["chatSpaceId", "spaceName", "chatProviderEnumId", "chatProviderLabel",
+            "slackChannelName", "deliveryMode", "webhookConfigured", "isActive"].asImmutable()
 
     /** Provider ids the product can actually deliver to — see TenantNotificationSupport. */
     static final List<String> SUPPORTED_PROVIDERS = [
@@ -160,5 +172,40 @@ class ChatSpaceFacadeSupport {
         } catch (Throwable ignored) {
             return fallback
         }
+    }
+
+    /**
+     * DAR-UI-123. A chat space as get#NotificationRoutes lists it: toChatSpaceMap's projection without the webhook URL
+     * (list#TenantChatSpaces returns it in clear text; a page that only moves dots has no use for it).
+     */
+    static Map<String, Object> toRouteSpaceMap(def ec, def spaceRow) {
+        Map<String, Object> full = toChatSpaceMap(ec, spaceRow, false)
+        return full == null ? null : full.subMap(ROUTE_SPACE_FIELDS)
+    }
+
+    /**
+     * DAR-UI-123. Posts TEST_MESSAGE to one of the tenant's spaces through the delivery path run notifications use
+     * (TenantNotificationSupport.postToChatSpace: Google Chat or Slack webhook, or the Slack bot).
+     *
+     * @return null when the space took it, else why not in plain words. A transport failure is logged, never echoed:
+     *     its message can carry the webhook URL.
+     */
+    static String sendTestMessage(def ec, String tenantId, String chatSpaceId) {
+        Map<String, Object> delivery
+        try {
+            delivery = TenantNotificationSupport.postToChatSpace(ec, tenantId, chatSpaceId, [text: TEST_MESSAGE])
+        } catch (HttpTimeoutException e) {
+            logger.warn("Chat space {} test message timed out", chatSpaceId)
+            return "The chat space did not answer in time."
+        } catch (Exception e) {
+            logger.warn("Chat space {} test message failed: {}", chatSpaceId, e.class.name)
+            return "Could not reach the chat space."
+        }
+        if (delivery == null) return "This space has no webhook or Slack channel to post to."
+        if (delivery.ok != true) {
+            return ("The chat space refused the message (${delivery.statusCode ?: '?'}" +
+                    "${delivery.providerMessage ? ', ' + delivery.providerMessage : ''}).").toString()
+        }
+        return null
     }
 }

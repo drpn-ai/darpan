@@ -8,7 +8,7 @@
 
     <entity entity-name="AppContentEntry" package="darpan.content" use="configuration" cache="never">
         <description>One mascot entry. contentKind is MASCOT_GLOSSARY, MASCOT_ACTION or MASCOT_HINT. A SEED row is generated
-            from the app's bundled registries: a release (the seed load) sets only the default*, matchLabels, whereShown and
+            from the app's bundled registries: a release (the seed load) sets only the default*, matchLabels, matchRegex, whereShown and
             hint-binding columns, so it never overwrites an admin edit (title, body, aliases, hidden); resetting an entry
             clears the edit columns. An ADMIN row (key `admin:slug`) is created in the admin app and is never written by a
             release. For a hint the words are `body` (defaultBody) and there is no title.</description>
@@ -19,6 +19,7 @@
         <field name="defaultTitle" type="text-medium"/>
         <field name="defaultBody" type="text-medium"><description>The words as released; may carry {token} slots a SEED edit must keep.</description></field>
         <field name="matchLabels" type="text-medium"><description>Every label this SEED row's bundle already answers, `|`-joined and normalised; an alias or pattern equal to one is refused.</description></field>
+        <field name="matchRegex" type="text-medium"><description>SEED rows: the app's bundled regex matchers this row answers (one JS/Java-common regex source per line; release code, never admin-edited). An alias one of them matches is refused: the app's bundle answers it first.</description></field>
         <field name="whereShown" type="text-medium"><description>Where the mascot says this, for the admin's list.</description></field>
         <field name="defaultSequence" type="number-integer"><description>A SEED hint's order on its route: (index + 1) * 10.</description></field>
         <field name="title" type="text-medium"><description>The production edit; empty means defaultTitle.</description></field>
@@ -45,11 +46,13 @@
         <description>A route the app has, generated with the seed (the router sweep). Seed-only: admins never write it.</description>
         <field name="routeName" type="id-long" is-pk="true"/>
         <field name="routePath" type="text-medium"/>
+        <field name="seedMark" type="id"><description>The generator's content mark when the row was last loaded; a row whose mark is not AppContentSeed CURRENT was dropped by a later release and is not part of the vocabulary.</description></field>
     </entity>
 
     <entity entity-name="AppRouteAnchor" package="darpan.content" use="configuration" cache="never">
         <description>A data-testid a route's components carry, generated with the seed. Seed-only: admins never write it.</description>
         <field name="routeName" type="id-long" is-pk="true"/>
         <field name="anchorTestId" type="id-long" is-pk="true"/>
+        <field name="seedMark" type="id"><description>As AppRoute.seedMark.</description></field>
     </entity>
 </entities>

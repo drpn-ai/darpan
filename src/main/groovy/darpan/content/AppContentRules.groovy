@@ -215,6 +215,41 @@ class AppContentRules {
         return currentMark != null && str(row.source) == SEED && str(row.seedMark) != currentMark
     }
 
+    /** A vocabulary row (AppRoute, AppRouteAnchor) the current release still has. No CURRENT row means no filter, as for entries. */
+    static boolean current(def row, String currentMark) {
+        return currentMark == null || str(row.seedMark) == currentMark
+    }
+
+    /** The AppRoute a release still has, or null (unknown, or dropped by a later release). */
+    static def currentRoute(def ec, String routeName) {
+        def route = ec.entity.find("darpan.content.AppRoute").condition("routeName", routeName).one()
+        return route != null && current(route, currentSeedMark(ec)) ? route : null
+    }
+
+    /** Whether a route's anchor is one the current release still has. */
+    static boolean anchorKnown(def ec, String routeName, String anchor) {
+        def a = ec.entity.find("darpan.content.AppRouteAnchor").condition("routeName", routeName).condition("anchorTestId", anchor).one()
+        return a != null && current(a, currentSeedMark(ec))
+    }
+
+    /**
+     * The compiled bundled regex matchers a SEED row carries (`matchRegex`, one per line). The sources are release code written by
+     * the generator and are the JS/Java common subset; one that does not compile here is skipped, never thrown.
+     */
+    static List<Pattern> bundledPatterns(def matchRegex) {
+        List<Pattern> out = []
+        str(matchRegex).split(/\n/).each { String source ->
+            if (source.isEmpty()) return
+            try { out << Pattern.compile(source) } catch (java.util.regex.PatternSyntaxException ignored) { }
+        }
+        return out
+    }
+
+    /** Whether the bundle's own regex matchers (the rows' matchRegex) answer this label. */
+    static boolean bundledPatternAnswers(def matchRegex, String label) {
+        return bundledPatterns(matchRegex).any { it.matcher(label).find() }
+    }
+
     /** Whether a stored row still obeys the rules, so a row written around them is not served. No database. */
     static boolean servable(Map row) {
         String kind = str(row.contentKind)
@@ -299,13 +334,12 @@ class AppContentRules {
             def seq = eff(row, proposed, "sequence")
             if (source == ADMIN || create) {
                 if (routeName.isEmpty()) out << "a hint needs a route"
-                else if (ec != null && ec.entity.find("darpan.content.AppRoute").condition("routeName", routeName).one() == null) out << "unknown route '${routeName}'".toString()
+                else if (ec != null && currentRoute(ec, routeName) == null) out << "unknown route '${routeName}'".toString()
                 if (!CONDITIONS.contains(condition)) out << "condition must be ALWAYS or ANCHOR_PRESENT"
                 else if (condition == ALWAYS && !anchor.isEmpty()) out << "an ALWAYS hint takes no anchor"
                 else if (condition == ANCHOR_PRESENT) {
                     if (!ANCHOR_ID.matcher(anchor).matches()) out << "anchor must be a data-testid of lowercase letters, digits and -"
-                    else if (ec != null && !routeName.isEmpty() &&
-                            ec.entity.find("darpan.content.AppRouteAnchor").condition("routeName", routeName).condition("anchorTestId", anchor).one() == null) {
+                    else if (ec != null && !routeName.isEmpty() && !anchorKnown(ec, routeName, anchor)) {
                         out << "unknown anchor '${anchor}' on route '${routeName}'".toString()
                     }
                 }
@@ -318,15 +352,17 @@ class AppContentRules {
         return out.unique()
     }
 
-    /** Every label already answered: each row's matchLabels, plus every other row's aliases; patterns are checked against them. */
+    /** Every label already answered: each row's matchLabels and the bundle's regex matchers, plus every other row's aliases; patterns are checked against them. */
     private static List<String> shadowProblems(def ec, String kind, String key, List<String> aliases, String pattern) {
         List<String> out = []
         Set<String> labels = new HashSet<String>()
         Set<String> otherPatterns = new HashSet<String>()
+        List<Pattern> bundled = []
         String mark = currentSeedMark(ec)
         ec.entity.find("darpan.content.AppContentEntry").list().each { def r ->
             if (retired(r.getMap(), mark)) return
             boolean self = r.contentKind == kind && r.contentKey == key
+            if (r.matchRegex) bundled.addAll(bundledPatterns(r.matchRegex))
             if (r.matchLabels) labels.addAll(str(r.matchLabels).split(/\|/) as List<String>)
             if (!self && r.aliases) labels.addAll(str(r.aliases).split(/\|/) as List<String>)
             if (!self && r.matchPattern) otherPatterns << str(r.matchPattern)
@@ -334,6 +370,7 @@ class AppContentRules {
         labels.remove("")
         aliases.each { String a ->
             if (labels.contains(a)) out << "alias '${a}' is already answered".toString()
+            else if (bundled.any { it.matcher(a).find() }) out << "alias '${a}' is already answered by a built-in pattern".toString()
             else if (otherPatterns.any { matchWildcard(it, a) }) out << "alias '${a}' is already answered by a pattern".toString()
         }
         if (pattern) {

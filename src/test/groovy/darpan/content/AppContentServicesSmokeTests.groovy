@@ -484,6 +484,60 @@ class AppContentServicesSmokeTests {
     }
 
     @Test
+    void aBundledRegexShadowsAnAdminAlias() {
+        loadSeed()
+        ["missing from netsuite", "download results.csv", "remove ledger row", "retry 3 not run"].each { String alias ->
+            List<String> p = AppContentRules.problems(ec, null, [contentKind: GLOSSARY, contentKey: "admin:regex-" + alias.length(), source: "ADMIN",
+                    title: "Regex", body: "is regex.", aliases: [alias]])
+            assertTrue(p.any { it.contains("already answered by a built-in pattern") }, "${alias}: ${p}")
+        }
+        assertEquals([], AppContentRules.problems(ec, null, [contentKind: GLOSSARY, contentKey: "admin:regex-free", source: "ADMIN",
+                title: "Regex", body: "is regex.", aliases: ["zzz regex free"]]))
+        assertTrue((admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "regex-save", title: "Regex", body: "is regex.", aliases: ["missing from netsuite"]]).problems as List)
+                .any { it.toString().contains("built-in pattern") })
+        assertNull(row(GLOSSARY, "admin:regex-save"))
+        // a release that no longer carries the pattern (retired row) stops refusing the alias
+        ec.entity.find("darpan.content.AppContentEntry").condition("contentKind", GLOSSARY).condition("contentKey", "missingInSource").disableAuthz().one()
+                .setAll([seedMark: "0000000000000000"]).update()
+        assertEquals([], AppContentRules.problems(ec, null, [contentKind: GLOSSARY, contentKey: "admin:regex-after", source: "ADMIN",
+                title: "Regex", body: "is regex.", aliases: ["missing from netsuite"]]))
+    }
+
+    @Test
+    void theListFlagsAShadowedSeedAlias() {
+        loadSeed()
+        // an alias written around the rules onto SEED rows: one the bundle's regex answers, one that is free, one a row's own aliases
+        edit("MASCOT_ACTION", "stop run", [aliases: "download results.csv|halt it"])
+        edit(GLOSSARY, "differenceCount", [aliases: "ledger tally"])
+        Map byKey = (admOk("list#AppContent", [:]).entries as List<Map>).collectEntries { [(it.kind + "/" + it.key): it] }
+        assertEquals("pattern:^download .+\$", byKey["MASCOT_ACTION/stop run"].shadowedBy)
+        assertNull(byKey[GLOSSARY + "/differenceCount"].shadowedBy, "a SEED row is not shadowed by its own free alias")
+        assertNull(byKey[GLOSSARY + "/missingInSource"].shadowedBy)
+        edit(GLOSSARY, "differenceCount", [aliases: "differences"])
+        Map own = (admOk("list#AppContent", [kind: GLOSSARY, words: "differenceCount"]).entries as List<Map>).find { it.key == "differenceCount" }
+        assertEquals("differenceCount", own.shadowedBy, "an alias equal to the row's own label is answered by the bundle")
+    }
+
+    @Test
+    void theVocabularyDropsRoutesAndAnchorsAReleaseRemoved() {
+        loadSeed()
+        Map seedHint = firstAnchoredSeedHint()
+        ec.entity.makeValue("darpan.content.AppRoute").setAll([routeName: "gone-route", routePath: "/gone", seedMark: "0000000000000000"]).create()
+        ec.entity.makeValue("darpan.content.AppRouteAnchor").setAll([routeName: seedHint.routeName, anchorTestId: "gone-anchor", seedMark: "0000000000000000"]).create()
+        Map out = admOk("get#AppContentVocabulary", [:])
+        assertNull((out.routes as List<Map>).find { it.routeName == "gone-route" })
+        assertFalse(((out.routes as List<Map>).find { it.routeName == seedHint.routeName }.anchors as List).contains("gone-anchor"))
+        assertTrue(((out.routes as List<Map>).find { it.routeName == seedHint.routeName }.anchors as List).contains(seedHint.anchorTestId))
+        Map hint = [contentKind: HINT, contentKey: "admin:gone-tip", source: "ADMIN", body: "Gone tip.", sequence: 5]
+        assertTrue(AppContentRules.problems(ec, null, hint + [routeName: "gone-route", conditionKind: "ALWAYS"]).any { it.contains("unknown route") })
+        assertTrue(AppContentRules.problems(ec, null, hint + [routeName: seedHint.routeName, conditionKind: "ANCHOR_PRESENT", anchorTestId: "gone-anchor"]).any { it.contains("unknown anchor") })
+        assertEquals([], AppContentRules.problems(ec, null, hint + [routeName: seedHint.routeName, conditionKind: "ANCHOR_PRESENT", anchorTestId: seedHint.anchorTestId]))
+        // no CURRENT row (no seed ever loaded): nothing is filtered, as for entries
+        ec.entity.find("darpan.content.AppContentSeed").disableAuthz().deleteAll()
+        assertNotNull((admOk("get#AppContentVocabulary", [:]).routes as List<Map>).find { it.routeName == "gone-route" })
+    }
+
+    @Test
     void everyWriteIsAudited() {
         loadSeed()
         admOk("create#AppContentEntry", [kind: GLOSSARY, slug: "audited", title: "Audited", body: "is audited.", aliases: ["zzz audited"]])

@@ -114,6 +114,64 @@ class AppContentRulesTests {
         assertFalse(AppContentRules.retired([source: "SEED", seedMark: "x"], null), "no seed loaded: nothing is retired")
     }
 
+    /** One sample label per bundled regex source: the same table as darpan-ui's mascotSeed.spec.ts, run through java.util.regex here. */
+    private static final Map<String, String> REGEX_SAMPLES = [
+            '^missing (from|in) .+$': 'missing from netsuite',
+            '^request access in( .+)?$': 'request access in shopify',
+            '^revoke .+$': 'revoke token abc',
+            '^download .+$': 'download results.csv',
+            '^remove passkey( .+)?$': 'remove passkey laptop',
+            '^remove .+$': 'remove ledger row',
+            '^move .+ (up|down)$': 'move rule 3 up',
+            '^change (rule|exception) .+$': 'change rule 4',
+            '^.+ is a finding$': 'orders is a finding',
+            '^check statement .+$': 'check statement 2',
+            '^open rules for .+$': 'open rules for shopify',
+            '^stop showing .+$': 'stop showing tips',
+            '^edit chat space( .+)?$': 'edit chat space ops',
+            '^send test to( .+)?$': 'send test to ops',
+            '^post .+ (in .+|nowhere)$': 'post digest nowhere',
+            '^edit rule .+$': 'edit rule 7',
+            '^notifying — .+$': 'notifying — ops',
+            '^retry (\\d+ )?not run$': 'retry 3 not run',
+            '^open script .+$': 'open script reader',
+            '^reads: .+$': 'reads: orders',
+            '^schedule: .+$': 'schedule: daily',
+            '^posts to: .+$': 'posts to: ops',
+            '^export .+ extract$': 'export orders extract',
+            '^(expand|collapse) .+ (object|array)$': 'expand items array',
+            '^open statement .+$': 'open statement 4',
+            '^audit schedule: .+$': 'audit schedule: daily',
+            '^after each run: .+$': 'after each run: email',
+            '^audit posts to: .+$': 'audit posts to: ops',
+            '^open conclusion .+$': 'open conclusion 2',
+            '^restore version .+$': 'restore version 3',
+    ]
+
+    @Test
+    void everyBundledRegexInTheSeedCompilesAndMatchesItsSample() {
+        File seed = new File(AppContentRulesTests.class.protectionDomain.codeSource.location.toURI()).parentFile
+        while (seed != null && !new File(seed, "data/AppContentSeedData.xml").exists()) seed = seed.parentFile
+        assertNotNull(seed, "component dir not found")
+        def xml = new XmlSlurper().parse(new File(seed, "data/AppContentSeedData.xml"))
+        List<String> sources = []
+        xml.'darpan.content.AppContentEntry'.each { def r ->
+            String regex = r.@matchRegex.text()
+            if (!regex) return
+            regex.split(/\n/).each { String source ->
+                sources << source
+                assertEquals(1, AppContentRules.bundledPatterns(source).size(), "${source} compiles under java.util.regex")
+                String sample = REGEX_SAMPLES[source]
+                assertNotNull(sample, "no sample for ${source}: add it here and in mascotSeed.spec.ts")
+                assertTrue(AppContentRules.bundledPatternAnswers(source, sample), "${source} matches '${sample}'")
+            }
+        }
+        assertEquals(REGEX_SAMPLES.keySet().sort(), sources.sort())
+        assertFalse(AppContentRules.bundledPatternAnswers("^download .+\$", "zzz fresh label"))
+        assertFalse(AppContentRules.bundledPatternAnswers("", "anything"))
+        assertFalse(AppContentRules.bundledPatternAnswers("([unclosed", "anything"), "a source that does not compile is skipped")
+    }
+
     @Test
     void wildcardMatches() {
         assertTrue(AppContentRules.matchWildcard("missing from *", "missing from shopify"))

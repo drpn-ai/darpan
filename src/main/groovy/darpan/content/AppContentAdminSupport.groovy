@@ -20,12 +20,15 @@ class AppContentAdminSupport {
                 aliasesMax: AppContentRules.MAX_ALIASES, patternMax: AppContentRules.MAX_PATTERN, wildcardsMax: AppContentRules.MAX_STARS]
     }
 
+    /** Only the routes and anchors the current release still has: a release that drops one retires it (no CURRENT row = no filter). */
     static Map vocabulary(def ec) {
+        String mark = AppContentRules.currentSeedMark(ec)
         Map<String, List<String>> anchors = [:]
         ec.entity.find("darpan.content.AppRouteAnchor").orderBy("routeName,anchorTestId").list().each { def a ->
+            if (!AppContentRules.current(a, mark)) return
             anchors.get(a.routeName, new ArrayList<String>()) << (a.anchorTestId as String)
         }
-        List<Map> routes = ec.entity.find("darpan.content.AppRoute").orderBy("routeName").list().collect { def r ->
+        List<Map> routes = ec.entity.find("darpan.content.AppRoute").orderBy("routeName").list().findAll { def r -> AppContentRules.current(r, mark) }.collect { def r ->
             [routeName: r.routeName, routePath: r.routePath, anchors: anchors.get(r.routeName as String) ?: []] as Map
         }
         return [routes: routes, conditionKinds: ["ALWAYS", "ANCHOR_PRESENT"], limits: limits()]
@@ -53,7 +56,7 @@ class AppContentAdminSupport {
 
     /** The preview of a hint's place: its route, its condition and its position among the route's other served hints. */
     static String hintWhereShown(def ec, String routeName, String conditionKind, String anchor, Integer sequence, String selfKey) {
-        def route = routeName ? ec.entity.find("darpan.content.AppRoute").condition("routeName", routeName).one() : null
+        def route = routeName ? AppContentRules.currentRoute(ec, routeName) : null
         String path = route != null ? route.routePath : routeName
         String when = conditionKind == AppContentRules.ANCHOR_PRESENT ? "when ${anchor} is on the page" : "always"
         String mark = AppContentRules.currentSeedMark(ec)
@@ -176,14 +179,17 @@ class AppContentAdminSupport {
         String mark = AppContentRules.currentSeedMark(ec)
         List<Map> rows = ec.entity.find(ENTRY).list().collect { it.getMap() as Map }
 
-        Map<String, Set<String>> seedLabels = [:]
+        // What each live SEED row already answers: its own labels, its aliases, and the bundle's regex matchers.
+        List<Map> seedAnswers = []
         rows.each { Map r ->
             if (str(r.source) != AppContentRules.SEED || AppContentRules.retired(r, mark)) return
             Set<String> labels = new LinkedHashSet<String>()
             if (r.matchLabels) labels.addAll(str(r.matchLabels).split(/\|/) as List<String>)
-            if (r.aliases) labels.addAll(str(r.aliases).split(/\|/) as List<String>)
+            Set<String> aliases = new LinkedHashSet<String>()
+            if (r.aliases) aliases.addAll(str(r.aliases).split(/\|/) as List<String>)
             labels.remove("")
-            seedLabels.put(str(r.contentKey), labels)
+            aliases.remove("")
+            seedAnswers << ([key: str(r.contentKey), labels: labels, aliases: aliases, regex: AppContentRules.bundledPatterns(r.matchRegex)] as Map)
         }
 
         List<Map> out = []
@@ -200,17 +206,24 @@ class AppContentAdminSupport {
                 String hay = [r.contentKey, title, body, r.aliases, r.matchPattern, r.matchLabels, r.defaultTitle, r.defaultBody].collect { str(it) }.join(" ").toLowerCase()
                 if (!hay.contains(words)) return
             }
+            // The row (SEED or ADMIN) whose answer an alias or wildcard of this row duplicates: a SEED alias is dropped by the app
+            // the same as an ADMIN one. A SEED row is never shadowed by its own aliases.
             String shadowedBy = null
-            if (!isSeed && !retired) {
+            if (!retired) {
                 List<String> mine = AppContentRules.normalizedAliases(r.aliases)
-                String pattern = str(r.matchPattern)
-                shadowedBy = seedLabels.find { String k, Set<String> labels ->
-                    labels.any { String l -> mine.contains(l) || (pattern && AppContentRules.matchWildcard(pattern, l)) }
+                String pattern = isSeed ? "" : str(r.matchPattern)
+                String self = str(r.contentKey)
+                shadowedBy = seedAnswers.find { Map s ->
+                    mine.any { String l -> s.labels.contains(l) || (s.key != self && s.aliases.contains(l)) || s.regex.any { it.matcher(l).find() } } ||
+                            (pattern && (s.labels + (isSeed ? [] : s.aliases)).any { String l -> AppContentRules.matchWildcard(pattern, l) })
                 }?.key
             }
             Integer seq = (r.sequence != null ? r.sequence : r.defaultSequence) as Integer
             String routePath = null
-            if (r.routeName) routePath = ec.entity.find("darpan.content.AppRoute").condition("routeName", r.routeName).one()?.routePath
+            if (r.routeName) {
+                def route = ec.entity.find("darpan.content.AppRoute").condition("routeName", r.routeName).one()
+                if (route != null && AppContentRules.current(route, mark)) routePath = route.routePath
+            }
             out << ([kind: r.contentKind, key: r.contentKey, source: r.source, title: title ?: null, body: body ?: null,
                     defaultTitle: r.defaultTitle, defaultBody: r.defaultBody, aliases: r.aliases ? (str(r.aliases).split(/\|/) as List<String>).findAll { it } : [],
                     matchPattern: r.matchPattern, hidden: str(r.hidden) == "Y", routeName: r.routeName, routePath: routePath,

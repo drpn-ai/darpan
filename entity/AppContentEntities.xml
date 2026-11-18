@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-313 (Aditi 2026-11-18: data-focused work must be editable in production without a deploy). The mascot's
+         glossary terms, control (action) entries and idle hints live in rows, so a wording fix or a new entry is an admin
+         edit, not a release. Global product copy, Darpan-internal: no companyUserGroupId, never under the active-tenant
+         filter. Sized to the generated seed's longest values (contentKey 64, defaultBody 187, whereShown 123 bytes). -->
+
+    <entity entity-name="AppContentEntry" package="darpan.content" use="configuration" cache="never">
+        <description>One mascot entry. contentKind is MASCOT_GLOSSARY, MASCOT_ACTION or MASCOT_HINT. A SEED row is generated
+            from the app's bundled registries: a release (the seed load) sets only the default*, matchLabels, whereShown and
+            hint-binding columns, so it never overwrites an admin edit (title, body, aliases, hidden); resetting an entry
+            clears the edit columns. An ADMIN row (key `admin:slug`) is created in the admin app and is never written by a
+            release. For a hint the words are `body` (defaultBody) and there is no title.</description>
+        <field name="contentKind" type="id" is-pk="true"/>
+        <field name="contentKey" type="id-long" is-pk="true"/>
+        <field name="source" type="id"><description>SEED or ADMIN.</description></field>
+        <field name="defaultTitle" type="text-medium"/>
+        <field name="defaultBody" type="text-medium"><description>The words as released; may carry {token} slots a SEED edit must keep.</description></field>
+        <field name="matchLabels" type="text-medium"><description>Every label this SEED row's bundle already answers, `|`-joined and normalised; an alias or pattern equal to one is refused.</description></field>
+        <field name="whereShown" type="text-medium"><description>Where the mascot says this, for the admin's list.</description></field>
+        <field name="defaultSequence" type="number-integer"><description>A SEED hint's order on its route: (index + 1) * 10.</description></field>
+        <field name="title" type="text-medium"><description>The production edit; empty means defaultTitle.</description></field>
+        <field name="body" type="text-medium"><description>The production edit; empty means defaultBody.</description></field>
+        <field name="aliases" type="text-long"><description>Extra plain labels, `|`-joined, normalised; at most 10, 60 chars each.</description></field>
+        <field name="matchPattern" type="text-medium"><description>ADMIN rows only: at most one wildcard pattern (`*` is one or more characters).</description></field>
+        <field name="hidden" type="text-indicator"><description>Y: the entry is unknown to the app (silent).</description></field>
+        <field name="routeName" type="id-long"><description>A hint's route, an AppRoute.routeName.</description></field>
+        <field name="conditionKind" type="id"><description>A hint's condition: ALWAYS or ANCHOR_PRESENT.</description></field>
+        <field name="anchorTestId" type="id-long"><description>A hint's data-testid, an AppRouteAnchor of its route (ANCHOR_PRESENT only).</description></field>
+        <field name="sequence" type="number-integer"><description>An ADMIN hint's order on its route, 0-9999.</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <field name="lastChangedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="AppRoute" package="darpan.content" use="configuration" cache="never">
+        <description>A route the app has, generated with the seed (the router sweep). Seed-only: admins never write it.</description>
+        <field name="routeName" type="id-long" is-pk="true"/>
+        <field name="routePath" type="text-medium"/>
+    </entity>
+
+    <entity entity-name="AppRouteAnchor" package="darpan.content" use="configuration" cache="never">
+        <description>A data-testid a route's components carry, generated with the seed. Seed-only: admins never write it.</description>
+        <field name="routeName" type="id-long" is-pk="true"/>
+        <field name="anchorTestId" type="id-long" is-pk="true"/>
+    </entity>
+</entities>

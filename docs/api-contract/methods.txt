@@ -87,6 +87,7 @@ facade.AgentReadFacadeServices.get#AgentAuditScope
 facade.AgentTurnFacadeServices.get#AgentConversation
 facade.AgentTurnFacadeServices.get#AgentStatus
 facade.AgentTurnFacadeServices.send#AgentTurn
+facade.AppContentFacadeServices.get#AppContent
 facade.AuditFacadeServices.add#AuditStatement
 facade.AuditFacadeServices.create#Audit
 facade.AuditFacadeServices.get#AuditCheckExtracts

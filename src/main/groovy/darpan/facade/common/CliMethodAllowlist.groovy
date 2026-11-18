@@ -25,6 +25,9 @@ class CliMethodAllowlist {
             // The service itself requires tenant-admin; an admin's agent may read the fresh-query log.
             "facade.AgentFacadeServices.list#AgentQueryLogs",
 
+            // DAR-BE-313: the mascot's edited and admin-made entries; global product copy, writes nothing, no credential.
+            "facade.AppContentFacadeServices.get#AppContent",
+
             "facade.AuditFacadeServices.get#AuditCheckExtracts",
             "facade.AuditFacadeServices.get#AuditCheckOptions",
             "facade.AuditFacadeServices.get#AuditFinding",

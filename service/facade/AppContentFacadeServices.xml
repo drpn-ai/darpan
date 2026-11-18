@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-313: the app's read of the mascot's data entries. Global product copy: no tenant, no companyUserGroupId, so a
+         signed-in user with no active tenant gets the same answer. Only edited SEED rows and ADMIN rows come back; the
+         bundled registries stay the app's first answer and its offline fallback. -->
+    <service verb="get" noun="AppContent" authz-action="view" allow-remote="true" authenticate="true">
+        <description>The mascot entries an admin has edited, hidden or created: every SEED row with a title, body, alias or
+            hidden edit, and every ADMIN row. Fields that are not set are omitted. version is the latest lastChangedDate.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="entries" type="List">
+                <parameter name="kind"/>
+                <parameter name="key"/>
+                <parameter name="source"/>
+                <parameter name="title"/>
+                <parameter name="body"/>
+                <parameter name="aliases" type="List"><parameter name="alias"/></parameter>
+                <parameter name="matchPattern"/>
+                <parameter name="hidden" type="Boolean"/>
+                <parameter name="routeName"/>
+                <parameter name="conditionKind"/>
+                <parameter name="anchorTestId"/>
+                <parameter name="sequence" type="Integer"/>
+            </parameter>
+            <parameter name="version"/>
+        </out-parameters>
+        <actions>
+            <set field="entries" from="[]"/>
+            <entity-find entity-name="darpan.content.AppContentEntry" list="rowList" cache="false">
+                <order-by field-name="contentKind,routeName,sequence,defaultSequence,contentKey"/>
+            </entity-find>
+            <iterate list="rowList" entry="row">
+                <set field="edited" from="row.source == 'ADMIN' || row.title || row.body || row.aliases || row.hidden == 'Y'"/>
+                <if condition="edited">
+                    <set field="entry" from="[kind: row.contentKind, key: row.contentKey, source: row.source]"/>
+                    <if condition="row.title"><script>entry.title = row.title</script></if>
+                    <if condition="row.body"><script>entry.body = row.body</script></if>
+                    <if condition="row.aliases"><script>entry.aliases = (row.aliases as String).split('\\|').findAll { it } as List</script></if>
+                    <if condition="row.matchPattern"><script>entry.matchPattern = row.matchPattern</script></if>
+                    <if condition="row.hidden == 'Y'"><script>entry.hidden = true</script></if>
+                    <if condition="row.routeName"><script>entry.routeName = row.routeName</script></if>
+                    <if condition="row.conditionKind"><script>entry.conditionKind = row.conditionKind</script></if>
+                    <if condition="row.anchorTestId"><script>entry.anchorTestId = row.anchorTestId</script></if>
+                    <set field="entrySequence" from="row.sequence != null ? row.sequence : row.defaultSequence"/>
+                    <if condition="entrySequence != null"><script>entry.sequence = entrySequence as Integer</script></if>
+                    <script>entries.add(entry)</script>
+                </if>
+            </iterate>
+            <set field="latest" from="rowList.findAll { it.lastChangedDate != null }.collect { it.lastChangedDate as java.sql.Timestamp }.max()"/>
+            <set field="version" from="latest != null ? latest.toInstant().toString() : null"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

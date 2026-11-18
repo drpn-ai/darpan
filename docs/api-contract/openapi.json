@@ -291,6 +291,9 @@
                                         "$ref": "#/components/schemas/SendAgentTurnRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAppContentRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/AddAuditStatementRequest"
                                     },
                                     {
@@ -974,6 +977,7 @@
                                         "facade.AgentTurnFacadeServices.get#AgentConversation": "#/components/schemas/GetAgentConversationRequest",
                                         "facade.AgentTurnFacadeServices.get#AgentStatus": "#/components/schemas/GetAgentStatusRequest",
                                         "facade.AgentTurnFacadeServices.send#AgentTurn": "#/components/schemas/SendAgentTurnRequest",
+                                        "facade.AppContentFacadeServices.get#AppContent": "#/components/schemas/GetAppContentRequest",
                                         "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
                                         "facade.AuditFacadeServices.create#Audit": "#/components/schemas/CreateAuditRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckExtracts": "#/components/schemas/GetAuditCheckExtractsRequest",
@@ -1453,6 +1457,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SendAgentTurnResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAppContentResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/AddAuditStatementResponse"
@@ -10936,6 +10943,143 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SendAgentTurnResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAppContentParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "The mascot entries an admin has edited, hidden or created: every SEED row with a title, body, alias or\n            hidden edit, and every ADMIN row. Fields that are not set are omitted. version is the latest lastChangedDate."
+            },
+            "GetAppContentResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "entries": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string"
+                                },
+                                "key": {
+                                    "type": "string"
+                                },
+                                "source": {
+                                    "type": "string"
+                                },
+                                "title": {
+                                    "type": "string"
+                                },
+                                "body": {
+                                    "type": "string"
+                                },
+                                "aliases": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "matchPattern": {
+                                    "type": "string"
+                                },
+                                "hidden": {
+                                    "type": "boolean"
+                                },
+                                "routeName": {
+                                    "type": "string"
+                                },
+                                "conditionKind": {
+                                    "type": "string"
+                                },
+                                "anchorTestId": {
+                                    "type": "string"
+                                },
+                                "sequence": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                }
+            },
+            "GetAppContentRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AppContentFacadeServices.get#AppContent",
+                "x-darpan-method": "facade.AppContentFacadeServices.get#AppContent",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AppContentFacadeServices.get#AppContent"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAppContentParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAppContentResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AppContentFacadeServices.get#AppContent. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAppContentResult"
                     }
                 },
                 "required": [
@@ -37679,6 +37823,7 @@
         "facade.AgentTurnFacadeServices.get#AgentConversation": "GetAgentConversation",
         "facade.AgentTurnFacadeServices.get#AgentStatus": "GetAgentStatus",
         "facade.AgentTurnFacadeServices.send#AgentTurn": "SendAgentTurn",
+        "facade.AppContentFacadeServices.get#AppContent": "GetAppContent",
         "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
         "facade.AuditFacadeServices.create#Audit": "CreateAudit",
         "facade.AuditFacadeServices.get#AuditCheckExtracts": "GetAuditCheckExtracts",

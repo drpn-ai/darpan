@@ -67,7 +67,7 @@ class StuckRunReaperNotifyTests {
 
         Map<String, Object> result
         try {
-            result = StuckRunReaper.sweep(ec, 120)
+            result = StuckRunReaper.sweep(ec)
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
@@ -118,7 +118,7 @@ class StuckRunReaperNotifyTests {
 
         // No delivery hook is needed/set here: the payload-build call throws before deliverGoogleChat is
         // ever reached, so if this test regresses (production catch removed), sweep() itself would throw.
-        Map<String, Object> result = StuckRunReaper.sweep(ec, 120)
+        Map<String, Object> result = StuckRunReaper.sweep(ec)
 
         assertEquals(1, result.reapedRunResultCount)
         Map<String, Object> row = store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0]

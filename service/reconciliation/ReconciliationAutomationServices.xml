@@ -290,18 +290,13 @@
          status message, freeing the run and unblocking the next scheduled scan. -->
     <service verb="sweep" noun="StuckReconciliationRuns" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
         <description>Reaper that flips stale AUT_STAT_RUNNING / AUT_STAT_PENDING ReconciliationRunResult and ReconciliationAutomationExecution rows to AUT_STAT_FAILED.</description>
-        <in-parameters>
-            <parameter name="staleMinutes" type="Integer" default-value="120">
-                <description>A row in RUNNING/PENDING whose lastUpdatedStamp is older than this many minutes is reaped.</description>
-            </parameter>
-        </in-parameters>
         <out-parameters>
             <parameter name="cutoffTimestamp" type="Timestamp"/>
             <parameter name="reapedRunResultCount" type="Integer"/>
             <parameter name="reapedExecutionCount" type="Integer"/>
         </out-parameters>
         <actions>
-            <set field="result" from="darpan.reconciliation.automation.StuckRunReaper.sweep(ec, staleMinutes)"/>
+            <set field="result" from="darpan.reconciliation.automation.StuckRunReaper.sweep(ec)"/>
             <set field="cutoffTimestamp" from="result.cutoffTimestamp"/>
             <set field="reapedRunResultCount" from="result.reapedRunResultCount"/>
             <set field="reapedExecutionCount" from="result.reapedExecutionCount"/>

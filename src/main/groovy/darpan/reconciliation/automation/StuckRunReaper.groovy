@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.common.DarpanEntityConstants
+import darpan.config.DarpanSettings
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.streak.AutomationStreakSupport
@@ -23,7 +24,7 @@ import java.sql.Timestamp
  *     scanner's duplicate check returns true and skips the same window forever.
  *
  * The reaper runs as a Moqui ServiceJob (see ReconciliationJobSeedData.xml) every 10 minutes,
- * sweeping rows whose lastUpdatedStamp is older than the configured threshold (default 120 min).
+ * sweeping rows whose lastUpdatedStamp is older than the reaperStaleMinutes setting (120 min unless edited).
  * Each transition writes a status message so operators can audit which runs were reaped.
  */
 @CompileStatic
@@ -34,19 +35,10 @@ class StuckRunReaper {
     static final String STATUS_PENDING = "AUT_STAT_PENDING"
     static final String STATUS_RUNNING = "AUT_STAT_RUNNING"
     static final String STATUS_FAILED  = "AUT_STAT_FAILED"
-    static final int DEFAULT_STALE_MINUTES = 120
 
-    static Map<String, Object> sweep(ExecutionContext ec, Object rawStaleMinutes) {
-        int staleMinutes
-        if (rawStaleMinutes instanceof Number) {
-            staleMinutes = (rawStaleMinutes as Number).intValue()
-        } else if (rawStaleMinutes != null && rawStaleMinutes.toString().trim()) {
-            try { staleMinutes = Integer.parseInt(rawStaleMinutes.toString().trim()) }
-            catch (NumberFormatException ignored) { staleMinutes = DEFAULT_STALE_MINUTES }
-        } else {
-            staleMinutes = DEFAULT_STALE_MINUTES
-        }
-        if (staleMinutes <= 0) staleMinutes = DEFAULT_STALE_MINUTES
+    /** The threshold is the reaperStaleMinutes setting (DAR-BE-304), read at each sweep; RunHealth shows the same one. */
+    static Map<String, Object> sweep(ExecutionContext ec) {
+        int staleMinutes = DarpanSettings.intValue("darpan.reconciliation.runHealth.reaperStaleMinutes")
 
         Timestamp cutoff = new Timestamp(System.currentTimeMillis() - (staleMinutes * 60_000L))
 

@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.config.DarpanSettings
 import groovy.transform.CompileDynamic
 
 import java.sql.Timestamp
@@ -19,16 +20,9 @@ class RunHealth {
 
     static final long MINUTE_MS = 60_000L
 
-    /** StuckRunReaper.DEFAULT_STALE_MINUTES fails a run this long after its last heartbeat. */
-    static final int REAPER_MINUTES = 120
-    /** Silence this long in ANY stage means the reaper is close; stuck regardless of stage. */
-    static final int SILENT_ANY_STAGE_MINUTES = 90
-    /** Extracts heartbeat every page, so this much silence inside one is not a slow page. */
-    static final int SILENT_EXTRACT_MINUTES = 15
-    static final int SLOW_FACTOR = 2
-    /** Below this a run is never "slow", whatever its history: a 2-minute run is nobody's problem. */
-    static final int SLOW_FLOOR_MINUTES = 15
-    static final int CANCEL_GRACE_MINUTES = 5
+    private static final String PREFIX = "darpan.reconciliation.runHealth."
+
+    private static int setting(String name) { return DarpanSettings.intValue(PREFIX + name) }
 
     /** [health: healthy | slow | stuck, reason: words or null]. First match wins. */
     static Map<String, Object> of(Map run, Timestamp now) {
@@ -37,20 +31,27 @@ class RunHealth {
         long silentMinutes = lastBeat == null ? 0 : minutesBetween(lastBeat, now)
         long elapsedMs = started == null ? 0 : now.time - started.time
         String stage = run.currentStage as String
+        // Thresholds are DarpanSettings (DAR-BE-304), read once per verdict so one run is judged on one set.
+        int reaperMinutes = setting("reaperStaleMinutes")
+        int silentAnyStage = setting("silentAnyStageMinutes")
+        int silentExtract = setting("silentExtractMinutes")
+        int slowFactor = setting("slowFactor")
+        int slowFloor = setting("slowFloorMinutes")
+        int cancelGrace = setting("cancelGraceMinutes")
 
-        if (silentMinutes >= SILENT_ANY_STAGE_MINUTES) {
+        if (silentMinutes >= silentAnyStage) {
             return verdict("stuck", "No progress for ${duration(silentMinutes * MINUTE_MS)}; " +
-                    "the stuck-run reaper fails it at ${REAPER_MINUTES}m")
+                    "the stuck-run reaper fails it at ${reaperMinutes}m")
         }
-        if (stage?.startsWith("EXTRACT") && silentMinutes >= SILENT_EXTRACT_MINUTES) {
+        if (stage?.startsWith("EXTRACT") && silentMinutes >= silentExtract) {
             return verdict("stuck", "Extract has not reported progress for ${duration(silentMinutes * MINUTE_MS)}")
         }
         Long usual = run.usualDurationMs as Long
-        if (usual != null && usual > 0 && elapsedMs >= SLOW_FACTOR * usual && elapsedMs >= SLOW_FLOOR_MINUTES * MINUTE_MS) {
+        if (usual != null && usual > 0 && elapsedMs >= slowFactor * usual && elapsedMs >= slowFloor * MINUTE_MS) {
             return verdict("slow", "Running ${duration(elapsedMs)}; its last successful run took ${duration(usual)}")
         }
         Timestamp cancelAt = run.cancelRequestedDate as Timestamp
-        if (cancelAt != null && minutesBetween(cancelAt, now) >= CANCEL_GRACE_MINUTES) {
+        if (cancelAt != null && minutesBetween(cancelAt, now) >= cancelGrace) {
             return verdict("slow", "Cancel requested ${duration(now.time - cancelAt.time)} ago; still running " +
                     "(a cancel lands at the next stage boundary)")
         }

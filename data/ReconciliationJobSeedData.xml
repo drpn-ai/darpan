@@ -39,18 +39,13 @@
 
     <!-- Audit H2.5 / H3.3: stuck-RUNNING reaper. Every 10 minutes, flip stale RUNNING/PENDING
          reconciliation rows to FAILED so the UI stops blocking re-triggers and the scanner stops
-         skipping those windows. Threshold: 120 minutes since the last update. -->
+         skipping those windows. Threshold: the reaperStaleMinutes setting. -->
     <moqui.service.job.ServiceJob
             jobName="sweep_StuckReconciliationRuns_10m"
             description="Reap reconciliation runs / automation executions wedged in RUNNING after crash."
             serviceName="reconciliation.ReconciliationAutomationServices.sweep#StuckReconciliationRuns"
             cronExpression="0 0/10 * * * ?"
             paused="N"/>
-
-    <moqui.service.job.ServiceJobParameter
-            jobName="sweep_StuckReconciliationRuns_10m"
-            parameterName="staleMinutes"
-            parameterValue="120"/>
 
     <!-- MACH P1: backfill denormalized tenant stamps on Rule children; idempotent no-op after
          the first pass (NULL-stamp query walks the tenant index and finds nothing). -->

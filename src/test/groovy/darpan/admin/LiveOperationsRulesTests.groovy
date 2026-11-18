@@ -33,6 +33,14 @@ class LiveOperationsRulesTests {
     }
 
     @Test
+    void theStuckReasonNamesTheReaperSetting() {
+        Map health = RunHealth.of([currentStage: "COMPARE", startedDate: minutesAgo(100),
+                                                    lastHeartbeatDate: minutesAgo(95)], NOW)
+        assertEquals("stuck", health.health)
+        assertTrue((health.reason as String).endsWith("fails it at 120m"), health.reason as String)
+    }
+
+    @Test
     void extractThatStoppedReportingProgressIsStuck() {
         Map health = RunHealth.of([currentStage: "EXTRACT_FILE2", startedDate: minutesAgo(30),
                                                     lastHeartbeatDate: minutesAgo(16)], NOW)

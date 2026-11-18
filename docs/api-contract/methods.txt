@@ -5,6 +5,14 @@ admin.AgentAccessAdminServices.pause#AgentAccessGrant
 admin.AgentAccessAdminServices.revoke#AgentAccessGrant
 admin.AgentAccessAdminServices.unpause#AgentAccessGrant
 admin.AgentAccessAdminServices.update#AgentAccessGrant
+admin.AgentConfigAdminServices.get#AgentConfig
+admin.AgentConfigAdminServices.get#AgentPrompt
+admin.AgentConfigAdminServices.reset#AgentConfigItem
+admin.AgentConfigAdminServices.update#AgentModelPrice
+admin.AgentConfigAdminServices.update#AgentPrompt
+admin.AgentConfigAdminServices.update#AgentRoleModel
+admin.AgentConfigAdminServices.update#AgentTenantDailyCap
+admin.AgentConfigAdminServices.update#AgentText
 admin.AgentTicketAdminServices.list#AllBrainChangeTickets
 admin.AgentTicketAdminServices.update#BrainChangeTicket
 admin.AppContentAdminServices.create#AppContentEntry

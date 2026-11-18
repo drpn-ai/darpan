@@ -134,6 +134,15 @@ class CliMethodAllowlist {
             "admin.AgentAccessAdminServices.update#AgentAccessGrant",
             "admin.AgentTicketAdminServices.list#AllBrainChangeTickets",
             "admin.AgentTicketAdminServices.update#BrainChangeTicket",
+            // DAR-BE-307: the agent's prompts, role models, prices, texts and per-tenant caps are edited by a super admin in the admin app.
+            "admin.AgentConfigAdminServices.get#AgentConfig",
+            "admin.AgentConfigAdminServices.get#AgentPrompt",
+            "admin.AgentConfigAdminServices.reset#AgentConfigItem",
+            "admin.AgentConfigAdminServices.update#AgentModelPrice",
+            "admin.AgentConfigAdminServices.update#AgentPrompt",
+            "admin.AgentConfigAdminServices.update#AgentRoleModel",
+            "admin.AgentConfigAdminServices.update#AgentTenantDailyCap",
+            "admin.AgentConfigAdminServices.update#AgentText",
             // DAR-BE-313: the mascot's entries are edited by a super admin in the admin app; a tenant's CLI token never writes them.
             "admin.AppContentAdminServices.create#AppContentEntry",
             "admin.AppContentAdminServices.delete#AppContentEntry",

@@ -35,6 +35,8 @@ class ApiContractGenerator {
             ["service/admin", "admin"],
             // DAR-BE-275: registering Darpan's own Shopify apps (list/save#ShopifyApp), super admin only.
             ["../shopify-darpan/service/admin", "admin"],
+            // DAR-BE-307: the agent's prompts, models, prices, texts and tenant caps (super admin only).
+            ["../darpan-agent/service/admin", "admin"],
     ]
     static final String SPEC_RELATIVE_PATH = "docs/api-contract/openapi.json"
     static final String METHODS_RELATIVE_PATH = "docs/api-contract/methods.txt"

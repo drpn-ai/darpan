@@ -45,6 +45,30 @@
                                         "$ref": "#/components/schemas/UpdateAgentAccessGrantRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAgentConfigRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAgentPromptRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResetAgentConfigItemRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAgentModelPriceRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAgentPromptRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAgentRoleModelRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAgentTenantDailyCapRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAgentTextRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListAllBrainChangeTicketsRequest"
                                     },
                                     {
@@ -913,6 +937,14 @@
                                         "admin.AgentAccessAdminServices.revoke#AgentAccessGrant": "#/components/schemas/RevokeAgentAccessGrantRequest",
                                         "admin.AgentAccessAdminServices.unpause#AgentAccessGrant": "#/components/schemas/UnpauseAgentAccessGrantRequest",
                                         "admin.AgentAccessAdminServices.update#AgentAccessGrant": "#/components/schemas/UpdateAgentAccessGrantRequest",
+                                        "admin.AgentConfigAdminServices.get#AgentConfig": "#/components/schemas/GetAgentConfigRequest",
+                                        "admin.AgentConfigAdminServices.get#AgentPrompt": "#/components/schemas/GetAgentPromptRequest",
+                                        "admin.AgentConfigAdminServices.reset#AgentConfigItem": "#/components/schemas/ResetAgentConfigItemRequest",
+                                        "admin.AgentConfigAdminServices.update#AgentModelPrice": "#/components/schemas/UpdateAgentModelPriceRequest",
+                                        "admin.AgentConfigAdminServices.update#AgentPrompt": "#/components/schemas/UpdateAgentPromptRequest",
+                                        "admin.AgentConfigAdminServices.update#AgentRoleModel": "#/components/schemas/UpdateAgentRoleModelRequest",
+                                        "admin.AgentConfigAdminServices.update#AgentTenantDailyCap": "#/components/schemas/UpdateAgentTenantDailyCapRequest",
+                                        "admin.AgentConfigAdminServices.update#AgentText": "#/components/schemas/UpdateAgentTextRequest",
                                         "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "#/components/schemas/ListAllBrainChangeTicketsRequest",
                                         "admin.AgentTicketAdminServices.update#BrainChangeTicket": "#/components/schemas/UpdateBrainChangeTicketRequest",
                                         "admin.AppContentAdminServices.create#AppContentEntry": "#/components/schemas/CreateAppContentEntryRequest",
@@ -1235,6 +1267,30 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateAgentAccessGrantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAgentConfigResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAgentPromptResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ResetAgentConfigItemResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAgentModelPriceResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAgentPromptResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAgentRoleModelResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAgentTenantDailyCapResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAgentTextResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListAllBrainChangeTicketsResponse"
@@ -2830,6 +2886,677 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateAgentAccessGrantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAgentConfigParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Everything editable about the agent except its numbers: prompts (promptId, edited, defaultChangedSinceEdit, chars,\n            lastChangedByUserId, lastChangedDate), roles (roleId, modelId, defaultModelId, edited), prices (modelId, the four prices,\n            source DEFAULT, EDITED or ADDED, usedBy), globalDailyUsdCap (effectiveValue, source, min, max; read only), tenantCaps and texts\n            (textId, text, defaultText, tokens, maxChars, edited, defaultChangedSinceEdit)."
+            },
+            "GetAgentConfigResult": {
+                "type": "object",
+                "properties": {
+                    "config": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAgentConfigRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.get#AgentConfig",
+                "x-darpan-method": "admin.AgentConfigAdminServices.get#AgentConfig",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.get#AgentConfig"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAgentConfigParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAgentConfigResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.get#AgentConfig. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAgentConfigResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAgentPromptParams": {
+                "type": "object",
+                "properties": {
+                    "promptId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "promptId"
+                ],
+                "description": "One prompt: promptId, text, defaultText, edited, defaultChangedSinceEdit and its newest 10 versions\n            (promptVersionId, text, changedByUserId, changedDate, reset). An unknown id is an error."
+            },
+            "GetAgentPromptResult": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAgentPromptRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.get#AgentPrompt",
+                "x-darpan-method": "admin.AgentConfigAdminServices.get#AgentPrompt",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.get#AgentPrompt"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAgentPromptParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAgentPromptResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.get#AgentPrompt. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAgentPromptResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ResetAgentConfigItemParams": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "id"
+                ],
+                "description": "Deletes an edit so the item follows its shipped default again. kind is PROMPT, ROLE_MODEL, PRICE, TEXT or\n            TENANT_CAP; id is the prompt, role, model, text or tenant id. Nothing to reset: nothing changes and no audit row. A price\n            added by an admin cannot be reset while a role uses its model. A prompt reset also writes a null version row."
+            },
+            "ResetAgentConfigItemResult": {
+                "type": "object",
+                "properties": {
+                    "reset": {
+                        "type": "object"
+                    }
+                }
+            },
+            "ResetAgentConfigItemRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.reset#AgentConfigItem",
+                "x-darpan-method": "admin.AgentConfigAdminServices.reset#AgentConfigItem",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.reset#AgentConfigItem"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ResetAgentConfigItemParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ResetAgentConfigItemResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.reset#AgentConfigItem. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ResetAgentConfigItemResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAgentModelPriceParams": {
+                "type": "object",
+                "properties": {
+                    "modelId": {
+                        "type": "string"
+                    },
+                    "inputUsdPerMTok": {
+                        "type": "string"
+                    },
+                    "outputUsdPerMTok": {
+                        "type": "string"
+                    },
+                    "cacheReadUsdPerMTok": {
+                        "type": "string"
+                    },
+                    "cacheWriteUsdPerMTok": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "modelId",
+                    "inputUsdPerMTok",
+                    "outputUsdPerMTok",
+                    "cacheReadUsdPerMTok",
+                    "cacheWriteUsdPerMTok"
+                ],
+                "description": "Adds a model's price or edits a shipped one, in dollars per million tokens. Input and output above 0, cache prices\n            0 or more, none above 1000."
+            },
+            "UpdateAgentModelPriceResult": {
+                "type": "object",
+                "properties": {
+                    "price": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateAgentModelPriceRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.update#AgentModelPrice",
+                "x-darpan-method": "admin.AgentConfigAdminServices.update#AgentModelPrice",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.update#AgentModelPrice"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAgentModelPriceParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAgentModelPriceResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.update#AgentModelPrice. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAgentModelPriceResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAgentPromptParams": {
+                "type": "object",
+                "properties": {
+                    "promptId": {
+                        "type": "string"
+                    },
+                    "promptText": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "promptId",
+                    "promptText"
+                ],
+                "description": "Saves a prompt. Refused, with the reason and nothing saved: an unknown id, an empty prompt, one over 100000\n            characters, or one that names a tenant (prompts are shared by every tenant). Saving the shipped text stores no edit\n            (an existing edit is dropped). Every save writes a version row; the audit row says how long the prompt is, not what\n            it says."
+            },
+            "UpdateAgentPromptResult": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateAgentPromptRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.update#AgentPrompt",
+                "x-darpan-method": "admin.AgentConfigAdminServices.update#AgentPrompt",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.update#AgentPrompt"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAgentPromptParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAgentPromptResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.update#AgentPrompt. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAgentPromptResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAgentRoleModelParams": {
+                "type": "object",
+                "properties": {
+                    "roleId": {
+                        "type": "string"
+                    },
+                    "modelId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "roleId",
+                    "modelId"
+                ],
+                "description": "Points a role (ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION, EMAIL_SMILE, AUDIT_RUN_WORDS) at a model. Refused:\n            an unknown role, a malformed model id, a model with no price, and none for any role but AUTHOR_ESCALATION. The next turn\n            re-checks the model with the provider."
+            },
+            "UpdateAgentRoleModelResult": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateAgentRoleModelRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.update#AgentRoleModel",
+                "x-darpan-method": "admin.AgentConfigAdminServices.update#AgentRoleModel",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.update#AgentRoleModel"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAgentRoleModelParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAgentRoleModelResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.update#AgentRoleModel. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAgentRoleModelResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAgentTenantDailyCapParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string"
+                    },
+                    "dailyUsdCap": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId",
+                    "dailyUsdCap"
+                ],
+                "description": "Sets one tenant's daily dollar cap for the agent, replacing the global cap\n            (darpan.agent.dailyUsdCapPerTenant) for that tenant. It must be a number inside the global cap's range, and the tenant must\n            exist."
+            },
+            "UpdateAgentTenantDailyCapResult": {
+                "type": "object",
+                "properties": {
+                    "tenantCap": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateAgentTenantDailyCapRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.update#AgentTenantDailyCap",
+                "x-darpan-method": "admin.AgentConfigAdminServices.update#AgentTenantDailyCap",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.update#AgentTenantDailyCap"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAgentTenantDailyCapParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAgentTenantDailyCapResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.update#AgentTenantDailyCap. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAgentTenantDailyCapResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAgentTextParams": {
+                "type": "object",
+                "properties": {
+                    "textId": {
+                        "type": "string"
+                    },
+                    "text": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "textId",
+                    "text"
+                ],
+                "description": "Saves an agent text (a tool description, a reply or a notice). It must keep the default's {tokens}, be plain text\n            and stay within its length cap. The audit row carries the old and new words."
+            },
+            "UpdateAgentTextResult": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "object"
+                    }
+                }
+            },
+            "UpdateAgentTextRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.AgentConfigAdminServices.update#AgentText",
+                "x-darpan-method": "admin.AgentConfigAdminServices.update#AgentText",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.AgentConfigAdminServices.update#AgentText"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAgentTextParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAgentTextResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.AgentConfigAdminServices.update#AgentText. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAgentTextResult"
                     }
                 },
                 "required": [
@@ -38388,6 +39115,14 @@
         "admin.AgentAccessAdminServices.revoke#AgentAccessGrant": "RevokeAgentAccessGrant",
         "admin.AgentAccessAdminServices.unpause#AgentAccessGrant": "UnpauseAgentAccessGrant",
         "admin.AgentAccessAdminServices.update#AgentAccessGrant": "UpdateAgentAccessGrant",
+        "admin.AgentConfigAdminServices.get#AgentConfig": "GetAgentConfig",
+        "admin.AgentConfigAdminServices.get#AgentPrompt": "GetAgentPrompt",
+        "admin.AgentConfigAdminServices.reset#AgentConfigItem": "ResetAgentConfigItem",
+        "admin.AgentConfigAdminServices.update#AgentModelPrice": "UpdateAgentModelPrice",
+        "admin.AgentConfigAdminServices.update#AgentPrompt": "UpdateAgentPrompt",
+        "admin.AgentConfigAdminServices.update#AgentRoleModel": "UpdateAgentRoleModel",
+        "admin.AgentConfigAdminServices.update#AgentTenantDailyCap": "UpdateAgentTenantDailyCap",
+        "admin.AgentConfigAdminServices.update#AgentText": "UpdateAgentText",
         "admin.AgentTicketAdminServices.list#AllBrainChangeTickets": "ListAllBrainChangeTickets",
         "admin.AgentTicketAdminServices.update#BrainChangeTicket": "UpdateBrainChangeTicket",
         "admin.AppContentAdminServices.create#AppContentEntry": "CreateAppContentEntry",

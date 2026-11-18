@@ -86,7 +86,7 @@ class EmailAdminSupport {
                     out.put(mode, ec.screen.makeRender().rootScreen(location).webappName(webapp).renderMode(mode).render())
                 }
             }
-            out.subject = ec.resource.expand(subjectText, "")
+            out.subject = EmailCopy.previewSubject(ec, emailTemplateId, subjectText, params)
         } finally {
             ec.context.pop()
         }

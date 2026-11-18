@@ -180,9 +180,16 @@ class EmailAdminServicesSmokeTests {
         assertTrue(refused([body: "Fine words.", note: "Open https://evil.example"])[0].contains("note"))
         // subjects: one plain line, only the shipped variables, never Groovy
         assertTrue(refused(null, 'Hi ${firstName}')[0].contains("Unknown variable"))
-        assertTrue(refused(null, "Line one\nline two")[0].contains("one plain line"))
-        assertTrue(refused(null, 'Run ${System.exit(1)}')[0].contains("Unknown variable"))
-        assertTrue(refused(null, 'Cost $5')[0].contains('must start a'))
+        String plain = "letters, digits, spaces and basic punctuation"
+        assertTrue(refused(null, "Line one\nline two")[0].contains(plain))
+        assertTrue(refused(null, 'Run ${System.exit(1)}')[0].contains(plain))
+        assertTrue(refused(null, 'Cost $5')[0].contains(plain))
+        // Moqui compiles a subject as a Groovy string: none of these may ever be saved
+        ['"""+\'x\'.class.name+java.lang.Thread.currentThread().name+"""${subjectLine}', 'Reminder: "${subjectLine}"', 'Hi ${\'x\'.class}',
+         'Hi ${ec.entity}', 'Hi `id`', 'Hi $name', 'Hi {x}', 'Hi \\ there', "Hi <b>", 'Hi ${tenantLabel'].each { String bad ->
+            List<String> why = refused(null, bad)
+            assertTrue(why[0].contains(plain) || why[0].contains("Unknown variable") || why[0].contains("HTML not allowed"), bad + " -> " + why)
+        }
         assertTrue(refused(null, "See evil.example.com")[0].contains("web address"))
         assertTrue(refused(null, "x" * 201)[0].contains("200"))
         assertTrue(refused(null, "")[0].contains("empty"))
@@ -244,6 +251,38 @@ class EmailAdminServicesSmokeTests {
         assertEquals('Welcome aboard, ${tenantLabel}', templateSubject(WELCOME), "the pre-send hook applies the edit")
 
         ok(svc("reset#EmailTemplate", [emailTemplateId: WELCOME, subject: true]))
+        assertEquals("You're in: \${tenantLabel} on Darpan", templateSubject(WELCOME))
+        assertEquals("You're in: \${tenantLabel} on Darpan", EmailCopy.effectiveSubject(ec, WELCOME))
+    }
+
+    @Test
+    void everyAcceptedSubjectExpandsTheSameThroughTheEngineAndThePureSubstitution() {
+        List<List> cases = []
+        EmailCopy.seedSubjects(ec).each { String id, String subject -> cases << [id, subject] }
+        cases << [WELCOME, "Welcome aboard, \${tenantLabel}! (It's 100% ready — really; a/b + c & d?)"] << [CHANGED, "Password changed – Darpan’s notice: ok."] <<
+                ["DARPAN_2FA_REMINDER", 'Re: ${subjectLine}'] << ["DARPAN_AUDIT_DIGEST", 'Digest ${digestSubject} ${digestSubject}']
+        cases.each { List c ->
+            String id = c[0], subject = c[1]
+            assertNull(EmailCopy.subjectProblem(ec, id, subject), subject)
+            Map params = EmailSamples.params(EmailCopy.screenFor(ec, id), null)
+            ec.context.push()
+            try {
+                ec.context.putAll(params)
+                assertEquals(EmailCopy.previewSubject(ec, id, subject, params), ec.resource.expand(subject, ""), subject)
+            } finally { ec.context.pop() }
+        }
+    }
+
+    @Test
+    void aFailingSubjectWriteNeverStopsASend() {
+        ok(svc("update#EmailTemplate", [emailTemplateId: WELCOME, subject: 'Welcome aboard, ${tenantLabel}']))
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/TenantWelcomeEmailSeedData.xml")
+        def broken = [entity: ec.entity, resource: ec.resource, transaction: [runRequireNew: { a, b, c -> throw new IllegalStateException("boom") }]]
+        EmailCopy.applySubject(broken, WELCOME) // must not throw
+        assertEquals("You're in: \${tenantLabel} on Darpan", templateSubject(WELCOME), "nothing written")
+        // a stored edit that fails the rules is skipped, not applied
+        def r = row(WELCOME, "subject"); r.set("copyText", '"""+1+"""${tenantLabel}'); r.update()
+        EmailCopy.applySubject(ec, WELCOME)
         assertEquals("You're in: \${tenantLabel} on Darpan", templateSubject(WELCOME))
         assertEquals("You're in: \${tenantLabel} on Darpan", EmailCopy.effectiveSubject(ec, WELCOME))
     }

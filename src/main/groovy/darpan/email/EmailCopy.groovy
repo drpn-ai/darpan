@@ -111,23 +111,40 @@ class EmailCopy {
         return null
     }
 
+    private static final Pattern SUBJECT_SLOT = Pattern.compile(/\$\{[A-Za-z][A-Za-z0-9_]*\}/)
+    private static final Pattern SUBJECT_PLAIN = Pattern.compile(/[\p{L}\p{N} .,:;!?\-'()&\/%+\u2014\u2013\u2019]*/)
+
     /**
-     * Why this subject may not be saved, or null. The subject is expanded by Moqui as a Groovy string, so the rules are
-     * strict: one line of at most 200 characters, no markup, no web address, no `$` or backslash outside `${name}` slots,
-     * and only the slots the shipped default subject has.
+     * Why this subject may not be saved, or null. Moqui expands a subject by compiling it as a Groovy string, so a
+     * subject is an ALLOWLIST: outside `${name}` slots only letters, digits, spaces and . , : ; ! ? - ' ( ) & / % + and
+     * the dashes and curly apostrophe; a slot is `${name}` with a plain name the shipped subject also has. Nothing else
+     * (no quote, backslash, backtick, brace or `$` outside a slot, no line break, no < >). At most 200 characters.
+     * The preview substitutes the slots itself (apply), and the real send's expansion of such text is the same result.
      */
     static String subjectProblem(def ec, String emailTemplateId, String text) {
         String defaultSubject = defaultSubject(ec, emailTemplateId)
         if (defaultSubject == null) return "Unknown email ${emailTemplateId}"
         if (!text?.trim()) return "The subject is empty"
         if (text.length() > MAX_SUBJECT_CHARS) return "The subject is longer than ${MAX_SUBJECT_CHARS} characters"
-        if (text =~ /[\r\n<>\\]/) return "The subject is one plain line: no line breaks, < > or backslash"
-        String outside = SLOT.matcher(text).replaceAll(" ")
-        if (outside.contains('$')) return "A \$ in the subject must start a \${variable}"
+        String outside = SUBJECT_SLOT.matcher(text).replaceAll(" ")
+        if (!SUBJECT_PLAIN.matcher(outside).matches()) {
+            return 'The subject may use letters, digits, spaces and basic punctuation, and variables written as ${name}.'
+        }
         if (outside =~ URL_LIKE) return "The subject carries a web address or host"
         Set<String> unknown = variables(text) - variables(defaultSubject)
         if (unknown) return "Unknown variable ${unknown.collect { '${' + it + '}' }.join(', ')}: the shipped subject does not have it"
         return null
+    }
+
+    /** The body screen's name for a template (EmailSamples key), from its seed-file EmailTemplate row's location in the database. */
+    static String screenFor(def ec, String emailTemplateId) {
+        String location = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", emailTemplateId).useCache(false).one()?.getString("bodyScreenLocation") ?: ""
+        return location.substring(location.lastIndexOf("/") + 1).replace(".xml", "")
+    }
+
+    /** The subject as the preview shows it: the slots filled from vars by pure substitution, never the template engine. */
+    static String previewSubject(def ec, String emailTemplateId, String text, Map vars) {
+        return apply(text, vars, variables(defaultSubject(ec, emailTemplateId)))
     }
 
     /** The subject the release ships for a template (from the seed files that define its EmailTemplate row), or null. */
@@ -155,11 +172,14 @@ class EmailCopy {
                 logOnce(emailTemplateId, SUBJECT, "the subject edit is not usable; the template's subject goes")
                 return
             }
-            def template = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", emailTemplateId).useCache(false).one()
-            if (template != null && template.getString("subject") != edit) {
-                template.set("subject", edit)
-                template.update()
-            }
+            // Its own transaction: the send's is not held (row lock across SMTP) and a failed write cannot abort it.
+            ec.transaction.runRequireNew(null, "Applying the subject edit failed", {
+                def template = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", emailTemplateId).useCache(false).one()
+                if (template != null && template.getString("subject") != edit) {
+                    template.set("subject", edit)
+                    template.update()
+                }
+            })
         } catch (Throwable t) {
             logOnce(emailTemplateId, SUBJECT, "applying the subject edit failed: ${t.class.simpleName} ${t.message}")
         }
@@ -306,6 +326,7 @@ class EmailCopy {
         Map<String, String> cached = seedSubjectsCache
         if (cached != null) return cached
         Map<String, String> found = new HashMap<>()
+        boolean allParsed = true
         SUBJECT_SEED_FILES.each { String file ->
             try {
                 ec.resource.getLocationReference("component://darpan/data/${file}.xml".toString()).openStream().withCloseable { InputStream is ->
@@ -314,10 +335,11 @@ class EmailCopy {
                     }
                 }
             } catch (Throwable t) {
+                allParsed = false
                 logOnce("*", "*", "could not read data/${file}.xml: ${t.message}")
             }
         }
-        if (found.size() >= SUBJECT_SEED_FILES.size()) seedSubjectsCache = found
+        if (allParsed) seedSubjectsCache = found
         return found
     }
 

@@ -5764,7 +5764,7 @@
                 "properties": {
                     
                 },
-                "description": "Each role the two-factor policy covers (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN in\n            any tenant) with its date and who in it is and is not enrolled, plus how many super admins are enrolled (the\n            break-glass rule needs two before super-admin enforcement can be switched on)."
+                "description": "Each role the two-factor policy covers (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN in\n            any tenant, and EVERYONE: any person with a Darpan role or a tenant membership) with its date and who in it is and is not enrolled, plus how many super admins are enrolled (the\n            break-glass rule needs two before super-admin enforcement can be switched on)."
             },
             "GetTwoFactorPoliciesResult": {
                 "type": "object",
@@ -6080,7 +6080,7 @@
                 "properties": {
                     "permissionGroupId": {
                         "type": "string",
-                        "description": "ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN or DARPAN_TENANT_ADMIN."
+                        "description": "ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN or EVERYONE (every person with a Darpan role or a tenant membership)."
                     },
                     "requiredFromDate": {
                         "oneOf": [

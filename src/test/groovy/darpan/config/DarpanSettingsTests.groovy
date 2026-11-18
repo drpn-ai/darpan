@@ -180,6 +180,30 @@ class DarpanSettingsTests {
         return dir
     }
 
+    @Test void theAgentSubAreasFollowTwoFactorInOrderAndBeforeRetention() {
+        String row = '"type":"INT","unit":"x","description":"x","defaultValue":"5","min":1,"max":9'
+        Path extra = catalogDir('{"settings":[{"key":"darpan.test.gw","area":"Agent \u00B7 Gateway",' + row + '},' +
+                '{"key":"darpan.test.wr","area":"Agent \u00B7 Writers",' + row + '},' +
+                '{"key":"darpan.test.au","area":"Agent \u00B7 Author",' + row + '},' +
+                '{"key":"darpan.test.in","area":"Agent \u00B7 Investigator",' + row + '},' +
+                '{"key":"darpan.test.ro","area":"Agent \u00B7 Router",' + row + '}]}')
+        ClassLoader saved = Thread.currentThread().contextClassLoader
+        try {
+            Thread.currentThread().contextClassLoader = new URLClassLoader([extra.toUri().toURL()] as URL[], saved)
+            DarpanSettings.resetForTest()
+            DarpanSettings.clock = { -> now }
+            DarpanSettings.rowLoader = { -> [:] as Map<String, Map> }
+            List<String> areas = DarpanSettings.describeAll().collect { it.area as String }.with { new ArrayList<String>(new LinkedHashSet<String>(it)) }
+            int twoFactor = areas.indexOf('Two-factor')
+            assertEquals(['Agent \u00B7 Router', 'Agent \u00B7 Investigator', 'Agent \u00B7 Author', 'Agent \u00B7 Writers', 'Agent \u00B7 Gateway'],
+                    areas.subList(twoFactor + 1, twoFactor + 6))
+            assertEquals('Retention', areas[twoFactor + 6])
+        } finally {
+            Thread.currentThread().contextClassLoader = saved
+            DarpanSettings.resetForTest()
+        }
+    }
+
     @Test void aCatalogWithoutTheCoreFileIsNeverCached() {
         DarpanSettings.resetForTest()
         DarpanSettings.clock = { -> now }

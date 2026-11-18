@@ -27,7 +27,9 @@ class DarpanSettings {
     static final String ENTITY = 'darpan.config.DarpanSetting'
     static final String CATALOG_RESOURCE = 'darpan/settings-catalog.json'
     static final long REFRESH_MILLIS = 30_000L
-    private static final List<String> AREA_ORDER = ['Runs', 'Run health', 'Two-factor', 'Agent', 'Retention']
+    // The middle dot is written as an escape: Groovy reads source in the platform encoding, the catalog JSON is UTF-8.
+    private static final List<String> AREA_ORDER = ['Runs', 'Run health', 'Two-factor', 'Agent \u00B7 Router', 'Agent \u00B7 Investigator', 'Agent \u00B7 Author',
+                                                                'Agent \u00B7 Writers', 'Agent \u00B7 Gateway', 'Retention']
     private static final String WHY = 'instance settings: tenant-neutral tunables'
 
     /** Seam: row map by key ([settingValue, note, lastChangedByUserId, lastChangedDate]); null means no rows. */
@@ -355,11 +357,12 @@ class DarpanSettings {
     static List<Map> describeAll() {
         List<String> keys = new ArrayList<>(catalog().keySet())
         List<String> indexed = keys.collect { it }
-        keys.sort(false) { String a, String b ->
+        // sort(false) returns a sorted copy and leaves `keys` as it was, so the copy is what gets described.
+        List<String> ordered = keys.sort(false) { String a, String b ->
             int c = areaRank(catalog().get(a).area) <=> areaRank(catalog().get(b).area)
             return c != 0 ? c : indexed.indexOf(a) <=> indexed.indexOf(b)
         }
-        return keys.collect { describe(it) }
+        return ordered.collect { describe(it) }
     }
 
     private static int areaRank(String area) {

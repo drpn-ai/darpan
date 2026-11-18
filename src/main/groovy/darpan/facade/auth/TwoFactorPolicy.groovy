@@ -21,8 +21,6 @@ class TwoFactorPolicy {
     /** DAR-BE-297: the policy row that covers every person with a Darpan role or a tenant membership (not just admins). */
     static final String EVERYONE = "EVERYONE"
     static final List<String> POLICY_GROUP_IDS = (TenantAccessSupport.DARPAN_ROLE_GROUP_IDS + [TENANT_ADMIN_GROUP_ID, EVERYONE]).asImmutable()
-    /** At least two enrolled super admins before super-admin enforcement can be switched on (break-glass). */
-    static final int MIN_ENROLLED_SUPER_ADMINS = 2
 
     static final String ON = "ON"
     static final String OFF = "OFF"
@@ -40,6 +38,15 @@ class TwoFactorPolicy {
         if (!dated) return null
         List<Timestamp> dates = rolesByUser(ec, [userId], dated.keySet(), true)[userId].collect { dated[it] }
         return dates ? dates.min() : null
+    }
+
+    /**
+     * DAR-BE-302, break-glass: whether this person keeps a way back in if one factor is lost: two or more ACTIVE factors, or
+     * unused recovery codes. admin.SecurityAdminServices update#TwoFactorPolicy asks it of the acting super admin before a
+     * super-admin role or EVERYONE can be required.
+     */
+    static boolean hasWayBackIn(def ec, String userId) {
+        return TwoFactorRecords.activeFactors(ec, userId).size() >= 2 || TwoFactorSupport.recoveryCodesLeft(ec, userId) > 0
     }
 
     static boolean isRequiredNow(def ec, String userId) {
@@ -94,8 +101,7 @@ class TwoFactorPolicy {
         return [policies: roles, enrolledSuperAdminCount: supers.count { it in enrolled } as int]
     }
 
-    /** Super admins (ADMIN, DARPAN_SUPER_ADMIN) with two-factor on: the break-glass rule admin.SecurityAdminServices
-     *  update#TwoFactorPolicy checks (at least MIN_ENROLLED_SUPER_ADMINS before a super-admin role can be required). */
+    /** Super admins (ADMIN, DARPAN_SUPER_ADMIN) with two-factor on: informational (the policy board shows it). */
     static int enrolledSuperAdminCount(def ec) {
         Timestamp now = ec.user.nowTimestamp
         Set<String> enrolled = enrolledUserIds(ec)

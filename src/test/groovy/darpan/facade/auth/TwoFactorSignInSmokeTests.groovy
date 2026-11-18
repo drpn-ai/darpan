@@ -350,25 +350,84 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         assertTrue(anon("login#Session", [username: TADMIN_USERNAME, password: PASSWORD]).out.authenticated as boolean)
     }
 
+    private static final String POLICY_SERVICE = "admin.SecurityAdminServices.update#TwoFactorPolicy"
+    private static final String WAY_BACK_REFUSAL = "Keep a second way back in before requiring two-factor for %s: add a passkey or an authenticator app as a second factor, or make recovery codes."
+
+    private void useUpRecoveryCodes(String userId) {
+        ec.entity.find(TwoFactorRecords.RECOVERY).condition("userId", userId).disableAuthz().updateAll([usedDate: ec.user.nowTimestamp])
+    }
+
+    private void addPasskeyRow(String userId) {
+        Timestamp now = new Timestamp(System.currentTimeMillis())
+        ec.entity.makeValue(TwoFactorRecords.FACTOR).setAll([userId: userId, factorTypeEnumId: TwoFactorRecords.TYPE_PASSKEY,
+                statusId: TwoFactorRecords.ACTIVE, createdDate: now, confirmedDate: now]).setSequencedIdPrimary().create()
+    }
+
     @Test
-    @DisplayName("super-admin enforcement needs two enrolled super admins; a policy change is on the admin trail")
-    void superAdminPolicyNeedsTwoEnrolled() {
-        Map refused = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
-                [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp])
-        assertTrue(refused.errors.any { it.contains("At least 2 super admins") }, "${refused.errors}")
-        String superSecret = enrol(SUPER_ID, SUPER_USERNAME).secret
-        enrol(SUPER2_ID, SUPER2_USERNAME)
-        Map ok = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
-                [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp, adminCode: code(superSecret)])
+    @DisplayName("DAR-BE-302: the only enrolled super admin, one factor and unused recovery codes, can require super admins and everyone; the change is on the admin trail")
+    void superAdminWithRecoveryCodesCanRequireTwoFactor() {
+        Map enrolled = enrol(SUPER_ID, SUPER_USERNAME)
+        assertEquals(10, (enrolled.recoveryCodes as List).size())
+        assertEquals(1, TwoFactorRecords.activeFactors(ec, SUPER_ID).size())
+        assertTrue(TwoFactorPolicy.hasWayBackIn(ec, SUPER_ID))
+        Map ok = signedInCall(SUPER_USERNAME, POLICY_SERVICE,
+                [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp, adminCode: code(enrolled.secret as String)])
         assertEquals([], ok.errors)
+        Map everyone = signedInCall(SUPER_USERNAME, POLICY_SERVICE,
+                [permissionGroupId: "EVERYONE", requiredFromDate: ec.user.nowTimestamp, adminCode: code(enrolled.secret as String)])
+        assertEquals([], everyone.errors)
         def audit = ec.entity.find("darpan.admin.AdminAuditLog").condition("targetType", "TwoFactorPolicy").disableAuthz().useCache(false).list()
-        assertEquals(["DARPAN_SUPER_ADMIN"], audit*.targetId)
+        assertEquals(["DARPAN_SUPER_ADMIN", "EVERYONE"] as Set, audit*.targetId as Set)
 
         Map board = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.get#TwoFactorPolicies", [:]).out
-        assertEquals(2, board.enrolledSuperAdminCount)
+        assertEquals(1, board.enrolledSuperAdminCount)
         Map superRow = (board.policies as List<Map>).find { it.permissionGroupId == "DARPAN_SUPER_ADMIN" }
-        assertEquals(2, superRow.enrolledCount)
-        assertEquals([SUPER_ID, SUPER2_ID] as Set, (superRow.enrolled as List<Map>)*.userId as Set)
+        assertEquals(1, superRow.enrolledCount)
+        assertEquals([SUPER_ID] as Set, (superRow.enrolled as List<Map>)*.userId as Set)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-302: one factor and no unused recovery codes is refused with the way-back text, saves nothing and spends no code")
+    void superAdminWithoutWayBackInIsRefused() {
+        Map enrolled = enrol(SUPER_ID, SUPER_USERNAME)
+        useUpRecoveryCodes(SUPER_ID)
+        assertFalse(TwoFactorPolicy.hasWayBackIn(ec, SUPER_ID))
+        String adminCode = code(enrolled.secret as String)
+        ["DARPAN_SUPER_ADMIN", "ADMIN", "EVERYONE"].each { String group ->
+            Map refused = signedInCall(SUPER_USERNAME, POLICY_SERVICE, [permissionGroupId: group, requiredFromDate: ec.user.nowTimestamp, adminCode: adminCode])
+            assertEquals([String.format(WAY_BACK_REFUSAL, group)], refused.errors)
+            assertNull(ec.entity.find("darpan.auth.TwoFactorRolePolicy").condition("permissionGroupId", group).disableAuthz().useCache(false).one()?.requiredFromDate, "${group} unchanged")
+        }
+        // No code was spent: the same code still proves the admin once they have a way back in.
+        addPasskeyRow(SUPER_ID)
+        Map ok = signedInCall(SUPER_USERNAME, POLICY_SERVICE, [permissionGroupId: "EVERYONE", requiredFromDate: ec.user.nowTimestamp, adminCode: adminCode])
+        assertEquals([], ok.errors)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-302: two factors (app and passkey) and no recovery codes is a way back in")
+    void superAdminWithTwoFactorsCanRequireTwoFactor() {
+        Map enrolled = enrol(SUPER_ID, SUPER_USERNAME)
+        useUpRecoveryCodes(SUPER_ID)
+        addPasskeyRow(SUPER_ID)
+        assertTrue(TwoFactorPolicy.hasWayBackIn(ec, SUPER_ID))
+        Map ok = signedInCall(SUPER_USERNAME, POLICY_SERVICE,
+                [permissionGroupId: "DARPAN_SUPER_ADMIN", requiredFromDate: ec.user.nowTimestamp, adminCode: code(enrolled.secret as String)])
+        assertEquals([], ok.errors)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-302: the way-back rule does not apply to DARPAN_TENANT_ADMIN or DARPAN_ADMIN; an admin with no factor still gets the set-up message")
+    void wayBackRuleIsOnlyForSuperAdminRolesAndEveryone() {
+        Map none = signedInCall(SUPER_USERNAME, POLICY_SERVICE, [permissionGroupId: "EVERYONE", requiredFromDate: ec.user.nowTimestamp])
+        assertEquals(["Set up two-factor on your own account before changing the two-factor policy."], none.errors)
+        Map enrolled = enrol(SUPER_ID, SUPER_USERNAME)
+        useUpRecoveryCodes(SUPER_ID)
+        ["DARPAN_TENANT_ADMIN", "DARPAN_ADMIN"].each { String group ->
+            Map ok = signedInCall(SUPER_USERNAME, POLICY_SERVICE,
+                    [permissionGroupId: group, requiredFromDate: ec.user.nowTimestamp, adminCode: code(enrolled.secret as String)])
+            assertEquals([], ok.errors, group)
+        }
     }
 
     @Test
@@ -400,14 +459,6 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         } finally {
             account(USER_ID).set("disabled", "N").set("disabledDateTime", null).update()
         }
-    }
-
-    @Test
-    @DisplayName("EVERYONE is refused until two super admins are enrolled")
-    void everyonePolicyNeedsTwoEnrolledSuperAdmins() {
-        Map refused = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
-                [permissionGroupId: "EVERYONE", requiredFromDate: ec.user.nowTimestamp])
-        assertTrue(refused.errors.any { it.contains("At least 2 super admins must have two-factor on before it is required for EVERYONE (0 do).") }, "${refused.errors}")
     }
 
     @Test

@@ -36,8 +36,8 @@
     <service verb="update" noun="TwoFactorPolicy" allow-remote="true">
         <description>Require two-factor for a role from a date (today or earlier: now; later: a grace period during which
             sign-in prompts), or make it optional again (clear). Super admins only, with a current code from their own
-            authenticator app or a passkey assertion (so they must have two-factor on). Requiring it for ADMIN or
-            DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row.</description>
+            authenticator app or a passkey assertion (so they must have two-factor on). Requiring it for ADMIN,
+            DARPAN_SUPER_ADMIN or EVERYONE needs the acting super admin to keep a second way back in (two factors, or unused recovery codes). Writes an AdminAuditLog row.</description>
         <in-parameters>
             <parameter name="permissionGroupId" required="true"><description>ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN or EVERYONE (every person with a Darpan role or a tenant membership).</description></parameter>
             <parameter name="requiredFromDate" type="Timestamp"><description>Required from this date. Leave out with clear.</description></parameter>
@@ -55,13 +55,11 @@
                 <return error="true" message="${permissionGroupId ?: '(missing)'} is not a role the two-factor policy covers (${policyGroupIds.join(', ')})."/></if>
             <if condition="!clear &amp;&amp; requiredFromDate == null">
                 <return error="true" message="Give requiredFromDate, or clear=true to make it optional."/></if>
-            <!-- Break-glass: one lost phone must not lock the platform out. -->
-            <if condition="!clear &amp;&amp; (permissionGroupId in darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS || permissionGroupId == darpan.facade.auth.TwoFactorPolicy.EVERYONE)">
-                <set field="enrolledSuperAdminCount" from="darpan.facade.auth.TwoFactorPolicy.enrolledSuperAdminCount(ec)"/>
-                <set field="minimumSuperAdmins" from="darpan.facade.auth.TwoFactorPolicy.MIN_ENROLLED_SUPER_ADMINS"/>
-                <if condition="enrolledSuperAdminCount &lt; minimumSuperAdmins">
-                    <return error="true" message="At least ${minimumSuperAdmins} super admins must have two-factor on before it is required for ${permissionGroupId} (${enrolledSuperAdminCount} do)."/></if>
-            </if>
+            <!-- Break-glass (DAR-BE-302): the acting super admin must keep a second way back in (two factors, or unused
+                 recovery codes), so one lost phone cannot lock them out. No factor at all falls through to NOT_ENROLLED below. -->
+            <if condition="!clear &amp;&amp; (permissionGroupId in darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS || permissionGroupId == darpan.facade.auth.TwoFactorPolicy.EVERYONE)
+                    &amp;&amp; darpan.facade.auth.TwoFactorRecords.enabled(ec, ec.user.userId) &amp;&amp; !darpan.facade.auth.TwoFactorPolicy.hasWayBackIn(ec, ec.user.userId)">
+                <return error="true" message="Keep a second way back in before requiring two-factor for ${permissionGroupId}: add a passkey or an authenticator app as a second factor, or make recovery codes."/></if>
             <!-- The fresh proof last (review M4), so a request refused above spends no code. -->
             <set field="problem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, adminCode, adminPasskeyAssertion)"/>
             <if condition="problem == darpan.facade.auth.TwoFactorRefusal.NOT_ENROLLED">

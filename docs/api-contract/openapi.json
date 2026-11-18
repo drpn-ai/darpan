@@ -6123,7 +6123,7 @@
                 "required": [
                     "permissionGroupId"
                 ],
-                "description": "Require two-factor for a role from a date (today or earlier: now; later: a grace period during which\n            sign-in prompts), or make it optional again (clear). Super admins only, with a current code from their own\n            authenticator app or a passkey assertion (so they must have two-factor on). Requiring it for ADMIN or\n            DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row."
+                "description": "Require two-factor for a role from a date (today or earlier: now; later: a grace period during which\n            sign-in prompts), or make it optional again (clear). Super admins only, with a current code from their own\n            authenticator app or a passkey assertion (so they must have two-factor on). Requiring it for ADMIN,\n            DARPAN_SUPER_ADMIN or EVERYONE needs the acting super admin to keep a second way back in (two factors, or unused recovery codes). Writes an AdminAuditLog row."
             },
             "UpdateTwoFactorPolicyResult": {
                 "type": "object",

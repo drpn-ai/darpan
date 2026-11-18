@@ -26,9 +26,12 @@ class EmailSamples {
     static final Map<String, Map> OTHER = [
             TenantWelcome: [firstName: "Riya", tenantLabel: "Malbon", rolePhrase: "as an Editor", username: "riya.k",
                             appBaseUrl: "https://app.drpn.ai"],
-            AuditDigest  : [digestText: "Gorjana · Month close\nOpen 5 · New 2 · Fixed 1", digestSubject: "Gorjana · Month close"],
-            AuditRun     : [runSubject: "Gorjana · Month close: 5 open", runHtml: "<p>Open 5 · New 2 · Fixed 1</p>",
-                            runText: "Open 5 · New 2 · Fixed 1"],
+            // The audit emails are built from their data by the screen (the same blocks a real send reads): see AuditEmailSamples.
+            AuditDigest  : [digestReport: AuditEmailSamples.digestReport(), digestKind: "AUDDK_DAILY", digestFullList: false,
+                            digestReportUrl: "https://app.drpn.ai/audits/month-close?date=2026-10-22&tenantId=GORJANA",
+                            digestSubject: "Month close · 2026-10 · Thu 22 Oct"],
+            AuditRun     : [runSubject: "Gorjana Month close, 1–10 November: 57 open findings", runFacts: AuditEmailSamples.runFacts(),
+                            runWords: AuditEmailSamples.runWords(), runBase: AuditEmailSamples.BASE],
     ].asImmutable()
 
     /** screen -> branch name -> how the base sample changes. The first branch of a screen is its default. */

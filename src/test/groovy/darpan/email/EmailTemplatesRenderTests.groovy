@@ -1,5 +1,7 @@
 package darpan.email
 
+import darpan.audit.AuditDigestSupport
+import darpan.audit.AuditRunMessage
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -136,15 +138,151 @@ class EmailTemplatesRenderTests {
             TwoFactorReminderAfter : ["TwoFactorReminder", SECURITY.TwoFactorReminder + [past: true]],
             TenantWelcomeUrl       : ["TenantWelcome", OTHER.TenantWelcome],
             TenantWelcomeNoUrl     : ["TenantWelcome", OTHER.TenantWelcome - [appBaseUrl: "https://app.drpn.ai"]],
-            AuditDigest            : ["AuditDigest", OTHER.AuditDigest],
+            // the digest as a send passes it: the finished text (chat gets the same text), here a made-up one
+            AuditDigest            : ["AuditDigest", [digestText: "Gorjana · Month close\nOpen 5 · New 2 · Fixed 1", digestSubject: "Gorjana · Month close"]],
     ]
+
+    /** DAR-BE-303: the audit run email by variant (the screen builds the body from the run's data through the copy blocks);
+     *  golden files are what AuditRunMessage built before its words moved into blocks. */
+    private static final Map<String, Map> AUDIT_RUN = [
+            AuditRunFull         : [runFacts: AuditEmailSamples.runFacts(), runWords: AuditEmailSamples.runWords(), runBase: AuditEmailSamples.BASE],
+            AuditRunNoWordsNoLink: [runFacts: AuditEmailSamples.runFacts(), runWords: [:], runBase: null],
+            AuditRunClean        : [runFacts: AuditEmailSamples.cleanRunFacts(), runWords: [:], runBase: AuditEmailSamples.BASE],
+    ]
+
+    private static final String DIGEST_URL = "https://app.drpn.ai/audits/month-close?date=2026-10-22&tenantId=GORJANA"
+
+    /** name -> [report, kind, fullList, weekAgo, url]; golden/<name>.text is the digest text as it was built before the blocks. */
+    private static Map<String, List> digestVariants() {
+        Map incomplete = AuditEmailSamples.digestReport()
+        incomplete.health = [complete: false, summary: "Not complete: check invoices-without-etail-id did not run."]
+        Map none = AuditEmailSamples.digestReport()
+        none.summary = [open: 0, newToday: 0, fixedToday: 2]
+        none.categories = [orders: [label: "Orders", counts: [open: 0], statements: [:]]]
+        Map big = AuditEmailSamples.digestReport()
+        big.categories.orders.statements.R2.findings = (1..400).collect { int i ->
+            [id: "F-${1000 + i}".toString(), headline: "Invoice INV${i} has no Etail id", state: "open", ageDays: i % 9]
+        }
+        big.categories.orders.statements.R2.findingsOmitted = 25
+        return [DigestDaily: [AuditEmailSamples.digestReport(), AuditDigestSupport.DAILY, false, null, DIGEST_URL],
+                DigestWeekly: [AuditEmailSamples.digestReport(), AuditDigestSupport.WEEKLY, false, [summary: [open: 5]], DIGEST_URL],
+                DigestFullList: [AuditEmailSamples.digestReport(), AuditDigestSupport.DAILY, true, null, DIGEST_URL],
+                DigestIncomplete: [incomplete, AuditDigestSupport.DAILY, false, null, null],
+                DigestNothingOpen: [none, AuditDigestSupport.DAILY, false, null, DIGEST_URL],
+                DigestFullCut: [big, AuditDigestSupport.DAILY, true, null, DIGEST_URL]]
+    }
+
+    private String digest(List v) {
+        return AuditDigestSupport.render(v[0] as Map, v[1] as String, v[2] as boolean, v[3] as Map, v[4] as String,
+                new EmailCopyReader(ec, "DARPAN_AUDIT_DIGEST"))
+    }
+
+    @Test
+    void theAuditEmailsRenderAsBeforeThroughTheBlocks() {
+        AUDIT_RUN.each { String name, Map params ->
+            ["html", "text"].each { String mode ->
+                String expected = Files.readString(Path.of("src/test/resources/email-golden/${name}.${mode}"))
+                String actual = render("AuditRun", params, mode)
+                Files.writeString(previews.resolve("${name}.${mode == 'html' ? 'html' : 'txt'}"), actual)
+                // the screen's own indentation wraps the body, as it did the passthrough; the body itself is compared byte for byte
+                assertEquals(expected.trim(), actual.trim(), "${name} ${mode}")
+            }
+        }
+        digestVariants().each { String name, List v ->
+            assertEquals(Files.readString(Path.of("src/test/resources/email-golden/${name}.text")), digest(v), name)
+        }
+        // the chat card shares the subtitle's block and is otherwise unchanged
+        assertEquals(Files.readString(Path.of("src/test/resources/email-golden/AuditRunCard.json")), groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(
+                AuditRunMessage.card(AuditEmailSamples.runFacts(), AuditEmailSamples.runWords(), AuditEmailSamples.BASE, new EmailCopyReader(ec, "DARPAN_AUDIT_RUN")))))
+    }
+
+    @Test
+    void theDigestScreenBuildsItsTextFromTheReportSoAPreviewShowsADraft() {
+        Map sample = EmailSamples.params("AuditDigest", null)
+        String text = render("AuditDigest", sample, "text")
+        assertTrue(text.contains(Files.readString(Path.of("src/test/resources/email-golden/DigestDaily.text")).replace(DIGEST_URL, sample.digestReportUrl as String)), text)
+        assertTrue(text.contains("https://docs.drpn.ai/guides/audits"), text)
+        String html = render("AuditDigest", sample, "html")
+        assertTrue(html.contains("Oldest open") && html.contains('class="dp-card"'), html)
+        // a draft block stands in, as the admin preview does
+        String draft = EmailCopy.withDraft(["DARPAN_AUDIT_DIGEST/list.oldest": "Stuck longest"]) { render("AuditDigest", sample, "text") }
+        assertTrue(draft.contains("Stuck longest") && !draft.contains("Oldest open"), draft)
+    }
+
+    @Test
+    void anAuditRunEditIsUsedAndABadOneFallsBack() {
+        Map full = AUDIT_RUN.AuditRunFull
+        try {
+            setCopy("DARPAN_AUDIT_RUN", "act.heading", "Do these first")
+            setCopy("DARPAN_AUDIT_RUN", "rule.all", 'Every one of the ${open} is in ${file}')
+            setCopy("DARPAN_AUDIT_RUN", "notrun", 'Skipped today: ${rules}.')
+            String html = render("AuditRun", full, "html"), text = render("AuditRun", full, "text")
+            assertTrue(html.contains("DO THESE FIRST") && text.contains("\nDo these first\n"), "heading in both parts")
+            assertTrue(text.contains("  Every one of the 1 is in gorjana-month-close-2026-11-R10.csv · ${AuditEmailSamples.BASE}/audits/month-close"), text)
+            assertTrue(html.contains("Skipped today: R9.") && text.contains("Skipped today: R9."))
+            assertFalse(html.contains("ACT ON FIRST") || html.contains("did not run on this morning"))
+
+            // an address, an unknown variable, empty text: the default goes, and the report link stays the code-built one
+            setCopy("DARPAN_AUDIT_RUN", "button", "Open https://evil.example/login")
+            setCopy("DARPAN_AUDIT_RUN", "act.heading", 'Act on ${nope}')
+            setCopy("DARPAN_AUDIT_RUN", "attachments", "   ")
+            html = render("AuditRun", full, "html")
+            assertTrue(html.contains(">Open the report in Darpan</a>") && html.contains("ACT ON FIRST") && html.contains("Each attachment has one row"), html)
+            assertFalse(html.contains("evil.example"), html)
+
+            // the guide links are an edit like any other: valid ones show, one the frame refuses keeps the default
+            setCopy("DARPAN_AUDIT_RUN", "guides", "Just one|guides/audits")
+            assertEquals(1 + (html =~ /href="${java.util.regex.Pattern.quote(AuditEmailSamples.BASE)}[^"]*"/).count,
+                    1 + (render("AuditRun", full, "html") =~ /href="${java.util.regex.Pattern.quote(AuditEmailSamples.BASE)}[^"]*"/).count)
+            html = render("AuditRun", full, "html")
+            assertEquals(1, (html =~ /href="https:\/\/docs\.drpn\.ai\//).count)
+            setCopy("DARPAN_AUDIT_RUN", "guides", "Evil|https://evil.example/x")
+            assertEquals(2, (render("AuditRun", full, "html") =~ /href="https:\/\/docs\.drpn\.ai\//).count)
+        } finally {
+            ["act.heading", "rule.all", "notrun", "button", "attachments", "guides"].each { setCopy("DARPAN_AUDIT_RUN", it, null) }
+        }
+    }
+
+    @Test
+    void aDigestEditReadsInChatAndEmailAlikeAndNeverAddsALink() {
+        List v = digestVariants().DigestDaily
+        try {
+            setCopy("DARPAN_AUDIT_DIGEST", "list.oldest", "Stuck longest")
+            setCopy("DARPAN_AUDIT_DIGEST", "report", "Open the report:")
+            setCopy("DARPAN_AUDIT_DIGEST", "age.many", '${days}d')
+            String text = digest(v)
+            assertTrue(text.contains("\nStuck longest\nF-1 · R2 · 6d · Invoice INV1 has no Etail id"), text)
+            assertTrue(text.endsWith("Open the report: ${DIGEST_URL}"), "the link is the code-built one: ${text}")
+            setCopy("DARPAN_AUDIT_DIGEST", "report", "Report at https://evil.example:")
+            assertTrue(digest(v).endsWith("Report: ${DIGEST_URL}"))
+            assertEquals("Nothing open.", digest(digestVariants().DigestNothingOpen).readLines().findAll { it }[-2])
+        } finally {
+            ["list.oldest", "report", "age.many"].each { setCopy("DARPAN_AUDIT_DIGEST", it, null) }
+        }
+    }
+
+    @Test
+    void everyBlockTheAuditBuildersReadIsSeeded() {
+        [["src/main/groovy/darpan/audit/AuditRunMessage.groovy", "DARPAN_AUDIT_RUN"],
+         ["src/main/groovy/darpan/audit/AuditDigestSupport.groovy", "DARPAN_AUDIT_DIGEST"]].each { List f ->
+            String x = new File(f[0] as String).text
+            Set<String> blocks = (x =~ /copy\.text\(\s*['"]([a-z.]+)['"]/).collect { it[1] as String }.toSet()
+            assertTrue(blocks.size() >= 10, "${f[0]}: the scan found the reads (${blocks})")
+            blocks.each { String id ->
+                assertNotNull(ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", f[1]).condition("blockId", id).one(), "${f[0]}: no seed row for ${f[1]}/${id}")
+            }
+            assertNotNull(ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", f[1]).condition("blockId", "guides").one())
+        }
+    }
 
     @Test
     void everyTemplateRendersAsBefore() {
         GOLDEN.each { String name, List v ->
             ["html", "text"].each { String mode ->
                 String expected = Files.readString(Path.of("src/test/resources/email-golden/${name}.${mode}"))
-                assertEquals(expected, render(v[0] as String, v[1] as Map, mode), "${name} ${mode}")
+                String actual = render(v[0] as String, v[1] as Map, mode)
+                Files.writeString(previews.resolve("golden-${name}.${mode}"), actual)
+                assertEquals(expected, actual, "${name} ${mode}")
             }
         }
     }

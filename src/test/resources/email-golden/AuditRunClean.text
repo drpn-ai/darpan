@@ -1,0 +1,15 @@
+Gorjana · Month close
+Run of 10 Nov 2026 · 1–10 November
+
+Open 0 · New 0 · Fixed 2
+
+Rules
+  R2  Every order is billed in NetSuite: clean
+  R9  Every Shopify order is in NetSuite: clean
+  R10  Every return is credited: clean
+
+Open the report in Darpan: https://app.drpn.ai/audits/month-close?period=2026-11&date=2026-11-10&tenantId=GORJANA
+
+User guide
+Resolve a finding: https://docs.drpn.ai/guides/audits#resolve-a-finding
+A finding stays open after a fix: https://docs.drpn.ai/troubleshooting/audits#a-finding-stays-open-after-you-fixed-it

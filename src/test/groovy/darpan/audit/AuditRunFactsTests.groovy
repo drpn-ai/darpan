@@ -15,6 +15,7 @@ class AuditRunFactsTests {
 
     private static final String RMA = "Return has an RMA, no credit memo"
     private static final String BASE = "https://app.example"
+    private static final darpan.email.EmailCopyReader COPY = darpan.email.SeedCopy.reader(AuditRunMessage.TEMPLATE)
 
     @Test
     void groupsCountDistinctOrdersAndReturnsAndListIdsOnlyUnderTwentyFive() {
@@ -85,7 +86,7 @@ class AuditRunFactsTests {
     @Test
     void theCardIsASummaryAndOneLinkNothingElse() {
         Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> null }
-        Map card = AuditRunMessage.card(facts, [:], BASE)
+        Map card = AuditRunMessage.card(facts, [:], BASE, COPY)
         assertEquals("Gorjana · Month close: 57 open findings", card.text)
         Map body = (card.cardsV2 as List<Map>)[0].card as Map
         assertEquals([title: "Gorjana · Month close", subtitle: "Run of 10 Nov 2026 · 1–10 November",
@@ -102,7 +103,7 @@ class AuditRunFactsTests {
         // DAR-BE-293: the link names its tenant, last, as a run link does, so the app switches into it.
         assertEquals("${BASE}/audits/month-close?period=2026-11&date=2026-11-10&tenantId=GORJANA".toString(), buttons[0].onClick.openLink.url)
 
-        Map withWords = AuditRunMessage.card(facts, [headline: "Thirty <orders> wait on a cause."], null)
+        Map withWords = AuditRunMessage.card(facts, [headline: "Thirty <orders> wait on a cause."], null, COPY)
         List<Map> w = ((withWords.cardsV2 as List<Map>)[0].card.sections as List<Map>)[0].widgets as List<Map>
         assertEquals("Thirty &lt;orders&gt; wait on a cause.", w[1].textParagraph.text)
         assertFalse(w.any { it.buttonList }, "no app address, no button")
@@ -112,7 +113,7 @@ class AuditRunFactsTests {
     void theEmailCarriesEveryDetailAndFallsBackToEachCausesOwnFix() {
         Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> cause == RMA ? "Issue the credit memo {creditMemo}" : null }
         assertEquals("Gorjana Month close, 1–10 November: 57 open findings", AuditRunMessage.subject(facts))
-        String html = AuditRunMessage.emailHtml(facts, [:], BASE)
+        String html = AuditRunMessage.emailHtml(facts, [:], BASE, COPY)
         assertTrue(html.contains("ACT ON FIRST"))
         assertTrue(html.contains(">Issue the credit memo</div>"), "no writer: the cause's own fix")
         assertTrue(html.contains("gorjana-month-close-2026-11-R10.csv"))
@@ -125,11 +126,11 @@ class AuditRunFactsTests {
         assertTrue(html.contains("'IBM Plex Mono'"), "the app's typeface")
         assertTrue(html.contains("R9 did not run on this morning."))
 
-        String written = AuditRunMessage.emailHtml(facts, [headline: "Mostly payments.", fixes: [("R10|" + RMA): "Credit each return."]], BASE)
+        String written = AuditRunMessage.emailHtml(facts, [headline: "Mostly payments.", fixes: [("R10|" + RMA): "Credit each return."]], BASE, COPY)
         assertTrue(written.contains(">Credit each return.</div>"), "the writer's sentence wins")
         assertTrue(written.contains("Mostly payments."))
 
-        String text = AuditRunMessage.emailText(facts, [:], null)
+        String text = AuditRunMessage.emailText(facts, [:], null, COPY)
         assertTrue(text.contains("R10 · 1 open · 0 new · Every return is credited"), text)
         assertTrue(text.contains("  All 1 in gorjana-month-close-2026-11-R10.csv\n"), text)
         // no app address, no app links; the only addresses are the user guide's (DAR-BE-298)

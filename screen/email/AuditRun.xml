@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- DAR-BE-207 email body: the run update as darpan.audit.AuditRunMessage built it, every value already escaped there.
+     DAR-BE-303: its words are DARPAN_AUDIT_RUN copy blocks.
      send#EmailTemplate renders this screen twice: html for the body, text for the plain-text alternative. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
+    <actions>
+        <!-- A send passes the finished body. The admin preview passes the run's data instead, so the draft's words show:
+             the body is built here, through the same blocks. -->
+        <set field="runCopy" from="new darpan.email.EmailCopyReader(ec, 'DARPAN_AUDIT_RUN')"/>
+        <set field="runHtml" from="ec.context.get('runHtml') ?: darpan.audit.AuditRunMessage.emailHtml(runFacts, ec.context.get('runWords') ?: [:], ec.context.get('runBase'), runCopy)"/>
+        <set field="runText" from="ec.context.get('runText') ?: darpan.audit.AuditRunMessage.emailText(runFacts, ec.context.get('runWords') ?: [:], ec.context.get('runBase'), runCopy)"/>
+    </actions>
     <widgets>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${runHtml}]]></text>

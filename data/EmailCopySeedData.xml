@@ -4,7 +4,8 @@
     <!-- DAR-BE-303 — the words of the Darpan emails, one row per block per template (screen/email/*.xml reads them through
          darpan.email.EmailCopy.text). The seed sets defaultText ONLY: the loader writes just the attributes given, so a
          release never overwrites an edit (copyText). Block id = area[.branch]; the `guides` block is lines of `Label|docs page path`.
-         The audit run email (DARPAN_AUDIT_RUN) has no row: its words are built in AuditRunMessage. -->
+         The audit run email (DARPAN_AUDIT_RUN) and the digest build their body in Groovy (AuditRunMessage, AuditDigestSupport):
+         the same rows, read there through EmailCopyReader; finding rows, counts and the report link stay code. -->
 
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="greeting" defaultText="Hi ${firstName},"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_PASSWORD_RESET_CODE" blockId="body" defaultText="Forgot your Darpan password? ${smile} Here's your way back in:"/>
@@ -76,5 +77,33 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="note" defaultText="You'll keep getting this reminder until a method is set up. Questions? Ask your Darpan administrator."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_2FA_REMINDER" blockId="guides" defaultText="Set up two-factor|guides/two-factor#set-it-up&#10;Who requires two-factor|guides/manage-users-and-access#require-two-factor"/>
 
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="subtitle" defaultText="Run of ${date} · ${span}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.open" defaultText="Open"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.new" defaultText="New"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.fixed" defaultText="Fixed"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="act.heading" defaultText="Act on first"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rules.heading" defaultText="Rules"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.open" defaultText="${open} open"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.clean" defaultText="clean"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.head" defaultText="${rule} · ${open} open · ${new} new"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.all" defaultText="All ${open} in ${file}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.link" defaultText="open ${rule} in Darpan"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="cause.none" defaultText="No cause named yet"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run on this morning."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="button" defaultText="Open the report in Darpan"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="attachments" defaultText="Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns)."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="guides" defaultText="Resolve a finding|guides/audits#resolve-a-finding&#10;A finding stays open after a fix|troubleshooting/audits#a-finding-stays-open-after-you-fixed-it"/>
+
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="week" defaultText="week to ${day}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="open.daily" defaultText="Open ${open} · New today ${new} · Fixed today ${fixed}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="open.weekly" defaultText="Open ${open} (${before} a week ago)"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="category" defaultText="${label}: open ${open}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="none" defaultText="Nothing open."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="report" defaultText="Report:"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="list.oldest" defaultText="Oldest open"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="list.all" defaultText="Open (${count})"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="more" defaultText="… ${left} more in the report"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="age.one" defaultText="1 day"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="age.many" defaultText="${days} days"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page&#10;When an audit misbehaves|troubleshooting/audits"/>
 </entity-facade-xml>

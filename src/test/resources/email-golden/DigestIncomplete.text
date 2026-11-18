@@ -1,0 +1,11 @@
+Month close · 2026-10 · Thu 22 Oct
+Not complete: check invoices-without-etail-id did not run.
+
+Open 3 · New today 1 · Fixed today 1
+Orders: open 2
+Returns: open 1
+
+Oldest open
+F-1 · R2 · 6 days · Invoice INV1 has no Etail id
+F-3 · R8 · 1 day · Return RX-1 has no RMA in NetSuite
+F-2 · R2 · 0 days · Invoice INV2 has no Etail id

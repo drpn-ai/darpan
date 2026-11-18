@@ -1,5 +1,7 @@
 package darpan.audit
 
+import darpan.email.EmailCopy
+import darpan.email.EmailCopyReader
 import darpan.email.EmailFrame
 
 import java.time.LocalDate
@@ -24,10 +26,12 @@ class AuditRunMessage {
                                 LINE = EmailFrame.LINE, LINE_SOFT = EmailFrame.LINE_SOFT, TILE = EmailFrame.TILE, ACCENT = EmailFrame.ACCENT
     private static final String F = EmailFrame.F
     private static final String LINK = "color:${INK};text-decoration:underline;text-decoration-color:${LINE};text-underline-offset:3px;"
-    private static final String NO_CAUSE = "No cause named yet"
-    /** The user guide pages a run update points to (DAR-BE-298). */
-    private static final List<List<String>> GUIDES = [["Resolve a finding", "guides/audits#resolve-a-finding"],
-                                                      ["A finding stays open after a fix", "troubleshooting/audits#a-finding-stays-open-after-you-fixed-it"]]
+    /**
+     * DAR-BE-303: the words are EmailCopyBlock rows of DARPAN_AUDIT_RUN, read through copy (the user guide links too);
+     * what stays here is the layout and the computed data (counts, finding rows, ids, links). The report link is built
+     * here from the app's address and is never part of an editable block.
+     */
+    static final String TEMPLATE = "DARPAN_AUDIT_RUN"
 
     /** "Gorjana Month close, 1–10 November: 42 open findings". */
     static String subject(Map facts) {
@@ -36,7 +40,10 @@ class AuditRunMessage {
 
     static String title(Map facts) { return "${facts.tenant?.name} · ${facts.audit?.name}".toString() }
 
-    static String subtitle(Map facts) { return "Run of ${day(facts.date as String, true)} · ${span(facts.window as Map)}".toString() }
+    /** "Run of 10 Nov 2026 · 1–10 November" (the chat card's header shares it). */
+    static String subtitle(Map facts, EmailCopyReader copy) {
+        return copy.text("subtitle", [date: day(facts.date as String, true), span: span(facts.window as Map)])
+    }
 
     /** The audit page for the run, or one rule of it; null when the app's address is not configured. */
     static String reportUrl(String base, Map facts, String rule = null) {
@@ -62,7 +69,7 @@ class AuditRunMessage {
 
     /** The three largest groups that have a cause: what to act on first. */
     static List<Map> actOnFirst(Map facts) {
-        return groups(facts).findAll { cause(it) != NO_CAUSE }.sort(false) { Map a, Map b -> (b.count as int) <=> (a.count as int) }.take(3)
+        return groups(facts).findAll { hasCause(it) }.sort(false) { Map a, Map b -> (b.count as int) <=> (a.count as int) }.take(3)
     }
 
     static List<String> rulesNotRun(Map facts) {
@@ -70,7 +77,7 @@ class AuditRunMessage {
     }
 
     /** Google Chat cardsV2: the counts, the writer's headline, what did not run, and the report's link. Nothing else. */
-    static Map card(Map facts, Map words, String base) {
+    static Map card(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
         List<Map> widgets = [[decoratedText: [text     : "<font color=\"${RED}\">${t.open} open</font>  ·  ${t.newToday} new  ·  " +
                 "<font color=\"${GREEN}\">${t.fixedToday} fixed</font>".toString(),
@@ -84,13 +91,14 @@ class AuditRunMessage {
         if (url) widgets << [buttonList: [buttons: [[text: "Open the report", onClick: [openLink: [url: url]]]]]]
         return [text   : "${title(facts)}: ${t.open} open findings".toString(),
                 cardsV2: [[cardId: "audit-run", card: [
-                        header  : [title: title(facts), subtitle: subtitle(facts), imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"],
+                        header  : [title: title(facts), subtitle: subtitle(facts, copy), imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"],
                         sections: [[widgets: widgets]]]]]]
     }
 
     /** The email body: header, Open/New/Fixed tiles, act on first, the rules, one section per rule with open findings. */
-    static String emailHtml(Map facts, Map words, String base) {
+    static String emailHtml(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
+        String noCause = copy.text("cause.none")
         String url = reportUrl(base, facts)
         StringBuilder rows = new StringBuilder()
         rules(facts).each { Map r ->
@@ -99,12 +107,12 @@ class AuditRunMessage {
             rows << "<tr><td style=\"${cell}font-size:12px;color:${MUTED};width:44px;\">${esc(r.id)}</td>" <<
                     "<td style=\"${cell}padding-right:12px;font-size:13px;line-height:1.55;color:${open ? INK : DIM};\">${esc(firstSentence(r.text as String))}</td>" <<
                     "<td style=\"${cell}font-size:13px;text-align:right;white-space:nowrap;color:${open ? INK : DIM};\">" <<
-                    "${open ? open + ' open' : 'clean'}</td></tr>"
+                    "${esc(open ? copy.text('rule.open', [open: open]) : copy.text('rule.clean'))}</td></tr>"
         }
         StringBuilder act = new StringBuilder()
         actOnFirst(facts).each { Map g ->
             act << "<tr><td style=\"${F}padding:9px 12px 9px 0;border-top:1px solid ${LINE_SOFT};font-size:20px;line-height:1.2;color:${INK};width:56px;vertical-align:top;\">${g.count}</td>" <<
-                    "<td style=\"${F}padding:9px 0;border-top:1px solid ${LINE_SOFT};font-size:13px;line-height:1.55;color:${INK};vertical-align:top;\">${esc(cause(g))}" <<
+                    "<td style=\"${F}padding:9px 0;border-top:1px solid ${LINE_SOFT};font-size:13px;line-height:1.55;color:${INK};vertical-align:top;\">${esc(cause(g, noCause))}" <<
                     "<div style=\"font-size:12px;color:${MUTED};\">${esc(g.rule)}</div></td></tr>"
         }
         StringBuilder blocks = new StringBuilder()
@@ -116,69 +124,70 @@ class AuditRunMessage {
                 String fx = fix ? "<div style=\"${F}font-size:12px;line-height:1.55;color:${MUTED};margin-top:2px;\">${esc(fix)}</div>" : ""
                 items << "<tr><td style=\"${F}padding:10px 12px 10px 0;border-top:1px solid ${LINE_SOFT};font-size:16px;line-height:1.3;color:${INK};width:48px;vertical-align:top;\">${g.count}</td>" <<
                         "<td style=\"${F}padding:10px 0;border-top:1px solid ${LINE_SOFT};vertical-align:top;\">" <<
-                        "<div style=\"font-size:13px;line-height:1.55;color:${INK};\">${esc(cause(g))}</div>${fx}${ids}</td></tr>"
+                        "<div style=\"font-size:13px;line-height:1.55;color:${INK};\">${esc(cause(g, noCause))}</div>${fx}${ids}</td></tr>"
             }
             String ruleUrl = reportUrl(base, facts, r.id as String)
-            String link = ruleUrl ? " · <a href=\"${esc(ruleUrl)}\" style=\"${LINK}\">open ${esc(r.id)} in Darpan</a>" : ""
+            String link = ruleUrl ? " · <a href=\"${esc(ruleUrl)}\" style=\"${LINK}\">${esc(copy.text('rule.link', [rule: r.id]))}</a>" : ""
             blocks << "<div style=\"margin-top:20px;padding:16px 18px;border:1px solid ${LINE};border-radius:10px;\">" <<
-                    EmailFrame.eyebrow("${r.id} · ${r.open} OPEN · ${r.newToday} NEW", 0) <<
+                    EmailFrame.eyebrow(copy.text("rule.head", [rule: r.id, open: r.open, new: r.newToday]).toUpperCase(Locale.ROOT), 0) <<
                     "<div style=\"${F}font-size:15px;line-height:1.45;letter-spacing:-.01em;color:${INK};margin:4px 0 10px;\">${esc(firstSentence(r.text as String))}</div>" <<
                     "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;\">${items}</table>" <<
-                    "<div style=\"${F}font-size:12px;color:${MUTED};margin-top:10px;padding-top:10px;border-top:1px dashed ${LINE};\">All ${r.open} in ${esc(csvName(facts, r.id as String))}${link}</div></div>"
+                    "<div style=\"${F}font-size:12px;color:${MUTED};margin-top:10px;padding-top:10px;border-top:1px dashed ${LINE};\">${esc(copy.text('rule.all', [open: r.open, file: csvName(facts, r.id as String)]))}${link}</div></div>"
         }
         String headline = words?.headline ? "<p style=\"${F}font-size:14px;line-height:1.6;color:${SOFT};margin:18px 0 0;\">${esc(words.headline as String)}</p>" : ""
         List<String> notRun = rulesNotRun(facts)
         String warn = notRun ? "<p style=\"${F}font-size:13px;line-height:1.5;color:${INK};margin:14px 0 0;padding:10px 12px;border:1px solid ${INK};border-radius:8px;\">" +
-                "${esc(notRun.join(', '))} did not run on this morning.</p>" : ""
-        String actSection = act ? EmailFrame.eyebrow("ACT ON FIRST", 28) +
+                "${esc(copy.text('notrun', [rules: notRun.join(', ')]))}</p>" : ""
+        String actSection = act ? EmailFrame.eyebrow(copy.text("act.heading").toUpperCase(Locale.ROOT), 28) +
                 "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin-top:8px;border-collapse:collapse;\">${act}</table>" : ""
         String button = url ? "<div style=\"margin-top:28px;\"><a href=\"${esc(url)}\" style=\"${F}display:inline-block;background:${ACCENT};color:#ffffff;" +
-                "border:1px solid ${ACCENT};font-size:13px;padding:11px 20px;border-radius:8px;text-decoration:none;\">Open the report in Darpan</a></div>" : ""
+                "border:1px solid ${ACCENT};font-size:13px;padding:11px 20px;border-radius:8px;text-decoration:none;\">${esc(copy.text('button'))}</a></div>" : ""
         return """${EmailFrame.open("DARPAN · AUDIT", subject(facts), true)}<div style="${F}font-size:20px;line-height:1.35;letter-spacing:-.015em;color:${INK};">${esc(title(facts))}</div>
-<div style="${F}font-size:13px;color:${MUTED};margin-top:4px;">${esc(subtitle(facts))}</div>
+<div style="${F}font-size:13px;color:${MUTED};margin-top:4px;">${esc(subtitle(facts, copy))}</div>
 ${headline}${warn}
 <table role="presentation" cellpadding="0" cellspacing="8" style="width:100%;margin:18px -8px 0;border-collapse:separate;"><tr>
-${tile("Open", t.open, true)}${tile("New", t.newToday, false)}${tile("Fixed", t.fixedToday, false)}</tr></table>
+${tile(copy.text("tile.open"), t.open, true)}${tile(copy.text("tile.new"), t.newToday, false)}${tile(copy.text("tile.fixed"), t.fixedToday, false)}</tr></table>
 ${actSection}
-${EmailFrame.eyebrow("RULES", 28)}
+${EmailFrame.eyebrow(copy.text("rules.heading").toUpperCase(Locale.ROOT), 28)}
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-top:8px;border-collapse:collapse;">${rows}</table>
 ${blocks}
 ${button}
-<p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns).</p>
-${EmailFrame.guides(GUIDES)}${EmailFrame.close()}""".toString()
+<p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">${esc(copy.text("attachments"))}</p>
+${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
     }
 
     /** The plain-text part: the same content, line by line. */
-    static String emailText(Map facts, Map words, String base) {
+    static String emailText(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
-        List<String> lines = [title(facts), subtitle(facts)]
+        String noCause = copy.text("cause.none")
+        List<String> lines = [title(facts), subtitle(facts, copy)]
         if (words?.headline) lines += ["", words.headline as String]
         List<String> notRun = rulesNotRun(facts)
-        if (notRun) lines += ["", "${notRun.join(', ')} did not run on this morning.".toString()]
-        lines += ["", "Open ${t.open} · New ${t.newToday} · Fixed ${t.fixedToday}".toString()]
+        if (notRun) lines += ["", copy.text("notrun", [rules: notRun.join(', ')])]
+        lines += ["", "${copy.text('tile.open')} ${t.open} · ${copy.text('tile.new')} ${t.newToday} · ${copy.text('tile.fixed')} ${t.fixedToday}".toString()]
         List<Map> act = actOnFirst(facts)
         if (act) {
-            lines += ["", "Act on first"]
-            act.each { Map g -> lines << "  ${g.count}  ${cause(g)} (${g.rule})".toString() }
+            lines += ["", copy.text("act.heading")]
+            act.each { Map g -> lines << "  ${g.count}  ${cause(g, noCause)} (${g.rule})".toString() }
         }
-        lines += ["", "Rules"]
+        lines += ["", copy.text("rules.heading")]
         rules(facts).each { Map r ->
-            lines << "  ${r.id}  ${firstSentence(r.text as String)}: ${(r.open as int) ? r.open + ' open' : 'clean'}".toString()
+            lines << "  ${r.id}  ${firstSentence(r.text as String)}: ${(r.open as int) ? copy.text('rule.open', [open: r.open]) : copy.text('rule.clean')}".toString()
         }
         rules(facts).findAll { (it.open as int) > 0 }.each { Map r ->
-            lines += ["", "${r.id} · ${r.open} open · ${r.newToday} new · ${firstSentence(r.text as String)}".toString()]
+            lines += ["", "${copy.text('rule.head', [rule: r.id, open: r.open, new: r.newToday])} · ${firstSentence(r.text as String)}".toString()]
             groups(facts).findAll { it.rule == r.id }.each { Map g ->
-                lines << "  ${g.count}  ${cause(g)}".toString()
+                lines << "  ${g.count}  ${cause(g, noCause)}".toString()
                 String fix = fixLine(g, words)
                 if (fix) lines << "      ${fix}".toString()
                 if (g.ids) lines << "      ${(g.ids as List).join(', ')}".toString()
             }
             String ruleUrl = reportUrl(base, facts, r.id as String)
-            lines << "  All ${r.open} in ${csvName(facts, r.id as String)}${ruleUrl ? ' · ' + ruleUrl : ''}".toString()
+            lines << "  ${copy.text('rule.all', [open: r.open, file: csvName(facts, r.id as String)])}${ruleUrl ? ' · ' + ruleUrl : ''}".toString()
         }
         String url = reportUrl(base, facts)
-        if (url) lines += ["", "Open the report in Darpan: ${url}".toString()]
-        return lines.join("\n") + "\n" + EmailFrame.guidesText(GUIDES)
+        if (url) lines += ["", "${copy.text('button')}: ${url}".toString()]
+        return lines.join("\n") + "\n" + EmailCopy.guidesText(copy.guides())
     }
 
     /** "1–10 November" within a month, "28 Oct – 3 Nov" across two. */
@@ -208,10 +217,9 @@ ${EmailFrame.guides(GUIDES)}${EmailFrame.close()}""".toString()
                 .replace('"', "&quot;").replace("'", "&#39;")
     }
 
-    private static String cause(Map group) {
-        String c = group.cause as String
-        return !c || c == "Unexplained" ? NO_CAUSE : c
-    }
+    private static boolean hasCause(Map group) { return group.cause && group.cause != "Unexplained" }
+
+    private static String cause(Map group, String noCause) { return hasCause(group) ? group.cause as String : noCause }
 
     private static String firstSentence(String text) {
         return (text ?: "").split(/\. /)[0].replaceAll(/\.$/, "")

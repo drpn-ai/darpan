@@ -1,0 +1,64 @@
+{
+    "text": "Gorjana \u00b7 Month close: 57 open findings",
+    "cardsV2": [
+        {
+            "cardId": "audit-run",
+            "card": {
+                "header": {
+                    "title": "Gorjana \u00b7 Month close",
+                    "subtitle": "Run of 10 Nov 2026 \u00b7 1\u201310 November",
+                    "imageUrl": "https://drpn.ai/favicon.png",
+                    "imageType": "CIRCLE"
+                },
+                "sections": [
+                    {
+                        "widgets": [
+                            {
+                                "decoratedText": {
+                                    "text": "<font color=\"#b3261e\">57 open</font>  \u00b7  3 new  \u00b7  <font color=\"#1e7e34\">1 fixed</font>",
+                                    "wrapText": true,
+                                    "topLabel": "Findings",
+                                    "startIcon": {
+                                        "materialIcon": {
+                                            "name": "fact_check"
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "textParagraph": {
+                                    "text": "Mostly payments this morning."
+                                }
+                            },
+                            {
+                                "decoratedText": {
+                                    "text": "<font color=\"#9a6700\">R9 did not run</font>",
+                                    "wrapText": true,
+                                    "startIcon": {
+                                        "materialIcon": {
+                                            "name": "warning"
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "buttonList": {
+                                    "buttons": [
+                                        {
+                                            "text": "Open the report",
+                                            "onClick": {
+                                                "openLink": {
+                                                    "url": "https://app.drpn.ai/audits/month-close?period=2026-11&date=2026-11-10&tenantId=GORJANA"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    ]
+}

@@ -54,7 +54,7 @@ class EmailAdminServicesSmokeTests {
             else if (r.copyText != null) { r.set("copyText", null); r.update() }
         }
         EmailCopy.seedSubjects(ec).each { String id, String subject ->
-            def t = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", id).one()
+            def t = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", id).useCache(false).one()
             if (t.subject != subject) { t.set("subject", subject); t.update() }
         }
         AuditLogTestSupport.wipe(ec, "darpan.admin.AdminAuditLog")
@@ -225,6 +225,30 @@ class EmailAdminServicesSmokeTests {
         assertTrue(svc("reset#EmailTemplate", [emailTemplateId: CHANGED, blockIds: ["nope"]]).errors.any { it.contains("No such block") })
     }
 
+    /** DAR-BE-303: the audit run and digest emails are managed like the other ten: their words are blocks, shown and previewed. */
+    @Test
+    void theAuditEmailsAreManagedWithTheirBlocksAndPreviewADraft() {
+        Map run = ok(svc("get#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN"])).result
+        List<String> runBlocks = (run.blocks as List<Map>)*.blockId
+        assertTrue(runBlocks.containsAll(["act.heading", "button", "guides", "notrun", "rule.all", "subtitle", "tile.open"]), "${runBlocks}")
+        Map digest = ok(svc("get#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_DIGEST"])).result
+        assertTrue((digest.blocks as List<Map>)*.blockId.containsAll(["guides", "list.oldest", "none", "report", "week"]))
+
+        Map out = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: ["act.heading": "Do these first"]])).result
+        assertTrue((out.html as String).contains("DO THESE FIRST") && (out.text as String).contains("Do these first"), out.text)
+        assertFalse((out.html as String).contains("ACT ON FIRST"))
+        assertTrue((out.html as String).contains("Gorjana · Month close") && (out.html as String).contains("did not run on this morning"))
+        Map dig = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_DIGEST", blocks: ["list.oldest": "Stuck longest"]])).result
+        assertTrue((dig.text as String).contains("Stuck longest") && !(dig.text as String).contains("Oldest open"), dig.text)
+        assertTrue((svc("update#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: [button: "Open https://evil.example"]])
+                .errors.any { it.contains("web address") }), "an address is refused")
+        assertNull(row("DARPAN_AUDIT_RUN", "button")?.copyText)
+        ok(svc("update#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: [button: "Open the report"]]))
+        assertEquals("Open the report", row("DARPAN_AUDIT_RUN", "button").copyText)
+        ok(svc("reset#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN"]))
+        assertNull(row("DARPAN_AUDIT_RUN", "button").copyText)
+    }
+
     // ---------------------------------------------------------------- subjects
 
     @Test
@@ -253,6 +277,31 @@ class EmailAdminServicesSmokeTests {
         ok(svc("reset#EmailTemplate", [emailTemplateId: WELCOME, subject: true]))
         assertEquals("You're in: \${tenantLabel} on Darpan", templateSubject(WELCOME))
         assertEquals("You're in: \${tenantLabel} on Darpan", EmailCopy.effectiveSubject(ec, WELCOME))
+    }
+
+    /** The password reset is sent with no one signed in (anonymous-view): the subject write must not depend on a user. */
+    @Test
+    void anAnonymousSendAppliesAnEditedSubject() {
+        ok(svc("update#EmailTemplate", [emailTemplateId: WELCOME, subject: 'Welcome aboard, ${tenantLabel}']))
+        ok(svc("update#EmailTemplate", [emailTemplateId: CHANGED, blocks: [note: "Not you? Tell us."]]))
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/TenantWelcomeEmailSeedData.xml")
+        assertEquals("You're in: \${tenantLabel} on Darpan", templateSubject(WELCOME), "the reload wrote the shipped subject")
+        Map holder = [:]
+        Thread worker = new Thread({
+            ExecutionContext tec = Moqui.getExecutionContextFactory().getExecutionContext()   // no one signed in, authz on
+            try {
+                holder.authzWasOn = !tec.artifactExecution.disableAuthz()
+                tec.artifactExecution.enableAuthz()
+                EmailCopy.applySubject(tec, WELCOME)
+                holder.note = EmailCopy.text(tec, CHANGED, "note", [:])
+            } catch (Throwable t) { holder.failure = t } finally { tec.destroy() }
+        } as Runnable, "email-anonymous-send")
+        worker.start()
+        worker.join()
+        assertNull(holder.failure)
+        assertEquals(true, holder.authzWasOn, "the anonymous caller runs with authz on")
+        assertEquals("Not you? Tell us.", holder.note, "an edited block is read with no one signed in, not silently the default")
+        assertEquals('Welcome aboard, ${tenantLabel}', templateSubject(WELCOME), "applied with no one signed in")
     }
 
     @Test

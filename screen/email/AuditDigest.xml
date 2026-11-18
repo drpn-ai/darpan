@@ -4,6 +4,10 @@
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <actions>
+        <!-- A send passes the finished text (chat gets the same one). The admin preview passes the report instead, so the
+             draft's words show: the text is built here, through the same blocks. -->
+        <set field="digestText" from="ec.context.get('digestText') ?: darpan.audit.AuditDigestSupport.render(digestReport, digestKind ?: 'AUDDK_DAILY', digestFullList == true, ec.context.get('digestWeekAgo'), ec.context.get('digestReportUrl'), new darpan.email.EmailCopyReader(ec, 'DARPAN_AUDIT_DIGEST'))"/>
+        <set field="digestHtml" from="darpan.email.EmailFrame.esc(digestText)"/>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · AUDIT DIGEST')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
         <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_AUDIT_DIGEST&quot;)"/>
@@ -12,10 +16,12 @@
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
-        <label text="${digestText}" type="pre" style="dp-pre"/>
+        <!-- Not a label: a label in text mode pads and cuts each value to a column width (a long digest lost its tail in the
+             plain-text part) and expands its text as a template. The text is inserted as it is. -->
         <render-mode>
-            <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>
-            <text type="text" no-boundary-comment="true"><![CDATA[${guidesText}]]></text>
+            <text type="html" no-boundary-comment="true"><![CDATA[<pre class="text-inline dp-pre">${digestHtml}</pre>${guidesHtml}${frameClose}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${digestText}
+${guidesText}]]></text>
         </render-mode>
     </widgets>
 </screen>

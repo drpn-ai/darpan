@@ -174,10 +174,12 @@ class EmailCopy {
             }
             // Its own transaction: the send's is not held (row lock across SMTP) and a failed write cannot abort it.
             ec.transaction.runRequireNew(null, "Applying the subject edit failed", {
-                def template = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", emailTemplateId).useCache(false).one()
-                if (template != null && template.getString("subject") != edit) {
-                    template.set("subject", edit)
-                    template.update()
+                unguarded(ec) {
+                    def template = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", emailTemplateId).useCache(false).one()
+                    if (template != null && template.getString("subject") != edit) {
+                        template.set("subject", edit)
+                        template.update()
+                    }
                 }
             })
         } catch (Throwable t) {
@@ -190,7 +192,7 @@ class EmailCopy {
         Set<String> names = new LinkedHashSet<>()
         seedDefaults(ec).each { String key, String text -> if (key.startsWith(emailTemplateId + "/") && !key.endsWith("/" + SUBJECT)) names.addAll(variables(text)) }
         try {
-            ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", emailTemplateId).useCache(false).list()
+            unguarded(ec) { ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", emailTemplateId).useCache(false).list() }
                     .each { if (it.getString("blockId") != SUBJECT) names.addAll(variables(it.getString("defaultText"))) }
         } catch (Throwable t) {
             logOnce(emailTemplateId, "*", "variables read failed: ${t.message}")
@@ -346,10 +348,23 @@ class EmailCopy {
     /** emailTemplateId/blockId -> shipped default text, every block the seed has. */
     static Map<String, String> seedBlockDefaults(def ec) { return seedDefaults(ec) }
 
+    /**
+     * Email copy is Darpan's own configuration, read and applied for whoever sends: a password reset goes out with no one
+     * signed in, and that caller has no authz on EmailCopyBlock or EmailTemplate (without this the edit would silently
+     * not apply and the default would go out). Authz is off only inside body, then restored whatever happens.
+     */
+    private static <T> T unguarded(def ec, Closure<T> body) {
+        def artifactExecution = ec.artifactExecution
+        boolean wasDisabled = artifactExecution != null ? artifactExecution.disableAuthz() : true
+        try { return body.call() } finally { if (artifactExecution != null && !wasDisabled) artifactExecution.enableAuthz() }
+    }
+
     static def row(def ec, String emailTemplateId, String blockId) {
         try {
-            return ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", emailTemplateId)
-                    .condition("blockId", blockId).useCache(false).one()
+            return unguarded(ec) {
+                ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", emailTemplateId)
+                        .condition("blockId", blockId).useCache(false).one()
+            }
         } catch (Throwable t) {
             logOnce(emailTemplateId, blockId, "the row read failed (${t.class.simpleName}); the seed default goes")
             return null

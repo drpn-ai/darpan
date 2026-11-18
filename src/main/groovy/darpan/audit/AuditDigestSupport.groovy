@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.common.DarpanEntityConstants
+import darpan.email.EmailCopyReader
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
@@ -46,8 +47,10 @@ class AuditDigestSupport {
     /**
      * The digest text. weekAgo is the report of seven mornings before, for a weekly summary; null for a daily one.
      * fullList lists every open finding the report carries, as far as one message holds.
+     * DAR-BE-303: the fixed words are DARPAN_AUDIT_DIGEST copy blocks read through copy; the counts, finding rows and the
+     * report link stay here. Chat and email get the same text, so both read the same blocks.
      */
-    static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl) {
+    static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl, EmailCopyReader copy) {
         Map head = (report?.report ?: [:]) as Map
         Map health = (report?.health ?: [:]) as Map
         Map summary = (report?.summary ?: [:]) as Map
@@ -56,7 +59,7 @@ class AuditDigestSupport {
 
         String day = dayLabel(head.date as String)
         lines.add([head.audit instanceof Map ? (head.audit as Map).name : null, head.period,
-                   weekly ? "week to ${day}" : day].findAll { it }.join(" · "))
+                   weekly ? copy.text("week", [day: day]) : day].findAll { it }.join(" · "))
         // The report says why a morning is not complete (a check that did not run, a partial read); the digest
         // repeats it, so a quiet count is never mistaken for a clean one.
         if (health.complete != true && health.summary) lines.add(health.summary as String)
@@ -64,53 +67,52 @@ class AuditDigestSupport {
 
         if (weekly) {
             Map before = (weekAgo?.summary ?: [:]) as Map
-            lines.add("Open ${count(summary.open)} (${count(before.open)} a week ago)")
+            lines.add(copy.text("open.weekly", [open: count(summary.open), before: count(before.open)]))
         } else {
-            lines.add("Open ${count(summary.open)} · " +
-                    "New today ${count(summary.newToday)} · Fixed today ${count(summary.fixedToday)}")
+            lines.add(copy.text("open.daily", [open: count(summary.open), new: count(summary.newToday), fixed: count(summary.fixedToday)]))
         }
         ((report?.categories ?: [:]) as Map).each { String id, Object raw ->
             Map category = raw as Map
             Map counts = (category.counts ?: [:]) as Map
-            if (count(counts.open)) lines.add("${category.label ?: id}: open ${count(counts.open)}")
+            if (count(counts.open)) lines.add(copy.text("category", [label: category.label ?: id, open: count(counts.open)]))
         }
 
         List<Map> open = findings(report, "open")
         if (!open) {
             lines.add("")
-            lines.add("Nothing open.")
+            lines.add(copy.text("none"))
         }
-        List<String> tail = reportUrl ? ["", "Report: ${reportUrl}".toString()] : []
+        List<String> tail = reportUrl ? ["", "${copy.text('report')} ${reportUrl}".toString()] : []
         int omitted = fullList ? omittedCount(report) : 0
         List<List> groups = fullList ?
-                [["Open", open]] :
-                [["Oldest open", open.take(OLDEST_SHOWN)]]
+                [[copy.text("list.all", [count: open.size()]), open]] :
+                [[copy.text("list.oldest"), open.take(OLDEST_SHOWN)]]
         int left = fullList ? open.size() + omitted : 0
         boolean full = false
         for (List group : groups) {
             List<Map> rows = group[1] as List<Map>
             if (!rows || full) continue
-            String title = fullList ? "${group[0]} (${rows.size()})" : group[0]
+            String title = group[0]
             if (length(lines + ["", title] + tail) > MESSAGE_LIMIT) { full = true; continue }
             lines.add("")
             lines.add(title as String)
             for (Map finding : rows) {
-                String line = findingLine(finding)
+                String line = findingLine(finding, copy)
                 // Leave room for the "more" line, so the cut is always said.
-                if (length(lines + [line, "… 9999 more in the report"] + tail) > MESSAGE_LIMIT) { full = true; break }
+                if (length(lines + [line, copy.text("more", [left: 9999])] + tail) > MESSAGE_LIMIT) { full = true; break }
                 lines.add(line)
                 left--
             }
         }
-        if (fullList && left > 0) lines.add("… ${left} more in the report".toString())
+        if (fullList && left > 0) lines.add(copy.text("more", [left: left]))
         lines.addAll(tail)
         return lines.join("\n")
     }
 
     /** "F-100000 · R2 · 6 days · Invoice INV8412671 has no Etail id". */
-    static String findingLine(Map finding) {
+    static String findingLine(Map finding, EmailCopyReader copy) {
         int age = count(finding.ageDays)
-        return [finding.id, finding.statement, age == 1 ? "1 day" : "${age} days", finding.headline]
+        return [finding.id, finding.statement, age == 1 ? copy.text("age.one") : copy.text("age.many", [days: age]), finding.headline]
                 .findAll { it != null && it != "" }.join(" · ")
     }
 
@@ -199,7 +201,8 @@ class AuditDigestSupport {
         Map report = assemble(ec, tenantId, digest.auditId as String, today)
         if (report == null) return [sent: false, reason: "NO_REPORT"]
         Map weekAgo = weekly ? assemble(ec, tenantId, digest.auditId as String, today.minusDays(7)) : null
-        String text = render(report, digest.kindEnumId as String, digest.fullList == "Y", weekAgo, reportUrl(ec, report))
+        String text = render(report, digest.kindEnumId as String, digest.fullList == "Y", weekAgo, reportUrl(ec, report),
+                new EmailCopyReader(ec, EMAIL_TEMPLATE))
         boolean delivered = false
         if (destination != null) {
             Map delivery = TenantNotificationSupport.deliverToDestination(destination, [text: text])

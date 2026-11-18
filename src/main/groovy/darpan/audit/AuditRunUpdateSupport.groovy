@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.common.DarpanEntityConstants
+import darpan.email.EmailCopyReader
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.automation.AutomationExecutionSupport
@@ -143,12 +144,13 @@ class AuditRunUpdateSupport {
             Map group = groupsByKey["${rule}|${cause ?: ''}".toString()]
             group ? AuditRunMessage.fixLine(group, words) : null
         }
+        EmailCopyReader copy = new EmailCopyReader(ec, AuditRunMessage.TEMPLATE)
         return [facts      : facts,
                 words      : words,
                 subject    : AuditRunMessage.subject(facts),
-                html       : AuditRunMessage.emailHtml(facts, words, base),
-                text       : AuditRunMessage.emailText(facts, words, base),
-                card       : AuditRunMessage.card(facts, words, base),
+                html       : AuditRunMessage.emailHtml(facts, words, base, copy),
+                text       : AuditRunMessage.emailText(facts, words, base, copy),
+                card       : AuditRunMessage.card(facts, words, base, copy),
                 attachments: csvs.collect { String rule, String body ->
                     [fileName: AuditRunMessage.csvName(facts, rule), contentType: "text/csv; charset=UTF-8", contentText: body]
                 }]

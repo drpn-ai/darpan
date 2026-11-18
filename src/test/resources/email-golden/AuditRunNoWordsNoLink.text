@@ -1,0 +1,36 @@
+Gorjana · Month close
+Run of 10 Nov 2026 · 1–10 November
+
+R9 did not run on this morning.
+
+Open 57 · New 3 · Fixed 1
+
+Act on first
+  24  Payment failed (R2)
+  2  Line not billed (R2)
+  1  Return has an RMA, no credit memo (R10)
+
+Rules
+  R2  Every order is billed in NetSuite: 56 open
+  R9  Every Shopify order is in NetSuite: clean
+  R10  Every return is credited: 1 open
+
+R2 · 56 open · 3 new · Every order is billed in NetSuite
+  30  No cause named yet
+  24  Payment failed
+      Ask the customer to pay again.
+      M201 #GOR201, M202 #GOR202
+  2  Line not billed
+      Bill the line in NetSuite.
+      M300 #GOR300
+  All 56 in gorjana-month-close-2026-11-R2.csv
+
+R10 · 1 open · 0 new · Every return is credited
+  1  Return has an RMA, no credit memo
+      Issue the credit memo.
+      RX-1 #GOR900
+  All 1 in gorjana-month-close-2026-11-R10.csv
+
+User guide
+Resolve a finding: https://docs.drpn.ai/guides/audits#resolve-a-finding
+A finding stays open after a fix: https://docs.drpn.ai/troubleshooting/audits#a-finding-stays-open-after-you-fixed-it

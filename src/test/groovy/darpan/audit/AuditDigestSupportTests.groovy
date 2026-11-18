@@ -12,11 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 class AuditDigestSupportTests {
 
+    private static final darpan.email.EmailCopyReader COPY = darpan.email.SeedCopy.reader(AuditDigestSupport.EMAIL_TEMPLATE)
     private static final String URL = "https://app.example/audits/month-close?date=2026-10-22"
 
     @Test
     void aDailyDigestCountsTheMorningByCategoryAndNamesTheOldestOpen() {
-        String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, false, null, URL)
+        String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, false, null, URL, COPY)
         assertEquals([
                 "Month close · 2026-10 · Thu 22 Oct",
                 "",
@@ -37,7 +38,7 @@ class AuditDigestSupportTests {
         Map doc = report()
         doc.health = [complete: false, summary: "Not complete: check invoices-without-etail-id did not run.",
                       checks: [ran: 1, partial: 0, notRun: 1]]
-        String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null)
+        String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null, COPY)
         assertEquals("Not complete: check invoices-without-etail-id did not run.", text.readLines()[1],
                 "said under the title, before any count")
         assertFalse(text.contains("Report:"), "no app address, no link line")
@@ -45,14 +46,14 @@ class AuditDigestSupportTests {
 
     @Test
     void aCompleteMorningSaysNothingAboutHealth() {
-        String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, false, null, null)
+        String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, false, null, null, COPY)
         assertFalse(text.contains("complete"), text)
     }
 
     @Test
     void aWeeklySummaryStandsEachCountBesideAWeekBefore() {
         Map before = [summary: [open: 5]]
-        String text = AuditDigestSupport.render(report(), AuditDigestSupport.WEEKLY, false, before, null)
+        String text = AuditDigestSupport.render(report(), AuditDigestSupport.WEEKLY, false, before, null, COPY)
         List<String> lines = text.readLines()
         assertEquals("Month close · 2026-10 · week to Thu 22 Oct", lines[0])
         assertEquals("Open 3 (5 a week ago)", lines[2])
@@ -61,7 +62,7 @@ class AuditDigestSupportTests {
 
     @Test
     void aFullListNamesEveryOpenFinding() {
-        String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, true, null, null)
+        String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, true, null, null, COPY)
         List<String> lines = text.readLines()
         int open = lines.indexOf("Open (3)")
         assertTrue(open > 0, text)
@@ -78,7 +79,7 @@ class AuditDigestSupportTests {
         }
         doc.categories.orders.statements.R2.findings = findings
         doc.categories.orders.statements.R2.findingsOmitted = 25
-        String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, true, null, URL)
+        String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, true, null, URL, COPY)
         assertTrue(text.length() <= AuditDigestSupport.MESSAGE_LIMIT, "${text.length()}")
         int shown = text.readLines().count { it.startsWith("F-") } as int
         int left = (text.readLines().find { it.contains("more in the report") } =~ /(\d+) more/)[0][1] as int
@@ -91,7 +92,7 @@ class AuditDigestSupportTests {
         Map doc = report()
         doc.summary = [open: 0, newToday: 0, fixedToday: 2]
         doc.categories = [orders: [label: "Orders", counts: [open: 0], statements: [:]]]
-        String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null)
+        String text = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null, COPY)
         assertEquals("Nothing open.", text.readLines().last())
     }
 
@@ -101,7 +102,7 @@ class AuditDigestSupportTests {
         doc.categories.orders.statements.R2.findings = (1..8).collect { int i ->
             [id: "F-${i}".toString(), headline: "h${i}", state: "open", ageDays: i]
         }
-        List<String> lines = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null).readLines()
+        List<String> lines = AuditDigestSupport.render(doc, AuditDigestSupport.DAILY, false, null, null, COPY).readLines()
         List<String> shown = lines.findAll { it.startsWith("F-") }
         assertEquals(["F-8", "F-7", "F-6", "F-5", "F-4"], shown.collect { it.split(" · ")[0] }, "oldest first")
     }

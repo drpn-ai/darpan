@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-264 email body. No bold. The only links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). The not-you line stays plain: it is the security instruction. A real alarm: the whimsy is only the reassurance.
-     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
+<!-- DAR-BE-264 codes locked. A real alarm (VOICE_GUIDE grave register): the personality is directness and being on their side, the only lightness is the reassurance.
+     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email) and the VOICE_GUIDE.md voice (Aditi
+     2026-11-18: "there still is no personality here"); the darpan-email skill holds the rules. No bold. The only
+     links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <actions>
@@ -11,9 +13,11 @@
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
-        <container style="dp-p"><label text="Hi ${firstName}, someone has your Darpan password. They tried it without your code, again and again, until ${at}."/></container>
-        <container style="dp-p"><label text="The code held, and they're still out on the doorstep, rattling the handle. Codes are locked on your account until your password changes."/></container>
-        <container style="dp-note"><label text="Reset your password now, and tell your Darpan administrator."/></container>
+        <container style="dp-p"><label text="Hi ${firstName},"/></container>
+        <container style="dp-p"><label text="Straight to it: someone has your Darpan password."/></container>
+        <container style="dp-p"><label text="They kept trying it without your code, over and over, until ${at}. Your code did its job. They didn't get in."/></container>
+        <container style="dp-p"><label text="To be safe, sign-in codes are locked on your account until the password changes."/></container>
+        <container style="dp-note"><label text="Reset your password now, and tell your Darpan administrator. Two minutes now saves a very long week."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-264 email body. No bold. The only links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). The not-you line stays plain: it is the security instruction.
-     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
+<!-- DAR-BE-264 recovery code used.
+     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email) and the VOICE_GUIDE.md voice (Aditi
+     2026-11-18: "there still is no personality here"); the darpan-email skill holds the rules. No bold. The only
+     links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <actions>
@@ -11,8 +13,9 @@
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
-        <container style="dp-p"><label text="Hi ${firstName}, a recovery code got you into Darpan on ${at}. That's what they're for: the spare key under the flowerpot."/></container>
-        <container style="dp-p"><label text="You have ${recoveryCodesLeft} left. When you're down to the last few, make a fresh set in User Settings, before the flowerpot runs empty."/></container>
+        <container style="dp-p"><label text="Hi ${firstName},"/></container>
+        <container style="dp-p"><label text="A recovery code just got you into Darpan (${at}). Phone missing? Battery dead? Happens to the best of us. That's exactly what they're for."/></container>
+        <container style="dp-p"><label text="You have ${recoveryCodesLeft} left. When you're down to the last few, make a fresh set in User Settings. Spare keys work best when there are spares."/></container>
         <container style="dp-note"><label text="Not you? Change your password now and tell your Darpan administrator."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-264 (review M2) email body. No bold. The only links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). The not-you line stays plain: it is the security instruction.
-     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
+<!-- DAR-BE-264 (review M2) authenticator app set up.
+     DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email) and the VOICE_GUIDE.md voice (Aditi
+     2026-11-18: "there still is no personality here"); the darpan-email skill holds the rules. No bold. The only
+     links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <actions>
@@ -11,8 +13,9 @@
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
-        <container style="dp-p"><label text="Hi ${firstName}, an authenticator app is now paired with your Darpan account, set up ${at}."/></container>
-        <container style="dp-p"><label text="Its six-digit codes sign you in from here on. They change every 30 seconds, so don't bother memorising them, and try not to get attached."/></container>
+        <container style="dp-p"><label text="Hi ${firstName},"/></container>
+        <container style="dp-p"><label text="Your authenticator app and Darpan are now officially a pair (since ${at})."/></container>
+        <container style="dp-p"><label text="When Darpan asks for a code, the app has one. A fresh one every 30 seconds, so don't bother memorising them. And try not to get attached."/></container>
         <container style="dp-note"><label text="Not you? Change your password and tell your Darpan administrator, who can reset your two-factor."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>

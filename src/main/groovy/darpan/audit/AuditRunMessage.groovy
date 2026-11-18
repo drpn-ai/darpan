@@ -25,6 +25,9 @@ class AuditRunMessage {
     private static final String F = EmailFrame.F
     private static final String LINK = "color:${INK};text-decoration:underline;text-decoration-color:${LINE};text-underline-offset:3px;"
     private static final String NO_CAUSE = "No cause named yet"
+    /** The user guide pages a run update points to (DAR-BE-298). */
+    private static final List<List<String>> GUIDES = [["Resolve a finding", "guides/audits#resolve-a-finding"],
+                                                      ["How findings close", "guides/audits#how-findings-close"]]
 
     /** "Gorjana Month close, 1–10 November: 42 open findings". */
     static String subject(Map facts) {
@@ -142,7 +145,7 @@ ${EmailFrame.eyebrow("RULES", 28)}
 ${blocks}
 ${button}
 <p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns).</p>
-${EmailFrame.close()}""".toString()
+${EmailFrame.guides(GUIDES)}${EmailFrame.close()}""".toString()
     }
 
     /** The plain-text part: the same content, line by line. */
@@ -175,7 +178,7 @@ ${EmailFrame.close()}""".toString()
         }
         String url = reportUrl(base, facts)
         if (url) lines += ["", "Open the report in Darpan: ${url}".toString()]
-        return lines.join("\n") + "\n"
+        return lines.join("\n") + "\n" + EmailFrame.guidesText(GUIDES)
     }
 
     /** "1–10 November" within a month, "28 Oct – 3 Nov" across two. */

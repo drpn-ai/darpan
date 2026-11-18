@@ -14,6 +14,8 @@ import java.time.format.DateTimeFormatter
  * renders a container's style as a class; the card's td carries the font and colour inline, so a client that drops
  * the style block still shows the theme's type. The audit email builds its own inner rows and shares this shell.
  *
+ * Every email ends with one or two user guide links ({@link #guides}, docs.drpn.ai pages only, address shown).
+ *
  * Classes: dp-p (a paragraph), dp-code (a code to type, shown as the app's tile), dp-note (the not-you line, behind
  * a dashed rule), dp-sign (the sign-off), dp-pre (preformatted digest text).
  */
@@ -35,7 +37,7 @@ class EmailFrame {
 
     /**
      * Everything before the email's own content: head, tile, card, eyebrow. webFont loads IBM Plex Mono from Google
-     * Fonts; security notices pass false, so they carry no outside address at all (the fallback stack is monospace).
+     * Fonts; notices pass false (the fallback stack is monospace), so their only outside addresses are the guide links.
      */
     static String open(String eyebrowText, String title = null, boolean webFont = false) {
         String font = webFont ? """<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&amp;display=swap" rel="stylesheet">\n""" : ""
@@ -50,6 +52,44 @@ ${eyebrow(eyebrowText, 0)}<div style="height:14px;line-height:14px;font-size:1px
     }
 
     static String close() { return "</td></tr></table></td></tr></table></body></html>" }
+
+    /** The user guide every link goes to; a template names a page path only, so no email can link anywhere else. */
+    static final String DOCS = "https://docs.drpn.ai"
+    private static final String LINK = "color:${INK};text-decoration:underline;text-decoration-color:${LINE};text-underline-offset:3px;"
+
+    /**
+     * DAR-BE-298 (Aditi 2026-11-18: "include 1-2 user guide links always"): the email's guide links, after the
+     * sign-off. guides is [[label, page path], ...], one or two of them; each shows its address beside it, so a reader
+     * sees where it goes before clicking, and the path is a docs.drpn.ai page (never a sign-in or action page).
+     */
+    static String guides(List<List<String>> guides) {
+        String rows = checked(guides).collect { List<String> g ->
+            "<div style=\"margin-top:6px;\"><a href=\"${esc(url(g[1]))}\" style=\"${LINK}\">${esc(g[0])}</a>" +
+                    " <span style=\"font-size:12px;color:${DIM};\">${esc(shown(g[1]))}</span></div>"
+        }.join("")
+        return "<div style=\"${F}margin-top:26px;padding-top:14px;border-top:1px solid ${LINE_SOFT};font-size:13px;line-height:1.6;color:${INK};\">" +
+                "${eyebrow("User guide", 0)}${rows}</div>"
+    }
+
+    /** The same links for the plain-text part: label, then the full address. */
+    static String guidesText(List<List<String>> guides) {
+        return "\nUser guide\n" + checked(guides).collect { List<String> g -> "${g[0]}: ${url(g[1])}" }.join("\n") + "\n"
+    }
+
+    private static List<List<String>> checked(List<List<String>> guides) {
+        if (!guides || guides.size() > 2) throw new IllegalArgumentException("An email carries one or two user guide links, not ${guides?.size() ?: 0}")
+        guides.each { List<String> g ->
+            if (g?.size() != 2 || !g[0] || !(g[1] ==~ /[a-z0-9\-\/]+(#[a-z0-9\-]+)?/)) {
+                throw new IllegalArgumentException("A guide link is [label, docs page path], e.g. ['Two-factor sign-in', 'guides/two-factor']: ${g}")
+            }
+        }
+        return guides
+    }
+
+    private static String url(String path) { return "${DOCS}/${path}".toString() }
+
+    /** What the reader sees beside the link: the page's address, without the section anchor. */
+    private static String shown(String path) { return "docs.drpn.ai/${path.split('#')[0]}".toString() }
 
     /** The app's eyebrow label: small, muted, widely tracked caps. */
     static String eyebrow(String text, int marginTop) {

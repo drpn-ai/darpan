@@ -115,7 +115,9 @@ class PasswordResetServicesSmokeTests {
         assertTrue(html.contains("15 minutes"), html)
         // the voiced copy (DAR-BE-139) keeps the plain security instruction
         assertTrue(html.contains("Your password stays exactly as it is."), html)
-        assertFalse(html.contains("<b>") || html.contains("<strong>") || html.contains("href"), html)
+        assertFalse(html.contains("<b>") || html.contains("<strong>"), html)
+        // DAR-BE-298: its only links are the user guide's
+        (html =~ /href="([^"]*)"/).each { assertTrue((it[1] as String).startsWith("https://docs.drpn.ai/"), html) }
     }
 
     @Test

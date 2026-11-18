@@ -6,10 +6,15 @@
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · AUDIT DIGEST')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Read the audit page', 'guides/audits#read-the-audit-page'], ['How findings close', 'guides/audits#how-findings-close']])"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Read the audit page', 'guides/audits#read-the-audit-page'], ['How findings close', 'guides/audits#how-findings-close']])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <label text="${digestText}" type="pre" style="dp-pre"/>
-        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${guidesText}]]></text>
+        </render-mode>
     </widgets>
 </screen>

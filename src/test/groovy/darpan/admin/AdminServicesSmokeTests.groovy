@@ -694,7 +694,9 @@ class AdminServicesSmokeTests {
         assertTrue(html.contains("You now have access to Malbon on Darpan, as a User."), html)
         assertTrue(html.contains("Sign in at https://app.drpn.ai with your Darpan username (rakshit.singh)"), html)
         assertTrue(html.contains("Questions? Just reply."), html)
-        assertFalse(html.contains("<b>") || html.contains("<strong>") || html.contains("href"), html)
+        assertFalse(html.contains("<b>") || html.contains("<strong>"), html)
+        // DAR-BE-298: its only links are the user guide's
+        (html =~ /href="([^"]*)"/).each { assertTrue((it[1] as String).startsWith("https://docs.drpn.ai/"), html) }
 
         String bare = renderBody("component://darpan/screen/email/TenantWelcome.xml", params + [appBaseUrl: null])
         assertTrue(bare.contains("Sign in to Darpan with your username (rakshit.singh)"), bare)

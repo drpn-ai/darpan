@@ -132,7 +132,8 @@ class AuditRunFactsTests {
         String text = AuditRunMessage.emailText(facts, [:], null)
         assertTrue(text.contains("R10 · 1 open · 0 new · Every return is credited"), text)
         assertTrue(text.contains("  All 1 in gorjana-month-close-2026-11-R10.csv\n"), text)
-        assertFalse(text.contains("http"), "no app address, no links")
+        // no app address, no app links; the only addresses are the user guide's (DAR-BE-298)
+        assertFalse(text.replace("https://docs.drpn.ai/", "").contains("http"), text)
     }
 
     @Test

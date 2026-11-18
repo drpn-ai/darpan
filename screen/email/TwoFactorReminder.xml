@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-297 email body: the daily reminder to set up two-factor. No bold. No code or password. The address is written as text (no link in a security email). Copy follows the darpan-email skill. -->
+<!-- DAR-BE-297 email body: the daily reminder to set up two-factor. No bold. No code or password. The app address is written as text; the only links are the user guide's (EmailFrame.guides). Copy follows the darpan-email skill. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Set up two-factor', 'guides/two-factor#set-it-up'], ['Who has to use it', 'guides/two-factor#who-has-to-use-it']])"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Set up two-factor', 'guides/two-factor#set-it-up'], ['Who has to use it', 'guides/two-factor#who-has-to-use-it']])"/>
         <set field="isPast" from="past == true || past == 'true'"/>
     </actions>
     <widgets>
@@ -22,6 +24,9 @@
         </fail-widgets></section>
         <container style="dp-note"><label text="You'll keep getting this reminder until a method is set up. Questions? Ask your Darpan administrator."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
-        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${guidesText}]]></text>
+        </render-mode>
     </widgets>
 </screen>

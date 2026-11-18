@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-290 email body; copy approved by Aditi 2026-11-14 ("plain + warm"). No bold. The sign-in address is plain text, not a link. Never a password: a new user's temporary password reaches the admin.
+<!-- DAR-BE-290 email body; copy approved by Aditi 2026-11-14 ("plain + warm"). No bold. The sign-in address is plain text; the only links are the user guide's (EmailFrame.guides). Never a password: a new user's temporary password reaches the admin.
      DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · WELCOME')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Quickstart', 'quickstart'], ['Find your way around', 'getting-started/ask-darpan-navigation']])"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Quickstart', 'quickstart'], ['Find your way around', 'getting-started/ask-darpan-navigation']])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
@@ -17,6 +19,9 @@
         </section>
         <container style="dp-note"><label text="Questions? Just reply. A person reads this inbox."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
-        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${guidesText}]]></text>
+        </render-mode>
     </widgets>
 </screen>

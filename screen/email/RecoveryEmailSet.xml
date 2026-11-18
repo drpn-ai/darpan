@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-028 email body; copy voiced in DAR-BE-139. No bold and no links (a link in a security email is the phishing shape). The not-you line stays plain: it is the security instruction.
+<!-- DAR-BE-028 email body; copy voiced in DAR-BE-139. No bold. The only links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). The not-you line stays plain: it is the security instruction.
      DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email); copy follows the darpan-email skill. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · ACCOUNT')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="guidesHtml" from="darpan.email.EmailFrame.guides([['Forgot password', 'troubleshooting/login-and-session#forgot-password']])"/>
+        <set field="guidesText" from="darpan.email.EmailFrame.guidesText([['Forgot password', 'troubleshooting/login-and-session#forgot-password']])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
@@ -15,6 +17,9 @@
         </section>
         <container style="dp-note"><label text="Not you? Ignore this email and tell your administrator."/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>
-        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text></render-mode>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${guidesText}]]></text>
+        </render-mode>
     </widgets>
 </screen>

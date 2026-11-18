@@ -15,7 +15,7 @@ import java.time.Instant
 import static org.junit.jupiter.api.Assertions.*
 
 /**
- * DAR-BE-298: every Darpan notice wears EmailFrame and keeps the email rules, in both parts of the message. Each render
+ * DAR-BE-298: every Darpan notice wears EmailFrame, carries one or two user guide links (docs.drpn.ai only), and keeps the email rules, in both parts of the message. Each render
  * is also written to build/email-previews/<screen>.html, which is how a copy change is looked at before it ships (the
  * darpan-email skill's review step).
  */
@@ -61,13 +61,15 @@ class EmailTemplatesRenderTests {
             assertTrue(html.contains('class="dp-card"'), "${screen}: inside EmailFrame\n${html}")
             assertTrue(html.contains("DARPAN · "), "${screen}: the eyebrow")
             assertFalse(html.contains("<b>") || html.contains("<strong>"), "${screen}: no bold")
-            assertFalse(html.contains("<a "), "${screen}: no link")
-            if (SECURITY.containsKey(screen)) assertFalse(html.contains("href"), "${screen}: no outside address in a security email")
+            List<String> hrefs = (html =~ /href="([^"]*)"/).collect { it[1] as String }
+            assertTrue(hrefs.size() in 1..2, "${screen}: one or two user guide links, got ${hrefs}")
+            hrefs.each { assertTrue(it.startsWith("https://docs.drpn.ai/"), "${screen}: links only to the user guide, got ${it}") }
             if (screen != "AuditDigest") assertTrue(html.contains("— Darpan"), "${screen}: signed")
 
             String text = render(screen, params, "text")
             assertTrue(text.trim().length() > 0, "${screen}: a plain-text part")
             assertFalse(text.contains("<table") || text.contains("<style"), "${screen}: the frame stays out of the text part\n${text}")
+            assertTrue(text.contains("User guide") && text.contains("https://docs.drpn.ai/"), "${screen}: the guide links in the text part\n${text}")
         }
     }
 
@@ -76,6 +78,18 @@ class EmailTemplatesRenderTests {
         String html = render("PasswordResetCode", SECURITY.PasswordResetCode, "html")
         assertTrue((html =~ /class="dp-code"[^>]*>\s*<span[^>]*>042117</).find(), html)
         assertTrue((html =~ /class="dp-note"[^>]*>\s*<span[^>]*>Didn(&#39;|')t ask for this\?/).find(), html)
+    }
+
+    @Test
+    void aGuideLinkIsADocsPageAndShowsWhereItGoes() {
+        String html = EmailFrame.guides([["Two-factor sign-in", "guides/two-factor#set-it-up"]])
+        assertTrue(html.contains('href="https://docs.drpn.ai/guides/two-factor#set-it-up"'), html)
+        assertTrue(html.contains(">docs.drpn.ai/guides/two-factor</span>"), html)
+        ["https://evil.example/x", "//evil.example", "guides/two-factor?next=x", "../x y"].each { String bad ->
+            assertThrows(IllegalArgumentException) { EmailFrame.guides([["Bad", bad]]) }
+        }
+        assertThrows(IllegalArgumentException) { EmailFrame.guides([]) }
+        assertThrows(IllegalArgumentException) { EmailFrame.guides([["a", "a"], ["b", "b"], ["c", "c"]]) }
     }
 
     @Test

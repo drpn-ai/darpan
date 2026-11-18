@@ -19,15 +19,22 @@ class SettingAdminSupport {
         return [setting: DarpanSettings.describe(settingKey)]
     }
 
+    static final int NOTE_MAX = 255
+
     static Map update(def ec, String settingKey, String value, String note) {
         String text = value?.trim()
         String problem = DarpanSettings.problem(settingKey, text)
         if (problem != null) return [error: problem]
-        String before = DarpanSettings.describe(settingKey).effectiveValue
         String cleanNote = note?.trim() ?: null
+        if (cleanNote != null && cleanNote.length() > NOTE_MAX) {
+            return [error: "The note is ${cleanNote.length()} characters; the most is ${NOTE_MAX}.".toString()]
+        }
+        String before = DarpanSettings.describe(settingKey).effectiveValue
         String audit = "${settingKey}: ${before} -> ${text}${cleanNote ? " (${cleanNote})" : ""}".toString()
-        // Saved and audited in a transaction of its own that commits here, so the setting this call returns (and every
-        // read on this node from now on) is the stored value, not the one before the surrounding transaction commits.
+        // Saved and audited in a transaction of its own that commits here. expireAfterCommit waits for the CALLER's
+        // commit, so inside a larger transaction the setting this call returns (and every read on this node) would still
+        // be the old value; committing first lets us expire at once. The price: a caller's larger transaction does not
+        // contain this write, so a later failure there does not undo it.
         ec.transaction.runRequireNew(null, "Could not save setting ${settingKey}", {
             ec.service.sync().name("store#" + ENTITY).parameters([settingKey: settingKey, settingValue: text, note: cleanNote,
                     lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp]).requireNewTransaction(false).call()
@@ -40,11 +47,18 @@ class SettingAdminSupport {
     }
 
     static Map reset(def ec, String settingKey) {
-        if (!DarpanSettings.catalog().containsKey(settingKey)) return [error: "No setting ${settingKey}.".toString()]
+        def sd = DarpanSettings.catalog().get(settingKey)
+        if (sd == null) return [error: "No setting ${settingKey}.".toString()]
         def row = ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).one()
         if (row != null) {
             Map d = DarpanSettings.describe(settingKey)
-            String audit = "${settingKey}: ${d.effectiveValue} -> default ${d.defaultValue}".toString()
+            // What is in force once the row is gone: a valid JVM property, else the default.
+            String prop = d.propertyValue
+            boolean byProperty = prop != null && DarpanSettings.parse(sd, prop) != null
+            String after = byProperty ? prop : d.defaultValue
+            String problem = orderProblem(sd, after)
+            if (problem != null) return [error: problem]
+            String audit = "${settingKey}: ${d.effectiveValue} -> ${byProperty ? "property" : "default"} ${after}".toString()
             ec.transaction.runRequireNew(null, "Could not reset setting ${settingKey}", {
                 ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).forUpdate(true).one()?.delete()
                 AdminAuditSupport.record(ec, "admin.SettingAdminServices.reset#Setting", "DarpanSetting", settingKey, audit)
@@ -54,5 +68,23 @@ class SettingAdminSupport {
             DarpanSettings.expireAfterCommit(ec)
         }
         return [setting: DarpanSettings.describe(settingKey)]
+    }
+
+    /** Null when `after` as this key's value keeps every lessThan pair in order; otherwise why not, naming the other key. */
+    private static String orderProblem(def sd, String after) {
+        BigDecimal v = new BigDecimal(after)
+        if (sd.lessThan != null) {
+            String other = DarpanSettings.describe(sd.lessThan).effectiveValue
+            if (!(v < new BigDecimal(other))) {
+                return "Resetting ${sd.key} would put it at ${after}, not below ${sd.lessThan} (${other}). Reset ${sd.lessThan} first, or lower ${sd.key} below ${other}.".toString()
+            }
+        }
+        for (def above : DarpanSettings.catalog().values().findAll { it.lessThan == sd.key }) {
+            String low = DarpanSettings.describe(above.key).effectiveValue
+            if (!(new BigDecimal(low) < v)) {
+                return "Resetting ${sd.key} would put it at ${after}, not above ${above.key} (${low}). Reset ${above.key} first, or lower it below ${after}.".toString()
+            }
+        }
+        return null
     }
 }

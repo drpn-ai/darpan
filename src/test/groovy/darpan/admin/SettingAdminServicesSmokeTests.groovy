@@ -31,6 +31,8 @@ class SettingAdminServicesSmokeTests {
     private static final String SUPER = "setsvc.super"
     private static final String TENANT_ID = "SETSVC_TENANT"
     private static final String TENANT = "setsvc.tenant"
+    private static final String DADMIN_ID = "SETSVC_DADMIN"
+    private static final String DADMIN = "setsvc.dadmin"
     private static final String PLAIN_ID = "SETSVC_PLAIN"
     private static final String PLAIN = "setsvc.plain"
     private static final String S = "admin.SettingAdminServices."
@@ -52,11 +54,11 @@ class SettingAdminServicesSmokeTests {
         ec.entity.find("darpan.config.DarpanSetting").disableAuthz().list().each { it.delete() }
         DarpanSettings.expire()
         AuditLogTestSupport.wipe(ec, "darpan.admin.AdminAuditLog")
-        [[SUPER_ID, SUPER], [TENANT_ID, TENANT], [PLAIN_ID, PLAIN]].each { id, name ->
+        [[SUPER_ID, SUPER], [TENANT_ID, TENANT], [DADMIN_ID, DADMIN], [PLAIN_ID, PLAIN]].each { id, name ->
             ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: id, username: name, userFullName: name,
                     emailAddress: "${name}@example.com", disabled: "N", requirePasswordChange: "N"]).createOrUpdate()
         }
-        [[SUPER_ID, "DARPAN_SUPER_ADMIN"], [TENANT_ID, "DARPAN_TENANT_ADMIN"]].each { id, group ->
+        [[SUPER_ID, "DARPAN_SUPER_ADMIN"], [TENANT_ID, "DARPAN_TENANT_ADMIN"], [DADMIN_ID, "DARPAN_ADMIN"]].each { id, group ->
             if (!ec.entity.find("moqui.security.UserGroupMember").condition([userGroupId: group, userId: id])
                     .disableAuthz().useCache(false).count()) {
                 ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: group, userId: id,
@@ -145,6 +147,27 @@ class SettingAdminServicesSmokeTests {
     }
 
     @Test
+    void aResetNeverLeavesSilentAndReaperOutOfOrderAndANoteHasALimit() {
+        ok(svc("update#Setting", [settingKey: REAPER, value: "240"]))
+        ok(svc("update#Setting", [settingKey: SILENT, value: "200"]))
+        Map r1 = svc("reset#Setting", [settingKey: REAPER])
+        assertTrue(r1.errors.any { it.contains(SILENT) && it.contains("120") }, "${r1.errors}")
+        assertEquals("240", ok(svc("get#Setting", [settingKey: REAPER])).result.setting.rowValue)
+        // the other direction: silent row 200 under reaper default 120 is not possible, so fake it with a property
+        ok(svc("update#Setting", [settingKey: SILENT, value: "100"]))
+        ok(svc("reset#Setting", [settingKey: REAPER]))   // 100 < 120 fine
+        System.setProperty(SILENT, "130")
+        DarpanSettings.expire()
+        Map r2 = svc("reset#Setting", [settingKey: SILENT])  // property 130 would sit above reaper 120
+        assertTrue(r2.errors.any { it.contains(REAPER) }, "${r2.errors}")
+        assertEquals("100", ok(svc("get#Setting", [settingKey: SILENT])).result.setting.rowValue)
+        Map longNote = svc("update#Setting", [settingKey: MAX, value: "4", note: "x" * 256])
+        assertTrue(longNote.errors.any { it.contains("255") }, "${longNote.errors}")
+        assertEquals(0, ec.entity.find("darpan.config.DarpanSetting").condition("settingKey", MAX).disableAuthz().useCache(false).count())
+        ok(svc("update#Setting", [settingKey: MAX, value: "4", note: "x" * 255]))
+    }
+
+    @Test
     void aJvmPropertyShowsAsItsOwnSourceAndARowBeatsIt() {
         System.setProperty(MAX, "6")
         DarpanSettings.expire()
@@ -158,7 +181,7 @@ class SettingAdminServicesSmokeTests {
         assertEquals("6", row.propertyValue)
         assertEquals("${MAX}: 6 -> 3".toString(), auditRows()[0].detailText)
         ok(svc("reset#Setting", [settingKey: MAX]))
-        assertEquals("${MAX}: 3 -> default 8".toString(), auditRows()[1].detailText)
+        assertEquals("${MAX}: 3 -> property 6".toString(), auditRows()[1].detailText)
         assertEquals("PROPERTY", ok(svc("get#Setting", [settingKey: MAX])).result.setting.source)
     }
 
@@ -166,7 +189,7 @@ class SettingAdminServicesSmokeTests {
     void onlyASuperAdminGetsIn() {
         ["get#Settings": [:], "get#Setting": [settingKey: MAX], "update#Setting": [settingKey: MAX, value: "2"],
          "reset#Setting": [settingKey: MAX]].each { String method, Map params ->
-            [PLAIN, TENANT].each { String who ->
+            [PLAIN, TENANT, DADMIN].each { String who ->
                 Map out = svc(method, params, who)
                 assertTrue(out.authzDenied != null || out.hasError, "${method} must refuse ${who}")
             }

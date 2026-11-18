@@ -21,7 +21,6 @@ import com.webauthn4j.verifier.exception.MaliciousCounterValueException
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.json.JsonOutput
 import org.moqui.entity.EntityCondition
-import org.moqui.util.SystemBinding
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -56,8 +55,10 @@ class PasskeySupport {
     private static final String ACCOUNT = "moqui.security.UserAccount"
     /** A decoy descriptor's transports: what a platform passkey reports most often. */
     static final String DECOY_TRANSPORTS = "internal,hybrid"
-    private static final String DECOY_KEY_LABEL = "darpan-passkey-first-sign-in-decoy-v1"
-    private static final byte[] FALLBACK_DECOY_KEY = randomKey()
+    static final String AUTH_SECRET = "darpan.auth.AuthSecret"
+    static final String DECOY_SECRET_ID = "PASSKEY_DECOY"
+    /** [factory, key]: the decoy key as read for one framework instance (tests boot several in one JVM). */
+    private static volatile Map decoyKeyCache
 
     static final int MAX_PASSKEYS = 10
     static final int NAME_MAX_LENGTH = 60
@@ -430,10 +431,9 @@ class PasskeySupport {
 
     /**
      * The decoy credential id begin#PasskeyFirstSignIn lists for a username with no live passkey: HMAC-SHA256 of the
-     * username (trimmed, lower case, as the case-insensitive lookup treats it) under a key derived from this instance's
-     * entity crypt-pass (the secret encrypted fields use), base64url: 32 bytes, as many authenticators' ids are. Stable
-     * for a username (two begins look alike), different per username, and not a credential anyone holds, so a finish
-     * with it is refused like any unknown passkey.
+     * username (trimmed, lower case, as the case-insensitive lookup treats it) under decoyKey, base64url: 32 bytes, as
+     * many authenticators' ids are. Stable for a username (two begins, two nodes, a restart look alike), different per
+     * username, and not a credential anyone holds, so a finish with it is refused like any unknown passkey.
      */
     static String decoyCredentialId(def ec, String username) {
         Mac mac = Mac.getInstance("HmacSHA256")
@@ -441,24 +441,56 @@ class PasskeySupport {
         return AuthPrimitives.b64url(mac.doFinal(username.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)))
     }
 
-    private static byte[] randomKey() {
-        byte[] key = new byte[32]
-        new java.security.SecureRandom().nextBytes(key)
+    /**
+     * The decoy key: one random 32-byte secret, made once and stored in AuthSecret (DECOY_SECRET_ID), so every node and
+     * every restart uses the same one, and nothing public (not the crypt-pass, which an instance may leave at a default)
+     * can compute it. Read once per framework and kept in memory. Created race-safely: the PK is fixed, so a second node
+     * creating it at the same moment fails its insert and reads the first one's row.
+     */
+    static byte[] decoyKey(def ec) {
+        Object factory = ec.factory
+        Map cached = decoyKeyCache
+        if (cached != null && cached.factory.is(factory)) return (byte[]) cached.key
+        synchronized (PasskeySupport) {
+            cached = decoyKeyCache
+            if (cached == null || !cached.factory.is(factory)) {
+                cached = [factory: factory, key: loadOrCreateDecoyKey(ec)]
+                decoyKeyCache = cached
+            }
+            return (byte[]) cached.key
+        }
+    }
+
+    /** Tests: forget the in-memory decoy key, so the next begin reads it from the database again. */
+    static void forgetDecoyKey() {
+        decoyKeyCache = null
+    }
+
+    private static byte[] loadOrCreateDecoyKey(def ec) {
+        String value = storedDecoySecret(ec)
+        if (!value) {
+            String fresh = AuthPrimitives.newToken()
+            try {
+                ec.transaction.runRequireNew(null, "Could not store the passkey decoy key", {
+                    ec.entity.makeValue(AUTH_SECRET).setAll([secretId: DECOY_SECRET_ID, secretValue: fresh,
+                            createdDate: ec.user.nowTimestamp]).create()
+                })
+            } catch (Exception e) {
+                logger.info("Passkey decoy key: another node stored it first ({}); reading theirs", e.class.simpleName)
+            }
+            value = storedDecoySecret(ec)
+        }
+        byte[] key = value ? AuthPrimitives.b64urlDecode(value) : null
+        if (key == null || key.length < 32) throw new IllegalStateException("The passkey decoy key could not be read")
         return key
     }
 
-    /** HMAC-SHA256(crypt-pass, DECOY_KEY_LABEL): the decoy key, never the crypt-pass itself. With no crypt-pass configured
-     *  (encrypted fields would not work either) a random key made once per JVM, so decoys stay stable until a restart. */
-    private static byte[] decoyKey(def ec) {
-        String raw = ec?.factory?.getConfXmlRoot()?.first("entity-facade")?.attribute("crypt-pass")
-        String pass = raw?.contains('${') ? SystemBinding.expand(raw) : raw
-        if (!pass?.trim() || pass.contains('${')) {
-            logger.warn("No entity crypt-pass configured: passkey sign-in decoys use a per-JVM random key")
-            return FALLBACK_DECOY_KEY
-        }
-        Mac mac = Mac.getInstance("HmacSHA256")
-        mac.init(new SecretKeySpec(pass.getBytes(StandardCharsets.UTF_8), "HmacSHA256"))
-        return mac.doFinal(DECOY_KEY_LABEL.getBytes(StandardCharsets.UTF_8))
+    /** Read in a transaction of its own, so a row another node committed after this request's transaction began is seen. */
+    private static String storedDecoySecret(def ec) {
+        return (String) ec.transaction.runRequireNew(null, "Could not read the passkey decoy key", {
+            TwoFactorRecords.find(ec, AUTH_SECRET, "global: the instance's passkey decoy key")
+                    .condition("secretId", DECOY_SECRET_ID).useCache(false).one()?.secretValue
+        })
     }
 
     /**

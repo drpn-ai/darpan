@@ -623,6 +623,47 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
     }
 
     @Test
+    @DisplayName("DAR-BE-301 review: decoys come from one stored random key: created once when begins race, stable across a cache reset, never the crypt-pass")
+    void decoysUseAStoredRandomKey() {
+        String username = "nobody.at.all"
+        Closure<String> decoy = { Map out -> new JsonSlurper().parseText(out.publicKeyOptions as String).allowCredentials[0].id }
+        Closure<String> hmac = { byte[] key, String value ->
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256")
+            mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"))
+            AuthPrimitives.b64url(mac.doFinal(value.getBytes("UTF-8")))
+        }
+        Closure<List> keyRows = { ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().useCache(false).list() }
+
+        ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().deleteAll()
+        PasskeySupport.forgetDecoyKey()
+        List<Map> raced = anonInParallel("facade.AuthFacadeServices.begin#PasskeyFirstSignIn", [[username: username], [username: username]])
+        String first = decoy(raced[0])
+        assertEquals(first, decoy(raced[1]), "two begins at once agree")
+        assertEquals(1, keyRows().size(), "the key row is made once")
+        String stored = keyRows()[0].secretValue
+        assertEquals(32, AuthPrimitives.b64urlDecode(stored).length)
+
+        PasskeySupport.forgetDecoyKey()
+        assertEquals(first, decoy(anon("begin#PasskeyFirstSignIn", [username: username]).out), "re-read from the database: the same decoy")
+        assertEquals(1, keyRows().size())
+        assertEquals(hmac(AuthPrimitives.b64urlDecode(stored), username), first, "the decoy is the stored key's HMAC")
+        ["MoquiDefaultPassword:CHANGEME", "CHANGE_ME"].each { String pass ->
+            byte[] derived = AuthPrimitives.b64urlDecode(hmac(pass.getBytes("UTF-8"), "darpan-passkey-first-sign-in-decoy-v1"))
+            assertNotEquals(hmac(derived, username), first, "not computable from the crypt-pass ${pass}")
+            assertNotEquals(hmac(pass.getBytes("UTF-8"), username), first)
+        }
+
+        // Another node stored the key first: this node uses that row, not one of its own.
+        ec.entity.find(PasskeySupport.AUTH_SECRET).disableAuthz().deleteAll()
+        PasskeySupport.forgetDecoyKey()
+        String othersKey = AuthPrimitives.newToken()
+        ec.entity.makeValue(PasskeySupport.AUTH_SECRET).setAll([secretId: PasskeySupport.DECOY_SECRET_ID, secretValue: othersKey,
+                createdDate: ec.user.nowTimestamp]).create()
+        assertEquals(hmac(AuthPrimitives.b64urlDecode(othersKey), username), decoy(anon("begin#PasskeyFirstSignIn", [username: username]).out))
+        assertEquals(1, keyRows().size())
+    }
+
+    @Test
     @DisplayName("DAR-BE-301: a challenge is used once, a refused finish uses it too")
     void aChallengeIsUsedOnce() {
         SoftwarePasskey key = enrolPasskey(USERNAME)

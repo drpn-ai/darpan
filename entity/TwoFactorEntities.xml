@@ -124,6 +124,17 @@
         <index name="PKSI_CHAL_EXPIRES"><index-field name="expiresDate"/></index>
     </entity>
 
+    <entity entity-name="AuthSecret" package="darpan.auth" use="configuration" cache="never">
+        <description>DAR-BE-301. An instance-wide random secret the sign-in code needs, made once on first use and shared by
+            every node: PASSKEY_DECOY is the key of begin#PasskeyFirstSignIn's decoy credential ids (32 random bytes,
+            base64url). Independent of the entity crypt-pass on purpose (that may be a public default). Not encrypted: it
+            only hides which usernames exist, which anyone who can read this table can read directly. Written only by
+            darpan.facade.auth.PasskeySupport; never exported by /transfer.</description>
+        <field name="secretId" type="id" is-pk="true"/>
+        <field name="secretValue" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+    </entity>
+
     <entity entity-name="TwoFactorRolePolicy" package="darpan.auth" use="configuration" cache="never">
         <description>Per-role enforcement switch: from requiredFromDate on, a person in this role cannot get a session without
             two-factor. Empty = optional (every seed row starts empty, so a deploy changes nothing). A date in the future is

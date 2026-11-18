@@ -185,4 +185,65 @@ class DarpanSettingsTests {
         Set<String> missing = used - DarpanSettings.catalog().keySet()
         assertTrue(missing.isEmpty(), "settings read in code but not in the catalog: ${missing}")
     }
+
+    private static Path catalogDir(String json) {
+        Path dir = Files.createTempDirectory('catalog')
+        Files.createDirectories(dir.resolve('darpan'))
+        Files.write(dir.resolve('darpan/settings-catalog.json'), json.getBytes('UTF-8'))
+        return dir
+    }
+
+    @Test void aMalformedOrDuplicateCatalogNeverBreaksReads() {
+        Path bad = catalogDir('{ not json')
+        Path dup = catalogDir('{"settings":[{"key":"' + MAX + '","type":"INT","area":"Runs","unit":"runs","description":"x","defaultValue":"3","min":1,"max":32},' +
+                '{"key":"darpan.test.extra","type":"INT","area":"Runs","unit":"runs","description":"x","defaultValue":"5","min":1,"max":9},' +
+                '{"key":"darpan.test.badDefault","type":"INT","area":"Runs","unit":"runs","description":"x","defaultValue":"50","min":1,"max":9}]}')
+        ClassLoader saved = Thread.currentThread().contextClassLoader
+        try {
+            Thread.currentThread().contextClassLoader = new URLClassLoader([bad.toUri().toURL(), dup.toUri().toURL()] as URL[], saved)
+            DarpanSettings.resetForTest()
+            DarpanSettings.clock = { -> now }
+            DarpanSettings.rowLoader = { -> loads++; [:] as Map<String, Map> }
+            assertEquals(8, DarpanSettings.intValue(MAX), 'first catalog wins a duplicate key')
+            assertEquals(5, DarpanSettings.intValue('darpan.test.extra'), 'a good entry beside the bad file still loads')
+            assertFalse(DarpanSettings.catalog().containsKey('darpan.test.badDefault'))
+            assertSame(DarpanSettings.catalog(), DarpanSettings.catalog(), 'parsed once')
+            assertEquals([7, 3, 1, 0], DarpanSettings.intListValue(DAYS))
+        } finally {
+            Thread.currentThread().contextClassLoader = saved
+            DarpanSettings.resetForTest()
+        }
+    }
+
+    @Test void aRolledBackEditLeavesTheSnapshotFresh() {
+        DarpanSettings.intValue(MAX)
+        List syncs = []
+        def ec = [transaction: [isTransactionInPlace: { -> true }, registerSynchronization: { s -> syncs << s }]]
+        DarpanSettings.expireAfterCommit(ec)
+        syncs[0].afterCompletion(jakarta.transaction.Status.STATUS_ROLLEDBACK)
+        DarpanSettings.intValue(MAX)
+        assertEquals(1, loads)
+        syncs[0].afterCompletion(jakarta.transaction.Status.STATUS_COMMITTED)
+        DarpanSettings.intValue(MAX)
+        assertEquals(2, loads)
+    }
+
+    @Test void anExpireDuringAReloadIsNotLost() {
+        DarpanSettings.intValue(MAX)
+        boolean first = true
+        DarpanSettings.rowLoader = { -> loads++; if (first) { first = false; DarpanSettings.expire() }; [:] as Map<String, Map> }
+        DarpanSettings.expire()
+        DarpanSettings.intValue(MAX)          // reload during which another edit commits
+        assertEquals(2, loads)
+        DarpanSettings.intValue(MAX)          // must reload again: the mid-load expire was kept
+        assertEquals(3, loads)
+        DarpanSettings.intValue(MAX)
+        assertEquals(3, loads)
+    }
+
+    @Test void aHugeBadValueIsTruncatedInTheWarnAndTheWarnedSetStaysBounded() {
+        System.setProperty(MAX, 'x' * 5000)
+        assertEquals(8, DarpanSettings.intValue(MAX))
+        assertEquals(8, DarpanSettings.intValue(MAX))
+    }
 }

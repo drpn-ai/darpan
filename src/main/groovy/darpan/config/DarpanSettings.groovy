@@ -2,6 +2,7 @@ package darpan.config
 
 import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonSlurper
+import jakarta.transaction.Status
 import jakarta.transaction.Synchronization
 import org.moqui.impl.context.ExecutionContextFactoryImpl
 import org.slf4j.Logger
@@ -82,48 +83,76 @@ class DarpanSettings {
     }
 
     private static Map<String, SettingDefinition> loadCatalog() {
-        ClassLoader cl = Thread.currentThread().contextClassLoader ?: DarpanSettings.classLoader
         Map<String, SettingDefinition> all = new LinkedHashMap<>()
         Map<String, String> from = [:]
-        Enumeration<URL> urls = cl.getResources(CATALOG_RESOURCE)
-        while (urls.hasMoreElements()) {
-            URL url = urls.nextElement()
-            String source = url.toString()
-            Map<String, SettingDefinition> part = url.openStream().withCloseable { parseCatalog(it.getText('UTF-8'), source) }
-            part.each { String k, SettingDefinition d ->
-                if (all.containsKey(k)) {
-                    throw new IllegalStateException("Setting ${k} is in two catalogs: ${from[k]} and ${source}".toString())
+        try {
+            ClassLoader cl = Thread.currentThread().contextClassLoader ?: DarpanSettings.classLoader
+            Enumeration<URL> urls = cl.getResources(CATALOG_RESOURCE)
+            while (urls.hasMoreElements()) {
+                String source = null
+                try {
+                    URL url = urls.nextElement()
+                    source = url.toString()
+                    Map<String, SettingDefinition> part = url.openStream().withCloseable { parseCatalog(it.getText('UTF-8'), source) }
+                    part.each { String k, SettingDefinition d ->
+                        if (all.containsKey(k)) {
+                            warnOnce('dup|' + k + '|' + source, "Setting {} is in two catalogs ({} and {}); keeping the first", k, from[k], source)
+                        } else {
+                            all.put(k, d)
+                            from.put(k, source)
+                        }
+                    }
+                } catch (Exception e) {
+                    warnOnce('bad|' + source, "Skipping unreadable settings catalog {}: {}", source, e.toString())
                 }
-                all.put(k, d)
-                from.put(k, source)
             }
+        } catch (Exception e) {
+            warnOnce('scan', "Could not scan for settings catalogs: {}", e.toString())
         }
         return Collections.unmodifiableMap(all)
     }
 
-    /** Parses one catalog file; each default must itself be valid. */
+    /** Parses one catalog file (throws when the file is not valid JSON); an entry that is malformed, repeated or has an invalid default is skipped with a WARN. */
     static Map<String, SettingDefinition> parseCatalog(String json, String source) {
         Map<String, SettingDefinition> out = new LinkedHashMap<>()
         Object parsed = new JsonSlurper().parseText(json)
         for (Object o : (parsed.settings as List)) {
             Map m = (Map) o
-            SettingDefinition d = new SettingDefinition(
-                    key: m.key, type: m.type, area: m.area, unit: m.unit, description: m.description,
-                    defaultValue: m.defaultValue == null ? null : m.defaultValue.toString(),
-                    min: m.min == null ? null : new BigDecimal(m.min.toString()),
-                    max: m.max == null ? null : new BigDecimal(m.max.toString()),
-                    maxItems: m.maxItems == null ? null : ((Number) m.maxItems).intValue(),
-                    lessThan: m.lessThan)
+            SettingDefinition d
+            try {
+                d = new SettingDefinition(
+                        key: m.key, type: m.type, area: m.area, unit: m.unit, description: m.description,
+                        defaultValue: m.defaultValue == null ? null : m.defaultValue.toString(),
+                        min: m.min == null ? null : new BigDecimal(m.min.toString()),
+                        max: m.max == null ? null : new BigDecimal(m.max.toString()),
+                        maxItems: m.maxItems == null ? null : ((Number) m.maxItems).intValue(),
+                        lessThan: m.lessThan)
+            } catch (Exception e) {
+                warnOnce('entry|' + source + '|' + m.key, "Skipping malformed setting {} in {}: {}", m.key, source, e.toString())
+                continue
+            }
             if (!d.key || !(d.type in ['INT', 'BOOLEAN', 'DECIMAL', 'INT_LIST'])) {
-                throw new IllegalStateException("Bad catalog entry in ${source}: ${m}".toString())
+                warnOnce('entry|' + source + '|' + m.key, "Skipping malformed setting {} in {}", m.key, source)
+            } else if (out.containsKey(d.key)) {
+                warnOnce('entry|' + source + '|' + d.key, "Setting {} twice in {}; keeping the first", d.key, source)
+            } else if (parse(d, d.defaultValue) == null) {
+                warnOnce('entry|' + source + '|' + d.key, "Skipping setting {} in {}: its default '{}' is not valid", d.key, source, d.defaultValue)
+            } else {
+                out.put(d.key, d)
             }
-            if (out.containsKey(d.key)) throw new IllegalStateException("Setting ${d.key} twice in ${source}".toString())
-            if (parse(d, d.defaultValue) == null) {
-                throw new IllegalStateException("Default of ${d.key} is not valid in ${source}: ${d.defaultValue}".toString())
-            }
-            out.put(d.key, d)
         }
         return out
+    }
+
+    private static final int WARNED_CAP = 1000
+
+    /** WARN once per id; past WARNED_CAP remembered ids it still warns, without remembering. */
+    private static void warnOnce(String id, String format, Object... args) {
+        if (warned.size() >= WARNED_CAP) {
+            logger.warn(format, args)
+        } else if (warned.add(id)) {
+            logger.warn(format, args)
+        }
     }
 
     private static SettingDefinition definition(String key) {
@@ -189,8 +218,9 @@ class DarpanSettings {
     private static Object acceptable(SettingDefinition sd, String origin, String text) {
         if (text == null) return null
         Object v = parse(sd, text)
-        if (v == null && warned.add(sd.key + '|' + origin + '|' + text)) {
-            logger.warn("Setting {}: ignoring {} value '{}' (not a valid {} in range); using the next source", sd.key, origin, text, sd.type)
+        if (v == null) {
+            String shown = text.length() > 200 ? text.substring(0, 200) + '...' : text
+            warnOnce(sd.key + '|' + origin + '|' + shown, "Setting {}: ignoring {} value '{}' (not a valid {} in range); using the next source", sd.key, origin, shown, sd.type)
         }
         return v
     }
@@ -242,7 +272,7 @@ class DarpanSettings {
         if (ec != null && ec.transaction.isTransactionInPlace()) {
             ec.transaction.registerSynchronization(new Synchronization() {
                 @Override void beforeCompletion() { }
-                @Override void afterCompletion(int status) { expire() }
+                @Override void afterCompletion(int status) { if (status == Status.STATUS_COMMITTED) expire() }
             })
         } else {
             expire()

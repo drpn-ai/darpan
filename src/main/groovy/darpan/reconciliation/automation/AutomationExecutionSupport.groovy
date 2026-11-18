@@ -300,8 +300,8 @@ class AutomationExecutionSupport {
                         windowStartDate: window.childWindowStartDate, windowEndDate: window.childWindowEndDate,
                         // Final review C1: no user on the scheduled path; the tenant is already asserted.
                         systemTenantRun: true,
-                        // Final review I6: StuckRunReaper fails a RUNNING execution row untouched for 120
-                        // minutes; a long walk touches it before every question.
+                        // Final review I6: StuckRunReaper fails a RUNNING execution row untouched for the
+                        // reaperStaleMinutes setting (admin app Settings); a long walk touches it before every question.
                         onQuestionStart: { Map q -> updateAutomationExecution(ec, execution, [lastUpdatedDate: nowTimestamp(ec)]) }])
                 status = summary.statusEnumId as String
                 firstRunResultId = summary.firstRunResultId as String
@@ -2927,7 +2927,7 @@ class AutomationExecutionSupport {
      * {@code StuckRunReaper} — the reaper flips any {@code ReconciliationRunResult} or
      * {@code ReconciliationAutomationExecution} row sitting in PENDING/RUNNING to FAILED (and, for the
      * run-result row, notifies) once its {@code lastUpdatedStamp} — Moqui's auto-maintained column, NOT
-     * {@code lastHeartbeatDate} — goes stale (default 120 min, {@code StuckRunReaper.groovy:36}). Any
+     * {@code lastHeartbeatDate} — goes stale (the {@code darpan.reconciliation.runHealth.reaperStaleMinutes} setting, admin app Settings). Any
      * {@code .update()} bumps {@code lastUpdatedStamp} regardless of which fields change; this refreshes
      * {@code lastHeartbeatDate} (and, on the execution row, {@code lastUpdatedDate}) purely so that
      * {@code .update()} has something real to write.</p>

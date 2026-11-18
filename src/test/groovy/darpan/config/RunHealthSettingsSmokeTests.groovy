@@ -115,6 +115,20 @@ class RunHealthSettingsSmokeTests {
     }
 
     @Test
+    void aSilentThresholdPastTheReaperStillShowsStuckBeforeTheReaperTakesTheRun() {
+        // raw rows (not through problem()): reaper 60, silent 90
+        saveRow(REAPER, "60")
+        saveRow(SILENT, "90")
+        Timestamp now = new Timestamp(System.currentTimeMillis())
+        [61, 75, 89].each { int silent ->
+            Map verdict = RunHealth.of([currentStage: "COMPARE", startedDate: minutesAgo(silent + 5), lastHeartbeatDate: minutesAgo(silent)], now)
+            assertEquals("stuck", verdict.health, "silent ${silent}m")
+            assertTrue((verdict.reason as String).endsWith("fails it at 60m"), verdict.reason as String)
+        }
+        assertEquals("healthy", RunHealth.of([currentStage: "COMPARE", startedDate: minutesAgo(40), lastHeartbeatDate: minutesAgo(30)], now).health)
+    }
+
+    @Test
     void aStaleJobParameterNoLongerOverridesTheSetting() {
         saveRow(REAPER, "60")
         createRunning(70)

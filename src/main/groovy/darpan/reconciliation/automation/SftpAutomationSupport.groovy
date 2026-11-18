@@ -182,7 +182,7 @@ class SftpAutomationSupport {
             // Task 2c/2d: heartbeat after every poll attempt. This is the SFTP path's phase boundary and
             // it matters more here than anywhere on the API side — a poll runs pollTimeoutMinutes (60 by
             // default, operator-configurable) of attempt/sleep cycles, and the row minted above is now
-            // exposed to StuckRunReaper's 120-minute lastUpdatedStamp sweep for that whole time.
+            // exposed to StuckRunReaper's lastUpdatedStamp sweep (setting darpan.reconciliation.runHealth.reaperStaleMinutes) for that whole time.
             Map<String, Object> pollResult = pollSftpUntilAvailable(ec, pollParams, {
                 AutomationExecutionSupport.heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
                 // Task 6: the poll boundary is this path's cancel checkpoint, and it is the checkpoint

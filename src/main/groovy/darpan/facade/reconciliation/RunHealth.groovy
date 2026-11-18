@@ -39,7 +39,9 @@ class RunHealth {
         int slowFloor = setting("slowFloorMinutes")
         int cancelGrace = setting("cancelGraceMinutes")
 
-        if (silentMinutes >= silentAnyStage) {
+        // A row or property written past the settings check could put this at or above the reaper; a run must show stuck
+        // before the reaper takes it, so the threshold never passes one minute short of it.
+        if (silentMinutes >= Math.min(silentAnyStage, reaperMinutes - 1)) {
             return verdict("stuck", "No progress for ${duration(silentMinutes * MINUTE_MS)}; " +
                     "the stuck-run reaper fails it at ${reaperMinutes}m")
         }

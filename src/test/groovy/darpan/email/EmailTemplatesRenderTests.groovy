@@ -304,6 +304,46 @@ class EmailTemplatesRenderTests {
         }
     }
 
+    /** DAR-BE-315: the plain-text part carries every sentence the html does, in order, as the copy has it: a text-mode label cut
+     *  each one at 132 columns and a branch under fail-widgets rendered empty, so the reminder lost its app address and its
+     *  after-date lines. Every template, every branch (the reminder before and after the date, both recovery and welcome sides). */
+    @Test
+    void theTextPartCarriesEveryBlockTheHtmlDoesInOrderAndUncut() {
+        GOLDEN.each { String name, List v ->
+            String html = render(v[0] as String, v[1] as Map, "html"), text = render(v[0] as String, v[1] as Map, "text")
+            List<String> blocks = (html =~ /(?s)<span class="text-inline">(.*?)<\/span>|<pre class="text-inline dp-pre">(.*?)<\/pre>/).collect { List m ->
+                unescape((m[1] ?: m[2]) as String).trim()
+            }.findAll { it }
+            assertTrue(blocks.size() >= 1, "${name}: the scan found the html's blocks")
+            int at = 0
+            blocks.each { String block ->
+                int found = text.indexOf(block, at)
+                assertTrue(found >= 0, "${name}: the text part lost or cut a block the html carries, in order: [${block}]\n${text}")
+                at = found + block.length()
+            }
+        }
+    }
+
+    @Test
+    void noTextLineIsCutAtAColumn() {
+        String before = render("TwoFactorReminder", SECURITY.TwoFactorReminder, "text")
+        String after = render("TwoFactorReminder", SECURITY.TwoFactorReminder + [past: true], "text")
+        [before, after].each { String t ->
+            assertTrue(t.contains("Set one up in User Settings, under Two-factor, at https://app.drpn.ai. It takes about a minute, which is less time than the kettle."), t)
+            assertTrue(t.contains("— Darpan"), t)
+        }
+        assertTrue(after.contains("Darpan now needs a second step when you sign in"), after)
+        assertTrue(after.contains("Darpan will ask you to set it up the next time you sign in"), after)
+        assertTrue(before.contains("becomes required for Darpan on 2 December 2026"), before)
+        assertEquals("a\n\nb\n", EmailFrame.textOf(["a", null, " ", "b"]))
+        String long150 = "x" * 300
+        assertTrue(EmailFrame.textOf([long150]).contains(long150))
+    }
+
+    private static String unescape(String h) {
+        return h.replace("&#39;", "'").replace("&quot;", '"').replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    }
+
     private String copyText(String templateId, String blockId) {
         return ec.entity.find("darpan.email.EmailCopyBlock").condition("emailTemplateId", templateId).condition("blockId", blockId).one().getString("copyText")
     }

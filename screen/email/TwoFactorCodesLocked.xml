@@ -5,6 +5,7 @@
      links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
+    <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
     <actions>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · SECURITY')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
@@ -16,6 +17,8 @@
         <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_2FA_CODES_LOCKED&quot;)"/>
         <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
         <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
+        <!-- DAR-BE-315: the plain-text part is these same copy blocks, one per paragraph, never cut or dropped; template/email/EmailText.ftl keeps the labels above out of it (stock text macros cut each at 132 columns and drop fail-widgets branches). -->
+        <set field="emailText" from="darpan.email.EmailFrame.textOf([copyGreeting, copyBody, copyNext, copyNote, '— Darpan'])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
@@ -26,7 +29,7 @@
         <container style="dp-sign"><label text="— Darpan"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>
-            <text type="text" no-boundary-comment="true"><![CDATA[${guidesText}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${emailText}${guidesText}]]></text>
         </render-mode>
     </widgets>
 </screen>

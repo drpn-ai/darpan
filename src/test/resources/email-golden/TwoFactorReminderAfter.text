@@ -1,9 +1,13 @@
-
-Two-factor sign-in means a code from an authenticator app, or a passkey, on top of your password. Set one up in User Settings, under
-
-You'll keep getting this reminder until a method is set up. Questions? Ask your Darpan administrator.                               
-— Darpan                                                                                                                            
         
+Hi Riya, Darpan now needs a second step when you sign in, and yours isn't set up yet. Worth doing now, before month-end gets busy.
+
+Two-factor sign-in means a code from an authenticator app, or a passkey, on top of your password. Set one up in User Settings, under Two-factor, at https://app.drpn.ai. It takes about a minute, which is less time than the kettle.
+
+Darpan will ask you to set it up the next time you sign in, so it can't catch you out.
+
+You'll keep getting this reminder until a method is set up. Questions? Ask your Darpan administrator.
+
+— Darpan
 
 User guide
 Set up two-factor: https://docs.drpn.ai/guides/two-factor#set-it-up

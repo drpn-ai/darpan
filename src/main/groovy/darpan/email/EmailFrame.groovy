@@ -77,6 +77,11 @@ ${eyebrow(eyebrowText, 0)}<div style="height:14px;line-height:14px;font-size:1px
         return "\nUser guide\n" + checked(guides).collect { List<String> g -> "${g[0]}: ${url(g[1])}" }.join("\n") + "\n"
     }
 
+    /** DAR-BE-315: the plain-text part's body: the copy blocks the html carries, in order, one per paragraph, as they are (no padding, no cut at a column width). Empty ones drop. */
+    static String textOf(List<String> lines) {
+        return lines.findAll { it != null && it.toString().trim() }.collect { it.toString() }.join("\n\n") + "\n"
+    }
+
     private static List<List<String>> checked(List<List<String>> guides) {
         if (!guides || guides.size() > 2) throw new IllegalArgumentException("An email carries one or two user guide links, not ${guides?.size() ?: 0}")
         guides.each { List<String> g ->

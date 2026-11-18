@@ -1242,6 +1242,7 @@ SERVICE get CliLoginRequest
     messages : List
     messages.message : String
     ok : Boolean
+    scope : String
     status : String
 
 SERVICE list CliSessions
@@ -1315,6 +1316,7 @@ SERVICE start CliLogin
   allow-remote: true
   IN:
     hostLabel : String [required]
+    scope : String
   OUT:
     deviceCode : String
     errors : List

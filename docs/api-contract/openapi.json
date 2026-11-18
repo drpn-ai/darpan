@@ -15655,6 +15655,10 @@
                         "type": "string",
                         "description": "The computer the CLI says it runs on."
                     },
+                    "scope": {
+                        "type": "string",
+                        "description": "DAR-BE-295. TENANT or ADMIN (darpan-admin: a super admin approves it)."
+                    },
                     "status": {
                         "type": "string",
                         "description": "PENDING (waiting for approval), APPROVED, DENIED, or EXPIRED (expired or unknown code)."
@@ -16180,6 +16184,10 @@
                     "hostLabel": {
                         "type": "string",
                         "description": "The computer the CLI runs on (its hostname), shown to the person before they approve."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "DAR-BE-295. TENANT (the default) or ADMIN: the darpan-admin CLI, which may call admin.* for 12 hours\n                    and which only a super admin may approve."
                     }
                 },
                 "required": [

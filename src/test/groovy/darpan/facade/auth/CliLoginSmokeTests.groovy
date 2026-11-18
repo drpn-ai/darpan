@@ -32,6 +32,9 @@ import static org.junit.jupiter.api.Assertions.*
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class CliLoginSmokeTests {
     private ExecutionContext ec
+    private long clock = 1_800_000_000_000L
+    private Closure<Long> originalClock
+    private final Map<String, String> secrets = [:]
 
     private static final String APPROVER_ID = "CLI_APPROVER"
     private static final String APPROVER_USERNAME = "cli.approver"
@@ -49,6 +52,7 @@ class CliLoginSmokeTests {
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "cli-login-smoke")
+        ec.entity.makeDataLoader().location("component://darpan/data/TwoFactorSeedData.xml").dummyFks(true).load()
     }
 
     @AfterAll
@@ -60,6 +64,10 @@ class CliLoginSmokeTests {
     void resetRows() {
         ec.entity.find("darpan.auth.CliDeviceCode").disableAuthz().deleteAll()
         ec.entity.find("darpan.auth.CliSession").disableAuthz().deleteAll()
+        ec.entity.find(TwoFactorRecords.FACTOR).disableAuthz().deleteAll()
+        secrets.clear()
+        originalClock = TwoFactorSupport.codeClock
+        TwoFactorSupport.codeClock = { clock }
         upsertAccount(APPROVER_ID, APPROVER_USERNAME)
         upsertAccount(OTHER_ID, OTHER_USERNAME)
         upsertAccount(PLAIN_ID, PLAIN_USERNAME)
@@ -79,6 +87,7 @@ class CliLoginSmokeTests {
 
     @AfterEach
     void clearMemo() {
+        TwoFactorSupport.codeClock = originalClock
         ec.context.getSharedMap().remove(CliAuthSupport.CLI_SESSION_CONTEXT_KEY)
         ec.context.getSharedMap().remove(CliAuthSupport.ADMIN_CLI_SESSION_CONTEXT_KEY)
         ec.user.logoutUser()
@@ -90,10 +99,11 @@ class CliLoginSmokeTests {
     @Test
     @DisplayName("DAR-BE-295: a super admin's ADMIN sign-in issues a 12-hour key and an ADMIN session")
     void adminScopeSignInIssuesATwelveHourKeyAndAnAdminSession() {
+        enrolApp(SUPER_ID)
         Map started = anon("start#CliLogin", [hostLabel: HOST, scope: "ADMIN"]).out
         assertEquals("ADMIN", signedIn(SUPER_USERNAME, "get#CliLoginRequest", [userCode: started.userCode]).out.scope)
         assertEquals("ADMIN", deviceRow(started.userCode as String).scopeId)
-        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode, code: nextCode(SUPER_ID)]).errors)
         Map polled = anon("poll#CliLogin", [deviceCode: started.deviceCode]).out
         assertEquals("APPROVED", polled.status)
         assertEquals(43200, polled.authTokenExpiresInSeconds)
@@ -153,7 +163,33 @@ class CliLoginSmokeTests {
         Timestamp past = new Timestamp(System.currentTimeMillis() - 12L * 3_600_000L - 1000L)
         ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", hash).disableAuthz().updateAll([createdDate: past])
         ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).disableAuthz().updateAll([fromDate: past])
-        assertEquals(CliAuthSupport.CLI_SESSION_EXPIRED, CliAuthSupport.cliSessionProblem(ec, hash, cliSessionOf(raw)))
+        assertEquals("This darpan-admin session has expired. Run the command again to sign in.", CliAuthSupport.cliSessionProblem(ec, hash, cliSessionOf(raw)))
+        assertEquals(CliAuthSupport.ADMIN_SESSION_EXPIRED, CliAuthSupport.cliSessionProblem(ec, hash, cliSessionOf(raw)))
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: a super admin with no two-factor is told to turn it on; no code is spent and the request stays PENDING")
+    void adminScopeApprovalNeedsTwoFactorOn() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST, scope: "ADMIN"]).out
+        Map refused = signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode])
+        assertEquals(["Turn on two-factor before approving a darpan-admin sign-in."], refused.errors)
+        assertEquals("PENDING", deviceRow(started.userCode as String).statusId)
+        assertNull(deviceRow(started.userCode as String).approvedByUserId)
+        // enrolled, but no code: still refused, still PENDING
+        enrolApp(SUPER_ID)
+        assertFalse(signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors.isEmpty())
+        assertEquals("PENDING", deviceRow(started.userCode as String).statusId)
+        // with a valid code: approved
+        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode, code: nextCode(SUPER_ID)]).errors)
+        assertEquals("APPROVED", deviceRow(started.userCode as String).statusId)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: a TENANT approval by an approver with no two-factor is unchanged")
+    void tenantApprovalNeedsNoFactor() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST]).out
+        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        assertEquals("APPROVED", deviceRow(started.userCode as String).statusId)
     }
 
     @Test
@@ -166,11 +202,27 @@ class CliLoginSmokeTests {
 
     /** start ADMIN, a super admin approves, poll: the raw key. */
     private String adminKey() {
+        enrolApp(SUPER_ID)
         Map started = anon("start#CliLogin", [hostLabel: HOST, scope: "ADMIN"]).out
-        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode, code: nextCode(SUPER_ID)]).errors)
         Map polled = anon("poll#CliLogin", [deviceCode: started.deviceCode]).out
         assertEquals("APPROVED", polled.status)
         return polled.authToken
+    }
+
+    /** An ACTIVE authenticator-app factor for userId, its secret kept for nextCode. */
+    private void enrolApp(String userId) {
+        String secret = TotpSupport.newSecret()
+        secrets[userId] = secret
+        ec.entity.makeValue(TwoFactorRecords.FACTOR).setAll([userId: userId, factorTypeEnumId: TwoFactorRecords.TYPE_TOTP,
+                statusId: TwoFactorRecords.ACTIVE, secret: secret, createdDate: ec.user.nowTimestamp,
+                confirmedDate: ec.user.nowTimestamp]).setSequencedIdPrimary().create()
+    }
+
+    /** The next step's code (the clock moves 30 seconds first, so the replay check never refuses a test's own code). */
+    private String nextCode(String userId) {
+        clock += 30_000L
+        return TotpSupport.code(TotpSupport.decodeSecret(secrets[userId]), TotpSupport.timeStep(clock))
     }
 
     private def cliSessionOf(String raw) {

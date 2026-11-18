@@ -419,6 +419,29 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         assertFalse(OTHER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
     }
 
+    @Test
+    @DisplayName("EVERYONE ignores memberships in disabled tenants: requiredFrom is null and the person is not listed, per request and in the list")
+    void everyoneIgnoresDisabledTenantMemberships() {
+        clearMemberships(USER_ID)
+        ec.entity.makeValue("darpan.auth.TenantUserPermissionGroupMember").setAll([tenantUserGroupId: TENANT_B, userId: USER_ID,
+                permissionUserGroupId: "DARPAN_TENANT_USER", fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
+        setPolicy(TwoFactorPolicy.EVERYONE, new Timestamp(System.currentTimeMillis() - 86_400_000L))
+        assertNotNull(TwoFactorPolicy.requiredFrom(ec, USER_ID))
+        ec.entity.makeValue("darpan.auth.TenantSetting").setAll([companyUserGroupId: TENANT_B, disabled: "Y"]).createOrUpdate()
+        try {
+            assertNull(TwoFactorPolicy.requiredFrom(ec, USER_ID))
+            assertFalse(USER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
+            // one live membership elsewhere covers them again
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "TF_TENANT_LIVE", description: "TF live tenant"]).createOrUpdate()
+            ec.entity.makeValue("darpan.auth.TenantUserPermissionGroupMember").setAll([tenantUserGroupId: "TF_TENANT_LIVE", userId: USER_ID,
+                    permissionUserGroupId: "DARPAN_TENANT_USER", fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
+            assertNotNull(TwoFactorPolicy.requiredFrom(ec, USER_ID))
+            assertTrue(USER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
+        } finally {
+            ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", TENANT_B).disableAuthz().deleteAll()
+        }
+    }
+
     private void clearMemberships(String userId) {
         ec.entity.find("moqui.security.UserGroupMember").condition("userId", userId).disableAuthz().deleteAll()
         ec.entity.find("darpan.auth.TenantUserPermissionGroupMember").condition("userId", userId).disableAuthz().deleteAll()

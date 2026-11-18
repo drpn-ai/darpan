@@ -347,17 +347,19 @@ class CliAuthSupport {
     }
 
     static final String CLI_SESSION_EXPIRED = "This CLI session has expired. Run darpan login to sign in again."
+    static final String ADMIN_SESSION_EXPIRED = "This darpan-admin session has expired. Run the command again to sign in."
     static final String CLI_TWO_FACTOR_NEEDED = "Two-factor is required for this account. Set it up in the Darpan app, then run darpan login again."
 
     static String cliSessionProblem(def ec, String cliKeyHash, def cliSession) {
+        String expired = cliSession?.scopeId == 'ADMIN' ? ADMIN_SESSION_EXPIRED : CLI_SESSION_EXPIRED
         if (cliSession == null || cliSession.revokedDate != null) return "This CLI session was signed out. Run darpan login to sign in again."
         def loginKey = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserLoginKey",
                         "self-scoped auth: re-check a CLI key's expiry for its web session")
                 .condition("loginKey", cliKeyHash).useCache(false).one()
         Timestamp thruDate = (Timestamp) loginKey?.thruDate
-        if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) return CLI_SESSION_EXPIRED
+        if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) return expired
         // DAR-BE-261: the age limit, for admins too, so an admin key issued for 30 days before the change ends at 7.
-        if (CliAccess.signInExpired((Timestamp) cliSession.createdDate, (String) cliSession.scopeId)) return CLI_SESSION_EXPIRED
+        if (CliAccess.signInExpired((Timestamp) cliSession.createdDate, (String) cliSession.scopeId)) return expired
         def account = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserAccount",
                         "self-scoped auth: re-check that a CLI session's account can still sign in")
                 .condition("userId", cliSession.userId).useCache(false).one()
@@ -365,7 +367,7 @@ class CliAuthSupport {
         // TwoFactorSupport.endSessions ran escaped its revoke), or of a person now required to use two-factor and not set
         // up, is refused.
         if (AuthSessionSupport.predatesSessionsEnd(cliSession.createdDate, account?.sessionsEndedDate) ||
-                AuthSessionSupport.predatesSessionsEnd(loginKey.fromDate, account?.sessionsEndedDate)) return CLI_SESSION_EXPIRED
+                AuthSessionSupport.predatesSessionsEnd(loginKey.fromDate, account?.sessionsEndedDate)) return expired
         if (TwoFactorPolicy.requiredButNotEnrolled(ec, (String) cliSession.userId)) return CLI_TWO_FACTOR_NEEDED
         if (!canSignIn(ec, account)) return "This account can no longer sign in."
         if (!cliAccessAllowed(ec, (String) cliSession.userId)) return CLI_ACCESS_REFUSED

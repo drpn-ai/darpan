@@ -114,6 +114,25 @@ class TwoFactorReminderSmokeTests extends TwoFactorTestSupport {
         setPolicy(TwoFactorPolicy.EVERYONE, null)
         call(JOB, [:])
         assertEquals([], sent.findAll { it.templateId == TwoFactorSupport.TEMPLATE_REMINDER })
+        assertEquals(0, sentCount(), "no REMINDER_SENT event for anyone")
+        assertEquals(0, TwoFactorPolicy.sendReminders(ec), "an early return: nothing sent")
+    }
+
+    @Test
+    @DisplayName("a person whose only tenant is disabled gets no reminder")
+    void disabledTenantMemberIsNotReminded() {
+        ec.entity.makeValue("darpan.auth.TenantSetting").setAll([companyUserGroupId: TENANT, disabled: "Y"]).createOrUpdate()
+        try {
+            call(JOB, [:])
+            assertEquals([], sent.findAll { it.templateId == TwoFactorSupport.TEMPLATE_REMINDER })
+            assertEquals(0, events("TFR_NOFACTOR", "REMINDER_SENT").size())
+        } finally {
+            ec.entity.find("darpan.auth.TenantSetting").condition("companyUserGroupId", TENANT).disableAuthz().deleteAll()
+        }
+    }
+
+    private int sentCount() {
+        return PEOPLE.sum { String[] p -> events(p[0], "REMINDER_SENT").size() } as int
     }
 
     private void factor(String userId, String type, String status) {

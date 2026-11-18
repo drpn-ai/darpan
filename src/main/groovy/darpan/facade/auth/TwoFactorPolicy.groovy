@@ -149,6 +149,8 @@ class TwoFactorPolicy {
      */
     static int sendReminders(def ec) {
         Timestamp now = ec.user.nowTimestamp
+        // No dated policy: nobody is owed a reminder, so skip the member, factor and event reads.
+        if (datedRoles(ec, false).isEmpty()) return 0
         List<String> covered = coveredPeople(ec, now)
         int sent = 0
         for (int i = 0; i < covered.size(); i += 500) {
@@ -194,7 +196,18 @@ class TwoFactorPolicy {
         Set<String> found = new HashSet<String>()
         def members = finder("darpan.auth.TenantUserPermissionGroupMember", "self-scoped auth: tenant members, for the two-factor policy covering everyone")
         if (userIds != null) members.condition("userId", EntityCondition.IN, userIds)
-        found.addAll(members.conditionDate("fromDate", "thruDate", now).useCache(false).list()*.userId as List<String>)
+        List memberRows = members.conditionDate("fromDate", "thruDate", now).useCache(false).list()
+        // A membership in a DISABLED tenant (an ex-customer) covers no one (the TenantAccessSupport.listDisabledTenantIds rule:
+        // TenantSetting.disabled = Y); the read stays bounded: only the tenants these members sit in.
+        Set<String> tenantIds = memberRows*.tenantUserGroupId as Set<String>
+        Set<String> disabledTenants = new HashSet<String>()
+        if (tenantIds) {
+            def settings = finder(TenantAccessSupport.TENANT_SETTING_ENTITY_NAME, "self-scoped auth: which tenants are disabled, for the two-factor policy covering everyone")
+                    .condition("disabled", "Y")
+            if (userIds != null) settings.condition("companyUserGroupId", EntityCondition.IN, tenantIds)
+            disabledTenants.addAll(settings.useCache(false).list()*.companyUserGroupId as List<String>)
+        }
+        found.addAll(memberRows.findAll { !(it.tenantUserGroupId as String in disabledTenants) }*.userId as List<String>)
         def roles = finder("moqui.security.UserGroupMember", "self-scoped auth: Darpan-wide roles, for the two-factor policy covering everyone")
         if (userIds != null) roles.condition("userId", EntityCondition.IN, userIds)
         found.addAll(roles.condition("userGroupId", EntityCondition.IN, TenantAccessSupport.DARPAN_ROLE_GROUP_IDS)

@@ -209,7 +209,11 @@
                 <return error="true" message="Only a super admin can approve a darpan-admin sign-in."/></if>
             <!-- DAR-BE-264: a fresh code (DAR-BE-270: or passkey assertion) from an approver with two-factor on, checked in its
                  own transaction, and last, so a request that is no longer waiting spends no code. -->
-            <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, code, passkeyAssertion)"/>
+            <!-- DAR-BE-295: an ADMIN-scope sign-in (a 12 h key that reaches admin.*) needs a fresh proof whether or not the
+                 approver is enrolled; one with no factor is told to turn it on, and nothing is spent. -->
+            <if condition="deviceRow.scopeId == 'ADMIN' &amp;&amp; !darpan.facade.auth.TwoFactorRecords.activeFactors(ec, ec.user.userId)">
+                <return error="true" message="Turn on two-factor before approving a darpan-admin sign-in."/></if>
+            <set field="codeProblem" from="deviceRow.scopeId == 'ADMIN' ? darpan.facade.auth.TwoFactorSupport.freshProofProblem(ec, code, passkeyAssertion) : darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, code, passkeyAssertion)"/>
             <if condition="codeProblem"><return error="true" message="${codeProblem}"/></if>
             <set field="deviceRow.statusId" value="APPROVED"/>
             <set field="deviceRow.approvedByUserId" from="ec.user.userId"/>

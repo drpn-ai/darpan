@@ -16,6 +16,8 @@ class AppContentRulesTests {
         assertEquals("timeout", AppContentRules.normalize("  Timeout (seconds): "))
         assertEquals("schema", AppContentRules.normalize("Source 2 Schema"))
         assertEquals("stop run", AppContentRules.normalize("Stop   Run"))
+        assertEquals("stop run", AppContentRules.normalize("\u00A0Stop\u00A0\u00A0Run:\uFEFF"), "JS \\s covers NBSP and the BOM")
+        assertEquals("i", AppContentRules.normalize("I"), "lower-cased with the root locale")
     }
 
     @Test
@@ -73,7 +75,11 @@ class AppContentRulesTests {
     void refusesAMalformedPattern() {
         assertEquals([], AppContentRules.patternProblems("missing from *"))
         assertEquals([], AppContentRules.patternProblems("retry * not run"))
-        assertFalse(AppContentRules.patternProblems("a*b*c*d* eeee").isEmpty(), "three or more *")
+        assertEquals([], AppContentRules.patternProblems("abcd*efg*hij"), "two * are allowed")
+        assertTrue(AppContentRules.patternProblems("abcd*efg*hij*klm").any { it.contains("at most 2") }, "exactly three * are refused")
+        assertTrue(AppContentRules.patternProblems("stop  run *").any { it.contains("normalised") }, "a double space can never match")
+        assertTrue(AppContentRules.patternProblems("run note: *").isEmpty(), "an inner colon is not stripped by normalize")
+        assertTrue(AppContentRules.patternProblems("stop run *:").any { it.contains("normalised") }, "a trailing colon can never match")
         assertTrue(AppContentRules.patternProblems("some thing** more").any { it.contains("**") })
         assertTrue(AppContentRules.patternProblems("a*b").any { it.contains("at least") }, "under 4 literal characters")
         assertTrue(AppContentRules.patternProblems("word " + "x" * 60 + " *").any { it.contains("over 60") })
@@ -90,8 +96,22 @@ class AppContentRulesTests {
         assertTrue(AppContentRules.aliasProblems(["<b>x</b>"]).any { it.contains("< or >") })
         assertTrue(AppContentRules.aliasProblems((1..11).collect { "alias ${it}".toString() }).any { it.contains("at most 10") })
         assertEquals([], AppContentRules.aliasProblems((1..10).collect { "alias ${it}".toString() }))
+        assertTrue(AppContentRules.aliasProblems(["differences|foo"]).any { it.contains("cannot contain |") }, "the separator never rides inside an alias")
         assertTrue(AppContentRules.aliasProblems("one|ONE").any { it.contains("twice") })
         assertEquals(["one", "two"], AppContentRules.normalizedAliases("One| Two |one|"))
+    }
+
+    @Test
+    void servableRefusesARowWrittenAroundTheRules() {
+        assertTrue(AppContentRules.servable([contentKind: "MASCOT_GLOSSARY", source: "ADMIN", title: "Term", body: "is fine.", aliases: "my term"]))
+        assertFalse(AppContentRules.servable([contentKind: "MASCOT_GLOSSARY", source: "ADMIN", title: "Term", body: "has <b>markup</b>"]))
+        assertFalse(AppContentRules.servable([contentKind: "MASCOT_GLOSSARY", source: "SEED", defaultTitle: "T", defaultBody: "ok.", body: "<b>x</b>"]))
+        assertFalse(AppContentRules.servable([contentKind: "MASCOT_GLOSSARY", source: "SEED", defaultTitle: "T", defaultBody: "ok.", aliases: "a|" + "x" * 61]))
+        assertTrue(AppContentRules.servable([contentKind: "MASCOT_GLOSSARY", source: "SEED", defaultTitle: "T", defaultBody: "ok.", hidden: "Y"]))
+        assertFalse(AppContentRules.servable([contentKind: "MASCOT_GLOSSARY", source: "ADMIN", title: "Term", body: "is fine.", matchPattern: "a**b"]))
+        assertTrue(AppContentRules.retired([source: "SEED", seedMark: "old"], "new"))
+        assertFalse(AppContentRules.retired([source: "ADMIN"], "new"))
+        assertFalse(AppContentRules.retired([source: "SEED", seedMark: "x"], null), "no seed loaded: nothing is retired")
     }
 
     @Test

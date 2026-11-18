@@ -63,14 +63,19 @@ class AppContentRules {
             Pattern.compile(/\bcutting-edge\b/, Pattern.CASE_INSENSITIVE),
     ]
 
+    /** JS `\s` (incl. NBSP and the BOM) and JS trim(), which Java's trim() is not. */
+    private static final String JS_SPACE = /(?U)[\s\uFEFF]/
+
+    private static String jsTrim(String s) { return s.replaceAll("^" + JS_SPACE + "+|" + JS_SPACE + "+\$", "") }
+
     /** Port of darpan-ui mascotTargets.normalizeLabel; the same three vectors are pinned in both repos. */
     static String normalize(String text) {
         if (text == null) return ""
-        String s = text.replaceAll(/\s+/, " ").trim()
-        s = s.replaceAll(/[:：]$/, "").trim()
-        s = s.replaceAll(/\s*\([^)]*\)$/, "")
-        s = s.replaceAll(/(?i)^source \d+\s+/, "").trim()
-        return s.toLowerCase()
+        String s = jsTrim(text.replaceAll(JS_SPACE + "+", " "))
+        s = jsTrim(s.replaceAll(/[:：]$/, ""))
+        s = s.replaceAll("(?U)" + /\s*\([^)]*\)$/, "")
+        s = jsTrim(s.replaceAll("(?iU)" + /^source \d+\s+/, ""))
+        return s.toLowerCase(Locale.ROOT)
     }
 
     /**
@@ -103,6 +108,7 @@ class AppContentRules {
         if (pattern.contains("\n") || pattern.contains("\r")) out << "pattern must be on one line"
         if (pattern != pattern.trim()) out << "pattern cannot start or end with a space"
         if (pattern != pattern.toLowerCase()) out << "pattern must be lowercase"
+        if (normalize(pattern) != pattern) out << "pattern must be in normalised form (single spaces, no trailing colon or (note), lowercase)"
         int stars = pattern.count("*")
         if (stars > MAX_STARS) out << "pattern can have at most ${MAX_STARS} *".toString()
         if (pattern.contains("**")) out << "pattern cannot have ** (two * in a row)"
@@ -126,6 +132,7 @@ class AppContentRules {
         Set<String> seen = new HashSet<String>()
         list.each { String raw ->
             if (raw.contains("<") || raw.contains(">")) { out << "alias '${raw.take(20)}' cannot contain < or >".toString(); return }
+            if (aliases instanceof Collection && raw.contains("|")) { out << "alias '${raw.take(20)}' cannot contain |".toString(); return }
             if (raw.contains("\n") || raw.contains("\r")) { out << "an alias must be on one line"; return }
             String n = normalize(raw)
             if (n.isEmpty()) { out << "an alias cannot be empty"; return }
@@ -195,6 +202,32 @@ class AppContentRules {
         if (text.contains("\n") || text.contains("\r")) out << "${field} must be on one line".toString()
         if (text != text.trim()) out << "${field} cannot start or end with a space".toString()
         return out
+    }
+
+    /** The mark of the newest seed load, or null when none was loaded (then no SEED row counts as retired). */
+    static String currentSeedMark(def ec) {
+        def v = ec.entity.find("darpan.content.AppContentSeed").condition("seedId", "CURRENT").one()
+        return v == null ? null : v.seedMark
+    }
+
+    /** A SEED row a later release no longer generates: its mark is not the current one. ADMIN rows never are. */
+    static boolean retired(Map row, String currentMark) {
+        return currentMark != null && str(row.source) == SEED && str(row.seedMark) != currentMark
+    }
+
+    /** Whether a stored row still obeys the rules, so a row written around them is not served. No database. */
+    static boolean servable(Map row) {
+        String kind = str(row.contentKind)
+        String source = str(row.source)
+        if (!KINDS.contains(kind) || (source != SEED && source != ADMIN)) return false
+        if (source == ADMIN || row.title || row.body) {
+            String t = source == SEED ? str(row.title ?: row.defaultTitle) : str(row.title)
+            String b = source == SEED ? str(row.body ?: row.defaultBody) : str(row.body)
+            if (!wordProblems(kind, source, t ?: null, b ?: null, str(row.defaultTitle), str(row.defaultBody)).isEmpty()) return false
+        }
+        if (row.aliases && !aliasProblems(row.aliases).isEmpty()) return false
+        if (row.matchPattern && !patternProblems(str(row.matchPattern)).isEmpty()) return false
+        return true
     }
 
     private static String str(def v) { return v == null ? "" : v.toString() }
@@ -290,7 +323,9 @@ class AppContentRules {
         List<String> out = []
         Set<String> labels = new HashSet<String>()
         Set<String> otherPatterns = new HashSet<String>()
+        String mark = currentSeedMark(ec)
         ec.entity.find("darpan.content.AppContentEntry").list().each { def r ->
+            if (retired(r.getMap(), mark)) return
             boolean self = r.contentKind == kind && r.contentKey == key
             if (r.matchLabels) labels.addAll(str(r.matchLabels).split(/\|/) as List<String>)
             if (!self && r.aliases) labels.addAll(str(r.aliases).split(/\|/) as List<String>)

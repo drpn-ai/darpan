@@ -15,6 +15,7 @@
         <field name="contentKind" type="id" is-pk="true"/>
         <field name="contentKey" type="id-long" is-pk="true"/>
         <field name="source" type="id"><description>SEED or ADMIN.</description></field>
+        <field name="seedMark" type="id"><description>SEED rows: the generator's content mark when the row was last loaded. A row whose mark is not AppContentSeed CURRENT was dropped by a later release: it is retired (not served, not shadowing) until an admin deletes it.</description></field>
         <field name="defaultTitle" type="text-medium"/>
         <field name="defaultBody" type="text-medium"><description>The words as released; may carry {token} slots a SEED edit must keep.</description></field>
         <field name="matchLabels" type="text-medium"><description>Every label this SEED row's bundle already answers, `|`-joined and normalised; an alias or pattern equal to one is refused.</description></field>
@@ -32,6 +33,12 @@
         <field name="createdByUserId" type="id"/>
         <field name="lastChangedByUserId" type="id"/>
         <field name="lastChangedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="AppContentSeed" package="darpan.content" use="configuration" cache="never">
+        <description>One row, seedId CURRENT, written by the seed load: the mark of the newest generated seed. See AppContentEntry.seedMark.</description>
+        <field name="seedId" type="id" is-pk="true"/>
+        <field name="seedMark" type="id"/>
     </entity>
 
     <entity entity-name="AppRoute" package="darpan.content" use="configuration" cache="never">

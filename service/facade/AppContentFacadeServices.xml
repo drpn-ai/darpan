@@ -33,8 +33,11 @@
             <entity-find entity-name="darpan.content.AppContentEntry" list="rowList" cache="false">
                 <order-by field-name="contentKind,routeName,sequence,defaultSequence,contentKey"/>
             </entity-find>
+            <set field="currentMark" from="darpan.content.AppContentRules.currentSeedMark(ec)"/>
             <iterate list="rowList" entry="row">
-                <set field="edited" from="row.source == 'ADMIN' || row.title || row.body || row.aliases || row.hidden == 'Y'"/>
+                <!-- A SEED row a later release dropped (old seedMark) is retired, and a row written around the rules is
+                     never served; the read re-checks words, aliases and pattern with no database. -->
+                <set field="edited" from="(row.source == 'ADMIN' || row.title || row.body || row.aliases || row.hidden == 'Y') &amp;&amp; !darpan.content.AppContentRules.retired(row.getMap(), currentMark) &amp;&amp; darpan.content.AppContentRules.servable(row.getMap())"/>
                 <if condition="edited">
                     <set field="entry" from="[kind: row.contentKind, key: row.contentKey, source: row.source]"/>
                     <if condition="row.title"><script>entry.title = row.title</script></if>

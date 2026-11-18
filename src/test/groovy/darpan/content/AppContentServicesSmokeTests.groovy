@@ -41,7 +41,7 @@ class AppContentServicesSmokeTests {
 
     @BeforeEach
     void reset() {
-        ["darpan.content.AppContentEntry", "darpan.content.AppRoute", "darpan.content.AppRouteAnchor",
+        ["darpan.content.AppContentEntry", "darpan.content.AppRoute", "darpan.content.AppRouteAnchor", "darpan.content.AppContentSeed",
          "moqui.security.UserGroupMember", "moqui.security.UserPreference"].each { ec.entity.find(it).disableAuthz().deleteAll() }
         ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: USER_ID, username: USERNAME,
                 userFullName: "Content User", emailAddress: "appcont@example.com", disabled: "N", requirePasswordChange: "N"]).createOrUpdate()
@@ -161,6 +161,34 @@ class AppContentServicesSmokeTests {
         Map partial = row(GLOSSARY, "differenceCount")
         assertEquals("a brand new default.", partial.defaultBody)
         assertEquals("Edited title", partial.title)
+    }
+
+    @Test
+    void aDroppedSeedEntryStopsBeingServedAndShadowing() {
+        loadSeed()
+        edit(GLOSSARY, "differenceCount", [title: "Edited title", lastChangedDate: T1])
+        createAdmin(GLOSSARY, "admin:my-term", [title: "My term", body: "is mine.", aliases: "my term"])
+        assertEquals(["admin:my-term", "differenceCount"], (read().entries as List<Map>)*.key.sort())
+        // Seed v2: a new mark, and the file no longer has differenceCount.
+        String v1 = new File(ReconciliationSmokeTestSupport.resolveBackendRoot().toFile(), "runtime/component/darpan/data/AppContentSeedData.xml").text
+        String mark = (v1 =~ /seedId="CURRENT" seedMark="([0-9a-f]+)"/)[0][1]
+        String v2 = v1.replace(mark, "ffffffffffffffff").readLines().findAll { !it.contains('contentKey="differenceCount"') }.join("\n")
+        ec.entity.makeDataLoader().xmlText(v2).dummyFks(true).load()
+
+        assertNotNull(row(GLOSSARY, "differenceCount"), "the row stays until an admin deletes it")
+        assertEquals(["admin:my-term"], (read().entries as List<Map>)*.key, "the dropped, edited entry is not served; the ADMIN row is")
+        assertEquals([], AppContentRules.problems(ec, null, [contentKind: GLOSSARY, contentKey: "admin:reuse", source: "ADMIN",
+                title: "Reuse", body: "is reused.", aliases: ["differences"]]), "a retired entry's labels no longer shadow")
+        assertTrue(AppContentRules.problems(ec, null, [contentKind: GLOSSARY, contentKey: "admin:dup", source: "ADMIN",
+                title: "Dup", body: "is dup.", aliases: ["my term"]]).any { it.contains("already answered") }, "ADMIN rows still count")
+    }
+
+    @Test
+    void aRowWrittenAroundTheRulesIsNotServed() {
+        loadSeed()
+        createAdmin(GLOSSARY, "admin:good", [title: "Good", body: "is good.", aliases: "good one"])
+        createAdmin(GLOSSARY, "admin:bad", [title: "Bad", body: "has <b>markup</b>", aliases: "bad one"])
+        assertEquals(["admin:good"], (read().entries as List<Map>)*.key)
     }
 
     @Test

@@ -52,7 +52,12 @@ class JobScheduleRulesTests {
     @Test
     void nextRunsAndGaps() {
         List<Instant> runs = JobScheduleRules.nextRuns("0 0 2 * * ?", NOW, 3)
-        assertEquals([Instant.parse("2026-11-19T02:00:00Z"), Instant.parse("2026-11-20T02:00:00Z"), Instant.parse("2026-11-21T02:00:00Z")], runs)
+        // 02:00 in the zone the job runner uses (the JVM default), not UTC
+        java.time.ZonedDateTime first = java.time.ZonedDateTime.ofInstant(NOW, JobScheduleRules.zone()).plusDays(1).withHour(2).withMinute(0).withSecond(0).withNano(0)
+        if (!first.toInstant().isAfter(NOW)) first = first.plusDays(1)
+        assertEquals([first, first.plusDays(1), first.plusDays(2)]*.toInstant(), runs)
+        assertEquals(first.toInstant(), JobScheduleRules.firstRunAtOrAfter("0 0 2 * * ?", first.toInstant()))
+        assertEquals(first.plusDays(1).toInstant(), JobScheduleRules.firstRunAtOrAfter("0 0 2 * * ?", first.toInstant().plusMillis(1)))
         assertEquals(1440, JobScheduleRules.smallestGapMinutes("0 0 2 * * ?", NOW))
         assertEquals(5, JobScheduleRules.smallestGapMinutes("0 0/5 * * * ?", NOW))
         assertEquals([], JobScheduleRules.nextRuns("garbage", NOW, 3))

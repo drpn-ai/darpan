@@ -8,12 +8,12 @@ import groovy.transform.CompileDynamic
 
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.ZonedDateTime
 
 /**
  * DAR-BE-305. What a scheduled job's cron may be, and when a resume's preview is still good. Pure: no entity or service
- * access. Quartz flavour (seconds field, `?`), the same parser the framework's job runner uses, evaluated in UTC like it.
+ * access. Quartz flavour (seconds field, `?`), the same parser the framework's job runner uses, evaluated in the JVM default zone like it.
  *
  * A cron is refused, with the reason, when it is blank, over 120 characters, does not parse, never fires within 400 days, or
  * its smallest gap between two runs (over the next 500 runs, at most three years ahead) is under the job's floor. The
@@ -28,6 +28,9 @@ class JobScheduleRules {
     static final long TOLERANCE_FLOOR_ROWS = 100L
     static final BigDecimal TOLERANCE_FRACTION = 0.05G
 
+    /** The zone the framework's job runner evaluates a cron in (ScheduledJobRunner: ZonedDateTime.now()), so what is promised here is what runs. */
+    static ZoneId zone() { return ZoneId.systemDefault() }
+
     private static final CronParser PARSER = new CronParser(CronDefinitionBuilder.instanceDefinitionFor(CronType.QUARTZ))
 
     /** Null when `cron` is acceptable for a job that may run at most every `minIntervalMinutes` (null reads as 1). */
@@ -41,7 +44,7 @@ class JobScheduleRules {
         } catch (Exception e) {
             return "Not a valid Quartz cron (six fields: seconds minutes hours day-of-month month day-of-week, with ? in one of the two day fields): ${e.message}".toString()
         }
-        ZonedDateTime start = ZonedDateTime.ofInstant(now, ZoneOffset.UTC)
+        ZonedDateTime start = ZonedDateTime.ofInstant(now, zone())
         Optional<ZonedDateTime> first
         try { first = time.nextExecution(start) } catch (Exception ignored) { first = Optional.empty() }
         if (!first.isPresent() || Duration.between(start, first.get()).toDays() > MAX_DAYS_TO_FIRST_RUN) {
@@ -60,7 +63,7 @@ class JobScheduleRules {
         List<Instant> out = []
         try {
             ExecutionTime time = ExecutionTime.forCron(PARSER.parse(cron.trim()))
-            ZonedDateTime cursor = ZonedDateTime.ofInstant(from, ZoneOffset.UTC)
+            ZonedDateTime cursor = ZonedDateTime.ofInstant(from, zone())
             while (out.size() < count) {
                 Optional<ZonedDateTime> next = time.nextExecution(cursor)
                 if (!next.isPresent()) break
@@ -74,12 +77,25 @@ class JobScheduleRules {
     /** The first run of `cron` at or after `at`, or null when the cron does not parse or never runs again. */
     static Instant firstRunAtOrAfter(String cron, Instant at) {
         try {
-            ExecutionTime time = ExecutionTime.forCron(PARSER.parse(cron.trim()))
-            ZonedDateTime zoned = ZonedDateTime.ofInstant(at, ZoneOffset.UTC)
+            ExecutionTime time = parsed(cron.trim())
+            ZonedDateTime zoned = ZonedDateTime.ofInstant(at, zone())
             if (at.nano == 0 && time.isMatch(zoned)) return at
             Optional<ZonedDateTime> next = time.nextExecution(zoned)
             return next.isPresent() ? next.get().toInstant() : null
         } catch (Exception ignored) { return null }
+    }
+
+    /** Parsed once per distinct cron: a board asks for one scan cron once per fire. Bounded, so edits cannot grow it. */
+    private static final Map<String, ExecutionTime> PARSED = new java.util.concurrent.ConcurrentHashMap<>()
+
+    private static ExecutionTime parsed(String cron) {
+        ExecutionTime t = PARSED.get(cron)
+        if (t == null) {
+            if (PARSED.size() > 64) PARSED.clear()
+            t = ExecutionTime.forCron(PARSER.parse(cron))
+            PARSED.put(cron, t)
+        }
+        return t
     }
 
     /** The smallest gap, in whole minutes (0 for a sub-minute gap), between consecutive runs; null when it has under two runs. */
@@ -92,8 +108,8 @@ class JobScheduleRules {
         List<Instant> runs = []
         try {
             ExecutionTime time = ExecutionTime.forCron(PARSER.parse(cron.trim()))
-            ZonedDateTime limit = ZonedDateTime.ofInstant(from, ZoneOffset.UTC).plusDays(HORIZON_DAYS)
-            ZonedDateTime cursor = ZonedDateTime.ofInstant(from, ZoneOffset.UTC)
+            ZonedDateTime limit = ZonedDateTime.ofInstant(from, zone()).plusDays(HORIZON_DAYS)
+            ZonedDateTime cursor = ZonedDateTime.ofInstant(from, zone())
             while (runs.size() < RUNS_CHECKED) {
                 Optional<ZonedDateTime> next = time.nextExecution(cursor)
                 if (!next.isPresent() || next.get().isAfter(limit)) break

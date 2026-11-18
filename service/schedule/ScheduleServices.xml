@@ -12,6 +12,9 @@
         <description>Sets cronExpression and paused from the shipped defaults on every Darpan job nobody edited, and
             parameterValue from defaultValue on every unedited parameter. Rows whose live value already equals the default
             are left alone and not counted.</description>
+        <in-parameters>
+            <parameter name="jobName"><description>Optional: apply to this job (and its parameters) only; blank = every job.</description></parameter>
+        </in-parameters>
         <out-parameters>
             <parameter name="jobsUpdated" type="Integer"/>
             <parameter name="parametersUpdated" type="Integer"/>
@@ -22,6 +25,7 @@
             <entity-find entity-name="moqui.service.job.ServiceJob" list="jobList" cache="false">
                 <econdition field-name="defaultCronExpression" operator="is-not-null"/>
                 <econdition field-name="editedDate" operator="is-null"/>
+                <econdition field-name="jobName" ignore-if-empty="true"/>
             </entity-find>
             <iterate list="jobList" entry="job">
                 <set field="wantPaused" from="job.defaultPaused ?: 'N'"/>
@@ -35,6 +39,7 @@
             <entity-find entity-name="moqui.service.job.ServiceJobParameter" list="paramList" cache="false">
                 <econdition field-name="defaultValue" operator="is-not-null"/>
                 <econdition field-name="editedDate" operator="is-null"/>
+                <econdition field-name="jobName" ignore-if-empty="true"/>
             </entity-find>
             <iterate list="paramList" entry="param">
                 <if condition="param.parameterValue != param.defaultValue">
@@ -43,6 +48,95 @@
                     <set field="parametersUpdated" from="parametersUpdated + 1"/>
                 </if>
             </iterate>
+        </actions>
+    </service>
+
+    <!-- DAR-BE-305: the pieces admin.ScheduleAdminServices shares. Internal: callers have checked super admin. -->
+
+    <service verb="describe" noun="ServiceJob" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>One job as admin.ScheduleAdminServices.get#ServiceJobs lists it; empty when there is no such job.</description>
+        <in-parameters><parameter name="jobName" required="true"/></in-parameters>
+        <out-parameters><parameter name="job" type="Map"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="moqui.service.job.ServiceJob" value-field="row" cache="false"/>
+            <if condition="!row"><return/></if>
+            <entity-find entity-name="moqui.service.job.ServiceJobParameter" list="paramRows" cache="false">
+                <econdition field-name="jobName"/>
+                <order-by field-name="parameterName"/>
+            </entity-find>
+            <entity-find entity-name="moqui.service.job.ServiceJobRun" list="runList" cache="false">
+                <econdition field-name="jobName"/>
+                <order-by field-name="-startTime"/>
+                <limit-range start="0" size="1"/>
+            </entity-find>
+            <set field="lastRun" from="runList ? runList[0] : null"/>
+            <set field="sd" from="((org.moqui.impl.service.ServiceFacadeImpl) ec.service).getServiceDefinition(row.serviceName)"/>
+            <set field="editable" from="row.defaultCronExpression != null"/>
+            <set field="parameters" from="[]"/>
+            <iterate list="paramRows" entry="p">
+                <set field="paramNode" from="sd?.getInParameter(p.parameterName)"/>
+                <script>parameters.add([parameterName: p.parameterName, value: p.parameterValue, defaultValue: p.defaultValue,
+                        edited: p.editedDate != null, type: paramNode == null ? null : (paramNode.attribute('type') ?: 'String')])</script>
+            </iterate>
+            <set field="nextRuns" from="row.cronExpression ? darpan.schedule.JobScheduleRules.nextRuns(row.cronExpression, ec.user.nowTimestamp.toInstant(), 3).collect { java.sql.Timestamp.from(it) } : []"/>
+            <set field="job" from="[jobName: row.jobName, description: row.description, serviceName: row.serviceName,
+                    cronExpression: row.cronExpression, paused: row.paused ?: 'N', defaultCronExpression: row.defaultCronExpression,
+                    defaultPaused: editable ? (row.defaultPaused ?: 'N') : null, minIntervalMinutes: row.minIntervalMinutes,
+                    editable: editable, edited: row.editedDate != null, editedByUserId: row.editedByUserId, editedDate: row.editedDate,
+                    nextRuns: nextRuns, lastRun: lastRun == null ? null : [startTime: lastRun.startTime, endTime: lastRun.endTime, hasError: lastRun.hasError],
+                    resumeNeedsPreview: row.resumePreviewService != null, parameters: parameters]"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="JobParameter" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Why `value` cannot be saved as parameter `parameterName` of `serviceName` (empty problem = it can): the service
+            is not defined, takes no such in-parameter, the value is blank, or it does not convert to the parameter's type. A
+            Boolean parameter takes only true, false, Y or N (any case).</description>
+        <in-parameters>
+            <parameter name="serviceName" required="true"/>
+            <parameter name="parameterName" required="true"/>
+            <parameter name="value"/>
+        </in-parameters>
+        <out-parameters><parameter name="problem"/></out-parameters>
+        <actions>
+            <set field="sd" from="((org.moqui.impl.service.ServiceFacadeImpl) ec.service).getServiceDefinition(serviceName)"/>
+            <set field="paramNode" from="sd?.getInParameter(parameterName)"/>
+            <set field="text" from="value?.toString()?.trim()"/>
+            <set field="type" from="paramNode?.attribute('type') ?: 'String'"/>
+            <set field="target" from="org.moqui.util.MClassLoader.getCommonClass(type)"/>
+            <set field="isBoolean" from="type in ['Boolean', 'boolean', 'java.lang.Boolean']"/>
+            <set field="converted" from="(text &amp;&amp; target != null &amp;&amp; !isBoolean) ? org.moqui.util.ObjectUtilities.basicConvert(text, type) : null"/>
+            <set field="problem" from="sd == null ? ('The service ' + serviceName + ' is not defined.')
+                    : paramNode == null ? (parameterName + ' is not a parameter of ' + serviceName + '; it takes ' + (sd.getInParameterNames().sort(false, { it }).join(', ') ?: 'none') + '.')
+                    : !text ? (parameterName + ' is blank; reset it to its default instead.')
+                    : (isBoolean &amp;&amp; !(text.toLowerCase() in ['true', 'false', 'y', 'n'])) ? (parameterName + ' must be true, false, Y or N; ' + text + ' is not.')
+                    : (target != null &amp;&amp; !isBoolean &amp;&amp; !target.isInstance(converted)) ? (parameterName + ' must be ' + type + '; ' + text + ' is not.')
+                    : null"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="ResumePreview" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Whether a resume that needs a preview may go ahead: runs today's dry run (previewService), applies the tolerance
+            rule to what the person saw (previewedRows). problem is empty when it may; note says both counts for the audit row.</description>
+        <in-parameters>
+            <parameter name="previewService" required="true"/>
+            <parameter name="previewedRows" type="Long"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="problem"/>
+            <parameter name="note"/>
+        </out-parameters>
+        <actions>
+            <if condition="previewedRows == null">
+                <set field="problem" from="darpan.schedule.JobScheduleRules.previewProblem(null, 0L)"/>
+                <return/>
+            </if>
+            <set field="counted" from="darpan.admin.ScheduleJobAdminSupport.previewRows(ec, previewService)"/>
+            <if condition="counted.error"><set field="problem" from="counted.error"/><return/></if>
+            <set field="problem" from="darpan.schedule.JobScheduleRules.previewProblem(previewedRows, counted.rows as long)"/>
+            <if condition="!problem">
+                <set field="note" from="'preview showed ' + previewedRows + ' rows, today\'s dry run counts ' + counted.rows"/>
+            </if>
         </actions>
     </service>
 </services>

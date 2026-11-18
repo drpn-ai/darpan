@@ -6375,7 +6375,7 @@
                 "properties": {
                     
                 },
-                "description": "Every scheduled job: jobName, description, serviceName, cronExpression, paused (Y/N), defaultCronExpression,\n            defaultPaused, minIntervalMinutes (the smallest gap an edited cron may leave), editable (Darpan's own jobs),\n            edited, editedByUserId, editedDate, nextRuns (the next 3, UTC), lastRun {startTime, endTime, hasError} from the newest\n            run, resumeNeedsPreview (resuming it deletes data: update#ServiceJob then needs previewedRows) and parameters\n            [{parameterName, value, defaultValue, edited, type}]."
+                "description": "Every scheduled job: jobName, description, serviceName, cronExpression, paused (Y/N), defaultCronExpression,\n            defaultPaused, minIntervalMinutes (the smallest gap an edited cron may leave), editable (Darpan's own jobs),\n            edited, editedByUserId, editedDate, nextRuns (the next 3), lastRun {startTime, endTime, hasError} from the newest\n            run, resumeNeedsPreview (resuming it deletes data: update#ServiceJob then needs previewedRows) and parameters\n            [{parameterName, value, defaultValue, edited, type}]. Crons run in the server's time zone (what the job runner uses)."
             },
             "GetServiceJobsResult": {
                 "type": "object",
@@ -6463,7 +6463,7 @@
                     "jobName",
                     "cronExpression"
                 ],
-                "description": "Checks a cron for a job without saving anything: problem (empty when fine; names the job's floor when the cron\n            runs more often than it allows, or says it never runs), the next 5 runs (UTC) and the smallest gap in minutes\n            between runs. Quartz cron: six fields (seconds first), at most 120 characters, must run within 400 days."
+                "description": "Checks a cron for a job without saving anything: problem (empty when fine; names the job's floor when the cron\n            runs more often than it allows, or says it never runs), the next 5 runs and the smallest gap in minutes\n            between runs. Quartz cron: six fields (seconds first), at most 120 characters, must run within 400 days."
             },
             "PreviewJobScheduleResult": {
                 "type": "object",
@@ -6563,7 +6563,7 @@
                 "required": [
                     "jobName"
                 ],
-                "description": "Puts a Darpan job back on its shipped defaults. With no parameterNames: the cron and pause state go back to the\n            shipped ones, every parameter edited here goes back to its default (a parameter with no default is deleted), and the\n            job follows the defaults on every later deploy again. With parameterNames: only those parameters (the cron and pause\n            state stay edited). A reset that resumes a job with resumePreviewService needs previewedRows, as update#ServiceJob does.\n            A job already on its defaults changes nothing and writes no audit row. Writes one AdminAuditLog row naming each\n            change."
+                "description": "Puts a Darpan job back on its shipped defaults. With no parameterNames: the cron and pause state go back to the\n            shipped ones, every parameter edited here goes back to its default (a parameter with no default is deleted), and the\n            job follows the defaults on every later deploy again. With parameterNames: only those parameters (the cron and pause\n            state stay edited). A reset that resumes a job with resumePreviewService needs previewedRows, as update#ServiceJob does,\n            and a reset that changes the cron counts as a run made now, as there. A job already on its defaults changes nothing and\n            writes no audit row. Writes one AdminAuditLog row naming each change."
             },
             "ResetServiceJobResult": {
                 "type": "object",
@@ -6660,7 +6660,7 @@
                 "required": [
                     "jobName"
                 ],
-                "description": "Edits a Darpan job: its cron, its pause state, its parameters, in one call; refused as a whole, with the reason and\n            nothing saved, when any part is wrong. Refused: a job that is not Darpan's, a cron that does not parse, is blank,\n            over 120 characters, never runs within 400 days or leaves a gap under the job's minIntervalMinutes, paused other than Y or N,\n            a parameter the job's service does not take, a blank value or one that does not convert to the parameter's type.\n            Resuming (Y to N) a job with resumePreviewService (retention) needs previewedRows, the total the preview showed: the\n            preview is run again and the resume is refused when today's count is more than 100 rows or 5% above it. Pausing needs\n            no preview. A value equal to the live one is not a change; no change writes no audit row. Writes one AdminAuditLog row\n            (`cron: a -> b; paused: Y -> N (preview showed N rows, today's dry run counts M); name: a -> b`)."
+                "description": "Edits a Darpan job: its cron, its pause state, its parameters, in one call; refused as a whole, with the reason and\n            nothing saved, when any part is wrong. Refused: a job that is not Darpan's, a cron that does not parse, is blank,\n            over 120 characters, never runs within 400 days or leaves a gap under the job's minIntervalMinutes, paused other than Y or N,\n            a parameter the job's service does not take, a blank value or one that does not convert to the parameter's type (a\n            Boolean takes true, false, Y or N).\n            Resuming (Y to N) a job with resumePreviewService (retention) needs previewedRows, the total the preview showed: the\n            preview is run again and the resume is refused when today's count is more than 100 rows or 5% above it. Pausing needs\n            no preview. A resumed job runs within about a minute (the runner catches up a run that was due while it was paused),\n            unless the same call changes its cron. A cron change counts as a run made now (ServiceJobRunLock.lastRunTime), so moving\n            the time to one already past today does not fire the job at once and break its floor; the next run is the cron's next\n            time. A value equal to the live one is not a change; no change writes no audit row. Writes one AdminAuditLog row\n            (`cron: a -> b; paused: Y -> N (preview showed N rows, today's dry run counts M); name: a -> b`)."
             },
             "UpdateServiceJobResult": {
                 "type": "object",

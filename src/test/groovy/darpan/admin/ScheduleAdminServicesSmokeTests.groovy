@@ -81,6 +81,7 @@ class ScheduleAdminServicesSmokeTests {
             ec.service.sync().name("schedule.ScheduleServices.apply#JobDefaults").call()
             ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: FRAMEWORK, description: "a framework job",
                     serviceName: "reconciliation.ReconciliationAutomationServices.scan#DueAutomations", cronExpression: "0 0 1 * * ?", paused: "N"]).createOrUpdate()
+            ec.entity.find("moqui.service.job.ServiceJobRunLock").deleteAll()
             ec.entity.find("moqui.service.job.ServiceJobRun").condition("jobName", EXTRACTS).deleteAll()
             ec.entity.find("darpan.agent.AgentQueryLog").condition("companyUserGroupId", TENANT).deleteAll()
         }
@@ -230,6 +231,56 @@ class ScheduleAdminServicesSmokeTests {
         assertNull(param(SCAN, "sparkAppName").defaultValue)
     }
 
+    @Test
+    void aCronChangeCountsAsARunMadeNowSoTheRunnerDoesNotCatchUpAtOnce() {
+        Timestamp before = new Timestamp(System.currentTimeMillis() - 1000L)
+        asSystem { ec.entity.find("moqui.service.job.ServiceJobRunLock").condition("jobName", EXTRACTS).deleteAll() }
+        ok(svc("update#ServiceJob", [jobName: EXTRACTS, paused: "Y"]))
+        assertNull(lock(EXTRACTS), "a pause change is not a cron change")
+        ok(svc("update#ServiceJob", [jobName: EXTRACTS, cronExpression: "0 0 4 * * ?"]))
+        assertNotNull(lock(EXTRACTS))
+        assertFalse(lock(EXTRACTS).lastRunTime.before(before), "lastRunTime is now, so a time already past today is not a missed run")
+        // an existing lock keeps its jobRunId and gets a new lastRunTime
+        asSystem {
+            ec.entity.makeValue("moqui.service.job.ServiceJobRun").setAll([jobRunId: "SCHJ_RUN", jobName: EXTRACTS]).createOrUpdate()
+            ec.entity.makeValue("moqui.service.job.ServiceJobRunLock").setAll([jobName: EXTRACTS, jobRunId: "SCHJ_RUN", lastRunTime: new Timestamp(0L)]).update()
+        }
+        ok(svc("update#ServiceJob", [jobName: EXTRACTS, cronExpression: "0 0 5 * * ?"]))
+        assertEquals("SCHJ_RUN", lock(EXTRACTS).jobRunId)
+        assertFalse(lock(EXTRACTS).lastRunTime.before(before))
+        // a reset that moves the cron back does the same
+        asSystem { ec.entity.makeValue("moqui.service.job.ServiceJobRunLock").setAll([jobName: EXTRACTS, lastRunTime: new Timestamp(0L)]).update() }
+        ok(svc("reset#ServiceJob", [jobName: EXTRACTS]))
+        assertFalse(lock(EXTRACTS).lastRunTime.before(before))
+    }
+
+    @Test
+    void aBooleanParameterTakesOnlyTrueFalseYOrN() {
+        String service = "reconciliation.ReconciliationGenericServices.reconcile#GenericFiles"
+        Closure<String> problem = { String v ->
+            Map out = [:]
+            asSystem { out = ec.service.sync().name("schedule.ScheduleServices.check#JobParameter")
+                    .parameters([serviceName: service, parameterName: "hasHeader", value: v]).call() }
+            return out.problem as String
+        }
+        ["true", "FALSE", "y", "N", " Y "].each { assertNull(problem(it), it) }
+        ["maybe", "1", "yes", ""].each { assertNotNull(problem(it), "'${it}'") }
+    }
+
+    @Test
+    void aResetTouchesOnlyItsOwnJob() {
+        String other = "sweep_RuleChildTenantStamps_hourly"
+        ok(svc("update#ServiceJob", [jobName: SCAN, cronExpression: "0 0/10 * * * ?"]))
+        // a shipped default moved on for a different, unedited job; resetting the scan job must not apply it
+        asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: other, defaultCronExpression: "0 0 5 * * ?"]).update() }
+        try {
+            ok(svc("reset#ServiceJob", [jobName: SCAN]))
+            assertEquals("0 15 * * * ?", job(other).cronExpression)
+        } finally {
+            asSystem { ec.entity.makeValue("moqui.service.job.ServiceJob").setAll([jobName: other, defaultCronExpression: "0 15 * * * ?"]).update() }
+        }
+    }
+
     // ------------------------------------------------------------------ pause and resume
 
     @Test
@@ -356,6 +407,10 @@ class ScheduleAdminServicesSmokeTests {
 
     private EntityValue job(String name) {
         return ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", name).disableAuthz().useCache(false).one()
+    }
+
+    private EntityValue lock(String name) {
+        return ec.entity.find("moqui.service.job.ServiceJobRunLock").condition("jobName", name).disableAuthz().useCache(false).one()
     }
 
     private EntityValue param(String jobName, String parameterName) {

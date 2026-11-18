@@ -56,22 +56,28 @@
     <service verb="get" noun="ServiceJobs" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
         <description>Every scheduled job: jobName, description, serviceName, cronExpression, paused (Y/N), defaultCronExpression,
             defaultPaused, minIntervalMinutes (the smallest gap an edited cron may leave), editable (Darpan's own jobs),
-            edited, editedByUserId, editedDate, nextRuns (the next 3, UTC), lastRun {startTime, endTime, hasError} from the newest
+            edited, editedByUserId, editedDate, nextRuns (the next 3), lastRun {startTime, endTime, hasError} from the newest
             run, resumeNeedsPreview (resuming it deletes data: update#ServiceJob then needs previewedRows) and parameters
-            [{parameterName, value, defaultValue, edited, type}].</description>
+            [{parameterName, value, defaultValue, edited, type}]. Crons run in the server's time zone (what the job runner uses).</description>
         <out-parameters>
             <parameter name="jobs" type="List"><parameter name="job" type="Map"/></parameter>
         </out-parameters>
         <actions>
             <set field="jobs" from="[]"/>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
-            <set field="jobs" from="darpan.admin.ScheduleJobAdminSupport.describeAll(ec)"/>
+            <entity-find entity-name="moqui.service.job.ServiceJob" list="jobRows" cache="false">
+                <order-by field-name="jobName"/>
+            </entity-find>
+            <iterate list="jobRows" entry="jobRow">
+                <service-call name="schedule.ScheduleServices.describe#ServiceJob" in-map="[jobName: jobRow.jobName]" out-map="described"/>
+                <script>jobs.add(described.job)</script>
+            </iterate>
         </actions>
     </service>
 
     <service verb="preview" noun="JobSchedule" allow-remote="true" authenticate="true" authz-action="view" transaction="ignore">
         <description>Checks a cron for a job without saving anything: problem (empty when fine; names the job's floor when the cron
-            runs more often than it allows, or says it never runs), the next 5 runs (UTC) and the smallest gap in minutes
+            runs more often than it allows, or says it never runs), the next 5 runs and the smallest gap in minutes
             between runs. Quartz cron: six fields (seconds first), at most 120 characters, must run within 400 days.</description>
         <in-parameters>
             <parameter name="jobName" required="true"/>
@@ -86,10 +92,11 @@
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <entity-find-one entity-name="moqui.service.job.ServiceJob" value-field="job" cache="false"/>
             <if condition="!job"><return error="true" message="No job ${jobName}."/></if>
-            <set field="checked" from="darpan.admin.ScheduleJobAdminSupport.previewSchedule(ec, job, cronExpression)"/>
-            <set field="problem" from="checked.problem"/>
-            <set field="nextRuns" from="checked.nextRuns"/>
-            <set field="smallestGapMinutes" from="checked.smallestGapMinutes"/>
+            <set field="text" from="cronExpression?.trim()"/>
+            <set field="nowInstant" from="ec.user.nowTimestamp.toInstant()"/>
+            <set field="problem" from="darpan.schedule.JobScheduleRules.cronProblem(text, job.minIntervalMinutes, nowInstant)"/>
+            <set field="nextRuns" from="text ? darpan.schedule.JobScheduleRules.nextRuns(text, nowInstant, 5).collect { java.sql.Timestamp.from(it) } : []"/>
+            <set field="smallestGapMinutes" from="text ? darpan.schedule.JobScheduleRules.smallestGapMinutes(text, nowInstant) : null"/>
         </actions>
     </service>
 
@@ -97,10 +104,14 @@
         <description>Edits a Darpan job: its cron, its pause state, its parameters, in one call; refused as a whole, with the reason and
             nothing saved, when any part is wrong. Refused: a job that is not Darpan's, a cron that does not parse, is blank,
             over 120 characters, never runs within 400 days or leaves a gap under the job's minIntervalMinutes, paused other than Y or N,
-            a parameter the job's service does not take, a blank value or one that does not convert to the parameter's type.
+            a parameter the job's service does not take, a blank value or one that does not convert to the parameter's type (a
+            Boolean takes true, false, Y or N).
             Resuming (Y to N) a job with resumePreviewService (retention) needs previewedRows, the total the preview showed: the
             preview is run again and the resume is refused when today's count is more than 100 rows or 5% above it. Pausing needs
-            no preview. A value equal to the live one is not a change; no change writes no audit row. Writes one AdminAuditLog row
+            no preview. A resumed job runs within about a minute (the runner catches up a run that was due while it was paused),
+            unless the same call changes its cron. A cron change counts as a run made now (ServiceJobRunLock.lastRunTime), so moving
+            the time to one already past today does not fire the job at once and break its floor; the next run is the cron's next
+            time. A value equal to the live one is not a change; no change writes no audit row. Writes one AdminAuditLog row
             (`cron: a -> b; paused: Y -> N (preview showed N rows, today's dry run counts M); name: a -> b`).</description>
         <in-parameters>
             <parameter name="jobName" required="true"/>
@@ -116,17 +127,81 @@
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <entity-find-one entity-name="moqui.service.job.ServiceJob" value-field="job" cache="false" for-update="true"/>
             <if condition="!job"><return error="true" message="No job ${jobName}."/></if>
-            <set field="plan" from="darpan.admin.ScheduleJobAdminSupport.planUpdate(ec, job, cronExpression, paused, parameters, previewedRows)"/>
-            <if condition="plan.error"><return error="true" message="${plan.error}"/></if>
-            <if condition="plan.changed">
-                <if condition="plan.jobChanged">
-                    <if condition="plan.cronExpression"><set field="job.cronExpression" from="plan.cronExpression"/></if>
-                    <if condition="plan.paused"><set field="job.paused" from="plan.paused"/></if>
+            <if condition="job.defaultCronExpression == null"><return error="true" message="${jobName} is not one of Darpan's jobs and cannot be edited here."/></if>
+            <if condition="cronExpression != null &amp;&amp; !cronExpression.trim()"><return error="true" message="The cron is blank; pause the job instead of clearing its cron."/></if>
+            <set field="newCron" from="cronExpression?.trim() ?: null"/>
+            <set field="newPaused" from="paused?.trim()?.toUpperCase() ?: null"/>
+            <if condition="newCron == null &amp;&amp; newPaused == null &amp;&amp; !parameters"><return error="true" message="Nothing to change: send cronExpression, paused or parameters."/></if>
+
+            <!-- plan: every check first, so a refusal has saved nothing -->
+            <set field="changes" from="[]"/>
+            <set field="cronChanged" from="false"/>
+            <set field="pausedChanged" from="false"/>
+            <if condition="newCron != null">
+                <set field="cronProblem" from="darpan.schedule.JobScheduleRules.cronProblem(newCron, job.minIntervalMinutes, ec.user.nowTimestamp.toInstant())"/>
+                <if condition="cronProblem"><return error="true" message="${cronProblem}"/></if>
+                <if condition="newCron != job.cronExpression">
+                    <set field="cronChanged" from="true"/>
+                    <script>changes.add('cron: ' + job.cronExpression + ' -> ' + newCron)</script>
+                </if>
+            </if>
+            <if condition="newPaused != null">
+                <if condition="!(newPaused in ['Y', 'N'])"><return error="true" message="paused is Y or N, not '${paused}'."/></if>
+                <set field="livePaused" from="job.paused ?: 'N'"/>
+                <if condition="newPaused != livePaused">
+                    <set field="pausedChanged" from="true"/>
+                    <set field="pausedNote" from="''"/>
+                    <if condition="newPaused == 'N' &amp;&amp; job.resumePreviewService != null">
+                        <service-call name="schedule.ScheduleServices.check#ResumePreview" out-map="pv"
+                                in-map="[previewService: job.resumePreviewService, previewedRows: previewedRows]"/>
+                        <if condition="pv.problem"><return error="true" message="${pv.problem}"/></if>
+                        <set field="pausedNote" from="' (' + pv.note + ')'"/>
+                    </if>
+                    <script>changes.add('paused: ' + livePaused + ' -> ' + newPaused + pausedNote)</script>
+                </if>
+            </if>
+            <set field="paramWrites" from="[]"/>
+            <iterate list="(parameters ?: [:]).entrySet()" entry="pe">
+                <set field="pName" from="pe.key.toString()"/>
+                <service-call name="schedule.ScheduleServices.check#JobParameter" out-map="chk"
+                        in-map="[serviceName: job.serviceName, parameterName: pName, value: pe.value]"/>
+                <if condition="chk.problem"><return error="true" message="${chk.problem}"/></if>
+                <set field="pValue" from="pe.value.toString().trim()"/>
+                <entity-find-one entity-name="moqui.service.job.ServiceJobParameter" value-field="existing" cache="false">
+                    <field-map field-name="jobName"/>
+                    <field-map field-name="parameterName" from="pName"/>
+                </entity-find-one>
+                <if condition="existing?.parameterValue != pValue">
+                    <script>paramWrites.add([parameterName: pName, value: pValue])
+                        changes.add(pName + ': ' + (existing?.parameterValue ?: '(none)') + ' -> ' + pValue)</script>
+                </if>
+            </iterate>
+
+            <!-- write -->
+            <if condition="changes">
+                <if condition="cronChanged || pausedChanged">
+                    <if condition="cronChanged"><set field="job.cronExpression" from="newCron"/></if>
+                    <if condition="pausedChanged"><set field="job.paused" from="newPaused"/></if>
                     <set field="job.editedByUserId" from="ec.user.userId"/>
                     <set field="job.editedDate" from="ec.user.nowTimestamp"/>
                     <entity-update value-field="job"/>
                 </if>
-                <iterate list="plan.paramWrites" entry="pw">
+                <if condition="cronChanged">
+                    <!-- the runner runs a job at once when its last scheduled time is after lastRunTime: count this edit as a run made now -->
+                    <entity-find-one entity-name="moqui.service.job.ServiceJobRunLock" value-field="runLock" cache="false" for-update="true">
+                        <field-map field-name="jobName"/>
+                    </entity-find-one>
+                    <if condition="runLock">
+                        <set field="runLock.lastRunTime" from="ec.user.nowTimestamp"/>
+                        <entity-update value-field="runLock"/>
+                    <else>
+                        <entity-make-value entity-name="moqui.service.job.ServiceJobRunLock" value-field="newLock"/>
+                        <set field="newLock.jobName" from="jobName"/>
+                        <set field="newLock.lastRunTime" from="ec.user.nowTimestamp"/>
+                        <entity-create value-field="newLock"/>
+                    </else></if>
+                </if>
+                <iterate list="paramWrites" entry="pw">
                     <entity-find-one entity-name="moqui.service.job.ServiceJobParameter" value-field="paramRow" cache="false">
                         <field-map field-name="jobName"/>
                         <field-map field-name="parameterName" from="pw.parameterName"/>
@@ -146,9 +221,10 @@
                         <entity-create value-field="newParam"/>
                     </else></if>
                 </iterate>
-                <script>darpan.admin.AdminAuditSupport.record(ec, "admin.ScheduleAdminServices.update#ServiceJob", "ServiceJob", jobName, plan.audit)</script>
+                <script>darpan.admin.AdminAuditSupport.record(ec, "admin.ScheduleAdminServices.update#ServiceJob", "ServiceJob", jobName, changes.join('; '))</script>
             </if>
-            <set field="job" from="darpan.admin.ScheduleJobAdminSupport.describeOne(ec, jobName)"/>
+            <service-call name="schedule.ScheduleServices.describe#ServiceJob" in-map="[jobName: jobName]" out-map="described"/>
+            <set field="job" from="described.job"/>
         </actions>
     </service>
 
@@ -156,9 +232,9 @@
         <description>Puts a Darpan job back on its shipped defaults. With no parameterNames: the cron and pause state go back to the
             shipped ones, every parameter edited here goes back to its default (a parameter with no default is deleted), and the
             job follows the defaults on every later deploy again. With parameterNames: only those parameters (the cron and pause
-            state stay edited). A reset that resumes a job with resumePreviewService needs previewedRows, as update#ServiceJob does.
-            A job already on its defaults changes nothing and writes no audit row. Writes one AdminAuditLog row naming each
-            change.</description>
+            state stay edited). A reset that resumes a job with resumePreviewService needs previewedRows, as update#ServiceJob does,
+            and a reset that changes the cron counts as a run made now, as there. A job already on its defaults changes nothing and
+            writes no audit row. Writes one AdminAuditLog row naming each change.</description>
         <in-parameters>
             <parameter name="jobName" required="true"/>
             <parameter name="parameterNames" type="List"><description>Parameters to reset; omit to reset everything.</description></parameter>
@@ -171,10 +247,61 @@
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <entity-find-one entity-name="moqui.service.job.ServiceJob" value-field="job" cache="false" for-update="true"/>
             <if condition="!job"><return error="true" message="No job ${jobName}."/></if>
-            <set field="plan" from="darpan.admin.ScheduleJobAdminSupport.planReset(ec, job, parameterNames, previewedRows)"/>
-            <if condition="plan.error"><return error="true" message="${plan.error}"/></if>
-            <if condition="plan.changed">
-                <iterate list="plan.paramRestores" entry="pr">
+            <if condition="job.defaultCronExpression == null"><return error="true" message="${jobName} is not one of Darpan's jobs and cannot be reset here."/></if>
+
+            <!-- plan -->
+            <set field="all" from="parameterNames == null"/>
+            <set field="names" from="parameterNames?.collect { it.toString() }"/>
+            <set field="changes" from="[]"/>
+            <set field="cronChanged" from="false"/>
+            <set field="markerSet" from="false"/>
+            <entity-find entity-name="moqui.service.job.ServiceJobParameter" list="paramRows" cache="false">
+                <econdition field-name="jobName"/>
+                <order-by field-name="parameterName"/>
+            </entity-find>
+            <if condition="all">
+                <set field="wantPaused" from="job.defaultPaused ?: 'N'"/>
+                <set field="livePaused" from="job.paused ?: 'N'"/>
+                <set field="markerSet" from="job.editedDate != null"/>
+                <if condition="job.cronExpression != job.defaultCronExpression">
+                    <set field="cronChanged" from="true"/>
+                    <script>changes.add('cron: ' + job.cronExpression + ' -> ' + job.defaultCronExpression)</script>
+                </if>
+                <if condition="livePaused != wantPaused">
+                    <set field="pausedNote" from="''"/>
+                    <if condition="wantPaused == 'N' &amp;&amp; job.resumePreviewService != null">
+                        <service-call name="schedule.ScheduleServices.check#ResumePreview" out-map="pv"
+                                in-map="[previewService: job.resumePreviewService, previewedRows: previewedRows]"/>
+                        <if condition="pv.problem"><return error="true" message="${pv.problem}"/></if>
+                        <set field="pausedNote" from="' (' + pv.note + ')'"/>
+                    </if>
+                    <script>changes.add('paused: ' + livePaused + ' -> ' + wantPaused + pausedNote)</script>
+                </if>
+            <else>
+                <set field="missing" from="names.find { !(it in paramRows*.parameterName) }"/>
+                <if condition="missing"><return error="true" message="${jobName} has no parameter ${missing} to reset."/></if>
+            </else></if>
+            <set field="restores" from="[]"/>
+            <set field="deletes" from="[]"/>
+            <iterate list="paramRows" entry="r">
+                <if condition="all || names.contains(r.parameterName)">
+                    <if condition="r.defaultValue != null">
+                        <if condition="r.parameterValue != r.defaultValue || r.editedDate != null">
+                            <script>restores.add([parameterName: r.parameterName, defaultValue: r.defaultValue])</script>
+                            <if condition="r.parameterValue != r.defaultValue">
+                                <script>changes.add(r.parameterName + ': ' + r.parameterValue + ' -> ' + r.defaultValue)</script>
+                            </if>
+                        </if>
+                    <else-if condition="!all || r.editedDate != null">
+                        <script>deletes.add(r.parameterName)
+                            changes.add(r.parameterName + ': ' + r.parameterValue + ' -> (removed)')</script>
+                    </else-if></if>
+                </if>
+            </iterate>
+
+            <!-- write -->
+            <if condition="changes || markerSet || restores || deletes">
+                <iterate list="restores" entry="pr">
                     <entity-find-one entity-name="moqui.service.job.ServiceJobParameter" value-field="paramRow" cache="false">
                         <field-map field-name="jobName"/>
                         <field-map field-name="parameterName" from="pr.parameterName"/>
@@ -184,22 +311,38 @@
                     <set field="paramRow.editedDate" from="null"/>
                     <entity-update value-field="paramRow"/>
                 </iterate>
-                <iterate list="plan.paramDeletes" entry="pn">
+                <iterate list="deletes" entry="pn">
                     <entity-delete-by-condition entity-name="moqui.service.job.ServiceJobParameter">
                         <econdition field-name="jobName"/>
                         <econdition field-name="parameterName" from="pn"/>
                     </entity-delete-by-condition>
                 </iterate>
-                <if condition="plan.resetJob">
+                <if condition="all">
                     <set field="job.editedByUserId" from="null"/>
                     <set field="job.editedDate" from="null"/>
                     <entity-update value-field="job"/>
-                    <!-- the load's own step: copies the shipped cron and pause state onto this now-unedited job -->
-                    <service-call name="schedule.ScheduleServices.apply#JobDefaults"/>
+                    <!-- the load's own step, for this job only: copies the shipped cron and pause state onto this now-unedited job -->
+                    <service-call name="schedule.ScheduleServices.apply#JobDefaults" in-map="[jobName: jobName]"/>
                 </if>
-                <script>darpan.admin.AdminAuditSupport.record(ec, "admin.ScheduleAdminServices.reset#ServiceJob", "ServiceJob", jobName, plan.audit)</script>
+                <if condition="cronChanged">
+                    <entity-find-one entity-name="moqui.service.job.ServiceJobRunLock" value-field="runLock" cache="false" for-update="true">
+                        <field-map field-name="jobName"/>
+                    </entity-find-one>
+                    <if condition="runLock">
+                        <set field="runLock.lastRunTime" from="ec.user.nowTimestamp"/>
+                        <entity-update value-field="runLock"/>
+                    <else>
+                        <entity-make-value entity-name="moqui.service.job.ServiceJobRunLock" value-field="newLock"/>
+                        <set field="newLock.jobName" from="jobName"/>
+                        <set field="newLock.lastRunTime" from="ec.user.nowTimestamp"/>
+                        <entity-create value-field="newLock"/>
+                    </else></if>
+                </if>
+                <script>darpan.admin.AdminAuditSupport.record(ec, "admin.ScheduleAdminServices.reset#ServiceJob", "ServiceJob", jobName,
+                        changes ? changes.join('; ') : 'follows the shipped defaults again')</script>
             </if>
-            <set field="job" from="darpan.admin.ScheduleJobAdminSupport.describeOne(ec, jobName)"/>
+            <service-call name="schedule.ScheduleServices.describe#ServiceJob" in-map="[jobName: jobName]" out-map="described"/>
+            <set field="job" from="described.job"/>
         </actions>
     </service>
 </services>

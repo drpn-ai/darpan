@@ -138,7 +138,7 @@ class TwoFactorPolicy {
      * Whether today's reminder is due, in calendar days (UTC): never sent; or one of daysBefore (settings: 7, 3, 1, 0) days before the date; or the date
      * has passed and repeatDays have gone by since the last one. Never twice on one day. Pure.
      */
-    static boolean reminderDue(Timestamp requiredFrom, Timestamp now, Timestamp lastSent, List<Integer> daysBefore = [7, 3, 1, 0], int repeatDays = 7) {
+    static boolean reminderDue(Timestamp requiredFrom, Timestamp now, Timestamp lastSent, List<Integer> daysBefore, int repeatDays) {
         if (requiredFrom == null || now == null) return false
         if (lastSent == null) return true
         LocalDate today = now.toInstant().atZone(ZoneOffset.UTC).toLocalDate()

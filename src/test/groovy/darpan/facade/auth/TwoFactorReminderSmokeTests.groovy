@@ -63,19 +63,26 @@ class TwoFactorReminderSmokeTests extends TwoFactorTestSupport {
     }
 
     @Test
+    @DisplayName("reminderDue: a list without 0 sends nothing on the day itself")
+    void aListWithoutZeroSendsNoDayZero() {
+        assertFalse(TwoFactorPolicy.reminderDue(d("2026-12-02"), d("2026-12-02"), d("2026-11-29"), [7, 3, 1], 7))
+        assertTrue(TwoFactorPolicy.reminderDue(d("2026-12-02"), d("2026-12-01"), d("2026-11-29"), [7, 3, 1], 7))
+    }
+
+    @Test
     @DisplayName("reminderDue: first, 7/3/1/0 days before, weekly after, never twice in a day")
     void reminderDueCadence() {
         Timestamp dec2 = d("2026-12-02")
-        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-11-18"), null))
-        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-11-25"), d("2026-11-18")), "7 days left")
-        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-11-24"), d("2026-11-18")), "8 days left")
-        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-11-29"), d("2026-11-25")), "3 days left")
-        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-01"), d("2026-11-29")), "1 day left")
-        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-02"), d("2026-11-29")), "0 days left")
-        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-12-02"), d("2026-12-02")), "already today")
-        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-09"), d("2026-12-02")), "a week after")
-        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-12-08"), d("2026-12-02")), "six days after")
-        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-20"), d("2026-12-09")))
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-11-18"), null, [7, 3, 1, 0], 7))
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-11-25"), d("2026-11-18"), [7, 3, 1, 0], 7), "7 days left")
+        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-11-24"), d("2026-11-18"), [7, 3, 1, 0], 7), "8 days left")
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-11-29"), d("2026-11-25"), [7, 3, 1, 0], 7), "3 days left")
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-01"), d("2026-11-29"), [7, 3, 1, 0], 7), "1 day left")
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-02"), d("2026-11-29"), [7, 3, 1, 0], 7), "0 days left")
+        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-12-02"), d("2026-12-02"), [7, 3, 1, 0], 7), "already today")
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-09"), d("2026-12-02"), [7, 3, 1, 0], 7), "a week after")
+        assertFalse(TwoFactorPolicy.reminderDue(dec2, d("2026-12-08"), d("2026-12-02"), [7, 3, 1, 0], 7), "six days after")
+        assertTrue(TwoFactorPolicy.reminderDue(dec2, d("2026-12-20"), d("2026-12-09"), [7, 3, 1, 0], 7))
     }
 
     // ---- the job ----

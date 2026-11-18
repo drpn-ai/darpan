@@ -371,6 +371,56 @@ class TwoFactorSignInSmokeTests extends TwoFactorTestSupport {
         assertEquals([SUPER_ID, SUPER2_ID] as Set, (superRow.enrolled as List<Map>)*.userId as Set)
     }
 
+    @Test
+    @DisplayName("EVERYONE covers a tenant user with no admin role: dated yesterday needs setup, dated tomorrow shows the grace date")
+    void everyonePolicyCoversATenantUser() {
+        clearMemberships(USER_ID)
+        ec.entity.makeValue("darpan.auth.TenantUserPermissionGroupMember").setAll([tenantUserGroupId: TENANT_B, userId: USER_ID,
+                permissionUserGroupId: "DARPAN_TENANT_USER", fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
+        Timestamp due = new Timestamp(System.currentTimeMillis() + 86_400_000L)
+        setPolicy(TwoFactorPolicy.EVERYONE, due)
+        Map grace = anon("login#Session", [username: USERNAME, password: PASSWORD]).out
+        assertTrue(grace.authenticated as boolean)
+        assertEquals(due, grace.sessionInfo.twoFactorDueDate)
+
+        setPolicy(TwoFactorPolicy.EVERYONE, new Timestamp(System.currentTimeMillis() - 86_400_000L))
+        Map login = anon("login#Session", [username: USERNAME, password: PASSWORD]).out
+        assertFalse(login.authenticated as boolean)
+        assertTrue(login.twoFactorSetupRequired as boolean)
+        assertTrue(USER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
+
+        // a disabled account is not covered
+        account(USER_ID).set("disabled", "Y").update()
+        try {
+            assertFalse(USER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
+            assertNull(TwoFactorPolicy.requiredFrom(ec, USER_ID))
+        } finally {
+            account(USER_ID).set("disabled", "N").update()
+        }
+    }
+
+    @Test
+    @DisplayName("EVERYONE is refused until two super admins are enrolled")
+    void everyonePolicyNeedsTwoEnrolledSuperAdmins() {
+        Map refused = signedInCall(SUPER_USERNAME, "admin.SecurityAdminServices.update#TwoFactorPolicy",
+                [permissionGroupId: "EVERYONE", requiredFromDate: ec.user.nowTimestamp])
+        assertTrue(refused.errors.any { it.contains("At least 2 super admins must have two-factor on before it is required for EVERYONE (0 do).") }, "${refused.errors}")
+    }
+
+    @Test
+    @DisplayName("EVERYONE leaves a person with no membership and no Darpan role uncovered")
+    void everyoneLeavesAPersonWithNoRoleUncovered() {
+        clearMemberships(OTHER_ID)
+        setPolicy(TwoFactorPolicy.EVERYONE, new Timestamp(System.currentTimeMillis() - 86_400_000L))
+        assertNull(TwoFactorPolicy.requiredFrom(ec, OTHER_ID))
+        assertFalse(OTHER_ID in TwoFactorPolicy.coveredPeople(ec, ec.user.nowTimestamp))
+    }
+
+    private void clearMemberships(String userId) {
+        ec.entity.find("moqui.security.UserGroupMember").condition("userId", userId).disableAuthz().deleteAll()
+        ec.entity.find("darpan.auth.TenantUserPermissionGroupMember").condition("userId", userId).disableAuthz().deleteAll()
+    }
+
     // ---- keys and sessions ----
 
     @Test

@@ -18,6 +18,7 @@
     <darpan.auth.TwoFactorRolePolicy permissionGroupId="DARPAN_SUPER_ADMIN"/>
     <darpan.auth.TwoFactorRolePolicy permissionGroupId="DARPAN_ADMIN"/>
     <darpan.auth.TwoFactorRolePolicy permissionGroupId="DARPAN_TENANT_ADMIN"/>
+    <darpan.auth.TwoFactorRolePolicy permissionGroupId="EVERYONE"/>
 
     <!-- Notices (Aditi, 2026-11-13, open question 9). EmailServer SYSTEM is seeded by PasswordResetEmailSeedData.xml. -->
     <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_2FA_RECOVERY_USED" description="Darpan recovery code used notice"

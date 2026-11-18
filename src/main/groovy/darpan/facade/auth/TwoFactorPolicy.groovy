@@ -14,7 +14,9 @@ class TwoFactorPolicy {
 
     /** The roles the policy covers: the three Darpan-wide ones (UserGroupMember) and tenant admin in any tenant. */
     static final String TENANT_ADMIN_GROUP_ID = TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID
-    static final List<String> POLICY_GROUP_IDS = (TenantAccessSupport.DARPAN_ROLE_GROUP_IDS + [TENANT_ADMIN_GROUP_ID]).asImmutable()
+    /** DAR-BE-297: the policy row that covers every person with a Darpan role or a tenant membership (not just admins). */
+    static final String EVERYONE = "EVERYONE"
+    static final List<String> POLICY_GROUP_IDS = (TenantAccessSupport.DARPAN_ROLE_GROUP_IDS + [TENANT_ADMIN_GROUP_ID, EVERYONE]).asImmutable()
     /** At least two enrolled super admins before super-admin enforcement can be switched on (break-glass). */
     static final int MIN_ENROLLED_SUPER_ADMINS = 2
 
@@ -25,7 +27,7 @@ class TwoFactorPolicy {
     /**
      * When two-factor is required for this person: the earliest requiredFromDate among their roles (a live
      * UserGroupMember row in ADMIN, DARPAN_SUPER_ADMIN or DARPAN_ADMIN, or tenant admin in ANY tenant: a factor belongs
-     * to the person, not the tenant). Null when no role of theirs has a date (optional). Runs on every request
+     * to the person, not the tenant; or, for EVERYONE, any membership or Darpan role on an enabled account). Null when no role of theirs has a date (optional). Runs on every request
      * (sessionInfo, the CLI key check): the policy first, so while no role has a date (the shipped state) that is the only read.
      */
     static Timestamp requiredFrom(def ec, String userId) {
@@ -97,7 +99,38 @@ class TwoFactorPolicy {
         return supers.count { it in enrolled } as int
     }
 
+    /**
+     * DAR-BE-297: the userIds the EVERYONE policy covers: an in-force tenant membership (any permission group, any tenant) or
+     * an in-force Darpan-wide role, on an account that is not disabled (a null flag counts as enabled). Reads every member:
+     * for reminders and the admin board, never the per-request path (that asks about the one user, rolesByUser).
+     */
+    static List<String> coveredPeople(def ec, Timestamp now) {
+        return coveredAmong(ec, null, now, false) as List<String>
+    }
+
     // ---- reads ----
+
+    /** The covered people among userIds (null: all): a membership read and a role read, then the disabled accounts out. */
+    private static Set<String> coveredAmong(def ec, Collection<String> userIds, Timestamp now, boolean perRequest) {
+        Closure finder = { String entity, String reason ->
+            perRequest ? TwoFactorRecords.findPerRequest(ec, entity, reason) : TwoFactorRecords.find(ec, entity, reason)
+        }
+        Set<String> found = new HashSet<String>()
+        def members = finder("darpan.auth.TenantUserPermissionGroupMember", "self-scoped auth: tenant members, for the two-factor policy covering everyone")
+        if (userIds != null) members.condition("userId", EntityCondition.IN, userIds)
+        found.addAll(members.conditionDate("fromDate", "thruDate", now).useCache(false).list()*.userId as List<String>)
+        def roles = finder("moqui.security.UserGroupMember", "self-scoped auth: Darpan-wide roles, for the two-factor policy covering everyone")
+        if (userIds != null) roles.condition("userId", EntityCondition.IN, userIds)
+        found.addAll(roles.condition("userGroupId", EntityCondition.IN, TenantAccessSupport.DARPAN_ROLE_GROUP_IDS)
+                .conditionDate("fromDate", "thruDate", now).useCache(false).list()*.userId as List<String>)
+        List<String> candidates = found.toList()
+        for (int i = 0; i < candidates.size(); i += 500) {
+            List<String> chunk = candidates.subList(i, Math.min(i + 500, candidates.size()))
+            found.removeAll(finder("moqui.security.UserAccount", "self-scoped auth: disabled accounts, for the two-factor policy covering everyone")
+                    .condition("userId", EntityCondition.IN, chunk).condition("disabled", "Y").useCache(false).list()*.userId as List<String>)
+        }
+        return found
+    }
 
     private static boolean requiredNow(Timestamp requiredFrom, Timestamp now) {
         return requiredFrom != null && !requiredFrom.after(now)
@@ -132,6 +165,9 @@ class TwoFactorPolicy {
                     .conditionDate("fromDate", "thruDate", now).useCache(false).list()
                     .each { roles[it.userId as String] << TENANT_ADMIN_GROUP_ID }
         }
+        if (EVERYONE in groupIds) {
+            coveredAmong(ec, userIds, now, perRequest).each { roles[it] << EVERYONE }
+        }
         return roles
     }
 
@@ -141,6 +177,7 @@ class TwoFactorPolicy {
     }
 
     private static List<String> roleMembers(def ec, String groupId, Timestamp now) {
+        if (groupId == EVERYONE) return coveredPeople(ec, now)
         if (groupId == TENANT_ADMIN_GROUP_ID) {
             return TwoFactorRecords.find(ec, "darpan.auth.TenantUserPermissionGroupMember", "admin: tenant admins in every tenant, for the two-factor policy")
                     .condition("permissionUserGroupId", groupId).conditionDate("fromDate", "thruDate", now).useCache(false)

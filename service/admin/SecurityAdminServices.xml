@@ -8,7 +8,7 @@
 
     <service verb="get" noun="TwoFactorPolicies" allow-remote="true" authz-action="view">
         <description>Each role the two-factor policy covers (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN in
-            any tenant) with its date and who in it is and is not enrolled, plus how many super admins are enrolled (the
+            any tenant, and EVERYONE: any person with a Darpan role or a tenant membership) with its date and who in it is and is not enrolled, plus how many super admins are enrolled (the
             break-glass rule needs two before super-admin enforcement can be switched on).</description>
         <out-parameters>
             <parameter name="policies" type="List"><description>One entry per role, in the order above.</description>
@@ -39,7 +39,7 @@
             authenticator app or a passkey assertion (so they must have two-factor on). Requiring it for ADMIN or
             DARPAN_SUPER_ADMIN is refused until at least two super admins have it on. Writes an AdminAuditLog row.</description>
         <in-parameters>
-            <parameter name="permissionGroupId" required="true"><description>ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN or DARPAN_TENANT_ADMIN.</description></parameter>
+            <parameter name="permissionGroupId" required="true"><description>ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN, DARPAN_TENANT_ADMIN or EVERYONE (every person with a Darpan role or a tenant membership).</description></parameter>
             <parameter name="requiredFromDate" type="Timestamp"><description>Required from this date. Leave out with clear.</description></parameter>
             <parameter name="clear" type="Boolean" default-value="false"><description>True makes the role optional again.</description></parameter>
             <parameter name="adminCode"><description>A current code from the acting admin's own authenticator app (or adminPasskeyAssertion).</description></parameter>
@@ -56,7 +56,7 @@
             <if condition="!clear &amp;&amp; requiredFromDate == null">
                 <return error="true" message="Give requiredFromDate, or clear=true to make it optional."/></if>
             <!-- Break-glass: one lost phone must not lock the platform out. -->
-            <if condition="!clear &amp;&amp; permissionGroupId in darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS">
+            <if condition="!clear &amp;&amp; (permissionGroupId in darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS || permissionGroupId == darpan.facade.auth.TwoFactorPolicy.EVERYONE)">
                 <set field="enrolledSuperAdminCount" from="darpan.facade.auth.TwoFactorPolicy.enrolledSuperAdminCount(ec)"/>
                 <set field="minimumSuperAdmins" from="darpan.facade.auth.TwoFactorPolicy.MIN_ENROLLED_SUPER_ADMINS"/>
                 <if condition="enrolledSuperAdminCount &lt; minimumSuperAdmins">

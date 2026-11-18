@@ -93,6 +93,16 @@ class EmailTemplatesRenderTests {
     }
 
     @Test
+    void theReminderReadsRightOnBothSidesOfTheDate() {
+        Map after = SECURITY.TwoFactorReminder + [past: true]
+        String html = render("TwoFactorReminder", after, "html")
+        Files.writeString(previews.resolve("TwoFactorReminderAfterDate.html"), html)
+        assertTrue(html.contains("now needs a second step") && !html.contains("2 December 2026"), html)
+        String before = render("TwoFactorReminder", SECURITY.TwoFactorReminder, "html")
+        assertTrue(before.contains("becomes required for Darpan on 2 December 2026"), before)
+    }
+
+    @Test
     void aPasskeyNameIsText() {
         String html = render("TwoFactorPasskeyAdded", [firstName: "Riya", passkeyName: "<img src=x>", at: AT], "html")
         assertFalse(html.contains("<img src=x>"), html)

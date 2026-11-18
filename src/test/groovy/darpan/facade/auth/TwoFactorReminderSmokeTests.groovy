@@ -87,6 +87,18 @@ class TwoFactorReminderSmokeTests extends TwoFactorTestSupport {
     }
 
     @Test
+    @DisplayName("the deadline is named on the calendar it is stored on, whatever the reader's zone")
+    void namesTheStoredDayNotTheReadersDay() {
+        account("TFR_NOFACTOR").set("timeZone", "America/Los_Angeles").update()
+        setPolicy(TwoFactorPolicy.EVERYONE, Timestamp.from(Instant.parse("2026-12-02T00:00:00Z")))
+        assertEquals([], call(JOB, [:]).errors)
+        Map mail = sent.find { it.to == "tfr.nofactor@example.com" }
+        assertNotNull(mail, "${sent}")
+        assertEquals("2 December 2026", mail.params.requiredDate)
+        assertTrue((mail.params.subjectLine as String).endsWith("by 2 December 2026") || mail.params.past == true, "${mail.params}")
+    }
+
+    @Test
     @DisplayName("people with an app or passkey, no email, or a disabled account are not reminded; no email means no event")
     void skipsThoseNotToBeReminded() {
         call(JOB, [:])

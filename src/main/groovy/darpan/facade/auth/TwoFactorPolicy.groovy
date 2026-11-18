@@ -126,7 +126,6 @@ class TwoFactorPolicy {
     // ---- reminders (DAR-BE-297) ----
 
     static final String REMINDER_SENT = "REMINDER_SENT"
-    private static final String REMINDER_ZONE = "America/Los_Angeles"
 
     /**
      * Whether today's reminder is due, in calendar days (UTC): never sent; or 7, 3, 1 or 0 days before the date; or the date
@@ -170,10 +169,9 @@ class TwoFactorPolicy {
                 def account = TwoFactorRecords.find(ec, "moqui.security.UserAccount", "self-scoped auth: the person a two-factor reminder goes to")
                         .condition("userId", userId).useCache(false).one()
                 if (!(account?.emailAddress as String)?.trim()) continue
-                String zone = account.timeZone as String
-                TimeZone tz = TimeZone.getTimeZone(zone && TimeZone.getAvailableIDs().contains(zone) ? zone : REMINDER_ZONE)
+                // The stored day is a UTC calendar day (the CLI sends "2026-12-02"), the same calendar reminderDue counts in.
                 SimpleDateFormat fmt = new SimpleDateFormat("d MMMM yyyy", Locale.ENGLISH)
-                fmt.setTimeZone(tz)
+                fmt.setTimeZone(TimeZone.getTimeZone("UTC"))
                 String requiredDate = fmt.format(from)
                 boolean past = !from.after(now)
                 TwoFactorRecords.notify(ec, userId, TwoFactorSupport.TEMPLATE_REMINDER, [requiredDate: requiredDate,

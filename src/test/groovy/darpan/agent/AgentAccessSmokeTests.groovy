@@ -116,6 +116,27 @@ class AgentAccessSmokeTests {
     }
 
     @Test
+    void "a Darpan admin has live AI in every tenant without a grant"() {
+        // DAR-BE-296: the DARPAN_ADMIN role alone (no super admin) is enough.
+        String admin = "AAS_DARPAN_ADMIN"
+        asSystem {
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_ADMIN", description: "Darpan admin"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: admin, username: "aas.darpan.admin", disabled: "N"]).createOrUpdate()
+            ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_ADMIN", userId: admin, fromDate: inHours(-1)]).createOrUpdate()
+        }
+        try {
+            Map a = AgentAccess.access(ec, "GORJANA", admin)
+            assertEquals(AgentAccess.LIVE, a.state)
+            assertEquals(null, a.grantId)
+        } finally {
+            asSystem {
+                ec.entity.find("moqui.security.UserGroupMember").condition("userId", admin).deleteAll()
+                ec.entity.find("moqui.security.UserAccount").condition("userId", admin).deleteAll()
+            }
+        }
+    }
+
+    @Test
     void "a grant whose thruDate has passed is EXPIRED"() {
         grant("G_OLD", ALPHA, ANN, [fromDate: inHours(-48), thruDate: inHours(-24)])
         Map a = AgentAccess.access(ec, ALPHA, ANN)

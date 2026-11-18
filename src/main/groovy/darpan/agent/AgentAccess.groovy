@@ -39,7 +39,7 @@ class AgentAccess {
     static Map access(def ec, String tenantId, String userId) {
         // DAR-BE-246 (Aditi 2026-11-12): a Darpan admin has AI access in every tenant without a grant, and no per-user limit; the
         // tenant switch, its daily budget and the hourly turn limit still apply.
-        if (tenantId && isSuperAdminUser(ec, userId))
+        if (tenantId && isDarpanAdminUser(ec, userId))
             return [state: LIVE, grantId: null, fromDate: null, thruDate: null, capMicros: null, spentMicros: 0L, pauseReason: null]
         def g = (tenantId && userId) ? currentGrant(ec, tenantId, userId) : null
         if (g == null) return [state: NOT_GRANTED, grantId: null, fromDate: null, thruDate: null, capMicros: null, spentMicros: 0L, pauseReason: null]
@@ -145,7 +145,7 @@ class AgentAccess {
      */
     static Map adminCreate(def ec, String userId, String tenantId, Timestamp fromDate, Timestamp thruDate, Integer days, BigDecimal costCapUsd) {
         Timestamp now = ec.user.nowTimestamp
-        if (isSuperAdminUser(ec, userId)) { ec.message.addError("User ${userId} is a Darpan admin, with AI access in every tenant; there is nothing to grant.".toString()); return null }
+        if (isDarpanAdminUser(ec, userId)) { ec.message.addError("User ${userId} is a Darpan admin, with AI access in every tenant; there is nothing to grant.".toString()); return null }
         if (!isMember(ec, tenantId, userId)) { ec.message.addError("User ${userId} is not a member of tenant ${tenantId}.".toString()); return null }
         Timestamp from = fromDate ?: now
         Map end = windowEnd(ec, from, thruDate, days, false)
@@ -277,12 +277,12 @@ class AgentAccess {
                 .useCache(false).count() > 0
     }
 
-    /** The user is in a super-admin group (ADMIN, DARPAN_SUPER_ADMIN) now; named by userId, never read from the signed-in user. */
-    static boolean isSuperAdminUser(def ec, String userId) {
+    /** The user is in a Darpan admin group (ADMIN, DARPAN_SUPER_ADMIN, DARPAN_ADMIN) now; named by userId, never read from the signed-in user. */
+    static boolean isDarpanAdminUser(def ec, String userId) {
         if (!userId) return false
         return darpan.facade.common.TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserGroupMember",
-                        "self-scoped auth: is this named user a super admin (a global group, no tenant)").condition("userId", userId)
-                .condition("userGroupId", EntityCondition.IN, darpan.facade.common.TenantAccessSupport.SUPER_ADMIN_GROUP_IDS)
+                        "self-scoped auth: is this named user a Darpan admin (a global group, no tenant)").condition("userId", userId)
+                .condition("userGroupId", EntityCondition.IN, darpan.facade.common.TenantAccessSupport.DARPAN_ADMIN_GROUP_IDS)
                 .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).useCache(false).count() > 0
     }
 

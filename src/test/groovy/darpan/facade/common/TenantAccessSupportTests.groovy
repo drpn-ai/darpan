@@ -91,35 +91,73 @@ class TenantAccessSupportTests {
         assertTrue(scope.canViewActiveTenantData as boolean)
         assertTrue(scope.canRunActiveTenantReconciliation as boolean)
         assertTrue(scope.canEditActiveTenantData as boolean)
-        assertFalse(scope.canManageDarpanCore as boolean)
+        assertTrue(scope.canManageDarpanCore as boolean)
+    }
+
+    private static def darpanAdminOnlyEc(Map extra = [:]) {
+        FinderStub adminFinder = new FinderStub(oneResult: [
+                userGroupId: TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
+                userId     : "EX_DARPAN_ADMIN",
+        ] + extra)
+        FinderStub companyGroupFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        return executionContext(
+                user: new UserStub(userId: "EX_DARPAN_ADMIN"),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupMember": adminFinder,
+                        "moqui.security.UserGroup"      : companyGroupFinder,
+                ])
+        )
     }
 
     @Test
-    void buildAccessScopeGrantsDarpanCoreToDarpanAdminGroupWithoutSuperAdmin() {
+    void buildAccessScopeGivesADarpanAdminEveryTenantAsTenantAdmin() {
+        def ec = darpanAdminOnlyEc()
+
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
+
+        assertFalse(scope.isSuperAdmin as boolean)
+        assertEquals(["GORJANA", "KREWE"] as Set, (scope.availableTenants*.userGroupId) as Set)
+        assertTrue(scope.canViewActiveTenantData as boolean)
+        assertTrue(scope.canRunActiveTenantReconciliation as boolean)
+        assertTrue(scope.canEditActiveTenantData as boolean)
+        assertTrue(scope.canManageDarpanCore as boolean)
+        assertEquals(["DARPAN_ADMIN", "DARPAN_TENANT_ADMIN", "DARPAN_TENANT_USER"], scope.activeTenantPermissionGroupIds)
+        assertTrue(TenantAccessSupport.isTenantAdmin(ec, "GORJANA"))
+    }
+
+    @Test
+    void endingTheDarpanAdminRoleEndsEveryTenantAccess() {
+        // The stub finder ignores conditionDate, so an ended membership is the finder returning no in-force row, as the
+        // real conditionDate(fromDate, thruDate, now) query does once thruDate has passed.
+        def ec = darpanAdminOnlyEc()
+        ec.entity.finders["moqui.security.UserGroupMember"].oneResult = null
+
+        assertFalse(TenantAccessSupport.isDarpanAdmin(ec))
+        assertEquals([], TenantAccessSupport.listAvailableTenants(ec))
+    }
+
+    @Test
+    void aDarpanAdminIsNotASuperAdmin() {
+        MessageFacadeStub message = new MessageFacadeStub()
         FinderStub adminFinder = new FinderStub(oneResult: [
                 userGroupId: TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
                 userId     : "EX_DARPAN_ADMIN",
         ])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_DARPAN_ADMIN"),
-                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupMember": adminFinder])
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupMember": adminFinder]),
+                message: message
         )
 
-        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
-
-        assertFalse(scope.isSuperAdmin as boolean)
-        assertEquals("TENANT", scope.scopeType)
-        assertEquals(null, scope.customerScopeId)
-        assertEquals(null, scope.activeTenantUserGroupId)
-        assertEquals([], scope.availableTenants)
-        assertFalse(scope.canViewActiveTenantData as boolean)
-        assertFalse(scope.canRunActiveTenantReconciliation as boolean)
-        assertFalse(scope.canEditActiveTenantData as boolean)
-        assertTrue(scope.canManageDarpanCore as boolean)
+        assertFalse(TenantAccessSupport.isSuperAdmin(ec))
+        assertFalse(TenantAccessSupport.requireSuperAdmin(ec))
     }
 
     @Test
-    void requireDarpanAdminRejectsSuperAdminWithoutDarpanAdminGroup() {
+    void requireDarpanAdminPassesASuperAdmin() {
         MessageFacadeStub message = new MessageFacadeStub()
         FinderStub adminFinder = new FinderStub(oneResult: [
                 userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
@@ -131,10 +169,8 @@ class TenantAccessSupportTests {
                 message: message
         )
 
-        boolean allowed = TenantAccessSupport.requireDarpanAdmin(ec, "Darpan admin required.")
-
-        assertFalse(allowed)
-        assertEquals(["Darpan admin required."], message.errors)
+        assertTrue(TenantAccessSupport.requireDarpanAdmin(ec, "Darpan admin required."))
+        assertEquals([], message.errors)
     }
 
     @Test

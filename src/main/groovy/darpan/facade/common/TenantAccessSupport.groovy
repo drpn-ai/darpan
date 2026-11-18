@@ -41,7 +41,8 @@ class TenantAccessSupport {
     static final String DARPAN_COMPANY_EDITOR_GROUP_ID = "DARPAN_COMPANY_EDITOR"
     static final String DARPAN_COMPANY_VIEW_ONLY_GROUP_ID = "DARPAN_COMPANY_VIEW_ONLY"
     static final List<String> SUPER_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_SUPER_ADMIN_GROUP_ID].asImmutable()
-    static final List<String> DARPAN_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_ADMIN_GROUP_ID].asImmutable()
+    /** Every tenant as tenant admin, the CLI with no grant, AI, app settings; super admin adds the admin app. */
+    static final List<String> DARPAN_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_SUPER_ADMIN_GROUP_ID, DARPAN_ADMIN_GROUP_ID].asImmutable()
     /** The Darpan-wide roles (UserGroupMember), in the order the admin app shows them: Moqui's ADMIN, super admin, Darpan
      *  admin. DAR-ADMIN-011's user board and DAR-BE-264's two-factor policy both read these. */
     static final List<String> DARPAN_ROLE_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_SUPER_ADMIN_GROUP_ID,
@@ -120,7 +121,7 @@ class TenantAccessSupport {
 
         List<Map<String, Object>> availableTenants = listAvailableTenants(ec)
         Map<String, Object> activeTenant = resolveEffectiveActiveTenant(ec, availableTenants)
-        Map<String, Object> activeTenantPermissionScope = resolveActiveTenantPermissionScope(ec, activeTenant?.userGroupId, superAdmin)
+        Map<String, Object> activeTenantPermissionScope = resolveActiveTenantPermissionScope(ec, activeTenant?.userGroupId, superAdmin, darpanAdmin)
         return [
             isSuperAdmin                : superAdmin,
             scopeType                   : SCOPE_TYPE_TENANT,
@@ -184,7 +185,7 @@ class TenantAccessSupport {
         String normalizedTenantUserGroupId = normalize(tenantUserGroupId)
         if (!normalizedTenantUserGroupId) return false
         if (!currentUserId(ec)) return false
-        if (isSuperAdmin(ec)) return true
+        if (isDarpanAdmin(ec)) return true
 
         return DARPAN_TENANT_ADMIN_GROUP_ID in listTenantPermissionGroupIds(ec, normalizedTenantUserGroupId)
     }
@@ -199,7 +200,7 @@ class TenantAccessSupport {
     }
 
     static List<Map<String, Object>> listAvailableTenants(def ec) {
-        List companyRecords = isSuperAdmin(ec) ? listAllTenantRecords(ec) : listTenantMembershipRecords(ec)
+        List companyRecords = isDarpanAdmin(ec) ? listAllTenantRecords(ec) : listTenantMembershipRecords(ec)
         Set<String> disabledTenantIds = listDisabledTenantIds(ec)
         return companyRecords
                 .collect { record ->
@@ -374,19 +375,22 @@ class TenantAccessSupport {
     static List<String> currentActiveTenantPermissionGroupIds(def ec) {
         String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
         boolean superAdmin = isSuperAdmin(ec)
-        return (resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin).permissionGroupIds ?: []) as List<String>
+        boolean darpanAdmin = isDarpanAdmin(ec)
+        return (resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin, darpanAdmin).permissionGroupIds ?: []) as List<String>
     }
 
     static boolean canEditActiveTenantData(def ec) {
         String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
         boolean superAdmin = isSuperAdmin(ec)
-        return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin).canEdit == true
+        boolean darpanAdmin = isDarpanAdmin(ec)
+        return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin, darpanAdmin).canEdit == true
     }
 
     static boolean canRunActiveTenantReconciliation(def ec) {
         String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
         boolean superAdmin = isSuperAdmin(ec)
-        return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin).canRun == true
+        boolean darpanAdmin = isDarpanAdmin(ec)
+        return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin, darpanAdmin).canRun == true
     }
 
     static boolean hasActiveTenantWriteAccess(def ec) {
@@ -729,7 +733,7 @@ class TenantAccessSupport {
      * so that display-path callers degrade gracefully instead of breaking the UI.
      */
     protected static List listAllTenantRecords(def ec) {
-        if (!isSuperAdmin(ec)) {
+        if (!isDarpanAdmin(ec)) {
             // Guard: tenant enumeration is super-admin only. Return empty so callers that iterate
             // this list produce no output rather than leaking tenant IDs across the boundary.
             org.slf4j.LoggerFactory.getLogger(TenantAccessSupport.class)
@@ -859,14 +863,14 @@ class TenantAccessSupport {
                 .sort() as List<String>
     }
 
-    protected static Map<String, Object> resolveActiveTenantPermissionScope(def ec, Object activeTenantUserGroupId, boolean superAdmin) {
+    protected static Map<String, Object> resolveActiveTenantPermissionScope(def ec, Object activeTenantUserGroupId, boolean superAdmin, boolean darpanAdmin) {
         String normalizedActiveTenantUserGroupId = normalize(activeTenantUserGroupId)
         if (!normalizedActiveTenantUserGroupId) {
             return [permissionGroupIds: [], canView: false, canRun: false, canEdit: false]
         }
-        if (superAdmin) {
+        if (darpanAdmin) {
             return [
-                    permissionGroupIds: [DARPAN_SUPER_ADMIN_GROUP_ID, DARPAN_TENANT_ADMIN_GROUP_ID, DARPAN_TENANT_USER_GROUP_ID],
+                    permissionGroupIds: [superAdmin ? DARPAN_SUPER_ADMIN_GROUP_ID : DARPAN_ADMIN_GROUP_ID, DARPAN_TENANT_ADMIN_GROUP_ID, DARPAN_TENANT_USER_GROUP_ID],
                     canView           : true,
                     canRun            : true,
                     canEdit           : true,

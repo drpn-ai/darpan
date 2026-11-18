@@ -37,9 +37,6 @@ class CliAccess {
                                                     TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID,
                                                     TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
                                                     TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID].asImmutable()
-    /** Darpan staff: use the CLI in every tenant they reach, with no grant. */
-    static final List<String> DARPAN_ADMIN_GROUP_IDS = [TenantAccessSupport.ADMIN_USER_GROUP_ID, TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
-                                                        TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID].asImmutable()
 
     static final String NOT_ON_IN_TENANT = "The Darpan CLI is not turned on for you in %s. A Darpan admin turns it on."
 
@@ -52,7 +49,7 @@ class CliAccess {
         if (!userId) return false
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserGroupMember", WHY)
                 .condition("userId", userId).useCache(false).list()
-                .any { it.userGroupId in DARPAN_ADMIN_GROUP_IDS && inForce(it) }
+                .any { it.userGroupId in TenantAccessSupport.DARPAN_ADMIN_GROUP_IDS && inForce(it) }
     }
 
     /** The user's permission groups in the tenant, in force now. */

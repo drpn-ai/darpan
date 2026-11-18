@@ -32,6 +32,9 @@ class CliAccess {
 
     /** Days a CLI sign-in lasts (one day is 24 hours), the same for every role: DAR-BE-261 ended the 30 days admins had. */
     static final int SIGN_IN_DAYS = 7
+    /** DAR-BE-295: an ADMIN-scope sign-in (darpan-admin) lasts this long, key and session both. */
+    static final int ADMIN_SIGN_IN_HOURS = 12
+    static final String ADMIN_SCOPE = "ADMIN"
     /** The permission groups that can use the CLI in a tenant (given a grant there). */
     static final List<String> CLI_ROLE_GROUP_IDS = [TenantAccessSupport.ADMIN_USER_GROUP_ID, TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
                                                     TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID,
@@ -74,8 +77,9 @@ class CliAccess {
 
     /** Whether a CLI sign-in made at signedInAt has outlived SIGN_IN_DAYS. Held on every call, admins included, so a key
      *  issued before DAR-BE-261 with a longer end stops at the same age. */
-    static boolean signInExpired(Timestamp signedInAt) {
-        return signedInAt != null && System.currentTimeMillis() - signedInAt.time >= SIGN_IN_DAYS * DAY_MS
+    static boolean signInExpired(Timestamp signedInAt, String scopeId = null) {
+        long limitMs = scopeId == ADMIN_SCOPE ? ADMIN_SIGN_IN_HOURS * 3_600_000L : SIGN_IN_DAYS * DAY_MS
+        return signedInAt != null && System.currentTimeMillis() - signedInAt.time >= limitMs
     }
 
     /** The user's grant in the tenant when it is ACTIVE and its window is open now; else null. */

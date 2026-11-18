@@ -25,6 +25,8 @@
             <description>Client IP of the start request, for the per-address limit.</description></field>
         <field name="createdDate" type="date-time"/>
         <field name="expiresDate" type="date-time"/>
+        <field name="scopeId" type="id">
+            <description>TENANT (also when empty) or ADMIN (darpan-admin: admin.* allowed, 12 hours)</description></field>
 
         <relationship type="one-nofk" title="ApprovedBy" related="moqui.security.UserAccount" short-alias="approvedBy">
             <key-map field-name="approvedByUserId" related="userId"/>
@@ -43,6 +45,8 @@
         <field name="hostLabel" type="text-short"/>
         <field name="createdDate" type="date-time"/>
         <field name="revokedDate" type="date-time"/>
+        <field name="scopeId" type="id">
+            <description>TENANT (also when empty) or ADMIN (darpan-admin: admin.* allowed, 12 hours)</description></field>
 
         <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
         <relationship type="one-nofk" related="moqui.security.UserLoginKey" short-alias="loginKey">

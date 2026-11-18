@@ -37,6 +37,8 @@ class CliAuthSupport {
     /** The mark on a web session a CLI key signed in: that key's hash, so revalidateCliWebSession can re-check it.
      *  A client cannot set it. */
     static final String CLI_SESSION_MARK_ATTRIBUTE = "darpan.cliSessionKeyHash"
+    /** The memo on the servlet request (a Boolean) for isAdminCliSession. A client cannot set it. */
+    static final String ADMIN_CLI_SESSION_ATTRIBUTE = "darpan.adminCliSession"
     static final int HOST_LABEL_MAX_LENGTH = 60
     static final int CLI_SESSION_ID_LENGTH = 12
 
@@ -154,11 +156,12 @@ class CliAuthSupport {
      * hashed in moqui.security.UserLoginKey, and the user's already-expired keys cleared out. It lives as long as a CLI
      * sign-in may (CliAccess.keyLifetimeDays: CliAccess.SIGN_IN_DAYS for everyone, admins included; DAR-BE-195, DAR-BE-261),
      * read for userId, the approver: poll#CliLogin runs anonymous.
+     * DAR-BE-295: scopeId ADMIN (darpan-admin) lives CliAccess.ADMIN_SIGN_IN_HOURS hours instead.
      * Returns [rawKey, hash, thruDate, expiresInSeconds]; rawKey exists nowhere else.
      */
-    static Map<String, Object> issueLoginKey(def ec, String userId, String description = null) {
+    static Map<String, Object> issueLoginKey(def ec, String userId, String description = null, String scopeId = null) {
         if (!userId) throw new IllegalArgumentException("issueLoginKey needs a userId")
-        int expiresInSeconds = CliAccess.keyLifetimeDays(ec, userId) * 86_400
+        int expiresInSeconds = scopeId == CliAccess.ADMIN_SCOPE ? CliAccess.ADMIN_SIGN_IN_HOURS * 3600 : CliAccess.keyLifetimeDays(ec, userId) * 86_400
         if (expiresInSeconds <= 0) throw new IllegalStateException(CLI_ACCESS_REFUSED)
         String rawKey = StringUtilities.getRandomString(40)
         String hash = AuthSessionSupport.hashLoginKey(ec, rawKey)
@@ -206,12 +209,40 @@ class CliAuthSupport {
             answer = (Boolean) known
         } else {
             String mark = sessionMark(request)
-            String cliKeyHash = mark ? null : requestLoginKeyHashes(ec).find { String hash -> isCliKeyHash(ec, hash) }
+            String cliKeyHash = null
+            def keySession = null
+            if (!mark) {
+                for (String hash in requestLoginKeyHashes(ec)) {
+                    keySession = cliSessionRow(ec, hash)
+                    if (keySession != null) { cliKeyHash = hash; break }
+                }
+            }
             answer = mark != null || cliKeyHash != null
             request.setAttribute(CLI_SESSION_ATTRIBUTE, answer)
+            // DAR-BE-295: the scope of the session just found (a marked web session's is read by its mark)
+            if (answer) request.setAttribute(ADMIN_CLI_SESSION_ATTRIBUTE,
+                    (mark ? cliSessionRow(ec, mark) : keySession)?.scopeId == CliAccess.ADMIN_SCOPE)
             if (cliKeyHash) markSession(request, cliKeyHash)
         }
         shared?.put(CLI_SESSION_CONTEXT_KEY, answer)
+        return answer
+    }
+
+    /** The shared-map memo key of isAdminCliSession. */
+    static final String ADMIN_CLI_SESSION_CONTEXT_KEY = "darpanAdminCliSession"
+
+    /**
+     * DAR-BE-295: true when the request's CLI session is an ADMIN-scope one (darpan-admin). isCliSession reads the
+     * session once, where it finds the key, and notes the scope on the servlet request (which no client can set) and
+     * on the shared map; this reads that note. False when the request is not a CLI session or no key was read.
+     */
+    static boolean isAdminCliSession(def ec) {
+        Map shared = sharedMap(ec)
+        if (shared?.get(ADMIN_CLI_SESSION_CONTEXT_KEY) == Boolean.TRUE) return true
+        def request = ec?.web?.request
+        if (request == null || !isCliSession(ec)) return false
+        boolean answer = request.getAttribute(ADMIN_CLI_SESSION_ATTRIBUTE) == Boolean.TRUE
+        if (answer) shared?.put(ADMIN_CLI_SESSION_CONTEXT_KEY, true)
         return answer
     }
 
@@ -240,10 +271,10 @@ class CliAuthSupport {
                 .unique()
     }
 
-    private static boolean isCliKeyHash(def ec, String hash) {
+    private static def cliSessionRow(def ec, String hash) {
         return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.auth.CliSession",
                         "self-scoped auth: is the request's login key a CLI key (pre-auth path, no active tenant)")
-                .condition("loginKeyHash", hash).useCache(false).count() > 0
+                .condition("loginKeyHash", hash).useCache(false).one()
     }
 
     /** The CLI key hash a web session was marked with, or null. */
@@ -326,7 +357,7 @@ class CliAuthSupport {
         Timestamp thruDate = (Timestamp) loginKey?.thruDate
         if (loginKey == null || (thruDate != null && thruDate.time <= System.currentTimeMillis())) return CLI_SESSION_EXPIRED
         // DAR-BE-261: the age limit, for admins too, so an admin key issued for 30 days before the change ends at 7.
-        if (CliAccess.signInExpired((Timestamp) cliSession.createdDate)) return CLI_SESSION_EXPIRED
+        if (CliAccess.signInExpired((Timestamp) cliSession.createdDate, (String) cliSession.scopeId)) return CLI_SESSION_EXPIRED
         def account = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "moqui.security.UserAccount",
                         "self-scoped auth: re-check that a CLI session's account can still sign in")
                 .condition("userId", cliSession.userId).useCache(false).one()

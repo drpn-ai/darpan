@@ -9,7 +9,12 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import jakarta.servlet.http.HttpServletRequest
+import darpan.facade.common.RpcMethodFence
+import org.moqui.context.ArtifactAuthorizationException
 import org.moqui.context.ExecutionContext
+import org.moqui.context.WebFacade
+import java.lang.reflect.Proxy
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
@@ -32,6 +37,9 @@ class CliLoginSmokeTests {
     private static final String APPROVER_USERNAME = "cli.approver"
     private static final String OTHER_ID = "CLI_OTHER"
     private static final String OTHER_USERNAME = "cli.other"
+    private static final String SUPER_ID = "CLI_SUPER"
+    private static final String SUPER_USERNAME = "cli.super"
+    private static final String ADMIN_METHOD = "admin.UserAdminServices.get#UserList"
     private static final String PLAIN_ID = "CLI_PLAIN"
     private static final String PLAIN_USERNAME = "cli.plain"
     private static final String HOST = "aditi-mbp"
@@ -55,19 +63,141 @@ class CliLoginSmokeTests {
         upsertAccount(APPROVER_ID, APPROVER_USERNAME)
         upsertAccount(OTHER_ID, OTHER_USERNAME)
         upsertAccount(PLAIN_ID, PLAIN_USERNAME)
+        upsertAccount(SUPER_ID, SUPER_USERNAME)
         // DAR-BE-195: a Darpan admin needs no CLI grant; PLAIN has none unless a test gives one.
         ec.entity.find(CliAccess.GRANT).disableAuthz().deleteAll()
         ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).condition("userId", PLAIN_ID).disableAuthz().deleteAll()
         darpanAdmin(APPROVER_ID, true)
         darpanAdmin(OTHER_ID, true)
         darpanAdmin(PLAIN_ID, false)
+        // DAR-BE-295: a super admin, who alone may approve a darpan-admin sign-in.
+        darpanAdmin(SUPER_ID, false)
+        ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: "DARPAN_SUPER_ADMIN", description: "Darpan super admin"]).createOrUpdate()
+        ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_SUPER_ADMIN", userId: SUPER_ID,
+                fromDate: new Timestamp(System.currentTimeMillis() - 60_000L)]).create()
     }
 
     @AfterEach
     void clearMemo() {
         ec.context.getSharedMap().remove(CliAuthSupport.CLI_SESSION_CONTEXT_KEY)
+        ec.context.getSharedMap().remove(CliAuthSupport.ADMIN_CLI_SESSION_CONTEXT_KEY)
         ec.user.logoutUser()
         ec.message.clearAll()
+    }
+
+    // ---- DAR-BE-295: a darpan-admin (ADMIN scope) sign-in ----
+
+    @Test
+    @DisplayName("DAR-BE-295: a super admin's ADMIN sign-in issues a 12-hour key and an ADMIN session")
+    void adminScopeSignInIssuesATwelveHourKeyAndAnAdminSession() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST, scope: "ADMIN"]).out
+        assertEquals("ADMIN", signedIn(SUPER_USERNAME, "get#CliLoginRequest", [userCode: started.userCode]).out.scope)
+        assertEquals("ADMIN", deviceRow(started.userCode as String).scopeId)
+        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        Map polled = anon("poll#CliLogin", [deviceCode: started.deviceCode]).out
+        assertEquals("APPROVED", polled.status)
+        assertEquals(43200, polled.authTokenExpiresInSeconds)
+        String hash = AuthSessionSupport.hashLoginKey(ec, polled.authToken as String)
+        assertEquals("ADMIN", ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", hash).useCache(false).disableAuthz().one().scopeId)
+        def key = ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).disableAuthz().one()
+        assertEquals(12L * 3_600_000L, ((Timestamp) key.thruDate).time - ((Timestamp) key.fromDate).time)
+        assertEquals("darpan-admin on ${HOST}".toString(), key.description)
+        // a plain start is TENANT
+        Map tenant = anon("start#CliLogin", [hostLabel: HOST]).out
+        assertEquals("TENANT", signedIn(SUPER_USERNAME, "get#CliLoginRequest", [userCode: tenant.userCode]).out.scope)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: a Darpan admin who is not a super admin cannot approve an ADMIN sign-in")
+    void adminScopeApprovalIsRefusedForANonSuperAdmin() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST, scope: "ADMIN"]).out
+        Map approved = signedIn(APPROVER_USERNAME, "approve#CliLogin", [userCode: started.userCode])
+        assertEquals(["Only a super admin can approve a darpan-admin sign-in."], approved.errors)
+        assertEquals("PENDING", deviceRow(started.userCode as String).statusId)
+        assertNull(deviceRow(started.userCode as String).approvedByUserId)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: the ADMIN key reaches an admin method through the fence")
+    void adminScopeKeyCallsAnAdminMethod() {
+        String raw = adminKey()
+        fenceEnforce(raw, ADMIN_METHOD)  // a refusal throws and fails the test
+        assertNull(CliAuthSupport.cliSessionProblem(ec, AuthSessionSupport.hashLoginKey(ec, raw), cliSessionOf(raw)))
+        // but only admin.*: a method outside the allowlist and outside admin.* is still refused
+        assertThrows(ArtifactAuthorizationException) { fenceEnforce(raw, "facade.AuthFacadeServices.save#ActiveTenant") }
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: a TENANT key is refused on admin methods, a super admin's included")
+    void tenantScopeKeyIsRefusedOnAdminMethodsEvenForASuperAdmin() {
+        String raw = signInByCli(SUPER_USERNAME)
+        ArtifactAuthorizationException refused = assertThrows(ArtifactAuthorizationException) { fenceEnforce(raw, ADMIN_METHOD) }
+        assertEquals("${ADMIN_METHOD} is not available to the Darpan CLI; use the app.".toString(), refused.message)
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: a tenant user's CLI key is refused on admin methods")
+    void tenantUsersCliKeyIsRefusedOnAdminMethods() {
+        role(PLAIN_ID, T1, "DARPAN_TENANT_USER")
+        cliGrant(PLAIN_ID, T1)
+        String raw = signInFor(PLAIN_USERNAME).authToken
+        assertThrows(ArtifactAuthorizationException) { fenceEnforce(raw, ADMIN_METHOD) }
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: an ADMIN session is refused 12 hours after sign-in, though its key's end is still ahead")
+    void adminScopeKeyIsRefusedAfterTwelveHours() {
+        String raw = adminKey()
+        String hash = AuthSessionSupport.hashLoginKey(ec, raw)
+        assertNull(CliAuthSupport.cliSessionProblem(ec, hash, cliSessionOf(raw)))
+        Timestamp past = new Timestamp(System.currentTimeMillis() - 12L * 3_600_000L - 1000L)
+        ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", hash).disableAuthz().updateAll([createdDate: past])
+        ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", hash).disableAuthz().updateAll([fromDate: past])
+        assertEquals(CliAuthSupport.CLI_SESSION_EXPIRED, CliAuthSupport.cliSessionProblem(ec, hash, cliSessionOf(raw)))
+    }
+
+    @Test
+    @DisplayName("DAR-BE-295: start refuses a scope that is neither TENANT nor ADMIN")
+    void startRefusesAnUnknownScope() {
+        Map call = anon("start#CliLogin", [hostLabel: HOST, scope: "ROOT"])
+        assertEquals(["scope is TENANT or ADMIN."], call.errors)
+        assertEquals(0, ec.entity.find("darpan.auth.CliDeviceCode").disableAuthz().count())
+    }
+
+    /** start ADMIN, a super admin approves, poll: the raw key. */
+    private String adminKey() {
+        Map started = anon("start#CliLogin", [hostLabel: HOST, scope: "ADMIN"]).out
+        assertEquals([], signedIn(SUPER_USERNAME, "approve#CliLogin", [userCode: started.userCode]).errors)
+        Map polled = anon("poll#CliLogin", [deviceCode: started.deviceCode]).out
+        assertEquals("APPROVED", polled.status)
+        return polled.authToken
+    }
+
+    private def cliSessionOf(String raw) {
+        return ec.entity.find("darpan.auth.CliSession").condition("loginKeyHash", AuthSessionSupport.hashLoginKey(ec, raw)).useCache(false).disableAuthz().one()
+    }
+
+    /** RpcMethodFence.enforce on a /rpc/json request carrying this CLI key in its login_key header. The real context
+     *  answers everything but ec.web, which is a stub request. The memos are cleared first, as a new request has none. */
+    private void fenceEnforce(String rawKey, String method) {
+        ec.context.getSharedMap().remove(CliAuthSupport.CLI_SESSION_CONTEXT_KEY)
+        ec.context.getSharedMap().remove(CliAuthSupport.ADMIN_CLI_SESSION_CONTEXT_KEY)
+        Map<String, Object> attributes = [:]
+        HttpServletRequest request = [
+                getServletPath: { -> "" }, getPathInfo: { -> "/rpc/json" }, getContextPath: { -> "" },
+                getRequestURI : { -> "/rpc/json" },
+                getHeader     : { String name -> name == "login_key" ? rawKey : null },
+                getCookies    : { -> null },
+                getSession    : { boolean create -> null },
+                getAttribute  : { String name -> attributes[name] },
+                setAttribute  : { String name, Object value -> attributes[name] = value },
+        ] as HttpServletRequest
+        WebFacade web = [getRequest: { -> request }, getRequestParameters: { -> [method: method] },
+                         getSecureRequestParameters: { -> [:] }] as WebFacade
+        ExecutionContext wrapped = (ExecutionContext) Proxy.newProxyInstance(ExecutionContext.classLoader, [ExecutionContext] as Class[]) { Object proxy, java.lang.reflect.Method m, Object[] args ->
+            m.name == "getWeb" ? web : m.invoke(ec, args)
+        }
+        RpcMethodFence.enforce(wrapped)
     }
 
     @Test

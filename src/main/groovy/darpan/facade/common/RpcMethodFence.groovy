@@ -30,6 +30,9 @@ import org.moqui.util.StringUtilities
  * only /rpc/json, so a CLI key cannot reach /rest/e1 or a screen instead. Requests that are not CLI sessions are
  * fenced exactly as before.
  *
+ * <p>DAR-BE-295: an ADMIN-scope session (darpan-admin) may call admin.*; the DARPAN_ADMIN_API artifact authz decides who.
+ * Every other method, and every path, is held to the same allowlist as any CLI session.
+ *
  * <p>Runs from the webroot before-request hook (darpan MoquiConf.xml) on every webroot request. It reads the same
  * parsed request-parameter map the dispatcher reads, so the method checked is the method dispatched.
  *
@@ -58,20 +61,21 @@ class RpcMethodFence {
         String reason = rejection(routed, normalised, params)
         if (reason) throw new ArtifactAuthorizationException(reason)
         if (CliAuthSupport.isCliSession(ec)) {
-            String cliReason = cliRejection(raw, routed, normalised, isJsonRpc(routed) ? requestedMethods(params) : [])
+            String cliReason = cliRejection(raw, routed, normalised, isJsonRpc(routed) ? requestedMethods(params) : [],
+                    CliAuthSupport.isAdminCliSession(ec))
             if (cliReason) throw new ArtifactAuthorizationException(cliReason)
         }
     }
 
     /** cliRejection for a plain path every view agrees on. Pure, for unit tests. */
-    static String cliRejection(String path, List<String> methods) {
+    static String cliRejection(String path, List<String> methods, boolean adminScope = false) {
         List<String> segments = segmentsOf(path)
-        return cliRejection(segments, segments, segments, methods)
+        return cliRejection(segments, segments, segments, methods, adminScope)
     }
 
     /** cliRejection where the raw path is already the routed one (nothing for Moqui to clean). Pure, for unit tests. */
-    static String cliRejection(List<String> routed, List<String> normalised, List<String> methods) {
-        return cliRejection(routed, routed, normalised, methods)
+    static String cliRejection(List<String> routed, List<String> normalised, List<String> methods, boolean adminScope = false) {
+        return cliRejection(routed, routed, normalised, methods, adminScope)
     }
 
     /**
@@ -80,12 +84,14 @@ class RpcMethodFence {
      * Moqui's routed path must equal the container's, so the CLI path matched is the one routed to. A null method (a
      * call with none) is left to the dispatcher, which answers it with a JSON-RPC error.
      */
-    static String cliRejection(List<String> raw, List<String> routed, List<String> normalised, List<String> methods) {
+    static String cliRejection(List<String> raw, List<String> routed, List<String> normalised, List<String> methods,
+                               boolean adminScope = false) {
         if (raw == null || routed == null || raw != routed || routed != normalised) return CLI_PATH_REFUSAL
         if (raw.any { String segment -> isDotSegment(segment) || segment.startsWith("~") }) return CLI_PATH_REFUSAL
         if (!isCliPath(routed)) return CLI_PATH_REFUSAL
         for (String method in (methods ?: [])) {
             if (method == null) continue
+            if (adminScope && method.startsWith("admin.")) continue
             if (!CliMethodAllowlist.ALLOWED.contains(method)) return "${method} is not available to the Darpan CLI; use the app.".toString()
         }
         return null

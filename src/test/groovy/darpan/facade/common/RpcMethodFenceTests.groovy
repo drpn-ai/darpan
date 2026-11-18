@@ -161,6 +161,23 @@ class RpcMethodFenceTests {
     }
 
     @Test
+    void cliRejectionLetsAdminMethodsThroughOnlyForAnAdminSession() {
+        String p = "/rpc/json"
+        List<String> m = ["admin.UserAdminServices.get#UserList"]
+        assertEquals("admin.UserAdminServices.get#UserList is not available to the Darpan CLI; use the app.".toString(),
+                RpcMethodFence.cliRejection(p, m, false))
+        assertNull(RpcMethodFence.cliRejection(p, m, true))
+        List<String> segments = RpcMethodFence.segmentsOf(p)
+        assertNull(RpcMethodFence.cliRejection(segments, segments, segments, m, true))
+        assertNull(RpcMethodFence.cliRejection(segments, segments, m, true))
+        // an admin session is held to the allowlist for everything that is not admin.*
+        String excluded = CliMethodAllowlist.EXCLUDED.find { it.startsWith("facade.") }
+        assertNotNull(excluded)
+        assertEquals("${excluded} is not available to the Darpan CLI; use the app.".toString(), RpcMethodFence.cliRejection(p, [excluded], true))
+        assertEquals(CLI_PATH_REFUSAL, RpcMethodFence.cliRejection("/rest/e1/moqui.security.UserAccount", m, true))
+    }
+
+    @Test
     void cliRestE1IsRefused() {
         ["/rest/e1/moqui.security.UserAccount", "/rest/s1/moqui/users", "/rest/s1/darpan/anything", "/rest/login",
          "/apps/darpan/Settings", "/qapps/darpan/rpc/json", "/rpc/json/extra", "/rpc/json.json", "/rest/s1/graphql/public",

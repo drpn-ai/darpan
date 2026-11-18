@@ -15,6 +15,10 @@
             <parameter name="hostLabel" required="true">
                 <description>The computer the CLI runs on (its hostname), shown to the person before they approve.</description>
             </parameter>
+            <parameter name="scope" default-value="TENANT">
+                <description>DAR-BE-295. TENANT (the default) or ADMIN: the darpan-admin CLI, which may call admin.* for 12 hours
+                    and which only a super admin may approve.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>
@@ -43,13 +47,16 @@
                 <econdition field-name="expiresDate" operator="less" from="new java.sql.Timestamp(nowDate.time - 86_400_000L)"/>
             </entity-delete-by-condition>
 
+            <if condition="scope != 'TENANT' &amp;&amp; scope != 'ADMIN'">
+                <return error="true" message="scope is TENANT or ADMIN."/></if>
+
             <set field="deviceCode" from="darpan.facade.auth.CliAuthSupport.newDeviceCode()"/>
             <set field="userCode" from="darpan.facade.auth.CliAuthSupport.newUserCode(ec)"/>
             <set field="expiresInSeconds" from="darpan.facade.auth.CliAuthSupport.DEVICE_CODE_LIFETIME_SECONDS" type="Integer"/>
             <set field="intervalSeconds" from="darpan.facade.auth.CliAuthSupport.POLL_INTERVAL_SECONDS" type="Integer"/>
             <entity-make-value entity-name="darpan.auth.CliDeviceCode" value-field="deviceRow"
                     map="[deviceCodeHash: darpan.facade.auth.CliAuthSupport.hashDeviceCode(deviceCode), userCode: userCode,
-                          hostLabel: darpan.facade.auth.CliAuthSupport.normalizeHostLabel(hostLabel), statusId: 'PENDING',
+                          hostLabel: darpan.facade.auth.CliAuthSupport.normalizeHostLabel(hostLabel), statusId: 'PENDING', scopeId: scope,
                           requestIp: requestIp, createdDate: nowDate,
                           expiresDate: new java.sql.Timestamp(nowDate.time + expiresInSeconds * 1000L)]"/>
             <entity-create value-field="deviceRow"/>
@@ -104,9 +111,9 @@
                         <entity-update value-field="deviceRow"/>
                         <set field="status" value="DENIED"/>
                         <else>
-                            <set field="issued" from="darpan.facade.auth.CliAuthSupport.issueLoginKey(ec, approver.userId, 'Darpan CLI on ' + (deviceRow.hostLabel ?: 'an unnamed computer'))"/>
+                            <set field="issued" from="darpan.facade.auth.CliAuthSupport.issueLoginKey(ec, approver.userId, (deviceRow.scopeId == 'ADMIN' ? 'darpan-admin on ' : 'Darpan CLI on ') + (deviceRow.hostLabel ?: 'an unnamed computer'), deviceRow.scopeId)"/>
                             <entity-make-value entity-name="darpan.auth.CliSession" value-field="cliSession"
-                                    map="[loginKeyHash: issued.hash, userId: approver.userId, hostLabel: deviceRow.hostLabel, createdDate: nowDate]"/>
+                                    map="[loginKeyHash: issued.hash, userId: approver.userId, hostLabel: deviceRow.hostLabel, createdDate: nowDate, scopeId: deviceRow.scopeId]"/>
                             <entity-create value-field="cliSession"/>
                             <set field="deviceRow.statusId" value="CLAIMED"/>
                             <set field="deviceRow.issuedLoginKeyHash" from="issued.hash"/>
@@ -137,6 +144,7 @@
             <parameter name="messages" type="List"><description>Informational messages.</description><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><description>Errors.</description><parameter name="error"/></parameter>
             <parameter name="hostLabel" type="String"><description>The computer the CLI says it runs on.</description></parameter>
+            <parameter name="scope" type="String"><description>DAR-BE-295. TENANT or ADMIN (darpan-admin: a super admin approves it).</description></parameter>
             <parameter name="status" type="String">
                 <description>PENDING (waiting for approval), APPROVED, DENIED, or EXPIRED (expired or unknown code).</description></parameter>
             <parameter name="expiresDate" type="Timestamp"><description>When the request expires.</description></parameter>
@@ -152,6 +160,7 @@
                 <set field="status" value="EXPIRED"/>
                 <else>
                     <set field="hostLabel" from="deviceRow.hostLabel"/>
+                    <set field="scope" from="deviceRow.scopeId ?: 'TENANT'"/>
                     <set field="expiresDate" from="deviceRow.expiresDate"/>
                     <set field="createdDate" from="deviceRow.createdDate"/>
                     <if condition="deviceRow.statusId == 'CLAIMED' || deviceRow.statusId == 'APPROVED'">
@@ -195,6 +204,9 @@
             <set field="deviceRow" from="deviceRows ? deviceRows[0] : null"/>
             <if condition="deviceRow == null || deviceRow.statusId != 'PENDING' || !deviceRow.expiresDate?.after(ec.user.nowTimestamp)">
                 <return error="true" message="This sign-in request has expired or was already answered. Run darpan login again."/></if>
+            <!-- DAR-BE-295: a darpan-admin sign-in is approved by a super admin only; refused before any code is spent. -->
+            <if condition="deviceRow.scopeId == 'ADMIN' &amp;&amp; !darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)">
+                <return error="true" message="Only a super admin can approve a darpan-admin sign-in."/></if>
             <!-- DAR-BE-264: a fresh code (DAR-BE-270: or passkey assertion) from an approver with two-factor on, checked in its
                  own transaction, and last, so a request that is no longer waiting spends no code. -->
             <set field="codeProblem" from="darpan.facade.auth.TwoFactorSupport.freshProofProblemIfEnrolled(ec, code, passkeyAssertion)"/>

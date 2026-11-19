@@ -3,6 +3,8 @@ package darpan.judge
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.reconciliation.RunConclusionStep
 import darpan.reconciliation.conclusion.ConclusionKeySupport
+import darpan.reconciliation.conclusion.ConclusionLookupSupport
+import darpan.reconciliation.conclusion.JsonRecordStream
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.conclusion.RunConclusionSupport
 import darpan.reconciliation.core.ReconciliationServices
@@ -12,6 +14,8 @@ import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
 
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.util.regex.Pattern
 
 /**
  * DAR-BE-318 plan 2, Task 8. The replay harness: a captured run's extracts through today's compare and conclude, and beside
@@ -27,6 +31,10 @@ import java.nio.charset.StandardCharsets
  *    becomes a pair of its own;
  *  - on any other side they stay kept out by Keep: the compare id reads SET_ASIDE, with no fields (ruling D8).
  *
+ * A replay never calls a system (ruling P2-24): every lookup the conclude pass asks and every ask the judge fetches is
+ * answered by capturedFetcher, from the lookups captured in the run folder (lookups/lookup-<name>-<millis>.json, the name
+ * today's lookup gives its extract), or not at all, with a warning that names it.
+ *
  * Runs on the request thread as the tenant user with authz on (rulings P2-7, P2-9): no disableAuthz, RunAdmission or
  * withSystemTenant. It never writes into the captured run folder (ruling P2-21) and records no finding (ruling P2-18).
  */
@@ -36,6 +44,9 @@ class JudgeReplaySupport {
     static final String RESULT_FILE = "result.json"
     static final String JUDGED_FILE = "judged-findings.json"
     static final String REPLAYS_PATH = "judge-replays"
+    static final String EXTRACTS_DIR = "extracts"
+    static final String LOOKUPS_DIR = "lookups"
+    static final Pattern CAPTURED_LOOKUP = ~/^lookup-([A-Za-z0-9_]+)-(\d+)\.json$/
     static final int BATCH_SIZE = 500
     static final List<String> SIDES = ["file1", "file2"].asImmutable()
 
@@ -65,7 +76,7 @@ class JudgeReplaySupport {
 
         // Pass 1: every key each side holds, so the pair fact type names them all before a fact is built (ruling P2-16).
         Map<String, Set<String>> keys = [file1: new TreeSet<String>(), file2: new TreeSet<String>()]
-        new PairRows(matched, missing, copyOf(readBack), [:], [:]).each { Map row ->
+        new PairRows(matched, missing, copyOf(readBack), [:], [:], [:]).each { Map row ->
             SIDES.each { String side -> if (row.get(side) != null) keys[side].addAll(((Map) row.get(side)).keySet()*.toString()) }
         }
         Map systems = (Map) (args.systems ?: [:])
@@ -80,21 +91,30 @@ class JudgeReplaySupport {
 
         // Pass 2: the same pairs in batches, each batch's asks fetched once, then built and judged.
         Map<String, Integer> skipped = [:]
+        Map<String, Integer> dropped = [:]
         Map<String, Integer> pairCounts = [matched: 0, missing: 0, readBack: 0]
-        Iterator<List<Map>> pairBatches = PairFactSupport.batches(new PairRows(matched, missing, readBack, skipped, pairCounts), BATCH_SIZE)
+        Iterator<List<Map>> pairBatches = PairFactSupport.batches(new PairRows(matched, missing, readBack, skipped, dropped, pairCounts), BATCH_SIZE)
         Map params = (Map) (args.params ?: [:])
+        // Ruling P2-24: asks are answered from the replay's captured lookups only, never through AskSupport.fetcher.
+        File extract1 = (File) ((Map) args.extractFiles)?.get("file1")
+        Set<String> notCaptured = new TreeSet<>()
+        Closure askFetcher = capturedFetcher(lookupsDirOf(extract1), "the replayed run", "Ask", notCaptured)
         Iterator<List<Map>> factBatches = new Iterator<List<Map>>() {
             boolean hasNext() { return pairBatches.hasNext() }
 
             List<Map> next() {
                 List<Map> batch = pairBatches.next()
                 Map<String, Map<String, Object>> asks = AskSupport.fetchAsks(ec, checkId, tenantId,
-                        batch.collect { Map row -> [row.compareId, row.file1, row.file2] }, warnings)
+                        batch.collect { Map row -> [row.compareId, row.file1, row.file2] }, [], askFetcher)
                 return batch.collect { Map row -> PairFactSupport.buildFact(row, sideState, params, asks.get(row.compareId as String)) }
             }
         }
         List<Map> findings = JudgeSupport.judge(ec, checkId, factBatches, (Map) (args.statementsByClaim ?: [:]), warnings)
+        warnings.addAll(notCaptured)
         skipped.each { String type, Integer n -> warnings.add("${n} ${type} rows are not pairs and were not judged".toString()) }
+        dropped.each { String side, Integer n ->
+            warnings.add("${n} ${side} records set aside under a key the compare already holds (kept or duplicated) were not judged".toString())
+        }
         return [findings: findings, warnings: warnings, pairCounts: pairCounts]
     }
 
@@ -130,18 +150,74 @@ class JudgeReplaySupport {
         if (head.truncated == true) {
             warnings.add("The ${side} sidecar is truncated: what it left out reads as absent".toString())
         }
+        if (head.present != true && new File(extractFile.parentFile, ExcludedRecordsSidecar.fileNameFor(extractFile.name)).exists()) {
+            warnings.add("The ${side} sidecar cannot be read: what it set aside reads as absent".toString())
+        }
         if (repeated) warnings.add("${repeated} ${side} records set aside under a compare id already read back were not judged".toString())
         return [records: records, ids: ids]
     }
 
-    /** A record as the pair fact holds it: text values, nested values as JSON text, nulls left out. */
+    /**
+     * A record as the pair fact holds it: text values, nested values as JSON text, nulls left out. A JSON number reads the same
+     * from both paths: Spark renders a kept record's 24.00 as 24.0 (and 12345678.00 as 1.2345678E7) while a read-back record
+     * keeps its raw 24.00, so every number is written as its plain value without trailing zeros (24, 12345678). Text, even
+     * text that looks like a number, is left as it is: both paths carry a JSON string unchanged, and an id like 000123 is not
+     * the number 123.
+     */
     static Map<String, String> flat(Map record) {
         Map<String, String> out = new LinkedHashMap<>()
         (record ?: [:]).each { Object key, Object value ->
             if (value == null) return
-            out.put(key as String, value instanceof Map || value instanceof List ? JsonOutput.toJson(value) : value.toString())
+            out.put(key as String, value instanceof Map || value instanceof List ? JsonOutput.toJson(value) :
+                    value instanceof Number ? numberText((Number) value) : value.toString())
         }
         return out
+    }
+
+    static String numberText(Number value) {
+        try {
+            return new BigDecimal(value.toString()).stripTrailingZeros().toPlainString()
+        } catch (NumberFormatException ignored) {
+            return value.toString()   // NaN, Infinity
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ captured lookups (P2-24)
+
+    /** <replay>/lookups for a copied extract at <replay>/extracts/<side>/<name>; null when the extract is not a replay's copy. */
+    static File lookupsDirOf(File copiedExtract) {
+        File extracts = copiedExtract?.parentFile?.parentFile
+        return extracts?.name == EXTRACTS_DIR ? new File(extracts.parentFile, LOOKUPS_DIR) : null
+    }
+
+    /**
+     * A lookup call with RunConclusionStep.fetchLookup's signature (ec, lookup, ids, tenantId, warnings) that never calls a
+     * system: it answers the asked ids from the newest captured lookup-<name>-<millis>.json in lookupsDir, and when none is
+     * captured it adds "<kind> <name> not captured in <where>; not replayed" to warnings and to notCaptured, and answers nothing.
+     */
+    static Closure capturedFetcher(File lookupsDir, String where, String kind, Set<String> notCaptured) {
+        return { def ec, Map lookup, List<String> ids, String tenantId, List<String> warnings ->
+            String name = lookup?.name as String
+            File file = capturedLookupFile(lookupsDir, name)
+            if (file == null) {
+                String warning = "${kind} ${name} not captured in ${where}; not replayed".toString()
+                notCaptured.add(warning)
+                warnings?.add(warning)
+                return [:]
+            }
+            Set<String> asked = new HashSet<String>((ids ?: []).collect { it as String })
+            Map<String, Object> found = [:]
+            JsonRecordStream.forEachRecord(file, "records") { Map record -> ConclusionLookupSupport.collect(found, lookup, record) }
+            return found.findAll { Object key, Object value -> asked.contains(key as String) }
+        }
+    }
+
+    static File capturedLookupFile(File lookupsDir, String name) {
+        if (lookupsDir == null || !name || !lookupsDir.isDirectory()) return null
+        return (lookupsDir.listFiles() ?: []).findAll { File f ->
+            def m = CAPTURED_LOOKUP.matcher(f.name)
+            f.isFile() && m.matches() && m.group(1) == name
+        }.max { File f -> new BigInteger(CAPTURED_LOOKUP.matcher(f.name).with { it.matches(); it.group(2) }) }
     }
 
     private static Map<String, Map<String, Map>> copyOf(Map<String, Map<String, Map>> readBack) {
@@ -150,25 +226,32 @@ class JudgeReplaySupport {
     }
 
     /**
-     * Pair rows, lazily: the matched frame, then the missing frame, then the read-back records no row named. Read-back records are
-     * removed from readBack as they are used. Rows of any other type (duplicate findings) are counted in skipped, not paired.
+     * Pair rows, lazily: the matched frame, then the missing frame, then the read-back records no row named. Every frame row
+     * takes its key out of readBack on both sides, so no compare id is paired twice:
+     *  - the side a row carries keeps the row's record; a read-back record under the same key there (kept and set aside under
+     *    one key) is counted in dropped;
+     *  - a missing row's absent side takes the read-back record, if any;
+     *  - a duplicate row (DUPLICATE_IN_FILE_x) is no pair: today's compare reports it and leaves its key out on both sides, so
+     *    the judging does too (skipped, and its read-back records counted in dropped), never as a read-back-only pair.
      */
     static class PairRows implements Iterator<Map> {
         private final Iterator<String> matched
         private final Iterator<String> missing
         private final Map<String, Map<String, Map>> readBack
         private final Map<String, Integer> skipped
+        private final Map<String, Integer> dropped
         private final Map<String, Integer> counts
         private final JsonSlurper slurper = new JsonSlurper()
         private Iterator<String> leftover
         private Map pending
 
         PairRows(Dataset matchedDf, Dataset missingDf, Map<String, Map<String, Map>> readBack, Map<String, Integer> skipped,
-                 Map<String, Integer> counts) {
+                 Map<String, Integer> dropped, Map<String, Integer> counts) {
             this.matched = rowsOf(matchedDf)
             this.missing = rowsOf(missingDf)
             this.readBack = readBack
             this.skipped = skipped
+            this.dropped = dropped
             this.counts = counts
         }
 
@@ -188,7 +271,7 @@ class JudgeReplaySupport {
             while (matched.hasNext()) {
                 Map row = (Map) slurper.parseText(matched.next())
                 String id = row.primaryId as String
-                SIDES.each { readBack[it]?.remove(id) }
+                SIDES.each { drop(it, id) }
                 count("matched")
                 return [compareId: id, file1: flat((Map) row.file1), file2: flat((Map) row.file2)]
             }
@@ -197,8 +280,15 @@ class JudgeReplaySupport {
                 String type = row.diffType as String
                 String id = row.primaryId as String
                 Map data = row.data ? flat((Map) slurper.parseText(row.data as String)) : [:]
-                if (type == "MISSING_IN_FILE_2") return count("missing") + [compareId: id, file1: data, file2: readBack.file2?.remove(id)]
-                if (type == "MISSING_IN_FILE_1") return count("missing") + [compareId: id, file1: readBack.file1?.remove(id), file2: data]
+                if (type == "MISSING_IN_FILE_2") {
+                    drop("file1", id)
+                    return count("missing") + [compareId: id, file1: data, file2: readBack.file2?.remove(id)]
+                }
+                if (type == "MISSING_IN_FILE_1") {
+                    drop("file2", id)
+                    return count("missing") + [compareId: id, file1: readBack.file1?.remove(id), file2: data]
+                }
+                SIDES.each { drop(it, id) }
                 skipped.put(type, (skipped.get(type) ?: 0) + 1)
             }
             if (leftover == null) {
@@ -211,6 +301,11 @@ class JudgeReplaySupport {
                 if (file1 != null || file2 != null) return count("readBack") + [compareId: id, file1: file1, file2: file2]
             }
             return null
+        }
+
+        /** Takes a read-back record out of the judging: its key already has a row on this side, or leaves the compare. */
+        private void drop(String side, String id) {
+            if (readBack[side]?.remove(id) != null) dropped.put(side, (dropped.get(side) ?: 0) + 1)
         }
 
         /** Counts a row of this kind; answers an empty map so a return can add the row to it. */
@@ -244,15 +339,18 @@ class JudgeReplaySupport {
         // compare writes a records file beside the extract it reads (JsonRecordLines).
         Map file1 = copyExtract(ec, (Map) files.FILE_1, folder, folderLocation, "FILE_1")
         Map file2 = copyExtract(ec, (Map) files.FILE_2, folder, folderLocation, "FILE_2")
+        copyCapturedLookups((File) args.runDir, folder)
 
         Map compareParams = [ruleSetId     : args.ruleSetId, compareScopeId: args.compareScopeId,
                              file1Location : file1.fileLocation, file2Location: file2.fileLocation,
                              file1Name     : file1.fileName, file2Name: file2.fileName, sparkAppName: "JudgeReplay"]
         if (judging) compareParams.putAll([judgeWithDecisions: true, judgeCheckId: check.checkId])
-        Map compared = call(ec, "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", compareParams,
-                "Replaying check ${check.checkId}")
+        // Kept even when the compare fails, so its persisted frames are always released (review M4).
+        Map compared = (ec.service.sync().name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                .parameters(compareParams).call() ?: [:]) as Map
         File diffFile
         try {
+            if (ec.message.hasError()) throw new IllegalStateException("Replaying check ${check.checkId}: ${ec.message.errorsString}".toString())
             Map written = ReconciliationServices.writeDiffDatasetOutput(ec, (Dataset) compared.diffDf, folder.absolutePath, DIFF_FILE, DIFF_FILE,
                     [timestamp         : ReconciliationServices.formatMetadataTimestamp(ec.user.nowTimestamp),
                      file1Label        : compared.file1Label, file2Label: compared.file2Label,
@@ -269,9 +367,12 @@ class JudgeReplaySupport {
             ReconciliationServices.unpersistDatasets((List) (compared.persistedSources ?: []))
         }
 
+        // Ruling P2-24: the conclude pass's lookups (and a brain's questions) are answered from the captured lookups only.
+        Set<String> notCaptured = new TreeSet<>()
+        Closure lookupFetcher = capturedFetcher(new File(folder, LOOKUPS_DIR), "run ${args.runFolder}".toString(), "Lookup", notCaptured)
         Map concluded = RunConclusionStep.runIfConfigured([ec: ec, compareScopeId: args.compareScopeId, diffFile: diffFile,
                 file1Source: null, file2Source: null, file1Result: [fileLocation: file1.fileLocation],
-                file2Result: [fileLocation: file2.fileLocation]]) ?: [:]
+                file2Result: [fileLocation: file2.fileLocation], lookupFetcher: lookupFetcher]) ?: [:]
         Map counts = [differenceCount             : compared.differenceCount, missingInFile1Count: compared.missingInFile1Count,
                       missingInFile2Count         : compared.missingInFile2Count,
                       missingObjectDifferenceCount: compared.missingObjectDifferenceCount]
@@ -292,7 +393,8 @@ class JudgeReplaySupport {
 
         List<Map> oldFindings = AuditAutomationSupport.findingsFrom(ec, tenantId, check, diffFile,
                 [systemEnumId: args.file1SystemEnumId], [systemEnumId: args.file2SystemEnumId], [:])
-        Map out = [oldFindings: oldFindings, judgedFindings: [], judgeWarnings: [], judgedPairCounts: [:], replayFolder: folderLocation]
+        Map out = [oldFindings: oldFindings, judgedFindings: [], judgeWarnings: [], judgedPairCounts: [:], replayFolder: folderLocation,
+                   replayWarnings: notCaptured as List]
         if (judging) {
             List<Map> judged = (List<Map>) (compared.judgedFindings ?: [])
             List<String> judgeWarnings = (List<String>) (compared.judgeWarnings ?: [])
@@ -314,14 +416,28 @@ class JudgeReplaySupport {
         String fileName = picked.fileName as String
         File source = darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, picked.fileLocation as String)
         if (source == null || !source.isFile()) throw new IllegalStateException("The ${side} extract ${fileName} is not on disk".toString())
-        File dir = new File(new File(folder, "extracts"), side)
+        File dir = new File(new File(folder, EXTRACTS_DIR), side)
         DataManagerSupport.ensureDirectory(dir, "judge replay")
-        java.nio.file.Files.copy(source.toPath(), new File(dir, fileName).toPath())
+        Files.copy(source.toPath(), new File(dir, fileName).toPath())
         File sidecar = new File(source.parentFile, ExcludedRecordsSidecar.fileNameFor(fileName))
-        if (sidecar.isFile()) java.nio.file.Files.copy(sidecar.toPath(), new File(dir, sidecar.name).toPath())
+        if (sidecar.isFile()) Files.copy(sidecar.toPath(), new File(dir, sidecar.name).toPath())
         String location = DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec),
-                "${folderLocation}/extracts/${side}/${fileName}".toString())
+                "${folderLocation}/${EXTRACTS_DIR}/${side}/${fileName}".toString())
         return [fileLocation: location, fileName: fileName]
+    }
+
+    /**
+     * The lookups captured in the run folder (<run>/lookups/lookup-<name>-<millis>.json), copied into <replay>/lookups/, the only
+     * place a replay's lookups and asks are answered from. Today's live lookups do not write there yet, so a run captured before
+     * they do replays every lookup as not captured.
+     */
+    static void copyCapturedLookups(File runDir, File folder) {
+        File captured = runDir != null ? new File(runDir, LOOKUPS_DIR) : null
+        File target = new File(folder, LOOKUPS_DIR)
+        DataManagerSupport.ensureDirectory(target, "judge replay")
+        (captured?.isDirectory() ? (captured.listFiles() ?: []) : []).each { File f ->
+            if (f.isFile() && CAPTURED_LOOKUP.matcher(f.name).matches()) Files.copy(f.toPath(), new File(target, f.name).toPath())
+        }
     }
 
     /** judge-replays/<checkId>/<stamp> under the data manager root, never an existing folder. */

@@ -45,6 +45,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *
  * The NetSuite filter is a promise (spec §8: a conclusion of the scope reads NetSuite with presence EXCLUDED), so the judge
  * reads the RMAs it set aside as kept records: they no longer fail NO_RMA, they fail NOT_REFUNDED.
+ *
+ * Fix round 1 edge cases: SR-1011 is a key NetSuite holds twice (a DUPLICATE row, out of the compare on both sides) with a
+ * third, set-aside RMA under it; SR-1012 has a kept refunded RMA and a set-aside one under the same key and no return. Amounts
+ * in NetSuite are JSON numbers (Spark renders 24.00 as 24.0 and 12345678.00 as 1.2345678E7). The scope has a conclusion
+ * lookup and the check a CheckAsk, both "orderInfo": run A captured it (lookups/lookup-orderInfo-<millis>.json, answering
+ * #T10007 as refunded in Shopify); run A2 holds the same extracts and no lookups (ruling P2-24).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class JudgeReplayTests {
@@ -61,6 +67,9 @@ class JudgeReplayTests {
     private static final String PENDING_RECEIPT = "Return Authorization : Pending Receipt"
     private static final String EXECUTION_A = "JRT_EXEC_A"
     private static final String RUN_FOLDER_A = "reconciliation-runs/" + EXECUTION_A
+    private static final String EXECUTION_A2 = "JRT_EXEC_A2"
+    private static final String RUN_FOLDER_A2 = "reconciliation-runs/" + EXECUTION_A2
+    private static final String CAPTURED_LOOKUP = "lookup-orderInfo-1762000000000.json"
     private static final List<String> WATCHED = ["rules.RuleSet", "rules.RuleSetRule", "rules.RuleSetCondition", "rules.FactType",
             "rules.FactField", "darpan.judge.CheckDecision", "darpan.judge.DecisionOutcome", "darpan.audit.AuditCheck",
             "darpan.audit.AuditFinding", "darpan.audit.AuditStatement", "darpan.rule.RuleSetCompareScope"]
@@ -105,6 +114,8 @@ class JudgeReplayTests {
                 sampleKeys: [file1: ["returnId", "status"], file2: ["externalReturnId", "status"]]]))
         factTypeId = generated.factTypeId
         assertEquals("netsuite_status", generated.keyNames.file2.status)
+        assertEquals(1, rows("rules.FactField", [factTypeId: factTypeId, fieldName: "ask_orderInfo_financialStatus"]).size(),
+                "the CheckAsk's kept field is on the pair fact type")
         seedNewConfig()
 
         // Tenant B: its own check on its own automation, so it can try A's run folder.
@@ -144,7 +155,8 @@ class JudgeReplayTests {
         List<Map> noRma = replayed().judgedFindings.findAll { it.claimOutcomeId == "NO_RMA" }
         assertEquals(["SR-1007", "SR-1008"], noRma*.recordKey.sort())
         assertEquals(["R5"], noRma*.statementCode.unique())
-        assertEquals(["UNEXPLAINED"], noRma*.causeOutcomeId.unique())
+        assertEquals(["REFUNDED_IN_SHOPIFY", "UNEXPLAINED"], noRma.sort { it.recordKey }*.causeOutcomeId,
+                "SR-1007's captured ask says refunded in Shopify; SR-1008 has no answer")
     }
 
     @Test
@@ -169,7 +181,7 @@ class JudgeReplayTests {
         assertEquals([["R5R", "SR-1010"]], c.onlyJudged.collect { [it.statementCode, it.recordKey] },
                 "the filter kept SR-1010 out of today's read entirely; the promise sees it")
         assertEquals("WAITING_FOR_ITEM", c.onlyJudged[0].causeOutcomeId)
-        assertNull(replayed().judgedFindings.find { it.recordKey in ["SR-1001", "SR-1002", "SR-1009"] },
+        assertNull(replayed().judgedFindings.find { it.recordKey in ["SR-1001", "SR-1002", "SR-1009", "SR-1011", "SR-1012"] },
                 "refunded RMAs, with or without a return in the window, break nothing")
     }
 
@@ -181,7 +193,8 @@ class JudgeReplayTests {
             assertEquals(mustHold, f.claimRuleSetId)
             assertEquals(f.claimOutcomeId == "NO_RMA" ? ruleIds.noRma : ruleIds.notRefunded, f.claimRuleId, "${f}")
             assertEquals(explains, f.causeRuleSetId)
-            assertEquals(f.causeOutcomeId == "WAITING_FOR_ITEM" ? ruleIds.waiting : null, f.causeRuleId, "${f}")
+            assertEquals(f.causeOutcomeId == "WAITING_FOR_ITEM" ? ruleIds.waiting :
+                    f.causeOutcomeId == "REFUNDED_IN_SHOPIFY" ? ruleIds.refundedInShopify : null, f.causeRuleId, "${f}")
         }
     }
 
@@ -199,8 +212,55 @@ class JudgeReplayTests {
 
     // --------------------------------------------------------------------------------------- the old path stays as it was
 
+    /**
+     * Review M1. Through the entry every live caller uses, reconcile#RuleSetCompareScope, with the flag absent, false and true,
+     * on the scope with no field rule and with one: the diff document the live writer (writeDiffDatasetOutput) makes of diffDf,
+     * and every other output, are byte-identical; only the judge's three outputs are added, and only with the flag true.
+     */
     @Test
-    void theOldOutputsAreByteIdenticalWithTheJudgeOnAndOff() {
+    void theCompareLiveCallersUseIsByteIdenticalWithTheFlagAbsentFalseAndTrue() {
+        List<String> judgeKeys = ["judgedFindings", "judgeWarnings", "judgedPairCounts"]
+        ["N", "Y"].each { String ruleEnabled ->
+            updateRow("darpan.rule.Rule", [ruleId: "JRT_AMOUNT_RULE"], [enabled: ruleEnabled])
+            try {
+                Map<String, byte[]> diffs = [:]
+                Map<String, String> results = [:]
+                [absent: null, "false": false, "true": true].each { String mode, Boolean flag ->
+                    File copy = copyExtractsFor("identity-${ruleEnabled}-${mode}")
+                    Map called = underFacadeGrant("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope",
+                            compareParams(copy, flag))
+                    assertEquals([], called.errors, "${ruleEnabled}/${mode}")
+                    Map out = called.out
+                    try {
+                        if (flag == true) assertTrue(out.containsKey("judgedFindings"), "the judge ran")
+                        else assertTrue(judgeKeys.every { !out.containsKey(it) }, "no judge output without the flag: ${out.keySet()}")
+                        if (ruleEnabled == "Y") assertTrue((out.ruleDifferenceCount as long) > 0, "the field rule fired")
+                        File dir = new File(dataManagerRoot, "identity-out/${ruleEnabled}-${mode}")
+                        dir.deleteDir()
+                        Map written = darpan.reconciliation.core.ReconciliationServices.writeDiffDatasetOutput(ec,
+                                (org.apache.spark.sql.Dataset) out.diffDf, dir.absolutePath, "result.json", "diff.json",
+                                [timestamp: "fixed", ruleSetId: out.ruleSetId, compareScopeId: out.compareScopeId],
+                                [totalDifferences: out.differenceCount], (List) out.validationErrors, (List) out.processingWarnings)
+                        diffs[mode] = new File(written.diffLocation as String).bytes
+                        results[mode] = groovy.json.JsonOutput.toJson(new TreeMap(out.findAll { k, v ->
+                            !(v instanceof org.apache.spark.sql.Dataset) && k != "persistedSources" && !(k in judgeKeys) }))
+                    } finally {
+                        darpan.reconciliation.core.ReconciliationServices.unpersistDatasets((List) (out?.persistedSources ?: []))
+                    }
+                }
+                assertTrue(diffs.absent.length > 0)
+                ["false", "true"].each { String mode ->
+                    assertArrayEquals(diffs.absent, diffs[mode], "rules ${ruleEnabled}: the diff document differs with the flag ${mode}")
+                    assertEquals(results.absent, results[mode], "rules ${ruleEnabled}: an output differs with the flag ${mode}")
+                }
+            } finally {
+                updateRow("darpan.rule.Rule", [ruleId: "JRT_AMOUNT_RULE"], [enabled: "N"])
+            }
+        }
+    }
+
+    @Test
+    void theJudgeDoesNotPerturbTheReplaysOldOutputs() {
         Map before = runFolderSnapshot()
         Map on = replay(checkA, RUN_FOLDER_A, true)
         Map off = replay(checkA, RUN_FOLDER_A, false)
@@ -228,7 +288,8 @@ class JudgeReplayTests {
         Map out = replayed()
         File dir = replayDir(out.replayFolder as String)
         assertTrue(out.replayFolder.startsWith("judge-replays/${checkA}/".toString()), out.replayFolder as String)
-        assertEquals(["diff.json", "extracts", "judged-findings.json", "result.json"], dir.list().sort() as List)
+        assertEquals(["diff.json", "extracts", "judged-findings.json", "lookups", "result.json"], dir.list().sort() as List)
+        assertEquals([CAPTURED_LOOKUP], new File(dir, "lookups").list() as List)
         assertEquals(["shopify-returns.json", "shopify-returns.json.records.jsonl"], new File(dir, "extracts/FILE_1").list().sort() as List)
         assertEquals(["netsuite-rmas.excluded.json", "netsuite-rmas.json", "netsuite-rmas.json.records.jsonl"],
                 new File(dir, "extracts/FILE_2").list().sort() as List, "the compare's records files are written beside the copies")
@@ -236,43 +297,107 @@ class JudgeReplayTests {
         assertEquals("${out.replayFolder}/judged-findings.json".toString(), out.judgedPath)
         Map judgedDoc = new JsonSlurper().parse(new File(dir, "judged-findings.json")) as Map
         assertEquals(checkA, judgedDoc.checkId)
-        assertEquals([matched: 2, missing: 6, readBack: 1], out.judgedPairCounts,
-                "SR-1001/1002 matched; five returns and SR-1009 missing; SR-1010 only in the sidecar")
+        assertEquals([matched: 2, missing: 7, readBack: 1], out.judgedPairCounts,
+                "SR-1001/1002 matched; five returns, SR-1009 and SR-1012 missing; SR-1010 only in the sidecar")
         assertEquals(out.judgedPairCounts, judgedDoc.pairs)
-        assertEquals([], out.judgeWarnings)
+        assertEquals([], out.replayWarnings, "run A captured its lookup")
         assertEquals(out.judgedFindings*.recordKey, (judgedDoc.findings as List<Map>)*.recordKey)
         Map result = new JsonSlurper().parse(new File(dir, "result.json")) as Map
-        assertEquals(6, result.differenceCount, "5 returns missing in NetSuite and SR-1009 missing in Shopify")
+        assertEquals(7, result.missingObjectDifferenceCount, "5 returns missing in NetSuite, SR-1009 and SR-1012 missing in Shopify")
+        assertTrue((result.duplicateDifferenceCount as int) > 0, "SR-1011 twice in NetSuite")
+        assertEquals((result.missingObjectDifferenceCount as int) + (result.duplicateDifferenceCount as int), result.differenceCount)
         Map diff = new JsonSlurper().parse(new File(dir, "diff.json")) as Map
-        Map concluded = ((List<Map>) diff.differences).find { it.primaryId == "SR-1004" }.conclusion as Map
-        assertEquals("DKR5T_SET_ASIDE", concluded.code, "today's conclude pass ran on the replay's own document")
+        Map<String, String> codes = ((List<Map>) diff.differences).findAll { it.diffType == "MISSING_IN_FILE_2" }
+                .collectEntries { [(it.primaryId): ((Map) it.conclusion).code] }
+        assertEquals("DKR5T_SET_ASIDE", codes["SR-1004"], "today's conclude pass ran on the replay's own document")
+        assertEquals("DKR5T_REFUNDED_IN_SHOPIFY", codes["SR-1007"], "the conclude pass's lookup was answered from the capture")
+        assertEquals("DKR5T_NO_RMA", codes["SR-1008"])
     }
 
+    /**
+     * Ruling P2-24. The scope has a conclusion lookup and the check a CheckAsk, so today's fetchLookup would resolve a connector
+     * and call its extract. With the lookup captured, its answers appear (the conclusion and the ask's cause); without, nothing is
+     * fetched, each is named in a warning, and no field appears. The live AskSupport.fetcher is never swapped or used.
+     */
     @Test
-    void aReplayReachesNoExtractAndNoLookup() {
+    void aReplayCallsNoSystemWhetherItsLookupsWereCapturedOrNot() {
         int connectorCalls = 0
-        int askCalls = 0
         Closure count = { Object[] args -> connectorCalls++; return null }
         SourceSystemConnectorSupport.metaClass.static.resolve = { def e, String id -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveBySystemEnumId = { def e, String id -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveByExtractServiceName = { def e, String name -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveByExpectedSourceConfigType = { def e, String type -> count() }
-        Closure originalFetcher = AskSupport.fetcher
-        AskSupport.fetcher = { Object[] args -> askCalls++; return [:] }
+        Closure liveFetcher = AskSupport.fetcher
         try {
-            // The stub is live: a lookup reaches it.
+            // The stub is live: today's lookup reaches it.
             RunConclusionStep.fetchLookup(ec, [name: "probe", systemEnumId: "NETSUITE"], ["SR-1"], A, [])
             assertEquals(1, connectorCalls, "test precondition: the counting stub intercepts connector resolution")
             connectorCalls = 0
 
-            Map out = replay(checkA, RUN_FOLDER_A, true)
-            assertEquals([], out.errors)
-            assertEquals(6, out.out.judgedFindings.size())
-            assertEquals(0, connectorCalls, "no extract or lookup connector was resolved")
-            assertEquals(0, askCalls, "no ask was fetched")
+            Map captured = replay(checkA, RUN_FOLDER_A, true)
+            assertEquals([], captured.errors)
+            assertEquals(0, connectorCalls, "captured: no extract or lookup connector was resolved")
+            assertEquals([], captured.out.replayWarnings)
+            assertFalse(captured.out.judgeWarnings.any { it.contains("not captured") }, "${captured.out.judgeWarnings}")
+            assertEquals("REFUNDED_IN_SHOPIFY", captured.out.judgedFindings.find { it.recordKey == "SR-1007" }.causeOutcomeId,
+                    "the captured ask's field reached the pair fact")
+
+            Map bare = replay(checkA, RUN_FOLDER_A2, true)
+            assertEquals([], bare.errors)
+            assertEquals(0, connectorCalls, "not captured: still no connector")
+            assertEquals(["Lookup orderInfo not captured in run ${RUN_FOLDER_A2}; not replayed".toString()], bare.out.replayWarnings)
+            assertTrue(bare.out.judgeWarnings.contains("Ask orderInfo not captured in the replayed run; not replayed"), "${bare.out.judgeWarnings}")
+            assertEquals("UNEXPLAINED", bare.out.judgedFindings.find { it.recordKey == "SR-1007" }.causeOutcomeId, "no ask field")
+            File bareDir = replayDir(bare.out.replayFolder as String)
+            Map diff = new JsonSlurper().parse(new File(bareDir, "diff.json")) as Map
+            assertEquals("DKR5T_NO_RMA", ((Map) ((List<Map>) diff.differences).find { it.primaryId == "SR-1007" }.conclusion).code,
+                    "no lookup answer reached the conclusion")
+            assertEquals([], new File(bareDir, "lookups").list() as List)
+            assertTrue(AskSupport.fetcher.is(liveFetcher), "the live fetcher is never swapped")
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(SourceSystemConnectorSupport)
-            AskSupport.fetcher = originalFetcher
+        }
+    }
+
+    // --------------------------------------------------------------------------------------- pairs (review I1, I2)
+
+    @Test
+    void aKeyKeptAndSetAsideOnOneSideOrDuplicatedIsPairedOnceAndBreaksNothing() {
+        Map out = replayed()
+        assertNull(out.judgedFindings.find { it.recordKey in ["SR-1011", "SR-1012"] },
+                "SR-1012's kept refunded RMA is judged, its set-aside one is not paired again; SR-1011 is a duplicate, not a pair")
+        assertTrue(out.judgeWarnings.any { it ==~ /\d+ DUPLICATE_IN_FILE_2 rows are not pairs and were not judged/ }, "${out.judgeWarnings}")
+        assertTrue(out.judgeWarnings.contains("2 file2 records set aside under a key the compare already holds (kept or duplicated) were not judged"),
+                "${out.judgeWarnings}")
+        assertFalse(out.judgeWarnings.any { it.contains("appears twice") })
+    }
+
+    @Test
+    void aNumberReadsTheSameFromSparkAndFromTheSidecar() {
+        JsonSlurper slurper = new JsonSlurper()
+        Map spark = JudgeReplaySupport.flat((Map) slurper.parseText('{"a":24.0,"b":24,"c":1.2345678E7,"d":"24.00","e":"000123"}'))
+        Map raw = JudgeReplaySupport.flat((Map) slurper.parseText('{"a":24.00,"b":24,"c":12345678.00,"d":"24.00","e":"000123"}'))
+        assertEquals([a: "24", b: "24", c: "12345678", d: "24.00", e: "000123"], spark, "numbers plain, text untouched")
+        assertEquals(spark, raw)
+
+        // End to end: the compare's own frames against the sidecar, as the judge reads them.
+        File copy = copyExtractsFor("numbers")
+        Map compared = underFacadeGrant("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope",
+                compareParams(copy, true))   // the flag builds the matched frame with no field rule
+        assertEquals([], compared.errors)
+        try {
+            Map sidecar = JudgeReplaySupport.readSidecar(new File(copy, "FILE_2/netsuite-rmas.json"),
+                    [keyFields: ["externalReturnId"], keyReliable: true], true, "file2", [])
+            List<Map> pairs = new JudgeReplaySupport.PairRows((org.apache.spark.sql.Dataset) compared.out.matchedPairDf,
+                    (org.apache.spark.sql.Dataset) compared.out.diffDf, [file1: [:], file2: sidecar.records], [:], [:], [:]).toList()
+            Map<String, Object> amount = pairs.collectEntries { [(it.compareId): ((Map) it.file2)?.amount] }
+            assertEquals("39", amount["SR-1001"], "kept, matched: Spark's 39.0")
+            assertEquals("12345678", amount["SR-1009"], "kept, missing in Shopify: Spark's 1.2345678E7")
+            assertEquals("24", amount["SR-1004"], "read back: the sidecar's raw 24.00")
+            assertEquals("12345678", amount["SR-1010"], "read back, no row: the sidecar's raw 12345678.00")
+            assertEquals(pairs*.compareId.unique(), pairs*.compareId, "no compare id paired twice")
+        } finally {
+            darpan.reconciliation.core.ReconciliationServices.unpersistDatasets((List) (compared.out?.persistedSources ?: []))
         }
     }
 
@@ -305,11 +430,14 @@ class JudgeReplayTests {
 
     @Test
     void noCallerOutsideTheReplaySetsJudgeWithDecisions() {
-        Path component = backendRoot.resolve("runtime/component/darpan")
-        List<String> allowed = ["service/reconciliation/ReconciliationCoreServices.xml", "service/judge/JudgeReplayServices.xml",
-                                "src/main/groovy/darpan/judge/JudgeReplaySupport.groovy"]
+        Path component = backendRoot.resolve("runtime/component")
+        List<String> allowed = ["darpan/service/reconciliation/ReconciliationCoreServices.xml", "darpan/service/judge/JudgeReplayServices.xml",
+                                "darpan/src/main/groovy/darpan/judge/JudgeReplaySupport.groovy"]
         List<String> users = []
-        [component.resolve("service"), component.resolve("src/main")].each { Path root ->
+        List<Path> roots = (component.toFile().listFiles() ?: []).findAll { it.isDirectory() }
+                .collectMany { [it.toPath().resolve("service"), it.toPath().resolve("src/main")] }.findAll { Files.isDirectory(it) }
+        assertTrue(roots.size() > 4, "every component is scanned, not only darpan: ${roots}")
+        roots.each { Path root ->
             Files.walk(root).withCloseable { stream ->
                 stream.filter { Files.isRegularFile(it) && (it.toString().endsWith(".xml") || it.toString().endsWith(".groovy") || it.toString().endsWith(".java")) }
                         .each { Path p -> if (p.toFile().getText("UTF-8").contains("judgeWithDecisions")) users.add(component.relativize(p).toString()) }
@@ -325,8 +453,13 @@ class JudgeReplayTests {
                 description: "The RMA is in NetSuite but not refunded yet"])
         insert("moqui.basic.Enumeration", [enumId: "DKR5T_NO_RMA", enumTypeId: "DarpanConclusion", enumCode: "DKR5T_NO_RMA",
                 description: "NetSuite has no RMA for the return"])
+        insert("moqui.basic.Enumeration", [enumId: "DKR5T_REFUNDED_IN_SHOPIFY", enumTypeId: "DarpanConclusion",
+                enumCode: "DKR5T_REFUNDED_IN_SHOPIFY", description: "Refunded in Shopify with no RMA"])
         insert("darpan.rule.RuleSet", [ruleSetId: "JRT_RS", ruleSetName: "Shopify returns vs NetSuite RMAs", companyUserGroupId: A])
         insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "JRT_SCOPE", ruleSetId: "JRT_RS", objectType: "RETURN",
+                conclusionLookupsJson: groovy.json.JsonOutput.toJson([[name: "orderInfo", subject: "FILE_1", idField: "orderName",
+                        systemEnumId: "SHOPIFY", sourceConfigId: "JRT_SHOP_CFG", keyField: "name",
+                        parameters: [keepRecordFields: ["financialStatus"]]]]),
                 description: "Shopify returns against NetSuite RMAs", companyUserGroupId: A])
         insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "JRT_SCOPE", fileSide: "FILE_1", systemEnumId: "SHOPIFY",
                 fileTypeEnumId: "DftJson", recordRootExpression: "records", primaryIdExpression: "returnId", companyUserGroupId: A])
@@ -340,6 +473,18 @@ class JudgeReplayTests {
                 appliesToBucket: "MISSING_FROM_FILE_2", companyUserGroupId: A])
         insert("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "JRT_SCOPE", sequenceNum: 10, conditionSeq: 1, subject: "FILE_2",
                 presence: "EXCLUDED", checkLabel: "NetSuite has the RMA, set aside by the run", companyUserGroupId: A])
+        // Reads the conclusion lookup: a return Shopify refunded that NetSuite has no RMA for.
+        insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "JRT_SCOPE", sequenceNum: 15, conclusionEnumId: "DKR5T_REFUNDED_IN_SHOPIFY",
+                appliesToBucket: "MISSING_FROM_FILE_2", companyUserGroupId: A])
+        insert("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "JRT_SCOPE", sequenceNum: 15, conditionSeq: 1, subject: "FILE_2",
+                presence: "ABSENT", checkLabel: "NetSuite has no RMA", companyUserGroupId: A])
+        insert("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "JRT_SCOPE", sequenceNum: 15, conditionSeq: 2, subject: "FILE_1",
+                fieldExpression: "orderInfo.financialStatus", operator: "IN", conditionValues: "refunded",
+                checkLabel: "Shopify refunded the order", companyUserGroupId: A])
+        // A field rule, off unless a test turns it on (the byte-identity test runs the scope with and without one).
+        insert("darpan.rule.Rule", [ruleId: "JRT_AMOUNT_RULE", ruleSetId: "JRT_RS", sequenceNum: 10, enabled: "N", ruleType: "DRL",
+                severity: "WARN", companyUserGroupId: A, ruleText: "Refund amount equals the RMA amount",
+                ruleLogic: 'rule "JRT_AMOUNT_RULE" salience 100 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("refundAmount"), ((Map) $m.get("file2")).get("amount"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "refundAmount", ((Map) $m.get("file1")).get("refundAmount"), ((Map) $m.get("file2")).get("amount"), "WARN", "Refund amount differs"); end'])
         insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "JRT_SCOPE", sequenceNum: 20, conclusionEnumId: "DKR5T_NO_RMA",
                 appliesToBucket: "MISSING_FROM_FILE_2", companyUserGroupId: A])
         insert("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "JRT_SCOPE", sequenceNum: 20, conditionSeq: 1, subject: "FILE_2",
@@ -347,8 +492,10 @@ class JudgeReplayTests {
 
         insert("darpan.reconciliation.ReconciliationAutomation", [automationId: "JRT_AUTO_A", automationName: "DK R5 returns",
                 companyUserGroupId: A, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "JRT_RS"])
-        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: EXECUTION_A, automationId: "JRT_AUTO_A",
-                companyUserGroupId: A, statusEnumId: "AUT_STAT_SUCCESS"])
+        [EXECUTION_A, EXECUTION_A2].each { String executionId ->
+            insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: executionId, automationId: "JRT_AUTO_A",
+                    companyUserGroupId: A, statusEnumId: "AUT_STAT_SUCCESS"])
+        }
         checkA = ec.entity.sequencedIdPrimary("darpan.audit.AuditCheck", null, null)
         insert("darpan.audit.AuditCheck", [checkId: checkA, companyUserGroupId: A, checkCode: "dk-r5-returns", label: "Returns vs RMAs",
                 savedRunId: "JRT_RS", automationId: "JRT_AUTO_A", file1RecordType: "return", file2RecordType: "returnAuthorization"])
@@ -359,6 +506,9 @@ class JudgeReplayTests {
                 categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM", statementText: "Every RMA is refunded", sequenceNum: 2])
         insert("darpan.audit.AuditStatementCheck", [checkId: checkA, statementId: "JRT_R5", companyUserGroupId: A, sequenceNum: 1,
                 diffTypes: "MISSING_IN_FILE_2"])
+        insert("darpan.judge.CheckAsk", [checkId: checkA, askName: "orderInfo", companyUserGroupId: A, subjectSide: "FILE_1",
+                idField: "orderName", systemEnumId: "SHOPIFY", sourceConfigId: "JRT_SHOP_CFG", keyField: "name",
+                keepRecordFields: "financialStatus"])
     }
 
     private void seedNewConfig() {
@@ -369,7 +519,10 @@ class JudgeReplayTests {
         meaning(mustHold, "NO_RMA", "JOK_FINDING", "The return has no RMA")
         meaning(mustHold, "NOT_REFUNDED", "JOK_FINDING", "The RMA is not refunded")
 
-        explains = createDecision("Y", ["WAITING_FOR_ITEM", "UNEXPLAINED"])
+        explains = createDecision("Y", ["WAITING_FOR_ITEM", "REFUNDED_IN_SHOPIFY", "UNEXPLAINED"])
+        ruleIds.refundedInShopify = storeRule(explains, "refunded in Shopify", 30, [line("01", "claim", "ENTCO_EQUALS", "NO_RMA"),
+                line("02", "ask_orderInfo_financialStatus", "ENTCO_EQUALS", "refunded")], "REFUNDED_IN_SHOPIFY")
+        meaning(explains, "REFUNDED_IN_SHOPIFY", "JOK_FINDING", "Refunded in Shopify with no RMA")
         ruleIds.waiting = storeRule(explains, "waiting for the item", 20, [line("01", "claim", "ENTCO_EQUALS", "NOT_REFUNDED"),
                 line("02", "netsuite_status", "ENTCO_EQUALS", PENDING_RECEIPT)], "WAITING_FOR_ITEM")
         meaning(explains, "WAITING_FOR_ITEM", "JOK_EXPECTED", "Waiting for the item to come back")
@@ -383,25 +536,63 @@ class JudgeReplayTests {
 
     /** The captured run: an automation execution's folder, side 1 in <stamp>/, side 2 and its sidecar in <stamp>-FILE_2/. */
     private void seedRunFolder() {
-        Path fixture = backendRoot.resolve("runtime/component/darpan/src/test/resources/judge/dk-r5")
-        File run = new File(dataManagerRoot, RUN_FOLDER_A)
-        // The test data manager outlives a run: start from an empty run folder and no replays.
-        run.deleteDir()
+        // The test data manager outlives a run: start from empty run folders and no replays.
         new File(dataManagerRoot, "judge-replays").deleteDir()
-        File side1 = new File(run, "20261101-060000000")
-        File side2 = new File(run, "20261101-060000000-FILE_2")
-        side1.mkdirs()
-        side2.mkdirs()
-        Files.copy(fixture.resolve("shopify-returns.json"), new File(side1, "shopify-returns.json").toPath())
-        Files.copy(fixture.resolve("netsuite-rmas.json"), new File(side2, "netsuite-rmas.json").toPath())
-        Files.copy(fixture.resolve("netsuite-rmas.excluded.json"), new File(side2, "netsuite-rmas.excluded.json").toPath())
+        new File(dataManagerRoot, "identity").deleteDir()
+        new File(dataManagerRoot, "identity-out").deleteDir()
+        [RUN_FOLDER_A, RUN_FOLDER_A2].each { String folder ->
+            File run = new File(dataManagerRoot, folder)
+            run.deleteDir()
+            File side1 = new File(run, "20261101-060000000")
+            File side2 = new File(run, "20261101-060000000-FILE_2")
+            side1.mkdirs()
+            side2.mkdirs()
+            Files.copy(fixture().resolve("shopify-returns.json"), new File(side1, "shopify-returns.json").toPath())
+            Files.copy(fixture().resolve("netsuite-rmas.json"), new File(side2, "netsuite-rmas.json").toPath())
+            Files.copy(fixture().resolve("netsuite-rmas.excluded.json"), new File(side2, "netsuite-rmas.excluded.json").toPath())
+        }
+        // Only run A captured its lookup.
+        File lookups = new File(dataManagerRoot, "${RUN_FOLDER_A}/lookups")
+        lookups.mkdirs()
+        Files.copy(fixture().resolve(CAPTURED_LOOKUP), new File(lookups, CAPTURED_LOOKUP).toPath())
+    }
+
+    private Path fixture() {
+        return backendRoot.resolve("runtime/component/darpan/src/test/resources/judge/dk-r5")
+    }
+
+    /** The fixture's extracts (and sidecar) in a scratch folder of the data manager, for calling the compare directly. */
+    private File copyExtractsFor(String name) {
+        File dir = new File(dataManagerRoot, "identity/${name}")
+        dir.deleteDir()
+        new File(dir, "FILE_1").mkdirs()
+        new File(dir, "FILE_2").mkdirs()
+        Files.copy(fixture().resolve("shopify-returns.json"), new File(dir, "FILE_1/shopify-returns.json").toPath())
+        Files.copy(fixture().resolve("netsuite-rmas.json"), new File(dir, "FILE_2/netsuite-rmas.json").toPath())
+        Files.copy(fixture().resolve("netsuite-rmas.excluded.json"), new File(dir, "FILE_2/netsuite-rmas.excluded.json").toPath())
+        return dir
+    }
+
+    /** reconcile#RuleSetCompareScope's parameters as a live caller passes them; flag null leaves judgeWithDecisions out. */
+    private Map compareParams(File copy, Boolean flag) {
+        String base = DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec),
+                dataManagerRoot.toPath().relativize(copy.toPath()).toString())
+        Map params = [ruleSetId: "JRT_RS", compareScopeId: "JRT_SCOPE", file1Location: "${base}/FILE_1/shopify-returns.json".toString(),
+                      file2Location: "${base}/FILE_2/netsuite-rmas.json".toString(), file1Name: "shopify-returns.json",
+                      file2Name: "netsuite-rmas.json", sparkAppName: "JudgeReplayTests"]
+        if (flag != null) params.judgeWithDecisions = flag
+        if (flag == true) params.judgeCheckId = checkA
+        return params
     }
 
     private Map runFolderSnapshot() {
         Map<String, String> out = new TreeMap<>()
-        File run = new File(dataManagerRoot, RUN_FOLDER_A)
-        run.eachFileRecurse { File f ->
-            out.put(run.toPath().relativize(f.toPath()).toString(), f.isFile() ? MessageDigest.getInstance("SHA-256").digest(f.bytes).encodeHex().toString() : "dir")
+        [RUN_FOLDER_A, RUN_FOLDER_A2].each { String folder ->
+            File run = new File(dataManagerRoot, folder)
+            run.eachFileRecurse { File f ->
+                out.put(folder + "/" + run.toPath().relativize(f.toPath()).toString(),
+                        f.isFile() ? MessageDigest.getInstance("SHA-256").digest(f.bytes).encodeHex().toString() : "dir")
+            }
         }
         return out
     }
@@ -526,6 +717,10 @@ class JudgeReplayTests {
 
     private void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
+    }
+
+    private List rows(String entityName, Map conditions) {
+        return ec.entity.find(entityName).condition(conditions).disableAuthz().useCache(false).list()
     }
 
     private void updateRow(String entityName, Map pk, Map fields) {

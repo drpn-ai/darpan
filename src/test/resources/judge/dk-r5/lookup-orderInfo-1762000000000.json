@@ -1,0 +1,5 @@
+{"metadata":{"note":"A captured conclusion lookup (lookup-<name>-<millis>.json); synthetic."},
+"records":[
+{"name":"#T10007","financialStatus":"refunded"},
+{"name":"#T99999","financialStatus":"refunded"}
+]}

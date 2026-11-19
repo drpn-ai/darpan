@@ -6,5 +6,6 @@
 {"returnId":"SR-1005","orderName":"#T10005","status":"OPEN","refundAmount":"71.25","closedAt":""},
 {"returnId":"SR-1006","orderName":"#T10006","status":"CLOSED","refundAmount":"18.00","closedAt":"2026-10-08T09:15:00Z"},
 {"returnId":"SR-1007","orderName":"#T10007","status":"CLOSED","refundAmount":"42.00","closedAt":"2026-10-09T14:45:00Z"},
-{"returnId":"SR-1008","orderName":"#T10008","status":"OPEN","refundAmount":"15.75","closedAt":""}
+{"returnId":"SR-1008","orderName":"#T10008","status":"OPEN","refundAmount":"15.75","closedAt":""},
+{"returnId":"SR-1011","orderName":"#T10011","status":"CLOSED","refundAmount":"20.00","closedAt":"2026-10-12T08:00:00Z"}
 ]}

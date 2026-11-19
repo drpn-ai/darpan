@@ -12,7 +12,8 @@
     <service verb="replay" noun="CheckJudgement" transaction="ignore" allow-remote="false">
         <description>Replays one of the active tenant's checks over a run it captured: the check's saved run compares the run
             folder's extracts (no system is called: no extract, no lookup, no verify pass), today's conclude pass names each
-            difference, and today's findings are read from the result. With judgeWithDecisions, the same compare also judges
+            difference, and today's findings are read from the result. Lookups and asks are answered only from the lookups the
+            run captured (&lt;run&gt;/lookups/lookup-&lt;name&gt;-&lt;millis&gt;.json); one not captured is reported, not fetched. With judgeWithDecisions, the same compare also judges
             every pair with the check's Must hold and Explains decisions. Everything is written to a new folder,
             judge-replays/&lt;checkId&gt;/&lt;stamp&gt;: diff.json (today's document), result.json (today's counts) and, when
             judging, judged-findings.json.</description>
@@ -32,6 +33,8 @@
                 set aside by a filter that is a promise, with no row of their own).</description></parameter>
             <parameter name="judgedPath"><description>Data-manager path of judged-findings.json; blank when not judging.</description></parameter>
             <parameter name="replayFolder"><description>Data-manager path of this replay's folder.</description></parameter>
+            <parameter name="replayWarnings" type="List"><description>Each lookup of today's conclude pass that the run did not
+                capture, so it was not replayed (no system is ever called, ruling P2-24). The judge's are in judgeWarnings.</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
@@ -89,6 +92,7 @@
 
             <set field="replayed" from="darpan.judge.JudgeReplaySupport.replay(ec, [tenantId: tenantId, check: check.getMap(),
                     ruleSetId: check.savedRunId, compareScopeId: scope.compareScopeId, runFolder: runPath, files: picked.files,
+                    runDir: darpan.facade.common.DataManagerSupport.resolveDirectoryFile(ec, runLocation, false),
                     file1SystemEnumId: systemBySide.FILE_1, file2SystemEnumId: systemBySide.FILE_2,
                     judgeWithDecisions: judgeWithDecisions != false])"/>
             <set field="oldFindings" from="replayed.oldFindings"/>
@@ -97,6 +101,7 @@
             <set field="judgedPairCounts" from="replayed.judgedPairCounts"/>
             <set field="judgedPath" from="replayed.judgedPath"/>
             <set field="replayFolder" from="replayed.replayFolder"/>
+            <set field="replayWarnings" from="replayed.replayWarnings"/>
         </actions>
     </service>
 

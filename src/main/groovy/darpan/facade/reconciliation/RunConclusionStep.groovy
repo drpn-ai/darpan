@@ -64,6 +64,9 @@ class RunConclusionStep {
                 lookupWarnings.add("Lookups not read: ${e.message}".toString())
             }
             String tenantId = normalize(scope?.companyUserGroupId)
+            // DAR-BE-318 (ruling P2-24): a replay hands its own fetcher, which answers only from captured lookups and never
+            // calls a system. Every other caller passes none and gets today's live fetchLookup.
+            Closure lookupFetcher = (Closure) args.get("lookupFetcher") ?: RunConclusionStep.&fetchLookup
             String kind = brainKind(scope?.conclusionBrain)
             Map brain = kind ? [kind: kind, tenantId: tenantId,
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
@@ -72,7 +75,7 @@ class RunConclusionStep {
                                 RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
                         if (lookup == null) throw new IllegalStateException("the scope has no lookup to ask ${question} of")
                         int before = lookupWarnings.size()
-                        Map found = fetchLookup(ec, lookup, ids, tenantId, lookupWarnings)
+                        Map found = (Map) lookupFetcher.call(ec, lookup, ids, tenantId, lookupWarnings)
                         // A failed lookup must not be remembered as "nothing found".
                         if (lookupWarnings.size() > before) throw new IllegalStateException(lookupWarnings.last())
                         return found
@@ -83,7 +86,7 @@ class RunConclusionStep {
                     unexplainedExpected: normalize(scope?.unexplainedOutcome) == RunConclusionSupport.OUTCOME_EXPECTED,
                     lookups    : lookups,
                     fetchLookup: { Map lookup, List<String> ids ->
-                        fetchLookup(ec, lookup, ids, normalize(scope?.companyUserGroupId), lookupWarnings)
+                        lookupFetcher.call(ec, lookup, ids, normalize(scope?.companyUserGroupId), lookupWarnings)
                     },
                     diffFile   : diffFile,
                     file1Label : documentLabels.file1Label,

@@ -23,9 +23,12 @@ class AskSupport {
      * pairFacts: rows [compareId, file1 Map or null, file2 Map or null] (null = side absent), before the fact is built.
      * Returns compareId -> [ask_<askName>_<field>: value] for every pair whose subject side has the id field. A pair
      * whose subject side is absent or whose id is blank is skipped. A failed fetch adds a warning and no fields.
+     * fetchWith: the lookup call for this judging only (a replay's, which answers from captured lookups, ruling P2-24);
+     * none uses fetcher. Passed per call, so a replay never changes what a live judging in the same JVM fetches with.
      */
     static Map<String, Map<String, Object>> fetchAsks(def ec, String checkId, String tenantId, List<Map> pairFacts,
-                                                      List<String> warnings) {
+                                                      List<String> warnings, Closure fetchWith = null) {
+        Closure fetch = fetchWith ?: fetcher
         Map<String, Map<String, Object>> result = [:]
         if (!normalize(checkId) || !normalize(tenantId)) return result
         List<Map> asks = ((reader.call(ec, checkId, tenantId) as List) ?: []).collect { toLookup(it as Map) }
@@ -38,7 +41,7 @@ class AskSupport {
                 if (id) compareIdsById.computeIfAbsent(id) { [] }.add(row[0] as String)
             }
             if (compareIdsById.isEmpty()) return
-            Map<String, Object> found = (fetcher.call(ec, ask, new ArrayList<String>(compareIdsById.keySet()), tenantId, warnings) ?: [:]) as Map
+            Map<String, Object> found = (fetch.call(ec, ask, new ArrayList<String>(compareIdsById.keySet()), tenantId, warnings) ?: [:]) as Map
             compareIdsById.each { String id, List<String> compareIds ->
                 Object answer = found.get(id)
                 if (answer == null) return

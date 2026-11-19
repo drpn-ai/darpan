@@ -100,6 +100,10 @@
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.judge.CheckParameter', entityValue, eecaOperation)</script></actions>
     </eeca>
+    <eeca id="TenantConfigChange_CheckAsk" entity="darpan.judge.CheckAsk" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.judge.CheckAsk', entityValue, eecaOperation)</script></actions>
+    </eeca>
     <eeca id="TenantConfigChange_ReconciliationAutomation" entity="darpan.reconciliation.ReconciliationAutomation" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.ReconciliationAutomation', entityValue, eecaOperation)</script></actions>

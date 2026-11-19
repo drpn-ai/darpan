@@ -80,4 +80,25 @@
             <key-map field-name="parameterSetId"/>
         </relationship>
     </entity>
+
+    <entity entity-name="CheckAsk" package="darpan.judge" use="configuration">
+        <description>One lookup a check asks per pair: the subject side's id is read from another system in a batch, and
+            each fetched field lands on the pair fact as ask_&lt;askName&gt;_&lt;field&gt;. Same shape as a conclusion lookup.</description>
+        <field name="checkId" type="id" is-pk="true"/>
+        <field name="askName" type="text-short" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="subjectSide" type="text-short" not-null="true"><description>FILE_1 or FILE_2.</description></field>
+        <field name="idField" type="text-medium" not-null="true"/>
+        <field name="systemEnumId" type="id" not-null="true"/>
+        <field name="sourceConfigId" type="id" not-null="true"/>
+        <field name="keyField" type="text-medium" not-null="true"/>
+        <field name="many" type="text-indicator"><description>Y: every record under a key is kept and values join with |.</description></field>
+        <field name="keepRecordFields" type="text-long"><description>Comma list of the fields the extract keeps and the ask exposes.</description></field>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="CHKASK_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.audit.AuditCheck" fk-name="CHKASK_CHECK">
+            <key-map field-name="checkId"/>
+        </relationship>
+    </entity>
 </entities>

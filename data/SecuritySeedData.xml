@@ -94,6 +94,7 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.judge.CheckDecision" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.judge.CheckParameterSet" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.judge.CheckParameter" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.judge.CheckAsk" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 
@@ -478,6 +479,7 @@
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_DECISION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckDecision" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_PARAMETER_SET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckParameterSet" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_PARAMETER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckParameter" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_ASK" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckAsk" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_TYPE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactType" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_FIELD" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactField" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_NODE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactNode" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>

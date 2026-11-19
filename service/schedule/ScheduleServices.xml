@@ -66,10 +66,10 @@
                 <econdition field-name="jobName"/>
                 <order-by field-name="parameterName"/>
             </entity-find>
-            <entity-find entity-name="moqui.service.job.ServiceJobRun" list="runList" cache="false">
+            <!-- limit in the SQL: limit-range jumps the cursor, which production's forward-only result sets refuse (DAR-BE-321) -->
+            <entity-find entity-name="moqui.service.job.ServiceJobRun" list="runList" cache="false" limit="1">
                 <econdition field-name="jobName"/>
                 <order-by field-name="-startTime"/>
-                <limit-range start="0" size="1"/>
             </entity-find>
             <set field="lastRun" from="runList ? runList[0] : null"/>
             <set field="sd" from="((org.moqui.impl.service.ServiceFacadeImpl) ec.service).getServiceDefinition(row.serviceName)"/>

@@ -73,6 +73,19 @@ class AuditRunMessage {
         return groups(facts).findAll { hasCause(it) }.sort(false) { Map a, Map b -> (b.count as int) <=> (a.count as int) }.take(3)
     }
 
+    /**
+     * DAR-BE-320. One line on what the play read and what it cost: "reads", "reads.calls" when calls were counted, and
+     * "reads.flags" when any read could cost less; null when the facts carry no read summary.
+     */
+    static String readsLine(Map facts, EmailCopyReader copy) {
+        Map r = facts?.reads as Map
+        if (!r) return null
+        String line = copy.text("reads", [reads: r.reads, connections: r.connections])
+        String calls = ((r.calls ?: 0) as long) > 0 ? copy.text("reads.calls", [calls: r.calls]) : ""
+        String flags = ((r.flags ?: 0) as int) > 0 ? copy.text("reads.flags", [flags: r.flags]) : ""
+        return [line, calls, flags].findAll().join(" ") ?: null
+    }
+
     static List<String> rulesNotRun(Map facts) {
         return rules(facts).findAll { it.checksNotRun }*.id as List<String>
     }
@@ -88,6 +101,8 @@ class AuditRunMessage {
         List<String> notRun = rulesNotRun(facts)
         if (notRun) widgets << [decoratedText: [text     : "<font color=\"${AMBER}\">${esc(notRun.join(', '))} did not run</font>".toString(),
                                                 wrapText : true, startIcon: [materialIcon: [name: "warning"]]]]
+        String reads = readsLine(facts, copy)
+        if (reads) widgets << [decoratedText: [text: esc(reads), wrapText: true, startIcon: [materialIcon: [name: "sync"]]]]
         String url = reportUrl(base, facts)
         if (url) widgets << [buttonList: [buttons: [[text: "Open the report", onClick: [openLink: [url: url]]]]]]
         return [text   : "${title(facts)}: ${t.open} open findings".toString(),
@@ -153,7 +168,7 @@ ${EmailFrame.eyebrow(copy.text("rules.heading").toUpperCase(Locale.ROOT), 28)}
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-top:8px;border-collapse:collapse;">${rows}</table>
 ${blocks}
 ${button}
-<p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">${esc(copy.text("attachments"))}</p>
+<p style="${F}font-size:12px;color:${DIM};margin:28px 0 0;padding-top:14px;border-top:1px solid ${LINE_SOFT};line-height:1.6;">${esc(copy.text("attachments"))}</p>${readsLine(facts, copy) ? "<p style=\"${F}font-size:12px;color:${DIM};margin:8px 0 0;line-height:1.6;\">${esc(readsLine(facts, copy))}</p>" : ""}
 ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
     }
 
@@ -188,6 +203,8 @@ ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
         }
         String url = reportUrl(base, facts)
         if (url) lines += ["", "${copy.text('button')}: ${url}".toString()]
+        String reads = readsLine(facts, copy)
+        if (reads) lines += ["", reads]
         return lines.join("\n") + "\n" + EmailCopy.guidesText(copy.guides())
     }
 

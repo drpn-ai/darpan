@@ -72,6 +72,27 @@ class BrainChangeTicketSmokeTests {
     }
 
     @Test
+    @DisplayName("a read-economy ticket is open per tenant and key until it is declined or shipped")
+    void readEconomyTicketIsFoundOpenPerTenantAndKey() {
+        // DAR-BE-320 phase 1b: the read reviewer raises one open ticket per tenant, flag and connection.
+        String hash = BrainTicketSupport.sha256("read-economy|DUPLICATE_READ|SHOPIFY|STORE_US")
+        asSystem {
+            upsert(TICKET, [ticketId: "BCT_RE_SHIPPED", companyUserGroupId: MINE, category: "READ_ECONOMY_EXTRACT", textHash: hash,
+                            verbatimText: "read 3 times", status: "SHIPPED"])
+            upsert(TICKET, [ticketId: "BCT_RE_OTHER", companyUserGroupId: OTHER, category: "READ_ECONOMY_EXTRACT", textHash: hash,
+                            verbatimText: "read 3 times", status: "RECEIVED"])
+            upsert(TICKET, [ticketId: "BCT_RE_CHAT", companyUserGroupId: MINE, category: "MISSING_FIELD", textHash: hash,
+                            verbatimText: "same hash, a chat ticket", status: "RECEIVED"])
+        }
+        assertNull(asSystem { BrainTicketSupport.openReadEconomyId(ec, MINE, hash) },
+                "shipped, another tenant's, or not a read-economy ticket: none open")
+        asSystem { upsert(TICKET, [ticketId: "BCT_RE_OPEN", companyUserGroupId: MINE, category: "READ_ECONOMY_BRAIN", textHash: hash,
+                                   verbatimText: "read 3 times", status: "ACCEPTED"]) }
+        assertEquals("BCT_RE_OPEN", asSystem { BrainTicketSupport.openReadEconomyId(ec, MINE, hash) })
+        assertFalse(BrainTicketSupport.CATEGORIES.contains("READ_ECONOMY_EXTRACT"), "the chat agent cannot raise one")
+    }
+
+    @Test
     @DisplayName("a repeated ticket in one conversation is created once")
     void repeatedTicketIsCreatedOnce() {
         Map first = create(CONV, "MISSING_FIELD", "Show the carrier on every finding.")

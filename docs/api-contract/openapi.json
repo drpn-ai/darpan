@@ -357,6 +357,9 @@
                                         "$ref": "#/components/schemas/GetAuditProgressRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAuditReadReportRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetAuditReportRequest"
                                     },
                                     {
@@ -1041,6 +1044,7 @@
                                         "facade.AuditFacadeServices.get#AuditFinding": "#/components/schemas/GetAuditFindingRequest",
                                         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "#/components/schemas/GetAuditFindingsByOrderRequest",
                                         "facade.AuditFacadeServices.get#AuditProgress": "#/components/schemas/GetAuditProgressRequest",
+                                        "facade.AuditFacadeServices.get#AuditReadReport": "#/components/schemas/GetAuditReadReportRequest",
                                         "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
                                         "facade.AuditFacadeServices.get#AuditSettings": "#/components/schemas/GetAuditSettingsRequest",
                                         "facade.AuditFacadeServices.get#Audits": "#/components/schemas/GetAuditsRequest",
@@ -1579,6 +1583,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditProgressResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAuditReadReportResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditReportResponse"
@@ -3326,7 +3333,7 @@
                     "roleId",
                     "modelId"
                 ],
-                "description": "Points a role (ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION, EMAIL_SMILE, AUDIT_RUN_WORDS) at a model. Refused:\n            an unknown role, a malformed model id, a model with no price, and none for any role but AUTHOR_ESCALATION. The next turn\n            re-checks the model with the provider."
+                "description": "Points a role (ROUTER, INVESTIGATOR, AUTHOR, AUTHOR_ESCALATION, EMAIL_SMILE, AUDIT_RUN_WORDS, AUDIT_READ_REVIEW) at a model. Refused:\n            an unknown role, a malformed model id, a model with no price, and none for any role but AUTHOR_ESCALATION. The next turn\n            re-checks the model with the provider."
             },
             "UpdateAgentRoleModelResult": {
                 "type": "object",
@@ -13180,6 +13187,111 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAuditProgressResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditReadReportParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code, e.g. month-close."
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "The morning, YYYY-MM-DD; blank is the audit's latest play."
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "The period, e.g. 2026-11; blank is every period played that morning."
+                    }
+                },
+                "required": [
+                    "audit"
+                ],
+                "description": "What one play of an audit read: its reads grouped by endpoint and connection (reads, records, the\n            checks that read, each read's window, the call tally), the totals, and the flags where a read cost more than it\n            needed (DUPLICATE_READ, WHOLE_PERIOD_READ, LOOKUP_OVER_SHARE, LOOKUP_EVERY_PLAY, THROTTLED, CALLS_GREW; thresholds\n            are the Audit reads settings). Empty when the audit has not played (darpan.audit.AuditReadReport)."
+            },
+            "GetAuditReadReportResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "report": {
+                        "type": "object",
+                        "description": "{reportDate, period, totals, groups, flags}"
+                    }
+                }
+            },
+            "GetAuditReadReportRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditReadReport",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditReadReport",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditReadReport"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditReadReportParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditReadReportResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditReadReport. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditReadReportResult"
                     }
                 },
                 "required": [
@@ -39219,6 +39331,7 @@
         "facade.AuditFacadeServices.get#AuditFinding": "GetAuditFinding",
         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "GetAuditFindingsByOrder",
         "facade.AuditFacadeServices.get#AuditProgress": "GetAuditProgress",
+        "facade.AuditFacadeServices.get#AuditReadReport": "GetAuditReadReport",
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
         "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",
         "facade.AuditFacadeServices.get#Audits": "GetAudits",

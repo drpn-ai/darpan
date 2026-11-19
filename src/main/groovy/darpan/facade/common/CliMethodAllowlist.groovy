@@ -33,6 +33,7 @@ class CliMethodAllowlist {
             "facade.AuditFacadeServices.get#AuditFinding",
             "facade.AuditFacadeServices.get#AuditFindingsByOrder",
             "facade.AuditFacadeServices.get#AuditProgress",
+            "facade.AuditFacadeServices.get#AuditReadReport",
             "facade.AuditFacadeServices.get#AuditReport",
             "facade.AuditFacadeServices.get#AuditSettings",
             "facade.AuditFacadeServices.get#Audits",

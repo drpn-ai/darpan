@@ -513,6 +513,60 @@ class AuditReportAssemblerSmokeTests {
     }
 
     @Test
+    void aSourceReadKeepsWhatItReadAndWhatItCost() {
+        // DAR-BE-320 phase 1b: the audit's read report needs the connection, the window and the extract's cost.
+        Map stats = read("SHOPIFY", "AUDSR_COMPLETE", 812, null) + [sourceConfigId: "SHOP_US",
+                windowFromDate: java.sql.Timestamp.valueOf("2026-11-12 08:00:00"), windowThruDate: java.sql.Timestamp.valueOf("2026-11-16 08:00:00"),
+                callsJson: '{"graphql":14,"bulkStarts":1,"bulkPolls":12,"downloads":1}',
+                lookupJson: '{"candidates":3,"checkedAgainst":790,"maxSharePercent":5,"lookedUp":3,"found":2}']
+        Map ok = ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T",
+                reportDate: Date.valueOf("2026-11-15"), period: "2026-11", sourceReads: [stats]]).call()
+        noErrors()
+        Map row = ec.entity.find("darpan.audit.AuditSourceRead").condition("checkRunId", ok.checkRunId).useCache(false).one().getMap()
+        assertEquals(["SHOP_US", 812L, '{"graphql":14,"bulkStarts":1,"bulkPolls":12,"downloads":1}'],
+                [row.sourceConfigId, (row.recordCount as Number).longValue(), row.callsJson])
+        assertEquals(java.sql.Timestamp.valueOf("2026-11-12 08:00:00"), row.windowFromDate)
+        assertEquals(java.sql.Timestamp.valueOf("2026-11-16 08:00:00"), row.windowThruDate)
+        assertTrue((row.lookupJson as String).contains('"found":2'))
+    }
+
+    @Test
+    void aPlaysReadReportGroupsItsReadsAndFlagsTheOnesThatCostMore() {
+        // DAR-BE-320 phase 1b: two checks of one audit read the same store on two mornings; the second morning one of
+        // them reads from the period's first day again.
+        audit(TRUN, "TREP_RR_AUDIT", "read-report", "Read report", "AUDP_MONTH")
+        statement(TRUN, "TREP_RR_AUDIT", "TREP_RR_S1", "S1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "read report S1")
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_RR1", companyUserGroupId: TRUN, checkCode: "rr-orders", label: "orders"])
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_RR2", companyUserGroupId: TRUN, checkCode: "rr-loop", label: "loop"])
+        link(TRUN, "TREP_RR1", "TREP_RR_S1", 1)
+        link(TRUN, "TREP_RR2", "TREP_RR_S1", 2)
+        Closure<Map> shop = { String from, long calls ->
+            read("SHOPIFY", "AUDSR_COMPLETE", 500, null) + [sourceConfigId: "SHOP_RR",
+                    windowFromDate: java.sql.Timestamp.valueOf("${from} 12:00:00"), windowThruDate: java.sql.Timestamp.valueOf("2026-11-11 12:00:00"),
+                    callsJson: "{\"graphql\":${calls},\"bulkStarts\":1}".toString()]
+        }
+        ["2026-11-10": "2026-11-01", "2026-11-11": "2026-11-07"].each { String day, String from ->
+            ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_RR1",
+                    reportDate: Date.valueOf(day), period: "2026-11", sourceReads: [shop(from, 10L)]]).call()
+            ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_RR2",
+                    reportDate: Date.valueOf(day), period: "2026-11", sourceReads: [shop("2026-11-01", 12L)]]).call()
+            noErrors()
+        }
+
+        Map report = AuditReadReport.forPlay(ec, TRUN, "TREP_RR_AUDIT", null, null,
+                [wholePeriodGraceDays: 4, lookupEveryPlayRuns: 3, throttledMax: 0, callsGrewPercent: 50, callsGrewMinCalls: 50])
+        assertEquals(["2026-11-11", "2026-11"], [report.reportDate, report.period], "blank date: the latest play")
+        assertEquals([reads: 2, connections: 1, records: 1000L, calls: [graphql: 22L, bulkStarts: 2L]], report.totals)
+        assertEquals([["DUPLICATE_READ", ["rr-orders", "rr-loop"]], ["WHOLE_PERIOD_READ", ["rr-loop"]]],
+                (report.flags as List<Map>).collect { [it.flag, it.checks] })
+
+        Map first = AuditReadReport.forPlay(ec, TRUN, "TREP_RR_AUDIT", Date.valueOf("2026-11-10"), "2026-11",
+                [wholePeriodGraceDays: 4, lookupEveryPlayRuns: 3, throttledMax: 0, callsGrewPercent: 50, callsGrewMinCalls: 50])
+        assertEquals(["DUPLICATE_READ"], (first.flags as List<Map>)*.flag, "the period's first play may read it all")
+        assertNull(AuditReadReport.forPlay(ec, KREWE, "TREP_RR_AUDIT", null, null), "another tenant sees no such audit")
+    }
+
+    @Test
     void aCheckServingAuditsOfTwoPeriodsMustBeGivenItsWindow() {
         ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T2",
                 reportDate: Date.valueOf("2026-11-14"), sourceReads: [read("OMS", "AUDSR_COMPLETE", 1, null)]]).call()

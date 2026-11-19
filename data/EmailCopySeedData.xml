@@ -96,6 +96,9 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run on this morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="button" defaultText="Open the report in Darpan"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="attachments" defaultText="Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns)."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="reads" defaultText="This morning Darpan read your systems ${reads} times over ${connections} connections."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="reads.calls" defaultText="${calls} API calls were counted."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="reads.flags" defaultText="${flags} of those reads could cost less; the Darpan team reviews them."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="guides" defaultText="Resolve a finding|guides/audits#resolve-a-finding&#10;A finding stays open after a fix|troubleshooting/audits#a-finding-stays-open-after-you-fixed-it"/>
 
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="week" defaultText="week to ${day}"/>

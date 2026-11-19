@@ -331,7 +331,8 @@
                     reading). The check is notRun and any reads are kept for the record.</description></parameter>
             <parameter name="sourceReads" type="List">
                 <description>One Map per extract: systemEnumId (an endpoint or a root system), statusEnumId
-                    (AUDSR_COMPLETE / AUDSR_PARTIAL / AUDSR_FAILED), recordCount, readStamp, reason.</description></parameter>
+                    (AUDSR_COMPLETE / AUDSR_PARTIAL / AUDSR_FAILED), recordCount, readStamp, reason; and, for the read
+                    report (DAR-BE-320), sourceConfigId, windowFromDate, windowThruDate, callsJson, lookupJson.</description></parameter>
             <parameter name="automationExecutionId">
                 <description>DAR-UI-072. The automation execution that read this run, kept so its extracts can be handed out.</description></parameter>
         </in-parameters>
@@ -425,7 +426,9 @@
                         map="[checkRunId:checkRunId, readSeqId:String.format('%02d', readSeq), companyUserGroupId:companyUserGroupId,
                               systemEnumId:(systemEnum.parentEnumId ?: systemEnum.enumId), endpointEnumId:systemEnum.enumId,
                               statusEnumId:sr.statusEnumId, recordCount:(sr.recordCount != null ? sr.recordCount as Long : null),
-                              readStamp:sr.readStamp, reason:sr.reason]"/>
+                              readStamp:sr.readStamp, reason:sr.reason, sourceConfigId:sr.sourceConfigId,
+                              windowFromDate:sr.windowFromDate, windowThruDate:sr.windowThruDate,
+                              callsJson:sr.callsJson, lookupJson:sr.lookupJson]"/>
                 <entity-create value-field="sourceRead"/>
             </iterate>
         </actions>

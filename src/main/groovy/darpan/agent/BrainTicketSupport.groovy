@@ -11,6 +11,12 @@ class BrainTicketSupport {
 
     static final Set<String> CATEGORIES = ["THRESHOLD_OR_WINDOW", "EXCLUSION", "STATEMENT_SCOPE", "FIX_WORDING", "CAUSE_STANCE",
             "NEW_CHECK_EXISTING_READ", "NEW_OR_WIDER_CAUSE", "MISSING_FIELD", "NEW_SYSTEM_OR_PACK", "PRODUCT_BUG", "DISPLAY"] as Set
+    /**
+     * DAR-BE-320. Raised by the audit read reviewer after a play with read flags, never by the chat agent (so not in
+     * CATEGORIES): EXTRACT means the read itself should change (shared read, window, document), BRAIN means the
+     * read-economy rules the brain and the author role follow.
+     */
+    static final Set<String> READ_ECONOMY = ["READ_ECONOMY_EXTRACT", "READ_ECONOMY_BRAIN"] as Set
     static final Set<String> STATUSES = ["RECEIVED", "ACCEPTED", "DECLINED", "SHIPPED"] as Set
     /** The only moves a ticket makes. */
     static final Map<String, List<String>> MOVES = [RECEIVED: ["ACCEPTED", "DECLINED"], ACCEPTED: ["SHIPPED", "DECLINED"],
@@ -46,6 +52,18 @@ class BrainTicketSupport {
     static String existingId(def ec, String tenantId, String conversationId, String textHash) {
         def row = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.BrainChangeTicket", "brain ticket idempotency: tenant compared in the condition").condition("companyUserGroupId", tenantId)
                 .condition("conversationId", conversationId).condition("textHash", textHash).useCache(false).one()
+        return row?.ticketId as String
+    }
+
+    /**
+     * DAR-BE-320. The open (RECEIVED or ACCEPTED) read-economy ticket of the tenant with this key hash, or null: one open
+     * ticket per tenant, flag and connection. A declined or shipped one does not count, so a flag that comes back is raised again.
+     */
+    static String openReadEconomyId(def ec, String tenantId, String textHash) {
+        def row = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.agent.BrainChangeTicket", "read-economy ticket: tenant compared in the condition")
+                .condition("companyUserGroupId", tenantId).condition("textHash", textHash)
+                .condition("category", "in", READ_ECONOMY as List).condition("status", "in", ["RECEIVED", "ACCEPTED"])
+                .useCache(false).list().find()
         return row?.ticketId as String
     }
 

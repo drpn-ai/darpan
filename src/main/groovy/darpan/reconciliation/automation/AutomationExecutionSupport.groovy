@@ -2220,6 +2220,11 @@ class AutomationExecutionSupport {
             ec.message.clearErrors()
         }
         if (errors) throw new IllegalStateException(errors.join("; "))
+        // DAR-BE-320 phase 1b: the window THIS side read (HotWax reads from its last covered day, the other side a
+        // little earlier), recorded on the audit's source read.
+        result = new LinkedHashMap<String, Object>(result)
+        if (!result.containsKey("readWindowFrom")) result.readWindowFrom = serviceParams.windowStartDate
+        if (!result.containsKey("readWindowThru")) result.readWindowThru = serviceParams.windowEndDate
         return result
     }
 

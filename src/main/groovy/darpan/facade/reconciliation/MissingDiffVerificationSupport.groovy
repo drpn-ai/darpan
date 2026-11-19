@@ -106,6 +106,8 @@ class MissingDiffVerificationSupport {
         int unresolvedCount = 0
         Map<String, Set<String>> removeIdsByToken = [:]
         Map<String, Integer> removedCountByToken = [:]
+        // DAR-BE-320 phase 1b: what happened on each side, for the audit's read report (AuditSourceRead.lookupJson).
+        Map<String, Map<String, Object>> sideOutcomes = [:]
         List<String> auditSentences = []
         sidesByToken.each { String token, Map<String, Object> side ->
             Set<String> candidates = candidateIdsByToken.containsKey(token) ? candidateIdsByToken.get(token) : (Set<String>) null
@@ -113,12 +115,18 @@ class MissingDiffVerificationSupport {
             // `return` skips THIS side only — a side over its own gate must not suppress a sibling that
             // is under its, since the two sides are different systems with different completeness guarantees.
             Long checked = checkedCountByToken.get(token)
+            long gate = maxShareByToken.containsKey(token) ? maxShareByToken.get(token) : (long) DEFAULT_MAX_LOOKUP_SHARE
+            Map<String, Object> outcome = [candidates: candidates.size(), checkedAgainst: checked, maxSharePercent: gate,
+                                           lookedUp: 0, found: 0] as Map<String, Object>
+            sideOutcomes.put(side.label as String, outcome)
             if (checked == null) {
+                outcome.skipped = "NO_COUNT"
                 warnings.add("Verification pass skipped for ${side.label}: the run did not say how many records were checked against it, so ${candidates.size()} missing difference(s) were not looked up.".toString())
                 return
             }
-            long maxShare = maxShareByToken.containsKey(token) ? maxShareByToken.get(token) : (long) DEFAULT_MAX_LOOKUP_SHARE
+            long maxShare = gate
             if (candidates.size() * 100L > maxShare * checked) {
+                outcome.skipped = "OVER_SHARE"
                 warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} of ${checked} records are reported missing there, above the ${maxShare}% a lookup is for. The read or the pairing needs fixing; nothing was looked up.".toString())
                 return
             }
@@ -131,10 +139,12 @@ class MissingDiffVerificationSupport {
             }
             performed = true
             checkedCount += ids.size()
+            outcome.lookedUp = ids.size()
             if (!(lookupResult?.ok)) {
                 lookupFailed = true
                 List errors = lookupResult?.errors instanceof List ? (List) lookupResult.errors : []
                 warnings.add("Verification lookup for ${side.label} failed; ${ids.size()} missing differences left as reported. ${errors ? errors.join("; ") : ""}".toString().trim())
+                outcome.failed = true
                 return
             }
             Set<String> found = new LinkedHashSet<String>()
@@ -153,6 +163,7 @@ class MissingDiffVerificationSupport {
                 if (value && ids.contains(value)) unresolved.add(value)
             }
             Set<String> removable = ids.findAll { found.contains(it) } as Set<String>
+            outcome.found = removable.size()
             unresolved.removeAll(removable)
             int confirmedMissingHere = ids.size() - removable.size() - unresolved.size()
             confirmedMissingCount += confirmedMissingHere
@@ -175,7 +186,7 @@ class MissingDiffVerificationSupport {
             return [performed: performed, rewritten: false, checkedCount: checkedCount, removedCount: 0,
                     confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
                     removedMissingInFile1: 0, removedMissingInFile2: 0,
-                    lookupFailed: lookupFailed, warnings: warnings, auditNote: auditNote] as Map<String, Object>
+                    lookupFailed: lookupFailed, warnings: warnings, auditNote: auditNote, sideOutcomes: sideOutcomes] as Map<String, Object>
         }
 
         // Pass 2 — stream-rewrite to a sibling temp file, then atomically replace the original.
@@ -186,6 +197,6 @@ class MissingDiffVerificationSupport {
                 confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
                 removedMissingInFile1: removedMissingInFile1,
                 removedMissingInFile2: removedMissingInFile2, lookupFailed: lookupFailed,
-                warnings: warnings, auditNote: auditNote] as Map<String, Object>
+                warnings: warnings, auditNote: auditNote, sideOutcomes: sideOutcomes] as Map<String, Object>
     }
 }

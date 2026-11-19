@@ -34,6 +34,8 @@ class AuditRunUpdateSupport {
     static final String SERVICE = "audit.AuditDigestServices.send#AuditRunUpdate"
     /** Optional (darpan-agent): {headline, fixes {"R10|cause": sentence}} from the fact sheet. Core never imports it. */
     static final String WORDS_SERVICE = "agent.AgentWriterServices.write#AuditRunWords"
+    /** Optional (darpan-agent, DAR-BE-320): turns a play's read flags into staff tickets. Core never imports it. */
+    static final String READ_REVIEW_SERVICE = "agent.AgentWriterServices.review#AuditReads"
     static final String EMAIL_TEMPLATE = "DARPAN_AUDIT_RUN"
 
     /** Every run-update email goes through here, so tests record sends instead of making them. */
@@ -121,6 +123,7 @@ class AuditRunUpdateSupport {
                 outcomes << [auditDigestId: digest.auditDigestId, sent: false, reason: "FAILED"]
             }
         }
+        reviewReads(ec, tenantId, auditId, built?.readReport as Map)
         return outcomes
     }
 
@@ -138,6 +141,10 @@ class AuditRunUpdateSupport {
         List<Map> units = AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, null, report.report?.period as String)
         Map facts = AuditRunFacts.build(report, units) { String rule, String cause, String findingId -> fixTextOf(ec, tenantId, findingId) }
         Map words = words(ec, tenantId, facts)
+        // DAR-BE-320: after the words, so the writer's fact sheet stays the findings only.
+        Map readReport = readReport(ec, tenantId, auditId, reportDate, period)
+        Map readSummary = AuditReadReport.summary(readReport)
+        if (readSummary) facts = facts + [reads: readSummary]
         String base = TenantNotificationSupport.resolveAppBaseUrl(ec)
         Map<String, Map> groupsByKey = (facts.groups as List<Map>).collectEntries { [("${it.rule}|${it.cause ?: ''}".toString()): it] }
         Map<String, String> csvs = AuditRunFacts.csvByRule(units) { String rule, String cause ->
@@ -147,6 +154,7 @@ class AuditRunUpdateSupport {
         EmailCopyReader copy = new EmailCopyReader(ec, AuditRunMessage.TEMPLATE)
         return [facts      : facts,
                 words      : words,
+                readReport : readReport,
                 subject    : AuditRunMessage.subject(facts, copy),
                 html       : AuditRunMessage.emailHtml(facts, words, base, copy),
                 text       : AuditRunMessage.emailText(facts, words, base, copy),
@@ -177,6 +185,36 @@ class AuditRunUpdateSupport {
             ec.message.clearErrors()
             logger.warn("Audit run update: the writer failed: {}", t.message)
             return [:]
+        }
+    }
+
+    /** The play's read report (DAR-BE-320), or null: a report that cannot be built never holds up the update. */
+    static Map readReport(def ec, String tenantId, String auditId, Date reportDate, String period) {
+        try {
+            return AuditReadReport.forPlay(ec, tenantId, auditId, reportDate, period)
+        } catch (Throwable t) {
+            logger.warn("Audit run update: read report for audit {} not built: {}", auditId, t.message)
+            return null
+        }
+    }
+
+    /**
+     * DAR-BE-320. A play with read flags goes to the optional reviewer (darpan-agent), which writes a diagnosis per flag
+     * and raises one staff ticket per tenant, flag and connection. No flags, or no reviewer installed: nothing is sent.
+     * After the update went out, so a slow model never delays it. Never throws.
+     */
+    static void reviewReads(def ec, String tenantId, String auditId, Map readReport) {
+        if (!(readReport?.flags) || !ec.service.isServiceDefined(READ_REVIEW_SERVICE)) return
+        try {
+            AutomationExecutionSupport.dispatchInternalService(ec, READ_REVIEW_SERVICE,
+                    [companyUserGroupId: tenantId, auditId: auditId, readReport: readReport])
+            if (ec.message.hasError()) {
+                logger.warn("Audit run update: the read reviewer refused: {}", ec.message.errorsString)
+                ec.message.clearErrors()
+            }
+        } catch (Throwable t) {
+            ec.message.clearErrors()
+            logger.warn("Audit run update: the read reviewer failed: {}", t.message)
         }
     }
 

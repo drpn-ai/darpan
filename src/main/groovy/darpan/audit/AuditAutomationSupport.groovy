@@ -229,7 +229,8 @@ class AuditAutomationSupport {
         try {
             String tenantId = normalize(readField(automation, "companyUserGroupId"))
             Timestamp now = new Timestamp(System.currentTimeMillis())
-            List<Map> reads = sourceReads(file1Source, file2Source, file1Result, file2Result, failure, now)
+            List<Map> reads = sourceReads(file1Source, file2Source, file1Result, file2Result, failure, now,
+                    [sideConfigIds: sideConfigIds, reconcileResult: reconcileResult])
             String notRunReason = failure != null && file1Result != null && file2Result != null ?
                     truncate("The compare failed: ${sanitizeErrorMessage(failure)}".toString(), REASON_MAX) : null
             File diff = reconcileResult && failure == null ? AutomationExecutionSupport.resolveDiffFile(ec, reconcileResult) : null
@@ -315,15 +316,37 @@ class AuditAutomationSupport {
 
     /** One read per side, as record#CheckRun takes them. */
     static List<Map> sourceReads(def file1Source, def file2Source, Map file1Result, Map file2Result, Throwable failure,
-                                 Timestamp now) {
+                                 Timestamp now, Map context = null) {
         String why = failure ? truncate(sanitizeErrorMessage(failure), REASON_MAX) : null
         String system1 = normalize(readField(file1Source, "systemEnumId"))
         String system2 = normalize(readField(file2Source, "systemEnumId"))
         List<Map> reads = []
-        reads << readOf(system1, file1Result, now, why)
+        reads << readOf(system1, file1Result, now, why) + readStats("FILE_1", file1Result, context)
         reads << readOf(system2, file2Result, now,
-                file1Result == null && failure ? "Not read: the ${system1} read failed first.".toString() : why)
+                file1Result == null && failure ? "Not read: the ${system1} read failed first.".toString() : why) +
+                readStats("FILE_2", file2Result, context)
         return reads.findAll { it.systemEnumId }
+    }
+
+    /**
+     * DAR-BE-320 phase 1b. What one side's read cost and covered, for the audit's read report: the connection it read,
+     * the window, the extract's own call tally (requestMetadata.shopifyCalls, or a system's requestMetadata.calls) and
+     * the verify pass's lookup outcome for this side. Every key is left out when unknown.
+     */
+    static Map readStats(String fileSide, Map result, Map context) {
+        Map out = [:]
+        String configId = normalize(((Map) context?.sideConfigIds)?.get(fileSide))
+        if (configId) out.sourceConfigId = configId
+        if (result?.readWindowFrom instanceof java.util.Date) out.windowFromDate = new Timestamp(((java.util.Date) result.readWindowFrom).time)
+        if (result?.readWindowThru instanceof java.util.Date) out.windowThruDate = new Timestamp(((java.util.Date) result.readWindowThru).time)
+        Map metadata = result?.requestMetadata instanceof Map ? (Map) result.requestMetadata : null
+        Object calls = metadata?.shopifyCalls ?: metadata?.calls
+        if (calls instanceof Map && calls) out.callsJson = truncate(groovy.json.JsonOutput.toJson(calls), REASON_MAX)
+        Map reconcile = (Map) context?.reconcileResult
+        String label = normalize(reconcile?.get(fileSide == "FILE_1" ? "file1Label" : "file2Label"))
+        Object lookup = label && reconcile?.verificationSides instanceof Map ? ((Map) reconcile.verificationSides).get(label) : null
+        if (lookup instanceof Map && lookup) out.lookupJson = truncate(groovy.json.JsonOutput.toJson(lookup), REASON_MAX)
+        return out
     }
 
     private static Map readOf(String systemEnumId, Map result, Timestamp now, String failureReason) {

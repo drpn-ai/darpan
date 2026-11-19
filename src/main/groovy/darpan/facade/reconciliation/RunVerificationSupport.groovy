@@ -269,6 +269,9 @@ class RunVerificationSupport {
             ec.message.clearErrors()
         }
         applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
+        // DAR-BE-320 phase 1b: each side's lookup outcome (side label -> candidates, gate, looked up, found or why
+        // skipped) travels with the compare result to the audit's source reads.
+        if (serviceResult != null && verification.sideOutcomes instanceof Map) serviceResult.verificationSides = verification.sideOutcomes
         // verifiedSystems names the sides this pass actually rechecked — several passes share the
         // VERIFY stage code, so without it a run that ran two of them shows two identical rows.
         RunObservability.endStep(ec, verifyStep,

@@ -190,6 +190,8 @@ class MissingDiffVerificationSupportTests {
         assertEquals(before, file.getText("UTF-8"))
         assertTrue(((List) result.warnings).any { it.toString().contains("3 of 10") && it.toString().contains("5%") },
                 "the warning names the share and the gate: ${result.warnings}")
+        assertEquals([candidates: 3, checkedAgainst: 10L, maxSharePercent: 5L, lookedUp: 0, found: 0, skipped: "OVER_SHARE"],
+                ((Map) result.sideOutcomes).get(FILE2), "the audit's read report sees why nothing was looked up")
     }
 
     @Test
@@ -390,6 +392,9 @@ class MissingDiffVerificationSupportTests {
         assertEquals(["2001"], file1Checked)
         assertEquals(1, result.removedCount)
         assertTrue((Boolean) result.rewritten)
+        assertEquals([candidates: 1, checkedAgainst: 100L, maxSharePercent: 2L, lookedUp: 1, found: 1],
+                ((Map) result.sideOutcomes).get(FILE1))
+        assertEquals("OVER_SHARE", ((Map) ((Map) result.sideOutcomes).get(FILE2)).skipped)
         assertEquals(["1001", "1002", "1003"] as Set,
                 (((List) parseDocument(file).differences).collect { it.primaryId } as Set))
     }

@@ -507,6 +507,21 @@
         <field name="reason" type="text-intermediate">
             <description>Why the read was partial or failed, in plain words; blank when complete.</description>
         </field>
+        <field name="sourceConfigId" type="id">
+            <description>DAR-BE-320. The connection read (a Shopify store, a HotWax instance, a NetSuite query's config).</description>
+        </field>
+        <field name="windowFromDate" type="date-time">
+            <description>DAR-BE-320. Start of the window this side read (HotWax: its last covered day; the other side a little earlier).</description>
+        </field>
+        <field name="windowThruDate" type="date-time">
+            <description>DAR-BE-320. End of the window this side read.</description>
+        </field>
+        <field name="callsJson" type="text-intermediate">
+            <description>DAR-BE-320. The extract's own call tally, e.g. Shopify {graphql, costPoints, throttled, bulkStarts, bulkPolls, downloads}.</description>
+        </field>
+        <field name="lookupJson" type="text-intermediate">
+            <description>DAR-BE-320. The verify pass on this side: candidates, checkedAgainst, maxSharePercent, lookedUp, found, skipped (NO_COUNT / OVER_SHARE), failed.</description>
+        </field>
         <relationship type="one" related="darpan.audit.AuditCheckRun" fk-name="AUDSRD_CHECK_RUN">
             <key-map field-name="checkRunId"/>
         </relationship>

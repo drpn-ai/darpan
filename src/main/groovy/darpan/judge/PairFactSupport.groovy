@@ -42,13 +42,17 @@ class PairFactSupport {
     }
 
     /**
-     * key -> field name for a side. Keys are taken in sorted order, so the same key set always gives the same names; a name
-     * that collides gets _2, _3 ... (the base is cut so the suffix still fits the limit).
+     * key -> field name for a side. The tenant's FactType is the one source of truth: every existing key -> name pair is kept as
+     * is (taken from the FactField descriptions), and only keys not seen before are named, in sorted order, with a numeric suffix
+     * (_2, _3 ...) when the name is taken (the base is cut so the suffix still fits the limit). Nothing here depends on which
+     * other keys a run happens to hold, and buildFact never derives a name itself.
      */
-    static Map<String, String> fieldNames(String prefix, Collection<String> keys) {
-        Map<String, String> names = new LinkedHashMap<>()
-        Set<String> used = new HashSet<>([prefix + "_presence"])   // a side key can never take the presence field's name
+    static Map<String, String> nameKeys(String prefix, Map<String, String> existing, Collection<String> keys) {
+        Map<String, String> names = new LinkedHashMap<>(existing ?: [:])
+        Set<String> used = new HashSet<>(names.values())
+        used.add(prefix + "_presence")   // a side key can never take the presence field's name
         (keys ?: []).collect { it as String }.toSet().sort().each { String key ->
+            if (names.containsKey(key)) return
             String base = fieldName(prefix, key)
             String name = base
             int n = 2
@@ -62,7 +66,8 @@ class PairFactSupport {
     }
 
     /**
-     * pairRow: [compareId, file1, file2]. sideState: [factTypeId, file1: [prefix, setAside: Set], file2: [prefix, setAside: Set]].
+     * pairRow: [compareId, file1, file2]. sideState: [factTypeId, file1: [prefix, setAside: Set, keyNames: Map key->field name], file2: [...]]
+     * (keyNames come from generate#PairFactType). A side key with no name is refused: the caller generates from every key first.
      * Returns [factTypeId, recordId: compareId, fact: [...]], the shape moqui-rules evaluate takes as a fact.
      */
     static Map<String, Object> buildFact(Map pairRow, Map sideState, Map params, Map askFields) {
@@ -77,8 +82,12 @@ class PairFactSupport {
             String presence = record != null ? KEPT : (setAside.contains(compareId) ? SET_ASIDE : ABSENT)
             fact.put(prefix + "_presence", presence)
             if (record != null) {
-                Map<String, String> names = fieldNames(prefix, record.keySet() as Collection<String>)
-                names.each { String key, String name -> fact.put(name, record.get(key)) }
+                Map<String, String> names = (state.keyNames ?: [:]) as Map<String, String>
+                record.each { Object key, Object value ->
+                    String name = names.get(key as String)
+                    if (name == null) throw new IllegalStateException("key ${key} of ${side} has no field name in the pair fact type".toString())
+                    fact.put(name, value)
+                }
             }
         }
         (params ?: [:]).each { Object name, Object value -> fact.put("param_" + name, value) }
@@ -112,6 +121,7 @@ class PairFactSupport {
             while (batch.size() < size && pairs.hasNext()) {
                 Map row = pairs.next()
                 String id = row.compareId as String
+                if (!id?.trim()) throw new IllegalStateException("a pair has no compare id".toString())
                 if (!seen.add(id)) throw new IllegalStateException("compare id ${id} appears twice in one judging".toString())
                 batch.add(row)
             }

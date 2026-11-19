@@ -25,6 +25,8 @@
         <out-parameters>
             <parameter name="factTypeId"/>
             <parameter name="fieldCount" type="Integer"/>
+            <parameter name="keyNames" type="Map"><description>file1 and file2: original record key to fact field name. The
+                one source of truth for names; PairFactSupport.buildFact takes it and never derives a name.</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
@@ -67,12 +69,15 @@
             <script>wanted.put('compareId', 'Compare id of the pair')</script>
             <script>wanted.put(prefixes[0] + '_presence', 'KEPT, SET_ASIDE or ABSENT on file 1'); wanted.put(prefixes[1] + '_presence', 'KEPT, SET_ASIDE or ABSENT on file 2')</script>
             <set field="sideKeys" from="[file1: (sampleKeys?.get('file1') ?: []) as List, file2: (sampleKeys?.get('file2') ?: []) as List]"/>
+            <set field="keyNames" from="[:]"/>
             <iterate list="[0, 1]" entry="sideIndex">
                 <set field="prefix" from="prefixes[sideIndex]"/>
-                <!-- Earlier runs' keys are read back from the field descriptions, so a rerun names every key the same way. -->
-                <set field="knownKeys" from="existingList.findAll { it.fieldName.startsWith(prefix + '_') &amp;&amp; it.fieldName != prefix + '_presence' &amp;&amp; it.description }.collect { it.description }"/>
-                <set field="keyNames" from="darpan.judge.PairFactSupport.fieldNames(prefix, knownKeys + sideKeys[sideIndex == 0 ? 'file1' : 'file2'])"/>
-                <script>keyNames.each { key, name -> wanted.put(name, key) }</script>
+                <set field="sideName" from="sideIndex == 0 ? 'file1' : 'file2'"/>
+                <!-- Existing key to name pairs are read back from the field descriptions and kept; only new keys are named. -->
+                <set field="knownNames" from="[:]"/>
+                <script>existingList.findAll { it.fieldName.startsWith(prefix + '_') &amp;&amp; it.fieldName != prefix + '_presence' &amp;&amp; it.description }.each { knownNames.put(it.description, it.fieldName) }</script>
+                <set field="sideKeyNames" from="darpan.judge.PairFactSupport.nameKeys(prefix, knownNames, sideKeys[sideName])"/>
+                <script>keyNames.put(sideName, sideKeyNames); sideKeyNames.each { key, name -> wanted.put(name, key) }</script>
             </iterate>
             <entity-find entity-name="darpan.judge.CheckParameter" list="parameterList">
                 <econdition field-name="checkId" from="checkId"/>

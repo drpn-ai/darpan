@@ -7,14 +7,19 @@ import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-BE-318 plan 2, Task 6 (D7). The pair fact: presence per side, prefixed side fields, parameters and asks. Pure Groovy. */
 class PairFactSupportTests {
 
-    private static Map state(String p1, String p2, Set<String> aside1 = [] as Set, Set<String> aside2 = [] as Set) {
-        return [factTypeId: "FT1", file1: [prefix: p1, setAside: aside1], file2: [prefix: p2, setAside: aside2]]
+    private static Map state(String p1, String p2, Set<String> aside1 = [] as Set, Set<String> aside2 = [] as Set,
+                             Collection<String> keys1 = ["orderId", "status", "a", "items[0].status", "presence", "id"],
+                             Collection<String> keys2 = ["id", "b", "tranId"]) {
+        return [factTypeId: "FT1",
+                file1: [prefix: p1, setAside: aside1, keyNames: PairFactSupport.nameKeys(p1, [:], keys1)],
+                file2: [prefix: p2, setAside: aside2, keyNames: PairFactSupport.nameKeys(p2, [:], keys2)]]
     }
 
     @Test
@@ -92,7 +97,7 @@ class PairFactSupportTests {
     @Test
     void aBracketedKeyGivesAnUnderscoreNameAndTheOriginalSurvivesInTheFieldMap() {
         assertEquals("hotwax_items_0__status", PairFactSupport.fieldName("hotwax", "items[0].status"))
-        Map names = PairFactSupport.fieldNames("hotwax", ["items[0].status"])
+        Map names = PairFactSupport.nameKeys("hotwax", [:], ["items[0].status"])
         assertEquals(["items[0].status": "hotwax_items_0__status"], names)
         Map fact = PairFactSupport.buildFact([compareId: "P7", file1: ["items[0].status": "OPEN"], file2: null],
                 state("hotwax", "netsuite"), [:], [:]).fact as Map
@@ -101,7 +106,7 @@ class PairFactSupportTests {
 
     @Test
     void collidingNamesGetANumericSuffixInKeyOrder() {
-        Map names = PairFactSupport.fieldNames("hotwax", ["a-b", "a_b", "a b"])
+        Map names = PairFactSupport.nameKeys("hotwax", [:], ["a-b", "a_b", "a b"])
         assertEquals(3, names.values().toSet().size())
         assertEquals("hotwax_a_b", names["a b"])
         assertEquals("hotwax_a_b_2", names["a-b"])
@@ -110,7 +115,7 @@ class PairFactSupportTests {
 
     @Test
     void aSideKeyNamedPresenceNeverTakesThePresenceFieldsName() {
-        assertEquals("hotwax_presence_2", PairFactSupport.fieldNames("hotwax", ["presence"])["presence"])
+        assertEquals("hotwax_presence_2", PairFactSupport.nameKeys("hotwax", [:], ["presence"])["presence"])
         Map fact = PairFactSupport.buildFact([compareId: "P8", file1: [presence: "x"], file2: null],
                 state("hotwax", "netsuite"), [:], [:]).fact as Map
         assertEquals("KEPT", fact.hotwax_presence)
@@ -118,10 +123,55 @@ class PairFactSupportTests {
     }
 
     @Test
+    void sparsePairsGetIdenticalNamesForSharedKeys() {
+        List<String> all = ["a-b", "a_b", "c"]
+        Map st = state("hotwax", "netsuite", [] as Set, [] as Set, all, [])
+        Map f1 = PairFactSupport.buildFact([compareId: "S1", file1: ["a_b": "1", c: "x"], file2: null], st, [:], [:]).fact as Map
+        Map f2 = PairFactSupport.buildFact([compareId: "S2", file1: ["a-b": "2", "a_b": "3"], file2: null], st, [:], [:]).fact as Map
+        assertEquals("1", f1.hotwax_a_b_2)
+        assertEquals("3", f2.hotwax_a_b_2)
+        assertEquals("2", f2.hotwax_a_b)
+    }
+
+    @Test
+    void aRerunKeepsEveryExistingNameAndNamesOnlyTheNewKeys() {
+        Map first = PairFactSupport.nameKeys("hotwax", [:], ["a-b", "a_b"])
+        Map again = PairFactSupport.nameKeys("hotwax", first, ["a-b", "a_b", "a b"])
+        first.each { k, v -> assertEquals(v, again[k]) }
+        assertEquals(3, again.values().toSet().size())
+        assertEquals("hotwax_a_b_3", again["a b"])
+    }
+
+    @Test
+    void keysCollidingAfterTheCutKeepDistinctNamesAcrossARerun() {
+        String k1 = "y" * 60 + "1"
+        String k2 = "y" * 60 + "2"
+        Map first = PairFactSupport.nameKeys("hotwax", [:], [k1])
+        Map again = PairFactSupport.nameKeys("hotwax", first, [k1, k2])
+        assertEquals(first[k1], again[k1])
+        assertNotEquals(again[k1], again[k2])
+        assertTrue(again.values().every { it.length() <= 40 })
+    }
+
+    @Test
+    void anUnmappedKeyIsRefusedLoudly() {
+        IllegalStateException e = assertThrows(IllegalStateException) {
+            PairFactSupport.buildFact([compareId: "U1", file1: [mystery: "1"], file2: null], state("hotwax", "netsuite"), [:], [:])
+        }
+        assertEquals("key mystery of file1 has no field name in the pair fact type", e.message)
+    }
+
+    @Test
+    void aBlankCompareIdIsRefusedLikeARepeat() {
+        Iterator<List<Map>> batchIt = PairFactSupport.batches([[compareId: " "]].iterator(), 2)
+        assertThrows(IllegalStateException) { batchIt.next() }
+    }
+
+    @Test
     void aLongNameIsCutToTheFieldNameLimit() {
         String name = PairFactSupport.fieldName("hotwax", "x" * 80)
         assertTrue(name.length() <= 40)
-        Map names = PairFactSupport.fieldNames("hotwax", ["x" * 80, "x" * 81])
+        Map names = PairFactSupport.nameKeys("hotwax", [:], ["x" * 80, "x" * 81])
         assertEquals(2, names.values().toSet().size())
         assertTrue(names.values().every { it.length() <= 40 })
     }

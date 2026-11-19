@@ -110,6 +110,23 @@ class PairFactTypeServiceTests {
     }
 
     @Test
+    void aRerunAddingACollidingKeyLeavesExistingFieldsUntouchedAndReturnsKeyNames() {
+        String check = seedCheck(A, "collide", [:], null, null)
+        Map first = generate(check, [file1: ["a-b"], file2: []])
+        String type = first.out.factTypeId
+        assertEquals([ "a-b": "file1_a_b"], first.out.keyNames.file1)
+        Map before = fields(type).collectEntries { k, v -> [(k): v.description] }
+        Map again = generate(check, [file1: ["a_b", "a b", "a-b"], file2: []])
+        assertEquals([], again.errors)
+        assertEquals("file1_a_b", again.out.keyNames.file1["a-b"])
+        assertEquals(["file1_a_b", "file1_a_b_2", "file1_a_b_3"], again.out.keyNames.file1.values().sort())
+        Map after = fields(type).collectEntries { k, v -> [(k): v.description] }
+        before.each { k, v -> assertEquals(v, after[k], "field ${k} unchanged") }
+        assertEquals("a b", after.file1_a_b_2)
+        assertEquals("a_b", after.file1_a_b_3)
+    }
+
+    @Test
     void aKindOverrideGoesThroughUpdateFactField() {
         String check = seedCheck(A, "kinds", [:], null, null)
         Map out = generate(check, [file1: ["amount"], file2: []], [kindOverrides: [file1_amount: "FVT_DECIMAL"]])

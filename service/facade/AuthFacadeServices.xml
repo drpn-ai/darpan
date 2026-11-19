@@ -1358,12 +1358,15 @@
     <service verb="begin" noun="PasskeyRegistration" allow-remote="true" authenticate="anonymous-all">
         <description>DAR-BE-270. Creation options for a new passkey. Either signed in (no two-factor yet: currentPassword;
             with two-factor on: a code or a passkey assertion), or with a setup challengeToken from login#Session
-            (twoFactorSetupRequired). Finish within 5 minutes with finish#PasskeyRegistration. Up to 10 passkeys.</description>
+            (twoFactorSetupRequired). DAR-UI-132: within 5 minutes of a sign-in that completed two-factor
+            (verify#SignInCode, finish#PasskeyFirstSignIn), on the session it made, the code or passkey assertion may be
+            left out: that sign-in is the proof. For adding a passkey only. Finish within 5 minutes with
+            finish#PasskeyRegistration. Up to 10 passkeys.</description>
         <in-parameters>
             <parameter name="challengeToken"><description>A setup challenge from login#Session; leave out when signed in.</description></parameter>
             <parameter name="currentPassword"><description>Signed in, no two-factor yet: the account's password (a wrong one counts as a failed login).</description></parameter>
-            <parameter name="code"><description>Signed in, two-factor on: a current code from the app.</description></parameter>
-            <parameter name="passkeyAssertion"><description>Signed in, two-factor on: instead of code, a passkey assertion over begin#PasskeyProof's options.</description></parameter>
+            <parameter name="code"><description>Signed in, two-factor on: a current code from the app. Leave out within 5 minutes of a two-factor sign-in on this session.</description></parameter>
+            <parameter name="passkeyAssertion"><description>Signed in, two-factor on: instead of code, a passkey assertion over begin#PasskeyProof's options. Leave out within 5 minutes of a two-factor sign-in on this session.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"><description>True when the call completed without facade errors.</description></parameter>

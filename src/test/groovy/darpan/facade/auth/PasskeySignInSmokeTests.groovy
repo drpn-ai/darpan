@@ -792,7 +792,140 @@ class PasskeySignInSmokeTests extends TwoFactorTestSupport {
                 "a refused begin stores nothing")
     }
 
+    // ---- DAR-UI-132: a sign-in that completed two-factor is the proof for adding a passkey, 5 minutes, on its session ----
+
+    @Test
+    @DisplayName("DAR-UI-132: right after a password + code, recovery code or passkey sign-in, adding a passkey needs no second proof")
+    void aTwoFactorSignInIsTheProofForAddingAPasskey() {
+        Map app = enrolAppWithCodes(USERNAME)
+        SoftwarePasskey key = new SoftwarePasskey()
+        assertEquals([], finish(USERNAME, key.register(beginRegistration(USERNAME, [code: code(app.secret as String)]))).errors)
+        ec.user.logoutUser()
+
+        Map<String, Closure<Map>> signIns = [
+                code    : { anon("verify#SignInCode", [challengeToken: challenge(USERNAME), code: code(app.secret as String)]) },
+                recovery: { anon("verify#SignInCode", [challengeToken: challenge(USERNAME), recoveryCode: (app.recoveryCodes as List)[0]]) },
+                passkey : {
+                    String token = challenge(USERNAME)
+                    String options = anon("begin#PasskeySignIn", [challengeToken: token]).out.publicKeyOptions
+                    anon("verify#SignInCode", [challengeToken: token, passkeyAssertion: key.assertion(options)])
+                },
+        ]
+        signIns.each { String how, Closure<Map> signIn ->
+            Map signedIn = signIn.call()
+            assertEquals([], signedIn.errors, how)
+            Map begun = withRequestKey(signedIn.out.authToken as String) { register([:]) }
+            assertEquals([], begun.errors, "${how}: the sign-in is the proof")
+            assertNotNull(begun.out.publicKeyOptions, how)
+            assertEquals(300, begun.out.expiresInSeconds, how)
+        }
+    }
+
+    @Test
+    @DisplayName("DAR-UI-132: right after a passkey-only sign-in (finish#PasskeyFirstSignIn), adding a passkey needs no second proof")
+    void aPasskeyFirstSignInIsTheProofForAddingAPasskey() {
+        SoftwarePasskey key = enrolPasskey(USERNAME)
+        Map begun = anon("begin#PasskeyFirstSignIn", [username: USERNAME])
+        Map finished = anon("finish#PasskeyFirstSignIn", [challengeToken: begun.out.challengeToken,
+                passkeyAssertion: key.assertion(begun.out.publicKeyOptions as String)])
+        assertTrue(finished.out.authenticated as boolean)
+        Map registration = withRequestKey(finished.out.authToken as String) { register([:]) }
+        assertEquals([], registration.errors)
+        assertNotNull(registration.out.publicKeyOptions)
+    }
+
+    @Test
+    @DisplayName("DAR-UI-132: the sign-in counts for 300 seconds; after that adding a passkey asks for a proof as before")
+    void theSignInCountsForFiveMinutes() {
+        String secret = enrolApp(USERNAME)
+        Map signedIn = anon("verify#SignInCode", [challengeToken: challenge(USERNAME), code: code(secret)])
+        String rawKey = signedIn.out.authToken
+        signedInSince(rawKey, 290)
+        assertEquals([], withRequestKey(rawKey) { register([:]) }.errors, "290 s on: still the proof")
+
+        signedInSince(rawKey, 301)
+        Map late = withRequestKey(rawKey) { register([:]) }
+        assertEquals([TwoFactorRefusal.CODE_NEEDED.message], late.errors, "301 s on: a proof is needed again")
+        assertEquals("PROOF_NEEDED", late.out.reason)
+        assertNull(late.out.publicKeyOptions)
+        assertEquals([], withRequestKey(rawKey) { register([code: code(secret)]) }.errors, "a code still works")
+    }
+
+    @Test
+    @DisplayName("DAR-UI-132: the sign-in proves nothing else: new codes, a new app, turning two-factor off still ask; a password-only sign-in proves nothing")
+    void theSignInIsTheProofForAddingAPasskeyOnly() {
+        String secret = enrolApp(USERNAME)
+        Map signedIn = anon("verify#SignInCode", [challengeToken: challenge(USERNAME), code: code(secret)])
+        String needed = TwoFactorRefusal.CODE_NEEDED.message
+        withRequestKey(signedIn.out.authToken as String) {
+            assertEquals([needed], this.call("facade.AuthFacadeServices.create#RecoveryCodes", [:]).errors, "create#RecoveryCodes")
+            assertEquals([needed], this.call("facade.AuthFacadeServices.begin#TwoFactorSetup", [:]).errors, "begin#TwoFactorSetup")
+            assertEquals([needed], this.call("facade.AuthFacadeServices.disable#TwoFactor", [:]).errors, "disable#TwoFactor")
+        }
+        assertTrue(TwoFactorSupport.status(ec, USER_ID).enabled as boolean)
+
+        // A person with no factor signed in by password alone: the password is still asked for.
+        Map login = anon("login#Session", [username: OTHER_USERNAME, password: PASSWORD])
+        assertTrue(login.out.authenticated as boolean)
+        Map passwordOnly = withRequestKey(login.out.authToken as String) { register([:]) }
+        assertEquals([TwoFactorRefusal.PASSWORD_NEEDED.message], passwordOnly.errors)
+    }
+
+    @Test
+    @DisplayName("DAR-UI-132: only the session the sign-in made: an older session, one with no key, or another person's key does not inherit it")
+    void anotherSessionDoesNotInheritTheSignIn() {
+        String secret = enrolApp(USERNAME)
+        ec.user.internalLoginUser(USERNAME)
+        String olderKey = ec.user.getLoginKey(1.0f)
+        signedInSince(olderKey, 3600)
+        ec.user.logoutUser()
+        Map signedIn = anon("verify#SignInCode", [challengeToken: challenge(USERNAME), code: code(secret)])
+        assertEquals([], signedIn.errors)
+        String needed = TwoFactorRefusal.CODE_NEEDED.message
+
+        assertEquals([needed], withRequestKey(olderKey) { register([:]) }.errors, "the person's older session")
+        assertEquals([needed], register([:]).errors, "a request that carries no key")
+        ec.user.internalLoginUser(OTHER_USERNAME)
+        String othersKey = ec.user.getLoginKey(1.0f)
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(USERNAME))
+        assertEquals([needed], withRequestKey(othersKey) { register([:]) }.errors, "another person's fresh key")
+        assertEquals([], withRequestKey(signedIn.out.authToken as String) { register([:]) }.errors, "its own session")
+    }
+
     // ---- helpers ----
+
+    private static final String REGISTRATION = "facade.AuthFacadeServices.begin#PasskeyRegistration"
+
+    /** begin#PasskeyRegistration on the request as it stands (no fresh sign-in). */
+    private Map register(Map params) {
+        return call(REGISTRATION, params)
+    }
+
+    /** body as if the request carried rawKey in its login_key header: a booted-Moqui test has no web request. */
+    private static <T> T withRequestKey(String rawKey, Closure<T> body) {
+        CliAuthSupport.metaClass.static.requestLoginKeyHashes = { def ecArg -> [AuthSessionSupport.hashLoginKey(ecArg, rawKey)] }
+        try {
+            return body.call()
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(CliAuthSupport)
+        }
+    }
+
+    /** Backdates the key's issue (its sign-in) to seconds ago. */
+    private void signedInSince(String rawKey, int seconds) {
+        ec.entity.find("moqui.security.UserLoginKey").condition("loginKey", AuthSessionSupport.hashLoginKey(ec, rawKey))
+                .disableAuthz().updateAll([fromDate: new Timestamp(System.currentTimeMillis() - seconds * 1000L)])
+    }
+
+    /** The app as the person's first factor: [secret, recoveryCodes]. */
+    private Map enrolAppWithCodes(String username) {
+        Map begun = signedIn(username, "begin#TwoFactorSetup", [currentPassword: PASSWORD])
+        Map confirmed = signedIn(username, "confirm#TwoFactorSetup", [code: code(begun.out.secret as String)], false)
+        assertEquals([], confirmed.errors)
+        ec.user.logoutUser()
+        return [secret: begun.out.secret, recoveryCodes: confirmed.out.recoveryCodes]
+    }
 
     private SoftwarePasskey enrolPasskey(String username) {
         SoftwarePasskey key = new SoftwarePasskey()

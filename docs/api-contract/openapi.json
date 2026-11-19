@@ -14268,14 +14268,14 @@
                     },
                     "code": {
                         "type": "string",
-                        "description": "Signed in, two-factor on: a current code from the app."
+                        "description": "Signed in, two-factor on: a current code from the app. Leave out within 5 minutes of a two-factor sign-in on this session."
                     },
                     "passkeyAssertion": {
                         "type": "string",
-                        "description": "Signed in, two-factor on: instead of code, a passkey assertion over begin#PasskeyProof's options."
+                        "description": "Signed in, two-factor on: instead of code, a passkey assertion over begin#PasskeyProof's options. Leave out within 5 minutes of a two-factor sign-in on this session."
                     }
                 },
-                "description": "DAR-BE-270. Creation options for a new passkey. Either signed in (no two-factor yet: currentPassword;\n            with two-factor on: a code or a passkey assertion), or with a setup challengeToken from login#Session\n            (twoFactorSetupRequired). Finish within 5 minutes with finish#PasskeyRegistration. Up to 10 passkeys."
+                "description": "DAR-BE-270. Creation options for a new passkey. Either signed in (no two-factor yet: currentPassword;\n            with two-factor on: a code or a passkey assertion), or with a setup challengeToken from login#Session\n            (twoFactorSetupRequired). DAR-UI-132: within 5 minutes of a sign-in that completed two-factor\n            (verify#SignInCode, finish#PasskeyFirstSignIn), on the session it made, the code or passkey assertion may be\n            left out: that sign-in is the proof. For adding a passkey only. Finish within 5 minutes with\n            finish#PasskeyRegistration. Up to 10 passkeys."
             },
             "BeginPasskeyRegistrationResult": {
                 "type": "object",

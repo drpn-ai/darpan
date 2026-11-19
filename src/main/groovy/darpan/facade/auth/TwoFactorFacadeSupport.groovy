@@ -2,6 +2,8 @@ package darpan.facade.auth
 
 import darpan.facade.common.FacadeSupport
 
+import java.sql.Timestamp
+
 import static darpan.common.ValueSupport.normalize
 
 /**
@@ -15,6 +17,9 @@ import static darpan.common.ValueSupport.normalize
  * JSON-RPC error.
  */
 class TwoFactorFacadeSupport {
+
+    /** DAR-UI-132: how long a sign-in that completed two-factor stands as the fresh proof for adding a passkey. */
+    static final long SIGN_IN_PROOF_MILLIS = 300_000L
 
     /**
      * verify#SignInCode: the challenge token from login#Session with a current code, a recovery code or a passkey
@@ -180,11 +185,12 @@ class TwoFactorFacadeSupport {
 
     /**
      * begin#PasskeyRegistration: creation options for the person, after the same check begin#TwoFactorSetup makes (a
-     * setup challenge; signed in: the current password with no factor yet, else a fresh proof).
+     * setup challenge; signed in: the current password with no factor yet, else a fresh proof). DAR-UI-132: with no proof
+     * given, a two-factor sign-in on this session under SIGN_IN_PROOF_MILLIS ago is the proof (signedInJustNow).
      */
     static Map<String, Object> beginPasskeyRegistration(def ec, Object challengeToken, Object currentPassword, Object code,
                                                         Object passkeyAssertion) {
-        def (String userId, TwoFactorRefusal problem) = setupSubject(ec, challengeToken, currentPassword, code, passkeyAssertion)
+        def (String userId, TwoFactorRefusal problem) = setupSubject(ec, challengeToken, currentPassword, code, passkeyAssertion, true)
         if (problem) return refused(ec, [challengeEnded: normalize(challengeToken) != null], problem, false)
         Map<String, Object> begun = PasskeySupport.registrationOptions(ec, userId)
         if (begun.refusal) return refused(ec, [challengeEnded: false], (TwoFactorRefusal) begun.refusal, false)
@@ -239,19 +245,42 @@ class TwoFactorFacadeSupport {
     /**
      * Who a begin step acts for: [userId, null], or [null, refusal]. A setup challenge's person; or the signed-in person
      * once they show it is them, so a session token alone cannot put someone else's app or passkey on the account: with
-     * two-factor on, a fresh proof from an existing factor; with none yet, the current password (a wrong one counts as a
-     * failed login).
+     * two-factor on, a fresh proof from an existing factor (or, when signInCounts and no proof is given, a sign-in just
+     * now: signedInJustNow); with none yet, the current password (a wrong one counts as a failed login).
      */
-    private static List setupSubject(def ec, Object challengeToken, Object currentPassword, Object code, Object passkeyAssertion) {
+    private static List setupSubject(def ec, Object challengeToken, Object currentPassword, Object code, Object passkeyAssertion,
+                                     boolean signInCounts = false) {
         boolean viaChallenge = normalize(challengeToken) != null
         String userId = setupUser(ec, challengeToken)
         if (!userId) return [null, noSubject(viaChallenge)]
         if (viaChallenge) return [userId, null]
         TwoFactorRefusal problem
-        if (TwoFactorRecords.enabled(ec, userId)) problem = TwoFactorSupport.freshProofProblem(ec, code, passkeyAssertion)
-        else if (!currentPassword) problem = TwoFactorRefusal.PASSWORD_NEEDED
+        if (TwoFactorRecords.enabled(ec, userId)) {
+            boolean noProof = !normalize(code) && !normalize(passkeyAssertion)
+            if (!(signInCounts && noProof && signedInJustNow(ec, userId))) problem = TwoFactorSupport.freshProofProblem(ec, code, passkeyAssertion)
+        } else if (!currentPassword) problem = TwoFactorRefusal.PASSWORD_NEEDED
         else if (!AuthFacadeSupport.ownPasswordMatches(ec, currentPassword.toString())) problem = TwoFactorRefusal.PASSWORD_WRONG
         return problem ? [null, problem] : [userId, null]
+    }
+
+    /**
+     * DAR-UI-132: true when the request's own login key (the first of the person's keys it carries, in the framework's
+     * order: CliAuthSupport.requestLoginKeyHashes) is live and was issued under SIGN_IN_PROOF_MILLIS ago. That key is the
+     * session a sign-in made, in header and cookie mode alike, and its fromDate is when the sign-in finished. For a person
+     * with two-factor on, a key is only ever issued once two-factor is done (verify#SignInCode with a code, recovery code
+     * or passkey; finish#PasskeyFirstSignIn; a factor confirmed, which ends every older key), so a fresh key is a fresh
+     * two-factor sign-in. A servlet session attribute would not do: header-mode darpan-ui sends no session cookie.
+     */
+    private static boolean signedInJustNow(def ec, String userId) {
+        long now = ec.user.nowTimestamp.time
+        for (String hash : CliAuthSupport.requestLoginKeyHashes(ec)) {
+            def key = TwoFactorRecords.find(ec, "moqui.security.UserLoginKey", "self-scoped auth: when the request's own login key was issued")
+                    .condition("loginKey", hash).useCache(false).one()
+            if (key == null || key.userId != userId) continue
+            Timestamp from = (Timestamp) key.fromDate, thru = (Timestamp) key.thruDate
+            return from != null && now - from.time < SIGN_IN_PROOF_MILLIS && (thru == null || thru.time > now)
+        }
+        return false
     }
 
     /**

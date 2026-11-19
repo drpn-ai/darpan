@@ -15,13 +15,13 @@ Repo `darpan-docs`.
 
 - SDL compared against: none: no schema change in 3.3.1; prod re-check after deploy.
 - SDL snapshot refreshed and pages regenerated: none: schema unchanged.
-- `graphql/changelog.mdx` entry: none: schema unchanged.
+- GraphQL changelog entry: none: schema unchanged.
 - Hand-written GraphQL pages: none: no GraphQL behaviour changed.
 
 ## Service catalog and public OpenAPI
 
-- `api-reference/service-catalog.mdx`: every contract method documented, none phantom: yes, unchanged from 3.3.0 (no
-  method or description changed).
+- Service catalog: every contract method documented, none phantom: yes, unchanged from 3.3.0 (no method or
+  description changed; checked against the tag's `methods.txt`).
 - `api-reference/openapi.json` regenerated with `scripts/public_openapi.py` at version 3.3.1: yes.
 - `api-reference/changelog.mdx` entry: yes, 3.3.1 listed under contract 4 with no method changes.
 

@@ -181,6 +181,32 @@ class MigrationAgentSurfaceSmokeTests {
         assertEquals("Y", registryRow("RULE_TENANT_STAMPS").getString("enabled"))
     }
 
+    // DAR-BE-319: every deploy reloads the registry seed (createOrUpdate). A migration an operator disabled
+    // in production must stay disabled; a migration a database has never seen still starts enabled.
+    @Test
+    void aSeedReloadKeepsADisabledMigrationDisabled() {
+        ec.service.sync().name("migration.MigrationServices.set#MigrationEnabled")
+                .parameters([migrationId: "ENDPOINT_ACCESS", enabled: false]).disableAuthz().call()
+        assertEquals("N", registryRow("ENDPOINT_ACCESS").getString("enabled"))
+
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MigrationRegistrySeedData.xml")
+
+        assertEquals("N", registryRow("ENDPOINT_ACCESS").getString("enabled"))
+    }
+
+    @Test
+    void aMigrationNewToTheDatabaseStartsEnabled() {
+        ec.entity.find("darpan.migration.DarpanMigrationPrereq").condition("migrationId", "RULE_TENANT_STAMPS")
+                .disableAuthz().deleteAll()
+        ec.entity.find("darpan.migration.DarpanMigrationPrereq").condition("prereqMigrationId", "RULE_TENANT_STAMPS")
+                .disableAuthz().deleteAll()
+        registryRow("RULE_TENANT_STAMPS").delete()
+
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MigrationRegistrySeedData.xml")
+
+        assertEquals("Y", registryRow("RULE_TENANT_STAMPS").getString("enabled"))
+    }
+
     @Test
     void setEnabledOnAnUnknownIdReportsNotOkWithExactlyOneError() {
         Map<String, Object> out = ec.service.sync().name("migration.MigrationServices.set#MigrationEnabled")

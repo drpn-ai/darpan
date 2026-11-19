@@ -1337,6 +1337,76 @@ class AutomationExecutionServiceSmokeTests {
     }
 
     @Test
+    void theScheduledPassLooksUpOnlyWithTheOtherSidesRecordCount() {
+        // DAR-BE-320: a side is looked up only when its missing rows are <= 5% of the records checked
+        // against it, and the scheduled path is what hands the pass those counts. 2 missing in OMS
+        // (FILE_2) checked against 1,000 Shopify records (FILE_1) is 0.2%: both ids are looked up.
+        seedReturnsAutomation("AUTO_RET_SHARE_GATE", [:])
+        File diffFile = missingInOmsDiffDocument(["9001", "9002"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        Map<String, Object> reconcileResult = [
+                differenceCount: 2L, missingInFile1Count: 0L, missingInFile2Count: 2L,
+                missingObjectDifferenceCount: 2L,
+                file1Label: "SHOPIFY", file2Label: "OMS",
+                diffLocation: diffFile.absolutePath,
+        ]
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_RET_SHARE_GATE").disableAuthz().useCache(false).one()
+        try {
+            AutomationExecutionSupport.verifyMissingDiffsIfEnabled(ec, automation,
+                    loadReturnsSource("AUTO_RET_SHARE_GATE", AutomationExecutionSupport.FILE_SIDE_1),
+                    loadReturnsSource("AUTO_RET_SHARE_GATE", AutomationExecutionSupport.FILE_SIDE_2),
+                    reconcileResult, runId, [:],
+                    [sourceExtractorConfigDefaults: [omsRestSourceConfigId: "TENANT_DEFAULT_CFG"]] as Map<String, Object>,
+                    [recordCount: 1000] as Map, [recordCount: 998] as Map)
+        } finally {
+            diffFile.delete()
+        }
+        def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_MISSING)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(verifyStep)
+        assertEquals(2L, ((verifyStep.recordCount ?: 0) as Number).longValue(),
+                "both missing ids were sent to the lookup: ${verifyStep.metricsJson} ${verifyStep.errorMessage} ${reconcileResult.processingWarnings}")
+    }
+
+    @Test
+    void theScheduledPassLooksNothingUpWithoutRecordCounts() {
+        // Fail closed: no counts, no share, no lookup (the step still records that the pass ran).
+        seedReturnsAutomation("AUTO_RET_NO_COUNTS", [:])
+        File diffFile = missingInOmsDiffDocument(["9001", "9002"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        Map<String, Object> reconcileResult = [
+                differenceCount: 2L, missingInFile1Count: 0L, missingInFile2Count: 2L,
+                missingObjectDifferenceCount: 2L,
+                file1Label: "SHOPIFY", file2Label: "OMS",
+                diffLocation: diffFile.absolutePath,
+        ]
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_RET_NO_COUNTS").disableAuthz().useCache(false).one()
+        try {
+            AutomationExecutionSupport.verifyMissingDiffsIfEnabled(ec, automation,
+                    loadReturnsSource("AUTO_RET_NO_COUNTS", AutomationExecutionSupport.FILE_SIDE_1),
+                    loadReturnsSource("AUTO_RET_NO_COUNTS", AutomationExecutionSupport.FILE_SIDE_2),
+                    reconcileResult, runId, [:],
+                    [sourceExtractorConfigDefaults: [omsRestSourceConfigId: "TENANT_DEFAULT_CFG"]] as Map<String, Object>)
+        } finally {
+            diffFile.delete()
+        }
+        def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_MISSING)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(verifyStep)
+        assertEquals(0L, ((verifyStep.recordCount ?: 0) as Number).longValue(), "nothing was looked up")
+        assertTrue(((reconcileResult.processingWarnings ?: []) as List).any { it.toString().contains("how many records") },
+                "the run says why nothing was looked up: ${reconcileResult.processingWarnings}")
+    }
+
+    @Test
     void aScheduledRunThatCannotVerifySaysSoOnItsTimeline() {
         // The 2026-08-27 production shape, exactly: real automation source rows carrying no config id
         // of their own, and no run defaults to fall back on. The pass cannot build a lookup, so it
@@ -1580,6 +1650,13 @@ class AutomationExecutionServiceSmokeTests {
     }
 
     /** Mirrors ReconciliationServices.writeDiffDatasetOutput's line-oriented writer exactly. */
+    /** writeMissingDiffDocument with the sides swapped: rows missing in OMS (FILE_2), the side these runs look up. */
+    private File missingInOmsDiffDocument(List<String> ids) {
+        File file = writeMissingDiffDocument(ids)
+        file.setText(file.getText("UTF-8").replace("OMS", "\u0000").replace("SHOPIFY", "OMS").replace("\u0000", "SHOPIFY"), "UTF-8")
+        return file
+    }
+
     private File writeMissingDiffDocument(List<String> ids) {
         File file = File.createTempFile("automation-verify-diff-", ".json")
         file.withWriter("UTF-8") { writer ->

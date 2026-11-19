@@ -770,7 +770,7 @@ class AutomationExecutionSupport {
                     }
                     // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
                     verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
-                            mintedRunResultId, stepCtx, executionParams)
+                            mintedRunResultId, stepCtx, executionParams, file1Result, file2Result)
                     // Second and third verification passes, in the same order the interactive path runs
                     // them. Each is a no-op unless this run's connector pair is the one it applies to.
                     verifyExchangePairsIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
@@ -1402,7 +1402,8 @@ class AutomationExecutionSupport {
     protected static boolean verifyMissingDiffsIfEnabled(def ec, def automation, def file1Source, def file2Source,
                                                          Map<String, Object> reconcileResult,
                                                          String runResultId, Map stepCtx,
-                                                         Map<String, Object> executionParams = null) {
+                                                         Map<String, Object> executionParams = null,
+                                                         Map file1Result = null, Map file2Result = null) {
         // ONE implementation, called identically by runSavedRunDiff.groovy. What is left here is the
         // scheduled path's own vocabulary -- its kill switch, its tenant anchor, its dispatch seam,
         // and the config defaults its extractor resolved -- and nothing about how the pass decides,
@@ -1419,6 +1420,10 @@ class AutomationExecutionSupport {
                 file2Source        : file2Source,
                 file1Label         : normalize(reconcileResult?.file1Label),
                 file2Label         : normalize(reconcileResult?.file2Label),
+                // DAR-BE-320: each side's extract count (the share gate) and the scope (the lookup's id kind).
+                file1RecordCount   : file1Result?.recordCount instanceof Number ? file1Result.recordCount : null,
+                file2RecordCount   : file2Result?.recordCount instanceof Number ? file2Result.recordCount : null,
+                compareScopeId     : normalize(readField(automation, "compareScopeId")),
                 // The RUN OWNER's tenant, never the session's: the scheduler authenticates as
                 // anonymous _NA_, which belongs to no tenant, so a session-derived value would
                 // resolve the wrong source config (the 2026-07-31 scheduled-automation failure).

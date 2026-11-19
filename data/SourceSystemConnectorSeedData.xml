@@ -163,7 +163,6 @@
             returnLinesLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnLinesByOrderExternalId"
             lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
             lookupIdsParameterName="externalIds"
-            lookupMaxIds="10000"
             extractOptionsJson='[{"name":"includeReturnsWithoutShopifyRef","label":"Include returns with no Shopify reference","type":"boolean"},{"name":"onlyCancelledReturns","label":"Only cancelled returns","type":"boolean"},{"name":"withReturnCredit","label":"Credit HotWax gave"}]'
             enabled="Y"/>
 
@@ -199,7 +198,7 @@
             keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,orderReturnStatus"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
-            lookupMaxIds="50000"
+            lookupIdField="refundOrReturnId"
             enabled="Y"
             extractOptionsJson='[{"name":"completedReturns","label":"Completed returns, one row per order: refunded, exchanged or orderRefunded","type":"text"}]'/>
 

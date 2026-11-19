@@ -763,27 +763,15 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void shopifyReturnRefsRaisesItsOwnLookupCapAboveTheSharedDefault() {
-        // The shared 1000 default encodes "a gap this large is not index skew, so do not bother
-        // looking". For the returns pair that reasoning is inverted: 601 of the OMS side's 903 records
-        // were missing-in-Shopify in the 2026-08-18 prod run (67%), because Shopify's updated_at is not
-        // reliably bumped and the extract's net is therefore never complete. At the shared default a
-        // two-day window would switch the pass off exactly when the false positives peak.
-        //
-        // RESIZED 10000 -> 50000 (DAR-BE-036). 10000 was sized as "~11x observed DAILY volume", and a
-        // window-scaled quantity measured in days has a cliff measured in days: gorjana's first
-        // full-MONTH run (result 101073, 2026-09-02) produced 17,172 and skipped the pass entirely.
-        // The sizing basis is now the WINDOW an operator may legitimately ask for — 50000 is ~3x that
-        // measured month, so a quarter-long backfill still verifies. This number is only an API-spend
-        // bound now: since partial-credit chunking landed, an oversized set degrades to a partial
-        // answer instead of losing the whole pass, so it no longer has to protect correctness.
+    void theReturnsLookupAnswersOnlyRefundAndReturnIdsAtTheDefaultShare() {
+        // DAR-BE-320. A lookup is a last resort for the few records that need a follow-up (Aditi
+        // 2026-11-19): the old 50,000-id cap, sized so gorjana's steady 67% gap still got looked up, is
+        // gone with the shared 1,000 default. The returns lookup also says which ids it answers for, so an
+        // order-keyed run (RAILS R6/R7, completedReturns) is never sent order ids as refund/return gids.
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
         assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
-        assertEquals(50000, connector.lookupMaxIds)
-        assertTrue((connector.lookupMaxIds as int) > 17172,
-                "must clear the measured 30-day gorjana volume that skipped the pass on 2026-09-02")
-        assertTrue((connector.lookupMaxIds as int) > MissingDiffVerificationSupport.DEFAULT_MAX_LOOKUP_IDS,
-                "the point of the per-connector slot is to exceed the shared default")
+        assertEquals("refundOrReturnId", connector.lookupIdField)
+        assertNull(connector.lookupMaxShare, "no connector carries its own gate; the 5% default applies")
     }
 
     // ------------------------------------------- DAR-BE-032 NetSuite, generalized by DAR-BE-044
@@ -852,12 +840,11 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void theOrdersLookupKeepsTheConservativeSharedDefault() {
-        // The orders pair's bulk export IS expected to be near-complete, so a gap past the default
-        // there still means something is broken and skipping remains the right call.
+    void theOrdersLookupUsesTheDefaultShareAndAnyKey() {
         Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
         assertNotNull(shopify, "SHOPIFY connector row should resolve")
-        assertNull(shopify.lookupMaxIds, "the orders lookup must keep the shared conservative cap")
+        assertNull(shopify.lookupMaxShare)
+        assertNull(shopify.lookupIdField)
     }
 
     // DAR-BE-157: windowed is a real Boolean, Y unless a row says N ("N" is a non-empty, truthy String).

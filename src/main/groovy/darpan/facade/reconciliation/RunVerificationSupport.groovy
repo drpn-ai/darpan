@@ -124,7 +124,9 @@ class RunVerificationSupport {
      * <p>args: {@code ec}, {@code enabled} (defaults true — the interactive path has no kill switch),
      * {@code serviceResult}, {@code diffFile}, {@code file1Source}/{@code file2Source},
      * {@code file1Label}/{@code file2Label}, {@code runOwnerUserGroupId}, {@code dispatcher},
-     * {@code runConfigDefaults}.</p>
+     * {@code runConfigDefaults}, {@code file1RecordCount}/{@code file2RecordCount} (each side's extract
+     * count: a side is checked against the OTHER side's records, DAR-BE-320 share gate) and
+     * {@code compareScopeId} (a side whose key is not the lookup's id kind is never looked up).</p>
      *
      * <p>Returns {@code [applies: true, run: Closure, verifiedLabels: List, missingInFile1,
      * missingInFile2]}, or {@code [applies: false, skipReason, skipDetail]}. A null {@code skipReason}
@@ -170,13 +172,20 @@ class RunVerificationSupport {
         long missingInFile1 = missingCount(serviceResult, "missingInFile1Count")
         long missingInFile2 = missingCount(serviceResult, "missingInFile2Count")
         Map<String, Closure> sideLookups = [:]
-        Map<String, Integer> sideMaxLookupIds = [:]
+        Map<String, Long> sideCheckedCounts = [:]
+        Map<String, Integer> sideMaxShares = [:]
         List<String> blockers = []
+        String compareScopeId = normalize(args.get("compareScopeId"))
         // A side with nothing missing needs no lookup and is not a blocker — only the sides this run
         // actually has rows to recheck on can explain why nothing was rechecked.
-        [[missingInFile1, args.get("file1Source"), file1Label],
-         [missingInFile2, args.get("file2Source"), file2Label]].each { List side ->
+        // A side is checked against the OTHER side's records: missing in FILE_1 means held by FILE_2.
+        [[missingInFile1, args.get("file1Source"), file1Label, "FILE_1", args.get("file2RecordCount")],
+         [missingInFile2, args.get("file2Source"), file2Label, "FILE_2", args.get("file1RecordCount")]].each { List side ->
             if (((long) side[0]) <= 0L) return
+            // DAR-BE-320: the lookup answers for one id kind (lookupIdField); a run keyed on another field
+            // on this side (RAILS R6/R7: Shopify order ids against a refund/return lookup) can never be
+            // answered by it, so the side is not lookup-capable here. Not a blocker: nothing failed.
+            if (!lookupAnswersKey(ec, side[1], compareScopeId, (String) side[3])) return
             Map<String, Object> resolved = resolveSideLookup(ec, side[1], runOwnerUserGroupId, dispatcher, runConfigDefaults)
             Closure lookup = (Closure) resolved.get("lookup")
             if (lookup == null) {
@@ -184,8 +193,9 @@ class RunVerificationSupport {
                 return
             }
             sideLookups.put((String) side[2], lookup)
-            Integer cap = buildVerificationLookupCap(ec, side[1])
-            if (cap != null) sideMaxLookupIds.put((String) side[2], cap)
+            if (side[4] instanceof Number) sideCheckedCounts.put((String) side[2], ((Number) side[4]).longValue())
+            Integer share = buildVerificationLookupShare(ec, side[1])
+            if (share != null) sideMaxShares.put((String) side[2], share)
         }
         // No lookups AND no blocker means verification never applied to this run — a diff between
         // two uploaded files has no source of record to recheck against. Silent, or every such run
@@ -201,8 +211,9 @@ class RunVerificationSupport {
                 run           : {
                     return MissingDiffVerificationSupport.verifyMissingDiffs([
                             diffFile        : diffFile, file1Label: file1Label, file2Label: file2Label,
-                            sideLookups     : sideLookups,
-                            sideMaxLookupIds: sideMaxLookupIds])
+                            sideLookups      : sideLookups,
+                            sideCheckedCounts: sideCheckedCounts,
+                            sideMaxShares    : sideMaxShares])
                 }] as Map<String, Object>
     }
 
@@ -822,14 +833,32 @@ class RunVerificationSupport {
     }
 
     /**
-     * This side's connector-declared ceiling on point lookups, or null to let the verification pass
-     * apply its own default. Resolved separately from the lookup closure so an unreadable or blank
-     * cap can never stop a usable lookup from being built.
+     * This side's connector-declared lookup gate in percent (lookupMaxShare), or null to let the
+     * verification pass apply its own default. Resolved separately from the lookup closure so an
+     * unreadable or blank gate can never stop a usable lookup from being built.
      */
-    static Integer buildVerificationLookupCap(def ec, Object source) {
+    static Integer buildVerificationLookupShare(def ec, Object source) {
         if (source == null) return null
-        Object cap = resolveConnector(ec, source)?.lookupMaxIds
-        return (cap instanceof Number && ((Number) cap).intValue() > 0) ? ((Number) cap).intValue() : null
+        Object share = resolveConnector(ec, source)?.lookupMaxShare
+        return (share instanceof Number && ((Number) share).intValue() > 0) ? ((Number) share).intValue() : null
+    }
+
+    /**
+     * DAR-BE-320. False only when the side's connector names the id kind its lookup answers for
+     * (lookupIdField, comma-separated field names) and the run's key on this side is a different
+     * field. Anything unknown (no connector field, no scope, no plain key) keeps today's behaviour.
+     */
+    static boolean lookupAnswersKey(def ec, Object source, String compareScopeId, String fileSide) {
+        if (source == null || compareScopeId == null) return true
+        String idFields = normalize(resolveConnector(ec, source)?.lookupIdField)
+        if (idFields == null) return true
+        return keyIsLookupKind(idFields, darpan.audit.AuditRecheckSupport.firstKeyField(ec, compareScopeId, fileSide))
+    }
+
+    /** The decision of {@link #lookupAnswersKey}: blank id fields or an unknown key keep the lookup. */
+    static boolean keyIsLookupKind(String idFields, String keyField) {
+        if (normalize(idFields) == null || normalize(keyField) == null) return true
+        return idFields.split(",").collect { it.trim() }.findAll { it }.contains(keyField.trim())
     }
 
     private static long longValue(Object raw) {

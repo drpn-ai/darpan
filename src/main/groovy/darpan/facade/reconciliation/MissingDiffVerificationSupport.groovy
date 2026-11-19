@@ -20,14 +20,12 @@ import groovy.json.JsonSlurper
  */
 class MissingDiffVerificationSupport {
 
-    /** Above this many missing rows per side the pass skips itself: a sync that broken is not
-     *  index skew, and point-checking it would hammer the source API for no signal.
-     *
-     *  That reasoning holds only where the extract is expected to be near-complete. Where it is NOT —
-     *  the returns pair enumerates through orders(query:) filtered on Shopify's updated_at, which is
-     *  not reliably bumped, so its gap is the steady state rather than a symptom (601 of 903 records,
-     *  gorjana prod 2026-08-18) — the side overrides this via sideMaxLookupIds. */
-    static final int DEFAULT_MAX_LOOKUP_IDS = 1000
+    /** DAR-BE-320 (Aditi 2026-11-19): a lookup is a last resort, justified only when roughly 1-5% of the
+     *  records need a follow-up. A side is looked up only when the rows reported missing in it are at
+     *  most this percent of the records checked against it (the other side's records); above that the
+     *  read or the pairing is wrong, and looking up would only spend the source API's budget on it.
+     *  A connector may set its own gate (SourceSystemConnector.lookupMaxShare). */
+    static final int DEFAULT_MAX_LOOKUP_SHARE = 5
 
     /** Opening phrase of this pass's audit sentence. Classified at the notification layer
      *  (TenantNotificationSupport.partitionAuditNotes) so a successful verification is reported as a
@@ -40,6 +38,16 @@ class MissingDiffVerificationSupport {
         return errors ? errors.join("; ") : ""
     }
 
+    /** label -> positive number, keyed by the normalized side token; anything else is left out. */
+    private static Map<String, Long> positiveNumbersByToken(Object raw) {
+        Map<String, Long> out = [:]
+        ((raw instanceof Map ? (Map) raw : [:]) as Map).each { Object label, Object value ->
+            String token = DiffDetailClassifier.normalizeToken(label)
+            if (token && value instanceof Number && ((Number) value).longValue() > 0L) out.put(token, ((Number) value).longValue())
+        }
+        return out
+    }
+
     // The document's line shapes, and the read and rewrite passes over them, live in
     // DiffDocumentStreamSupport, shared with the return-presence and conclude passes.
 
@@ -49,11 +57,11 @@ class MissingDiffVerificationSupport {
      *   file1Label   : String, file2Label : String — side labels as written into the document
      *   sideLookups  : Map side label -> Closure(List<String> ids) returning
      *                  [ok, foundIds, missingIds, errors] (the lookup service contract)
-     *   maxLookupIds : optional cap applied to any side with no entry in sideMaxLookupIds,
-     *                  default {@link #DEFAULT_MAX_LOOKUP_IDS}
-     *   sideMaxLookupIds : optional Map side label -> cap, letting each side carry the cap its own
-     *                  connector declares. A side over ITS OWN cap contributes nothing and must never
-     *                  disable a sibling side that is under its.
+     *   sideCheckedCounts : Map side label -> how many records were checked against that side (the
+     *                  other side's record count). A side without one is not looked up (fail closed).
+     *   sideMaxShares : optional Map side label -> percent gate, default {@link #DEFAULT_MAX_LOOKUP_SHARE}.
+     *                  A side over ITS OWN gate contributes nothing and must never disable a sibling
+     *                  side that is under its.
      *
      * returns [performed, rewritten, checkedCount, removedCount, confirmedMissingCount, unresolvedCount,
      *          removedMissingInFile1, removedMissingInFile2, warnings, auditNote]
@@ -62,14 +70,8 @@ class MissingDiffVerificationSupport {
         File diffFile = (File) args.diffFile
         String file1Token = DiffDetailClassifier.normalizeToken(args.file1Label)
         String file2Token = DiffDetailClassifier.normalizeToken(args.file2Label)
-        int maxLookupIds = (args.maxLookupIds instanceof Number) ? ((Number) args.maxLookupIds).intValue() : DEFAULT_MAX_LOOKUP_IDS
-        Map<String, Integer> maxLookupIdsByToken = [:]
-        ((Map) (args.sideMaxLookupIds ?: [:])).each { Object label, Object cap ->
-            String token = DiffDetailClassifier.normalizeToken(label)
-            if (token && cap instanceof Number && ((Number) cap).intValue() > 0) {
-                maxLookupIdsByToken.put(token, ((Number) cap).intValue())
-            }
-        }
+        Map<String, Long> checkedCountByToken = positiveNumbersByToken(args.sideCheckedCounts)
+        Map<String, Long> maxShareByToken = positiveNumbersByToken(args.sideMaxShares)
         List<String> warnings = []
         Map<String, Object> inert = [performed: false, rewritten: false, checkedCount: 0, removedCount: 0,
                 confirmedMissingCount: 0, unresolvedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
@@ -96,7 +98,7 @@ class MissingDiffVerificationSupport {
         }
 
         // Dispatch the point lookups. foundIds = verified present in the side that reported them
-        // missing -> false positives to remove. Anything else (failure, over cap) removes nothing.
+        // missing -> false positives to remove. Anything else (failure, over its gate) removes nothing.
         boolean performed = false
         boolean lookupFailed = false
         int checkedCount = 0
@@ -108,12 +110,16 @@ class MissingDiffVerificationSupport {
         sidesByToken.each { String token, Map<String, Object> side ->
             Set<String> candidates = candidateIdsByToken.containsKey(token) ? candidateIdsByToken.get(token) : (Set<String>) null
             if (!candidates) return
-            int sideMaxLookupIds = maxLookupIdsByToken.containsKey(token) ? maxLookupIdsByToken.get(token) : maxLookupIds
-            if (candidates.size() > sideMaxLookupIds) {
-                // `return` skips THIS side only — a side over its own cap must not suppress a sibling
-                // that is under its, since the two sides are different systems with different
-                // completeness guarantees.
-                warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} missing differences exceeds the ${sideMaxLookupIds}-id lookup cap for this side.".toString())
+            // `return` skips THIS side only — a side over its own gate must not suppress a sibling that
+            // is under its, since the two sides are different systems with different completeness guarantees.
+            Long checked = checkedCountByToken.get(token)
+            if (checked == null) {
+                warnings.add("Verification pass skipped for ${side.label}: the run did not say how many records were checked against it, so ${candidates.size()} missing difference(s) were not looked up.".toString())
+                return
+            }
+            long maxShare = maxShareByToken.containsKey(token) ? maxShareByToken.get(token) : (long) DEFAULT_MAX_LOOKUP_SHARE
+            if (candidates.size() * 100L > maxShare * checked) {
+                warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} of ${checked} records are reported missing there, above the ${maxShare}% a lookup is for. The read or the pairing needs fixing; nothing was looked up.".toString())
                 return
             }
             List<String> ids = new ArrayList<>(candidates)

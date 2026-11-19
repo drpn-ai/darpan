@@ -27,6 +27,8 @@ class MissingDiffVerificationSupportTests {
 
     private static final String FILE1 = "OMS"
     private static final String FILE2 = "SHOPIFY"
+    /** Enough records checked on each side that every fixture here is far under the 5% share gate. */
+    private static final Map PLENTY = [(FILE1): 1_000_000, (FILE2): 1_000_000]
 
     private static Map missingRow(String id, String presentIn, String missingIn) {
         return [
@@ -107,6 +109,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [(FILE2): { List<String> ids ->
                     dispatched.add(ids)
                     // 1001 exists in Shopify (bulk export skew); 1002 is truly missing
@@ -149,6 +152,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [(FILE2): { List<String> ids ->
                     return [ok: false, foundIds: [], missingIds: [], errors: ["boom"]]
                 }],
@@ -162,7 +166,9 @@ class MissingDiffVerificationSupportTests {
     }
 
     @Test
-    void sideOverCapIsSkippedWithWarning() {
+    void aSideAboveTheShareGateIsNotLookedUp() {
+        // DAR-BE-320 (Aditi): a lookup is a last resort, for the 1-5% of records that need a follow-up.
+        // 3 of 10 checked records missing is 30%: the read or the pairing is wrong, so nothing is looked up.
         File file = writeDiffDocument([
                 missingRow("1001", FILE1, FILE2),
                 missingRow("1002", FILE1, FILE2),
@@ -171,18 +177,53 @@ class MissingDiffVerificationSupportTests {
         String before = file.getText("UTF-8")
         int dispatchCalls = 0
         Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
-                diffFile    : file,
-                file1Label  : FILE1,
-                file2Label  : FILE2,
-                maxLookupIds: 2,
-                sideLookups : [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+                diffFile         : file,
+                file1Label       : FILE1,
+                file2Label       : FILE2,
+                sideCheckedCounts: [(FILE2): 10],
+                sideLookups      : [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
         assertFalse((Boolean) result.performed)
         assertFalse((Boolean) result.rewritten)
         assertEquals(0, dispatchCalls)
         assertEquals(before, file.getText("UTF-8"))
-        assertTrue(((List) result.warnings).any { it.toString().contains("cap") })
+        assertTrue(((List) result.warnings).any { it.toString().contains("3 of 10") && it.toString().contains("5%") },
+                "the warning names the share and the gate: ${result.warnings}")
+    }
+
+    @Test
+    void aSideAtExactlyTheShareGateIsLookedUp() {
+        File file = writeDiffDocument((1..5).collect { missingRow("10${it}".toString(), FILE1, FILE2) })
+        int dispatchCalls = 0
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile         : file,
+                file1Label       : FILE1,
+                file2Label       : FILE2,
+                sideCheckedCounts: [(FILE2): 100],
+                sideLookups      : [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
+        ])
+
+        assertTrue((Boolean) result.performed)
+        assertEquals(1, dispatchCalls)
+        assertEquals(5, result.confirmedMissingCount)
+    }
+
+    @Test
+    void aSideWithNoCheckedCountIsNotLookedUp() {
+        // Fail closed: without the number of records checked there is no share, so no lookup.
+        File file = writeDiffDocument([missingRow("1001", FILE1, FILE2)])
+        int dispatchCalls = 0
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile   : file,
+                file1Label : FILE1,
+                file2Label : FILE2,
+                sideLookups: [(FILE2): { List<String> ids -> dispatchCalls++; [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+        ])
+
+        assertFalse((Boolean) result.performed)
+        assertEquals(0, dispatchCalls)
+        assertTrue(((List) result.warnings).any { it.toString().contains("how many records") }, "${result.warnings}")
     }
 
     @Test
@@ -194,6 +235,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 // only FILE2 is lookup-capable; the sole missing row is missing in FILE1
                 sideLookups: [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
         ])
@@ -213,6 +255,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: [], missingIds: ids, errors: []] }],
         ])
 
@@ -230,6 +273,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
@@ -247,6 +291,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
@@ -266,6 +311,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [
                         (FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] },
                         (FILE1): { List<String> ids -> return [ok: true, foundIds: ["2001"], missingIds: ["2002"], errors: []] },
@@ -304,6 +350,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [(FILE2): { List<String> ids -> return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
 
@@ -315,12 +362,9 @@ class MissingDiffVerificationSupportTests {
     }
 
     @Test
-    void eachSideIsCappedIndependentlyByItsOwnConnectorCap() {
-        // The two sides of a run are different systems with different enumeration guarantees. The
-        // returns pair's Shopify extract cannot be trusted for completeness at all (updated_at is not
-        // reliably bumped), so a large gap there is the STEADY STATE, not evidence of a broken sync —
-        // while for the orders pair a gap that large still means something is wrong. One shared cap
-        // cannot express both, so an over-cap side must not disable a healthy sibling.
+    void eachSideIsGatedByItsOwnShare() {
+        // The two sides are different systems: a side over its own gate contributes nothing and must
+        // never disable a sibling that is under its own. A side may carry its own gate (sideMaxShares).
         File file = writeDiffDocument([
                 missingRow("1001", FILE1, FILE2),
                 missingRow("1002", FILE1, FILE2),
@@ -329,42 +373,25 @@ class MissingDiffVerificationSupportTests {
         ])
         List<String> file1Checked = []
         Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
-                diffFile        : file,
-                file1Label      : FILE1,
-                file2Label      : FILE2,
-                sideMaxLookupIds: [(FILE2): 2, (FILE1): 10],
-                sideLookups     : [
+                diffFile         : file,
+                file1Label       : FILE1,
+                file2Label       : FILE2,
+                sideCheckedCounts: [(FILE2): 40, (FILE1): 100],
+                sideMaxShares    : [(FILE1): 2],
+                sideLookups      : [
                         (FILE2): { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] },
                         (FILE1): { List<String> ids -> file1Checked.addAll(ids); [ok: true, foundIds: ids, missingIds: [], errors: []] },
                 ],
         ])
 
-        // FILE2 is over its own cap of 2 and contributes nothing...
-        assertTrue(((List) result.warnings).any { it.toString().contains("cap") })
-        // ...but FILE1 is under its cap of 10 and is still verified and removed.
+        // FILE2: 3 of 40 = 7.5%, over the default 5%, contributes nothing...
+        assertTrue(((List) result.warnings).any { it.toString().contains("3 of 40") })
+        // ...FILE1: 1 of 100 = 1%, under its own 2%, is still verified and removed.
         assertEquals(["2001"], file1Checked)
         assertEquals(1, result.removedCount)
         assertTrue((Boolean) result.rewritten)
         assertEquals(["1001", "1002", "1003"] as Set,
                 (((List) parseDocument(file).differences).collect { it.primaryId } as Set))
-    }
-
-    @Test
-    void aSideWithNoOwnCapFallsBackToTheSharedDefault() {
-        File file = writeDiffDocument([missingRow("1001", FILE1, FILE2), missingRow("1002", FILE1, FILE2)])
-        int dispatchCalls = 0
-        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
-                diffFile        : file,
-                file1Label      : FILE1,
-                file2Label      : FILE2,
-                maxLookupIds    : 1,
-                sideMaxLookupIds: [:],
-                sideLookups     : [(FILE2): { List<String> ids -> dispatchCalls++; [ok: true, foundIds: ids, missingIds: [], errors: []] }],
-        ])
-
-        assertFalse((Boolean) result.performed)
-        assertEquals(0, dispatchCalls)
-        assertTrue(((List) result.warnings).any { it.toString().contains("cap") })
     }
 
     @Test
@@ -387,6 +414,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile   : file,
                 file1Label : FILE1,
                 file2Label : FILE2,
+                sideCheckedCounts: PLENTY,
                 sideLookups: [(FILE2): { List<String> ids ->
                     return [ok           : true,
                             foundIds     : ["1001"],

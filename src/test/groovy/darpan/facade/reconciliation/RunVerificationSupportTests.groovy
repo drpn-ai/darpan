@@ -140,4 +140,16 @@ class RunVerificationSupportTests {
         assertNull(serviceResult.processingWarnings,
                 "an empty verification must not add an empty warnings array to the result document")
     }
+
+    @Test
+    void anOrderKeyedSideIsNeverSentToARefundOrReturnLookup() {
+        // DAR-BE-320: RAILS R6/R7 (completedReturns) are keyed by orderId; the returns lookup answers
+        // refundOrReturnId. Sending order ids there asks nothing, and a number clash would drop a true finding.
+        assertFalse(RunVerificationSupport.keyIsLookupKind("refundOrReturnId", "orderId"))
+        assertTrue(RunVerificationSupport.keyIsLookupKind("refundOrReturnId", "refundOrReturnId"))
+        assertTrue(RunVerificationSupport.keyIsLookupKind("id, legacyResourceId", "legacyResourceId"))
+        assertTrue(RunVerificationSupport.keyIsLookupKind(null, "orderId"), "no declared id kind: no check")
+        assertTrue(RunVerificationSupport.keyIsLookupKind("refundOrReturnId", null), "no plain key: no check")
+    }
+
 }

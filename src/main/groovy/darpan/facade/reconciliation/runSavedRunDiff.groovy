@@ -456,7 +456,7 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
 // way to stop a slow scheduled pass, and a manual run has always verified unconditionally. Wiring it
 // in here would silently change what the Run button does on any deployment already setting it.
 def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label,
-                            String runOwnerUserGroupId ->
+                            String runOwnerUserGroupId, Map file1Result, Map file2Result, String compareScopeId ->
     RunVerificationSupport.runMissingDiffPass([
             ec                 : ec,
             runResultId        : obsRunId,
@@ -469,6 +469,10 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
             file2Label         : file2Label,
             runOwnerUserGroupId: runOwnerUserGroupId,
             dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
+            // DAR-BE-320: each side's extract count (the share gate) and the scope (the lookup's id kind).
+            file1RecordCount   : file1Result?.recordCount instanceof Number ? file1Result.recordCount : null,
+            file2RecordCount   : file2Result?.recordCount instanceof Number ? file2Result.recordCount : null,
+            compareScopeId     : compareScopeId,
     ])
 }
 
@@ -915,7 +919,8 @@ try {
                                             sides: [[source: file1Source, label: file1Label], [source: file2Source, label: file2Label]],
                                             file1Label: file1Label, file2Label: file2Label])
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label,
-                                            savedRun.companyUserGroupId as String)
+                                            savedRun.companyUserGroupId as String, (Map) file1Result, (Map) file2Result,
+                                            savedRun.compareScopeId as String)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result, file1Label, file2Label,
                                             savedRun.companyUserGroupId as String)

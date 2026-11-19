@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-318 (D2). moqui-rules is tenant-agnostic; inside Darpan every one of its rows belongs to exactly one tenant.
+         Each entity gets companyUserGroupId here, an EntityFilter in DARPAN_ACTIVE_COMPANY_SCOPE and an ArtifactGroupMember in
+         DARPAN_APP (data/SecuritySeedData.xml), and RulesTenant.eecas.xml guards every write: a root row (RuleSet, RulePiece,
+         FactType, FileCheck) is stamped from the active tenant (left blank, so seen by no tenant, when there is none), a child
+         row copies its parent's tenant, and no write reaches
+         another tenant's row (script/rules/RulesTenantGuard.xml). The rule-type tables (RuleConditionType, RuleActionType) are
+         shared by every tenant and are not extended. -->
+    <extend-entity entity-name="FactType" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="FactField" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="FactNode" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="FactNodeCondition" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RuleSet" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RuleSetFactType" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RuleSetOutcome" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RuleSetRule" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RuleSetCondition" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RuleSetAction" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RuleSetActionField" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RulePiece" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="RulePieceCondition" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="FileCheck" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="FileCheckRecord" package="rules">
+        <field name="companyUserGroupId" type="id"><description>The tenant that owns this row. Stamped on create by script/rules/RulesTenantGuard.xml, never changed.</description></field>
+    </extend-entity>
+</entities>

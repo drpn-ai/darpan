@@ -150,6 +150,9 @@ class DisableAuthzRatchetTest {
     static final Map<String, Integer> COMPONENT_BASELINES = [
             "darpan service+screen XML .disableAuthz("            : 66, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
             "darpan service+screen XML disable-authz=\"true\""    : 35,
+            // DAR-BE-318: script/rules/RulesTenantGuard.xml, the moqui-rules write guard the rules.* EECAs run. Its one
+            // unfiltered read (rulesGuardFind) loads the row written, or a row it names, by primary key to check its owner.
+            "darpan script XML .disableAuthz("                    : 1,
             "darpan-hotwax Groovy .disableAuthz("                 : 6,
             "darpan-hotwax service+screen XML .disableAuthz("     : 0,
             "darpan-hotwax service+screen XML disable-authz=\"true\"": 0,
@@ -198,6 +201,9 @@ class DisableAuthzRatchetTest {
             List<Path> xmlDirs = [root.resolve("service"), root.resolve("screen")]
             tally(counts, sites, componentRoot, "${component} service+screen XML .disableAuthz(", xmlDirs, ".xml", ".disableAuthz(")
             tally(counts, sites, componentRoot, "${component} service+screen XML disable-authz=\"true\"", xmlDirs, ".xml", 'disable-authz="true"')
+            if (component == "darpan") {
+                tally(counts, sites, componentRoot, "darpan script XML .disableAuthz(", [root.resolve("script")], ".xml", ".disableAuthz(")
+            }
         }
 
         assertTrue(counts.keySet() == COMPONENT_BASELINES.keySet(),

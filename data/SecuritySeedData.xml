@@ -73,6 +73,22 @@
             artifactName="darpan.reconciliation.ReconciliationAutomationSource" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.reconciliation.ReconciliationAutomationExecution" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <!-- DAR-BE-318 (D2): every moqui-rules entity (rules.*), each tenant-owned (entity/RulesTenantEntities.xml). -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.FactType" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.FactField" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.FactNode" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.FactNodeCondition" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RuleSet" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RuleSetFactType" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RuleSetOutcome" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RuleSetRule" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RuleSetCondition" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RuleSetAction" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RuleSetActionField" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RulePiece" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.RulePieceCondition" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.FileCheck" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="rules.FileCheckRecord" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 
@@ -450,6 +466,23 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.script.TenantScriptDeployment"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <!-- DAR-BE-318 (D2): every moqui-rules row belongs to one tenant. A child row carries its parent's tenant, stamped by
+         script/rules/RulesTenantGuard.xml, so each entity is filtered on its own column. The filter covers reads; the guard covers writes. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_TYPE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactType" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_FIELD" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactField" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_NODE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactNode" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_NODE_CONDITION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactNodeCondition" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_SET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RuleSet" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_SET_FACT_TYPE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RuleSetFactType" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_SET_OUTCOME" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RuleSetOutcome" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_SET_RULE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RuleSetRule" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_SET_CONDITION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RuleSetCondition" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_SET_ACTION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RuleSetAction" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_SET_ACTION_FIELD" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RuleSetActionField" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_PIECE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RulePiece" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_RULE_PIECE_CONDITION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.RulePieceCondition" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FILE_CHECK" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FileCheck" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FILE_CHECK_RECORD" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FileCheckRecord" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER"

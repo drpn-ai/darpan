@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-318 (D2). Every write to a moqui-rules row runs script/rules/RulesTenantGuard.xml before it reaches the database:
+  a create is stamped with the acting tenant (blank when there is none), an update or delete is refused unless the row is
+  the acting tenant's, and nothing a row names may be another tenant's. It runs before the write, on the very EntityValue
+  the insert reads (EntityValueBase.create), and on error too, so a message left by earlier work never skips it. A refusal
+  throws, so a refused write never reaches the database and the caller's transaction rolls back. Entity filters cover reads
+  only: an entity-auto update or delete writes by primary key without a find. XML actions only, no Darpan class.
+-->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="RulesTenant_FactType" entity="rules.FactType" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.FactType"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_FactField" entity="rules.FactField" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.FactField"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_FactNode" entity="rules.FactNode" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.FactNode"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_FactNodeCondition" entity="rules.FactNodeCondition" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.FactNodeCondition"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RuleSet" entity="rules.RuleSet" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RuleSet"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RuleSetFactType" entity="rules.RuleSetFactType" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RuleSetFactType"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RuleSetOutcome" entity="rules.RuleSetOutcome" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RuleSetOutcome"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RuleSetRule" entity="rules.RuleSetRule" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RuleSetRule"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RuleSetCondition" entity="rules.RuleSetCondition" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RuleSetCondition"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RuleSetAction" entity="rules.RuleSetAction" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RuleSetAction"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RuleSetActionField" entity="rules.RuleSetActionField" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RuleSetActionField"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RulePiece" entity="rules.RulePiece" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RulePiece"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_RulePieceCondition" entity="rules.RulePieceCondition" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.RulePieceCondition"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_FileCheck" entity="rules.FileCheck" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.FileCheck"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+    <eeca id="RulesTenant_FileCheckRecord" entity="rules.FileCheckRecord" on-create="true" on-update="true" on-delete="true"
+            run-before="true" run-on-error="true">
+        <actions><set field="rulesGuardEntity" value="rules.FileCheckRecord"/><script location="component://darpan/script/rules/RulesTenantGuard.xml"/></actions>
+    </eeca>
+</eecas>

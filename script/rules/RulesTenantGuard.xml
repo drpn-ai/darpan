@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-318 (D2). The write half of Darpan's ownership of moqui-rules rows; the read half is the DARPAN_ACTIVE_COMPANY_SCOPE
+  filter on each rules entity. entity/RulesTenant.eecas.xml runs this before every create, update and delete of a rules
+  row, with rulesGuardEntity, entityValue and eecaOperation in the context.
+
+  The acting tenant is ec.user.context.activeTenantUserGroupId, the value the filter reads (TenantAccessSupport.syncUserContext
+  sets it on every request and sign-in); with none it is blank.
+  - A create is stamped with the acting tenant: a root row (decision, piece, fact type, file check) directly, a child row only
+    when its parent is the acting tenant's. With no acting tenant a root row is left blank, which no filtered user can see.
+  - An update or delete is refused unless the row is the acting tenant's, and a row never changes tenant.
+  - Whatever a row names (its parent, a fact type, a decision, a piece) must be the acting tenant's.
+  Another tenant's row reads as "does not exist", the words a filtered read gives. A refusal throws, so the write never
+  happens and the caller's transaction rolls back. The guard does not depend on the filter: entity-auto update and delete
+  write by primary key without a find, and a caller with authz disabled sees no filter at all, so rows are read here by
+  primary key across tenants (rulesGuardFind, the one unfiltered read).
+
+  XML actions only, with no Darpan class, so the EECAs load in any runtime that has this component, moqui-rules' own test
+  runs included.
+-->
+<actions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-actions-3.xsd">
+    <set field="rgFactTypeRef" from="[field: 'factTypeId', entity: 'rules.FactType', noun: 'Fact type']"/>
+    <set field="rgDecisionRef" from="[field: 'ruleSetId', entity: 'rules.RuleSet', noun: 'Decision']"/>
+    <set field="rgPieceLineRef" from="[field: 'compareValue', entity: 'rules.RulePiece', noun: 'Piece', whenPieceLine: true]"/>
+    <set field="rgSpecs" from="[
+            'rules.RuleSet'           : [noun: 'Decision'],
+            'rules.RulePiece'         : [noun: 'Piece', refs: [rgFactTypeRef]],
+            'rules.FactType'          : [noun: 'Fact type'],
+            'rules.FileCheck'         : [noun: 'File check', refs: [rgDecisionRef, rgFactTypeRef]],
+            'rules.RuleSetFactType'   : [noun: 'Decision fact type', parent: [entity: 'rules.RuleSet', noun: 'Decision', keys: ['ruleSetId']], refs: [rgFactTypeRef]],
+            'rules.RuleSetOutcome'    : [noun: 'Decision outcome', parent: [entity: 'rules.RuleSet', noun: 'Decision', keys: ['ruleSetId']]],
+            'rules.RuleSetRule'       : [noun: 'Rule', parent: [entity: 'rules.RuleSet', noun: 'Decision', keys: ['ruleSetId']]],
+            'rules.RuleSetCondition'  : [noun: 'Rule line', parent: [entity: 'rules.RuleSetRule', noun: 'Rule', keys: ['ruleId']], refs: [rgFactTypeRef, rgPieceLineRef]],
+            'rules.RuleSetAction'     : [noun: 'Rule action', parent: [entity: 'rules.RuleSetRule', noun: 'Rule', keys: ['ruleId']], refs: [rgDecisionRef, rgFactTypeRef]],
+            'rules.RuleSetActionField': [noun: 'Rule action field', parent: [entity: 'rules.RuleSetAction', noun: 'Rule action', keys: ['ruleId', 'actionSeqId']]],
+            'rules.RulePieceCondition': [noun: 'Piece line', parent: [entity: 'rules.RulePiece', noun: 'Piece', keys: ['pieceId']], refs: [rgFactTypeRef, rgPieceLineRef]],
+            'rules.FactField'         : [noun: 'Fact field', parent: [entity: 'rules.FactType', noun: 'Fact type', keys: ['factTypeId']],
+                                         refs: [[field: 'itemFactTypeId', entity: 'rules.FactType', noun: 'Fact type']]],
+            'rules.FactNode'          : [noun: 'Fact node', parent: [entity: 'rules.FactType', noun: 'Fact type', keys: ['factTypeId']]],
+            'rules.FactNodeCondition' : [noun: 'Fact node condition', parent: [entity: 'rules.FactType', noun: 'Fact type', keys: ['factTypeId']]],
+            'rules.FileCheckRecord'   : [noun: 'File check record', parent: [entity: 'rules.FileCheck', noun: 'File check', keys: ['fileCheckId']]]]"/>
+    <set field="rgSpec" from="rgSpecs.get(rulesGuardEntity)"/>
+    <if condition="rgSpec == null"><script>throw new org.moqui.BaseArtifactException("No tenant guard for ${rulesGuardEntity}")</script></if>
+
+    <set field="rulesGuardFind" from="{ String findEntity, Map findPk -> ec.entity.find(findEntity).condition(findPk).disableAuthz().useCache(false).one() }"/>
+    <set field="rgNotExist" from="{ Object noun, Collection ids -> new org.moqui.BaseArtifactException(&quot;${noun} ${ids.join('/')} does not exist&quot;) }"/>
+    <set field="rgActive" from="ec.user.context.activeTenantUserGroupId"/>
+    <set field="rgTenant" from="rgActive &amp;&amp; rgActive != '__NO_ACTIVE_TENANT__' ? rgActive.toString() : null"/>
+
+    <set field="rgPk" from="ec.entity.getEntityDefinition(rulesGuardEntity).getPkFieldNames().collectEntries { [(it): entityValue.get(it)] }"/>
+    <set field="rgStored" from="rgPk.values().every { it != null &amp;&amp; it.toString() } ? rulesGuardFind(rulesGuardEntity, rgPk) : null"/>
+    <if condition="rgStored != null &amp;&amp; (rgStored.companyUserGroupId ?: null) != rgTenant">
+        <script>throw rgNotExist(rgSpec.noun, rgPk.values())</script></if>
+
+    <set field="rgValues" from="null"/>
+    <if condition="eecaOperation == 'create'">
+        <if condition="entityValue.companyUserGroupId &amp;&amp; entityValue.companyUserGroupId != rgTenant">
+            <script>throw new org.moqui.BaseArtifactException("A ${rgSpec.noun} can be made only for the active tenant.")</script></if>
+        <set field="rgValues" from="entityValue.getMap()"/>
+    <else-if condition="eecaOperation == 'update' &amp;&amp; rgStored != null">
+        <if condition="entityValue.isFieldSet('companyUserGroupId') &amp;&amp; (entityValue.companyUserGroupId ?: null) != rgTenant">
+            <script>throw new org.moqui.BaseArtifactException("A ${rgSpec.noun} cannot move to another tenant.")</script></if>
+        <set field="rgValues" from="rgStored.getMap() + entityValue.getMap()"/>
+    </else-if>
+    </if>
+
+    <if condition="rgValues != null">
+        <if condition="rgSpec.parent">
+            <set field="rgParentPk" from="rgSpec.parent.keys.collectEntries { [(it): rgValues.get(it)] }"/>
+            <set field="rgParent" from="rgParentPk.values().every { it != null &amp;&amp; it.toString() } ? rulesGuardFind(rgSpec.parent.entity, rgParentPk) : null"/>
+            <if condition="rgParent == null || (rgParent.companyUserGroupId ?: null) != rgTenant">
+                <script>throw rgNotExist(rgSpec.parent.noun, rgParentPk.values())</script></if>
+        </if>
+        <!-- A named row that does not exist at all is left to moqui-rules' own checks; another tenant's is refused. -->
+        <set field="rgRefs" from="rgSpec.refs ?: []"/>
+        <iterate list="rgRefs" entry="rgRef">
+            <set field="rgRefId" from="rgValues.get(rgRef.field)"/>
+            <if condition="rgRefId &amp;&amp; (!rgRef.whenPieceLine || rgValues.conditionTypeId == 'RCT_PIECE')">
+                <set field="rgTarget" from="rulesGuardFind(rgRef.entity, [(ec.entity.getEntityDefinition(rgRef.entity).getPkFieldNames()[0]): rgRefId])"/>
+                <if condition="rgTarget != null &amp;&amp; (rgTarget.companyUserGroupId ?: null) != rgTenant">
+                    <script>throw rgNotExist(rgRef.noun, [rgRefId])</script></if>
+            </if>
+        </iterate>
+        <if condition="eecaOperation == 'create'"><script>entityValue.set('companyUserGroupId', rgTenant)</script></if>
+    </if>
+</actions>

@@ -59,6 +59,7 @@ class RulesTenantScopeTests {
     private String pieceA
     private String fileCheckA
     private String ruleSetB
+    private String ruleB
 
     @BeforeAll
     void setup() {
@@ -99,6 +100,8 @@ class RulesTenantScopeTests {
         actAs(EDITOR_USERNAME, B)
         createFactType(FACT_B, false)
         ruleSetB = createDecision(FACT_B)
+        // Its own name and priority, so moving A's rule into B's decision would hit no unique index: only the guard stops it.
+        ruleB = storeBigOpenRule(ruleSetB, FACT_B, "big open (B)", 20).out.ruleId as String
     }
 
     @AfterAll
@@ -289,6 +292,26 @@ class RulesTenantScopeTests {
     }
 
     @Test
+    void aTenantCannotReparentItsOwnRuleIntoAnotherTenantsDecision() {
+        // A owns the rule, so the row-owner check passes; only the parent check stops A planting it in B's decision.
+        Map<String, List<Map>> before = snapshot()
+        assertRefused(underFacadeGrant("update#rules.RuleSetRule", [ruleId: ruleA, ruleSetId: ruleSetB]),
+                "Decision ${ruleSetB} does not exist")
+        assertEquals(before, snapshot(), "no rules row changed in any tenant")
+    }
+
+    @Test
+    void aTenantCannotPointItsOwnLineAtAnotherTenantsPiece() {
+        // B owns the line and the write skips moqui-rules' own checks, so only the guard's piece reference check stops it.
+        actAs(EDITOR_USERNAME, B)
+        String lineSeq = rows("rules.RuleSetCondition", [ruleId: ruleB])[0].conditionSeqId
+        Map<String, List<Map>> before = snapshot()
+        assertRefused(underFacadeGrant("update#rules.RuleSetCondition", [ruleId: ruleB, conditionSeqId: lineSeq,
+                conditionTypeId: "RCT_PIECE", compareValue: pieceA]), "Piece ${pieceA} does not exist")
+        assertEquals(before, snapshot(), "no rules row changed in any tenant")
+    }
+
+    @Test
     void aRowCannotMoveToAnotherTenant() {
         Map<String, List<Map>> before = snapshot()
         assertRefused(underFacadeGrant("update#rules.RuleSetRule", [ruleId: ruleA, companyUserGroupId: B]),
@@ -321,9 +344,9 @@ class RulesTenantScopeTests {
         return created.out.ruleSetId as String
     }
 
-    private Map storeBigOpenRule(String ruleSetId, String factTypeId) {
-        Map stored = underFacadeGrant("moqui.rules.RuleServices.store#Rule", [ruleSetId: ruleSetId, ruleName: "big open",
-                priority: 10, conditions: [line("01", factTypeId, "amount", "ENTCO_GREATER", "100"),
+    private Map storeBigOpenRule(String ruleSetId, String factTypeId, String ruleName = "big open", Integer priority = 10) {
+        Map stored = underFacadeGrant("moqui.rules.RuleServices.store#Rule", [ruleSetId: ruleSetId, ruleName: ruleName,
+                priority: priority, conditions: [line("01", factTypeId, "amount", "ENTCO_GREATER", "100"),
                                            line("02", factTypeId, "status", "ENTCO_EQUALS", "OPEN")],
                 actions: [[actionTypeId: "RAT_OUTCOME", outcomeId: "BIG_OPEN"]]])
         assertEquals([], stored.errors, "fixture: rule of ${ruleSetId}")

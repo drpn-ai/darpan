@@ -686,19 +686,31 @@ class ReconciliationSavedRunSupport {
             if (fieldName) keepFields.add(fieldName)
         }
         keepFields.addAll(ruleKeepFields)
-        // DAR-BE-097: the fields this side's conclusion conditions read. Projected away, a condition sees a blank: a
-        // NOT_BLANK / IN never fires and a BLANK fires on every record. DAR-BE-192: not a brain row's: its guard is never
-        // compiled into the tree and names a field no record has (an extract that checks its fields refused it, gorjana R7).
+        keepFields.addAll(conclusionReadFieldsForSide(ec, compareScopeId, fileSide))
+        return keepFields ? new ArrayList<String>(keepFields) : null
+    }
+
+    /**
+     * DAR-BE-097: the top-level fields this side's conclusion conditions read. Projected away (or never asked for), a
+     * condition sees a blank: a NOT_BLANK / IN / WITHIN_HOURS never fires and a BLANK fires on every record. DAR-BE-192:
+     * not a brain row's: its guard is never compiled into the tree and names a field no record has (an extract that
+     * checks its fields refused it, gorjana R7). The caller has already tenant-gated the scope.
+     */
+    static List<String> conclusionReadFieldsForSide(def ec, Object compareScopeId, Object fileSide) {
+        String scopeId = normalize(compareScopeId)
+        String side = normalize(fileSide)?.toUpperCase()
+        if (!scopeId || !(side in ["FILE_1", "FILE_2"])) return []
         Set<String> brainRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionRule")
-                .condition("compareScopeId", compareScopeId).condition("engine", "BRAIN").useCache(false).list()
+                .condition("compareScopeId", scopeId).condition("engine", "BRAIN").useCache(false).list()
                 .collect { String.valueOf(it.sequenceNum) } as Set<String>
+        Set<String> fields = new LinkedHashSet<String>()
         TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionCondition")
-                .condition("compareScopeId", compareScopeId).condition("subject", fileSide).useCache(false).list().each { Object row ->
+                .condition("compareScopeId", scopeId).condition("subject", side).useCache(false).list().each { Object row ->
             if (brainRows.contains(String.valueOf(row.sequenceNum))) return
             String fieldName = topLevelRecordField(normalize(row.fieldExpression))
-            if (fieldName) keepFields.add(fieldName)
+            if (fieldName) fields.add(fieldName)
         }
-        return keepFields ? new ArrayList<String>(keepFields) : null
+        return new ArrayList<String>(fields)
     }
 
     /**
@@ -852,8 +864,8 @@ class ReconciliationSavedRunSupport {
     }
 
     /**
-     * The readFields to send an extract service, or null when it does not declare the parameter or no rule reads a field
-     * on this side. Both run paths call this, so a scheduled run reads what an interactive one does (before DAR-BE-239 the
+     * The readFields to send an extract service, or null when it does not declare the parameter or no rule or conclusion
+     * condition reads a field on this side. Both run paths call this, so a scheduled run reads what an interactive one does (before DAR-BE-239 the
      * scheduled path sent no fields and its transaction rule compared against nothing).
      */
     static List<String> extractReadFields(def ec, String extractServiceName, Object compareScopeId, Object fileSide) {
@@ -864,7 +876,10 @@ class ReconciliationSavedRunSupport {
         // Tenant-gated: a scope outside the active tenant reads as none, never another tenant's rules.
         def scope = TenantScopedFinder.findTenantScopedByIdQuiet(ec, "darpan.rule.RuleSetCompareScope", "compareScopeId", scopeId)
         if (scope == null) return null
-        List<String> fields = ruleReadFieldsForSide(collectRuleRows(ec, scope.ruleSetId), fileSide)
+        // DAR-CLIENT-006: and the fields its conclusion tree reads (Steve Madden's sync grace: HotWax lastUpdatedTxStamp,
+        // asked for by nothing else on a read that excludes stores and channels).
+        List<String> fields = (ruleReadFieldsForSide(collectRuleRows(ec, scope.ruleSetId), fileSide) +
+                conclusionReadFieldsForSide(ec, scopeId, fileSide)).unique()
         return fields ?: null
     }
 

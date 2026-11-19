@@ -236,6 +236,46 @@ class RunSideOptionsSmokeTests {
         assertEquals(["paymentRefNums"], captured?.readFields, captured?.toString())
     }
 
+    /**
+     * DAR-CLIENT-006: a field only the conclusion tree reads reaches the read too. Steve Madden's 1.5-hour sync grace reads
+     * when HotWax last changed the order; its run excludes stores and channels, so its read selects only the key, the
+     * filter fields and what the run reads, and before this the tree's field was never asked for (a blank, never within).
+     * A condition on the other side, or naming no field, adds nothing.
+     */
+    @Test
+    void theConclusionTreesFieldsReachTheOmsOrderReadToo() {
+        Map created = create([file1SystemEnumId: "SHOPIFY", file1PrimaryIdExpression: '$.records[*].id',
+                              file2SystemEnumId: "OMS_GQL", file2PrimaryIdExpression: '$.records[*].externalId',
+                              rules: [[sequenceNum: 1, ruleType: "FIELD_COMPARISON", enabled: "Y", severity: "WARN",
+                                       ruleText: "isFulfilled = isCompleted", ruleLogic: "",
+                                       expression: '{"type":"FIELD_COMPARISON","file1FieldPath":"$.records[*].isFulfilled",' +
+                                               '"file2FieldPath":"$.records[*].isCompleted","operator":"="}']]])
+        assertFalse(created.hadError as boolean, created.errorText as String)
+        Map row = source(created, "FILE_2").getMap()
+        String code = "CONC_TSIDE_GRACE"
+        boolean was = ec.artifactExecution.disableAuthz()
+        try {
+            if (!ec.entity.find("moqui.basic.EnumerationType").condition("enumTypeId", "DarpanConclusion").useCache(false).one()) {
+                ReconciliationSmokeTestSupport.insertEntityDirect(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Conclusion"])
+            }
+            if (!ec.entity.find("moqui.basic.Enumeration").condition("enumId", code).useCache(false).one()) {
+                ReconciliationSmokeTestSupport.insertEntityDirect(ec, "moqui.basic.Enumeration",
+                        [enumId: code, enumTypeId: "DarpanConclusion", enumCode: code, description: "HotWax completed under 1.5 h ago"])
+            }
+        } finally {
+            if (!was) ec.artifactExecution.enableAuthz()
+        }
+        Map saved = darpan.reconciliation.conclusion.RunConclusionAuthoringSupport.save(ec, created.savedRun.savedRunId as String, [
+                [key: "10", conclusion: code, bucket: "RULE", conditions: [
+                        [subject: "FILE_2", field: "isCompleted", operator: "IN", values: ["Y"], checkLabel: "HotWax completed it"],
+                        [subject: "FILE_2", field: "lastUpdatedTxStamp", operator: "WITHIN_HOURS", values: ["1.5"], checkLabel: "HotWax changed it in 1.5 hours"],
+                        [subject: "FILE_1", field: "updatedAt", operator: "WITHIN_HOURS", values: ["1.5"], checkLabel: "Shopify changed it in 1.5 hours"]]]])
+        assertFalse(ec.message.hasError(), "${ec.message.errorsString} ${saved}")
+
+        String gqlOrders = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+        assertEquals(["isCompleted", "lastUpdatedTxStamp"], ReconciliationSavedRunSupport.extractReadFields(ec, gqlOrders, row.compareScopeId, "FILE_2"))
+    }
+
     @Test
     void theManualRunHandsTheOptionsToTheExtractUnderItsOwnParams() {
         Map created = create([file1ExtractOptions: [onlyCancelledReturns: true]])

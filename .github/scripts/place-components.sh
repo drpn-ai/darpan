@@ -19,7 +19,8 @@ git clone --depth 1 --branch master https://github.com/moqui/moqui-sftp.git \
 # failed in CI only. The production image clones it the same way (darpan-docker-config docker/Dockerfile).
 # darpan-agent: its facade services are part of the API contract (ApiContractGenerator.SERVICE_DIRS), which fails
 # without it; the production image carries it too.
-for repo in darpan-hotwax netsuite-darpan shopify-darpan database-darpan moqui-gql darpan-agent; do
+# moqui-rules: the rules.* entities and moqui.rules.RuleServices.* that darpan calls as services only (DAR-BE-318).
+for repo in darpan-hotwax netsuite-darpan shopify-darpan database-darpan moqui-gql darpan-agent moqui-rules; do
   git clone --depth 1 --branch main "https://github.com/drpn-ai/${repo}.git" \
     "darpan-backend/runtime/component/${repo}"
 done

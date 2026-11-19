@@ -18,25 +18,27 @@ darpan-docs commit `1e05972` (unpushed).
 | DAR-BE-313 | Mascot words served from the backend | none: no page describes the mascot's words | none: no reference content | none: no new message | none: no connection change |
 | DAR-BE-307 | Agent prompts, models, prices, texts and caps as data | none: admin app only; the darpan-agent README documents it (3f223d7) | none: no page names the agent properties | none: no new message | none: no connection change |
 | DAR-UI-120 | Username-first sign-in; the standalone passkey button is gone | guides/two-factor.mdx | reference/auth-and-access.mdx | troubleshooting/login-and-session.mdx | none: no connection change |
-| DAR-UI-121, 122, 125 to 129 | Settings pages as rows, popups, icon edit buttons | owed, see below | none: no reference content | owed, see below | none: no connection change |
-| DAR-UI-123 | Notifications grid and Add space flow | owed, see below | none: no reference content | owed, see below | owed, see below |
-| DAR-UI-124 | Scripts list and per-script pages | owed, see below | none: the functions reference is on the developers site (a03f05c) | none: no new message | none: no connection change |
+| DAR-UI-121, 122, 125 to 129 | Settings pages as rows, popups, icon edit buttons | guides/manage-tenant-settings.mdx, guides/configure-ai.mdx, guides/audits.mdx, guides/author-rules.mdx, guides/setup-reconciliation-run.mdx, guides/review-results.mdx, getting-started/tenant-admin-quickstart.mdx, getting-started/core-concepts.mdx | none: no reference content | troubleshooting/audits.mdx | none: no connection change |
+| DAR-UI-123 | Notifications grid and Add space flow | guides/run-completion-alerts.mdx, guides/manage-tenant-settings.mdx | none: no reference content | troubleshooting/automations-and-alerts.mdx | guides/run-completion-alerts.mdx (Slack workspace line) |
+| DAR-UI-124 | Scripts list and per-script pages | guides/manage-tenant-settings.mdx | none: the functions reference is on the developers site (a03f05c) | none: no new message | none: no connection change |
 | DAR-UI-131 | Drag the mascot | none: no page describes the mascot's position | none | none | none |
 
-Owed (Aditi's call: a docs pass before the cut, or a named follow-up after it). These pages still name labels the
-reworked settings pages no longer show; the gate below fails on each until it is rewritten from the new pages:
+Changed (darpan-docs, "Darpan 3.3.0: guides follow the reworked settings pages"). Each page was rewritten from the
+reworked screens, so a reader finds every control it names:
 
-- guides/manage-tenant-settings.mdx: Tenant Context, Streaks space and Save Streaks Space, Darpan admin only, and the
-  Scripts profile and deploy labels (DAR-UI-122, 123, 124).
-- guides/run-completion-alerts.mdx: Add a chat space, Connect with a bot token, Replace bot token, Reconnect and
-  Disconnect workspace, Streaks space (DAR-UI-123).
-- troubleshooting/automations-and-alerts.mdx: Connect with a bot token (DAR-UI-123).
-- getting-started/tenant-admin-quickstart.mdx and getting-started/core-concepts.mdx: Tenant Context, Streaks space,
-  Darpan admin only (DAR-UI-121, 122).
-- guides/configure-ai.mdx: Darpan admin only (the AI row is now hidden from tenant admins, DAR-UI-122).
-- guides/audits.mdx and troubleshooting/audits.mdx: Save statement, Only tenant admins can change this (DAR-UI-127).
-- guides/author-rules.mdx and guides/setup-reconciliation-run.mdx: Edit Rules (DAR-UI-128).
-- guides/review-results.mdx: Move up, Move down, Save conclusions (DAR-UI-128).
+- guides/manage-tenant-settings.mdx: Tenant Settings is Chat, Time, Audit and AI rows; the streaks space is the
+  **Streaks** row on the Notifications page; the AI section is shown to Darpan admins only; the tenant is confirmed
+  under the name on User Settings; script steps follow the Reads and Schedule popups (DAR-UI-121, 122, 123, 124).
+- guides/run-completion-alerts.mdx: Add space flow, **Paste a bot token**, **Replace token**, **Reconnect**,
+  **Disconnect**, the **Streaks** row (DAR-UI-123).
+- troubleshooting/automations-and-alerts.mdx: **Paste a bot token**, **Replace token**, **Reconnect** (DAR-UI-123).
+- getting-started/tenant-admin-quickstart.mdx and getting-started/core-concepts.mdx: tenant switch from **Switch** on
+  User Settings; Tenant Settings rows; AI section for Darpan admins only (DAR-UI-121, 122).
+- guides/configure-ai.mdx: the AI section is not shown to tenant admins (DAR-UI-122).
+- guides/audits.mdx and troubleshooting/audits.mdx: **Save** in the statement popup, the Schedule, After each run,
+  Posts to and Statements strip, and the tenant-admin-only controls (DAR-UI-126, 127).
+- guides/author-rules.mdx and guides/setup-reconciliation-run.mdx: the **Edit rules** pencil (DAR-UI-128).
+- guides/review-results.mdx: conclusion rows, **Order** list and **Save** in the popup (DAR-UI-128).
 
 ## GraphQL reference (developers.drpn.ai)
 

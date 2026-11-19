@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-318 plan 2 (D3 + D4 folded, D5). The tenant-owned config the judge reads beside a moqui-rules decision:
+         what each outcome means and how to fix it, which decisions a check uses, and the check's parameter sets.
+         Every row carries companyUserGroupId (filter DARPAN_ACTIVE_COMPANY_SCOPE, group DARPAN_APP). -->
+
+    <entity entity-name="DecisionOutcome" package="darpan.judge" use="configuration">
+        <description>What one outcome of a tenant's decision means: its kind, label and fix text. The decision's own
+            outcome row (rules.RuleSetOutcome) holds only the id.</description>
+        <field name="ruleSetId" type="id" is-pk="true"/>
+        <field name="outcomeId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="outcomeKindEnumId" type="id" not-null="true">
+            <description>Enumeration of type JudgeOutcomeKind: JOK_FINDING, JOK_EXPECTED, JOK_HIDDEN or JOK_SET_ASIDE.</description>
+        </field>
+        <field name="label" type="text-medium" enable-audit-log="true"/>
+        <field name="fixText" type="text-long" enable-audit-log="true"/>
+        <field name="fixOwner" type="text-medium" enable-audit-log="true"/>
+        <field name="fixWhereEnumId" type="id" enable-audit-log="true">
+            <description>The root system where the fix is made; same enumeration as AuditCheck.fixWhereEnumId.</description>
+        </field>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="DECOUT_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="OutcomeKind" related="moqui.basic.Enumeration" fk-name="DECOUT_KIND">
+            <key-map field-name="outcomeKindEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="FixWhere" related="moqui.basic.Enumeration" fk-name="DECOUT_FIX_WHERE">
+            <key-map field-name="fixWhereEnumId" related="enumId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="CheckDecision" package="darpan.judge" use="configuration">
+        <description>Which moqui-rules decision a check uses at each stage. Keep stages arrive in plan 3.</description>
+        <field name="checkId" type="id" is-pk="true"/>
+        <field name="stageEnumId" type="id" is-pk="true">
+            <description>Enumeration of type CheckDecisionStage: CDS_MUST_HOLD or CDS_EXPLAINS.</description>
+        </field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="ruleSetId" type="id" not-null="true"/>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="CHKDEC_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.audit.AuditCheck" fk-name="CHKDEC_CHECK">
+            <key-map field-name="checkId"/>
+        </relationship>
+        <relationship type="one" title="Stage" related="moqui.basic.Enumeration" fk-name="CHKDEC_STAGE">
+            <key-map field-name="stageEnumId" related="enumId"/>
+        </relationship>
+        <index name="CHKDEC_RULE_SET"><index-field name="ruleSetId"/></index>
+    </entity>
+
+    <entity entity-name="CheckParameterSet" package="darpan.judge" use="configuration">
+        <description>One named set of parameter values a check runs its decision with.</description>
+        <field name="checkId" type="id" is-pk="true"/>
+        <field name="parameterSetId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="label" type="text-medium"/>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="CHKPSET_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.audit.AuditCheck" fk-name="CHKPSET_CHECK">
+            <key-map field-name="checkId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="CheckParameter" package="darpan.judge" use="configuration">
+        <description>One parameter name and value inside a check's parameter set.</description>
+        <field name="checkId" type="id" is-pk="true"/>
+        <field name="parameterSetId" type="id" is-pk="true"/>
+        <field name="parameterName" type="text-short" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="parameterValue" type="text-medium"/>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="CHKPARM_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.judge.CheckParameterSet" fk-name="CHKPARM_SET">
+            <key-map field-name="checkId"/>
+            <key-map field-name="parameterSetId"/>
+        </relationship>
+    </entity>
+</entities>

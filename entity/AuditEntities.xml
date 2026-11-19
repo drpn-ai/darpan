@@ -84,6 +84,12 @@
         <field name="sequenceNum" type="number-integer">
             <description>Order of statements in the report.</description>
         </field>
+        <field name="claimRuleSetId" type="id">
+            <description>DAR-BE-318. The moqui-rules decision whose outcome is the promise this statement makes. Blank: no claim yet.</description>
+        </field>
+        <field name="claimOutcomeId" type="id">
+            <description>DAR-BE-318. The outcome (of claimRuleSetId) the statement promises.</description>
+        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDSTMT_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>

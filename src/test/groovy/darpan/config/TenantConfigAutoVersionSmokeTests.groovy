@@ -241,6 +241,9 @@ class TenantConfigAutoVersionSmokeTests {
         TransferSpecs.KINDS.findAll { !it.notInVersion }.each { walk(it) }
         held.remove("moqui.basic.Enumeration")      // a conclusion code is the tenant's through TenantConclusion
         held.add("darpan.rule.TenantConclusion")
+        // DAR-BE-318 plan 2: the judge's tenant config is watched from the day it exists; TransferSpecs carries it later.
+        held.addAll(["darpan.judge.DecisionOutcome", "darpan.judge.CheckDecision", "darpan.judge.CheckParameterSet",
+                "darpan.judge.CheckParameter"])
         assertEquals(held, TenantConfigChangeTracker.watchedEntities(ec) as Set<String>,
                 "a table a version holds but nothing watches would change without a version")
         asSystem {

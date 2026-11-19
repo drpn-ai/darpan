@@ -84,6 +84,22 @@
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.audit.AuditStatementCheck', entityValue, eecaOperation)</script></actions>
     </eeca>
+    <eeca id="TenantConfigChange_DecisionOutcome" entity="darpan.judge.DecisionOutcome" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.judge.DecisionOutcome', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_CheckDecision" entity="darpan.judge.CheckDecision" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.judge.CheckDecision', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_CheckParameterSet" entity="darpan.judge.CheckParameterSet" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.judge.CheckParameterSet', entityValue, eecaOperation)</script></actions>
+    </eeca>
+    <eeca id="TenantConfigChange_CheckParameter" entity="darpan.judge.CheckParameter" on-create="true" on-update="true" on-delete="true"
+            run-before="true" get-entire-entity="true">
+        <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.judge.CheckParameter', entityValue, eecaOperation)</script></actions>
+    </eeca>
     <eeca id="TenantConfigChange_ReconciliationAutomation" entity="darpan.reconciliation.ReconciliationAutomation" on-create="true" on-update="true" on-delete="true"
             run-before="true" get-entire-entity="true">
         <actions><script>darpan.config.TenantConfigChangeTracker.note(ec, 'darpan.reconciliation.ReconciliationAutomation', entityValue, eecaOperation)</script></actions>

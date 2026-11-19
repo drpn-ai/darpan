@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-318 plan 2. The tenant-owned config the judge reads beside a moqui-rules decision (entity/JudgeEntities.xml).
+         Every read finds by an explicit companyUserGroupId condition as well as the DARPAN_ACTIVE_COMPANY_SCOPE filter, and
+         never by a bare primary key: another tenant's id reads as "does not exist". Neither service disables authz. -->
+
+    <service verb="store" noun="DecisionOutcome" allow-remote="false">
+        <description>Saves what one outcome of the active tenant's decision means. Refuses an outcome the decision does not
+            list (rules.RuleSetOutcome of the same tenant).</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="outcomeId" required="true"/>
+            <parameter name="outcomeKindEnumId" required="true"/>
+            <parameter name="label" required="true"/>
+            <parameter name="fixText"/>
+            <parameter name="fixOwner"/>
+            <parameter name="fixWhereEnumId"/>
+        </in-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
+                <return error="true" message="No active tenant"/></if>
+            <entity-find entity-name="moqui.basic.Enumeration" list="kindList">
+                <econdition field-name="enumId" from="outcomeKindEnumId"/>
+                <econdition field-name="enumTypeId" value="JudgeOutcomeKind"/>
+            </entity-find>
+            <if condition="!kindList">
+                <return error="true" message="Outcome kind ${outcomeKindEnumId} is not one of JOK_FINDING, JOK_EXPECTED, JOK_HIDDEN, JOK_SET_ASIDE"/></if>
+            <if condition="fixWhereEnumId">
+                <entity-find entity-name="moqui.basic.Enumeration" list="whereList">
+                    <econdition field-name="enumId" from="fixWhereEnumId"/>
+                    <econdition field-name="enumTypeId" value="DarpanSystemSource"/>
+                </entity-find>
+                <if condition="!whereList">
+                    <return error="true" message="Fix system ${fixWhereEnumId} does not exist"/></if>
+            </if>
+            <entity-find entity-name="rules.RuleSetOutcome" list="listedList">
+                <econdition field-name="ruleSetId" from="ruleSetId"/>
+                <econdition field-name="outcomeId" from="outcomeId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!listedList">
+                <return error="true" message="Decision ${ruleSetId} does not list outcome ${outcomeId}"/></if>
+
+            <entity-find entity-name="darpan.judge.DecisionOutcome" list="existingList">
+                <econdition field-name="ruleSetId" from="ruleSetId"/>
+                <econdition field-name="outcomeId" from="outcomeId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="existingList">
+                <then>
+                    <set field="existing" from="existingList[0]"/>
+                    <set field="existing.outcomeKindEnumId" from="outcomeKindEnumId"/>
+                    <set field="existing.label" from="label"/>
+                    <set field="existing.fixText" from="fixText"/>
+                    <set field="existing.fixOwner" from="fixOwner"/>
+                    <set field="existing.fixWhereEnumId" from="fixWhereEnumId"/>
+                    <script>existing.update()</script>
+                </then>
+                <else>
+                    <service-call name="create#darpan.judge.DecisionOutcome" in-map="[ruleSetId:ruleSetId, outcomeId:outcomeId,
+                            companyUserGroupId:tenantId, outcomeKindEnumId:outcomeKindEnumId, label:label, fixText:fixText,
+                            fixOwner:fixOwner, fixWhereEnumId:fixWhereEnumId]"/>
+                </else>
+            </if>
+        </actions>
+    </service>
+
+    <service verb="get" noun="CheckJudgeConfig" allow-remote="false">
+        <description>Everything the judge reads for one of the active tenant's checks: its two decisions, the meaning of every
+            outcome of those decisions that has one, and its parameter sets. A check of another tenant does not exist.</description>
+        <in-parameters>
+            <parameter name="checkId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="mustHoldRuleSetId"/>
+            <parameter name="explainsRuleSetId"/>
+            <parameter name="outcomes" type="Map"><description>Keyed "ruleSetId|outcomeId": outcomeKindEnumId, label, fixText,
+                fixOwner, fixWhereEnumId.</description></parameter>
+            <parameter name="parameterSets" type="List"><description>Each: parameterSetId, label, parameters (name to value).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
+                <return error="true" message="No active tenant"/></if>
+            <entity-find entity-name="darpan.audit.AuditCheck" list="checkList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!checkList">
+                <return error="true" message="Check ${checkId} does not exist"/></if>
+
+            <set field="outcomes" from="[:]"/>
+            <set field="parameterSets" from="[]"/>
+            <entity-find entity-name="darpan.judge.CheckDecision" list="decisionList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <iterate list="decisionList" entry="decision">
+                <if condition="decision.stageEnumId == 'CDS_MUST_HOLD'"><set field="mustHoldRuleSetId" from="decision.ruleSetId"/></if>
+                <if condition="decision.stageEnumId == 'CDS_EXPLAINS'"><set field="explainsRuleSetId" from="decision.ruleSetId"/></if>
+                <entity-find entity-name="darpan.judge.DecisionOutcome" list="outcomeList">
+                    <econdition field-name="ruleSetId" from="decision.ruleSetId"/>
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                </entity-find>
+                <iterate list="outcomeList" entry="outcome">
+                    <script>outcomes.put(outcome.ruleSetId + '|' + outcome.outcomeId, [outcomeKindEnumId: outcome.outcomeKindEnumId,
+                            label: outcome.label, fixText: outcome.fixText, fixOwner: outcome.fixOwner,
+                            fixWhereEnumId: outcome.fixWhereEnumId])</script>
+                </iterate>
+            </iterate>
+
+            <entity-find entity-name="darpan.judge.CheckParameterSet" list="setList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <order-by field-name="parameterSetId"/>
+            </entity-find>
+            <iterate list="setList" entry="parameterSet">
+                <entity-find entity-name="darpan.judge.CheckParameter" list="parameterList">
+                    <econdition field-name="checkId" from="checkId"/>
+                    <econdition field-name="parameterSetId" from="parameterSet.parameterSetId"/>
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    <order-by field-name="parameterName"/>
+                </entity-find>
+                <set field="parameters" from="new java.util.LinkedHashMap()"/>
+                <iterate list="parameterList" entry="parameter">
+                    <script>parameters.put(parameter.parameterName, parameter.parameterValue)</script>
+                </iterate>
+                <script>parameterSets.add([parameterSetId: parameterSet.parameterSetId, label: parameterSet.label, parameters: parameters])</script>
+            </iterate>
+        </actions>
+    </service>
+</services>

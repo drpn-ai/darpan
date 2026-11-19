@@ -1,0 +1,7 @@
+{"metadata":{"systemEnumId":"NETSUITE","recordType":"returnAuthorization",
+"configuredExclusions":[{"sequenceNum":1,"fieldExpression":"status","operator":"INCLUDE_IN","values":["Return Authorization : Refunded"],"excludedCount":4}]},
+"records":[
+{"externalReturnId":"SR-1001","tranId":"RMA-5001","status":"Return Authorization : Refunded","amount":"39.00","tranDate":"2026-10-03"},
+{"externalReturnId":"SR-1002","tranId":"RMA-5002","status":"Return Authorization : Refunded","amount":"58.50","tranDate":"2026-10-04"},
+{"externalReturnId":"SR-1009","tranId":"RMA-5009","status":"Return Authorization : Refunded","amount":"12.00","tranDate":"2026-10-10"}
+]}

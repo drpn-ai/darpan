@@ -408,6 +408,10 @@
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
             <parameter name="file2KeysOutLocation"><description>DAR-BE-091. Every distinct compare_id on FILE_2, one per line: with file1KeysOutLocation, the records an audit run examined.</description></parameter>
+            <parameter name="judgeWithDecisions" type="Boolean" default-value="false"><description>DAR-BE-318 plan 2. Set by
+                judge.JudgeReplayServices.replay#CheckJudgement only: the matched and missing frames are also judged with
+                judgeCheckId's decisions into judgedFindings. Every other output is the same either way.</description></parameter>
+            <parameter name="judgeCheckId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -439,6 +443,9 @@
             <parameter name="ruleErrors" type="List"/>
             <!-- Audit 2026-06-11 #16: persisted Spark Datasets for the caller to unpersist in a finally. -->
             <parameter name="persistedSources" type="List"/>
+            <parameter name="judgedFindings" type="List"><description>DAR-BE-318: set only with judgeWithDecisions.</description></parameter>
+            <parameter name="judgeWarnings" type="List"/>
+            <parameter name="judgedPairCounts" type="Map"/>
         </out-parameters>
         <actions>
             <set field="ruleSetIdInput" from="ruleSetId"/>
@@ -464,7 +471,7 @@
                     file1Label:file1LabelInput, file2Label:file2LabelInput,
                     hasHeader:hasHeader,
                     allowDuplicateCompareIds:activeRuleCount == 0,
-                    buildMatchedPairs:activeRuleCount > 0,
+                    buildMatchedPairs:activeRuleCount > 0 || judgeWithDecisions == true,
                     file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation, file2KeysOutLocation:file2KeysOutLocation,
                     sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="baseResult"/>
@@ -528,6 +535,16 @@
                 <set field="ruleExecutionFailed" from="ruleExecResult.ruleExecutionFailed == true"/>
                 <set field="ruleErrors" from="(ruleExecResult.ruleErrors ?: []).findAll { it }.unique()"/>
                 <set field="persistedSources" from="baseResult.persistedSources ?: []"/>
+                <!-- DAR-BE-318 plan 2: the judge beside today's path, for the replay only. It reads the frames above and
+                     sets nothing they set. -->
+                <if condition="judgeWithDecisions == true">
+                    <service-call name="judge.JudgeReplayServices.judge#ComparePairs" out-map="judged"
+                            in-map="[checkId:judgeCheckId, compareScopeId:compareScopeIdValue, matchedPairDf:matchedPairDfValue,
+                            missingDiffDf:normalizedMissingDiffDf, file1Location:file1Location, file2Location:file2Location]"/>
+                    <set field="judgedFindings" from="judged?.judgedFindings"/>
+                    <set field="judgeWarnings" from="judged?.warnings"/>
+                    <set field="judgedPairCounts" from="judged?.pairCounts"/>
+                </if>
             </if>
         </actions>
     </service>

@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-318 plan 2, Task 8. The replay harness: a captured run's extracts through today's compare and conclude and,
+         beside them, through the judge, so the two sets of findings can be compared (spec §8, parity gate). Runs on the
+         request thread as the tenant user with authz ON (rulings P2-7, P2-9): no disableAuthz, no RunAdmission, no
+         withSystemTenant. Every read names companyUserGroupId beside the active-tenant filter, so another tenant's check or run
+         folder reads as "does not exist". The captured run folder is never written (ruling P2-21) and no finding is recorded
+         (ruling P2-18). The Groovy (streaming Spark frames and files, batching pairs) is darpan.judge.JudgeReplaySupport. -->
+
+    <service verb="replay" noun="CheckJudgement" transaction="ignore" allow-remote="false">
+        <description>Replays one of the active tenant's checks over a run it captured: the check's saved run compares the run
+            folder's extracts (no system is called: no extract, no lookup, no verify pass), today's conclude pass names each
+            difference, and today's findings are read from the result. With judgeWithDecisions, the same compare also judges
+            every pair with the check's Must hold and Explains decisions. Everything is written to a new folder,
+            judge-replays/&lt;checkId&gt;/&lt;stamp&gt;: diff.json (today's document), result.json (today's counts) and, when
+            judging, judged-findings.json.</description>
+        <in-parameters>
+            <parameter name="checkId" required="true"/>
+            <parameter name="runFolder" required="true"><description>Data-manager path of the captured run:
+                reconciliation-runs/&lt;automationExecutionId&gt;, an execution of the check's own automation, its side 1
+                extract in &lt;stamp&gt;/ and side 2 (with any .excluded.json sidecar) in &lt;stamp&gt;-FILE_2/.</description></parameter>
+            <parameter name="judgeWithDecisions" type="Boolean" default-value="true"><description>false runs today's path only
+                (the byte-identity proof of the old outputs).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="oldFindings" type="List"><description>Today's findings, as AuditAutomationSupport.findingsFrom reads them.</description></parameter>
+            <parameter name="judgedFindings" type="List"><description>The judge's findings (JudgeSupport.judge), expected ones included.</description></parameter>
+            <parameter name="judgeWarnings" type="List"/>
+            <parameter name="judgedPairCounts" type="Map"><description>Pairs judged: matched, missing and readBack (records
+                set aside by a filter that is a promise, with no row of their own).</description></parameter>
+            <parameter name="judgedPath"><description>Data-manager path of judged-findings.json; blank when not judging.</description></parameter>
+            <parameter name="replayFolder"><description>Data-manager path of this replay's folder.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
+                <return error="true" message="No active tenant"/></if>
+            <entity-find entity-name="darpan.audit.AuditCheck" list="checkList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!checkList">
+                <return error="true" message="Check ${checkId} does not exist"/></if>
+            <set field="check" from="checkList[0]"/>
+
+            <!-- The run folder: reconciliation-runs/<execution id>, one of the tenant's own executions of the check's automation. -->
+            <set field="runPath" from="darpan.facade.common.DataManagerSupport.normalizeRelativePath(runFolder)"/>
+            <set field="runParts" from="runPath ? runPath.tokenize('/') : []"/>
+            <set field="executionList" from="[]"/>
+            <if condition="runParts.size() == 2 &amp;&amp; runParts[0] == darpan.facade.common.DataManagerSupport.RECONCILIATION_RUNS_PATH">
+                <entity-find entity-name="darpan.reconciliation.ReconciliationAutomationExecution" list="executionList">
+                    <econdition field-name="automationExecutionId" from="runParts[1]"/>
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                </entity-find>
+            </if>
+            <if condition="!executionList">
+                <return error="true" message="Run folder ${runFolder} does not exist"/></if>
+            <if condition="!check.automationId || executionList[0].automationId != check.automationId">
+                <return error="true" message="Run folder ${runFolder} is not a run of check ${checkId}"/></if>
+            <set field="runLocation" from="darpan.facade.common.DataManagerSupport.childLocation(darpan.facade.common.DataManagerSupport.resolveReconciliationRunsLocation(ec), runParts[1])"/>
+            <set field="picked" from="darpan.reconciliation.automation.ExtractReplaySupport.pickFromRunFolder(
+                    darpan.facade.common.DataManagerSupport.resolveDirectoryFile(ec, runLocation, false), runLocation, true)"/>
+            <if condition="picked.error">
+                <return error="true" message="Run folder ${runFolder}: ${picked.error}"/></if>
+
+            <!-- The check's saved run: one two-sided compare scope. -->
+            <entity-find entity-name="darpan.rule.RuleSet" list="ruleSetList">
+                <econdition field-name="ruleSetId" from="check.savedRunId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!check.savedRunId || !ruleSetList">
+                <return error="true" message="Check ${checkId} has no saved run"/></if>
+            <entity-find entity-name="darpan.rule.RuleSetCompareScope" list="scopeList">
+                <econdition field-name="ruleSetId" from="check.savedRunId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="scopeList.size() != 1">
+                <return error="true" message="The saved run of check ${checkId} has ${scopeList.size()} compare scopes, not one"/></if>
+            <set field="scope" from="scopeList[0]"/>
+            <if condition="scope.scopeMode == 'EVALUATE'">
+                <return error="true" message="Check ${checkId} reads one system; a replay judges pairs of two"/></if>
+            <entity-find entity-name="darpan.rule.RuleSetCompareSource" list="sourceList">
+                <econdition field-name="compareScopeId" from="scope.compareScopeId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <set field="systemBySide" from="sourceList.collectEntries { [(it.fileSide): it.systemEnumId] }"/>
+
+            <set field="replayed" from="darpan.judge.JudgeReplaySupport.replay(ec, [tenantId: tenantId, check: check.getMap(),
+                    ruleSetId: check.savedRunId, compareScopeId: scope.compareScopeId, runFolder: runPath, files: picked.files,
+                    file1SystemEnumId: systemBySide.FILE_1, file2SystemEnumId: systemBySide.FILE_2,
+                    judgeWithDecisions: judgeWithDecisions != false])"/>
+            <set field="oldFindings" from="replayed.oldFindings"/>
+            <set field="judgedFindings" from="replayed.judgedFindings"/>
+            <set field="judgeWarnings" from="replayed.judgeWarnings"/>
+            <set field="judgedPairCounts" from="replayed.judgedPairCounts"/>
+            <set field="judgedPath" from="replayed.judgedPath"/>
+            <set field="replayFolder" from="replayed.replayFolder"/>
+        </actions>
+    </service>
+
+    <service verb="compare" noun="JudgedFindings" allow-remote="false">
+        <description>Today's findings against the judge's, keyed by statementCode and recordKey: same counts the keys both
+            hold; a record whose other findings name different statements on each side is one differentStatement entry; the
+            rest are onlyOld and onlyJudged.</description>
+        <in-parameters>
+            <parameter name="oldFindings" type="List"/>
+            <parameter name="judgedFindings" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="same" type="Integer"/>
+            <parameter name="onlyOld" type="List"/>
+            <parameter name="onlyJudged" type="List"/>
+            <parameter name="differentStatement" type="List"><description>Each: recordKey, oldStatementCodes,
+                judgedStatementCodes, oldFindings, judgedFindings.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="compared" from="darpan.judge.JudgeReplaySupport.compare(oldFindings ?: [], judgedFindings ?: [])"/>
+            <set field="same" from="compared.same"/>
+            <set field="onlyOld" from="compared.onlyOld"/>
+            <set field="onlyJudged" from="compared.onlyJudged"/>
+            <set field="differentStatement" from="compared.differentStatement"/>
+        </actions>
+    </service>
+
+    <service verb="judge" noun="ComparePairs" transaction="ignore" allow-remote="false">
+        <description>Internal. The judging behind reconcile#RuleSetCompareScope's judgeWithDecisions: the compare's matched
+            and missing frames, as pairs, through the check's decisions. A side whose source filters are promises (a conclusion
+            of the scope reads it with presence EXCLUDED, spec §8) has what they set aside read back as its own records; any
+            other side's set-aside records read SET_ASIDE. Statements come from the tenant's AuditStatement rows that promise
+            an outcome of the check's Must hold decision.</description>
+        <in-parameters>
+            <parameter name="checkId" required="true"/>
+            <parameter name="compareScopeId" required="true"/>
+            <parameter name="matchedPairDf" type="org.apache.spark.sql.Dataset"/>
+            <parameter name="missingDiffDf" type="org.apache.spark.sql.Dataset"><description>RULESET_DIFF_SCHEMA rows.</description></parameter>
+            <parameter name="file1Location"/>
+            <parameter name="file2Location"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="judgedFindings" type="List"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="pairCounts" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
+                <return error="true" message="No active tenant"/></if>
+            <service-call name="judge.JudgeConfigServices.get#CheckJudgeConfig" in-map="[checkId: checkId]" out-map="config"/>
+            <check-errors/>
+            <if condition="(config.parameterSets ?: []).size() > 1">
+                <return error="true" message="Check ${checkId} has ${config.parameterSets.size()} parameter sets; a replay judges one"/></if>
+            <set field="params" from="config.parameterSets ? (config.parameterSets[0].parameters ?: [:]) : [:]"/>
+
+            <set field="statementsByClaim" from="[:]"/>
+            <set field="statementWarnings" from="[]"/>
+            <if condition="config.mustHoldRuleSetId">
+                <entity-find entity-name="darpan.audit.AuditStatement" list="statementList">
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    <econdition field-name="claimRuleSetId" from="config.mustHoldRuleSetId"/>
+                    <order-by field-name="sequenceNum"/>
+                    <order-by field-name="statementId"/>
+                </entity-find>
+                <iterate list="statementList.collect { it.getMap() }.findAll { it.isActive != 'N' &amp;&amp; it.claimOutcomeId }" entry="statement">
+                    <set field="claimKey" from="statement.claimRuleSetId + '|' + statement.claimOutcomeId"/>
+                    <if condition="statementsByClaim.containsKey(claimKey)">
+                        <script>statementWarnings.add("Statements ${statementsByClaim[claimKey]} and ${statement.statementCode} both promise ${claimKey}; ${statementsByClaim[claimKey]} is used".toString())</script>
+                        <else><script>statementsByClaim.put(claimKey, statement.statementCode)</script></else>
+                    </if>
+                </iterate>
+            </if>
+
+            <entity-find entity-name="darpan.rule.RuleSetCompareSource" list="sourceList">
+                <econdition field-name="compareScopeId" from="compareScopeId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <entity-find entity-name="darpan.rule.RuleSetCompareSourceKeyField" list="keyFieldList">
+                <econdition field-name="compareScopeId" from="compareScopeId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <order-by field-name="sequenceNum"/>
+            </entity-find>
+            <set field="systems" from="[:]"/>
+            <set field="keySpecs" from="[:]"/>
+            <iterate list="sourceList" entry="source">
+                <set field="side" from="source.fileSide == 'FILE_1' ? 'file1' : 'file2'"/>
+                <script>systems.put(side, source.systemEnumId)
+                    keySpecs.put(side, darpan.facade.reconciliation.RunConclusionStep.keySpec(
+                            keyFieldList.collect { it.getMap() }.findAll { it.fileSide == source.fileSide }.collect { it.fieldExpression as String },
+                            source.primaryIdExpression, source.idValueNormalizer, source.recordRootExpression))</script>
+            </iterate>
+            <!-- Spec §8: a side's filters are promises when a conclusion of the scope reads that side with presence EXCLUDED. -->
+            <entity-find entity-name="darpan.rule.RuleSetConclusionCondition" list="excludedReadList">
+                <econdition field-name="compareScopeId" from="compareScopeId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="presence" value="EXCLUDED"/>
+            </entity-find>
+            <set field="promiseSides" from="excludedReadList.collect { it.subject == 'FILE_1' ? 'file1' : 'file2' } as Set"/>
+
+            <set field="judged" from="darpan.judge.JudgeReplaySupport.judgeCompare(ec, [checkId: checkId, tenantId: tenantId,
+                    matchedPairDf: matchedPairDf, missingDiffDf: missingDiffDf, keySpecs: keySpecs, systems: systems,
+                    promiseSides: promiseSides, statementsByClaim: statementsByClaim, params: params,
+                    extractFiles: [file1: darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, file1Location),
+                                   file2: darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, file2Location)]])"/>
+            <set field="judgedFindings" from="judged.findings"/>
+            <set field="warnings" from="statementWarnings + judged.warnings"/>
+            <set field="pairCounts" from="judged.pairCounts"/>
+        </actions>
+    </service>
+</services>

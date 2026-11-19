@@ -1,0 +1,10 @@
+{"metadata":{"systemEnumId":"SHOPIFY","recordType":"return","note":"Synthetic DAR-BE-318 replay fixture shaped like Dolls Kill R5; no real customer data."},
+"records":[
+{"returnId":"SR-1001","orderName":"#T10001","status":"CLOSED","refundAmount":"39.00","closedAt":"2026-10-03T10:00:00Z"},
+{"returnId":"SR-1002","orderName":"#T10002","status":"CLOSED","refundAmount":"58.50","closedAt":"2026-10-04T11:30:00Z"},
+{"returnId":"SR-1004","orderName":"#T10004","status":"OPEN","refundAmount":"24.00","closedAt":""},
+{"returnId":"SR-1005","orderName":"#T10005","status":"OPEN","refundAmount":"71.25","closedAt":""},
+{"returnId":"SR-1006","orderName":"#T10006","status":"CLOSED","refundAmount":"18.00","closedAt":"2026-10-08T09:15:00Z"},
+{"returnId":"SR-1007","orderName":"#T10007","status":"CLOSED","refundAmount":"42.00","closedAt":"2026-10-09T14:45:00Z"},
+{"returnId":"SR-1008","orderName":"#T10008","status":"OPEN","refundAmount":"15.75","closedAt":""}
+]}

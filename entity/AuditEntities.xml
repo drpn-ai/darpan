@@ -127,6 +127,11 @@
         <field name="savedRunId" type="id">
             <description>The saved run (RuleSet) that executes the check. Blank until the run is configured.</description>
         </field>
+        <field name="pairFactTypeId" type="id">
+            <description>DAR-BE-318. The tenant's generated moqui-rules fact type (rules.FactType) that describes this check's
+                pair fact. Minted and saved by judge.PairFactServices.generate#PairFactType, only for the active tenant's own
+                check. Blank until the check's pair fact type is first generated.</description>
+        </field>
         <field name="automationId" type="id">
             <description>DAR-BE-092. The scheduled automation that runs this check. When set, that automation reads the
                 audit's windows (get#AuditWindow: the period to date) instead of its own, and

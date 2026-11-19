@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-318 plan 2, Task 6 (D7). The tenant's generated moqui-rules fact type for a check's pair fact (see
+         darpan.judge.PairFactSupport for the fact). Runs on the request thread as the tenant user with authz ON: no
+         disableAuthz, no RunAdmission, no withSystemTenant. Every read names companyUserGroupId beside the active-tenant filter,
+         so another tenant's check or fact type reads as "does not exist". Darpan has no compile dependency on moqui-rules:
+         it writes rules.* through entity-auto and moqui.rules.RuleServices services, where the RulesTenantGuard EECAs stamp
+         and guard every row. -->
+
+    <service verb="generate" noun="PairFactType" allow-remote="false">
+        <description>Creates or extends the active tenant's pair fact type for one of its checks: moqui-rules fact type
+            "&lt;checkCode&gt;_PAIR", its id minted and saved in AuditCheck.pairFactTypeId. Every field is text (FVT_TEXT):
+            compareId, a presence field per side, the side fields, param_&lt;name&gt; for each parameter of the check, and the
+            ask fields. A rerun adds fields and never deletes one. A kind override goes through moqui-rules update#FactField.</description>
+        <in-parameters>
+            <parameter name="checkId" required="true"/>
+            <parameter name="sampleKeys" type="Map"><description>file1 and file2: the record keys each side holds. asks: ask
+                field names (ask_&lt;name&gt;_&lt;field&gt;) beyond the checks' keepRecordFields.</description></parameter>
+            <parameter name="file1SystemEnumId"><description>Gives the side prefix (OMS gives hotwax). Blank gives file1.</description></parameter>
+            <parameter name="file2SystemEnumId"/>
+            <parameter name="kindOverrides" type="Map"><description>fieldName to a moqui-rules value kind, like FVT_DECIMAL.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="factTypeId"/>
+            <parameter name="fieldCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
+                <return error="true" message="No active tenant"/></if>
+            <entity-find entity-name="darpan.audit.AuditCheck" list="checkList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!checkList">
+                <return error="true" message="Check ${checkId} does not exist"/></if>
+            <set field="check" from="checkList[0]"/>
+
+            <!-- The fact type: the saved one when it is still the tenant's, otherwise a new one. -->
+            <set field="factTypeId" from="null"/>
+            <if condition="check.pairFactTypeId">
+                <entity-find entity-name="rules.FactType" list="typeList">
+                    <econdition field-name="factTypeId" from="check.pairFactTypeId"/>
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                </entity-find>
+                <if condition="typeList"><set field="factTypeId" from="check.pairFactTypeId"/></if>
+            </if>
+            <if condition="!factTypeId">
+                <service-call name="create#rules.FactType" out-map="createdType" out-map-add-to-existing="false"
+                        in-map="[description: check.checkCode + '_PAIR']"/>
+                <set field="factTypeId" from="createdType.factTypeId"/>
+                <set field="check.pairFactTypeId" from="factTypeId"/>
+                <script>check.update()</script>
+            </if>
+
+            <entity-find entity-name="rules.FactField" list="existingList">
+                <econdition field-name="factTypeId" from="factTypeId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <set field="existingNames" from="existingList.collect { it.fieldName } as Set"/>
+
+            <!-- What the fact holds: fieldName to the words kept in FactField.description. -->
+            <set field="prefixes" from="darpan.judge.PairFactSupport.sidePrefixes(file1SystemEnumId, file2SystemEnumId)"/>
+            <set field="wanted" from="new LinkedHashMap()"/>
+            <script>wanted.put('compareId', 'Compare id of the pair')</script>
+            <script>wanted.put(prefixes[0] + '_presence', 'KEPT, SET_ASIDE or ABSENT on file 1'); wanted.put(prefixes[1] + '_presence', 'KEPT, SET_ASIDE or ABSENT on file 2')</script>
+            <set field="sideKeys" from="[file1: (sampleKeys?.get('file1') ?: []) as List, file2: (sampleKeys?.get('file2') ?: []) as List]"/>
+            <iterate list="[0, 1]" entry="sideIndex">
+                <set field="prefix" from="prefixes[sideIndex]"/>
+                <!-- Earlier runs' keys are read back from the field descriptions, so a rerun names every key the same way. -->
+                <set field="knownKeys" from="existingList.findAll { it.fieldName.startsWith(prefix + '_') &amp;&amp; it.fieldName != prefix + '_presence' &amp;&amp; it.description }.collect { it.description }"/>
+                <set field="keyNames" from="darpan.judge.PairFactSupport.fieldNames(prefix, knownKeys + sideKeys[sideIndex == 0 ? 'file1' : 'file2'])"/>
+                <script>keyNames.each { key, name -> wanted.put(name, key) }</script>
+            </iterate>
+            <entity-find entity-name="darpan.judge.CheckParameter" list="parameterList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <script>parameterList.collect { it.parameterName }.unique().each { wanted.put('param_' + it, 'Parameter ' + it) }</script>
+            <entity-find entity-name="darpan.judge.CheckAsk" list="askList">
+                <econdition field-name="checkId" from="checkId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <script>
+                askList.each { ask -> ((ask.keepRecordFields ?: '').split(',') as List).collect { it.trim() }.findAll { it }.each { field ->
+                    wanted.put('ask_' + ask.askName + '_' + field, 'Ask ' + ask.askName + ': ' + field) } }
+                (sampleKeys?.get('asks') ?: []).each { name -> wanted.put(name as String, 'Ask field') }
+            </script>
+
+            <set field="addedCount" from="0"/>
+            <iterate list="wanted.entrySet()" entry="entry">
+                <if condition="!existingNames.contains(entry.key)">
+                    <service-call name="create#rules.FactField"
+                            in-map="[factTypeId: factTypeId, fieldName: entry.key, valueTypeEnumId: 'FVT_TEXT', description: entry.value]"/>
+                    <set field="addedCount" from="addedCount + 1"/>
+                </if>
+            </iterate>
+            <iterate list="(kindOverrides ?: [:]).entrySet()" entry="override">
+                <service-call name="moqui.rules.RuleServices.update#FactField"
+                        in-map="[factTypeId: factTypeId, fieldName: override.key, valueTypeEnumId: override.value]"/>
+            </iterate>
+            <set field="fieldCount" from="existingNames.size() + addedCount"/>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,167 @@
+package darpan.judge
+
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+
+import java.nio.file.Path
+
+import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertThrows
+import static org.junit.jupiter.api.Assertions.assertTrue
+
+/** DAR-BE-318 plan 2, Task 6 (D7). The pair fact: presence per side, prefixed side fields, parameters and asks. Pure Groovy. */
+class PairFactSupportTests {
+
+    private static Map state(String p1, String p2, Set<String> aside1 = [] as Set, Set<String> aside2 = [] as Set) {
+        return [factTypeId: "FT1", file1: [prefix: p1, setAside: aside1], file2: [prefix: p2, setAside: aside2]]
+    }
+
+    @Test
+    void aMatchedPairIsKeptOnBothSides() {
+        Map out = PairFactSupport.buildFact([compareId: "P1", file1: [orderId: "O1", status: "OPEN"], file2: [id: "O1"]],
+                state("hotwax", "netsuite"), [threshold: "5"], [ask_a_status: "S"])
+        assertEquals("FT1", out.factTypeId)
+        assertEquals("P1", out.recordId)
+        Map fact = out.fact as Map
+        assertEquals("P1", fact.compareId)
+        assertEquals("KEPT", fact.hotwax_presence)
+        assertEquals("KEPT", fact.netsuite_presence)
+        assertEquals("OPEN", fact.hotwax_status)
+        assertEquals("O1", fact.netsuite_id)
+        assertEquals("5", fact.param_threshold)
+        assertEquals("S", fact.ask_a_status)
+    }
+
+    @Test
+    void aMissingInFile2RowIsKeptAndAbsent() {
+        Map fact = PairFactSupport.buildFact([compareId: "P2", file1: [orderId: "O2"], file2: null],
+                state("hotwax", "netsuite"), [:], [:]).fact as Map
+        assertEquals("KEPT", fact.hotwax_presence)
+        assertEquals("ABSENT", fact.netsuite_presence)
+        assertFalse(fact.keySet().any { it.startsWith("netsuite_") && it != "netsuite_presence" })
+    }
+
+    @Test
+    void aRecordInFile2sSideFileIsSetAsideNotAbsent() {
+        Map fact = PairFactSupport.buildFact([compareId: "P3", file1: [orderId: "O3"], file2: null],
+                state("hotwax", "netsuite", [] as Set, ["P3"] as Set), [:], [:]).fact as Map
+        assertEquals("KEPT", fact.hotwax_presence)
+        assertEquals("SET_ASIDE", fact.netsuite_presence)
+    }
+
+    @Test
+    void setAsideOnOneSideAndAbsentOnTheOtherSaysExactlyThat() {
+        Map fact = PairFactSupport.buildFact([compareId: "P4", file1: null, file2: null],
+                state("hotwax", "netsuite", ["P4"] as Set, [] as Set), [:], [:]).fact as Map
+        assertEquals("SET_ASIDE", fact.hotwax_presence)
+        assertEquals("ABSENT", fact.netsuite_presence)
+    }
+
+    @Test
+    void aSideThatHoldsTheRecordIsKeptEvenIfTheSidecarNamesTheId() {
+        Map fact = PairFactSupport.buildFact([compareId: "P5", file1: [a: "1"], file2: [b: "2"]],
+                state("hotwax", "netsuite", ["P5"] as Set, ["P5"] as Set), [:], [:]).fact as Map
+        assertEquals("KEPT", fact.hotwax_presence)
+        assertEquals("KEPT", fact.netsuite_presence)
+    }
+
+    @Test
+    void twoHotwaxSidesGetPrefixesHotwax1AndHotwax2() {
+        assertEquals(["hotwax1", "hotwax2"], PairFactSupport.sidePrefixes("OMS", "OMS"))
+        assertEquals(["hotwax", "netsuite"], PairFactSupport.sidePrefixes("OMS", "NETSUITE"))
+        assertEquals(["shopify", "database"], PairFactSupport.sidePrefixes("SHOPIFY", "DATABASE"))
+        Map fact = PairFactSupport.buildFact([compareId: "P6", file1: [id: "A"], file2: [id: "B"]],
+                state("hotwax1", "hotwax2"), [:], [:]).fact as Map
+        assertEquals("A", fact.hotwax1_id)
+        assertEquals("B", fact.hotwax2_id)
+        assertEquals("KEPT", fact.hotwax1_presence)
+        assertEquals("KEPT", fact.hotwax2_presence)
+    }
+
+    @Test
+    void sidePrefixIsTheRootSystemLowerCased() {
+        assertEquals("hotwax", PairFactSupport.sidePrefix("OMS"))
+        assertEquals("hotwax", PairFactSupport.sidePrefix("HOTWAX_OMS"))
+        assertEquals("netsuite", PairFactSupport.sidePrefix("NETSUITE"))
+        assertEquals("shopify", PairFactSupport.sidePrefix("SHOPIFY"))
+        assertEquals("database", PairFactSupport.sidePrefix("DATABASE"))
+        assertEquals("file", PairFactSupport.sidePrefix(null))
+    }
+
+    @Test
+    void aBracketedKeyGivesAnUnderscoreNameAndTheOriginalSurvivesInTheFieldMap() {
+        assertEquals("hotwax_items_0__status", PairFactSupport.fieldName("hotwax", "items[0].status"))
+        Map names = PairFactSupport.fieldNames("hotwax", ["items[0].status"])
+        assertEquals(["items[0].status": "hotwax_items_0__status"], names)
+        Map fact = PairFactSupport.buildFact([compareId: "P7", file1: ["items[0].status": "OPEN"], file2: null],
+                state("hotwax", "netsuite"), [:], [:]).fact as Map
+        assertEquals("OPEN", fact.hotwax_items_0__status)
+    }
+
+    @Test
+    void collidingNamesGetANumericSuffixInKeyOrder() {
+        Map names = PairFactSupport.fieldNames("hotwax", ["a-b", "a_b", "a b"])
+        assertEquals(3, names.values().toSet().size())
+        assertEquals("hotwax_a_b", names["a b"])
+        assertEquals("hotwax_a_b_2", names["a-b"])
+        assertEquals("hotwax_a_b_3", names["a_b"])
+    }
+
+    @Test
+    void aSideKeyNamedPresenceNeverTakesThePresenceFieldsName() {
+        assertEquals("hotwax_presence_2", PairFactSupport.fieldNames("hotwax", ["presence"])["presence"])
+        Map fact = PairFactSupport.buildFact([compareId: "P8", file1: [presence: "x"], file2: null],
+                state("hotwax", "netsuite"), [:], [:]).fact as Map
+        assertEquals("KEPT", fact.hotwax_presence)
+        assertEquals("x", fact.hotwax_presence_2)
+    }
+
+    @Test
+    void aLongNameIsCutToTheFieldNameLimit() {
+        String name = PairFactSupport.fieldName("hotwax", "x" * 80)
+        assertTrue(name.length() <= 40)
+        Map names = PairFactSupport.fieldNames("hotwax", ["x" * 80, "x" * 81])
+        assertEquals(2, names.values().toSet().size())
+        assertTrue(names.values().every { it.length() <= 40 })
+    }
+
+    @Test
+    void aRepeatedCompareIdAcrossTwoBatchesIsRefused() {
+        List<Map> rows = [[compareId: "D1"], [compareId: "D2"], [compareId: "D3"], [compareId: "D1"]]
+        Iterator<List<Map>> batchIt = PairFactSupport.batches(rows.iterator(), 2)
+        assertEquals(["D1", "D2"], batchIt.next()*.compareId)
+        IllegalStateException e = assertThrows(IllegalStateException) { while (batchIt.hasNext()) batchIt.next() }
+        assertEquals("compare id D1 appears twice in one judging", e.message)
+    }
+
+    @Test
+    void aRepeatedCompareIdInOneBatchIsRefusedToo() {
+        Iterator<List<Map>> batchIt = PairFactSupport.batches([[compareId: "D1"], [compareId: "D1"]].iterator(), 500)
+        IllegalStateException e = assertThrows(IllegalStateException) { batchIt.next() }
+        assertEquals("compare id D1 appears twice in one judging", e.message)
+    }
+
+    @Test
+    void batchesSplitBySizeAndKeepOrder() {
+        List<Map> rows = (1..5).collect { [compareId: "C${it}".toString()] }
+        List<List<Map>> all = PairFactSupport.batches(rows.iterator(), 2).collect { it }
+        assertEquals([2, 2, 1], all*.size())
+        assertEquals((1..5).collect { "C${it}".toString() }, all.flatten()*.compareId)
+    }
+
+    @Test
+    void setAsideIdsStreamTheSidecarAndKeyThemByTheSidesCompareIdExpression(@TempDir Path dir) {
+        File extract = new File(dir.toFile(), "file2.json")
+        extract.text = "[]"
+        new File(dir.toFile(), "file2.excluded.json").text =
+                '{"sourceFileName":"file2.json","truncated":false,"total":2,"records":[{"tranId":"T1","_excludedBy":"1:x"},{"tranId":"T2","_excludedBy":"1:x"}]}'
+        Map out = PairFactSupport.setAsideIds(extract) { Map record -> record.tranId as String }
+        assertEquals(["T1", "T2"] as Set, out.ids)
+        assertTrue(out.present as boolean)
+        assertFalse(out.truncated as boolean)
+        Map none = PairFactSupport.setAsideIds(new File(dir.toFile(), "nothing.json")) { Map record -> "x" }
+        assertEquals([] as Set, none.ids)
+        assertFalse(none.present as boolean)
+    }
+}

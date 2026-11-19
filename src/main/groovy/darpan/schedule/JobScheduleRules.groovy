@@ -35,6 +35,11 @@ class JobScheduleRules {
 
     /** Null when `cron` is acceptable for a job that may run at most every `minIntervalMinutes` (null reads as 1). */
     static String cronProblem(String cron, Number minIntervalMinutes, Instant now) {
+        return cronProblem(cron, minIntervalMinutes, now, zone())
+    }
+
+    /** As above, on the clock of `zone` (tests name one; the services use the runner's, zone()). */
+    static String cronProblem(String cron, Number minIntervalMinutes, Instant now, ZoneId zone) {
         String text = cron?.trim()
         if (!text) return "The cron is blank; pause the job instead of clearing its cron."
         if (text.length() > MAX_LENGTH) return "The cron is ${text.length()} characters; the most is ${MAX_LENGTH}.".toString()
@@ -44,14 +49,14 @@ class JobScheduleRules {
         } catch (Exception e) {
             return "Not a valid Quartz cron (six fields: seconds minutes hours day-of-month month day-of-week, with ? in one of the two day fields): ${e.message}".toString()
         }
-        ZonedDateTime start = ZonedDateTime.ofInstant(now, zone())
+        ZonedDateTime start = ZonedDateTime.ofInstant(now, zone)
         Optional<ZonedDateTime> first
         try { first = time.nextExecution(start) } catch (Exception ignored) { first = Optional.empty() }
         if (!first.isPresent() || Duration.between(start, first.get()).toDays() > MAX_DAYS_TO_FIRST_RUN) {
             return "This cron never runs within ${MAX_DAYS_TO_FIRST_RUN} days.".toString()
         }
         int floor = Math.max(1, (minIntervalMinutes ?: 1) as int)
-        Long gap = smallestGapSeconds(text, now)
+        Long gap = smallestGapSeconds(text, now, zone)
         if (gap != null && gap < floor * 60L) {
             return "Runs every ${describeGap(gap)} at its tightest; this job may run at most every ${floor} minute${floor == 1 ? '' : 's'}.".toString()
         }
@@ -100,26 +105,43 @@ class JobScheduleRules {
 
     /** The smallest gap, in whole minutes (0 for a sub-minute gap), between consecutive runs; null when it has under two runs. */
     static Integer smallestGapMinutes(String cron, Instant from) {
-        Long seconds = smallestGapSeconds(cron, from)
+        return smallestGapMinutes(cron, from, zone())
+    }
+
+    static Integer smallestGapMinutes(String cron, Instant from, ZoneId zone) {
+        Long seconds = smallestGapSeconds(cron, from, zone)
         return seconds == null ? null : (int) (seconds / 60L)
     }
 
     static Long smallestGapSeconds(String cron, Instant from) {
-        List<Instant> runs = []
+        return smallestGapSeconds(cron, from, zone())
+    }
+
+    /**
+     * Each gap is the larger of the time that passes and the wall-clock gap (DAR-BE-322): on a clock with daylight saving
+     * the spring-forward day is 23 hours, yet a daily cron is still once a day; and the repeated fall-back hour, 0 on the
+     * wall clock, still really passes. A floor is a "how often" rule, so it can be off by the one shifted hour, never more.
+     */
+    static Long smallestGapSeconds(String cron, Instant from, ZoneId zone) {
+        List<ZonedDateTime> runs = []
         try {
             ExecutionTime time = ExecutionTime.forCron(PARSER.parse(cron.trim()))
-            ZonedDateTime limit = ZonedDateTime.ofInstant(from, zone()).plusDays(HORIZON_DAYS)
-            ZonedDateTime cursor = ZonedDateTime.ofInstant(from, zone())
+            ZonedDateTime limit = ZonedDateTime.ofInstant(from, zone).plusDays(HORIZON_DAYS)
+            ZonedDateTime cursor = ZonedDateTime.ofInstant(from, zone)
             while (runs.size() < RUNS_CHECKED) {
                 Optional<ZonedDateTime> next = time.nextExecution(cursor)
                 if (!next.isPresent() || next.get().isAfter(limit)) break
-                runs << next.get().toInstant()
+                runs << next.get()
                 cursor = next.get()
             }
         } catch (Exception ignored) { return null }
         if (runs.size() < 2) return null
         long best = Long.MAX_VALUE
-        for (int i = 1; i < runs.size(); i++) best = Math.min(best, runs[i].epochSecond - runs[i - 1].epochSecond)
+        for (int i = 1; i < runs.size(); i++) {
+            long passed = runs[i].toEpochSecond() - runs[i - 1].toEpochSecond()
+            long onTheClock = Duration.between(runs[i - 1].toLocalDateTime(), runs[i].toLocalDateTime()).seconds
+            best = Math.min(best, Math.max(passed, onTheClock))
+        }
         return best
     }
 

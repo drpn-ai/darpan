@@ -27,6 +27,20 @@ class JobScheduleRulesTests {
         assertNotNull(JobScheduleRules.cronProblem("0/30 * * * * ?", 1, NOW), "every 30 seconds is under one minute")
     }
 
+    /** DAR-BE-322: on a server clock with daylight saving, the spring-forward day is 23 hours long; a once-a-day cron is
+     *  still once a day, so a 1440-minute floor must pass (it refused every daily time on Steve Madden's server). */
+    @Test
+    void aDailyCronOnADaylightSavingClockKeepsAOneDayFloor() {
+        java.time.ZoneId newYork = java.time.ZoneId.of("America/New_York")
+        assertNull(JobScheduleRules.cronProblem("0 30 13 * * ?", 1440, NOW, newYork))
+        assertNull(JobScheduleRules.cronProblem("0 0 15 * * ?", 1440, NOW, newYork))
+        assertEquals(1440, JobScheduleRules.smallestGapMinutes("0 30 13 * * ?", NOW, newYork))
+        // twice a day is still refused on that clock
+        assertNotNull(JobScheduleRules.cronProblem("0 30 1,13 * * ?", 1440, NOW, newYork))
+        // an hourly cron across spring-forward (02:00 does not exist) is still an hour apart on the wall clock
+        assertEquals(60, JobScheduleRules.smallestGapMinutes("0 0 * * * ?", NOW, newYork))
+    }
+
     @Test
     void aCronThatNeverFiresIsRefused() {
         String p = JobScheduleRules.cronProblem("0 0 0 30 2 ?", 1, NOW)

@@ -12,8 +12,8 @@
     <service verb="generate" noun="PairFactType" allow-remote="false">
         <description>Creates or extends the active tenant's pair fact type for one of its checks: moqui-rules fact type
             "&lt;checkCode&gt;_PAIR", its id minted and saved in AuditCheck.pairFactTypeId. Every field is text (FVT_TEXT):
-            compareId, a presence field per side, the side fields, param_&lt;name&gt; for each parameter of the check, and the
-            ask fields. A rerun adds fields and never deletes one. A kind override goes through moqui-rules update#FactField.</description>
+            compareId, a presence field per side, claim (the failed promise, set only for the Explains decision), the side fields,
+            param_&lt;name&gt; for each parameter of the check, and the ask fields. A rerun adds fields and never deletes one. A kind override goes through moqui-rules update#FactField.</description>
         <in-parameters>
             <parameter name="checkId" required="true"/>
             <parameter name="sampleKeys" type="Map"><description>file1 and file2: the record keys each side holds. asks: ask
@@ -68,6 +68,8 @@
             <set field="wanted" from="new LinkedHashMap()"/>
             <script>wanted.put('compareId', 'Compare id of the pair')</script>
             <script>wanted.put(prefixes[0] + '_presence', 'KEPT, SET_ASIDE or ABSENT on file 1'); wanted.put(prefixes[1] + '_presence', 'KEPT, SET_ASIDE or ABSENT on file 2')</script>
+            <!-- Set only when the Explains decision runs: the outcome id of the promise that failed (JudgeSupport.judge). -->
+            <script>wanted.put('claim', 'The failed promise, for the Explains decision')</script>
             <set field="sideKeys" from="[file1: (sampleKeys?.get('file1') ?: []) as List, file2: (sampleKeys?.get('file2') ?: []) as List]"/>
             <set field="keyNames" from="[:]"/>
             <iterate list="[0, 1]" entry="sideIndex">

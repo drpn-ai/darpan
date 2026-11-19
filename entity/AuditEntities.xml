@@ -300,6 +300,20 @@
             <description>DAR-BE-090. One sentence on what the conclusion means for this record; the finding JSON's
                 diagnosis.explanation. Blank falls back to the conclusion's description.</description>
         </field>
+        <field name="claimRuleSetId" type="id">
+            <description>DAR-BE-318. The moqui-rules Must hold decision whose rule found the failed promise. Blank: the finding
+                came from the old path, not the judge. Like the other evidence, the latest read replaces it.</description>
+        </field>
+        <field name="claimRuleId" type="id">
+            <description>DAR-BE-318. The rule of claimRuleSetId that matched (the failed promise).</description>
+        </field>
+        <field name="causeRuleSetId" type="id">
+            <description>DAR-BE-318. The moqui-rules Explains decision that gave the cause.</description>
+        </field>
+        <field name="causeRuleId" type="id">
+            <description>DAR-BE-318. The rule of causeRuleSetId that matched first. Blank with causeRuleSetId set: no rule
+                matched, so the cause is UNEXPLAINED.</description>
+        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDF_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>

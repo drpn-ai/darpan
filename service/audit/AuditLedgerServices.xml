@@ -37,7 +37,8 @@
             <parameter name="findings" type="List">
                 <description>One Map per (statement, record): statementCode, recordKey, headline (all required);
                     ruleText, expectedAmount, actualAmount, currencyUomId, expectedSource, actualSource,
-                    conclusionEnumId, diagnosisText; records [{systemEnumId, recordType, recordId, internalId, recordStatus}];
+                    conclusionEnumId, diagnosisText; claimRuleSetId, claimRuleId, causeRuleSetId, causeRuleId (DAR-BE-318:
+                    the rules that judged it; blank when not given); records [{systemEnumId, recordType, recordId, internalId, recordStatus}];
                     checks [{label, passed (Boolean), value}].</description></parameter>
         </in-parameters>
         <out-parameters>
@@ -163,6 +164,10 @@
                 <set field="finding.actualSource" from="f.actualSource"/>
                 <set field="finding.conclusionEnumId" from="f.conclusionEnumId"/>
                 <set field="finding.diagnosisText" from="f.diagnosisText"/>
+                <set field="finding.claimRuleSetId" from="f.claimRuleSetId"/>
+                <set field="finding.claimRuleId" from="f.claimRuleId"/>
+                <set field="finding.causeRuleSetId" from="f.causeRuleSetId"/>
+                <set field="finding.causeRuleId" from="f.causeRuleId"/>
                 <set field="finding.lastCheckedStamp" from="checkStamp"/>
                 <entity-create value-field="finding" or-update="true"/>
 

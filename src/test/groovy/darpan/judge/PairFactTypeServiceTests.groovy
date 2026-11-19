@@ -81,7 +81,7 @@ class PairFactTypeServiceTests {
         assertEquals("returns-vs-credits_PAIR", type.description)
 
         Map byName = fields(factTypeId)
-        assertEquals(["ask_ask1_status", "ask_ask1_total", "compareId", "file1_presence", "file2_presence",
+        assertEquals(["ask_ask1_status", "ask_ask1_total", "claim", "compareId", "file1_presence", "file2_presence",
                       "file1_items_0__status", "file1_orderId", "file2_tranId", "param_days", "param_tolerance"].sort(), byName.keySet().sort())
         assertTrue(byName.values().every { it.valueTypeEnumId == "FVT_TEXT" })
         assertEquals("items[0].status", byName.file1_items_0__status.description)
@@ -93,7 +93,7 @@ class PairFactTypeServiceTests {
         String check = seedCheck(A, "same-system", [:], null, null)
         Map out = generate(check, [file1: ["id"], file2: ["id"]], [file1SystemEnumId: "OMS", file2SystemEnumId: "OMS"])
         assertEquals([], out.errors)
-        assertEquals(["compareId", "hotwax1_id", "hotwax1_presence", "hotwax2_id", "hotwax2_presence"],
+        assertEquals(["claim", "compareId", "hotwax1_id", "hotwax1_presence", "hotwax2_id", "hotwax2_presence"],
                 fields(out.out.factTypeId as String).keySet().sort())
     }
 
@@ -166,7 +166,7 @@ class PairFactTypeServiceTests {
         assertNotEquals(aType, bType)
         assertEquals(B, row("rules.FactType", [factTypeId: bType]).companyUserGroupId)
         assertEquals([B], fields(bType).values()*.companyUserGroupId.unique())
-        assertEquals(["ask_ask1_status", "compareId", "file1_orderId", "file1_presence", "file2_presence", "file2_tranId", "param_days"],
+        assertEquals(["ask_ask1_status", "claim", "compareId", "file1_orderId", "file1_presence", "file2_presence", "file2_tranId", "param_days"],
                 fields(bType).keySet().sort())
         assertEquals(aBefore, fields(aType), "A's type is untouched")
     }

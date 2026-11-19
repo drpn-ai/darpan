@@ -80,6 +80,9 @@
             <parameter name="outcomes" type="Map"><description>Keyed "ruleSetId|outcomeId": outcomeKindEnumId, label, fixText,
                 fixOwner, fixWhereEnumId.</description></parameter>
             <parameter name="parameterSets" type="List"><description>Each: parameterSetId, label, parameters (name to value).</description></parameter>
+            <parameter name="decisions" type="Map"><description>Keyed by ruleSetId, for each of the two decisions that is the
+                active tenant's: firstMatchOnly and outcomeIds (the outcomes it lists). A decision of another tenant, or one
+                that does not exist, has no entry.</description></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
@@ -94,6 +97,7 @@
 
             <set field="outcomes" from="[:]"/>
             <set field="parameterSets" from="[]"/>
+            <set field="decisions" from="[:]"/>
             <entity-find entity-name="darpan.judge.CheckDecision" list="decisionList">
                 <econdition field-name="checkId" from="checkId"/>
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
@@ -110,6 +114,20 @@
                             label: outcome.label, fixText: outcome.fixText, fixOwner: outcome.fixOwner,
                             fixWhereEnumId: outcome.fixWhereEnumId])</script>
                 </iterate>
+                <!-- DAR-BE-318 Task 7: the judge refuses a decision whose shape is wrong before it runs one (ruling P2-17). -->
+                <entity-find entity-name="rules.RuleSet" list="ruleSetList">
+                    <econdition field-name="ruleSetId" from="decision.ruleSetId"/>
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                </entity-find>
+                <if condition="ruleSetList">
+                    <entity-find entity-name="rules.RuleSetOutcome" list="listedList">
+                        <econdition field-name="ruleSetId" from="decision.ruleSetId"/>
+                        <econdition field-name="companyUserGroupId" from="tenantId"/>
+                        <order-by field-name="outcomeId"/>
+                    </entity-find>
+                    <script>decisions.put(decision.ruleSetId, [firstMatchOnly: ruleSetList[0].firstMatchOnly,
+                            outcomeIds: listedList.collect { it.outcomeId }])</script>
+                </if>
             </iterate>
 
             <entity-find entity-name="darpan.judge.CheckParameterSet" list="setList">

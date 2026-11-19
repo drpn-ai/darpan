@@ -323,6 +323,18 @@ class AuditLedgerServicesSmokeTests {
         ec.message.clearErrors()
     }
 
+    @Test
+    void aJudgedFindingKeepsTheRulesThatJudgedItAndAFindingWithoutThemHasNone() {
+        Map lineage = [claimRuleSetId: "RS_MUST", claimRuleId: "RULE_CLAIM", causeRuleSetId: "RS_EXPLAINS", causeRuleId: "RULE_CAUSE"]
+        Map out = record(CHECK, "2026-10-07", [finding("R4", "LINE-1") + lineage, finding("R9", "LINE-2")])
+        List ids = out.findingIds as List
+        Map judged = row(ids[0] as String)
+        assertEquals(lineage, lineage.keySet().collectEntries { [(it): judged[it]] })
+        Map plain = row(ids[1] as String)
+        lineage.keySet().each { assertNull(plain[it], "a caller passing no lineage leaves ${it} blank") }
+        assertEquals(["Finding LINE-1", "Finding LINE-2"], [judged.headline, plain.headline])
+    }
+
     // -----------------------------------------------------------------------------------------
 
     private static Map finding(String statementCode, String recordKey) {

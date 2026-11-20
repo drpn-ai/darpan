@@ -77,9 +77,14 @@ class RunConclusionStep {
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
                     // Answers the shared store serves are never fetched, so they are kept here (live passes only; a replay shares nothing).
                     captureServed: lookupsDir == null ? null : { String question, Map<String, Map> served ->
-                        Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
-                                RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
-                        if (lookup != null) captureServed(lookupsDir, lookup, served, lookupWarnings)
+                        // A capture is evidence, never part of the verdict: nothing here may end the conclusion step.
+                        try {
+                            Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
+                                    RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
+                            if (lookup != null) captureServed(lookupsDir, lookup, served, lookupWarnings)
+                        } catch (Throwable t) {
+                            lookupWarnings.add("Question ${question}${NOT_CAPTURED}${normalize(t.message) ?: t.class.simpleName}".toString())
+                        }
                     },
                     fetchQuestion: { String question, List<String> ids ->
                         Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
@@ -175,13 +180,26 @@ class RunConclusionStep {
             if (answer instanceof List) records.addAll((List) answer.findAll { it != null })
             else if (answer != null) records.add(answer)
         }
-        if (!records) return
+        // Even with nothing found, a capture is written: the replay must answer empty, as live did, not "not captured".
+        writeCapture(lookupsDir, lookup, records, warnings)
+    }
+
+    private static long lastCaptureMillis = 0L
+
+    /** A capture name no earlier one in this JVM or folder holds, so two fetches in one millisecond never overwrite each other. */
+    static synchronized String uniqueCaptureName(File lookupsDir, String name) {
+        long millis = Math.max(System.currentTimeMillis(), lastCaptureMillis + 1)
+        while (new File(lookupsDir, "lookup-${name}-${millis}.json").exists()) millis++
+        lastCaptureMillis = millis
+        return "lookup-${name}-${millis}.json".toString()
+    }
+
+    /** One {metadata, records} capture, atomically; any failure is a warning, never thrown. */
+    static void writeCapture(File lookupsDir, Map lookup, List records, List<String> warnings) {
+        String name = lookup?.name as String
         try {
             lookupsDir.mkdirs()
-            long millis = System.currentTimeMillis()
-            File target = new File(lookupsDir, "lookup-${name}-${millis}.json")
-            // Never the same name twice: the replay reads the newest by its number, and an older file must not be overwritten.
-            while (target.exists()) target = new File(lookupsDir, "lookup-${name}-${++millis}.json")
+            File target = new File(lookupsDir, uniqueCaptureName(lookupsDir, name))
             File partial = new File(lookupsDir, "${target.name}.partial")
             partial.setText(JsonOutput.toJson([metadata: [lookup: name, systemEnumId: lookup.systemEnumId, servedFromStore: true,
                                                           recordCount: records.size()], records: records]), "UTF-8")
@@ -257,10 +275,19 @@ class RunConclusionStep {
                           (normalize(connector.dateToParameterName) ?: "windowEnd")  : ec.user.nowTimestamp]
             // DAR-BE-205: conclusionLookup tells an extract that declares it (HotWax orders) to answer for every id named,
             // with none of a comparison's built-in exclusions; an audit re-check by key never sends it.
-            if (capture) lookupsDir.mkdirs()
+            if (capture) {
+                // An unwritable folder costs the capture, never the answer.
+                try {
+                    lookupsDir.mkdirs()
+                    if (!lookupsDir.isDirectory() || !lookupsDir.canWrite()) throw new IllegalStateException("${lookupsDir.name} is not writable")
+                } catch (Throwable t) {
+                    warnings.add("Lookup ${lookup.name}${NOT_CAPTURED}${normalize(t.message) ?: t.class.simpleName}".toString())
+                    capture = false
+                }
+            }
             Map out = ec.service.sync().name(service).parameters(options + window + (capture ? [outputLocation: outputLocationFor(ec, lookupsDir)] : [:]) + [(configParameter): lookup.sourceConfigId,
                     lookupKeys: ids, lookupKeyField: lookup.keyField, conclusionLookup: true, companyUserGroupId: tenantId, systemEnumId: connector.systemEnumId,
-                    fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
+                    fileName: (capture ? uniqueCaptureName(lookupsDir, lookup.name as String) : "lookup-${lookup.name}-${System.currentTimeMillis()}.json").toString()]).call()
             List errors = (List) (out?.errors ?: (ec.message.hasError() ? ec.message.errors : []))
             if (errors) throw new IllegalStateException(errors.join("; "))
             File file = RunVerificationSupport.resolveLocationFile(ec, normalize(out?.fileLocation))
@@ -270,6 +297,8 @@ class RunConclusionStep {
             }
             // DAR-BE-174: a `many` lookup keeps every record under a key (an order's items), others one.
             Map<String, Object> found = [:]
+            // An extract that answered "no data" writes no file; the capture says so, so a replay answers empty too.
+            if (!file?.isFile() && capture) writeCapture(lookupsDir, lookup, [], warnings)
             if (file?.isFile()) JsonRecordStream.forEachRecord(file, "records") { Map r -> ConclusionLookupSupport.collect(found, lookup, r) }
             ec.logger.info("conclusion lookup ${lookup.name}: asked ${ids.size()} ids of ${lookup.systemEnumId}, found ${found.size()}")
             return found

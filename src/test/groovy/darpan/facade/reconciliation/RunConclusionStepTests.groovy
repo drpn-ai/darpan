@@ -355,4 +355,65 @@ class RunConclusionStepTests {
         assertEquals(2, captures(new File(tmp, "run")).size())
         assertEquals(["A1", "B2"], replayOf(dir, LOOKUP, ["A1", "B2"]).keySet().sort())
     }
+
+    private static Map brainFinding() {
+        return [key: "M1088731\u001F01", bucket: "MISSING_FROM_FILE_2", sides: [
+                FILE_1: [presence: "KEPT", record: [omsOrderId: "M1088731", orderItemSeqId: "01", orderGrandTotal: 371.54]],
+                FILE_2: [presence: "ABSENT", firstFieldPresence: "ABSENT"]]]
+    }
+
+    @Test
+    void aCaptureThatThrowsDoesNotChangeTheBrainsVerdict() {
+        BrainAnswerStore.put("GORJANA", "orderPayments", "M1088731", [orderId: "M1088731", grandTotal: 371.54,
+                paymentPreferenceSlotsFull: false, paymentPreferences: []])
+        Map plain = BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", labelFor: { String c -> c }, findings: [brainFinding()],
+                fetchQuestion: { String q, List ids -> [:] }])
+        Map broken = BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", labelFor: { String c -> c }, findings: [brainFinding()],
+                fetchQuestion: { String q, List ids -> [:] }, captureServed: { String q, Map m -> throw new IllegalStateException("disk gone") }])
+        assertEquals(plain.byKey, broken.byKey)
+        assertEquals(1, broken.warnings.size())
+        assertTrue(broken.warnings[0].contains("orderPayments") && broken.warnings[0].contains("disk gone"), broken.warnings[0])
+    }
+
+    @Test
+    void anUnwritableCaptureFolderStillAnswersTheLookup() {
+        File blocker = new File(tmp, "blocker")
+        blocker.setText("a file, not a folder")
+        List<String> warnings = []
+        Map found = RunConclusionStep.fetchLookup(stubEc([[orderId: "A1"]], [:]), LOOKUP, ["A1"], "T1", warnings, new File(blocker, "lookups"))
+        assertEquals(["A1"], found.keySet() as List)
+        assertEquals(1, warnings.size())
+        assertTrue(warnings[0].contains("orderInNetsuite") && warnings[0].contains(RunConclusionStep.NOT_CAPTURED), warnings[0])
+    }
+
+    @Test
+    void twoCapturesInOneMillisecondKeepTheirOwnNames() {
+        File dir = new File(tmp, "run/lookups")
+        dir.mkdirs()
+        Set<String> names = [] as Set
+        50.times {
+            String n = RunConclusionStep.uniqueCaptureName(dir, "orderInNetsuite")
+            assertTrue(JudgeReplaySupport.CAPTURED_LOOKUP.matcher(n).matches(), n)
+            names << n
+            new File(dir, n).setText("{}")
+        }
+        assertEquals(50, names.size())
+    }
+
+    @Test
+    void aLiveEmptyAnswerReplaysAsEmptyNotAsNotCaptured() {
+        File dir = new File(tmp, "run/lookups")
+        RunConclusionStep.fetchLookup(stubEc([], [:]), LOOKUP, ["A1"], "T1", [], dir)
+        assertEquals(1, captures(new File(tmp, "run")).size())
+        Set<String> notCaptured = [] as Set
+        List<String> warnings = []
+        Map replayed = (Map) JudgeReplaySupport.capturedFetcher(dir, "the run", "Lookup", notCaptured).call(null, LOOKUP, ["A1"], "T1", warnings)
+        assertEquals([:], replayed)
+        assertTrue(notCaptured.isEmpty() && warnings.isEmpty())
+        // store-served, all "nothing found"
+        File dir2 = new File(tmp, "run2/lookups")
+        RunConclusionStep.captureServed(dir2, LOOKUP, [A1: null], [])
+        assertEquals([:], replayOf(dir2, LOOKUP, ["A1"]))
+        assertEquals(1, captures(new File(tmp, "run2")).size())
+    }
 }

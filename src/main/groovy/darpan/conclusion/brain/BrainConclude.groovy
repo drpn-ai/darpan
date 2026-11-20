@@ -76,7 +76,12 @@ class BrainConclude {
             dropped += (plan.dropped ?: 0) as int
             // DAR-BE-318 plan 3a: a live run keeps the answers the store served too, beside the ones it fetched, so a replay has them.
             if (shareAnswers && captureServed != null) {
-                ((Map<String, Map<String, Map>>) (plan.fromStore ?: [:])).each { String q, Map<String, Map> served -> captureServed.call(q, served) }
+                ((Map<String, Map<String, Map>>) (plan.fromStore ?: [:])).each { String q, Map<String, Map> served ->
+                    // A capture is evidence, never part of the verdict.
+                    try { captureServed.call(q, served) } catch (Throwable t) {
+                        warnings.add("Question ${q} answers not captured: ${t.message ?: t.class.simpleName}".toString())
+                    }
+                }
             }
             Set<String> gained = [] as Set
             ((Map<String, Map>) plan.answered).each { String q, Map byId ->

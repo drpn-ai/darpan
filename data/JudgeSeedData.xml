@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-318 plan 2: the judge's own vocabulary, kept apart from the audit-run vocabulary in AuditSeedData.xml
+     (whose contract, AuditCatalogContractTests, pins the codes the audit-run JSON emits). -->
+<entity-facade-xml type="darpan-seed">
+    <!-- What an outcome of a moqui-rules decision means to the judge, and a check's decision stages. -->
+    <moqui.basic.EnumerationType enumTypeId="JudgeOutcomeKind" description="Judge outcome kind"/>
+    <moqui.basic.Enumeration enumId="JOK_FINDING" enumTypeId="JudgeOutcomeKind" enumCode="finding" description="Finding" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="JOK_EXPECTED" enumTypeId="JudgeOutcomeKind" enumCode="expected" description="Expected" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="JOK_HIDDEN" enumTypeId="JudgeOutcomeKind" enumCode="hidden" description="Hidden" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="JOK_SET_ASIDE" enumTypeId="JudgeOutcomeKind" enumCode="setAside" description="Set aside" sequenceNum="4"/>
+    <moqui.basic.EnumerationType enumTypeId="CheckDecisionStage" description="Check decision stage"/>
+    <moqui.basic.Enumeration enumId="CDS_MUST_HOLD" enumTypeId="CheckDecisionStage" enumCode="mustHold" description="Must hold" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CDS_EXPLAINS" enumTypeId="CheckDecisionStage" enumCode="explains" description="Explains" sequenceNum="2"/>
+</entity-facade-xml>

@@ -683,7 +683,10 @@ class AuthFacadeSupportTests {
         // itself, so there is no headroom to absorb a descheduled sample — and the suite now runs several
         // JVMs at once, which makes that routine rather than exceptional. A floor would apply to every
         // call and so would lift the minimum too, which is what keeps this sensitive to the real defect.
-        long elapsedMillis = (1..5).collect { signIn.call() as Long }.min()
+        // 20 samples, not 5: CI runs several test JVMs at once, and all of 5 samples over the floor happened there
+        // (2026-11-20, shard 1/4) with no padding in the code. A floor would lift every sample, so the minimum stays
+        // as sensitive to the real defect.
+        long elapsedMillis = (1..20).collect { signIn.call() as Long }.min()
 
         assertTrue(elapsedMillis < 25L, "a successful sign-in waited ${elapsedMillis}ms behind the refusal floor")
     }

@@ -105,7 +105,29 @@ class TenantOwnedEntityFilterContractTests {
      */
     // 3.0.0 shipped all 16 (DAR-BE-159/160/161/164/167/194/195/209, DAR-CLI-003); DAR-BE-265/275's two went into
     // upgrade-data.xml with DAR-BE-282, which restates every row (filterMap now fails closed)
-    static final Map<String, String> PENDING_NEXT_PACK = [:].asImmutable() as Map<String, String>
+    // DAR-BE-318 plan 2: every moqui-rules row and judge config row belongs to one tenant (15 rules.* + 5 darpan.judge.*)
+    static final Map<String, String> PENDING_NEXT_PACK = [
+            "DARPAN_SCOPE_JUDGE_DECISION_OUTCOME": "darpan.judge.DecisionOutcome",
+            "DARPAN_SCOPE_JUDGE_CHECK_DECISION": "darpan.judge.CheckDecision",
+            "DARPAN_SCOPE_JUDGE_CHECK_PARAMETER_SET": "darpan.judge.CheckParameterSet",
+            "DARPAN_SCOPE_JUDGE_CHECK_PARAMETER": "darpan.judge.CheckParameter",
+            "DARPAN_SCOPE_JUDGE_CHECK_ASK": "darpan.judge.CheckAsk",
+            "DARPAN_SCOPE_RULES_FACT_TYPE": "rules.FactType",
+            "DARPAN_SCOPE_RULES_FACT_FIELD": "rules.FactField",
+            "DARPAN_SCOPE_RULES_FACT_NODE": "rules.FactNode",
+            "DARPAN_SCOPE_RULES_FACT_NODE_CONDITION": "rules.FactNodeCondition",
+            "DARPAN_SCOPE_RULES_RULE_SET": "rules.RuleSet",
+            "DARPAN_SCOPE_RULES_RULE_SET_FACT_TYPE": "rules.RuleSetFactType",
+            "DARPAN_SCOPE_RULES_RULE_SET_OUTCOME": "rules.RuleSetOutcome",
+            "DARPAN_SCOPE_RULES_RULE_SET_RULE": "rules.RuleSetRule",
+            "DARPAN_SCOPE_RULES_RULE_SET_CONDITION": "rules.RuleSetCondition",
+            "DARPAN_SCOPE_RULES_RULE_SET_ACTION": "rules.RuleSetAction",
+            "DARPAN_SCOPE_RULES_RULE_SET_ACTION_FIELD": "rules.RuleSetActionField",
+            "DARPAN_SCOPE_RULES_RULE_PIECE": "rules.RulePiece",
+            "DARPAN_SCOPE_RULES_RULE_PIECE_CONDITION": "rules.RulePieceCondition",
+            "DARPAN_SCOPE_RULES_FILE_CHECK": "rules.FileCheck",
+            "DARPAN_SCOPE_RULES_FILE_CHECK_RECORD": "rules.FileCheckRecord",
+    ].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS).asImmutable()

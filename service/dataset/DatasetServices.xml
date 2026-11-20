@@ -252,32 +252,45 @@
 
     <service verb="project" noun="KeptRecords" type="interface">
         <description>Plan 3b-1 (ruling P3b1-9): what a connector's servingProjectionServiceName implements, in its system's own
-            component (core names no system). A kept-copy slice (KeptCopySupport) calls it twice for a side that may keep only
-            some fields: first with no recordsFile, before the copy is opened, to ask whether the copy can stand in for the
-            side's live read; then with the slice's records, to trim them as the live extract would and to write beside the
-            slice any side file the live extract writes. A servingProblem, at either call, makes the side read live.</description>
+            component (core names no system). Called three ways:
+            (1) with unionFields only, when a dataset's read is planned (DatasetSupport.unionFields): answer keepableFields, the
+            ones of them the system's read can select and keep, so one source's field it cannot read never fails the shared read;
+            (2) with copy, side and the window but no recordsFile, before a slice opens the copy: answer servingProblem unless
+            the copy stands in for the side's live read;
+            (3) with recordsFile as well: write the side's records to outputFile trimmed exactly as the live extract would, and
+            write beside the slice any side file the live extract writes.
+            The contract: a service MUST answer servingProblem whenever it cannot reproduce the live read's records and side
+            files byte for byte; core trusts what it writes, checking only the record count. Core itself filters the copy
+            records before (3) and writes the excluded-records side file (when the row's excludedRecordsSidecar is Y) from the
+            copy records as they are, unprojected: a connector that declares Y and names a projection service must keep in its
+            copy what its live side file carries. A servingProblem makes the side read live.</description>
         <in-parameters>
             <parameter name="systemEnumId" required="true"/>
-            <parameter name="copy" type="Map" required="true"><description>keptFields (the field list the copy's read was sent;
-                null: whole records), heldFields (the top-level fields its records carry), sideFiles (name to absolute path of the
-                files its read wrote beside its records; null when not recorded).</description></parameter>
-            <parameter name="side" type="Map" required="true"><description>keepFields (the list the side sends its extract; null:
+            <parameter name="unionFields" type="List"><description>(1) The fields a dataset's read would keep.</description></parameter>
+            <parameter name="copy" type="Map"><description>(2, 3) keptFields (the field list the copy's read was sent;
+                null: whole records), readFields (what it was asked to read besides), heldFields (the top-level fields its records
+                carry), sideFiles (name to absolute path of the files its read wrote beside its records, from the version the slice
+                opened; null when not recorded).</description></parameter>
+            <parameter name="side" type="Map"><description>(2, 3) keepFields (the list the side sends its extract; null:
                 whole records), filterFields, readFields, windowField.</description></parameter>
-            <parameter name="windowStart" type="Timestamp" required="true"/>
-            <parameter name="windowEnd" type="Timestamp" required="true"/>
-            <parameter name="recordsFile"><description>Absolute path of the slice's records, one JSON record a line, in the window
-                and past the side's filters, as the copy holds them. Empty: answer servingProblem only.</description></parameter>
-            <parameter name="outputFile"><description>Absolute path to write the trimmed records to, one a line, in order.</description></parameter>
-            <parameter name="outputLocation"><description>The data-manager location the slice's file lands in.</description></parameter>
-            <parameter name="fileName"><description>The slice's file name there.</description></parameter>
+            <parameter name="windowStart" type="Timestamp"/>
+            <parameter name="windowEnd" type="Timestamp"/>
+            <parameter name="recordsFile"><description>(3) Absolute path of the slice's records, one JSON record a line, in the
+                window and past the side's filters, as the copy holds them.</description></parameter>
+            <parameter name="outputFile"><description>(3) Absolute path to write the trimmed records to, one a line, in order.</description></parameter>
+            <parameter name="outputLocation"><description>(3) The data-manager location the slice's file lands in; side files go
+                there and nowhere else.</description></parameter>
+            <parameter name="fileName"><description>(3) The slice's file name there.</description></parameter>
         </in-parameters>
         <out-parameters>
-            <parameter name="servingProblem"><description>Why the copy cannot stand in for the live read; empty when it can.</description></parameter>
+            <parameter name="keepableFields" type="List"><description>(1) The unionFields the system's read can keep.</description></parameter>
+            <parameter name="servingProblem"><description>(2, 3) Why the copy cannot stand in for the live read; empty when it can.</description></parameter>
             <parameter name="missingFields" type="List"><description>The fields the copy lacks, when that is why.</description></parameter>
-            <parameter name="recordCount" type="Long"><description>Records written to outputFile.</description></parameter>
-            <parameter name="writtenLocations" type="List"><description>Side files written beside the slice (removed if it is not served).</description></parameter>
-            <parameter name="resultFields" type="Map"><description>What the live extract answers besides its file (a side file's
-                location), added to the served result.</description></parameter>
+            <parameter name="recordCount" type="Long"><description>(3) Records written to outputFile.</description></parameter>
+            <parameter name="writtenLocations" type="List"><description>(3) Side files written beside the slice (removed if it is
+                not served; a path outside the slice's folder is never touched).</description></parameter>
+            <parameter name="resultFields" type="Map"><description>(3) What the live extract answers besides its file (a side
+                file's location), added to the served result; a key the slice answers itself is dropped.</description></parameter>
         </out-parameters>
     </service>
 

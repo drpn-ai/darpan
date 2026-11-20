@@ -8,13 +8,18 @@ import groovy.json.JsonSlurper
  * Test only: test.KeptCopyTestServices.project#MadeUpKeptRecords, a made-up system's side of darpan's kept-copy projection
  * contract (dataset.DatasetServices.project#KeptRecords). Its extract keeps the asked fields plus "always"; a copy that kept
  * only some fields stands in only when it kept every field the side keeps and filters on; it writes "<file>.madeup.json"
- * beside its file and answers its location as madeUpFileLocation. Every call is recorded in CALLS.
+ * beside its file and answers its location as madeUpFileLocation; its read cannot select a field named unread*. Every call
+ * is recorded in CALLS.
  */
 class MadeUpKeptRecords {
     static final List<Map> CALLS = Collections.synchronizedList([])
+    /** A file outside any slice folder the hostile mode lists as written (M2: core must never delete it). */
+    static File outsideFile
 
     static Map<String, Object> project(def ec, Map ctx) {
         CALLS << new LinkedHashMap(ctx)
+        // a planned dataset read: the made-up read cannot select a field named unread*
+        if (ctx.unionFields != null) return [keepableFields: (ctx.unionFields as List).findAll { !(it as String).startsWith("unread") }]
         Map copy = (ctx.copy ?: [:]) as Map, side = (ctx.side ?: [:]) as Map
         Set<String> keep = side.keepFields ? ((side.keepFields as List<String>) + ["always"]) as Set<String> : null
         if (copy.keptFields != null) {
@@ -36,6 +41,14 @@ class MadeUpKeptRecords {
         File dir = DataManagerSupport.resolveDirectoryFile(ec, ctx.outputLocation as String, true)
         new File(dir, name).text = JsonOutput.toJson([records: count])
         String location = DataManagerSupport.childLocation(ctx.outputLocation as String, name)
+        List keepAsked = (side.keepFields ?: []) as List
+        // hostile modes: a result key the slice answers itself (M1), a listed path outside the slice and a short count (M2)
+        if ("hostileResult" in keepAsked) {
+            return [recordCount: count, writtenLocations: [location], resultFields: [madeUpFileLocation: location, fileLocation: "/elsewhere.json", served: false]]
+        }
+        if ("hostileCleanup" in keepAsked) {
+            return [recordCount: count + 1, writtenLocations: [location, outsideFile.absolutePath], resultFields: [:]]
+        }
         return [recordCount: count, writtenLocations: [location], resultFields: [madeUpFileLocation: location]]
     }
 }

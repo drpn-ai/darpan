@@ -291,9 +291,7 @@ class KeptCopySupport {
                 warnings       : served.warnings ?: [],
                 errors         : []] as Map<String, Object>
         // what the connector's projection service says the live extract answers besides its file (ruling P3b1-9)
-        ["served", "extractFile", "reason", "fileLocation", "fileName", "recordCount", "metadata", "warnings"].with { Collection known ->
-            served.each { k, v -> if (!(k in known) && !result.containsKey(k)) result.put(k as String, v) }
-        }
+        served.each { k, v -> if (!((k as String) in RESERVED_RESULT_KEYS) && !result.containsKey(k as String)) result.put(k as String, v) }
         return result
     }
 
@@ -305,9 +303,11 @@ class KeptCopySupport {
     private static void queueRebuildIfFieldsChanged(def ec, Map dataset, Map manifest, String reason) {
         try {
             Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)
-            List<String> next = DatasetRefreshSupport.keepFieldsForRead(ec, dataset, connector)
+            Map<String, List<String>> nextRead = DatasetRefreshSupport.fieldsForRead(ec, dataset, connector)
+            List<String> next = nextRead?.keep
             List<String> held = manifest?.keptFields as List<String>
-            if (next == held) {
+            // the same keep and read lists: a rebuild would read the copy the same way again
+            if (next == held && (next == null || (nextRead.read ?: []) == ((manifest?.readFields ?: []) as List))) {
                 logger.info("Dataset ${dataset.datasetId} not served: ${reason}; its next read keeps the same fields")
                 return
             }
@@ -376,9 +376,10 @@ class KeptCopySupport {
     private static Map callProjection(def ec, Map side, File dir, Map manifest, String windowField, Map extra) {
         String serviceName = side.projectionServiceName as String
         if (ec.service.getServiceDefinition(serviceName) == null) return [servingProblem: PROJECTION_NOT_INSTALLED]
-        Map<String, File> sideFiles = KeptCopyStore.sideFiles(dir)
+        // the side files of the version the slice opens (manifest.version), never whichever is current by then
+        Map<String, File> sideFiles = KeptCopyStore.sideFiles(dir, manifest.version as String)
         Map params = [systemEnumId: side.systemEnumId,
-                      copy        : [keptFields: manifest.keptFields, heldFields: manifest.heldFields,
+                      copy        : [keptFields: manifest.keptFields, readFields: manifest.readFields, heldFields: manifest.heldFields,
                                      sideFiles : sideFiles == null ? null : sideFiles.collectEntries { k, v -> [(k): v.absolutePath] }],
                       side        : [keepFields  : side.keepFields, readFields: side.readFields, windowField: windowField,
                                      filterFields: SourceFilterSupport.parseRules(side.filters).collect { normalize(it.fieldExpression) }],
@@ -497,9 +498,19 @@ class KeptCopySupport {
             Map projected = [:]
             if (side.projectionServiceName) {
                 projectedWork = File.createTempFile("kept-copy-projected-", ".partial", outDir)
+                Set<String> before = (outDir.list() ?: []) as Set<String>
                 projected = callProjection(ec, side, dir, manifest, windowField, [recordsFile: recordsWork.absolutePath,
                         outputFile: projectedWork.absolutePath, outputLocation: location, fileName: fileName])
-                projectionWrote.addAll(((projected.writtenLocations ?: []) as List).collect { it as String })
+                // a service that failed may not say what it wrote: whatever it added to the slice's folder goes with the slice
+                if (projected.servingProblem) {
+                    (outDir.listFiles() ?: []).findAll { !(it.name in before) && it.isFile() }.each { projectionWrote.add(it.absolutePath) }
+                }
+                // only files inside the slice's own folder are ever removed again (a listed path elsewhere is ignored)
+                ((projected.writtenLocations ?: []) as List).each { Object loc ->
+                    File f = locationFile(ec, loc as String)
+                    if (f != null && insideFolder(f, outDir)) projectionWrote.add(f.absolutePath)
+                    else logger.warn("Projection service ${side.projectionServiceName} listed ${loc} outside the slice's folder; it is never removed")
+                }
                 if (projected.servingProblem) return notServed(projected.servingProblem as String)
                 if ((projected.recordCount as Long) != kept) {
                     return notServed("the projection service wrote ${projected.recordCount} records of ${kept}".toString())
@@ -554,9 +565,18 @@ class KeptCopySupport {
             }
             File extractFile = ec.resource.getLocationReference(fileLocation)?.getFile() ?: new File(outDir, fileName)
             served = true
-            // what the system says its live read answers besides the file (a side file's location), on the served result
-            return [served: true, extractFile: extractFile, reason: null, fileLocation: fileLocation, fileName: fileName,
-                    recordCount: kept, metadata: metadata, warnings: warnings] + ((projected.resultFields ?: [:]) as Map)
+            // what the system says its live read answers besides the file (a side file's location), on the served result;
+            // never in place of what the slice itself answers
+            Map result = [served: true, extractFile: extractFile, reason: null, fileLocation: fileLocation, fileName: fileName,
+                          recordCount: kept, metadata: metadata, warnings: warnings]
+            ((projected.resultFields ?: [:]) as Map).each { Object k, Object v ->
+                if (result.containsKey(k as String) || (k as String) in RESERVED_RESULT_KEYS) {
+                    logger.warn("Projection service ${side.projectionServiceName} answered reserved result key ${k}; dropped")
+                } else {
+                    result.put(k as String, v)
+                }
+            }
+            return result
         } finally {
             recordsWork?.delete()
             projectedWork?.delete()
@@ -568,12 +588,32 @@ class KeptCopySupport {
                     new File(outDir, fileName).delete()
                     new File(outDir, ExcludedRecordsSidecar.fileNameFor(fileName)).delete()
                 }
-                projectionWrote.each { String loc ->
-                    File f = loc.startsWith("/") ? new File(loc) : ec.resource.getLocationReference(loc)?.getFile()
-                    f?.delete()
-                }
+                projectionWrote.each { String path -> new File(path).delete() }
                 createdDirs.each { File d -> if (d.list()?.length == 0) d.delete() }
             }
+        }
+    }
+
+    /** Keys a slice's result carries itself, which a projection service's resultFields never replace. */
+    static final Set<String> RESERVED_RESULT_KEYS = (["served", "extractFile", "reason", "fileLocation", "fileName", "recordCount",
+                                                      "metadata", "warnings", "dataAvailable", "fileTypeEnumId",
+                                                      "requestMetadata", "errors"] as Set<String>).asImmutable()
+
+    private static File locationFile(def ec, String location) {
+        if (!location) return null
+        try {
+            return location.startsWith("/") ? new File(location) : ec.resource.getLocationReference(location)?.getFile()
+        } catch (Throwable ignored) {
+            return null
+        }
+    }
+
+    /** {@code f} lies inside {@code folder}, after resolving links and dot segments. */
+    private static boolean insideFolder(File f, File folder) {
+        try {
+            return f.canonicalFile.toPath().startsWith(folder.canonicalFile.toPath()) && f.canonicalFile != folder.canonicalFile
+        } catch (IOException ignored) {
+            return false
         }
     }
 

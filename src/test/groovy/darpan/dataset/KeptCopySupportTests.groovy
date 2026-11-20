@@ -841,15 +841,37 @@ class KeptCopySupportTests {
         assertTrue((after.nextReadDate as Timestamp).time <= System.currentTimeMillis(), "queued for the read that keeps the field")
     }
 
-    /** A test-only connector row of a made-up system that names the test-only projection service. */
+    /**
+     * M1/M2: a projection service never replaces what the slice answers itself, and an abandoned slice removes only files in
+     * its own folder, whatever the service lists.
+     */
+    @Test
+    void aProjectionServiceNeverReplacesTheSlicesAnswerNorDeletesOutsideItsFolder() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj-hostile", "id", "createdAt")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z", hostileResult: 1, hostileCleanup: 2]], "id", "createdAt")
+        Map served = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id", "hostileResult"], "proj-hostile"))
+        assertTrue(served.served as boolean, served.reason as String)
+        assertTrue((served.fileLocation as String).endsWith("slice.json"), "the slice's own location: ${served.fileLocation}")
+        assertNotNull(served.madeUpFileLocation, "a key of its own is still added")
+
+        MadeUpKeptRecords.outsideFile = File.createTempFile("outside-a-slice-", ".json")
+        try {
+            Map params = projParams(connector, ["id", "hostileCleanup"], "proj-hostile-2", null)
+            params.projConfigId = "conn-proj-hostile"
+            Map abandoned = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START, windowEnd: END]))
+            assertFalse(abandoned.served as boolean)
+            assertTrue(MadeUpKeptRecords.outsideFile.exists(), "a listed path outside the slice's folder is never deleted")
+            assertFalse(new File(locationFile(runLocation("proj-hostile-2")), "slice.madeup.json").exists(), "its own side file is removed")
+        } finally {
+            MadeUpKeptRecords.outsideFile.delete()
+        }
+    }
+
+    /** A test-only connector row of a made-up system that names the test-only extract and projection service. */
     private void loadProjectionConnector() {
-        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_PROJ" extractServiceName="${RETURNS_EXTRACT}"
-                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_PROJ_TYPE"
-                configParameterName="projConfigId" preserveWindowInstants="Y" keepFieldsParameterName="keepFields"
-                filterParameterName="sourceFilters" excludedRecordsSidecar="N"
-                servingProjectionServiceName="test.KeptCopyTestServices.project#MadeUpKeptRecords" enabled="Y"/>
-        </entity-facade-xml>""").dummyFks(true).load()
+        ec.entity.makeDataLoader().location("classpath://dataset/MadeUpProjectionConnector.xml").dummyFks(true).load()
     }
 
     private Map projParams(Map connector, List<String> keep, String token, List<Map> filters) {

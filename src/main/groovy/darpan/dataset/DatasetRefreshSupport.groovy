@@ -116,10 +116,11 @@ class DatasetRefreshSupport {
                 // the tenant's zone, as the live paths resolve it (refresh runs under the dataset's tenant)
                 String zone = TenantAccessSupport.resolveActiveTenantTimeZone(ec)
                 // plan 3b-1 (ruling 3b1-7): the fields the tenant's checks on this source read, when the read can keep only those
-                List<String> keptFields = kind == FULL ?
-                        keepFieldsForRead(ec, dataset, SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)) : null
+                Map<String, List<String>> fields = kind == FULL ?
+                        fieldsForRead(ec, dataset, SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)) : null
+                List<String> keptFields = fields?.keep
                 result = read(ec, dataset, dir, readSeqId, kind, fromStamp, startedAt, zone, (Closure) extractor,
-                        ownerGuard(ec, dataset.datasetId as String, dataset.companyUserGroupId as String, startedAt), keptFields)
+                        ownerGuard(ec, dataset.datasetId as String, dataset.companyUserGroupId as String, startedAt), fields)
                 if (!result.error) {
                     result.nextReadDate = nextReadAt(startedAt, zone, dataset.readHourLocal as Integer)
                     result.keptFieldsJson = keptFields == null ? null : groovy.json.JsonOutput.toJson(keptFields)
@@ -190,16 +191,17 @@ class DatasetRefreshSupport {
     }
 
     /**
-     * Plan 3b-1 (ruling 3b1-7): the field list the dataset's next read sends its extractor, or null for whole records. Only a
-     * rolling dataset projects (each read replaces the whole copy, so its records never mix two projections), and only
-     * through a connector that takes keep fields and names a projection service a slice trims with (ruling P3b1-9).
+     * Plan 3b-1 (ruling 3b1-7): what the dataset's next read asks its extractor, [keep, read] (DatasetSupport.unionFields),
+     * or null for whole records. Only a rolling dataset projects (each read replaces the whole copy, so its records never mix
+     * two projections), and only through a connector that takes keep fields and names a projection service a slice trims
+     * with (ruling P3b1-9).
      */
-    static List<String> keepFieldsForRead(def ec, Map dataset, Map<String, Object> connector) {
+    static Map<String, List<String>> fieldsForRead(def ec, Map dataset, Map<String, Object> connector) {
         if (!isRolling(dataset) || !connector?.keepFieldsParameterName || !connector?.servingProjectionServiceName) {
             return null
         }
-        Set<String> kept = DatasetSupport.keptFields(ec, dataset)
-        return kept == null ? null : new ArrayList<String>(kept)
+        Map<String, Set<String>> union = DatasetSupport.unionFields(ec, dataset)
+        return union == null ? null : [keep: new ArrayList<String>(union.keep), read: new ArrayList<String>(union.read)]
     }
 
     /**
@@ -309,7 +311,7 @@ class DatasetRefreshSupport {
      */
     static Map read(def ec, Map dataset, File datasetDir, String readSeqId, String readKindEnumId,
                     Timestamp fromStamp, Timestamp readThru, String timeZone, Closure extractor, Closure ownerGuard,
-                    List<String> keptFields = null) {
+                    Map<String, List<String>> fields = null) {
         try {
             boolean full = readKindEnumId == FULL
             String tenantId = dataset.companyUserGroupId
@@ -319,9 +321,18 @@ class DatasetRefreshSupport {
 
             String location = readLocation(ec, tenantId, datasetId, readSeqId)
             DataManagerSupport.resolveDirectoryFile(ec, location, true)
+            List<String> keptFields = full ? fields?.keep : null
             Map<String, Object> params = extractParams(connector, dataset, location, readSeqId,
-                    full ? dataset.windowField as String : dataset.stampField as String, fromStamp, readThru, timeZone,
-                    full ? keptFields : null)
+                    full ? dataset.windowField as String : dataset.stampField as String, fromStamp, readThru, timeZone, keptFields)
+            // the sources' read fields go as a live read sends them (readFields: a field the source cannot select is left out),
+            // only to an extract that declares the parameter (ReconciliationSavedRunSupport.extractReadFields' rule)
+            List<String> readFields = keptFields != null ? fields?.read : null
+            if (readFields && ec.service.getServiceDefinition(serviceName)?.inParameterNameList
+                    ?.contains(ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER)) {
+                params.put(ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER, readFields)
+            } else {
+                readFields = null
+            }
 
             Map out = ((extractor ?: liveExtractor(ec)).call(serviceName, params) ?: [:]) as Map
             List errors = (out.errors instanceof Collection ? (Collection) out.errors : []).findAll { it } as List
@@ -331,7 +342,7 @@ class DatasetRefreshSupport {
             Timestamp readAt = new Timestamp(file.lastModified())
             // plan 3b-1: a full read's copy keeps the fields it was sent and the files the read wrote beside its records (a
             // connector's projection service may reproduce a run's side file from them)
-            Map copyInfo = full ? [keptFields: keptFields, sideFiles: sideFilesOf(file)] : [:]
+            Map copyInfo = full ? [keptFields: keptFields, readFields: readFields, sideFiles: sideFilesOf(file)] : [:]
 
             // The swap and the prune run together under the owner guard: a refresh that lost its lock does neither, and
             // KeptCopyStore deletes its new version.

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Test only (on the test classpath, never shipped): a made-up system's extract, so core's kept-copy code is tested with
+         no system component installed. Its parameters are what a dataset read and a run side send it; tests pass their own
+         extractor closure, so its body never reads anything. -->
+    <service verb="extract" noun="MadeUpRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="keepFields" type="List"/>
+            <parameter name="readFields" type="List"/>
+            <parameter name="sourceFilters" type="List"/>
+            <parameter name="madeUpCap" type="Integer"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileLocation"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
+</services>

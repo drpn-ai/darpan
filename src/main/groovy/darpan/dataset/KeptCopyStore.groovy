@@ -36,11 +36,11 @@ class KeptCopyStore {
     }
 
     /**
-     * [version, readThru, readAt, recordCount, coveredFrom, idField, stampField, windowField, keptFields, heldFields,
-     * sideFiles] of the current version, or null when there is none. coveredFrom..windowField say what the copy covers:
+     * [version, readThru, readAt, recordCount, coveredFrom, idField, stampField, windowField, keptFields, readFields,
+     * heldFields, sideFiles] of the current version, or null when there is none. coveredFrom..windowField say what the copy covers:
      * every record created (windowField) at or after coveredFrom, keyed by idField and stamped by stampField. A version
      * written before they were recorded has them null, which reads as covering nothing. keptFields is the field list the read
-     * was sent (null: whole records), heldFields the top-level fields its records carry (null when not recorded), sideFiles
+     * was sent (null: whole records), readFields the fields it was asked to read besides (null: none), heldFields the top-level fields its records carry (null when not recorded), sideFiles
      * the names of the files the read wrote beside its records, kept with the version (empty: it wrote none; null: not
      * recorded).
      */
@@ -54,19 +54,23 @@ class KeptCopyStore {
                 recordCount: ((Number) (m.get("recordCount") ?: 0)).longValue(), coveredFrom: toTimestamp(m.get("coveredFrom")),
                 idField    : m.get("idField") ?: null, stampField: m.get("stampField") ?: null, windowField: m.get("windowField") ?: null,
                 keptFields : m.get("keptFields") instanceof List ? (List<String>) m.get("keptFields") : null,
+                readFields : m.get("readFields") instanceof List ? (List<String>) m.get("readFields") : null,
                 heldFields : m.get("heldFields") instanceof List ? (List<String>) m.get("heldFields") : null,
                 sideFiles  : m.get("sideFiles") instanceof List ? (List<String>) m.get("sideFiles") : null]
     }
 
     /**
-     * The current version's side files (the files its read wrote beside its records) by name; empty when the read wrote
-     * none, null when the version recorded none or there is no version.
+     * A version's side files (the files its read wrote beside its records) by name: the version a slice opened, never
+     * whichever is current by then. Empty when the read wrote none; null when the version recorded none or is gone.
      */
-    static Map<String, File> sideFiles(File datasetDir) {
-        Map m = manifest(datasetDir)
-        if (m?.sideFiles == null) return null
-        File dir = new File(new File(datasetDir, m.version as String), SIDE_FILES_DIR)
-        return ((List<String>) m.sideFiles).collectEntries { String name -> [(name): new File(dir, name)] }
+    static Map<String, File> sideFiles(File datasetDir, String version) {
+        File versionDir = version ? new File(datasetDir, version) : null
+        File manifestFile = versionDir == null ? null : new File(versionDir, MANIFEST_FILE)
+        if (manifestFile == null || !manifestFile.isFile()) return null
+        Object names = ((Map) new JsonSlurper().parse(manifestFile, "UTF-8")).get("sideFiles")
+        if (!(names instanceof List)) return null
+        File dir = new File(versionDir, SIDE_FILES_DIR)
+        return ((List<String>) names).collectEntries { String name -> [(name): new File(dir, name)] }
                 .findAll { String name, File f -> f.isFile() } as Map<String, File>
     }
 
@@ -166,7 +170,8 @@ class KeptCopyStore {
      * countMisses false (a rolling dataset, which re-reads its whole window daily) nothing is a miss: missCount is null,
      * and changedCount, addedCount and removedCount are counted as before. An idField naming several fields (comma) keys
      * each record by its _copyId. {@code copyInfo} (plan 3b-1): keptFields, the field list the read was sent (null: whole
-     * records), recorded in the manifest with the fields the records carry; sideFiles, the files the read wrote beside its
+     * records), recorded in the manifest with the fields the records carry; readFields, what it was asked to read besides;
+     * sideFiles, the files the read wrote beside its
      * records by name (kept with the version; absent: not recorded).
      */
     static Map replace(File datasetDir, Iterator<Map> full, String idField, String stampField, String createdField,
@@ -191,6 +196,7 @@ class KeptCopyStore {
                 [coveredFrom: horizonStart, idField: idField, stampField: stampField, windowField: createdField]
         Set<String> held = new TreeSet<String>()
         Map info = coverage + [keptFields: copyInfo?.keptFields == null ? null : new ArrayList(copyInfo.keptFields as Collection),
+                               readFields: copyInfo?.readFields ? new ArrayList(copyInfo.readFields as Collection) : null,
                                heldFields: held, sideFiles: copyInfo?.sideFiles instanceof Map ? copyInfo.sideFiles : null]
         Map out = writeVersion(datasetDir, readThru, readAt, info, swapGuard) { Writer w ->
             long count = 0
@@ -291,6 +297,7 @@ class KeptCopyStore {
                     idField: coverage?.idField, stampField: coverage?.stampField, windowField: coverage?.windowField]
             // plan 3b-1: only when known, so a version written without them reads exactly as before
             if (coverage?.keptFields != null) manifestJson.keptFields = coverage.keptFields
+            if (coverage?.readFields) manifestJson.readFields = coverage.readFields
             if (coverage?.heldFields != null) manifestJson.heldFields = new ArrayList((Collection) coverage.heldFields)
             if (sideFiles != null) manifestJson.sideFiles = new ArrayList<String>(sideFiles.keySet()).sort()
             new File(tmp, MANIFEST_FILE).setText(JsonOutput.toJson(manifestJson), "UTF-8")

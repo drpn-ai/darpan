@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test only: KC_PROJ, a made-up system that keeps copies through core's hooks alone (ruling P3b1-9): its own extract and
+     projection service (both on the test classpath), keep fields, filters, a side-file declaration and dataset read parameters. -->
+<entity-facade-xml type="seed">
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_PROJ"
+            extractServiceName="reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRecords"
+            dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_PROJ_TYPE"
+            configParameterName="projConfigId" preserveWindowInstants="Y" keepFieldsParameterName="keepFields"
+            keepFieldsBase="id,createdAt" filterParameterName="sourceFilters" excludedRecordsSidecar="N"
+            servingProjectionServiceName="test.KeptCopyTestServices.project#MadeUpKeptRecords"
+            datasetReadParametersJson='{"madeUpCap":7}' enabled="Y"/>
+</entity-facade-xml>

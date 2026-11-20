@@ -36,6 +36,43 @@ class KeptCopyStoreTests {
     }
     List<String> versionDirs() { dir.listFiles().findAll { it.isDirectory() && it.name.startsWith("v") }*.name.sort() }
 
+    /** Plan 3b-1: a copy that kept only some fields records them; a merge of whole records onto it would mix the two. */
+    @Test void aMergeOntoACopyThatKeptSomeFieldsCoversNothing() {
+        KeptCopyStore.replace(dir, [rec("1", "2026-10-05T00:00:00Z")].iterator(), "id", "updatedAt", "createdAt", ts("2026-09-01T00:00:00Z"),
+                ts("2026-11-08T00:00:00Z"), ts("2026-11-08T00:00:05Z"), 2, null, false, [keptFields: ["id", "updatedAt"], readFields: ["total"]])
+        Map projected = KeptCopyStore.manifest(dir)
+        assertEquals(["id", "updatedAt"], projected.keptFields)
+        assertEquals(["total"], projected.readFields)
+        assertNotNull(projected.coveredFrom)
+        merge(dir, [rec("2", "2026-11-09T00:00:00Z")], "2026-11-09T00:00:00Z")
+        Map merged = KeptCopyStore.manifest(dir)
+        assertNull(merged.coveredFrom, "the merged copy covers nothing until a full read replaces it")
+        // whole records on both sides merge as before
+        File whole = new File(dir.parentFile, "whole")
+        replace(whole, [rec("1", "2026-10-05T00:00:00Z")])
+        merge(whole, [rec("2", "2026-11-09T00:00:00Z")], "2026-11-09T00:00:00Z")
+        assertNotNull(KeptCopyStore.manifest(whole).coveredFrom)
+    }
+
+    /** Plan 3b-1: a version keeps the files its read wrote beside its records, read back by that version, not the current one. */
+    @Test void aVersionKeepsItsReadsSideFilesReadBackByVersion() {
+        File side = new File(dir.parentFile, "read-1.extra.json")
+        side.text = "first"
+        KeptCopyStore.replace(dir, [rec("1", "2026-10-05T00:00:00Z")].iterator(), "id", "updatedAt", "createdAt", ts("2026-09-01T00:00:00Z"),
+                ts("2026-11-08T00:00:00Z"), ts("2026-11-08T00:00:05Z"), 2, null, false, [sideFiles: [(side.name): side]])
+        String first = KeptCopyStore.manifest(dir).version
+        assertEquals([side.name], KeptCopyStore.manifest(dir).sideFiles)
+        side.text = "second"
+        KeptCopyStore.replace(dir, [rec("1", "2026-10-06T00:00:00Z")].iterator(), "id", "updatedAt", "createdAt", ts("2026-09-01T00:00:00Z"),
+                ts("2026-11-09T00:00:00Z"), ts("2026-11-09T00:00:05Z"), 2, null, false, [sideFiles: [:]])
+        String second = KeptCopyStore.manifest(dir).version
+        assertEquals("first", KeptCopyStore.sideFiles(dir, first)[side.name].text, "the version a slice opened keeps its own")
+        assertEquals([:], KeptCopyStore.sideFiles(dir, second), "the read wrote none")
+        replace(new File(dir.parentFile, "untracked"), [rec("1", "2026-10-05T00:00:00Z")])
+        assertNull(KeptCopyStore.sideFiles(new File(dir.parentFile, "untracked"), KeptCopyStore.manifest(new File(dir.parentFile, "untracked")).version),
+                "a version that recorded none")
+    }
+
     @Test void aFirstMergeMakesVersionOne() {
         assertNull(KeptCopyStore.manifest(dir))
         Map r = merge(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T15:00:00Z")])

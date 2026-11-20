@@ -17,16 +17,29 @@ import static darpan.common.ValueSupport.normalize
 /** DAR-BE-318 plan 3a: helpers for the kept copy of a dataset (the hashing and folder ones are pure). */
 class DatasetSupport {
 
-    /**
-     * Plan 3b-1 (ruling 3b1-7): the fields a dataset's copy keeps of each record, in order, or null for whole records. The
-     * union, over the dataset tenant's run sources (RuleSetCompareSource) and automation sources whose system, connection and
-     * options key equal the dataset's (KeptCopySupport.optionsKey, the key find#ServingDataset matches a side by; ruling
-     * P3b1-1), of each source's keep fields (RunExtractSupport.sideKeepFields), read fields and filter fields (a slice
-     * filters the copy record); then the dataset's own id, stamp and window fields. Null when the connector names no
-     * projection service (servingProjectionServiceName, ruling P3b1-9) or takes no keep fields, when no source matches, when any matching source keeps whole records (no projection; every automation source, which sends
-     * none), or when the active tenant is not the dataset's. Only the dataset tenant's rows are read (A7).
-     */
+    /** {@link #unionFields}' keep list: the fields a dataset's copy keeps of each record, in order; null for whole records. */
     static Set<String> keptFields(def ec, Map dataset) {
+        return (Set<String>) unionFields(ec, dataset)?.keep
+    }
+
+    /**
+     * Plan 3b-1 (ruling 3b1-7): what a dataset's read asks of its source, as [keep, read], or null for whole records. Over
+     * the dataset tenant's current run sources (RuleSetCompareSource of an active, unarchived rule set) whose system,
+     * connection and options key equal the dataset's (KeptCopySupport.optionsKey, the key find#ServingDataset matches a side
+     * by; ruling P3b1-1):
+     * <ul>
+     * <li>keep: each source's keep fields (RunExtractSupport.sideKeepFields) and filter fields (a slice filters the copy
+     *     record), then the dataset's own id, stamp and window fields; trimmed to the fields the connector's projection
+     *     service says its read can keep (project#KeptRecords' keepableFields), so one source's field the system cannot read
+     *     never fails the shared read (that source's side then reads live, as it would anyway);</li>
+     * <li>read: each source's read fields (ReconciliationSavedRunSupport.extractReadFields), sent as readFields, the way a
+     *     live read sends them: a field the system cannot select is left out by its read, never refused.</li>
+     * </ul>
+     * Null when the connector names no projection service (servingProjectionServiceName, ruling P3b1-9) or takes no keep
+     * fields, when no source matches, when any matching source keeps whole records (no projection; every current automation
+     * source, which sends none), or when the active tenant is not the dataset's. Only the dataset tenant's rows are read (A7).
+     */
+    static Map<String, Set<String>> unionFields(def ec, Map dataset) {
         String tenantId = normalize(dataset?.companyUserGroupId)
         String systemEnumId = normalize(dataset?.systemEnumId)
         String sourceConfigId = normalize(dataset?.sourceConfigId)
@@ -37,19 +50,25 @@ class DatasetSupport {
         String datasetHash = normalize(dataset.optionsHash) ?: optionsHash(new groovy.json.JsonSlurper().parseText(
                 (dataset.optionsJson ?: "{}") as String) as Map)
 
-        Set<String> union = new LinkedHashSet<String>()
+        Set<String> keep = new LinkedHashSet<String>()
+        Set<String> read = new LinkedHashSet<String>()
         int matched = 0
-        // automation sources keep whole records: one that reads this copy makes it whole
+        // automation sources keep whole records: a current one that reads this copy makes it whole (M6: an archived or
+        // paused automation runs nothing)
+        Set<String> currentAutomations = TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.ReconciliationAutomation")
+                .condition("companyUserGroupId", tenantId).useCache(false).list()
+                .findAll { current(it) }*.automationId as Set<String>
         def automationSources = TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.ReconciliationAutomationSource")
                 .condition("companyUserGroupId", tenantId).condition("systemEnumId", systemEnumId).useCache(false).list()
         for (def source : automationSources) {
+            if (!((source.automationId as String) in currentAutomations)) continue
             Map parameters = (AutomationExecutionSupport.resolveSourceExtractorMetadata(ec, source, [:])?.parameters ?: [:]) as Map
             if (matches(connector, parameters, sourceConfigId, datasetHash)) return null
         }
 
-        // run sources: the tenant's rule sets (the tenant boundary), their scopes, their sides on this system
+        // run sources: the tenant's current rule sets (the tenant boundary), their scopes, their sides on this system
         List<String> ruleSetIds = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSet").condition("companyUserGroupId", tenantId)
-                .useCache(false).list()*.ruleSetId as List<String>
+                .useCache(false).list().findAll { current(it) }*.ruleSetId as List<String>
         if (!ruleSetIds) return null
         Map<String, String> ruleSetOfScope = [:]
         TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareScope",
@@ -66,13 +85,13 @@ class DatasetSupport {
             parameters.put(normalize(connector.configParameterName) ?: "sourceConfigId", source.sourceConfigId)
             if (!matches(connector, parameters, sourceConfigId, datasetHash)) continue
             matched++
-            List<String> keep = RunExtractSupport.sideKeepFields(ec, source, connector)
-            if (keep == null) return null
-            union.addAll(keep)
-            union.addAll(ReconciliationSavedRunSupport.extractReadFields(ec, connector.extractServiceName as String,
+            List<String> sideKeep = RunExtractSupport.sideKeepFields(ec, source, connector)
+            if (sideKeep == null) return null
+            keep.addAll(sideKeep)
+            read.addAll(ReconciliationSavedRunSupport.extractReadFields(ec, connector.extractServiceName as String,
                     source.compareScopeId, source.fileSide) ?: [])
             try {
-                union.addAll(ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
+                keep.addAll(ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
                         .collect { normalize(it.fieldExpression) }.findAll { it })
             } catch (IllegalArgumentException ignored) {
                 // a filter its live read would refuse as well: keep whole records rather than guess its field
@@ -80,9 +99,40 @@ class DatasetSupport {
             }
         }
         if (matched == 0) return null
-        union.addAll(DatasetRefreshSupport.idFields(dataset.idField as String))
-        [dataset.stampField, dataset.windowField].each { String f = normalize(it); if (f) union.add(f) }
-        return union
+        keep.addAll(DatasetRefreshSupport.idFields(dataset.idField as String))
+        [dataset.stampField, dataset.windowField].each { String f = normalize(it); if (f) keep.add(f) }
+        Set<String> keepable = keepableFields(ec, connector, keep)
+        if (keepable == null) return null
+        return [keep: keep.findAll { it in keepable } as LinkedHashSet<String>, read: read]
+    }
+
+    /** A rule set or automation that still runs: active and not archived. */
+    private static boolean current(def row) {
+        return !"N".equalsIgnoreCase(normalize(row.isActive) ?: "Y") && !"Y".equalsIgnoreCase(normalize(row.isArchived) ?: "N")
+    }
+
+    /**
+     * The fields of {@code fields} the connector's projection service says its read can keep (project#KeptRecords called
+     * with unionFields); null, so whole records, when the service is missing or fails. Leaves the message facade as it
+     * found it.
+     */
+    private static Set<String> keepableFields(def ec, Map<String, Object> connector, Set<String> fields) {
+        String serviceName = normalize(connector.servingProjectionServiceName)
+        if (!SourceSystemConnectorSupport.isAllowedProjectionServiceShape(serviceName) || ec.service.getServiceDefinition(serviceName) == null) {
+            return null
+        }
+        // a service called with errors on the facade does not run; those errors are the caller's, left alone
+        if (ec.message.hasError()) return null
+        try {
+            Map out = ec.service.sync().name(serviceName).parameters([systemEnumId: connector.systemEnumId,
+                    unionFields: new ArrayList<String>(fields)]).call() ?: [:]
+            if (ec.message.hasError()) return null
+            return out.keepableFields instanceof Collection ? (out.keepableFields as Collection).collect { it as String } as Set<String> : null
+        } catch (Throwable t) {
+            return null
+        } finally {
+            ec.message.clearErrors()
+        }
     }
 
     /** The source would read this dataset: its connection and its options key (KeptCopySupport.optionsKey) are the dataset's. */

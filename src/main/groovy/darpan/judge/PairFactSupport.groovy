@@ -44,19 +44,20 @@ class PairFactSupport {
     /**
      * key -> field name for a side. The tenant's FactType is the one source of truth: every existing key -> name pair is kept as
      * is (taken from the FactField descriptions), and only keys not seen before are named, in sorted order, with a numeric suffix
-     * (_2, _3 ...) when the name is taken (the base is cut so the suffix still fits the limit). Nothing here depends on which
+     * (_2, _3 ...) when the name is taken, ignoring case (the base is cut so the suffix still fits the limit). Nothing here depends on which
      * other keys a run happens to hold, and buildFact never derives a name itself.
      */
     static Map<String, String> nameKeys(String prefix, Map<String, String> existing, Collection<String> keys) {
         Map<String, String> names = new LinkedHashMap<>(existing ?: [:])
-        Set<String> used = new HashSet<>(names.values())
-        used.add(prefix + "_presence")   // a side key can never take the presence field's name
+        // Names clash ignoring case: prod MySQL compares the FactField key case-insensitively (utf8_general_ci), H2 does not.
+        Set<String> used = new HashSet<>(names.values().collect { it.toLowerCase() })
+        used.add((prefix + "_presence").toLowerCase())   // a side key can never take the presence field's name
         (keys ?: []).collect { it as String }.toSet().sort().each { String key ->
             if (names.containsKey(key)) return
             String base = fieldName(prefix, key)
             String name = base
             int n = 2
-            while (!used.add(name)) {
+            while (!used.add(name.toLowerCase())) {
                 String suffix = "_" + n++
                 name = (base.length() + suffix.length() > MAX_FIELD_NAME ? base.substring(0, MAX_FIELD_NAME - suffix.length()) : base) + suffix
             }

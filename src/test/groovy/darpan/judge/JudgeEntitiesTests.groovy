@@ -14,7 +14,6 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
-import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -213,16 +212,6 @@ class JudgeEntitiesTests {
     private static void assertRefused(Map result, String expected) {
         assertTrue(result.errors.any { it?.contains(expected.toString()) },
                 "expected a refusal containing '${expected}', got errors ${result.errors}")
-    }
-
-    private def row(String entityName, Map pk) {
-        def value = ec.entity.find(entityName).condition(pk).disableAuthz().useCache(false).one()
-        assertNotNull(value, "${entityName} ${pk} must exist")
-        return value
-    }
-
-    private List rows(String entityName, Map conditions) {
-        return ec.entity.find(entityName).condition(conditions).disableAuthz().useCache(false).list()
     }
 
     private void actAs(String username, String tenant) {

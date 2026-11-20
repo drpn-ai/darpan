@@ -104,6 +104,17 @@ class PairFactSupportTests {
         assertEquals("OPEN", fact.hotwax_items_0__status)
     }
 
+    // DAR-BE-318 final review M1: prod MySQL compares the FactField name case-insensitively, so keys that differ only in case need distinct names.
+    @Test
+    void keysThatDifferOnlyInCaseGetDistinctNamesIgnoringCaseAndExistingNamesStay() {
+        Map names = PairFactSupport.nameKeys("hotwax", [:], ["status", "Status"])
+        assertEquals(["Status": "hotwax_Status", "status": "hotwax_status_2"], names, "sorted order: Status first")
+        assertEquals(2, names.values().collect { it.toLowerCase() }.toSet().size())
+        Map again = PairFactSupport.nameKeys("hotwax", [status: "hotwax_status"], ["status", "Status"])
+        assertEquals("hotwax_status", again.status, "an existing name is kept")
+        assertEquals("hotwax_Status_2", again.Status)
+    }
+
     @Test
     void collidingNamesGetANumericSuffixInKeyOrder() {
         Map names = PairFactSupport.nameKeys("hotwax", [:], ["a-b", "a_b", "a b"])

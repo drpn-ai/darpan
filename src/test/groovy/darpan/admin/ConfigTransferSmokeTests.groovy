@@ -699,6 +699,31 @@ class ConfigTransferSmokeTests {
         assertEquals(["RUN:XFER_RS"], blocked(repurposed, "SCOPE_IN_USE", map), "nor turned into another object's scope")
     }
 
+    // DAR-BE-318 final review I1 (ruling P2-10): judge config is not transferable until plan 4; these ids name rules.* rows of this instance.
+    @Test
+    void theJudgesIdsOnAStatementAndACheckAreNotCarried() {
+        def statement = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "XFER_AUDIT_R4").disableAuthz().one()
+        def check = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "XFER_CHK1").disableAuthz().one()
+        statement.setAll([claimRuleSetId: "XFER_JUDGE_RS", claimOutcomeId: "XFER_JUDGE_OUT"])
+        statement.update()
+        check.set("pairFactTypeId", "XFER_JUDGE_FACT")
+        check.update()
+        try {
+            Map bundle = exportSource()
+            Map exportedStatement = (bundle.statements as List<Map>).find { it.ref == "STATEMENT:XFER_AUDIT_R4" }
+            Map exportedCheck = (bundle.checks as List<Map>).find { it.ref == "CHECK:XFER_CHK1" }
+            assertEquals("Returns have memos", (exportedStatement.fields as Map).statementText, "its own fields still travel")
+            assertFalse(["claimRuleSetId", "claimOutcomeId"].any { (exportedStatement.fields as Map).containsKey(it) }, "${exportedStatement}")
+            assertFalse((exportedCheck.fields as Map).containsKey("pairFactTypeId"), "${exportedCheck}")
+            assertFalse(JsonOutput.toJson(bundle).contains("XFER_JUDGE"), "no judge id anywhere in the bundle")
+        } finally {
+            statement.setAll([claimRuleSetId: null, claimOutcomeId: null])
+            statement.update()
+            check.set("pairFactTypeId", null)
+            check.update()
+        }
+    }
+
     @Test
     void missingReferenceDataBlocks() {
         Map bundle = copy(exportSource())

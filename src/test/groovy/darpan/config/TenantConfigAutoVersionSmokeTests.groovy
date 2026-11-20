@@ -109,6 +109,32 @@ class TenantConfigAutoVersionSmokeTests {
         assertEquals(1L, pending.changeCount as Long, "one transaction, one mark")
     }
 
+    // DAR-BE-318 final review I1: generate#PairFactType writes AuditCheck.pairFactTypeId on a replay; that is derived state, no config change.
+    @Test
+    void aReplayWritingAChecksPairFactTypeIdMarksNothingButARealEditStillDoes() {
+        String checkId = "${MINE}_INV".toString()
+        asSystem { ec.entity.find(PENDING).deleteAll() }
+        try {
+            inTransaction {
+                asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().set("pairFactTypeId", "TCA_FACT_1").update() }
+            }
+            settle()
+            assertNull(pendingOf(MINE), "the first replay's pair fact type id is no config change")
+            assertEquals("TCA_FACT_1", asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).useCache(false).one().pairFactTypeId })
+
+            inTransaction {
+                asSystem { ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().setAll([pairFactTypeId: "TCA_FACT_2", label: "Invoices with no Etail id"]).update() }
+            }
+            assertNotNull(waitForPending(MINE), "a real edit beside it still marks the tenant")
+        } finally {
+            settle()
+            asSystem {
+                ec.entity.find("darpan.audit.AuditCheck").condition("checkId", checkId).one().setAll([pairFactTypeId: null, label: "Invoices missing an Etail id"]).update()
+                ec.entity.find(PENDING).deleteAll()
+            }
+        }
+    }
+
     // DAR-BE-237: a script or deployment save is a config change; a deployment's run (when it ran, how, when next) is not.
     @Test
     void aScriptSaveMarksItsTenantAndADeploymentRunDoesNot() {

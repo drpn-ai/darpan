@@ -97,8 +97,7 @@ class JudgeReplaySupport {
         Map params = (Map) (args.params ?: [:])
         // Ruling P2-24: asks are answered from the replay's captured lookups only, never through AskSupport.fetcher.
         File extract1 = (File) ((Map) args.extractFiles)?.get("file1")
-        Set<String> notCaptured = new TreeSet<>()
-        Closure askFetcher = capturedFetcher(lookupsDirOf(extract1), "the replayed run", "Ask", notCaptured)
+        Closure askFetcher = capturedFetcher(lookupsDirOf(extract1), "the replayed run", "Ask", new TreeSet<String>())
         // Every warning an ask gives, once each across batches (each starts "Ask "; the replay also lists them in replayWarnings).
         Set<String> askWarnings = new LinkedHashSet<>()
         Iterator<List<Map>> factBatches = new Iterator<List<Map>>() {

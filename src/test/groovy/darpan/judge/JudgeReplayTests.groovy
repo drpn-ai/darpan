@@ -475,6 +475,66 @@ class JudgeReplayTests {
         assertEquals(allowed.sort(), users.sort())
     }
 
+    /**
+     * Ruling P2-27, pinned at RunConclusionStep (N2-M1): a brain scope concluded with its own lookupFetcher (a replay) neither reads
+     * BrainAnswerStore (a stored answer is asked again) nor writes it (the fetched answer is not kept).
+     */
+    @Test
+    void aBrainScopeConcludedWithItsOwnLookupFetcherNeitherReadsNorWritesTheSharedAnswers() {
+        String SEP = "\u001F"
+        String FILE_1 = "FILE_1", FILE_2 = "FILE_2"
+        darpan.conclusion.brain.BrainAnswerStore.clear()
+        try {
+            // Its own run: JRT_RS must keep its one scope (the replay refuses a saved run with two).
+            insert("darpan.rule.RuleSet", [ruleSetId: "JRT_BRAIN_RS", ruleSetName: "Brain pin", companyUserGroupId: A])
+            insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "JRT_BRAIN_SCOPE", ruleSetId: "JRT_BRAIN_RS", objectType: "ORDER_LINE_UNIT",
+                    conclusionBrain: "ORDER_LINE", description: "Brain pin", companyUserGroupId: A,
+                    conclusionLookupsJson: groovy.json.JsonOutput.toJson([[name: "orderPayments", subject: "FILE_1", idField: "omsOrderId",
+                            systemEnumId: "HOTWAX_OMS", sourceConfigId: "JRT_HW_CFG", keyField: "orderId"]])])
+            insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "JRT_BRAIN_SCOPE", sequenceNum: 10, conclusionEnumId: "DKR5T_NO_RMA",
+                    appliesToBucket: "MISSING_FROM_FILE_2", companyUserGroupId: A])
+            [[FILE_1, "HotWax", "omsOrderId"], [FILE_2, "NetSuite", "orderId"]].each { List side ->
+                insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "JRT_BRAIN_SCOPE", fileSide: side[0], systemEnumId: "SHOPIFY",
+                        fileTypeEnumId: "DftJson", recordRootExpression: "records", primaryIdExpression: side[2], companyUserGroupId: A])
+                insert("darpan.rule.RuleSetCompareSourceKeyField", [compareScopeId: "JRT_BRAIN_SCOPE", fileSide: side[0], sequenceNum: 1,
+                        fieldExpression: side[2], companyUserGroupId: A])
+                insert("darpan.rule.RuleSetCompareSourceKeyField", [compareScopeId: "JRT_BRAIN_SCOPE", fileSide: side[0], sequenceNum: 2,
+                        fieldExpression: side[0] == FILE_1 ? "orderItemSeqId" : "orderLineId", companyUserGroupId: A])
+            }
+            File doc = File.createTempFile("brain-pin", ".json")
+            File extract1 = File.createTempFile("brain-pin-oms", ".json")
+            File extract2 = File.createTempFile("brain-pin-ns", ".json")
+            [doc, extract1, extract2]*.deleteOnExit()
+            extract1.text = groovy.json.JsonOutput.toJson([records: ["JBP1", "JBP2"].collect { [omsOrderId: it, orderItemSeqId: "01"] }])
+            extract2.text = groovy.json.JsonOutput.toJson([records: []])
+            List rows = ["JBP1", "JBP2"].collect { String id ->
+                [diffType: "missing_in_NetSuite", compareScopeId: "JRT_BRAIN_SCOPE", objectType: "ORDER_LINE_UNIT",
+                 primaryId: id + SEP + "01", presentIn: "HotWax", missingIn: "NetSuite",
+                 data: groovy.json.JsonOutput.toJson([omsOrderId: id, orderItemSeqId: "01", orderGrandTotal: 50]), message: "missing"]
+            }
+            // The layout ReconciliationServices.writeDiffDatasetOutput writes: the conclude pass reads the rows one per line.
+            doc.withWriter("UTF-8") { w ->
+                w << "{\n\"metadata\":" + groovy.json.JsonOutput.toJson([file1Label: "HotWax", file2Label: "NetSuite"]) + ",\n"
+                w << "\"summary\":" + groovy.json.JsonOutput.toJson([totalDifferences: 2]) + ",\n\"validationErrors\":[],\n\"processingWarnings\":[],\n"
+                w << "\"differences\":[" + rows.collect { "\n" + groovy.json.JsonOutput.toJson(it) }.join(",") + "]\n}"
+            }
+            // JBP2 is already "stored": a reading brain would not ask for it.
+            darpan.conclusion.brain.BrainAnswerStore.put(A, "orderPayments", "JBP2", [orderId: "JBP2", stored: true])
+            List<List<String>> asked = []
+            Closure fetcher = { Object[] a -> asked << ((List<String>) a[2]); ((List<String>) a[2]).collectEntries { [(it): [orderId: it]] } }
+
+            Map result = RunConclusionStep.runIfConfigured([ec: ec, compareScopeId: "JRT_BRAIN_SCOPE", diffFile: doc, lookupFetcher: fetcher,
+                    file1Result: [fileLocation: extract1.absolutePath], file2Result: [fileLocation: extract2.absolutePath]])
+
+            assertEquals(2, result.brain?.asked, "the brain ran and asked both orders: ${result}")
+            assertEquals([["JBP1", "JBP2"]], asked, "the stored answer is not read, so JBP2 is asked too")
+            assertFalse(darpan.conclusion.brain.BrainAnswerStore.has(A, "orderPayments", "JBP1"), "the fetched answer is not written")
+            assertEquals(true, darpan.conclusion.brain.BrainAnswerStore.get(A, "orderPayments", "JBP2")?.stored, "the stored answer is left as it was")
+        } finally {
+            darpan.conclusion.brain.BrainAnswerStore.clear()
+        }
+    }
+
     // --------------------------------------------------------------------------------------- fixture
 
     private void seedOldConfig() {

@@ -52,6 +52,8 @@ class TenantConfigChangeTracker {
      */
     static final Set<String> STAMPS = (["lastUpdatedStamp", "lastUpdatedDate"] as Set<String>).asImmutable()
     static final Map<String, Set<String>> OPERATIONAL_FIELDS = [
+            // DAR-BE-318: generate#PairFactType writes this id on a replay; it is derived state, not config (never in a version).
+            "darpan.audit.AuditCheck"                       : (["pairFactTypeId"] as Set<String>),
             "darpan.reconciliation.ReconciliationAutomation": (["isActive", "nextScheduledFireTime", "lastScheduledFireTime"] as Set<String>),
             // DAR-BE-237: every run of a script deployment writes when it ran, how it went and when it runs next.
             "darpan.script.TenantScriptDeployment"          : (["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage",

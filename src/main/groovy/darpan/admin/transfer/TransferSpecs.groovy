@@ -138,14 +138,17 @@ class TransferSpecs {
             // DAR-BE-199. The schedule is the instance's own, like the automations that carry it: it never travels.
             [kind: AUDIT, entityName: "darpan.audit.Audit", pkField: "auditId", naturalKey: "auditCode",
              dropFields: ["scheduleTime", "scheduleTimeZone", "scheduleActive"]],
+            // DAR-BE-318 (ruling P2-10): the claim names a rules.* Must hold and outcome by id; judge config is not transferable
+            // until plan 4, and an id minted here can name another row elsewhere, so the pair never travels.
             [kind: STATEMENT, entityName: "darpan.audit.AuditStatement", pkField: "statementId", naturalKey: "statementCode",
-             refFields: [auditId: AUDIT]],
+             refFields: [auditId: AUDIT], dropFields: ["claimRuleSetId", "claimOutcomeId"]],
             // DAR-BE-188. automationId is no value; it travels as a ref (heldRefs) only in a transfer that carries automations,
             // and only when the bundle holds the automation the check runs under. A version leaves it out, as before.
             // DAR-BE-206. graceDays is retired (a grace is an expected conclusion rule): a bundle or version made before
             // still carries it, and the import drops it (retiredFields) instead of refusing it as UNKNOWN_FIELD.
             [kind: CHECK, entityName: "darpan.audit.AuditCheck", pkField: "checkId", naturalKey: "checkCode",
-             refFields: [savedRunId: RUN], dropFields: ["automationId"], heldRefs: [automationId: AUTOMATION],
+             // DAR-BE-318 (ruling P2-10): pairFactTypeId names a rules.FactType minted on this instance (derived state).
+             refFields: [savedRunId: RUN], dropFields: ["automationId", "pairFactTypeId"], heldRefs: [automationId: AUTOMATION],
              retiredFields: ["graceDays"],
              // A check's links to statements: only those of the audits in the bundle travel; links to other audits stay.
              // DAR-BE-196: conclusionCodes no longer travels (expected causes are the run's rules); a bundle carrying it is refused.

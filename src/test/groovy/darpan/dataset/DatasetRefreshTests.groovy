@@ -48,6 +48,12 @@ class DatasetRefreshTests {
     private static final String SHOPIFY_EXTRACT = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
     private static final long DAY = 86_400_000L
     private static final long HOUR = 3_600_000L
+    /**
+     * The instant the test records' dates count back from, taken once for the class. Taken per record, a second boundary
+     * between two builds of "the same" order gave it a different createdAt and stamp, and the second read counted it changed
+     * or added.
+     */
+    private static final Instant RECORD_NOW = Instant.now().truncatedTo(ChronoUnit.SECONDS)
 
     private ExecutionContext ec
 
@@ -820,7 +826,7 @@ class DatasetRefreshTests {
 
     /** A Shopify-shaped order created createdDaysAgo and updated updatedDaysAgo. */
     private static Map order(int n, int createdDaysAgo, int updatedDaysAgo, String name = null) {
-        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        Instant now = RECORD_NOW
         return [id: "${n}".toString(), name: name ?: "#${n}".toString(),
                 createdAt: now.minus(createdDaysAgo, ChronoUnit.DAYS).toString(),
                 updatedAt: now.minus(updatedDaysAgo, ChronoUnit.DAYS).toString()]
@@ -846,7 +852,7 @@ class DatasetRefreshTests {
 
     /** One unit of an order line: its copy id is orderId|orderItemSeqId|unitSeq. */
     private static Map unit(int orderId, int seq, int unitSeq, int createdDaysAgo, int updatedDaysAgo, String name = "unit") {
-        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        Instant now = RECORD_NOW
         return [orderId: "${orderId}".toString(), orderItemSeqId: "${seq}".toString(), unitSeq: "${unitSeq}".toString(), name: name,
                 createdAt: now.minus(createdDaysAgo, ChronoUnit.DAYS).toString(),
                 updatedAt: now.minus(updatedDaysAgo, ChronoUnit.DAYS).toString()]

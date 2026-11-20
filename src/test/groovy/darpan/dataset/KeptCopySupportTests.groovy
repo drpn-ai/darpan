@@ -77,6 +77,13 @@ class KeptCopySupportTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "classpath://data/EntityTypeData.xml", "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/DatasetSeedData.xml")
         ec.entity.makeDataLoader().location("component://darpan/data/SourceSystemConnectorSeedData.xml").dummyFks(true).load()
+        // Shopify's own side-file declarations on its rows (ruling P3b1-9). The OMS returns row is used here as a windowed
+        // source with no projection: its side-file N is set below, and its projection service (darpan-hotwax's classes, not
+        // on this classpath) is exercised by darpan-hotwax's HotWaxRollingCopyParityTests.
+        ec.entity.makeDataLoader().location("component://shopify-darpan/data/ShopifyConnectorSeedData.xml").dummyFks(true).load()
+        def omsReturns = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "OMS_RETURNS_GQL").disableAuthz().one()
+        omsReturns.set("excludedRecordsSidecar", "N")
+        omsReturns.update()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert("moqui.security.UserGroup", [userGroupId: B, description: "Gorjana",
                                             groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
@@ -634,17 +641,12 @@ class KeptCopySupportTests {
         assertTrue(served.served as boolean, served.reason as String)
         assertEquals("entryDate", served.metadata.windowFieldName)
         assertEquals(["r1"], json(served.extractFile as File).records*.returnId)
-        // the same side asking its source to keep only some fields is served projected, as the returns extractor projects
-        // (ruling P3b1-8: keep fields plus items)
+        // with no projection service on its row, the same side asking its source to keep only some fields reads live
         Map keeping = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-own-field", [location: runLocation("own-keep"), runToken: "k"],
                 START, END, "slice.json", ["returnId", "entryDate"], null, null, "UTC")
-        Map projected = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, keeping, [tenantId: A, windowStart: START, windowEnd: END]))
-        assertTrue(projected.served as boolean, projected.reason as String)
-        assertEquals([[returnId: "r1", entryDate: ts("2026-11-10T12:00:00Z").time]], json(projected.extractFile as File).records,
-                "statusId is not kept")
-        // a connector without a projection spec still reads live when its side keeps fields
-        Map noSpec = connector + [systemEnumId: "KC_NO_SPEC"]
-        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.side(noSpec, keeping, [tenantId: A, windowStart: START, windowEnd: END]).liveOnly)
+        assertNull(connector.servingProjectionServiceName)
+        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, keeping,
+                [tenantId: A, windowStart: START, windowEnd: END])).reason)
 
         // the same source kept on another field than its extractor windows on
         String other = datasetOf("OMS_RETURNS_GQL", "conn-other-field", "returnId", "returnDate")
@@ -733,55 +735,132 @@ class KeptCopySupportTests {
     }
 
     /**
-     * Ruling P3b1-7: a served slice writes the excluded-records side file exactly when its connector's live extract does
-     * (ExcludedRecordsSidecar.WRITTEN_BY). OMS returns filter but write none, so their slice applies the filters and writes
-     * none, and the conclude pass reads the filtered side UNKNOWN, as on a live run. Shopify orders still write theirs. A
-     * filtering side whose connector is in neither set reads live.
+     * Ruling P3b1-9: a served slice writes the excluded-records side file exactly when its connector row says the live
+     * extract does (excludedRecordsSidecar, declared by the system's own component), on a made-up system: Y writes it, N
+     * applies the filters and writes none (the conclude pass then reads the side UNKNOWN, as on a live run), undeclared reads
+     * live. Shopify's real declaration (Y) behaves the same.
      */
     @Test
-    void aServedSliceWritesASideFileOnlyWhenItsExtractorWould() {
-        assertTrue("OMS_RETURNS_GQL" in ExcludedRecordsSidecar.NOT_WRITTEN_BY)
-        assertTrue("SHOPIFY" in ExcludedRecordsSidecar.WRITTEN_BY)
-        List<Map<String, Object>> rules = [[sequenceNum: 1, fieldExpression: "returnChannelEnumId", operator: "EXCLUDE_IN", filterValues: "POS_RTN_CHANNEL"]]
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
-        String id = datasetOf("OMS_RETURNS_GQL", "conn-sidefile", "returnId", "entryDate")
-        copyOf(A, id, [omsReturn("r-web", "2026-11-10T12:00:00Z") + [returnChannelEnumId: "ECOM_RTN_CHANNEL"],
-                       omsReturn("r-pos", "2026-11-10T13:00:00Z") + [returnChannelEnumId: "POS_RTN_CHANNEL"]], "returnId", "entryDate")
-        Map params = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-sidefile", [location: runLocation("sidefile"), runToken: "s"],
-                START, END, "slice.json", null, rules, null, "UTC")
-        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START, windowEnd: END]))
-        assertTrue(served.served as boolean, served.reason as String)
-        File extract = served.extractFile as File
-        Map doc = json(extract)
-        assertEquals(["r-web"], doc.records*.returnId, "the filters still apply")
-        assertEquals(1, doc.metadata.filters.configuredExclusions[0].excludedCount)
-        assertFalse(new File(extract.parentFile, ExcludedRecordsSidecar.fileNameFor(extract.name)).exists(), "no side file, as live")
-        assertTrue(RunConclusionSupport.indexSide([extractFile: extract, keyFields: ["returnId"]], ["r-pos"] as Set<String>,
+    void aServedSliceWritesASideFileOnlyWhenItsConnectorSaysItsExtractDoes() {
+        loadDaysConnector()
+        Map window = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-11-10T00:00:00Z"), ts("2026-11-11T00:00:00Z"), TENANT_ZONE)
+        List<Map> dropX = [[sequenceNum: 1, fieldExpression: "id", operator: "EXCLUDE_IN", filterValues: "x"]]
+        Closure<Map> serve = { String declared, String token ->
+            // the test row given a filter parameter and a declaration, as a system's component would declare it
+            Map days = SourceSystemConnectorSupport.resolve(ec, "KC_DAYS") + [filterParameterName: "sourceFilters", excludedRecordsSidecar: declared]
+            String daysId = datasetOf("KC_DAYS", "conn-days-${token}", "id", "trandate")
+            copyOf(A, daysId, [[id: "d1", trandate: "2026-11-10"], [id: "x", trandate: "2026-11-10"]], "id", "trandate")
+            Map dayParams = RunExtractSupport.buildExtractParams(days, "FILE_1", "conn-days-${token}", [location: runLocation("days-${token}"), runToken: "d"],
+                    (Timestamp) window.windowStartDate, (Timestamp) window.windowEndDate, "slice.json", null, dropX, null, window.timeZone)
+            return KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(days, dayParams,
+                    [tenantId: A, windowStart: window.windowStartDate, windowEnd: window.windowEndDate]))
+        }
+        Map writes = serve("Y", "y")
+        assertTrue(writes.served as boolean, writes.reason as String)
+        File yExtract = writes.extractFile as File
+        assertEquals(["d1"], json(yExtract).records*.id, "the filters apply")
+        assertEquals(["x"], json(new File(yExtract.parentFile, ExcludedRecordsSidecar.fileNameFor(yExtract.name))).records*.id)
+        Map writesNone = serve("N", "n")
+        assertTrue(writesNone.served as boolean, writesNone.reason as String)
+        File nExtract = writesNone.extractFile as File
+        assertEquals(["d1"], json(nExtract).records*.id, "the filters still apply")
+        assertFalse(new File(nExtract.parentFile, ExcludedRecordsSidecar.fileNameFor(nExtract.name)).exists(), "no side file, as live")
+        assertTrue(RunConclusionSupport.indexSide([extractFile: nExtract, keyFields: ["id"]], ["x"] as Set<String>,
                 [] as Set<String>).unknownWhenAbsent as boolean, "the filtered side reads UNKNOWN, as on a live run")
+        assertEquals(KeptCopySupport.SIDE_FILE_UNDECLARED, serve(null, "undeclared").reason)
 
-        // Shopify orders write theirs, as plan 3a did
+        // a real declaration, from Shopify's own data
         String shopify = dataset("conn-sidefile-shopify")
         copy(A, shopify, [order("web", "2026-11-10T09:00:00Z", [sourceName: "web"]), order("pos", "2026-11-10T10:00:00Z", [sourceName: "pos"])])
-        Map shopifyServed = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
+        Map shopifyConnector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        assertEquals("Y", shopifyConnector.excludedRecordsSidecar)
+        Map shopifyServed = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(shopifyConnector,
                 [shopifyAuthConfigId: "conn-sidefile-shopify", sourceFilters: [[sequenceNum: 1, fieldExpression: "sourceName", operator: "EXCLUDE_IN", filterValues: "POS"]],
                  outputLocation: runLocation("sidefile-shopify"), fileName: "slice.json"], [tenantId: A, windowStart: START, windowEnd: END]))
         assertTrue(shopifyServed.served as boolean, shopifyServed.reason as String)
         File shopifySide = new File((shopifyServed.extractFile as File).parentFile, ExcludedRecordsSidecar.fileNameFor("slice.json"))
         assertEquals(["pos"], json(shopifySide).records*.id)
+    }
 
-        // a filtering side whose connector is in neither set: read live
-        loadDaysConnector()
-        // the test row given a filter parameter, as a tenant's own filtering connector would have
-        Map days = SourceSystemConnectorSupport.resolve(ec, "KC_DAYS") + [filterParameterName: "sourceFilters"]
-        Map window = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-11-10T00:00:00Z"), ts("2026-11-11T00:00:00Z"), TENANT_ZONE)
-        String daysId = datasetOf("KC_DAYS", "conn-days-filtered", "id", "trandate")
-        copyOf(A, daysId, [[id: "d1", trandate: "2026-11-10"]], "id", "trandate")
-        Map dayParams = RunExtractSupport.buildExtractParams(days, "FILE_1", "conn-days-filtered", [location: runLocation("days-filtered"), runToken: "d"],
-                (Timestamp) window.windowStartDate, (Timestamp) window.windowEndDate, "slice.json", null,
-                [[sequenceNum: 1, fieldExpression: "id", operator: "EXCLUDE_IN", filterValues: "X"]], null, window.timeZone)
-        assertNotNull(dayParams.sourceFilters)
-        assertEquals(KeptCopySupport.SIDE_FILE_UNDECLARED, KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(days, dayParams,
-                [tenantId: A, windowStart: window.windowStartDate, windowEnd: window.windowEndDate])).reason)
+    /**
+     * Ruling P3b1-9, on a made-up system: a connector that names a projection service has its side served projected by it.
+     * The service is asked first (no records), then trims the slice's records after the filters and writes its side file
+     * beside the slice, whose location lands on the served result.
+     */
+    @Test
+    void aConnectorsProjectionServiceTrimsAServedSide() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj", "id", "createdAt")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z", a: 1, b: 2, always: "k"],
+                       [id: "p2", createdAt: "2026-11-10T10:00:00Z", a: 3, b: 4, always: "k", drop: "y"]], "id", "createdAt")
+        MadeUpKeptRecords.CALLS.clear()
+        Map served = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id", "a"], "proj", [[sequenceNum: 1, fieldExpression: "drop",
+                operator: "EXCLUDE_IN", filterValues: "y"]]))
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals([[id: "p1", a: 1, always: "k"]], json(served.extractFile as File).records, "trimmed by the system's own rule, after the filters")
+        assertEquals(2, MadeUpKeptRecords.CALLS.size(), "asked before the copy is opened, then given the records")
+        assertNull(MadeUpKeptRecords.CALLS[0].recordsFile)
+        assertEquals(["id", "a"], MadeUpKeptRecords.CALLS[0].side.keepFields)
+        assertEquals(["drop"], MadeUpKeptRecords.CALLS[0].side.filterFields)
+        assertEquals([:], MadeUpKeptRecords.CALLS[0].copy.sideFiles == null ? [:] : MadeUpKeptRecords.CALLS[0].copy.sideFiles)
+        File madeUp = locationFile(served.madeUpFileLocation as String)
+        assertEquals([records: 1], json(madeUp), "its side file beside the slice")
+        assertEquals(served.madeUpFileLocation, KeptCopySupport.extractResult(served).madeUpFileLocation, "and on the automation path's result")
+
+        // the same connector with no projection service: a side that keeps fields reads live, as before
+        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.side(connector + [servingProjectionServiceName: null],
+                projParams(connector, ["id", "a"], "proj-none", null), [tenantId: A, windowStart: START, windowEnd: END]).liveOnly)
+        // one that names a service of another shape, or one not installed, never serves
+        assertEquals("the connector names an invalid projection service", KeptCopySupport.side(connector + [servingProjectionServiceName:
+                "dataset.DatasetServices.store#Dataset"], projParams(connector, ["id"], "proj-bad", null), [tenantId: A, windowStart: START, windowEnd: END]).liveOnly)
+        assertEquals(KeptCopySupport.PROJECTION_NOT_INSTALLED, KeptCopySupport.sliceIfServed(ec, projSide(connector + [servingProjectionServiceName:
+                "test.KeptCopyTestServices.project#NoSuchRecords"], ["id"], "proj-missing")).reason)
+    }
+
+    /**
+     * Ruling 3b1-7 / P3b1-9, on a made-up system: a side the copy cannot serve (its service says the copy lacks a field)
+     * reads live, nothing is left behind, and the dataset is queued for the read that would keep the field.
+     */
+    @Test
+    void aSideTheProjectionServiceRefusesReadsLiveAndQueuesTheRebuild() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj-lack", "id", "createdAt")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z", a: 1]], "id", "createdAt", new Timestamp(READ_THRU.time - 60 * DAY),
+                [keptFields: ["id", "createdAt", "a"]])
+        def row = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().one()
+        row.nextReadDate = ts("2026-12-25T00:00:00Z")
+        row.update()
+        Map refused = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id", "b"], "proj-lack"))
+        assertFalse(refused.served as boolean)
+        assertEquals("the made-up copy lacks b", refused.reason)
+        assertFalse(new File(locationFile(runLocation("proj-lack")), "slice.json").exists(), "nothing is left behind")
+        // no source reads this copy, so its next read keeps whole records: a different list, so it is due now
+        def after = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().one()
+        assertTrue((after.nextReadDate as Timestamp).time <= System.currentTimeMillis(), "queued for the read that keeps the field")
+    }
+
+    /** A test-only connector row of a made-up system that names the test-only projection service. */
+    private void loadProjectionConnector() {
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_PROJ" extractServiceName="${RETURNS_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_PROJ_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="Y" keepFieldsParameterName="keepFields"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="N"
+                servingProjectionServiceName="test.KeptCopyTestServices.project#MadeUpKeptRecords" enabled="Y"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+    }
+
+    private Map projParams(Map connector, List<String> keep, String token, List<Map> filters) {
+        return RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-${token}".toString(), [location: runLocation(token), runToken: token],
+                START, END, "slice.json", keep, filters, null, "UTC") + [outputLocation: runLocation(token), fileName: "slice.json"]
+    }
+
+    private Map projSide(Map connector, List<String> keep, String token, List<Map> filters = null) {
+        Map params = projParams(connector, keep, token, filters)
+        params.projConfigId = "conn-${token == 'proj-missing' ? 'proj' : token}".toString()
+        return KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START, windowEnd: END])
     }
 
     private static final String LIVE_TEXT = '{"metadata":{"live":true},"records":[{"id":"live-1"}]}'
@@ -811,9 +890,9 @@ class KeptCopySupportTests {
 
     /** A full read into a rolling copy, covering 60 days back from READ_THRU. */
     private void copyOf(String tenant, String datasetId, List<Map> records, String idField, String windowField,
-                        Timestamp coveredFrom = new Timestamp(READ_THRU.time - 60 * DAY)) {
+                        Timestamp coveredFrom = new Timestamp(READ_THRU.time - 60 * DAY), Map copyInfo = null) {
         KeptCopyStore.replace(DatasetRefreshSupport.datasetDir(ec, tenant, datasetId), records.iterator(), idField, windowField, windowField,
-                coveredFrom, READ_THRU, READ_AT, 2, null, false)
+                coveredFrom, READ_THRU, READ_AT, 2, null, false, copyInfo)
     }
 
     /** The interactive dispatcher's own parameters for an OMS returns side over START..END, as the side is built from them. */

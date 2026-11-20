@@ -8,7 +8,6 @@ import darpan.facade.reconciliation.RunExtractSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
-import darpan.reconciliation.core.CompareIdExpressionSupport
 import groovy.json.JsonOutput
 
 import java.security.MessageDigest
@@ -22,10 +21,9 @@ class DatasetSupport {
      * Plan 3b-1 (ruling 3b1-7): the fields a dataset's copy keeps of each record, in order, or null for whole records. The
      * union, over the dataset tenant's run sources (RuleSetCompareSource) and automation sources whose system, connection and
      * options key equal the dataset's (KeptCopySupport.optionsKey, the key find#ServingDataset matches a side by; ruling
-     * P3b1-1), of each source's keep fields (RunExtractSupport.sideKeepFields), read fields, filter fields (a slice filters
-     * the copy record) and the id fields its check's asks read on that side; then the dataset's own id, stamp and window
-     * fields. Null when the connector has no projection spec (KeptFieldsProjection) or takes no keep fields, when no
-     * source matches, when any matching source keeps whole records (no projection; every automation source, which sends
+     * P3b1-1), of each source's keep fields (RunExtractSupport.sideKeepFields), read fields and filter fields (a slice
+     * filters the copy record); then the dataset's own id, stamp and window fields. Null when the connector names no
+     * projection service (servingProjectionServiceName, ruling P3b1-9) or takes no keep fields, when no source matches, when any matching source keeps whole records (no projection; every automation source, which sends
      * none), or when the active tenant is not the dataset's. Only the dataset tenant's rows are read (A7).
      */
     static Set<String> keptFields(def ec, Map dataset) {
@@ -35,7 +33,7 @@ class DatasetSupport {
         if (!tenantId || !systemEnumId || !sourceConfigId) return null
         if (TenantAccessSupport.currentActiveTenantUserGroupId(ec) != tenantId) return null
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, systemEnumId)
-        if (KeptFieldsProjection.specFor(systemEnumId) == null || !normalize(connector?.keepFieldsParameterName)) return null
+        if (!normalize(connector?.servingProjectionServiceName) || !normalize(connector?.keepFieldsParameterName)) return null
         String datasetHash = normalize(dataset.optionsHash) ?: optionsHash(new groovy.json.JsonSlurper().parseText(
                 (dataset.optionsJson ?: "{}") as String) as Map)
 
@@ -80,7 +78,6 @@ class DatasetSupport {
                 // a filter its live read would refuse as well: keep whole records rather than guess its field
                 return null
             }
-            union.addAll(askIdFields(ec, tenantId, ruleSetOfScope.get(source.compareScopeId as String), source.fileSide as String))
         }
         if (matched == 0) return null
         union.addAll(DatasetRefreshSupport.idFields(dataset.idField as String))
@@ -93,18 +90,6 @@ class DatasetSupport {
         String configName = normalize(connector?.configParameterName) ?: "sourceConfigId"
         if (normalize(parameters?.get(configName)) != sourceConfigId) return false
         return optionsHash(KeptCopySupport.optionsKey(connector, (Map<String, Object>) parameters)) == datasetHash
-    }
-
-    /** The id fields the asks of the rule set's checks read on this side's records (CheckAsk.subjectSide). */
-    private static List<String> askIdFields(def ec, String tenantId, String ruleSetId, String fileSide) {
-        if (!ruleSetId || !fileSide) return []
-        List<String> checkIds = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditCheck").condition("companyUserGroupId", tenantId)
-                .condition("savedRunId", ruleSetId).useCache(false).list()*.checkId as List<String>
-        if (!checkIds) return []
-        return TenantScopedFinder.findTenantScoped(ec, "darpan.judge.CheckAsk").condition("companyUserGroupId", tenantId)
-                .condition("checkId", "in", checkIds).condition("subjectSide", fileSide).useCache(false).list()
-                .collect { CompareIdExpressionSupport.topLevelRecordField(normalize(it.idField)) ?: normalize(it.idField) }
-                .findAll { it } as List<String>
     }
 
     /** SHA-256 hex (64 characters) of the options as canonical JSON: map keys sorted at every depth. */

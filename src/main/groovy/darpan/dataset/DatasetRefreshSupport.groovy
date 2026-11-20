@@ -37,14 +37,6 @@ class DatasetRefreshSupport {
     static final String LOCK_TAKEN_OVER = "lock taken over: another refresh holds this dataset now"
     /** The extract parameter a dataset read windows by: its stampField (daily) or windowField (full). */
     static final String WINDOW_FIELD_PARAMETER = "windowFieldName"
-    /**
-     * Plan 3b-1: an extractor that lists excluded exchange orders in a side file takes how many to list; a dataset read asks
-     * for every one of its 60 days, so a slice can list a day's as the day's live read would.
-     */
-    static final String EXCHANGE_MANIFEST_MAX_PARAMETER = "exchangeManifestMaxEntries"
-    static final int DATASET_EXCHANGE_MANIFEST_MAX = 50_000
-    /** The out-parameter an extractor answers its exchange-manifest side file's location in. */
-    static final String EXCHANGE_MANIFEST_LOCATION = "exchangeManifestFileLocation"
     private static final long DAY = 86_400_000L
 
     /** The dataset's folder under the data manager root, which honours darpan.data.manager.location (ruling P3a-7). */
@@ -200,10 +192,10 @@ class DatasetRefreshSupport {
     /**
      * Plan 3b-1 (ruling 3b1-7): the field list the dataset's next read sends its extractor, or null for whole records. Only a
      * rolling dataset projects (each read replaces the whole copy, so its records never mix two projections), and only
-     * through a connector that takes keep fields and whose projection a slice reproduces (KeptFieldsProjection).
+     * through a connector that takes keep fields and names a projection service a slice trims with (ruling P3b1-9).
      */
     static List<String> keepFieldsForRead(def ec, Map dataset, Map<String, Object> connector) {
-        if (!isRolling(dataset) || !connector?.keepFieldsParameterName || KeptFieldsProjection.specFor(dataset.systemEnumId) == null) {
+        if (!isRolling(dataset) || !connector?.keepFieldsParameterName || !connector?.servingProjectionServiceName) {
             return null
         }
         Set<String> kept = DatasetSupport.keptFields(ec, dataset)
@@ -330,12 +322,6 @@ class DatasetRefreshSupport {
             Map<String, Object> params = extractParams(connector, dataset, location, readSeqId,
                     full ? dataset.windowField as String : dataset.stampField as String, fromStamp, readThru, timeZone,
                     full ? keptFields : null)
-            def definition = ec.service.getServiceDefinition(serviceName)
-            if (EXCHANGE_MANIFEST_MAX_PARAMETER in (definition?.getInParameterNames() ?: [])) {
-                params.put(EXCHANGE_MANIFEST_MAX_PARAMETER, DATASET_EXCHANGE_MANIFEST_MAX)
-            }
-            // an extractor that answers an exchange-manifest location writes the side file only when it saw an exchange
-            boolean writesExchangeManifest = EXCHANGE_MANIFEST_LOCATION in (definition?.getOutParameterNames() ?: [])
 
             Map out = ((extractor ?: liveExtractor(ec)).call(serviceName, params) ?: [:]) as Map
             List errors = (out.errors instanceof Collection ? (Collection) out.errors : []).findAll { it } as List
@@ -343,14 +329,9 @@ class DatasetRefreshSupport {
             File file = resolveFile(ec, out.fileLocation as String)
             if (file == null || !file.isFile()) throw new IllegalStateException("The read returned no file")
             Timestamp readAt = new Timestamp(file.lastModified())
-            Map copyInfo = [keptFields: full ? keptFields : null]
-            if (full && writesExchangeManifest) {
-                File exchange = out.get(EXCHANGE_MANIFEST_LOCATION) ? resolveFile(ec, out.get(EXCHANGE_MANIFEST_LOCATION) as String) : null
-                if (out.get(EXCHANGE_MANIFEST_LOCATION) && (exchange == null || !exchange.isFile())) {
-                    throw new IllegalStateException("The read named an exchange manifest it did not write")
-                }
-                copyInfo.exchangeManifest = exchange ?: false
-            }
+            // plan 3b-1: a full read's copy keeps the fields it was sent and the files the read wrote beside its records (a
+            // connector's projection service may reproduce a run's side file from them)
+            Map copyInfo = full ? [keptFields: keptFields, sideFiles: sideFilesOf(file)] : [:]
 
             // The swap and the prune run together under the owner guard: a refresh that lost its lock does neither, and
             // KeptCopyStore deletes its new version.
@@ -395,6 +376,15 @@ class DatasetRefreshSupport {
             logger.warn("Dataset ${dataset?.datasetId} read ${readSeqId} failed", t)
             return [error: t.message ?: t.toString()]
         }
+    }
+
+    /** The files a read wrote beside its records file, in the read's own folder, by name (work files left out). */
+    static Map<String, File> sideFilesOf(File readFile) {
+        Map<String, File> files = new TreeMap<String, File>()
+        readFile.parentFile?.listFiles()?.each { File f ->
+            if (f.isFile() && f.name != readFile.name && !f.name.endsWith(".partial")) files.put(f.name, f)
+        }
+        return files
     }
 
     /** {@code records} with {@link KeptCopyStore#COPY_ID} set on each record from its {@code idParts} values. */
@@ -462,7 +452,22 @@ class DatasetRefreshSupport {
         // the trusted owner tenant, as the automation path sends it: the extractor checks its config against this tenant
         params.companyUserGroupId = dataset.companyUserGroupId
         SourceExtractOptionsSupport.mergeUnder(params, SourceExtractOptionsSupport.runtimeOptions(connector, dataset.optionsJson))
+        // plan 3b-1: what the connector declares every dataset read sends (datasetReadParametersJson), under everything above
+        SourceExtractOptionsSupport.mergeUnder(params, datasetReadParameters(connector))
         return params
+    }
+
+    /** The connector's datasetReadParametersJson as a map; empty when blank or not a JSON object. */
+    static Map<String, Object> datasetReadParameters(Map<String, Object> connector) {
+        String json = connector?.datasetReadParametersJson as String
+        if (!json?.trim()) return [:]
+        try {
+            Object parsed = new groovy.json.JsonSlurper().parseText(json)
+            return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
+        } catch (Exception e) {
+            logger.warn("The connector for ${connector?.systemEnumId} has unreadable datasetReadParametersJson; none sent", e)
+            return [:]
+        }
     }
 
     /**

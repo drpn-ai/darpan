@@ -1430,6 +1430,21 @@
             <description>DAR-BE-176. The DataSourceDefinition this endpoint reads with, when its extract is data-defined
                 (extractServiceName is then the generic extract#DataDefinedSource). Blank: the endpoint's own coded extract.</description>
         </field>
+        <field name="excludedRecordsSidecar" type="text-indicator">
+            <description>DAR-BE-318 (ruling P3b1-9). Whether this endpoint's extract writes the records its source filters set
+                aside beside its file (.excluded.json, ExcludedRecordsSidecar): Y it does, N it does not, blank undeclared. A
+                kept-copy slice writes the side file exactly when this says Y, and a filtering side whose endpoint is undeclared
+                reads live. Set by the system's own component on its rows, never in core.</description>
+        </field>
+        <field name="servingProjectionServiceName" type="text-medium">
+            <description>DAR-BE-318 (ruling P3b1-9). A project#* service in the system's own component that implements
+                dataset.DatasetServices.project#KeptRecords: it says whether a kept copy can stand in for a side's live read
+                and trims the side's records as the extract would. Blank: a side that sends keep fields or readFields reads live.</description>
+        </field>
+        <field name="datasetReadParametersJson" type="text-medium">
+            <description>DAR-BE-318. Extract parameters every dataset read of this endpoint sends, as a JSON object (a run never
+                sends them), e.g. a longer side-file list for a 60-day read. Blank: none.</description>
+        </field>
         <field name="enabled" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

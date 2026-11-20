@@ -24,23 +24,8 @@ class ExcludedRecordsSidecar {
 
     static final int MAX_ENTRIES = 50000
 
-    /**
-     * DAR-BE-063 §1.5: the filtering connectors whose live extract writes this sidecar. Moving one here needs a test in
-     * its own component that proves the sidecar is written. FilteringConnectorSidecarContractTests holds every seeded
-     * filtering connector to exactly one of these two sets, and a kept-copy slice (KeptCopySupport) writes the sidecar
-     * exactly when the live read would (DAR-BE-318 ruling P3b1-7).
-     * OMS_ORDER_ITEMS_GQL: the unit-grain shaper collects what it drops (darpan-hotwax
-     * DataDefinedOrderItemsServiceSmokeTests.byKeysWithFiltersAndTheSidecar); OMS_PRODUCTS_GQL: OmsGqlProductsConnectorWiringTests.
-     */
-    static final Set<String> WRITTEN_BY = (["OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL", "SHOPIFY_ORDER_LINE_UNITS", "NETSUITE_SUITEQL",
-                                            "SHOPIFY"] as Set<String>).asImmutable()
-    /**
-     * Connectors that filter without a verified sidecar today. Conclusions on these sides read UNKNOWN when they filter.
-     * OMS_GQL (DAR-BE-064): its script calls writeBeside, but at ORDER grain the shared OmsExtractSupport shaper never feeds
-     * the excluded collector (only the unit-grain branch collects), so the sidecar is always empty today.
-     * OMS_RETURNS_GQL (DAR-BE-040 fix 3): the returns script writes no sidecar.
-     */
-    static final Set<String> NOT_WRITTEN_BY = (["SHOPIFY_RETURN_REFS", "OMS_GQL", "OMS_RETURNS_GQL"] as Set<String>).asImmutable()
+    // Whether an endpoint's extract writes this sidecar is declared on its connector row by the system's own component
+    // (SourceSystemConnector.excludedRecordsSidecar, DAR-BE-318 ruling P3b1-9), and a kept-copy slice follows it.
 
     static String fileNameFor(String extractFileName) {
         String name = extractFileName ?: "extract"

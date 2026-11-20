@@ -156,6 +156,17 @@ class SourceSystemConnectorSupport {
     private static final Pattern PROBE_SERVICE_NAME =
             Pattern.compile(/^(reconciliation|facade)\.[A-Za-z0-9]+(Extraction|Facade)Services\.probe#[A-Za-z0-9]+$/)
 
+    /**
+     * DAR-BE-318 (ruling P3b1-9). A connector's servingProjectionServiceName may only name a project#* service: the verb no
+     * other slot dispatches, so a registry row cannot aim the kept-copy slice at any other service.
+     */
+    private static final Pattern PROJECTION_SERVICE_NAME = Pattern.compile(/^[a-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)*Services\.project#[A-Za-z0-9]+$/)
+
+    static boolean isAllowedProjectionServiceShape(String serviceName) {
+        String s = normalize(serviceName)
+        return s != null && PROJECTION_SERVICE_NAME.matcher(s).matches()
+    }
+
     static boolean isAllowedProbeServiceShape(String serviceName) {
         String s = normalize(serviceName)
         return s != null && PROBE_SERVICE_NAME.matcher(s).matches()
@@ -217,6 +228,10 @@ class SourceSystemConnectorSupport {
                 extractOptionsJson         : readString(record, "extractOptionsJson"),
                 // DAR-BE-176: the data definition a data-defined endpoint reads with (blank: its coded extract).
                 dataSourceDefinitionId     : readString(record, "dataSourceDefinitionId"),
+                // DAR-BE-318 (ruling P3b1-9): declared by the system's own component; "Y", "N" or null (undeclared)
+                excludedRecordsSidecar     : readString(record, "excludedRecordsSidecar")?.toUpperCase(),
+                servingProjectionServiceName: readString(record, "servingProjectionServiceName"),
+                datasetReadParametersJson  : readString(record, "datasetReadParametersJson"),
                 enabled                    : isEnabled(record),
         ] as Map<String, Object>
     }

@@ -250,6 +250,37 @@
         </actions>
     </service>
 
+    <service verb="project" noun="KeptRecords" type="interface">
+        <description>Plan 3b-1 (ruling P3b1-9): what a connector's servingProjectionServiceName implements, in its system's own
+            component (core names no system). A kept-copy slice (KeptCopySupport) calls it twice for a side that may keep only
+            some fields: first with no recordsFile, before the copy is opened, to ask whether the copy can stand in for the
+            side's live read; then with the slice's records, to trim them as the live extract would and to write beside the
+            slice any side file the live extract writes. A servingProblem, at either call, makes the side read live.</description>
+        <in-parameters>
+            <parameter name="systemEnumId" required="true"/>
+            <parameter name="copy" type="Map" required="true"><description>keptFields (the field list the copy's read was sent;
+                null: whole records), heldFields (the top-level fields its records carry), sideFiles (name to absolute path of the
+                files its read wrote beside its records; null when not recorded).</description></parameter>
+            <parameter name="side" type="Map" required="true"><description>keepFields (the list the side sends its extract; null:
+                whole records), filterFields, readFields, windowField.</description></parameter>
+            <parameter name="windowStart" type="Timestamp" required="true"/>
+            <parameter name="windowEnd" type="Timestamp" required="true"/>
+            <parameter name="recordsFile"><description>Absolute path of the slice's records, one JSON record a line, in the window
+                and past the side's filters, as the copy holds them. Empty: answer servingProblem only.</description></parameter>
+            <parameter name="outputFile"><description>Absolute path to write the trimmed records to, one a line, in order.</description></parameter>
+            <parameter name="outputLocation"><description>The data-manager location the slice's file lands in.</description></parameter>
+            <parameter name="fileName"><description>The slice's file name there.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="servingProblem"><description>Why the copy cannot stand in for the live read; empty when it can.</description></parameter>
+            <parameter name="missingFields" type="List"><description>The fields the copy lacks, when that is why.</description></parameter>
+            <parameter name="recordCount" type="Long"><description>Records written to outputFile.</description></parameter>
+            <parameter name="writtenLocations" type="List"><description>Side files written beside the slice (removed if it is not served).</description></parameter>
+            <parameter name="resultFields" type="Map"><description>What the live extract answers besides its file (a side file's
+                location), added to the served result.</description></parameter>
+        </out-parameters>
+    </service>
+
     <service verb="queue" noun="DatasetRefresh" transaction="force-new" allow-remote="false">
         <description>Plan 3b-1 (ruling 3b1-7): the active tenant's dataset is due now, so the next scan#DueDatasets rebuilds
             it. A served side asked for a field its copy lacks, and the dataset's next read would keep it (KeptCopySupport).

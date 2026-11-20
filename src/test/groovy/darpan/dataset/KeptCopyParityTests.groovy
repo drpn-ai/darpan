@@ -88,6 +88,8 @@ class KeptCopyParityTests {
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/ConclusionCatalogSeedData.xml", "component://darpan/data/DatasetSeedData.xml")
         ec.entity.makeDataLoader().location("component://darpan/data/SourceSystemConnectorSeedData.xml").dummyFks(true).load()
+        // the system's own declarations on its rows (ruling P3b1-9): side files
+        ec.entity.makeDataLoader().location("component://shopify-darpan/data/ShopifyConnectorSeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])
         seedSavedRun()

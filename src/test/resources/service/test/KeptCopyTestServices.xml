@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Test only (on the test classpath, never shipped): DAR-BE-318 ruling P3b1-9's projection contract implemented for a
+         made-up system, so core's kept-copy hook is tested without any system component. MadeUpKeptRecords holds the logic. -->
+    <service verb="project" noun="MadeUpKeptRecords" allow-remote="false">
+        <implements service="dataset.DatasetServices.project#KeptRecords"/>
+        <actions><script>context.putAll(darpan.dataset.MadeUpKeptRecords.project(ec, context))</script></actions>
+    </service>
+</services>

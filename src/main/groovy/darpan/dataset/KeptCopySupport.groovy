@@ -3,13 +3,13 @@ package darpan.dataset
 import darpan.facade.common.DataManagerSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.nio.charset.StandardCharsets
 import java.sql.Timestamp
 import java.time.Instant
 import java.time.LocalDate
@@ -40,10 +40,10 @@ import static darpan.common.ValueSupport.normalize
  * <li>any other windowed connector is sent the run's instants as they are (RunExtractSupport.buildExtractParams sends ISO
  *     text, AutomationExecutionSupport.applyWindowParameters the Timestamps). Its extractor reads them half-open, unless it
  *     declares preserveWindowInstants: then it has a mode that rounds them to whole days in its own zone, and the side reads
- *     live. The sent bounds must be the run's instants; a record value is an ISO instant or epoch milliseconds (the HotWax
+ *     live. The sent bounds must be the run's instants; a record value is an ISO instant or epoch milliseconds (as some
  *     extracts write those), and any other value, or none, stops serving rather than being skipped (ruling P3b1-6: a
  *     record is dropped only when it is placed outside the window);</li>
- * <li>a whole-days connector (windowDateOnly, NetSuite) is sent calendar days, read in the window's zone by the live code
+ * <li>a whole-days connector (windowDateOnly) is sent calendar days, read in the window's zone by the live code
  *     (ReconciliationApiWindowSupport.calendarDateIn). Its source keeps records whose day falls in [from, to) (SuiteQL's
  *     {@code >= TO_DATE(from) AND < TO_DATE(to)}), so a record dated as a plain yyyy-MM-dd day is compared as that day. A
  *     record dated any other way, or not at all, is not placed on a day here, because the source compares days in its own zone, which no
@@ -53,19 +53,18 @@ import static darpan.common.ValueSupport.normalize
  * </ul>
  * The side's field is the connector's windowFieldName, which the dispatchers send; else the field the extractor windows on
  * by itself, its windowFieldName parameter's default-value (ruling 3b1-4); else, for a plan 3a connector only, createdAt.
- * No field, no serving. The excluded-records side file is written exactly when the live extractor writes one
- * (ExcludedRecordsSidecar.WRITTEN_BY, ruling P3b1-7); a filtering side whose connector is in neither of its sets reads live.</p>
+ * No field, no serving. The excluded-records side file is written exactly when the connector row says its extract writes
+ * one (SourceSystemConnector.excludedRecordsSidecar Y, declared by the system's own component; ruling P3b1-9); a filtering
+ * side whose connector declares neither Y nor N reads live.</p>
  *
- * <p><b>Kept fields</b> (plan 3b-1, rulings 3b1-7 and P3b1-8). A connector whose extractor projects with
- * {@link KeptFieldsProjection} (it has a spec there) is served projected: the slice trims each copy record with the very
- * function the extractor trims with, and only when the copy can stand in for the live read
- * ({@link KeptFieldsProjection#servingProblem}: it holds every field the side keeps, filters on and windows on, was read
- * the same way for the fields whose values depend on it, and in the same order). A side the copy cannot serve reads live,
- * logged, and when the dataset's next read would keep other fields than the copy holds, the dataset is queued for that read
- * now (queue#DatasetRefresh). Such a side's readFields only shape its read, so they are checked there, not refused. Any
- * other connector's side that sends keep fields or readFields reads live, as before. An extractor that writes an
- * exchange-manifest side file has it written beside the slice from the copy's own, with the excluded exchange orders the
- * window holds; a copy whose read cut its list short, or that kept none, reads live.</p>
+ * <p><b>Kept fields</b> (plan 3b-1, rulings 3b1-7 and P3b1-9). Core knows no system's projection. A connector that names a
+ * projection service (servingProjectionServiceName, a project#* service in its system's component implementing
+ * dataset.DatasetServices.project#KeptRecords) is served projected: before the copy is opened the service is asked whether
+ * the copy can stand in for the side's live read (its kept and held fields, its side files, the side's keep, filter and
+ * read fields, the window); then it trims the slice's records as its extractor would and writes any side file the live
+ * read writes beside its records. A side it refuses reads live, logged, and when the dataset's next read would keep other
+ * fields than the copy holds, the dataset is queued for that read now (queue#DatasetRefresh). Any other connector's side
+ * that sends keep fields or readFields reads live, as before.</p>
  *
  * <p><b>The options key</b> ({@code find#ServingDataset}'s options) is the run side's extract options its connector
  * declares (SourceExtractOptionsSupport.declaredOptions), read off the parameters the dispatcher built, with false and
@@ -107,8 +106,7 @@ class KeptCopySupport {
     static final String SIDE_FILE_UNDECLARED = "the side filters, and whether its source writes the excluded-records side file is not declared"
     static final String KEEPS_FIELDS = "the side asks its source to keep only some fields, and a slice holds whole copy records"
     static final String EXTRA_FIELDS = "the side asks its source for extra fields"
-    static final String NO_EXCHANGE_MANIFEST = "the copy kept no exchange manifest, which the live read writes"
-    static final String EXCHANGE_MANIFEST_CUT = "the copy's exchange manifest was cut short"
+    static final String PROJECTION_NOT_INSTALLED = "the connector's projection service is not installed"
     static final String QUEUE_SERVICE = "dataset.DatasetServices.queue#DatasetRefresh"
 
     /**
@@ -139,8 +137,9 @@ class KeptCopySupport {
         String statusName = normalize(connector?.statusParameterName)
         String keepName = normalize(connector?.keepFieldsParameterName)
         Set<String> declared = SourceExtractOptionsSupport.declaredOptions(connector)*.name as Set<String>
-        // plan 3b-1: a connector whose extractor projects with KeptFieldsProjection is served projected
-        KeptFieldsProjection.Spec spec = KeptFieldsProjection.specFor(normalize(connector?.systemEnumId))
+        // plan 3b-1 (ruling P3b1-9): a connector whose system names a projection service is served projected
+        String projectionName = normalize(connector?.servingProjectionServiceName)
+        boolean projects = SourceSystemConnectorSupport.isAllowedProjectionServiceShape(projectionName)
 
         Map<String, Object> options = optionsKey(connector, p)
         List<String> undeclared = []
@@ -148,7 +147,7 @@ class KeptCopySupport {
             String name = k as String
             if (!(name in declared) && !(name in DISPATCH_PARAMETERS) && name != configName && name != filterName &&
                     name != statusName && name != keepName && name != normalize(connector?.dateFromParameterName) &&
-                    name != normalize(connector?.dateToParameterName) && !(spec != null && name == "readFields") && present(v)) {
+                    name != normalize(connector?.dateToParameterName) && !(projects && name == "readFields") && present(v)) {
                 undeclared << name
             }
         }
@@ -162,10 +161,11 @@ class KeptCopySupport {
         if (run?.stateMode) liveOnly = "the side reads by status, with no window"
         else if (connector?.windowed == false) liveOnly = "the source reads its whole population, with no window"
         else if (statusName && present(p.get(statusName))) liveOnly = "the side reads by status"
-        // a connector without a projection spec projects in code out of reach here (a data definition keeps its keepWith
+        // a connector without a projection service projects in code out of reach here (a data definition keeps its keepWith
         // companions), and its readFields change what it reads: such a side is never served copy records
-        else if (spec == null && present(p.get("readFields"))) liveOnly = EXTRA_FIELDS
-        else if (spec == null && keepName && present(p.get(keepName))) liveOnly = KEEPS_FIELDS
+        else if (projectionName && !projects) liveOnly = "the connector names an invalid projection service"
+        else if (!projects && present(p.get("readFields"))) liveOnly = EXTRA_FIELDS
+        else if (!projects && keepName && present(p.get(keepName))) liveOnly = KEEPS_FIELDS
         else if (undeclared) liveOnly = "the side sends parameters no dataset is keyed by: ${undeclared.sort().join(', ')}".toString()
 
         return [
@@ -184,8 +184,11 @@ class KeptCopySupport {
                 sentWindowEnd  : dateToName ? p.get(dateToName) : null,
                 filters        : filterName ? p.get(filterName) : null,
                 // the fields the side asks its source to keep (null: whole records) and to read, for a projecting connector
-                keepFields     : spec != null && keepName && present(p.get(keepName)) ? new ArrayList((Collection) p.get(keepName)) : null,
-                readFields     : spec != null && present(p.get("readFields")) ? new ArrayList((Collection) p.get("readFields")) : null,
+                keepFields     : projects && keepName && present(p.get(keepName)) ? new ArrayList((Collection) p.get(keepName)) : null,
+                readFields     : projects && present(p.get("readFields")) ? new ArrayList((Collection) p.get("readFields")) : null,
+                projectionServiceName: projects ? projectionName : null,
+                // Y: the extract writes the excluded-records side file, N: it does not, null: undeclared
+                excludedRecordsSidecar: normalize(connector?.excludedRecordsSidecar)?.toUpperCase() ?: null,
                 byKeys         : p.get("lookupKeys") != null,
                 outputLocation : normalize(p.outputLocation),
                 fileName       : normalize(p.fileName),
@@ -261,23 +264,16 @@ class KeptCopySupport {
                 }
             }
 
-            // plan 3b-1: a projecting connector's side is served projected, when the copy can stand in for its live read
-            KeptFieldsProjection.Spec spec = KeptFieldsProjection.specFor(side.systemEnumId)
-            if (spec != null) {
-                Map problem = KeptFieldsProjection.servingProblem(spec, manifest, [keepFields: side.keepFields,
-                        filterFields: SourceFilterSupport.parseRules(side.filters).collect { normalize(it.fieldExpression) },
-                        readFields: side.readFields, windowField: windowField])
-                if (problem != null) {
-                    queueRebuildIfFieldsChanged(ec, dataset, manifest, problem.reason as String)
-                    return notServed(problem.reason as String)
-                }
-                if (spec.exchangeManifestMax != null && !(manifest.exchangeManifest in [KeptCopyStore.EXCHANGE_MANIFEST_KEPT,
-                                                                                         KeptCopyStore.EXCHANGE_MANIFEST_NONE])) {
-                    return notServed(NO_EXCHANGE_MANIFEST)
+            // plan 3b-1 (ruling P3b1-9): a projecting connector's system says whether the copy can stand in for the live read
+            if (side.projectionServiceName) {
+                Map checked = callProjection(ec, side, dir, manifest, windowField, [:])
+                if (checked.servingProblem) {
+                    queueRebuildIfFieldsChanged(ec, dataset, manifest, checked.servingProblem as String)
+                    return notServed(checked.servingProblem as String)
                 }
             }
 
-            return slice(ec, side, dataset, dir, manifest, windowField, live, spec)
+            return slice(ec, side, dataset, dir, manifest, windowField, live)
         } catch (Throwable t) {
             logger.warn("Kept copy not served for ${side?.systemEnumId} ${side?.sourceConfigId}", t)
             return notServed("the copy could not be read: ${t.message ?: t}".toString())
@@ -294,8 +290,10 @@ class KeptCopySupport {
                 requestMetadata: served.metadata,
                 warnings       : served.warnings ?: [],
                 errors         : []] as Map<String, Object>
-        // an extractor that writes an exchange manifest answers its location (null when the window held no exchange)
-        if (served.containsKey("exchangeManifestFileLocation")) result.exchangeManifestFileLocation = served.exchangeManifestFileLocation
+        // what the connector's projection service says the live extract answers besides its file (ruling P3b1-9)
+        ["served", "extractFile", "reason", "fileLocation", "fileName", "recordCount", "metadata", "warnings"].with { Collection known ->
+            served.each { k, v -> if (!(k in known) && !result.containsKey(k)) result.put(k as String, v) }
+        }
         return result
     }
 
@@ -306,7 +304,7 @@ class KeptCopySupport {
      */
     private static void queueRebuildIfFieldsChanged(def ec, Map dataset, Map manifest, String reason) {
         try {
-            Map<String, Object> connector = darpan.reconciliation.automation.SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)
+            Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)
             List<String> next = DatasetRefreshSupport.keepFieldsForRead(ec, dataset, connector)
             List<String> held = manifest?.keptFields as List<String>
             if (next == held) {
@@ -369,8 +367,38 @@ class KeptCopySupport {
         return out.dataset instanceof Map ? (Map) out.dataset : null
     }
 
-    private static Map slice(def ec, Map side, Map dataset, File dir, Map manifest, String windowField, Map live,
-                             KeptFieldsProjection.Spec spec = null) {
+    /**
+     * The side's projection service (dataset.DatasetServices.project#KeptRecords), called as the current user, leaving the
+     * message facade as it found it. {@code extra} is empty for the check before the copy is opened, or carries recordsFile,
+     * outputFile, outputLocation and fileName to project. Answers the service's out-parameters; a service that is missing,
+     * throws or adds errors answers [servingProblem: why], so the side reads live.
+     */
+    private static Map callProjection(def ec, Map side, File dir, Map manifest, String windowField, Map extra) {
+        String serviceName = side.projectionServiceName as String
+        if (ec.service.getServiceDefinition(serviceName) == null) return [servingProblem: PROJECTION_NOT_INSTALLED]
+        Map<String, File> sideFiles = KeptCopyStore.sideFiles(dir)
+        Map params = [systemEnumId: side.systemEnumId,
+                      copy        : [keptFields: manifest.keptFields, heldFields: manifest.heldFields,
+                                     sideFiles : sideFiles == null ? null : sideFiles.collectEntries { k, v -> [(k): v.absolutePath] }],
+                      side        : [keepFields  : side.keepFields, readFields: side.readFields, windowField: windowField,
+                                     filterFields: SourceFilterSupport.parseRules(side.filters).collect { normalize(it.fieldExpression) }],
+                      windowStart : side.windowStart, windowEnd: side.windowEnd] + extra
+        Map out
+        try {
+            out = (ec.service.sync().name(serviceName).parameters(params).call() ?: [:]) as Map
+        } catch (Throwable t) {
+            logger.warn("Projection service ${serviceName} failed for ${side.systemEnumId}", t)
+            out = [servingProblem: "the connector's projection service failed: ${t.message ?: t}".toString()]
+        }
+        if (ec.message.hasError()) {
+            String errors = ec.message.getErrors().join("; ")
+            ec.message.clearErrors()
+            return [servingProblem: "the connector's projection service failed: ${errors}".toString()]
+        }
+        return out
+    }
+
+    private static Map slice(def ec, Map side, Map dataset, File dir, Map manifest, String windowField, Map live) {
         Timestamp start = side.windowStart as Timestamp
         Timestamp end = side.windowEnd as Timestamp
         Instant from = start.toInstant(), to = end.toInstant()
@@ -387,37 +415,21 @@ class KeptCopySupport {
         List<File> createdDirs = []
         for (File d = outDir; d != null && !d.exists(); d = d.parentFile) createdDirs << d
         boolean served = false, wroteDocument = false
-        // ruling P3b1-7: the side file only where the live extractor writes one (the filters apply either way)
-        boolean writesSideFile = side.systemEnumId in ExcludedRecordsSidecar.WRITTEN_BY
-        if (rules && !writesSideFile && !(side.systemEnumId in ExcludedRecordsSidecar.NOT_WRITTEN_BY)) {
-            return notServed(SIDE_FILE_UNDECLARED)
-        }
+        // ruling P3b1-9: the side file only where the connector row says the live extract writes one (the filters apply
+        // either way); a filtering side whose system declares neither reads live
+        boolean writesSideFile = side.excludedRecordsSidecar == "Y"
+        if (rules && !writesSideFile && side.excludedRecordsSidecar != "N") return notServed(SIDE_FILE_UNDECLARED)
         Map collector = rules && writesSideFile ? ExcludedRecordsSidecar.newCollector() : null
         Map<String, Integer> excludedCounts = [:], absentCounts = [:]
         File recordsWork = null
+        File projectedWork = null
         File documentWork = null
+        // what the projection service wrote beside the slice, removed again if the slice is not served
+        List<String> projectionWrote = []
         String windowMode = side.windowMode ?: EXACT_INSTANTS
         LocalDate fromDay = live.fromDay as LocalDate, toDay = live.toDay as LocalDate
         // a record whose window value the live read would place but this slice cannot: nothing is served
         String unplaceable = null
-        // plan 3b-1: the fields the live extractor trims each record to (null: whole records)
-        Set<String> projection = spec == null ? null : KeptFieldsProjection.keptBy(spec, side.keepFields)
-        // the excluded exchange orders the window holds, from the copy's own exchange manifest
-        List exchangeEntries = null
-        if (spec?.exchangeManifestMax != null) {
-            Map kept = exchangeManifestOf(dir, manifest)
-            if (kept == null || kept.truncated == true) return notServed(EXCHANGE_MANIFEST_CUT)
-            exchangeEntries = ((kept.manifest ?: []) as List).findAll { Object entry ->
-                Instant at = recordInstant(entry instanceof Map ? ((Map) entry).get(windowField) : null)
-                at != null && !at.isBefore(from) && at.isBefore(to)
-            }
-            if (((kept.manifest ?: []) as List).any { Object entry -> recordInstant(entry instanceof Map ? ((Map) entry).get(windowField) : null) == null }) {
-                return notServed("an exchange order in the copy's manifest has no ${windowField}".toString())
-            }
-            // the live read lists at most so many and says it cut the list: a slice cannot say which it would have kept
-            if (exchangeEntries.size() > spec.exchangeManifestMax) return notServed(EXCHANGE_MANIFEST_CUT)
-        }
-        String exchangeFileName = exchangeEntries ? fileName.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json" : null
         try {
             DataManagerSupport.ensureDirectory(outDir, "kept copy slice")
             recordsWork = File.createTempFile("kept-copy-records-", ".partial", outDir)
@@ -441,8 +453,8 @@ class KeptCopySupport {
                             if (at == null || at.isBefore(from) || !at.isBefore(to)) continue
                         } else if (blank(value)) {
                             // ruling P3b1-6: a record is dropped only when it is placed outside the window. One with no
-                            // value may be dated by a field the source filters on and the record never carries (an OMS
-                            // order-item unit has omsOrderDate, the server filters on its order's orderDate).
+                            // value may be dated by a field the source filters on and the record never carries (a line
+                            // record dated only by its own field, where the server filters on its order's date).
                             unplaceable = "a record has no ${windowField}, so the slice cannot place it in or out of the window".toString()
                             break
                         } else if (windowMode == CALENDAR_DAYS) {
@@ -472,9 +484,9 @@ class KeptCopySupport {
                             bucket.put(key, (bucket.get(key) ?: 0) + 1)
                             continue
                         }
-                        if (kept > 0) w.write(",")
-                        // projected after the filters, as the extractor does (they read fields it may not keep)
-                        w.write(JsonOutput.toJson(projection == null ? record : KeptFieldsProjection.project(record, projection)))
+                        // one record a line; a projecting connector's service trims them after the filters, as its extractor does
+                        w.write(JsonOutput.toJson(record))
+                        w.write("\n")
                         kept++
                     }
                 }
@@ -482,6 +494,17 @@ class KeptCopySupport {
             }
             if (unplaceable) return notServed(unplaceable)
             if (!sameVersion) return notServed(COPY_CHANGED)
+            Map projected = [:]
+            if (side.projectionServiceName) {
+                projectedWork = File.createTempFile("kept-copy-projected-", ".partial", outDir)
+                projected = callProjection(ec, side, dir, manifest, windowField, [recordsFile: recordsWork.absolutePath,
+                        outputFile: projectedWork.absolutePath, outputLocation: location, fileName: fileName])
+                projectionWrote.addAll(((projected.writtenLocations ?: []) as List).collect { it as String })
+                if (projected.servingProblem) return notServed(projected.servingProblem as String)
+                if ((projected.recordCount as Long) != kept) {
+                    return notServed("the projection service wrote ${projected.recordCount} records of ${kept}".toString())
+                }
+            }
             Map<String, Object> metadata = [
                     servedFromCopy      : true,
                     datasetId           : dataset.datasetId,
@@ -508,10 +531,17 @@ class KeptCopySupport {
             ].findAll { it.value != null } as Map<String, Object>
 
             documentWork = File.createTempFile("kept-copy-", ".partial", outDir)
-            documentWork.withOutputStream { OutputStream out ->
-                out.write(('{"metadata":' + JsonOutput.toJson(metadata) + ',"records":[').getBytes(StandardCharsets.UTF_8))
-                recordsWork.withInputStream { InputStream input -> input.transferTo(out) }
-                out.write(']}'.getBytes(StandardCharsets.UTF_8))
+            File recordLines = projectedWork ?: recordsWork
+            documentWork.withWriter("UTF-8") { Writer out ->
+                out.write('{"metadata":' + JsonOutput.toJson(metadata) + ',"records":[')
+                boolean first = true
+                recordLines.eachLine("UTF-8") { String line ->
+                    if (!line) return
+                    if (!first) out.write(",")
+                    out.write(line)
+                    first = false
+                }
+                out.write(']}')
             }
             DataManagerSupport.moveIntoLocation(ec, documentWork, fileLocation)
             wroteDocument = true
@@ -522,28 +552,14 @@ class KeptCopySupport {
                 // advisory, as every extractor treats it
                 warnings.add("Excluded-records sidecar not written: ${sidecarError.message}".toString())
             }
-            Map<String, Object> exchange = [:]
-            if (spec?.exchangeManifestMax != null) {
-                // as the live read: a file only when the window held an excluded exchange order, its location answered
-                exchange.exchangeManifestFileLocation = null
-                if (exchangeFileName) {
-                    File work = File.createTempFile("kept-copy-exchange-", ".partial", outDir)
-                    try {
-                        work.setText(JsonOutput.toJson([manifest: exchangeEntries, truncated: false, sourceFileName: fileName]), "UTF-8")
-                        String exchangeLocation = DataManagerSupport.childLocation(location, exchangeFileName)
-                        DataManagerSupport.moveIntoLocation(ec, work, exchangeLocation)
-                        exchange.exchangeManifestFileLocation = exchangeLocation
-                    } finally {
-                        work.delete()
-                    }
-                }
-            }
             File extractFile = ec.resource.getLocationReference(fileLocation)?.getFile() ?: new File(outDir, fileName)
             served = true
+            // what the system says its live read answers besides the file (a side file's location), on the served result
             return [served: true, extractFile: extractFile, reason: null, fileLocation: fileLocation, fileName: fileName,
-                    recordCount: kept, metadata: metadata, warnings: warnings] + exchange
+                    recordCount: kept, metadata: metadata, warnings: warnings] + ((projected.resultFields ?: [:]) as Map)
         } finally {
             recordsWork?.delete()
+            projectedWork?.delete()
             documentWork?.delete()
             ExcludedRecordsSidecar.discard(collector)
             if (!served) {
@@ -551,20 +567,14 @@ class KeptCopySupport {
                 if (wroteDocument) {
                     new File(outDir, fileName).delete()
                     new File(outDir, ExcludedRecordsSidecar.fileNameFor(fileName)).delete()
-                    if (exchangeFileName) new File(outDir, exchangeFileName).delete()
+                }
+                projectionWrote.each { String loc ->
+                    File f = loc.startsWith("/") ? new File(loc) : ec.resource.getLocationReference(loc)?.getFile()
+                    f?.delete()
                 }
                 createdDirs.each { File d -> if (d.list()?.length == 0) d.delete() }
             }
         }
-    }
-
-    /** The copy's exchange manifest as the read wrote it ({manifest, truncated}); an empty one when the read wrote none. */
-    private static Map exchangeManifestOf(File dir, Map manifest) {
-        if (manifest?.exchangeManifest == KeptCopyStore.EXCHANGE_MANIFEST_NONE) return [manifest: [], truncated: false]
-        File file = KeptCopyStore.sideFile(dir, KeptCopyStore.EXCHANGE_MANIFEST_FILE)
-        if (file == null) return null
-        Object parsed = new groovy.json.JsonSlurper().parse(file, "UTF-8")
-        return parsed instanceof Map ? (Map) parsed : null
     }
 
     private static boolean present(Object v) {

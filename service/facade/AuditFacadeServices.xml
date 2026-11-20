@@ -227,7 +227,7 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="settings" type="Map"><description>{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest
+            <parameter name="settings" type="Map"><description>{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest
                 day play can record today), schedule: {active, time HH:mm,
                 timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,
                 checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],
@@ -433,7 +433,7 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="settings" type="Map"><description>{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest
+            <parameter name="settings" type="Map"><description>{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest
                 day play can record today), schedule: {active, time HH:mm,
                 timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,
                 savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}</description></parameter>

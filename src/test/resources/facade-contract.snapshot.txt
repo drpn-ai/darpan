@@ -2596,6 +2596,7 @@ SERVICE list Automations
     automations.customWindowEndDate : Timestamp
     automations.customWindowStartDate : Timestamp
     automations.description : String
+    automations.effectiveNextStart : Timestamp
     automations.executionCount : Integer
     automations.inputModeCode : String
     automations.inputModeEnumId : String
@@ -2605,6 +2606,8 @@ SERVICE list Automations
     automations.lastScheduledFireTime : Timestamp
     automations.maxWindowDays : Integer
     automations.nextScheduledFireTime : Timestamp
+    automations.peakHoursUntil : Timestamp
+    automations.peakPeriodName : String
     automations.permissions : Map
     automations.reconciliationMappingId : String
     automations.relativeWindowCount : Integer

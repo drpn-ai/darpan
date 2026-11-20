@@ -116,7 +116,8 @@ class AutomationFacadeSupport {
         ]
     }
 
-    static Map<String, Object> buildAutomationRow(def ec, def automation, boolean includeSources, List sources, List executions) {
+    static Map<String, Object> buildAutomationRow(def ec, def automation, boolean includeSources, List sources, List executions,
+                                                  Map<String, Object> peakTick = null) {
         String automationId = readString(automation, "automationId")
         List sourceRows = sources ?: []
         List executionRows = executions ?: []
@@ -126,6 +127,8 @@ class AutomationFacadeSupport {
         Map<String, Object> chatSpaceSummary = resolveChatSpaceSummary(ec, automation)
         // DAR-BE-199: an audit's automation runs on the audit's schedule, never paused or resumed by itself.
         Map audit = darpan.audit.AuditSettingsSupport.auditOfAutomation(ec, readString(automation, "companyUserGroupId"), automationId)
+        Map<String, Object> peak = AutomationExecutionSupport.peakNextRun(ec,
+                peakTick ?: AutomationExecutionSupport.newPeakTick(ec.user.nowTimestamp), automation)
         Map<String, Object> row = [
                 automationId          : automationId,
                 automationName        : readString(automation, "automationName"),
@@ -147,6 +150,10 @@ class AutomationFacadeSupport {
                 timezone              : readString(automation, "windowTimeZone") ?: "UTC",
                 nextScheduledFireTime : readField(automation, "nextScheduledFireTime"),
                 lastScheduledFireTime : readField(automation, "lastScheduledFireTime"),
+                // DAR-BE-328: where the next run really starts (a peak-period move or hold), and until when peak hours last now.
+                effectiveNextStart    : peak.effectiveNextStart,
+                peakPeriodName        : peak.peakPeriodName,
+                peakHoursUntil        : peak.peakHoursUntil,
                 relativeWindowTypeEnumId: readString(automation, "relativeWindowTypeEnumId"),
                 relativeWindowLabel   : enumLabel(ec, readString(automation, "relativeWindowTypeEnumId")),
                 relativeWindowCount   : readField(automation, "relativeWindowCount"),

@@ -1201,6 +1201,55 @@ class AutomationExecutionSupport {
         }
     }
 
+    /**
+     * DAR-BE-328: what the automation page shows for the next run. effectiveNextStart is when the scheduler will start it
+     * (the SAME peakStart the scan uses, so page and scheduler cannot disagree; the stored fire itself when no period
+     * applies); peakPeriodName names the period behind a differing start; peakHoursUntil is set only while now is inside
+     * peak hours. Fails open: any error leaves the stored fire and no peak hours.
+     */
+    static Map<String, Object> peakNextRun(def ec, Map<String, Object> tick, def automation) {
+        Map<String, Object> out = [:]
+        Timestamp fire = toTimestamp(readField(automation, "nextScheduledFireTime"))
+        if (fire != null) out.effectiveNextStart = fire
+        try {
+            String tenantId = normalize(readField(automation, "companyUserGroupId"))
+            List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
+            if (!windows) return out
+            ZoneId zone = peakZoneOf(ec, tick, tenantId)
+            Instant until = PeakPeriodSupport.peakHoursEndIfInside(windows, ((Timestamp) tick.now).toInstant(), zone)
+            Map<String, Object> result = [:]
+            if (fire != null) {
+                Instant start = peakStart(ec, tick, fire.toInstant(), normalize(readField(automation, "automationId")), tenantId,
+                        true, toTimestamp(readField(automation, "lastScheduledFireTime")))
+                result.effectiveNextStart = Timestamp.from(start)
+                if (start != fire.toInstant()) {
+                    PeakWindow period = PeakPeriodSupport.activeOn(windows, fire.toInstant().atZone(zone).toLocalDate()) ?:
+                            PeakPeriodSupport.activeOn(windows, start.atZone(zone).toLocalDate())
+                    if (period?.periodName) result.peakPeriodName = period.periodName
+                }
+            }
+            if (until != null) result.peakHoursUntil = Timestamp.from(until)
+            return result
+        } catch (Throwable peakError) {
+            logger.error("Peak periods could not be applied to the next run of automation {}; showing its normal time",
+                    readField(automation, "automationId"), peakError)
+            return out
+        }
+    }
+
+    /** DAR-BE-328: when the tenant's peak hours end, only while now is inside them; null otherwise or if they cannot be read. */
+    static Instant peakHoursEndNow(def ec, String tenantId, Timestamp now) {
+        try {
+            Map<String, Object> tick = newPeakTick(now)
+            List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
+            if (!windows) return null
+            return PeakPeriodSupport.peakHoursEndIfInside(windows, now.toInstant(), peakZoneOf(ec, tick, tenantId))
+        } catch (Throwable peakError) {
+            logger.error("Peak hours of tenant {} could not be read; none is shown", tenantId, peakError)
+            return null
+        }
+    }
+
     private static List<PeakWindow> peakWindowsOf(def ec, Map<String, Object> tick, String tenantId) {
         Map<String, List<PeakWindow>> cache = (Map<String, List<PeakWindow>>) tick.windows
         String key = tenantId ?: ""

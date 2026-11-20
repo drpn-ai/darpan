@@ -2676,6 +2676,9 @@
                 <parameter name="timezone"/>
                 <parameter name="nextScheduledFireTime" type="Timestamp"/>
                 <parameter name="lastScheduledFireTime" type="Timestamp"/>
+                <parameter name="effectiveNextStart" type="Timestamp"><description>DAR-BE-328: when the next run really starts (a peak-period move or hold); equals nextScheduledFireTime when none applies.</description></parameter>
+                <parameter name="peakPeriodName"><description>The peak period behind a differing effectiveNextStart.</description></parameter>
+                <parameter name="peakHoursUntil" type="Timestamp"><description>Set only while now is inside peak hours: when they end.</description></parameter>
                 <parameter name="relativeWindowTypeEnumId"/>
                 <parameter name="relativeWindowLabel"/>
                 <parameter name="relativeWindowCount" type="Integer"/>
@@ -2708,7 +2711,9 @@
             <set field="executionRecords" from="automationIds ? ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', 'in', automationIds).orderBy('automationId,-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [] : []"/>
             <set field="sourcesByAutomationId" from="sourceRows.groupBy { sourceRow -> ((sourceRow.automationId)?.toString()?.trim()) }"/>
             <set field="executionsByAutomationId" from="executionRecords.groupBy { executionRecord -> ((executionRecord.automationId)?.toString()?.trim()) }"/>
-            <set field="automationRows" from="automationRecords.collect { automationRecord -> darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, false, sourcesByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: [], darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(executionsByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: [])) }"/>
+            <!-- DAR-BE-328: one peak tick for the page, so a tenant's peak periods are read once, not once per row. -->
+            <set field="peakTick" from="darpan.reconciliation.automation.AutomationExecutionSupport.newPeakTick(ec.user.nowTimestamp)"/>
+            <set field="automationRows" from="automationRecords.collect { automationRecord -> darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, false, sourcesByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: [], darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(executionsByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: []), peakTick) }"/>
             <if condition="search">
                 <set field="automationRows" from="automationRows.findAll { row -> [row.automationId, row.automationName, row.description, row.savedRunId, row.savedRunName, row.inputModeLabel, row.sourceSummary, row.scheduleSummary, row.timezone, row.lastExecution?.statusLabel].any { value -> value?.toString()?.toLowerCase()?.contains(search) } }"/>
             </if>

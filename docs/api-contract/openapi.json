@@ -13486,7 +13486,7 @@
                     },
                     "settings": {
                         "type": "object",
-                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,\n                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],\n                runEmail: {active, alsoSendTo: [address], members (how many accounts receive it by default: current tenant\n                members and Darpan admins), admins (how many of those are Darpan admins), chatSpaceId or null, canEdit (the caller\n                is a tenant admin; others see it read-only)} (DAR-BE-207:\n                the update emailed after each run to the members and admins, plus alsoSendTo)}"
+                        "description": "{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,\n                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],\n                runEmail: {active, alsoSendTo: [address], members (how many accounts receive it by default: current tenant\n                members and Darpan admins), admins (how many of those are Darpan admins), chatSpaceId or null, canEdit (the caller\n                is a tenant admin; others see it read-only)} (DAR-BE-207:\n                the update emailed after each run to the members and admins, plus alsoSendTo)}"
                     }
                 }
             },
@@ -14050,7 +14050,7 @@
                     },
                     "settings": {
                         "type": "object",
-                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}"
+                        "description": "{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}"
                     }
                 }
             },
@@ -28400,6 +28400,32 @@
                                         }
                                     ],
                                     "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                },
+                                "effectiveNextStart": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. DAR-BE-328: when the next run really starts (a peak-period move or hold); equals nextScheduledFireTime when none applies."
+                                },
+                                "peakPeriodName": {
+                                    "type": "string",
+                                    "description": "The peak period behind a differing effectiveNextStart."
+                                },
+                                "peakHoursUntil": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. Set only while now is inside peak hours: when they end."
                                 },
                                 "relativeWindowTypeEnumId": {
                                     "type": "string"

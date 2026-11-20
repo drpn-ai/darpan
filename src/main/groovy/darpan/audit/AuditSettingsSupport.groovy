@@ -61,6 +61,8 @@ class AuditSettingsSupport {
         ZoneId zone = ZoneId.of(tenantZone(ec))
         return [audit     : [id: audit.auditCode, name: audit.auditName, period: periods[audit.periodEnumId as String]],
                 playableFrom: playableFrom(ec, tenantId, audit, LocalDate.now(zone), zone),
+                // DAR-BE-328: the instant today's peak hours end, only while now is inside them; play notes it.
+                peakHoursUntil: AutomationExecutionSupport.peakHoursEndNow(ec, tenantId, ec.user.nowTimestamp)?.toString(),
                 schedule  : [active          : schedule.active,
                              time            : schedule.time,
                              timeZone        : schedule.timeZone,

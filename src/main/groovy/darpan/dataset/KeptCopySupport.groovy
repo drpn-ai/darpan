@@ -198,38 +198,49 @@ class KeptCopySupport {
         String fileName = side.fileName ?:
                 "${DataManagerSupport.safeToken(side.systemEnumId, 'source').toLowerCase()}-${start.time}-${end.time}.json".toString()
         String fileLocation = DataManagerSupport.childLocation(location, fileName)
-        File outDir = DataManagerSupport.resolveDirectoryFile(ec, location, true)
         // parsed before the copy is opened, as the extractors do: a malformed rule fails here and the live read reports it
         List<Map<String, Object>> rules = SourceFilterSupport.parseRules(side.filters)
+        File outDir = DataManagerSupport.resolveDirectoryFile(ec, location, false)
+        if (outDir == null) return notServed("the output location is not a folder")
+        // the folders this slice creates, deepest first: an aborted slice removes them again when they are empty
+        List<File> createdDirs = []
+        for (File d = outDir; d != null && !d.exists(); d = d.parentFile) createdDirs << d
+        boolean served = false, wroteDocument = false
         Map collector = rules ? ExcludedRecordsSidecar.newCollector() : null
         Map<String, Integer> excludedCounts = [:], absentCounts = [:]
-        File recordsWork = File.createTempFile("kept-copy-records-", ".partial", outDir)
+        File recordsWork = null
         File documentWork = null
         try {
-            Iterator<Map> copy = KeptCopyStore.records(dir)
-            // the records opened are the manifest's version only if current.json still names it (versions only move on)
-            if (KeptCopyStore.manifest(dir)?.version != manifest.version) return notServed(COPY_CHANGED)
+            DataManagerSupport.ensureDirectory(outDir, "kept copy slice")
+            recordsWork = File.createTempFile("kept-copy-records-", ".partial", outDir)
             long inWindow = 0, kept = 0
-            recordsWork.withWriter("UTF-8") { Writer w ->
-                while (copy.hasNext()) {
-                    Map record = (Map) copy.next().get("record")
-                    Instant at = instant(record?.get(windowField))
-                    // half-open, as instants: [windowStart, windowEnd)
-                    if (at == null || at.isBefore(from) || !at.isBefore(to)) continue
-                    inWindow++
-                    Map<String, Object> verdict = SourceFilterSupport.evaluate(record, rules)
-                    if (verdict != null) {
-                        ExcludedRecordsSidecar.collect(collector, record, (Map) verdict.rule)
-                        String key = String.valueOf(((Map) verdict.rule).sequenceNum)
-                        Map<String, Integer> bucket = SourceFilterSupport.REASON_FIELD_ABSENT == verdict.reason ? absentCounts : excludedCounts
-                        bucket.put(key, (bucket.get(key) ?: 0) + 1)
-                        continue
+            // ruling P3a-14: the copy's file is closed however the slice ends
+            boolean sameVersion = KeptCopyStore.withRecords(dir) { Iterator<Map> copy ->
+                // the records opened are the manifest's version only if current.json still names it (versions only move on)
+                if (KeptCopyStore.manifest(dir)?.version != manifest.version) return false
+                recordsWork.withWriter("UTF-8") { Writer w ->
+                    while (copy.hasNext()) {
+                        Map record = (Map) copy.next().get("record")
+                        Instant at = instant(record?.get(windowField))
+                        // half-open, as instants: [windowStart, windowEnd)
+                        if (at == null || at.isBefore(from) || !at.isBefore(to)) continue
+                        inWindow++
+                        Map<String, Object> verdict = SourceFilterSupport.evaluate(record, rules)
+                        if (verdict != null) {
+                            ExcludedRecordsSidecar.collect(collector, record, (Map) verdict.rule)
+                            String key = String.valueOf(((Map) verdict.rule).sequenceNum)
+                            Map<String, Integer> bucket = SourceFilterSupport.REASON_FIELD_ABSENT == verdict.reason ? absentCounts : excludedCounts
+                            bucket.put(key, (bucket.get(key) ?: 0) + 1)
+                            continue
+                        }
+                        if (kept > 0) w.write(",")
+                        w.write(JsonOutput.toJson(record))
+                        kept++
                     }
-                    if (kept > 0) w.write(",")
-                    w.write(JsonOutput.toJson(record))
-                    kept++
                 }
+                return true
             }
+            if (!sameVersion) return notServed(COPY_CHANGED)
             Map<String, Object> metadata = [
                     servedFromCopy      : true,
                     datasetId           : dataset.datasetId,
@@ -259,6 +270,7 @@ class KeptCopySupport {
                 out.write(']}'.getBytes(StandardCharsets.UTF_8))
             }
             DataManagerSupport.moveIntoLocation(ec, documentWork, fileLocation)
+            wroteDocument = true
             List<String> warnings = []
             try {
                 ExcludedRecordsSidecar.writeBeside(ec, collector, location, fileName, outDir)
@@ -267,12 +279,21 @@ class KeptCopySupport {
                 warnings.add("Excluded-records sidecar not written: ${sidecarError.message}".toString())
             }
             File extractFile = ec.resource.getLocationReference(fileLocation)?.getFile() ?: new File(outDir, fileName)
+            served = true
             return [served: true, extractFile: extractFile, reason: null, fileLocation: fileLocation, fileName: fileName,
                     recordCount: kept, metadata: metadata, warnings: warnings]
         } finally {
-            recordsWork.delete()
+            recordsWork?.delete()
             documentWork?.delete()
             ExcludedRecordsSidecar.discard(collector)
+            if (!served) {
+                // nothing of an unserved slice stays: the live read writes this location on its own
+                if (wroteDocument) {
+                    new File(outDir, fileName).delete()
+                    new File(outDir, ExcludedRecordsSidecar.fileNameFor(fileName)).delete()
+                }
+                createdDirs.each { File d -> if (d.list()?.length == 0) d.delete() }
+            }
         }
     }
 

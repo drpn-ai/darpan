@@ -370,6 +370,52 @@ class KeptCopySupportTests {
         assertEquals(["pos-1"], json(scheduledSide).records*.id)
     }
 
+    /**
+     * Ruling P3a-14: a slice that fails mid-stream (here its filter throws on the second record in the window, after the
+     * first was written) closes the copy's file, leaves no partial output and no folder it made, and the side reads live.
+     */
+    @Test
+    void aSliceThatFailsMidStreamClosesTheCopyAndLeavesNothing() {
+        String id = dataset("conn-abort")
+        copy(A, id, (1..5).collect { int n -> order("ab-${n}".toString(), "2026-11-10T1${n}:00:00Z".toString()) })
+        int openBefore = KeptCopyStore.openReaders()
+        int[] evaluated = [0]
+        SourceFilterSupport.metaClass.static.evaluate = { Object record, List rules ->
+            if (++evaluated[0] == 2) throw new IllegalStateException("filter failed mid-stream")
+            return null
+        }
+        try {
+            String location = runLocation("abort")
+            File runFolder = locationFile(location).parentFile
+            assertFalse(runFolder.exists(), "test precondition: the slice makes its own folders")
+            Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
+                    [shopifyAuthConfigId: "conn-abort", outputLocation: location, fileName: "abort.json"],
+                    [tenantId: A, windowStart: START, windowEnd: END]))
+            assertFalse(served.served as boolean)
+            assertTrue((served.reason as String).contains("filter failed mid-stream"), served.reason as String)
+            assertEquals(2, evaluated[0], "it failed mid-stream, after a record was written")
+            assertEquals(openBefore, KeptCopyStore.openReaders(), "the copy's file is closed")
+            assertFalse(runFolder.exists(), "no partial output and no empty folder is left: ${runFolder.list()}")
+
+            // through the interactive path: the live read, alone in its folder
+            evaluated[0] = 0
+            List<Map> calls = []
+            Map run = interactive("conn-abort", START, END, calls)
+            assertEquals([], run.errors)
+            assertEquals(1, calls.size(), "read live")
+            File live = locationFile(calls[0].location as String)
+            assertEquals([live.name], live.parentFile.list().toList(), "only the live file is there")
+            assertEquals(openBefore, KeptCopyStore.openReaders())
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(SourceFilterSupport)
+        }
+        // and a slice that is served closes the copy too
+        Map ok = direct("conn-abort", START, END, "abort-ok")
+        assertTrue(ok.served as boolean, ok.reason as String)
+        assertEquals(5, ok.recordCount)
+        assertEquals(openBefore, KeptCopyStore.openReaders())
+    }
+
     // ------------------------------------------------------------------------------------------------------- helpers
 
     private static final String LIVE_TEXT = '{"metadata":{"live":true},"records":[{"id":"live-1"}]}'

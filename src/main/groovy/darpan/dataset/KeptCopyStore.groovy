@@ -41,8 +41,29 @@ class KeptCopyStore {
     static Iterator<Map> records(File datasetDir) {
         String version = currentVersion(datasetDir)
         if (version == null) return Collections.<Map> emptyList().iterator()
-        return lineIterator(new File(new File(datasetDir, version), RECORDS_FILE))
+        return new RecordReader(new File(new File(datasetDir, version), RECORDS_FILE))
     }
+
+    /**
+     * Streams the current version to {@code body} as an iterator of [id, stamp, readAt, record: Map] (empty when there is
+     * none) and closes the file when body returns or throws, however far it read (ruling P3a-14). Returns body's result.
+     */
+    static <T> T withRecords(File datasetDir, Closure<T> body) {
+        String version = currentVersion(datasetDir)
+        RecordReader reader = version == null ? null : new RecordReader(new File(new File(datasetDir, version), RECORDS_FILE))
+        try {
+            return body.call(reader != null ? reader : Collections.<Map> emptyList().iterator())
+        } finally {
+            reader?.close()
+        }
+    }
+
+    /** Version files open for reading in this JVM right now: a reader that is never closed shows here. */
+    static int openReaders() {
+        return OPEN_READERS.get()
+    }
+
+    private static final java.util.concurrent.atomic.AtomicInteger OPEN_READERS = new java.util.concurrent.atomic.AtomicInteger()
 
     /** Merges the changed records into the copy: an equal or newer stamp replaces, a new id is appended. */
     static Map merge(File datasetDir, Iterator<Map> changed, String idField, String stampField,
@@ -262,22 +283,43 @@ class KeptCopyStore {
         if (lineWrittenHook != null) lineWrittenHook.call()
     }
 
-    private static Iterator<Map> lineIterator(File file) {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(new GZIPInputStream(new FileInputStream(file), 65536), StandardCharsets.UTF_8))
-        JsonSlurper slurper = new JsonSlurper()
-        String[] next = [reader.readLine()]
-        return new Iterator<Map>() {
-            boolean hasNext() {
-                if (next[0] == null) reader.close()
-                return next[0] != null
+    /** One version's records, a line at a time; closes itself at the end, and on close(). */
+    private static class RecordReader implements Iterator<Map>, Closeable {
+        private final BufferedReader reader
+        private final JsonSlurper slurper = new JsonSlurper()
+        private String next
+        private boolean closed
+
+        RecordReader(File file) {
+            reader = new BufferedReader(new InputStreamReader(new GZIPInputStream(new FileInputStream(file), 65536), StandardCharsets.UTF_8))
+            OPEN_READERS.incrementAndGet()
+            try {
+                next = reader.readLine()
+            } catch (Throwable t) {
+                close()
+                throw t
             }
-            Map next() {
-                if (next[0] == null) throw new NoSuchElementException()
-                Map m = (Map) slurper.parseText(next[0])
-                next[0] = reader.readLine()
-                if (next[0] == null) reader.close()
-                return m
-            }
+            if (next == null) close()
+        }
+
+        boolean hasNext() {
+            return next != null
+        }
+
+        Map next() {
+            if (next == null) throw new NoSuchElementException()
+            Map m = (Map) slurper.parseText(next)
+            next = reader.readLine()
+            if (next == null) close()
+            return m
+        }
+
+        void close() {
+            if (closed) return
+            closed = true
+            next = null
+            OPEN_READERS.decrementAndGet()
+            reader.close()
         }
     }
 

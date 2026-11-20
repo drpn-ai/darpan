@@ -9,6 +9,7 @@ import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -174,15 +175,32 @@ class RunPathParityGateTest {
      */
     @Test
     void bothExtractDispatchersOfferTheSideToTheKeptCopy() {
-        String seam = "KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side("
-        ["facade/reconciliation/RunExtractSupport.groovy", SCHEDULED_PATH].each { String rel ->
-            String code = codeOf(rel)
-            assertEquals(1, code.count(seam), "${rel} must offer its side to the kept copy exactly once, through ${seam}")
-            int offered = code.indexOf(seam)
-            int live = rel == SCHEDULED_PATH ? code.indexOf("def call = ec.service.sync().name(serviceName)") :
-                    code.indexOf("serviceCaller.call(extractServiceName, extractParams)")
-            assertTrue(live > 0 && offered < live, "${rel} must offer the side to the kept copy before its live call")
+        Pattern seam = ~/KeptCopySupport\s*\.\s*sliceIfServed\s*\(\s*ec\s*,\s*KeptCopySupport\s*\.\s*side\s*\(/
+        // [file, the dispatcher method, its live call], each matched only inside that method's own body
+        [["facade/reconciliation/RunExtractSupport.groovy", "extractApiSource",
+          ~/serviceCaller\s*\.\s*call\s*\(\s*extractServiceName\s*,\s*extractParams\s*\)/],
+         [SCHEDULED_PATH, "callConfiguredSourceExtractor",
+          ~/def\s+call\s*=\s*ec\s*\.\s*service\s*\.\s*sync\s*\(\s*\)\s*\.\s*name\s*\(\s*serviceName\s*\)/]].each { List row ->
+            String rel = row[0], method = row[1]
+            String body = methodBody(codeOf(rel), method)
+            Matcher offered = seam.matcher(body)
+            assertTrue(offered.find(), "${rel} ${method} must offer its side to the kept copy, through KeptCopySupport.sliceIfServed")
+            int offeredAt = offered.start()
+            assertFalse(offered.find(), "${rel} ${method} must offer its side to the kept copy exactly once")
+            Matcher live = ((Pattern) row[2]).matcher(body)
+            assertTrue(live.find(), "${rel} ${method}: its live call was not found; if it changed, update this gate")
+            assertTrue(offeredAt < live.start(), "${rel} ${method} must offer the side to the kept copy before its live call")
+            assertFalse(live.find(), "${rel} ${method}: more than one live call matched; anchor this gate again")
         }
+    }
+
+    /** The text of {@code method}'s body: from its declaration to the next method declaration at class level. */
+    private static String methodBody(String code, String method) {
+        Matcher decl = Pattern.compile(/(?m)^    (?:(?:public|protected|private|static)\s+)+[\w<>,\[\]\s]+\s+${method}\s*\(/).matcher(code)
+        assertTrue(decl.find(), "Could not find the declaration of ${method}; if it moved, update this gate.")
+        Matcher next = Pattern.compile(/(?m)^    (?:(?:public|protected|private|static)\s+)+[\w<>,\[\]\s]+\s+\w+\s*\(/).matcher(code)
+        int end = next.find(decl.end()) ? next.start() : code.length()
+        return code.substring(decl.start(), end)
     }
 
     // -------------------------------------------------------------------------------------------

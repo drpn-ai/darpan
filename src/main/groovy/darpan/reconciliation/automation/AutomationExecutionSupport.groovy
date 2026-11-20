@@ -2215,7 +2215,7 @@ class AutomationExecutionSupport {
         }
         logger.info("${serviceParams.fileSide} reads live, not from a kept copy: ${served.reason}")
 
-        def call =ec.service.sync().name(serviceName).parameters(serviceParams)
+        def call = ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
         // Counted first: only an error this call adds is its failure (a side's login can leave one of its own).
         int errorsBefore = ((ec.message.getErrors() ?: []) as List).size()

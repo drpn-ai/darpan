@@ -3,6 +3,7 @@ package darpan.peak
 import darpan.facade.common.TenantAccessSupport
 import groovy.transform.Immutable
 import org.moqui.Moqui
+import org.moqui.impl.context.ExecutionContextFactoryImpl
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -71,9 +72,25 @@ class PeakReadPolicy {
     }
 
     private static ReadLimits loadFromDb(def ec, String tenantId) {
-        def context = ec ?: Moqui.getExecutionContext()
-        LocalDate today = LocalDate.now(TenantAccessSupport.tenantTimeZoneFor(context, tenantId))
-        return PeakPeriodLoader.readLimits(context, tenantId, today)
+        // Same pattern as DarpanSettings.loadRowsFromDatabase: a caller's or the thread's existing context is used and never
+        // destroyed; one created here (a bare pool thread) is destroyed so it does not stay in the thread-local.
+        def ecfi = Moqui.executionContextFactory
+        boolean created = false
+        def context = ec
+        if (context == null) {
+            if (ecfi == null) return ReadLimits.NONE
+            context = ((ExecutionContextFactoryImpl) ecfi).activeContext.get()
+            if (context == null) {
+                context = ecfi.getExecutionContext()
+                created = true
+            }
+        }
+        try {
+            LocalDate today = LocalDate.now(TenantAccessSupport.tenantTimeZoneFor(context, tenantId))
+            return PeakPeriodLoader.readLimits(context, tenantId, today)
+        } finally {
+            if (created) ((ExecutionContextFactoryImpl) ecfi).destroyActiveExecutionContext()
+        }
     }
 
     private static void warnOnce(String tenant, Throwable t) {

@@ -311,7 +311,10 @@ class DatasetRefreshSupport {
 
             // The swap and the prune run together under the owner guard: a refresh that lost its lock does neither, and
             // KeptCopyStore deletes its new version.
+            CopyIdCheck idCheck = new CopyIdCheck()
             Closure swapAndPrune = { Closure swap ->
+                // a record missing an id part, or two with one copy id, fails the read before anything is swapped in
+                idCheck.assertClean(dataset.idField as String)
                 return ownerGuard.call({ ->
                     swap.call()
                     KeptCopyStore.prune(datasetDir)
@@ -325,7 +328,7 @@ class DatasetRefreshSupport {
             Iterator<Map> source = new RecordFileIterator(file)
             RecordFileIterator records = (RecordFileIterator) source
             List<String> idParts = idFields(dataset.idField as String)
-            if (idParts.size() > 1) source = withCopyId(records, idParts)
+            if (idParts.size() > 1) source = withCopyId(records, idParts, idCheck)
             Map counts
             try {
                 counts = full ?
@@ -352,14 +355,48 @@ class DatasetRefreshSupport {
     }
 
     /** {@code records} with {@link KeptCopyStore#COPY_ID} set on each record from its {@code idParts} values. */
-    private static Iterator<Map> withCopyId(Iterator<Map> records, List<String> idParts) {
+    private static Iterator<Map> withCopyId(Iterator<Map> records, List<String> idParts, CopyIdCheck check) {
         return new Iterator<Map>() {
             boolean hasNext() { return records.hasNext() }
 
             Map next() {
                 Map r = records.next()
-                r.put(KeptCopyStore.COPY_ID, copyId(r, idParts))
+                String id = copyId(r, idParts)
+                check.see(r, idParts, id)
+                r.put(KeptCopyStore.COPY_ID, id)
                 return r
+            }
+        }
+    }
+
+    /**
+     * What a read saw of its composite ids: records with a missing or blank id part, and copy ids seen twice. Such a record
+     * would collapse into another one in the copy, so {@link #assertClean} fails the read instead (a configuration fault: the
+     * extractor does not supply a declared id field, or the fields do not identify a record).
+     */
+    static class CopyIdCheck {
+        long missing = 0
+        long duplicates = 0
+        String firstMissing
+        String firstDuplicate
+        private final Set<String> seen = new HashSet<String>()
+
+        void see(Map record, List<String> idParts, String id) {
+            if (idParts.any { String f -> record.get(f) == null || String.valueOf(record.get(f)).trim().isEmpty() }) {
+                if (missing++ == 0) firstMissing = idParts.collect { String f -> "${f}=${record.get(f)}".toString() }.join(", ")
+            } else if (!seen.add(id)) {
+                if (duplicates++ == 0) firstDuplicate = id
+            }
+        }
+
+        void assertClean(String idField) {
+            if (missing > 0) {
+                throw new IllegalStateException(("${missing} records lack a value for part of the id ${idField}; the first has " +
+                        "${firstMissing}. The extractor must supply every declared id field").toString())
+            }
+            if (duplicates > 0) {
+                throw new IllegalStateException(("${duplicates} records repeat a copy id of ${idField}; the first repeated id is " +
+                        "${firstDuplicate}. These fields do not identify a record").toString())
             }
         }
     }

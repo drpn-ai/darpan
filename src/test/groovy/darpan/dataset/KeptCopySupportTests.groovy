@@ -488,6 +488,22 @@ class KeptCopySupportTests {
 
     // ------------------------------------------------------------------------------------------------------- helpers
 
+    @Test
+    void aServedSliceOfACompositeDatasetCarriesNoCopyId() {
+        String id = dataset("conn-composite", [idField: "id,sub"])
+        List<Map> records = [order("o1", "2026-11-10T09:00:00Z", [sub: "1"]), order("o1", "2026-11-10T10:00:00Z", [sub: "2"])]
+                .collect { it + [_copyId: "${it.id}|${it.sub}".toString()] }
+        copy(A, id, records, 62, "id,sub")
+        assertTrue(KeptCopyStore.records(DatasetRefreshSupport.datasetDir(ec, A, id)).every { it.record.containsKey("_copyId") },
+                "the copy itself keeps the derived key")
+        Map served = direct("conn-composite", START, END, "composite")
+        assertTrue(served.served as boolean, served.reason as String)
+        List<Map> out = json(served.extractFile as File).records
+        assertEquals(2, out.size())
+        assertTrue(out.every { !it.containsKey("_copyId") }, out.toString())
+        assertEquals(["1", "2"], out*.sub)
+    }
+
     private static final String LIVE_TEXT = '{"metadata":{"live":true},"records":[{"id":"live-1"}]}'
 
     private static Timestamp ts(String iso) {

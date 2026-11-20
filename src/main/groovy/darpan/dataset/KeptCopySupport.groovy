@@ -227,6 +227,11 @@ class KeptCopySupport {
                 recordsWork.withWriter("UTF-8") { Writer w ->
                     while (copy.hasNext()) {
                         Map record = (Map) copy.next().get("record")
+                        // the derived key of a composite id is the copy's own: a served record equals a live one
+                        if (record != null && record.containsKey(KeptCopyStore.COPY_ID)) {
+                            record = new LinkedHashMap(record)
+                            record.remove(KeptCopyStore.COPY_ID)
+                        }
                         Instant at = instant(record?.get(windowField))
                         // half-open, as instants: [windowStart, windowEnd)
                         if (at == null || at.isBefore(from) || !at.isBefore(to)) continue

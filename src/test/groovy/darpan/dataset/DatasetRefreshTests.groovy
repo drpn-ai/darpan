@@ -309,6 +309,89 @@ class DatasetRefreshTests {
     }
 
     @Test
+    void reStoringARollingDatasetWithoutTheRuleKeepsItRolling() {
+        String id = rolling("roll-restore")
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5)])).errors)
+        def before = find("darpan.dataset.Dataset", [datasetId: id])
+        assertNotNull(before.lastFullReadAt)
+        // a re-store that names neither the rule nor the stamp field
+        Map again = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-roll-restore", options: [:],
+                idField: "id", windowField: "createdAt", marginDays: 3])
+        assertEquals([], again.errors)
+        assertEquals(id, again.out.datasetId)
+        def row = find("darpan.dataset.Dataset", [datasetId: id])
+        assertEquals("DRR_ROLLING", row.readRuleEnumId)
+        assertEquals(60, row.horizonDays as int)
+        assertEquals("createdAt", row.stampField)
+        assertEquals(3, row.marginDays as int)
+        assertEquals(before.lastFullReadAt, row.lastFullReadAt, "nothing that matters changed")
+        // and a changed-since dataset re-stored without a rule or stamp keeps both
+        String cs = dataset("cs-restore")
+        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-cs-restore", options: [:],
+                idField: "id", windowField: "createdAt"]).errors)
+        def csRow = find("darpan.dataset.Dataset", [datasetId: cs])
+        assertEquals("DRR_CHANGED_SINCE", csRow.readRuleEnumId)
+        assertEquals("updatedAt", csRow.stampField)
+    }
+
+    @Test
+    void changingToRollingDefaultsTheHorizonToSixty() {
+        String id = dataset("to-rolling")
+        assertEquals(62, find("darpan.dataset.Dataset", [datasetId: id]).horizonDays as int)
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5)])).errors)
+        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-to-rolling", options: [:],
+                idField: "id", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"]).errors)
+        def row = find("darpan.dataset.Dataset", [datasetId: id])
+        assertEquals("DRR_ROLLING", row.readRuleEnumId)
+        assertEquals(60, row.horizonDays as int)
+        assertNull(row.lastFullReadAt, "a rule change forces a full read")
+        // an explicit horizon wins, and an omitted one on a later update is kept
+        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-to-rolling", options: [:],
+                idField: "id", windowField: "createdAt", horizonDays: 45]).errors)
+        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-to-rolling", options: [:],
+                idField: "id", windowField: "createdAt"]).errors)
+        assertEquals(45, find("darpan.dataset.Dataset", [datasetId: id]).horizonDays as int)
+    }
+
+    @Test
+    void theIdFieldIsStoredTrimmedAndNeverEmpty() {
+        String id = dataset("id-trim", [idField: " orderId , orderItemSeqId ,"])
+        assertEquals("orderId,orderItemSeqId", find("darpan.dataset.Dataset", [datasetId: id]).idField)
+        Map empty = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-id-empty", options: [:],
+                idField: " , ", stampField: "updatedAt", windowField: "createdAt"])
+        assertFalse(empty.errors.isEmpty())
+        // "id," is the single field id: records key by it, not by a missing _copyId
+        String single = dataset("id-comma", [idField: "id,"])
+        assertEquals([], refresh(single, stub([], [order(1, 5, 5), order(2, 4, 4)])).errors)
+        assertEquals(["1", "2"], KeptCopyStore.records(dir(single)).collect { it.id }.sort())
+    }
+
+    @Test
+    void aRecordMissingAnIdPartFailsTheReadNamingIt() {
+        String id = dataset("missing-part", [idField: "orderId,orderItemSeqId,unitSeq"])
+        assertEquals([], refresh(id, stub([], [unit(1, 1, 1, 5, 5)])).errors)
+        Map before = KeptCopyStore.manifest(dir(id))
+        Map bad = unit(2, 1, 1, 5, 5)
+        bad.remove("unitSeq")
+        Map blank = unit(3, 1, 1, 5, 5)
+        blank.unitSeq = " "
+        Map res = refresh(id, stub([], [unit(1, 1, 1, 5, 5), bad, blank]), true)
+        assertTrue(res.errors.any { it.contains("2 records lack a value") && it.contains("orderId=2") && it.contains("unitSeq=null") }, res.errors.toString())
+        assertEquals(before.version, KeptCopyStore.manifest(dir(id)).version, "the copy is as it was")
+        assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"]).statusId)
+        assertNotNull(find("darpan.dataset.Dataset", [datasetId: id]).nextReadDate)
+    }
+
+    @Test
+    void twoRecordsWithTheSameCopyIdFailTheRead() {
+        String id = dataset("dup-copy-id", [idField: "orderId,orderItemSeqId,unitSeq"])
+        Map res = refresh(id, stub([], [unit(1, 1, 1, 5, 5), unit(2, 1, 1, 5, 5), unit(1, 1, 1, 5, 5, "again")]))
+        assertTrue(res.errors.any { it.contains("1 records repeat a copy id") && it.contains("1|1|1") }, res.errors.toString())
+        assertNull(KeptCopyStore.manifest(dir(id)), "nothing was swapped in")
+        assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000001"]).statusId)
+    }
+
+    @Test
     void aSingleFieldIdIsUnchanged() {
         String id = dataset("single-id")
         assertEquals([], refresh(id, stub([], [order(1, 5, 5), order(2, 4, 4)])).errors)

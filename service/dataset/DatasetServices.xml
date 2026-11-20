@@ -21,7 +21,7 @@
             <parameter name="options" type="Map"/>
             <parameter name="idField" required="true"/>
             <parameter name="stampField"><description>Required for DRR_CHANGED_SINCE; DRR_ROLLING defaults it to windowField.</description></parameter>
-            <parameter name="readRuleEnumId" default-value="DRR_CHANGED_SINCE"/>
+            <parameter name="readRuleEnumId"><description>DRR_CHANGED_SINCE or DRR_ROLLING. Omitted: an existing dataset keeps its rule, a new one is changed-since.</description></parameter>
             <parameter name="windowField" required="true"/>
             <parameter name="statusId"/>
             <parameter name="marginDays" type="Integer"/>
@@ -36,12 +36,12 @@
             <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
             <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
                 <return error="true" message="No active tenant"/></if>
-            <if condition="!(readRuleEnumId in ['DRR_CHANGED_SINCE', 'DRR_ROLLING'])">
+            <if condition="readRuleEnumId &amp;&amp; !(readRuleEnumId in ['DRR_CHANGED_SINCE', 'DRR_ROLLING'])">
                 <return error="true" message="Dataset read rule ${readRuleEnumId} is not one of DRR_CHANGED_SINCE, DRR_ROLLING"/></if>
-            <set field="rolling" from="readRuleEnumId == 'DRR_ROLLING'"/>
-            <if condition="!stampField &amp;&amp; !rolling">
-                <return error="true" message="stampField is required for a DRR_CHANGED_SINCE dataset"/></if>
-            <if condition="!stampField"><set field="stampField" from="windowField"/></if>
+            <!-- idField is stored canonical: trimmed, no empty parts ("a, b," -> "a,b") -->
+            <set field="idField" from="darpan.dataset.DatasetRefreshSupport.idFields(idField as String).join(',')"/>
+            <if condition="!idField">
+                <return error="true" message="idField must name at least one field"/></if>
             <if condition="statusId">
                 <entity-find entity-name="moqui.basic.Enumeration" list="statusList">
                     <econdition field-name="enumId" from="statusId"/>
@@ -67,20 +67,33 @@
                 <if condition="connectorProblem">
                     <return error="true" message="A dataset of ${systemEnumId} cannot be kept: ${connectorProblem}"/></if>
             </if>
+            <set field="effectiveRule" from="readRuleEnumId ?: (existingList ? existingList[0].readRuleEnumId : null) ?: 'DRR_CHANGED_SINCE'"/>
+            <set field="rolling" from="effectiveRule == 'DRR_ROLLING'"/>
+            <if condition="!stampField">
+                <if condition="rolling">
+                    <then><set field="stampField" from="windowField"/></then>
+                    <else-if condition="existingList &amp;&amp; existingList[0].readRuleEnumId != 'DRR_ROLLING'">
+                        <set field="stampField" from="existingList[0].stampField"/></else-if>
+                    <else><return error="true" message="stampField is required for a DRR_CHANGED_SINCE dataset"/></else>
+                </if>
+            </if>
             <if condition="existingList">
                 <then>
                     <set field="existing" from="existingList[0]"/>
+                    <!-- switching to rolling without a horizon takes the rolling width; any other omitted horizon is left alone -->
+                    <if condition="horizonDays == null &amp;&amp; rolling &amp;&amp; existing.readRuleEnumId != 'DRR_ROLLING'">
+                        <set field="horizonDays" from="60" type="Integer"/></if>
                     <!-- I2: a copy built under other settings is never served (KeptCopySupport checks its manifest); the next
                          refresh reads in full to rebuild it -->
                     <set field="settingsChanged" from="existing.idField != idField || existing.stampField != stampField ||
                             existing.windowField != windowField ||
                             (horizonDays != null &amp;&amp; (existing.horizonDays as Long) != (horizonDays as Long)) ||
-                            existing.readRuleEnumId != readRuleEnumId"/>
+                            existing.readRuleEnumId != effectiveRule"/>
                     <if condition="settingsChanged">
                         <set field="existing.lastFullReadAt" from="null"/>
                         <log level="info" message="Dataset ${existing.datasetId}: idField, stampField, windowField or horizonDays changed; the next refresh reads in full, and the copy is not served until it does"/>
                     </if>
-                    <set field="existing.readRuleEnumId" from="readRuleEnumId"/>
+                    <set field="existing.readRuleEnumId" from="effectiveRule"/>
                     <set field="existing.idField" from="idField"/>
                     <set field="existing.stampField" from="stampField"/>
                     <set field="existing.windowField" from="windowField"/>
@@ -95,7 +108,7 @@
                 <else>
                     <service-call name="create#darpan.dataset.Dataset" out-map="created" in-map="[companyUserGroupId:tenantId,
                             systemEnumId:systemEnumId, sourceConfigId:sourceConfigId, optionsJson:optionsJson, optionsHash:optionsHash,
-                            statusId:statusId ?: 'DST_ACTIVE', readRuleEnumId:readRuleEnumId, idField:idField, stampField:stampField,
+                            statusId:statusId ?: 'DST_ACTIVE', readRuleEnumId:effectiveRule, idField:idField, stampField:stampField,
                             windowField:windowField, marginDays:marginDays ?: 2, fullReadDays:fullReadDays ?: 7,
                             horizonDays:horizonDays ?: (rolling ? 60 : 62), readHourLocal:readHourLocal != null ? readHourLocal : 4]"/>
                     <set field="datasetId" from="created.datasetId"/>

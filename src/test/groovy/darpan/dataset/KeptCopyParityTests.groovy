@@ -166,6 +166,41 @@ class KeptCopyParityTests {
         assertTrue(typeById.values().count { it == "MISSING_IN_FILE_2" } >= 2, typeById.toString())
     }
 
+    /** A composite-id rolling dataset serves the same records, byte for byte, as a live read (no _copyId leaks). */
+    @Test
+    void aServedCompositeRollingRunMatchesALiveRun() {
+        Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-composite",
+                options: [:], idField: "id,legacyResourceId", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"])
+        assertEquals([], stored.errors)
+        String id = stored.out.datasetId
+        datasetIds["conn-composite"] = id
+        Map res = atCopyClock(0) { refresh(id, stub([])) }
+        assertEquals([], res.errors)
+        assertEquals("DRK_FULL", res.out.readKindEnumId)
+        assertEquals(30, KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id)).recordCount)
+
+        List<Map> servedCalls = []
+        Map served = interactive("conn-composite", servedCalls, "composite")
+        assertEquals([], served.errors)
+        assertEquals(0, servedCalls.size(), "the served run never calls the live extractor")
+        Map dsRow = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().useCache(false).one().getMap()
+        underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: "DST_PAUSED", systemEnumId: "SHOPIFY",
+                sourceConfigId: "conn-composite", options: [:], idField: "id,legacyResourceId", windowField: "createdAt"])
+        List<Map> liveCalls = []
+        Map live
+        try {
+            live = interactive("conn-composite", liveCalls, "composite")
+        } finally {
+            underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: "DST_ACTIVE", systemEnumId: "SHOPIFY",
+                    sourceConfigId: "conn-composite", options: [:], idField: "id,legacyResourceId", windowField: "createdAt"])
+        }
+        assertEquals(1, liveCalls.size())
+        assertEquals("DRR_ROLLING", dsRow.readRuleEnumId)
+        List servedRecords = json(new File(served.result.fileLocation as String)).records
+        assertFalse(servedRecords.isEmpty())
+        assertEquals(JsonOutput.toJson(json(new File(live.result.fileLocation as String)).records), JsonOutput.toJson(servedRecords))
+    }
+
     @Test
     void aServedRunRetriesFromItsOwnSlice() {
         String id = keptDataset("conn-retry")

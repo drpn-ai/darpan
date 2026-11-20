@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
+import org.moqui.entity.EntityCondition
 
 import java.nio.file.Path
 import java.sql.Date
@@ -161,6 +162,18 @@ class AuditRunUpdateSmokeTests {
         AutomationExecutionSupport.setRunAdmission(null)
         AutomationExecutionSupport.peakWindowsLoader = null
         AutomationExecutionSupport.tenantZoneLoader = null
+        removePeakAudit()
+    }
+
+    /** peakAudit()'s rows go after each test, so no active TRU_PEAK_* automation is left for a later scheduler scan. */
+    private void removePeakAudit() {
+        List<String> ids = ["TRU_PEAK_0755", "TRU_PEAK_0800"]
+        ec.entity.find("darpan.audit.AuditStatementCheck").condition("statementId", "TRU_PEAK_R1").deleteAll()
+        ec.entity.find("darpan.audit.AuditCheck").condition("checkId", EntityCondition.IN, ids.collect { it + "_CHK" }).deleteAll()
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution").condition("automationId", EntityCondition.IN, ids).deleteAll()
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", EntityCondition.IN, ids).deleteAll()
+        ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "TRU_PEAK_R1").deleteAll()
+        ec.entity.find("darpan.audit.Audit").condition("auditId", "TRU_PEAK_AUDIT").deleteAll()
     }
 
     @Test

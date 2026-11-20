@@ -129,6 +129,9 @@ class TenantOwnedEntityFilterContractTests {
             "DARPAN_SCOPE_RULES_RULE_PIECE_CONDITION": "rules.RulePieceCondition",
             "DARPAN_SCOPE_RULES_FILE_CHECK": "rules.FileCheck",
             "DARPAN_SCOPE_RULES_FILE_CHECK_RECORD": "rules.FileCheckRecord",
+            // DAR-BE-328 plan 1: peak periods and their run times
+            "DARPAN_SCOPE_PEAK_PERIOD": "darpan.peak.PeakPeriod",
+            "DARPAN_SCOPE_PEAK_PERIOD_RUN_TIME": "darpan.peak.PeakPeriodRunTime",
     ].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */

@@ -15,7 +15,7 @@ class KeptCopyStoreTests {
     File dir
 
     @BeforeEach void setUp() { dir = new File(Files.createTempDirectory("kept-copy-").toFile(), "ds") }
-    @AfterEach void tearDown() { dir.parentFile.deleteDir() }
+    @AfterEach void tearDown() { KeptCopyStore.lineWrittenHook = null; dir.parentFile.deleteDir() }
 
     static Timestamp ts(String iso) { Timestamp.from(Instant.parse(iso)) }
     static Map rec(String id, String updated, Map more = [:]) {
@@ -62,6 +62,65 @@ class KeptCopyStoreTests {
         Map r = merge(dir, [rec("1", "2026-10-03T16:22:01+02:00", [total: "12.00"])])
         assertEquals(1, r.changedCount)
         assertEquals("12.00", byId()["1"].record.total)
+    }
+
+    @Test void stampsAreComparedAsInstantsNotText() {
+        // as text "...23:00:00+09:00" sorts after "...14:30:00Z", as an instant it is 9 hours earlier
+        merge(dir, [rec("1", "2026-10-03T14:30:00Z", [total: "10.00"])])
+        Map r = merge(dir, [rec("1", "2026-10-03T23:00:00+09:00", [total: "99.00"])])
+        assertEquals(0, r.changedCount)
+        assertEquals("10.00", byId()["1"].record.total)
+        // the same instant with and without millis is equal, so it replaces
+        Map r2 = merge(dir, [rec("1", "2026-10-03T14:30:00.000Z", [total: "11.00"])])
+        assertEquals(1, r2.changedCount)
+        assertEquals("11.00", byId()["1"].record.total)
+        // and in a full read the same instant in another form is not a changed stamp
+        Map r3 = replace(dir, [rec("1", "2026-10-03T23:30:00+09:00", [total: "11.00"])])
+        assertEquals(0, r3.changedCount)
+        assertEquals(0, r3.missCount)
+    }
+
+    private void assertFailsMidWriteLeavesCopyAlone(Closure refresh) {
+        merge(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z")])
+        String currentBefore = new File(dir, "current.json").text
+        List<String> versionsBefore = versionDirs()
+        int[] lines = [0]
+        KeptCopyStore.lineWrittenHook = { if (++lines[0] == 2) throw new IllegalStateException("disk full") }
+        assertThrows(IllegalStateException) { refresh.call() }
+        KeptCopyStore.lineWrittenHook = null
+        assertTrue(lines[0] >= 2, "the failure must happen after writing started")
+        assertEquals(currentBefore, new File(dir, "current.json").text)
+        assertEquals(versionsBefore, versionDirs())
+        assertEquals(["1", "2"], byId().keySet().sort())
+        assertEquals([], dir.listFiles().findAll { it.name.startsWith(".tmp-") })
+    }
+
+    @Test void aMergeThatFailsWhileWritingLeavesCurrentUnchanged() {
+        assertFailsMidWriteLeavesCopyAlone { merge(dir, [rec("3", "2026-10-06T00:00:00Z")]) }
+    }
+
+    @Test void aReplaceThatFailsWhileWritingLeavesCurrentUnchanged() {
+        assertFailsMidWriteLeavesCopyAlone { replace(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z"), rec("3", "2026-10-06T00:00:00Z")]) }
+    }
+
+    @Test void anOrphanVersionNeverDisplacesThePrevious() {
+        String v1 = merge(dir, [rec("a", "2026-10-03T14:22:01Z")]).version
+        // a crash after the version moved into place but before current.json swapped leaves an orphan
+        File orphan = new File(dir, "v29990101-000000000")
+        assertTrue(orphan.mkdirs())
+        String v3 = merge(dir, [rec("b", "2026-10-04T00:00:00Z")]).version
+        String v4 = merge(dir, [rec("c", "2026-10-05T00:00:00Z")]).version
+        KeptCopyStore.prune(dir)
+        assertEquals([v3, v4].sort(), versionDirs())
+        assertFalse(orphan.exists())
+        assertEquals(["a", "b", "c"], byId().keySet().sort())
+        // with only one refresh after the orphan, v1 is the previous and stays
+        File d2 = new File(dir.parentFile, "ds2")
+        String w1 = merge(d2, [rec("a", "2026-10-03T14:22:01Z")]).version
+        new File(d2, "v29990101-000000000").mkdirs()
+        String w3 = merge(d2, [rec("b", "2026-10-04T00:00:00Z")]).version
+        KeptCopyStore.prune(d2)
+        assertEquals([w1, w3].sort(), d2.listFiles().findAll { it.isDirectory() }*.name.sort())
     }
 
     @Test void mergeKeepsUntouchedRecords() {

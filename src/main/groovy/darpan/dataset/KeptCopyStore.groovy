@@ -152,22 +152,21 @@ class KeptCopyStore {
         return digest.collect { String.format("%02x", it & 0xff) }.join()
     }
 
-    /** Keeps the current and the previous version; deletes the rest (and any stale temp folders). */
+    /** Keeps the version current.json names and the one it replaced; deletes everything else (orphans, stale temp folders). */
     static void prune(File datasetDir) {
-        String current = currentVersion(datasetDir)
         File[] dirs = datasetDir.listFiles()
         if (dirs == null) return
-        List<String> versions = dirs.findAll { it.isDirectory() && it.name ==~ /v\d{8}-\d{9}.*/ }*.name.sort()
-        String keepPrevious = null
-        if (current != null) {
-            int at = versions.indexOf(current)
-            if (at > 0) keepPrevious = versions[at - 1]
+        String current = currentVersion(datasetDir)
+        String previous = previousVersion(datasetDir)
+        dirs.findAll { it.isDirectory() }.each { File d ->
+            boolean isVersion = d.name ==~ /v\d{8}-\d{9}.*/
+            boolean isTemp = d.name.startsWith(".tmp-")
+            if ((isVersion && d.name != current && d.name != previous) || isTemp) deleteTree(d)
         }
-        versions.each { String v ->
-            if (v != current && v != keepPrevious) deleteTree(new File(datasetDir, v))
-        }
-        dirs.findAll { it.isDirectory() && it.name.startsWith(".tmp-") }.each { deleteTree(it) }
     }
+
+    /** Test seam: called after each line is written to a new version; may throw to simulate a mid-write failure. */
+    static Closure lineWrittenHook = null
 
     // ---- internals ----
 
@@ -202,7 +201,8 @@ class KeptCopyStore {
     /** current.json is replaced last, atomically where the filesystem allows. */
     private static void writeCurrent(File datasetDir, String version) {
         File tmpCurrent = new File(datasetDir, ".tmp-current-" + UUID.randomUUID().toString())
-        tmpCurrent.setText(JsonOutput.toJson([version: version]), "UTF-8")
+        Map prior = readCurrent(datasetDir)
+        tmpCurrent.setText(JsonOutput.toJson([version: version, previousVersion: prior?.get("version")]), "UTF-8")
         Path src = tmpCurrent.toPath()
         Path dst = new File(datasetDir, CURRENT_FILE).toPath()
         try {
@@ -227,12 +227,18 @@ class KeptCopyStore {
         return name
     }
 
-    private static String currentVersion(File datasetDir) {
+    private static Map readCurrent(File datasetDir) {
         File file = new File(datasetDir, CURRENT_FILE)
-        if (!file.isFile()) return null
-        Map m = (Map) new JsonSlurper().parse(file, "UTF-8")
-        String v = m.get("version")
+        return file.isFile() ? (Map) new JsonSlurper().parse(file, "UTF-8") : null
+    }
+
+    private static String currentVersion(File datasetDir) {
+        String v = readCurrent(datasetDir)?.get("version")
         return v && new File(datasetDir, v).isDirectory() ? v : null
+    }
+
+    private static String previousVersion(File datasetDir) {
+        return readCurrent(datasetDir)?.get("previousVersion")
     }
 
     private static Map entry(String id, Object stamp, Timestamp readAt, Map record) {
@@ -242,6 +248,7 @@ class KeptCopyStore {
     private static void writeLine(Writer w, Map entry) {
         w.write(JsonOutput.toJson(entry))
         w.write("\n")
+        if (lineWrittenHook != null) lineWrittenHook.call()
     }
 
     private static Iterator<Map> lineIterator(File file) {

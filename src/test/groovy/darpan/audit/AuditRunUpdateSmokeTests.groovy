@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.peak.PeakWindow
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.notification.TenantNotificationSupport
@@ -16,7 +17,9 @@ import java.nio.file.Path
 import java.sql.Date
 import java.sql.Timestamp
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 
@@ -156,6 +159,59 @@ class AuditRunUpdateSmokeTests {
     void restore() {
         TenantNotificationSupport.resetDeliveryHook()
         AutomationExecutionSupport.setRunAdmission(null)
+        AutomationExecutionSupport.peakWindowsLoader = null
+        AutomationExecutionSupport.tenantZoneLoader = null
+    }
+
+    @Test
+    void aCheckHeldForPeakHoursKeepsTheRunUpdateWaiting() {
+        Map audit = peakAudit()
+        AutomationExecutionSupport.peakWindowsLoader = { def e, String t, LocalDate d ->
+            [new PeakWindow("TRU_PEAK", "Black Friday", LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1),
+                    LocalTime.of(8, 0), LocalTime.of(23, 0), [])]
+        }
+        AutomationExecutionSupport.tenantZoneLoader = { def e, String t -> LA }
+
+        assertFalse(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 9, 30)),
+                "the 08:00 check is held to 23:00: it will still run, so the run's update waits for it")
+        assertFalse(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 23, 30)),
+                "released at 23:00 and not yet submitted: still owed for an hour after its start")
+    }
+
+    @Test
+    void withNoPeakPeriodAnOldDueFireNoLongerHoldsTheRunUpdate() {
+        Map audit = peakAudit()
+        AutomationExecutionSupport.peakWindowsLoader = { def e, String t, LocalDate d -> [] }
+        AutomationExecutionSupport.tenantZoneLoader = { def e, String t -> LA }
+
+        assertTrue(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 9, 30)),
+                "due 08:00, 90 minutes ago and never submitted: no scheduler here (STILL_DUE_MS), as before peak periods")
+        assertFalse(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 8, 30)),
+                "due 30 minutes ago: still owed")
+    }
+
+    /** A second audit of GORJANA: two checks through two automations due 07:55 and 08:00 Los Angeles on Nov 28. */
+    private Map peakAudit() {
+        insert("darpan.audit.Audit", [auditId: "TRU_PEAK_AUDIT", companyUserGroupId: GORJANA, auditCode: "peak-close",
+                auditName: "Peak close", periodEnumId: "AUDP_MONTH"])
+        insert("darpan.audit.AuditStatement", [statementId: "TRU_PEAK_R1", companyUserGroupId: GORJANA, auditId: "TRU_PEAK_AUDIT",
+                statementCode: "R1", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", statementText: "Every order is billed."])
+        [["TRU_PEAK_0755", 7, 55], ["TRU_PEAK_0800", 8, 0]].each { List a ->
+            insert("darpan.reconciliation.ReconciliationAutomation", [automationId: a[0], automationName: a[0],
+                    companyUserGroupId: GORJANA, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "TRU_RS",
+                    windowTimeZone: "America/Los_Angeles", isActive: "Y", scheduleExpr: "0 ${a[2]} ${a[1]} * * ?".toString(),
+                    nextScheduledFireTime: la(11, 28, a[1] as int, a[2] as int),
+                    lastScheduledFireTime: la(11, 27, a[1] as int, a[2] as int)])
+            insert("darpan.audit.AuditCheck", [checkId: "${a[0]}_CHK".toString(), companyUserGroupId: GORJANA,
+                    checkCode: "${a[0]}".toLowerCase().replace('_', '-'), label: a[0], savedRunId: "TRU_RS", automationId: a[0]])
+            insert("darpan.audit.AuditStatementCheck", [checkId: "${a[0]}_CHK".toString(), statementId: "TRU_PEAK_R1",
+                    companyUserGroupId: GORJANA, sequenceNum: 1L])
+        }
+        return [auditId: "TRU_PEAK_AUDIT", companyUserGroupId: GORJANA]
+    }
+
+    private static Timestamp la(int month, int day, int hour, int minute) {
+        Timestamp.from(ZonedDateTime.of(2026, month, day, hour, minute, 0, 0, LA).toInstant())
     }
 
     @Test

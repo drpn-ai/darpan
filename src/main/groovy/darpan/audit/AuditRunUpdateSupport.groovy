@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory
 
 import java.sql.Date
 import java.sql.Timestamp
+import java.time.Instant
 import java.time.LocalDate
 
 import static darpan.common.ValueSupport.normalize
@@ -276,19 +277,36 @@ class AuditRunUpdateSupport {
      * Run health reads the same); none of them waiting in or holding a RunAdmission slot, apart from the one that just
      * finished (an automation admitted but not yet started has no execution row); and none due within the last hour and
      * not yet submitted (the scan defers what its tenant's lane cannot start to its next tick). A due time older than
-     * that means no scheduler is running here, and does not hold the update back.
+     * that means no scheduler is running here, and does not hold the update back. DAR-BE-328: nor any held for peak hours
+     * or moved later by a peak period (see {@link #stillOwed}).
      */
     static boolean idle(def ec, String tenantId, Map audit, String finishedAutomationId, Timestamp now) {
         if (AuditSettingsSupport.progress(ec, tenantId, audit, now).active) return false
         def admission = AutomationExecutionSupport.getRunAdmission()
+        // DAR-BE-328: the tenant's peak periods and zone are read once for this call, as the scan reads them once a tick.
+        Map<String, Object> peakTick = AutomationExecutionSupport.newPeakTick(now)
         return !AuditSettingsSupport.automationsOfAudit(ec, tenantId, audit).any { Map automation ->
             String id = automation.automationId as String
             if (id == finishedAutomationId) return false
             if (admission.busy(AutomationExecutionSupport.admissionLabel(id))) return true
             if (automation.isActive != "Y" || automation.isArchived == "Y") return false
-            Timestamp due = AutomationExecutionSupport.resolveDueScheduledFireTime(automation, now)
-            return due != null && now.time - due.time < STILL_DUE_MS
+            return stillOwed(ec, peakTick, automation, now)
         }
+    }
+
+    /**
+     * DAR-BE-328: whether the scan still owes this automation a start for this run, with the same peak-period start the
+     * scan uses. One whose fire has come but whose start is later (held for peak hours, or moved later) is owed: it will
+     * run. One whose start has come is owed for STILL_DUE_MS after that start. With no peak periods, or if reading them
+     * fails, the start is the fire, exactly the rule before peak periods.
+     */
+    static boolean stillOwed(def ec, Map<String, Object> peakTick, Map automation, Timestamp now) {
+        Timestamp fire = AutomationExecutionSupport.resolveCandidateFireTime(automation, now)
+        if (fire == null) return false
+        Instant start = AutomationExecutionSupport.peakStart(ec, peakTick, fire.toInstant(), automation.automationId as String,
+                automation.companyUserGroupId as String, true, automation.lastScheduledFireTime as Timestamp)
+        if (start.isAfter(now.toInstant())) return !fire.after(now)
+        return now.time - start.toEpochMilli() < STILL_DUE_MS
     }
 
     /** Identifies one run: its morning, its period, and the latest end of any execution of the audit's automations. */

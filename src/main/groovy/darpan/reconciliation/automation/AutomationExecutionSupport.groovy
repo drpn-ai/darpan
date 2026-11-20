@@ -1171,7 +1171,7 @@ class AutomationExecutionSupport {
     static void setTenantZoneLoader(Closure<ZoneId> loader) { tenantZoneLoader = loader ?: DEFAULT_TENANT_ZONE_LOADER }
 
     /** DAR-BE-328: one scan tick's per-tenant peak windows and zones, each loaded at most once and never kept past the tick. */
-    protected static Map<String, Object> newPeakTick(Timestamp now) {
+    static Map<String, Object> newPeakTick(Timestamp now) {
         return [now: now, windows: [:], zones: [:]] as Map<String, Object>
     }
 
@@ -1181,7 +1181,7 @@ class AutomationExecutionSupport {
      * them waits until they end, and so does one that would happen now while now is inside them. With no peak periods,
      * or if reading them fails, the fire itself: a peak-period bug never stops scheduling.
      */
-    protected static Instant peakStart(def ec, Map<String, Object> tick, Instant fire, String automationId, String tenantId,
+    static Instant peakStart(def ec, Map<String, Object> tick, Instant fire, String automationId, String tenantId,
                                        boolean applyMoves, Timestamp lastFire = null) {
         List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
         if (!windows) return fire

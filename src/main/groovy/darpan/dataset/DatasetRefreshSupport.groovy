@@ -359,11 +359,10 @@ class DatasetRefreshSupport {
             }
             boolean rolling = isRolling(dataset)
             // A composite idField keys the copy by a derived _copyId written into each record (ruling 3b1-3); the manifest
-            // keeps the dataset's own idField list so serving matches it. A single field is left alone.
-            Iterator<Map> source = new RecordFileIterator(file)
-            RecordFileIterator records = (RecordFileIterator) source
-            List<String> idParts = idFields(dataset.idField as String)
-            if (idParts.size() > 1) source = withCopyId(records, idParts, idCheck)
+            // keeps the dataset's own idField list so serving matches it. A single field is left alone. Either way a record
+            // the read repeats with identical content is one record, and one id with two contents fails the read (P3b1-15).
+            RecordFileIterator records = new RecordFileIterator(file)
+            Iterator<Map> source = onePerCopyId(records, idFields(dataset.idField as String), idCheck)
             Map counts
             try {
                 counts = full ?
@@ -398,39 +397,71 @@ class DatasetRefreshSupport {
         return files
     }
 
-    /** {@code records} with {@link KeptCopyStore#COPY_ID} set on each record from its {@code idParts} values. */
-    private static Iterator<Map> withCopyId(Iterator<Map> records, List<String> idParts, CopyIdCheck check) {
+    /**
+     * {@code records}, one per copy id (ruling P3b1-15): a record whose copy id this read already gave, with identical content
+     * (the same page read twice), is dropped; under a composite idField each record kept gets {@link KeptCopyStore#COPY_ID}.
+     * What {@code check} saw (a missing id part, one id with two contents) fails the read at {@link CopyIdCheck#assertClean}.
+     */
+    private static Iterator<Map> onePerCopyId(Iterator<Map> records, List<String> idParts, CopyIdCheck check) {
+        boolean composite = idParts.size() > 1
         return new Iterator<Map>() {
-            boolean hasNext() { return records.hasNext() }
+            private Map pending
+
+            boolean hasNext() {
+                while (pending == null && records.hasNext()) {
+                    Map r = records.next()
+                    String id = copyId(r, idParts)
+                    if (!check.see(r, idParts, id)) continue
+                    if (composite) r.put(KeptCopyStore.COPY_ID, id)
+                    pending = r
+                }
+                return pending != null
+            }
 
             Map next() {
-                Map r = records.next()
-                String id = copyId(r, idParts)
-                check.see(r, idParts, id)
-                r.put(KeptCopyStore.COPY_ID, id)
+                if (!hasNext()) throw new NoSuchElementException()
+                Map r = pending
+                pending = null
                 return r
             }
         }
     }
 
     /**
-     * What a read saw of its composite ids: records with a missing or blank id part, and copy ids seen twice. Such a record
-     * would collapse into another one in the copy, so {@link #assertClean} fails the read instead (a configuration fault: the
-     * extractor does not supply a declared id field, or the fields do not identify a record).
+     * What a read saw of its copy ids (rulings P3b1-3, P3b1-15): records with a missing or blank part of a composite id, and
+     * ids given twice with different content. Either would collapse a record into another one in the copy, so
+     * {@link #assertClean} fails the read instead (a configuration fault: the extractor does not supply a declared id field,
+     * or the fields do not identify a record). An id given twice with identical content is the same record read twice, and
+     * is dropped. A single-field record with no id is passed on as before. Holds a content hash per id, the same order of
+     * heap as KeptCopyStore.replace's index.
      */
     static class CopyIdCheck {
         long missing = 0
         long duplicates = 0
+        long repeatsDropped = 0
         String firstMissing
         String firstDuplicate
-        private final Set<String> seen = new HashSet<String>()
+        private final Map<String, String> seen = new HashMap<String, String>()
+        private static final Logger LOG = LoggerFactory.getLogger(DatasetRefreshSupport)
 
-        void see(Map record, List<String> idParts, String id) {
-            if (idParts.any { String f -> record.get(f) == null || String.valueOf(record.get(f)).trim().isEmpty() }) {
-                if (missing++ == 0) firstMissing = idParts.collect { String f -> "${f}=${record.get(f)}".toString() }.join(", ")
-            } else if (!seen.add(id)) {
-                if (duplicates++ == 0) firstDuplicate = id
+        /** True when the record goes on into the copy; false for a repeat (dropped, or a collision that fails the read). */
+        boolean see(Map record, List<String> idParts, String id) {
+            boolean blankPart = idParts.any { String f -> record.get(f) == null || String.valueOf(record.get(f)).trim().isEmpty() }
+            if (blankPart) {
+                if (idParts.size() > 1 && missing++ == 0) {
+                    firstMissing = idParts.collect { String f -> "${f}=${record.get(f)}".toString() }.join(", ")
+                }
+                return true
             }
+            String hash = contentHash(record)
+            String prior = seen.putIfAbsent(id, hash)
+            if (prior == null) return true
+            if (prior == hash) {
+                repeatsDropped++
+                return false
+            }
+            if (duplicates++ == 0) firstDuplicate = id
+            return false
         }
 
         void assertClean(String idField) {
@@ -439,9 +470,16 @@ class DatasetRefreshSupport {
                         "${firstMissing}. The extractor must supply every declared id field").toString())
             }
             if (duplicates > 0) {
-                throw new IllegalStateException(("${duplicates} records repeat a copy id of ${idField}; the first repeated id is " +
-                        "${firstDuplicate}. These fields do not identify a record").toString())
+                throw new IllegalStateException(("${duplicates} records repeat a copy id of ${idField} with different content; " +
+                        "the first repeated id is ${firstDuplicate}. These fields do not identify a record").toString())
             }
+            if (repeatsDropped > 0) LOG.info("A read of ${idField} repeated ${repeatsDropped} records with identical content; each kept once")
+        }
+
+        private static String contentHash(Map record) {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(DatasetSupport.canonicalJson(record).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            return Base64.getEncoder().encodeToString(digest)
         }
     }
 

@@ -397,6 +397,61 @@ class DatasetRefreshTests {
         assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000001"]).statusId)
     }
 
+    /**
+     * Ruling P3b1-15, on a made-up system: within one read, a record repeated with identical content (a page read twice) is
+     * one record, under a single-field id and a composite one alike.
+     */
+    @Test
+    void aRepeatedSingleIdWithIdenticalContentIsOneRecord() {
+        String id = madeUpDataset("repeat-same", "id")
+        List<Map> records = [order(1, 5, 5), order(2, 4, 4), order(1, 5, 5)]
+        Map res = refresh(id, stub([], records))
+        assertEquals([], res.errors)
+        assertEquals(["1", "2"], KeptCopyStore.records(dir(id)).collect { it.id }.sort())
+        assertEquals(2, KeptCopyStore.manifest(dir(id)).recordCount)
+        assertEquals(2, find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000001"]).recordsRead as int, "the repeat is dropped")
+        // the next, changed-since read repeating a record is merged once too
+        Map again = refresh(id, stub([], [order(2, 4, 1), order(2, 4, 1)]))
+        assertEquals([], again.errors)
+        assertEquals(1, find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"]).recordsRead as int)
+
+        // a composite id: the identical repeat no longer fails the read (it did under P3b1-3)
+        String units = madeUpDataset("repeat-same-unit", "orderId,orderItemSeqId,unitSeq")
+        assertEquals([], refresh(units, stub([], [unit(1, 1, 1, 5, 5), unit(1, 1, 2, 5, 5), unit(1, 1, 1, 5, 5)])).errors)
+        assertEquals(["1|1|1", "1|1|2"], KeptCopyStore.records(dir(units)).collect { it.id }.sort())
+    }
+
+    /**
+     * Ruling P3b1-15, on a made-up system: within one read, two records with one id and different content are not one record.
+     * A single-field id used to keep one of them silently (the other lost); now the read fails, naming the id and the count,
+     * and the copy stays as it was.
+     */
+    @Test
+    void aRepeatedSingleIdWithDifferentContentFailsTheRead() {
+        String id = madeUpDataset("repeat-differs", "id")
+        assertEquals([], refresh(id, stub([], [order(5, 5, 5)])).errors)
+        Map before = KeptCopyStore.manifest(dir(id))
+        Map res = refresh(id, stub([], [order(1, 5, 5), order(2, 4, 4), order(1, 5, 5, "#1 again"), order(2, 4, 4, "#2 again")]), true)
+        assertTrue(res.errors.any { it.contains("2 records repeat a copy id of id with different content") && it.contains("is 1.") },
+                res.errors.toString())
+        assertEquals(before.version, KeptCopyStore.manifest(dir(id)).version, "the copy is as it was")
+        assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"]).statusId)
+    }
+
+    /** A made-up system (no real system's row): its extract is the test-only one; the stub stands in for it. */
+    private String madeUpDataset(String conn, String idField) {
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_PLAIN"
+                extractServiceName="reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRecords"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_PLAIN_TYPE"
+                configParameterName="plainConfigId" preserveWindowInstants="Y" enabled="Y"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        Map res = call("store#Dataset", [systemEnumId: "KC_PLAIN", sourceConfigId: "conn-${conn}".toString(), options: [:],
+                idField: idField, stampField: "updatedAt", windowField: "createdAt"])
+        assertEquals([], res.errors)
+        return res.out.datasetId
+    }
+
     @Test
     void aSingleFieldIdIsUnchanged() {
         String id = dataset("single-id")

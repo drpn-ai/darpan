@@ -1490,7 +1490,7 @@ class AutomationFacadeSupport {
      */
     static final Map<String, List<String>> SUITEQL_TEMPLATE_FIELDS = [
             SALES_LINES        : ["orderLineId", "lineId", "lineState", "lineLocation", "itemType", "quantityShipped",
-                                  "quantityBilled", "quantityBackordered", "lineClosed"],
+                                  "quantityBilled", "quantityBackordered", "lineClosed", "itemName", "lineAmount"],
             STATE_CONTRADICTION: ["contradiction", "contradictionBrief"],
     ].asImmutable()
 

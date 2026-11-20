@@ -54,7 +54,9 @@ import static darpan.common.ValueSupport.normalize
  * The side's field is the connector's windowFieldName, which the dispatchers send; else the field the extractor windows on
  * by itself, its windowFieldName parameter's default-value (ruling 3b1-4); else, for a plan 3a connector only, createdAt.
  * No field, no serving. A side that sends its connector's keep-fields parameter reads live: the copy holds whole
- * records, and each extractor's projection lives in its own repo, out of reach here.</p>
+ * records, and each extractor's projection lives in its own repo, out of reach here. The excluded-records side file is
+ * written exactly when the live extractor writes one (ExcludedRecordsSidecar.WRITTEN_BY, ruling P3b1-7); a filtering side
+ * whose connector is in neither of its sets reads live.</p>
  *
  * <p><b>The options key</b> ({@code find#ServingDataset}'s options) is the run side's extract options its connector
  * declares (SourceExtractOptionsSupport.declaredOptions), read off the parameters the dispatcher built, with false and
@@ -93,6 +95,7 @@ class KeptCopySupport {
     static final String ROUNDS_TO_DAYS = "the source rounds its window to whole days in its own zone unless its connector keeps the instants"
     static final String DAYS_PAST_READ_THRU = "the window's last day may end after the copy's readThru in the source's zone"
     static final String DAYS_BEFORE_HORIZON = "the window's first day may start before what the copy covers in the source's zone"
+    static final String SIDE_FILE_UNDECLARED = "the side filters, and whether its source writes the excluded-records side file is not declared"
     static final String KEEPS_FIELDS = "the side asks its source to keep only some fields, and a slice holds whole copy records"
 
     /**
@@ -307,7 +310,12 @@ class KeptCopySupport {
         List<File> createdDirs = []
         for (File d = outDir; d != null && !d.exists(); d = d.parentFile) createdDirs << d
         boolean served = false, wroteDocument = false
-        Map collector = rules ? ExcludedRecordsSidecar.newCollector() : null
+        // ruling P3b1-7: the side file only where the live extractor writes one (the filters apply either way)
+        boolean writesSideFile = side.systemEnumId in ExcludedRecordsSidecar.WRITTEN_BY
+        if (rules && !writesSideFile && !(side.systemEnumId in ExcludedRecordsSidecar.NOT_WRITTEN_BY)) {
+            return notServed(SIDE_FILE_UNDECLARED)
+        }
+        Map collector = rules && writesSideFile ? ExcludedRecordsSidecar.newCollector() : null
         Map<String, Integer> excludedCounts = [:], absentCounts = [:]
         File recordsWork = null
         File documentWork = null
@@ -363,7 +371,7 @@ class KeptCopySupport {
                         inWindow++
                         Map<String, Object> verdict = SourceFilterSupport.evaluate(record, rules)
                         if (verdict != null) {
-                            ExcludedRecordsSidecar.collect(collector, record, (Map) verdict.rule)
+                            if (collector != null) ExcludedRecordsSidecar.collect(collector, record, (Map) verdict.rule)
                             String key = String.valueOf(((Map) verdict.rule).sequenceNum)
                             Map<String, Integer> bucket = SourceFilterSupport.REASON_FIELD_ABSENT == verdict.reason ? absentCounts : excludedCounts
                             bucket.put(key, (bucket.get(key) ?: 0) + 1)

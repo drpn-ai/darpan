@@ -386,7 +386,8 @@ class KeptCopyStore {
      */
     static Instant parseInstant(Object value) {
         if (value == null) return null
-        if (value instanceof Long || value instanceof Integer || value instanceof BigInteger) {
+        // Long or wider only: JSON reads every epoch-millis date after January 1970 as one, and a small Integer is no date
+        if (value instanceof Long || value instanceof BigInteger) {
             return Instant.ofEpochMilli(((Number) value).longValue())
         }
         String s = value.toString().trim()

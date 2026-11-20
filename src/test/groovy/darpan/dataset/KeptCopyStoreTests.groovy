@@ -280,6 +280,11 @@ class KeptCopyStoreTests {
         assertEquals(1, full.missCount)
         assertEquals(["1", "2"], byId().keySet().sort())
         assertEquals(2L, KeptCopyStore.manifest(dir).recordCount)
+        // a Long (or wider) is epoch milliseconds; a small Integer is no date, never a 1970 instant
+        assertEquals(Instant.ofEpochMilli(oct3), KeptCopyStore.parseInstant(oct3))
+        assertEquals(Instant.ofEpochMilli(oct3), KeptCopyStore.parseInstant(BigInteger.valueOf(oct3)))
+        assertNull(KeptCopyStore.parseInstant(5))
+        assertNull(KeptCopyStore.parseInstant(1234567))
     }
 
     @Test void pruneKeepsTwoVersions() {

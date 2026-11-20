@@ -6,6 +6,7 @@ import darpan.facade.reconciliation.RunExtractSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
+import darpan.reconciliation.conclusion.RunConclusionSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.source.SourceFilterSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -199,12 +200,14 @@ class RollingCopyParityTests {
         assertTrue(servedDoc.records.every { it.returnDate != null }, "whole records, as the scheduled live read keeps them")
         assertEquals(JsonOutput.toJson(liveDoc.records), JsonOutput.toJson(servedDoc.records))
         assertFalse(JsonOutput.toJson(servedDoc.records).contains("_copyId"), "no derived id leaks into a slice")
-        File servedSide = sidecarOf(served)
-        File liveSide = sidecarOf(live)
-        assertTrue(servedSide.isFile() && liveSide.isFile(), "the filtered returns are set aside in both")
-        // each side file names its own extract, whose name a scheduled read leaves to the extractor; the rest is equal
-        Closure<String> sideText = { File f -> JsonOutput.toJson(json(f).findAll { it.key != "sourceFileName" }) }
-        assertEquals(sideText(liveSide), sideText(servedSide))
+        // ruling P3b1-7: the returns extract writes no excluded-records side file, and neither does its slice, so the
+        // conclude pass reads the filtered side UNKNOWN on both
+        assertFalse(sidecarOf(served).exists(), "no side file, as the live returns read writes none")
+        assertFalse(sidecarOf(live).exists())
+        [served, live].each { Map run ->
+            assertTrue(RunConclusionSupport.indexSide([extractFile: new File(run.result.fileLocation as String), keyFields: ["returnId"]],
+                    ["R002"] as Set<String>, [] as Set<String>).unknownWhenAbsent as boolean, "a filtered side with no side file is UNKNOWN")
+        }
 
         Map servedOut = compareAndWrite(served, "served")
         Map liveOut = compareAndWrite(live, "live")
@@ -221,11 +224,11 @@ class RollingCopyParityTests {
 
     /**
      * An interactive side with a compare scope sends keepRecordFields, narrower than the records (no returnDate). The
-     * slice cannot project as the extractor does, so with the dataset active the side still reads live, and its diff.json
-     * is the paused dataset's live run's, byte for byte.
+     * slice cannot project as the extractor does, so with the dataset active the side still reads live (KEEPS_FIELDS) and
+     * gets the extractor's projected records.
      */
     @Test
-    void aSideThatKeepsFewerFieldsReadsLiveAndMatchesTheLiveRun() {
+    void aSideThatKeepsFewerFieldsReadsLiveThoughItsCopyIsActive() {
         String id = rollingReturns(CONN + "-keep")
         assertEquals([], atCopyClock(0) { refresh(id, stub([])) }.errors)
 
@@ -239,22 +242,8 @@ class RollingCopyParityTests {
         assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.side(connector, activeCalls[0].params as Map,
                 [tenantId: A, windowStart: START, windowEnd: END]).liveOnly)
         Map activeDoc = json(new File(active.result.fileLocation as String))
+        assertFalse(activeDoc.metadata.containsKey("servedFromCopy"), "the live file, not a slice")
         assertTrue(activeDoc.records.every { !it.containsKey("returnDate") }, "projected by the extractor")
-
-        setStatus(id, "DST_PAUSED", CONN + "-keep")
-        List<Map> liveCalls = []
-        Map live
-        try {
-            live = interactive(liveCalls, "keep-live", CONN + "-keep")
-        } finally {
-            setStatus(id, "DST_ACTIVE", CONN + "-keep")
-        }
-        assertEquals(1, liveCalls.size())
-        Map activeOut = compareAndWrite(active, "keep-active")
-        Map liveOut = compareAndWrite(live, "keep-live")
-        ["diff.json", "result.json"].each { String name ->
-            assertArrayEquals(liveOut[name], activeOut[name], "${name} differs")
-        }
     }
 
     @Test
@@ -351,11 +340,10 @@ class RollingCopyParityTests {
             }
             File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
             new File(dir, fileName).setText(JsonOutput.toJson([metadata: [live: true, windowStart: from.toString(), windowEnd: to.toString(),
-                                                                          filters: applied.configuredExclusions],
+                                                                          filters: [configuredExclusions: applied.configuredExclusions]],
                                                                records : applied.records]), "UTF-8")
-            if (applied.excludedCollector) {
-                ExcludedRecordsSidecar.writeBeside(ec, (Map) applied.excludedCollector, params.outputLocation as String, fileName, dir)
-            }
+            // as extract#HotWaxOmsGqlReturns: the excluded returns are counted, never written to a side file
+            ExcludedRecordsSidecar.discard((Map) applied.excludedCollector)
             return [fileLocation: DataManagerSupport.childLocation(params.outputLocation as String, fileName), fileName: fileName,
                     recordCount: ((List) applied.records).size()]
         }

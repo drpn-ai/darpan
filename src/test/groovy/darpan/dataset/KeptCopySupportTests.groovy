@@ -8,6 +8,7 @@ import darpan.facade.reconciliation.RunExtractSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
+import darpan.reconciliation.conclusion.RunConclusionSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -708,6 +709,14 @@ class KeptCopySupportTests {
         assertTrue((direct.reason as String).contains("has no orderDate"), direct.reason as String)
         assertFalse(new File(locationFile(runLocation("units")), "slice.json").exists(), "nothing is left behind")
 
+        // a small integer is no epoch-millis date: unplaceable, never a 1970 instant
+        String smallId = datasetOf("OMS_RETURNS_GQL", "conn-small-int", "returnId", "entryDate")
+        copyOf(A, smallId, [[returnId: "s1", entryDate: 5]], "returnId", "entryDate")
+        Map small = KeptCopySupport.sliceIfServed(ec, returnsSide(SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL"),
+                "conn-small-int", "small-int"))
+        assertFalse(small.served as boolean)
+        assertTrue((small.reason as String).contains("neither an ISO instant nor epoch milliseconds"), small.reason as String)
+
         loadDaysConnector()
         String daysId = datasetOf("KC_DAYS", "conn-days-undated", "id", "trandate")
         copyOf(A, daysId, [[id: "nov-10", trandate: "2026-11-10"], [id: "undated"]], "id", "trandate")
@@ -715,6 +724,58 @@ class KeptCopySupportTests {
         Map undated = daySide("conn-days-undated", window, "days-undated")
         assertFalse(undated.served as boolean)
         assertTrue((undated.reason as String).contains("has no trandate"), undated.reason as String)
+    }
+
+    /**
+     * Ruling P3b1-7: a served slice writes the excluded-records side file exactly when its connector's live extract does
+     * (ExcludedRecordsSidecar.WRITTEN_BY). OMS returns filter but write none, so their slice applies the filters and writes
+     * none, and the conclude pass reads the filtered side UNKNOWN, as on a live run. Shopify orders still write theirs. A
+     * filtering side whose connector is in neither set reads live.
+     */
+    @Test
+    void aServedSliceWritesASideFileOnlyWhenItsExtractorWould() {
+        assertTrue("OMS_RETURNS_GQL" in ExcludedRecordsSidecar.NOT_WRITTEN_BY)
+        assertTrue("SHOPIFY" in ExcludedRecordsSidecar.WRITTEN_BY)
+        List<Map<String, Object>> rules = [[sequenceNum: 1, fieldExpression: "returnChannelEnumId", operator: "EXCLUDE_IN", filterValues: "POS_RTN_CHANNEL"]]
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        String id = datasetOf("OMS_RETURNS_GQL", "conn-sidefile", "returnId", "entryDate")
+        copyOf(A, id, [omsReturn("r-web", "2026-11-10T12:00:00Z") + [returnChannelEnumId: "ECOM_RTN_CHANNEL"],
+                       omsReturn("r-pos", "2026-11-10T13:00:00Z") + [returnChannelEnumId: "POS_RTN_CHANNEL"]], "returnId", "entryDate")
+        Map params = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-sidefile", [location: runLocation("sidefile"), runToken: "s"],
+                START, END, "slice.json", null, rules, null, "UTC")
+        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START, windowEnd: END]))
+        assertTrue(served.served as boolean, served.reason as String)
+        File extract = served.extractFile as File
+        Map doc = json(extract)
+        assertEquals(["r-web"], doc.records*.returnId, "the filters still apply")
+        assertEquals(1, doc.metadata.filters.configuredExclusions[0].excludedCount)
+        assertFalse(new File(extract.parentFile, ExcludedRecordsSidecar.fileNameFor(extract.name)).exists(), "no side file, as live")
+        assertTrue(RunConclusionSupport.indexSide([extractFile: extract, keyFields: ["returnId"]], ["r-pos"] as Set<String>,
+                [] as Set<String>).unknownWhenAbsent as boolean, "the filtered side reads UNKNOWN, as on a live run")
+
+        // Shopify orders write theirs, as plan 3a did
+        String shopify = dataset("conn-sidefile-shopify")
+        copy(A, shopify, [order("web", "2026-11-10T09:00:00Z", [sourceName: "web"]), order("pos", "2026-11-10T10:00:00Z", [sourceName: "pos"])])
+        Map shopifyServed = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
+                [shopifyAuthConfigId: "conn-sidefile-shopify", sourceFilters: [[sequenceNum: 1, fieldExpression: "sourceName", operator: "EXCLUDE_IN", filterValues: "POS"]],
+                 outputLocation: runLocation("sidefile-shopify"), fileName: "slice.json"], [tenantId: A, windowStart: START, windowEnd: END]))
+        assertTrue(shopifyServed.served as boolean, shopifyServed.reason as String)
+        File shopifySide = new File((shopifyServed.extractFile as File).parentFile, ExcludedRecordsSidecar.fileNameFor("slice.json"))
+        assertEquals(["pos"], json(shopifySide).records*.id)
+
+        // a filtering side whose connector is in neither set: read live
+        loadDaysConnector()
+        // the test row given a filter parameter, as a tenant's own filtering connector would have
+        Map days = SourceSystemConnectorSupport.resolve(ec, "KC_DAYS") + [filterParameterName: "sourceFilters"]
+        Map window = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-11-10T00:00:00Z"), ts("2026-11-11T00:00:00Z"), TENANT_ZONE)
+        String daysId = datasetOf("KC_DAYS", "conn-days-filtered", "id", "trandate")
+        copyOf(A, daysId, [[id: "d1", trandate: "2026-11-10"]], "id", "trandate")
+        Map dayParams = RunExtractSupport.buildExtractParams(days, "FILE_1", "conn-days-filtered", [location: runLocation("days-filtered"), runToken: "d"],
+                (Timestamp) window.windowStartDate, (Timestamp) window.windowEndDate, "slice.json", null,
+                [[sequenceNum: 1, fieldExpression: "id", operator: "EXCLUDE_IN", filterValues: "X"]], null, window.timeZone)
+        assertNotNull(dayParams.sourceFilters)
+        assertEquals(KeptCopySupport.SIDE_FILE_UNDECLARED, KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(days, dayParams,
+                [tenantId: A, windowStart: window.windowStartDate, windowEnd: window.windowEndDate])).reason)
     }
 
     private static final String LIVE_TEXT = '{"metadata":{"live":true},"records":[{"id":"live-1"}]}'

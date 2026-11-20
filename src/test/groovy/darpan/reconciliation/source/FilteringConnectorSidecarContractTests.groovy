@@ -1,5 +1,6 @@
 package darpan.reconciliation.source
 
+import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import groovy.xml.XmlSlurper
 import org.junit.jupiter.api.Test
 
@@ -21,16 +22,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 class FilteringConnectorSidecarContractTests {
 
-    // OMS_ORDER_ITEMS_GQL: the unit-grain shaper collects what it drops (darpan-hotwax
-    // DataDefinedOrderItemsServiceSmokeTests.byKeysWithFiltersAndTheSidecar); OMS_PRODUCTS_GQL: OmsGqlProductsConnectorWiringTests.
-    static final Set<String> WRITES_SIDECAR = ["OMS_ORDER_ITEMS_GQL", "OMS_PRODUCTS_GQL",
-                                               "SHOPIFY_ORDER_LINE_UNITS", "NETSUITE_SUITEQL", "SHOPIFY"] as Set
+    // The two sets live in main code (ExcludedRecordsSidecar), the one declaration a kept-copy slice also reads
+    // (DAR-BE-318 ruling P3b1-7); see there for why each connector sits where it does.
+    static final Set<String> WRITES_SIDECAR = ExcludedRecordsSidecar.WRITTEN_BY
     /** Filter without a verified sidecar today. Conclusions on these sides read UNKNOWN when they filter. */
-    // OMS_GQL (DAR-BE-064): its script calls ExcludedRecordsSidecar.writeBeside, but at ORDER grain the shared
-    // OmsExtractSupport shaper never feeds the excluded collector (only the unit-grain branch collects), so
-    // the sidecar is always empty today.
-    // OMS_RETURNS_GQL (DAR-BE-040 fix 3): the returns script writes no sidecar.
-    static final Set<String> NOT_YET = ["SHOPIFY_RETURN_REFS", "OMS_GQL", "OMS_RETURNS_GQL"] as Set
+    static final Set<String> NOT_YET = ExcludedRecordsSidecar.NOT_WRITTEN_BY
 
     private static Path componentRoot() {
         Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()

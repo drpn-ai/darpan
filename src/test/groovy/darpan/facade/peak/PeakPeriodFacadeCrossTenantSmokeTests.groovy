@@ -68,8 +68,8 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         assertTrue(got.ok as boolean, "${got.errors}")
         assertEquals("Black Friday sale", got.peakPeriod.periodName)
         assertEquals(1, ((List) got.runTimes).size())
-        assertEquals([[targetLabel: "AUTO_A", normalTime: "10:00", startsAt: "23:00", reason: "10:00 is in peak hours"]], got.heldRuns,
-                "A's daily 10:00 run waits for peak hours to end")
+        assertEquals([], got.heldRuns,
+                "A's daily 10:00 run would wait for peak hours, but its run time moves it to 06:00 every day, before them")
         assertEquals("06:00", ((List) got.runTimes)[0].runTime)
         assertEquals("10:00", ((List) got.runTimes)[0].normalTime)
         assertEquals("AUTO_A", ((List) got.targets).find { it.automationId == "AUTO_A" }?.automationId)

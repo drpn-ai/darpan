@@ -248,6 +248,18 @@ class AutomationFacadeSmokeTests {
         assertEquals("AUT_STAT_SUCCESS", ((Map) refreshedRow.lastExecution).statusEnumId)
         assertEquals(1, refreshedRow.executionCount)
 
+        // DAR-BE-328: a peak period's run time names the automation (FK PEAKRT_AUTOMATION); deleting it still works.
+        ec.message.clearErrors()
+        Map<String, Object> periodSave = callFacade("facade.PeakPeriodFacadeServices.save#PeakPeriod", [
+                periodName: "Delete-guard sale", fromDate: "2027-03-01", thruDate: "2027-03-02"])
+        assertTrue((Boolean) periodSave.ok, periodSave.errors?.toString())
+        String peakPeriodId = periodSave.peakPeriodId as String
+        Map<String, Object> runTimeSave = callFacade("facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime", [
+                peakPeriodId: peakPeriodId, automationId: automationId, runTime: "06:00"])
+        assertTrue((Boolean) runTimeSave.ok, runTimeSave.errors?.toString())
+        String runTimeId = runTimeSave.runTimeId as String
+        assertNotNull(findOne("darpan.peak.PeakPeriodRunTime", [runTimeId: runTimeId]))
+
         ec.message.clearErrors()
         Map<String, Object> deleteResult = callFacade("facade.ReconciliationFacadeServices.delete#Automation", [
                 automationId: automationId,
@@ -257,6 +269,11 @@ class AutomationFacadeSmokeTests {
         assertEquals(2, deleteResult.deletedSourceCount)
         assertEquals(2, deleteResult.deletedExecutionCount)
         assertNull(findOne("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId]))
+        assertNull(findOne("darpan.peak.PeakPeriodRunTime", [runTimeId: runTimeId]), "the run time went with its automation")
+        assertNotNull(findOne("darpan.peak.PeakPeriod", [peakPeriodId: peakPeriodId]), "the period itself stays")
+
+        ec.message.clearErrors()
+        assertTrue((Boolean) callFacade("facade.PeakPeriodFacadeServices.delete#PeakPeriod", [peakPeriodId: peakPeriodId]).ok)
     }
 
     @Test

@@ -18,9 +18,13 @@ class PeakPeriodFacadeSupportTests {
 
     private static final Map BLACK_FRIDAY = period('Black Friday sale', '2026-11-24', '2026-12-01')
 
-    private static PeakWindow window(String start = '08:00', String end = '23:00') {
+    private static PeakWindow window(String start = '08:00', String end = '23:00', List<RunTimeMove> moves = []) {
         new PeakWindow('P1', 'Black Friday sale', LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1),
-                LocalTime.parse(start), LocalTime.parse(end), [])
+                LocalTime.parse(start), LocalTime.parse(end), moves)
+    }
+
+    private static RunTimeMove move(String automationId, LocalDate onDate, String at) {
+        new RunTimeMove([automationId] as Set, onDate, LocalTime.parse(at))
     }
 
     private static Map automation(String id, String cron, Map extra = [:]) {
@@ -131,5 +135,49 @@ class PeakPeriodFacadeSupportTests {
     void noPeakHoursHoldsNothing() {
         PeakWindow none = new PeakWindow('P1', 'x', LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), null, null, [])
         assertEquals([], PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 0 10 * * ?')], none, LA))
+    }
+
+    @Test
+    void runMovedOutOfPeakHoursNotListed() {
+        PeakWindow w = window('08:00', '23:00', [move('A1', null, '06:00')])
+        assertEquals([], PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 0 10 * * ?')], w, LA))
+    }
+
+    @Test
+    void runMovedIntoPeakHoursListedAtItsMovedTime() {
+        PeakWindow w = window('08:00', '23:00', [move('A1', LocalDate.of(2026, 11, 28), '10:00')])
+        assertEquals([[targetLabel: 'Run A1', normalTime: '10:00', startsAt: '23:00', reason: '10:00 is in peak hours']],
+                PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 15 2 * * ?')], w, LA))
+    }
+
+    @Test
+    void moveOnALaterDateOfThePeriodIsStillSeen() {
+        PeakWindow w = window('08:00', '23:00', [move('A1', LocalDate.of(2026, 12, 1), '12:30')])
+        assertEquals(['12:30'], PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 15 2 * * ?')], w, LA)*.normalTime,
+                'Dec 1 is past the first seven days, but a move names it')
+    }
+
+    @Test
+    void hourlyRunFoldsToOneRow() {
+        List<Map> rows = PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 0 * * * ?')], window(), LA)
+        assertEquals([[targetLabel: 'Run A1', normalTime: '08:00–22:00', startsAt: '23:00', reason: '08:00–22:00 is in peak hours']], rows)
+    }
+
+    @Test
+    void windowOfCarriesMovesAndExpandsAuditsToTheirChecks() {
+        Map periodRow = [peakPeriodId: 'P1', periodName: 'Black Friday sale', fromDate: '2026-11-24', thruDate: '2026-12-01',
+                         peakHoursStart: '08:00', peakHoursEnd: '23:00']
+        List<Map> scheduled = [automation('C1', '0 0 12 * * ?', [auditId: 'AUD1', auditName: 'Month close']),
+                               automation('C2', '0 0 12 * * ?', [auditId: 'AUD1', auditName: 'Month close']),
+                               automation('A1', '0 0 10 * * ?')]
+        PeakWindow w = PeakPeriodFacadeSupport.windowOf(periodRow, [
+                [runTimeId: 'RT1', auditId: 'AUD1', onDate: null, runTime: '06:00'],
+                [runTimeId: 'RT2', automationId: 'A1', onDate: '2026-11-28', runTime: '07:00'],
+                [runTimeId: 'RT3', automationId: 'A1', onDate: null, runTime: 'bad']], scheduled)
+        assertEquals(2, w.moves.size())
+        assertEquals(['C1', 'C2'] as Set, w.moves[0].automationIds)
+        assertEquals(LocalDate.of(2026, 11, 28), w.moves[1].onDate)
+        assertEquals(['Run A1'], PeakPeriodFacadeSupport.heldRuns(scheduled, w, LA)*.targetLabel,
+                'the audit moved to 06:00 every day is no longer held; A1 is held on the days it is not moved')
     }
 }

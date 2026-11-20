@@ -71,7 +71,7 @@
                 <set field="normalTimes" from="darpan.peak.PeakPeriodFacadeSupport.normalTimes(targetInfo.scheduled, fromLocal, zone)"/>
                 <set field="runTimeRows" from="darpan.peak.PeakPeriodFacadeSupport.rows(ec, 'darpan.peak.PeakPeriodRunTime', tenantId).condition('peakPeriodId', peakPeriodIdValue).orderBy(['onDate', 'runTime']).list() ?: []"/>
                 <set field="runTimes" from="runTimeRows.collect { rt -> [runTimeId: rt.runTimeId, automationId: rt.automationId, auditId: rt.auditId, targetLabel: labelById[rt.automationId ?: rt.auditId] ?: (rt.automationId ?: rt.auditId), onDate: rt.onDate?.toString(), runTime: rt.runTime, normalTime: normalTimes[rt.automationId ?: rt.auditId]] }"/>
-                <set field="peakWindow" from="darpan.peak.PeakPeriodFacadeSupport.windowOf(periodRow)"/>
+                <set field="peakWindow" from="darpan.peak.PeakPeriodFacadeSupport.windowOf(periodRow, runTimeRows, targetInfo.scheduled)"/>
                 <set field="heldRuns" from="darpan.peak.PeakPeriodFacadeSupport.heldRuns(targetInfo.scheduled, peakWindow, zone)"/>
                 <set field="targets" from="targetInfo.targets"/>
                 <set field="peakPeriod" from="[peakPeriodId: periodRow.peakPeriodId, periodName: periodRow.periodName, fromDate: fromLocal.toString(), thruDate: thruLocal.toString(), peakHoursStart: periodRow.peakHoursStart, peakHoursEnd: periodRow.peakHoursEnd, hotwaxReadSharePct: periodRow.hotwaxReadSharePct, netsuiteSerial: periodRow.netsuiteSerial ?: 'N', isActive: periodRow.isActive ?: 'Y', state: darpan.peak.PeakPeriodFacadeSupport.stateOf(periodRow.getMap(), today), timeZone: zone.getId(), createdByUserId: periodRow.createdByUserId, lastUpdatedDate: periodRow.lastUpdatedDate]"/>

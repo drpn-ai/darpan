@@ -43,6 +43,7 @@ class PeakPeriodLoaderSmokeTests {
         period("PA_INACTIVE", A, "2026-11-24", "2026-12-01", "N", "08:00", "23:00")
         period("PA_PAST", A, "2026-10-01", "2026-10-31", "Y", null, null)
         period("PA_BAD_HOURS", A, "2026-12-10", "2026-12-12", "Y", "8am", "23:00")
+        period("PA_SAME_HOURS", A, "2026-12-14", "2026-12-16", "Y", "08:00", "08:00")
         period("PB_ACTIVE", B, "2026-11-24", "2026-12-01", "Y", "09:00", "21:00")
 
         automation("AUTO_PK_CHECK", A)
@@ -70,7 +71,7 @@ class PeakPeriodLoaderSmokeTests {
     @Test
     void loadsOnlyThisTenantsActivePeriods() {
         assertEquals(["PA_ACTIVE"], PeakPeriodLoader.load(ec, A, FROM)*.peakPeriodId,
-                "inactive, ended and malformed periods are left out; B's period never shows for A")
+                "inactive, ended and malformed periods (and peak hours that start and end at once) are left out; B's period never shows for A")
         assertEquals(["PB_ACTIVE"], PeakPeriodLoader.load(ec, B, FROM)*.peakPeriodId)
         assertEquals([], PeakPeriodLoader.load(ec, "NO_SUCH_TENANT", FROM))
 

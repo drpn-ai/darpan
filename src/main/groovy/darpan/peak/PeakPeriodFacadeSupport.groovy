@@ -9,7 +9,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
-import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
@@ -90,40 +89,61 @@ class PeakPeriodFacadeSupport {
     }
 
     /**
-     * The scheduled runs the period's peak hours would hold, one row per (run, usual time) whose start moves: audit checks
-     * (maps carrying auditId + auditName) fold into one row labelled with the audit. automations: automationId, label,
-     * scheduleExpr, windowTimeZone. Times are tenant-zone "HH:mm". Run-time moves are not applied: this is what peak hours
-     * alone do.
+     * The scheduled runs the period's peak hours would hold, one row per run: audit checks (maps carrying auditId +
+     * auditName) fold into one row labelled with the audit. automations: automationId, label, scheduleExpr,
+     * windowTimeZone. Times are tenant-zone "HH:mm". The window's run-time moves apply first, as the scheduler applies
+     * them (only to the first fire of a date): a run moved out of peak hours is not listed, one moved into them is, with
+     * its moved time as normalTime. A run held at several times (a sub-daily schedule) shows "first–last" as normalTime
+     * and its latest start. Scans the period's first HELD_RUN_SCAN_DAYS days plus every date a move names.
      */
     static List<Map> heldRuns(List<Map> automations, PeakWindow w, ZoneId tenantZone) {
         if (w == null || w.peakStart == null || w.peakEnd == null) return []
-        LocalDate lastDay = w.fromDate.plusDays(HELD_RUN_SCAN_DAYS - 1)
-        if (w.thruDate.isBefore(lastDay)) lastDay = w.thruDate
-        ZonedDateTime scanStart = w.fromDate.atStartOfDay(tenantZone)
-        Instant scanEnd = lastDay.plusDays(1).atStartOfDay(tenantZone).toInstant()
-        Timestamp before = Timestamp.from(scanStart.toInstant().minusMillis(1))
+        List<PeakWindow> withHours = [w]
+        List<PeakWindow> movesOnly = [new PeakWindow(w.peakPeriodId, w.periodName, w.fromDate, w.thruDate, null, null, w.moves ?: [])]
+        SortedSet<LocalDate> days = new TreeSet<LocalDate>()
+        for (int d = 0; d < HELD_RUN_SCAN_DAYS && !w.fromDate.plusDays(d).isAfter(w.thruDate); d++) days << w.fromDate.plusDays(d)
+        (w.moves ?: []).each { RunTimeMove m ->
+            if (m.onDate != null && !m.onDate.isBefore(w.fromDate) && !m.onDate.isAfter(w.thruDate)) days << m.onDate
+        }
 
-        Map<String, Map> rows = new LinkedHashMap<String, Map>()
+        Map<String, Map> held = new LinkedHashMap<String, Map>()
         for (Map automation in (automations ?: [])) {
+            String automationId = normalize(automation.get("automationId"))
             String auditId = normalize(automation.get("auditId"))
-            String label = auditId ? (normalize(automation.get("auditName")) ?: auditId) : (normalize(automation.get("label")) ?: normalize(automation.get("automationId")))
-            String key = auditId ? "audit:" + auditId : "automation:" + normalize(automation.get("automationId"))
-            Timestamp cursor = before
-            for (int i = 0; i < HELD_RUN_MAX_FIRES; i++) {
-                Timestamp next = AutomationExecutionSupport.resolveNextScheduledFireTime(automation, cursor, cursor)
-                if (next == null || !next.toInstant().isBefore(scanEnd)) break
-                cursor = next
-                Instant fire = next.toInstant()
-                Instant start = PeakPeriodSupport.effectiveStart(fire, normalize(automation.get("automationId")), [w], tenantZone, false)
-                if (start == fire) continue
-                String normalTime = fire.atZone(tenantZone).format(HH_MM)
-                rows.putIfAbsent(key + "|" + normalTime, [targetLabel: label, normalTime: normalTime,
-                        startsAt: start.atZone(tenantZone).format(HH_MM), reason: "${normalTime} is in peak hours".toString()])
+            String label = auditId ? (normalize(automation.get("auditName")) ?: auditId) : (normalize(automation.get("label")) ?: automationId)
+            String key = auditId ? "audit:" + auditId : "automation:" + automationId
+            int fires = 0
+            for (LocalDate day in days) {
+                Instant dayEnd = day.plusDays(1).atStartOfDay(tenantZone).toInstant()
+                Timestamp cursor = Timestamp.from(day.atStartOfDay(tenantZone).toInstant().minusMillis(1))
+                boolean firstOfDay = true
+                while (fires < HELD_RUN_MAX_FIRES) {
+                    Timestamp next = AutomationExecutionSupport.resolveNextScheduledFireTime(automation, cursor, cursor)
+                    if (next == null || !next.toInstant().isBefore(dayEnd)) break
+                    cursor = next
+                    fires++
+                    Instant fire = next.toInstant()
+                    Instant moved = PeakPeriodSupport.effectiveStart(fire, automationId, movesOnly, tenantZone, firstOfDay)
+                    Instant start = PeakPeriodSupport.effectiveStart(fire, automationId, withHours, tenantZone, firstOfDay)
+                    firstOfDay = false
+                    if (start == moved) continue
+                    Map row = held.computeIfAbsent(key) { [label: label, times: new TreeSet<String>(), latest: null, latestOffset: null] }
+                    ((SortedSet<String>) row.times) << moved.atZone(tenantZone).format(HH_MM)
+                    // Latest start by its distance from the start of the fire's day, so a start past midnight is later.
+                    long offset = start.toEpochMilli() - day.atStartOfDay(tenantZone).toInstant().toEpochMilli()
+                    if (row.latestOffset == null || offset > (row.latestOffset as long)) {
+                        row.latestOffset = offset
+                        row.latest = start.atZone(tenantZone).format(HH_MM)
+                    }
+                }
             }
         }
-        return rows.values().toList().sort { Map r -> [r.normalTime, r.targetLabel] as List<String> } as List<Map>
+        return held.values().collect { Map row ->
+            SortedSet<String> times = (SortedSet<String>) row.times
+            String normalTime = times.size() == 1 ? times.first() : "${times.first()}–${times.last()}".toString()
+            [targetLabel: row.label, normalTime: normalTime, startsAt: row.latest, reason: "${normalTime} is in peak hours".toString()]
+        }.sort { Map r -> [r.normalTime, r.targetLabel] as List<String> } as List<Map>
     }
-
 
     /**
      * The usual time of each run in tenant "HH:mm": the first fire at or after the period's first day, keyed by automationId
@@ -166,13 +186,27 @@ class PeakPeriodFacadeSupport {
         }
     }
 
-    /** The period's peak hours as a PeakWindow with no moves; null peak hours when they are unset or do not parse. */
-    static PeakWindow windowOf(def periodRow) {
+    /**
+     * The period as a PeakWindow with its run-time moves, as PeakPeriodLoader builds it for the scheduler; null peak hours
+     * when they are unset or do not parse. A move that names an audit applies to that audit's check automations in
+     * scheduled (the maps targetsOf returns, which carry auditId); a run time whose time does not parse is left out.
+     */
+    static PeakWindow windowOf(def periodRow, List runTimeRows = [], List<Map> scheduled = []) {
         LocalTime start = parseTime(normalize(periodRow.get("peakHoursStart")))
         LocalTime end = parseTime(normalize(periodRow.get("peakHoursEnd")))
         if (start == null || end == null || start == end) { start = null; end = null }
+        List<RunTimeMove> moves = (runTimeRows ?: []).collect { rt ->
+            LocalTime at = parseTime(normalize(rt.get("runTime")))
+            if (at == null) return null
+            String automationId = normalize(rt.get("automationId"))
+            String auditId = normalize(rt.get("auditId"))
+            Set<String> ids = automationId ? ([automationId] as Set<String>) :
+                    ((scheduled ?: []).findAll { Map a -> auditId && normalize(a.get("auditId")) == auditId }
+                            .collect { Map a -> normalize(a.get("automationId")) }.findAll { it } as Set<String>)
+            return ids ? new RunTimeMove(ids.asImmutable(), toLocalDate(rt.get("onDate")), at) : null
+        }.findAll { it != null } as List<RunTimeMove>
         return new PeakWindow(normalize(periodRow.get("peakPeriodId")), normalize(periodRow.get("periodName")),
-                toLocalDate(periodRow.get("fromDate")), toLocalDate(periodRow.get("thruDate")), start, end, [])
+                toLocalDate(periodRow.get("fromDate")), toLocalDate(periodRow.get("thruDate")), start, end, moves)
     }
 
     /** Not ended by start date, then ended by end date, newest first. Rows carry state, fromDate, thruDate (LocalDate). */
@@ -227,8 +261,18 @@ class PeakPeriodFacadeSupport {
         rows(ec, "darpan.peak.PeakPeriodRunTime", tenantId).condition("peakPeriodId", peakPeriodId).deleteAll()
     }
 
+    /**
+     * Deletes every run time of the tenant that names this automation, so deleting the automation does not fail on the
+     * PEAKRT_AUTOMATION foreign key. Returns how many were deleted.
+     */
+    static int deleteRunTimesForAutomation(def ec, String tenantId, String automationId) {
+        if (!normalize(tenantId) || !normalize(automationId)) return 0
+        return rows(ec, "darpan.peak.PeakPeriodRunTime", tenantId).condition("automationId", automationId).deleteAll()
+    }
+
+    /** Per-request reads (every page load, every scheduler tick): the DEBUG twin of findGlobalUnscoped, so no INFO line each time. */
     static def rows(def ec, String entityName, String tenantId) {
-        return TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
+        return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
     }
 
     static LocalDate toLocalDate(Object value) {

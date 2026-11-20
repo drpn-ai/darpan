@@ -49,6 +49,12 @@ class PeakPeriodLoader {
                 logger.warn("Peak period {} (tenant {}) left out of scheduling: peak hours {}", peakPeriodId, tenant, e.message)
                 return
             }
+            if (peakStart != null && peakStart == peakEnd) {
+                // Save refuses this ("Peak hours cannot start and end at the same time."); read as is it would be 24 hours.
+                logger.warn("Peak period {} (tenant {}) left out of scheduling: its peak hours start and end at {}",
+                        peakPeriodId, tenant, peakStart)
+                return
+            }
             if ((peakStart == null) != (peakEnd == null)) {
                 logger.warn("Peak period {} (tenant {}) has only one end of its peak hours; scheduling reads it as no peak hours",
                         peakPeriodId, tenant)
@@ -92,7 +98,8 @@ class PeakPeriodLoader {
     }
 
     private static def rows(def ec, String entityName, String tenant) {
-        return TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY).condition("companyUserGroupId", tenant).useCache(false)
+        // Every scan tick reads every tenant: the DEBUG twin, so the INFO log does not get a line per tenant per tick.
+        return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, entityName, WHY).condition("companyUserGroupId", tenant).useCache(false)
     }
 
     private static LocalDate toLocalDate(Object value) {

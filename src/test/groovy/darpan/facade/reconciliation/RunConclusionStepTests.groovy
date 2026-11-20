@@ -313,4 +313,46 @@ class RunConclusionStepTests {
         assertTrue(w2[0].contains("order-info"))
         assertEquals([], captures(run))
     }
+
+    private static void writeCapture(File dir, String name, long millis, List<Map> records) {
+        dir.mkdirs()
+        new File(dir, "lookup-${name}-${millis}.json").setText(groovy.json.JsonOutput.toJson([metadata: [:], records: records]), "UTF-8")
+    }
+
+    private static Map replayOf(File dir, Map lookup, List<String> ids) {
+        return (Map) JudgeReplaySupport.capturedFetcher(dir, "the run", "Lookup", [] as Set).call(null, lookup, ids, "T1", [])
+    }
+
+    @Test
+    void aReplayAnswersEveryBatchOfALookup() {
+        File dir = new File(tmp, "run/lookups")
+        writeCapture(dir, "orderInNetsuite", 1000, [[orderId: "A1", v: 1]])
+        writeCapture(dir, "orderInNetsuite", 2000, [[orderId: "B2", v: 2]])
+        Map replayed = replayOf(dir, LOOKUP, ["A1", "B2"])
+        assertEquals(["A1", "B2"], replayed.keySet().sort())
+    }
+
+    @Test
+    void theNewerCaptureWinsForTheSameId() {
+        File dir = new File(tmp, "run/lookups")
+        writeCapture(dir, "orderInNetsuite", 2000, [[orderId: "A1", v: "new"]])
+        writeCapture(dir, "orderInNetsuite", 1000, [[orderId: "A1", v: "old"], [orderId: "C3", v: "only-old"]])
+        Map replayed = replayOf(dir, LOOKUP, ["A1", "C3"])
+        assertEquals("new", replayed.A1.v)
+        assertEquals("only-old", replayed.C3.v)
+        Map many = LOOKUP + [many: true]
+        writeCapture(new File(tmp, "m"), "orderInNetsuite", 1000, [[orderId: "A1", i: 1], [orderId: "A1", i: 2]])
+        writeCapture(new File(tmp, "m"), "orderInNetsuite", 2000, [[orderId: "A1", i: 2], [orderId: "A1", i: 3]])
+        assertEquals([1, 2, 3], replayOf(new File(tmp, "m"), many, ["A1"]).A1*.i)
+    }
+
+    @Test
+    void aLivePassOfTwoBatchesReplaysEveryId() {
+        File dir = new File(tmp, "run/lookups")
+        RunConclusionStep.fetchLookup(stubEc([[orderId: "A1"]], [:]), LOOKUP, ["A1"], "T1", [], dir)
+        Thread.sleep(5)
+        RunConclusionStep.fetchLookup(stubEc([[orderId: "B2"]], [:]), LOOKUP, ["B2"], "T1", [], dir)
+        assertEquals(2, captures(new File(tmp, "run")).size())
+        assertEquals(["A1", "B2"], replayOf(dir, LOOKUP, ["A1", "B2"]).keySet().sort())
+    }
 }

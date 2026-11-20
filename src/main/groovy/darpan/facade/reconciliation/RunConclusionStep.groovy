@@ -139,6 +139,27 @@ class RunConclusionStep {
     }
 
     /**
+     * The form RunExtractSupport.buildExtractParams hands extractors: a data-manager location string (every extractor resolves
+     * it with DataManagerSupport.resolveDirectoryFile). A folder under the data manager is named that way; any other folder
+     * (a test's temp dir) falls back to its absolute path.
+     */
+    static String outputLocationFor(def ec, File dir) {
+        try {
+            String base = darpan.facade.common.DataManagerSupport.resolveDataManagerLocation(ec)
+            File root = darpan.facade.common.DataManagerSupport.resolveDirectoryFile(ec, base, false)
+            if (root != null) {
+                java.nio.file.Path rootPath = root.canonicalFile.toPath()
+                java.nio.file.Path dirPath = dir.canonicalFile.toPath()
+                if (dirPath.startsWith(rootPath)) {
+                    return darpan.facade.common.DataManagerSupport.childLocation(base, rootPath.relativize(dirPath).toString().replace(File.separator, "/"))
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return dir.absolutePath
+    }
+
+    /**
      * Keeps answers the brain store served as <lookupsDir>/lookup-<name>-<millis>.json ({metadata, records}), the file
      * JudgeReplaySupport.capturedFetcher reads. Nothing found for an id adds no record. A write that fails, or a name the
      * capture pattern cannot hold, is a warning and no file, never a failure.
@@ -237,7 +258,7 @@ class RunConclusionStep {
             // DAR-BE-205: conclusionLookup tells an extract that declares it (HotWax orders) to answer for every id named,
             // with none of a comparison's built-in exclusions; an audit re-check by key never sends it.
             if (capture) lookupsDir.mkdirs()
-            Map out = ec.service.sync().name(service).parameters(options + window + (capture ? [outputLocation: lookupsDir.absolutePath] : [:]) + [(configParameter): lookup.sourceConfigId,
+            Map out = ec.service.sync().name(service).parameters(options + window + (capture ? [outputLocation: outputLocationFor(ec, lookupsDir)] : [:]) + [(configParameter): lookup.sourceConfigId,
                     lookupKeys: ids, lookupKeyField: lookup.keyField, conclusionLookup: true, companyUserGroupId: tenantId, systemEnumId: connector.systemEnumId,
                     fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
             List errors = (List) (out?.errors ?: (ec.message.hasError() ? ec.message.errors : []))

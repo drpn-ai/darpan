@@ -203,8 +203,10 @@ class JudgeReplaySupport {
     static Closure capturedFetcher(File lookupsDir, String where, String kind, Set<String> notCaptured) {
         return { def ec, Map lookup, List<String> ids, String tenantId, List<String> warnings ->
             String name = lookup?.name as String
-            File file = capturedLookupFile(lookupsDir, name)
-            if (file == null) {
+            // DAR-BE-318 P3a-4: a live pass writes one file per fetch batch (and one for store-served answers), so every
+            // capture of the name is read, oldest to newest by millis; the newest wins per id, a `many` lookup keeps the union.
+            List<File> files = capturedLookupFiles(lookupsDir, name)
+            if (files.isEmpty()) {
                 String warning = "${kind} ${name} not captured in ${where}; not replayed".toString()
                 notCaptured.add(warning)
                 warnings?.add(warning)
@@ -212,16 +214,35 @@ class JudgeReplaySupport {
             }
             Set<String> asked = new HashSet<String>((ids ?: []).collect { it as String })
             Map<String, Object> found = [:]
-            try {
-                JsonRecordStream.forEachRecord(file, "records") { Map record -> ConclusionLookupSupport.collect(found, lookup, record) }
-            } catch (Exception e) {
-                String warning = "${kind} ${name} not read from its capture ${file.name}: ${e.message ?: e.class.simpleName}".toString()
-                notCaptured.add(warning)
-                warnings?.add(warning)
-                return [:]
+            for (File file : files) {
+                try {
+                    Map<String, Object> fromFile = [:]
+                    JsonRecordStream.forEachRecord(file, "records") { Map record -> ConclusionLookupSupport.collect(fromFile, lookup, record) }
+                    fromFile.each { String key, Object value ->
+                        if (lookup.many == true && found.get(key) instanceof List) {
+                            List kept = (List) found.get(key)
+                            ((List) value).each { Object r -> if (!kept.contains(r)) kept.add(r) }
+                        } else {
+                            found.put(key, value)
+                        }
+                    }
+                } catch (Exception e) {
+                    String warning = "${kind} ${name} not read from its capture ${file.name}: ${e.message ?: e.class.simpleName}".toString()
+                    notCaptured.add(warning)
+                    warnings?.add(warning)
+                }
             }
             return found.findAll { Object key, Object value -> asked.contains(key as String) }
         }
+    }
+
+    /** Every capture of a lookup name in lookupsDir, oldest first by the millis in its name. */
+    static List<File> capturedLookupFiles(File lookupsDir, String name) {
+        if (lookupsDir == null || !name || !lookupsDir.isDirectory()) return []
+        return (lookupsDir.listFiles() ?: []).findAll { File f ->
+            def m = CAPTURED_LOOKUP.matcher(f.name)
+            f.isFile() && m.matches() && m.group(1) == name
+        }.sort { File f -> new BigInteger(CAPTURED_LOOKUP.matcher(f.name).with { it.matches(); it.group(2) }) }
     }
 
     static File capturedLookupFile(File lookupsDir, String name) {

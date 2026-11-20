@@ -15,8 +15,12 @@ import darpan.conclusion.brain.fact.ShopifyOrder
  */
 class BrainAskPlanner {
 
+    /**
+     * useStore false (DAR-BE-318, ruling P2-27: a replay) never reads BrainAnswerStore: every subject not answered from facts
+     * is fetched, through the caller's own fetchQuestion.
+     */
     static Map plan(List<Ask> asks, Map<Object, Cause> bestCauses, String tenantId, Map<String, Integer> mayEnableRanks,
-                    Map<String, Map<String, Map>> fromFacts = null) {
+                    Map<String, Map<String, Map>> fromFacts = null, boolean useStore = true) {
         Map<String, LinkedHashSet<String>> toFetch = [:]
         Map<String, Map<String, Map>> answered = [:]
         int dropped = 0
@@ -48,7 +52,7 @@ class BrainAskPlanner {
                 count(ask.question, "fromFacts")
                 return
             }
-            if (BrainAnswerStore.has(tenantId, ask.question, id)) {
+            if (useStore && BrainAnswerStore.has(tenantId, ask.question, id)) {
                 answered.computeIfAbsent(ask.question, { [:] }).put(id, BrainAnswerStore.get(tenantId, ask.question, id))
                 reused++
                 count(ask.question, "reused")

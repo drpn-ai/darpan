@@ -32,6 +32,14 @@ class RunConclusionStepTests {
         assertEquals([], rules[1].conditions)
     }
 
+    // DAR-BE-318, ruling P2-27: a replay (its own lookupFetcher) keeps its brain off the answers live runs share.
+    @Test
+    void onlyACallerWithItsOwnLookupFetcherKeepsTheBrainOffTheSharedAnswers() {
+        assertEquals(true, RunConclusionStep.sharesBrainAnswers([ec: null, compareScopeId: "S"]), "live callers pass no fetcher")
+        assertEquals(true, RunConclusionStep.sharesBrainAnswers([lookupFetcher: null]))
+        assertEquals(false, RunConclusionStep.sharesBrainAnswers([lookupFetcher: { Object[] a -> [:] }]), "a replay")
+    }
+
     // DAR-BE-228: the brain's per-question ledger lands in the step's metadata beside the counts.
     @Test
     void theBrainsPerQuestionLedgerLandsInTheRunMetadata() {

@@ -99,18 +99,22 @@ class JudgeReplaySupport {
         File extract1 = (File) ((Map) args.extractFiles)?.get("file1")
         Set<String> notCaptured = new TreeSet<>()
         Closure askFetcher = capturedFetcher(lookupsDirOf(extract1), "the replayed run", "Ask", notCaptured)
+        // Every warning an ask gives, once each across batches (each starts "Ask "; the replay also lists them in replayWarnings).
+        Set<String> askWarnings = new LinkedHashSet<>()
         Iterator<List<Map>> factBatches = new Iterator<List<Map>>() {
             boolean hasNext() { return pairBatches.hasNext() }
 
             List<Map> next() {
                 List<Map> batch = pairBatches.next()
+                List<String> batchWarnings = []
                 Map<String, Map<String, Object>> asks = AskSupport.fetchAsks(ec, checkId, tenantId,
-                        batch.collect { Map row -> [row.compareId, row.file1, row.file2] }, [], askFetcher)
+                        batch.collect { Map row -> [row.compareId, row.file1, row.file2] }, batchWarnings, askFetcher)
+                askWarnings.addAll(batchWarnings)
                 return batch.collect { Map row -> PairFactSupport.buildFact(row, sideState, params, asks.get(row.compareId as String)) }
             }
         }
         List<Map> findings = JudgeSupport.judge(ec, checkId, factBatches, (Map) (args.statementsByClaim ?: [:]), warnings)
-        warnings.addAll(notCaptured)
+        warnings.addAll(askWarnings)
         skipped.each { String type, Integer n -> warnings.add("${n} ${type} rows are not pairs and were not judged".toString()) }
         dropped.each { String side, Integer n ->
             warnings.add("${n} ${side} records set aside under a key the compare already holds (kept or duplicated) were not judged".toString())
@@ -194,6 +198,8 @@ class JudgeReplaySupport {
      * A lookup call with RunConclusionStep.fetchLookup's signature (ec, lookup, ids, tenantId, warnings) that never calls a
      * system: it answers the asked ids from the newest captured lookup-<name>-<millis>.json in lookupsDir, and when none is
      * captured it adds "<kind> <name> not captured in <where>; not replayed" to warnings and to notCaptured, and answers nothing.
+     * A captured file that cannot be read is the same: "<kind> <name> not read from its capture: ..." and no answer (review
+     * N-M2: one lookup's bad file must not end the whole conclude pass or judging).
      */
     static Closure capturedFetcher(File lookupsDir, String where, String kind, Set<String> notCaptured) {
         return { def ec, Map lookup, List<String> ids, String tenantId, List<String> warnings ->
@@ -207,7 +213,14 @@ class JudgeReplaySupport {
             }
             Set<String> asked = new HashSet<String>((ids ?: []).collect { it as String })
             Map<String, Object> found = [:]
-            JsonRecordStream.forEachRecord(file, "records") { Map record -> ConclusionLookupSupport.collect(found, lookup, record) }
+            try {
+                JsonRecordStream.forEachRecord(file, "records") { Map record -> ConclusionLookupSupport.collect(found, lookup, record) }
+            } catch (Exception e) {
+                String warning = "${kind} ${name} not read from its capture ${file.name}: ${e.message ?: e.class.simpleName}".toString()
+                notCaptured.add(warning)
+                warnings?.add(warning)
+                return [:]
+            }
             return found.findAll { Object key, Object value -> asked.contains(key as String) }
         }
     }
@@ -394,7 +407,7 @@ class JudgeReplaySupport {
         List<Map> oldFindings = AuditAutomationSupport.findingsFrom(ec, tenantId, check, diffFile,
                 [systemEnumId: args.file1SystemEnumId], [systemEnumId: args.file2SystemEnumId], [:])
         Map out = [oldFindings: oldFindings, judgedFindings: [], judgeWarnings: [], judgedPairCounts: [:], replayFolder: folderLocation,
-                   replayWarnings: notCaptured as List]
+                   replayWarnings: replayWarnings(notCaptured, (Map) concluded.brain, [])]
         if (judging) {
             List<Map> judged = (List<Map>) (compared.judgedFindings ?: [])
             List<String> judgeWarnings = (List<String>) (compared.judgeWarnings ?: [])
@@ -402,6 +415,7 @@ class JudgeReplaySupport {
             Map pairCounts = (Map) (compared.judgedPairCounts ?: [:])
             judgedFile.setText(JsonOutput.toJson([checkId: check.checkId, pairs: pairCounts, warnings: judgeWarnings, findings: judged]),
                     StandardCharsets.UTF_8.name())
+            out.replayWarnings = replayWarnings(notCaptured, (Map) concluded.brain, judgeWarnings)
             out.putAll([judgedFindings: judged, judgeWarnings: judgeWarnings, judgedPairCounts: pairCounts,
                         judgedPath    : DataManagerSupport.relativeDataManagerPath(ec, judgedFile)])
         }
@@ -438,6 +452,17 @@ class JudgeReplaySupport {
         (captured?.isDirectory() ? (captured.listFiles() ?: []) : []).each { File f ->
             if (f.isFile() && CAPTURED_LOOKUP.matcher(f.name).matches()) Files.copy(f.toPath(), new File(target, f.name).toPath())
         }
+    }
+
+    /**
+     * What the replay could not answer, once each: the conclude pass's lookups not captured, every brain question that went
+     * unanswered (a default-lookup question has no lookup in a replay, review N-M4), and every warning an ask gave.
+     */
+    static List<String> replayWarnings(Set<String> lookupsNotCaptured, Map brainSummary, List<String> judgeWarnings) {
+        Set<String> out = new LinkedHashSet<>(lookupsNotCaptured ?: [])
+        ((List) (brainSummary?.warnings ?: [])).each { out.add("Brain: ${it}".toString()) }
+        (judgeWarnings ?: []).findAll { it?.startsWith("Ask ") }.each { out.add(it) }
+        return out as List<String>
     }
 
     /** judge-replays/<checkId>/<stamp> under the data manager root, never an existing folder. */

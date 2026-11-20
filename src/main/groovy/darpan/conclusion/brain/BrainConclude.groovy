@@ -26,10 +26,13 @@ class BrainConclude {
 
     /**
      * args: kind, tenantId, findings ([key, bucket, sides] each), fetchQuestion(question, ids) -> id -> record, labelFor(code);
-     * catalog (BrainQuestionCatalog entries, default all of them).
+     * catalog (BrainQuestionCatalog entries, default all of them); shareAnswers (default true): false neither reads nor writes
+     * BrainAnswerStore, the answers every check in this JVM shares (DAR-BE-318, ruling P2-27: a replay, whose answers come only
+     * from its captured lookups and must never reach a live run's, nor take one of theirs).
      */
     static Map run(Map args) {
         String kind = (String) args.kind
+        boolean shareAnswers = args.shareAnswers != false
         String tenantId = (String) args.tenantId
         Closure fetchQuestion = (Closure) args.fetchQuestion
         Closure labelFor = (Closure) (args.labelFor ?: { String c -> c })
@@ -62,7 +65,7 @@ class BrainConclude {
             List<Ask> asks = (List<Ask>) round.collectMany { (List) it.asks }
             Map<Object, Cause> best = [:]
             round.each { best.putAll((Map) it.bestCauses) }
-            Map plan = BrainAskPlanner.plan(asks, best, tenantId, ranks, fromFacts)
+            Map plan = BrainAskPlanner.plan(asks, best, tenantId, ranks, fromFacts, shareAnswers)
             reused += (plan.reused ?: 0) as int
             answeredFromFacts += (plan.fromFacts ?: 0) as int
             ((Map<String, Map<String, Integer>>) (plan.byQuestion ?: [:])).each { String q, Map<String, Integer> c ->
@@ -89,7 +92,7 @@ class BrainConclude {
                         Map found = (Map) (fetchQuestion.call(question, ids) ?: [:])
                         ids.each { String id ->
                             Map answer = (Map) found.get(id)
-                            BrainAnswerStore.put(tenantId, question, id, answer)
+                            if (shareAnswers) BrainAnswerStore.put(tenantId, question, id, answer)
                             answers.get(question).put(id, answer)
                             gained.add("${question}|${id}".toString())
                         }

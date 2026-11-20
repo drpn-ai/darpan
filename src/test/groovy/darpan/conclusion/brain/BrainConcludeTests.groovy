@@ -126,6 +126,56 @@ class BrainConcludeTests {
         assertEquals(CODE, ((Map) out.byKey.M248496).code)
     }
 
+    /**
+     * DAR-BE-318, ruling P2-27. A replay's brain (shareAnswers false) never reads the store: an answer a live run cached is not
+     * used, the question is asked of the replay's own fetchQuestion. And it never writes: the store is exactly as before,
+     * whether the replay's answer was found or not.
+     */
+    @Test
+    void aReplaysBrainNeitherReadsNorWritesTheSharedAnswers() {
+        // A frozen clock: the store's freshness can never be why an answer is or is not there (a loaded test machine).
+        long now = System.currentTimeMillis()
+        BrainAnswerStore.clock = { now }
+        try {
+            replaysBrainNeitherReadsNorWrites()
+        } finally {
+            BrainAnswerStore.clock = { System.currentTimeMillis() }
+        }
+    }
+
+    private void replaysBrainNeitherReadsNorWrites() {
+        Map cached = [orderId: "M1088731", grandTotal: 371.54, paymentPreferenceSlotsFull: false, paymentPreferences: []]
+        BrainAnswerStore.put("GORJANA", "orderPayments", "M1088731", cached)
+        List asked = []
+        Map out = BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", findings: [r1()], shareAnswers: false,
+                fetchQuestion: { String q, List ids -> asked << [q, ids]; PAYMENTS }, labelFor: { String c -> c }])
+        assertEquals([["orderPayments", ["M1088731"]]], asked, "the live run's cached answer is not read")
+        assertEquals(0, out.reused)
+        assertEquals(CODE, ((Map) out.byKey[KEY]).code, "concluded from the replay's own answer")
+        assertTrue(BrainAnswerStore.get("GORJANA", "orderPayments", "M1088731").is(cached), "the store keeps the live answer")
+
+        BrainAnswerStore.clear()
+        BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", findings: [r1()], shareAnswers: false,
+                fetchQuestion: { String q, List ids -> [:] }, labelFor: { String c -> c }])
+        assertFalse(BrainAnswerStore.has("GORJANA", "orderPayments", "M1088731"), "nothing found is not stored either")
+        BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", findings: [r1()], shareAnswers: false,
+                fetchQuestion: { String q, List ids -> PAYMENTS }, labelFor: { String c -> c }])
+        assertFalse(BrainAnswerStore.has("GORJANA", "orderPayments", "M1088731"), "a found answer is not stored")
+    }
+
+    /** The control: a live-style pass (no switch) reads a cached answer and stores what it asks. */
+    @Test
+    void aLiveBrainStillReadsAndWritesTheSharedAnswers() {
+        BrainAnswerStore.put("GORJANA", "orderPayments", "M1088731", PAYMENTS.M1088731)
+        int calls = 0
+        Map out = run("orderLine", r1(), { String q, List ids -> calls++; PAYMENTS })
+        assertEquals(0, calls, "the cached answer is read")
+        assertEquals(1, out.reused)
+        BrainAnswerStore.clear()
+        run("orderLine", r1(), { String q, List ids -> PAYMENTS })
+        assertTrue(BrainAnswerStore.has("GORJANA", "orderPayments", "M1088731"), "what it asks is stored")
+    }
+
     /** Security review 2026-10-28: a question's ids go out in bounded batches, and one failed batch fails alone. */
     @Test
     void aQuestionIsAskedInBoundedBatchesAndAFailedBatchFailsAlone() {

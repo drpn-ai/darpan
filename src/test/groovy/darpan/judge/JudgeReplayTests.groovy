@@ -345,7 +345,9 @@ class JudgeReplayTests {
             Map bare = replay(checkA, RUN_FOLDER_A2, true)
             assertEquals([], bare.errors)
             assertEquals(0, connectorCalls, "not captured: still no connector")
-            assertEquals(["Lookup orderInfo not captured in run ${RUN_FOLDER_A2}; not replayed".toString()], bare.out.replayWarnings)
+            assertEquals(["Lookup orderInfo not captured in run ${RUN_FOLDER_A2}; not replayed".toString(),
+                          "Ask orderInfo not captured in the replayed run; not replayed"], bare.out.replayWarnings,
+                    "the conclude pass's lookup and the judge's ask, once each")
             assertTrue(bare.out.judgeWarnings.contains("Ask orderInfo not captured in the replayed run; not replayed"), "${bare.out.judgeWarnings}")
             assertEquals("UNEXPLAINED", bare.out.judgedFindings.find { it.recordKey == "SR-1007" }.causeOutcomeId, "no ask field")
             File bareDir = replayDir(bare.out.replayFolder as String)
@@ -357,6 +359,33 @@ class JudgeReplayTests {
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(SourceSystemConnectorSupport)
         }
+    }
+
+    /** Review N-M4 / N-M3: an unanswered brain question (a default-lookup one has no lookup in a replay) and ask warnings are named. */
+    @Test
+    void replayWarningsNameUnansweredBrainQuestionsAndAsks() {
+        List<String> out = JudgeReplaySupport.replayWarnings(["Lookup orderInfo not captured in run R; not replayed"] as Set,
+                [warnings: ["Question orderPayments not answered for 3 subject(s): the scope has no lookup to ask orderPayments of"]],
+                ["Ask orderInfo not captured in the replayed run; not replayed", "2 DUPLICATE_IN_FILE_2 rows are not pairs and were not judged",
+                 "Ask orderInfo not captured in the replayed run; not replayed"])
+        assertEquals(["Lookup orderInfo not captured in run R; not replayed",
+                      "Brain: Question orderPayments not answered for 3 subject(s): the scope has no lookup to ask orderPayments of",
+                      "Ask orderInfo not captured in the replayed run; not replayed"], out)
+    }
+
+    @Test
+    void anUnreadableCaptureIsAWarningNotAFailure() {
+        File dir = new File(dataManagerRoot, "identity/bad-capture")
+        dir.deleteDir()
+        dir.mkdirs()
+        new File(dir, "lookup-orderInfo-1.json").text = '{"records":[{"name":'
+        Set<String> notCaptured = new TreeSet<>()
+        List<String> warnings = []
+        Map found = (Map) JudgeReplaySupport.capturedFetcher(dir, "run R", "Ask", notCaptured)
+                .call(ec, [name: "orderInfo", keyField: "name"], ["#T1"], A, warnings)
+        assertEquals([:], found)
+        assertTrue(warnings.size() == 1 && warnings[0].startsWith("Ask orderInfo not read from its capture lookup-orderInfo-1.json"), "${warnings}")
+        assertEquals(warnings as Set, notCaptured)
     }
 
     // --------------------------------------------------------------------------------------- pairs (review I1, I2)

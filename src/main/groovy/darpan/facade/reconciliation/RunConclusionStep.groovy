@@ -68,7 +68,8 @@ class RunConclusionStep {
             // calls a system. Every other caller passes none and gets today's live fetchLookup.
             Closure lookupFetcher = (Closure) args.get("lookupFetcher") ?: RunConclusionStep.&fetchLookup
             String kind = brainKind(scope?.conclusionBrain)
-            Map brain = kind ? [kind: kind, tenantId: tenantId,
+            // Ruling P2-27: with its own fetcher (a replay) the brain neither reads nor writes the answers live runs share.
+            Map brain = kind ? [kind: kind, tenantId: tenantId, shareAnswers: sharesBrainAnswers(args),
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
                     fetchQuestion: { String question, List<String> ids ->
                         Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
@@ -106,6 +107,15 @@ class RunConclusionStep {
                     [errorMessage: "Conclusions not drawn: ${normalize(t.message) ?: t.class.simpleName}".toString()])
             return [ran: false, warning: t.message]
         }
+    }
+
+    /**
+     * DAR-BE-318, ruling P2-27: whether this pass's brain reads and writes BrainAnswerStore, the answers every check in the JVM
+     * shares. A caller that hands its own lookupFetcher (a replay, answering from captured lookups only) must neither take a
+     * live run's answers nor leave its own for one; every other caller shares, as before.
+     */
+    static boolean sharesBrainAnswers(Map args) {
+        return args?.get("lookupFetcher") == null
     }
 
     /** The conclude step's metadata: counts, unread sides, lookup warnings and the brain's counts with its per-question ledger (DAR-BE-228). */

@@ -224,6 +224,36 @@ class PeakScheduleScanTests {
     }
 
     @Test
+    void movedEarlierNeverStartsBeforeItsReadWindowCloses() {
+        // windowTimeZone London, tenant Los Angeles: the 02:15 London fire of Nov 28 is 18:15 LA on Nov 27 and reads
+        // Nov 27 London, which closes at 16:00 LA. A move to 06:00 LA on Nov 27 must wait for 16:00, or the run reads ten
+        // hours of orders still to come and never checks them.
+        PeakWindow w = new PeakWindow("P1", "Black Friday", LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), null, null,
+                [new RunTimeMove(["100518"] as Set, LocalDate.of(2026, 11, 27), LocalTime.of(6, 0))])
+        FakeEc ec = ec([w])
+        Timestamp fire = london(11, 28, 2, 15)
+        FakeRow automation = addAutomation(ec, "100518", "0 15 2 * * ?", fire, london(11, 27, 2, 15))
+        automation.windowTimeZone = "Europe/London"
+        Timestamp windowEnd = london(11, 28, 0, 0)
+        assertEquals(la(11, 27, 16, 0), windowEnd)
+
+        scan(ec, la(11, 27, 6, 1))
+
+        assertTrue(executed(ec).isEmpty(), "06:00 LA is before the London read window closes")
+        assertEquals(windowEnd.toInstant(), AutomationExecutionSupport.peakStart(ec, AutomationExecutionSupport.newPeakTick(la(11, 27, 6, 1)),
+                fire.toInstant(), "100518", TENANT, true, automation.lastScheduledFireTime as Timestamp, automation))
+
+        scan(ec, la(11, 27, 16, 1))
+
+        assertEquals(1, executed(ec).size())
+        assertEquals(fire, executed(ec)[0].scheduledFireTime, "it still reads the fire's own window")
+    }
+
+    private static Timestamp london(int month, int day, int hour, int minute) {
+        Timestamp.from(ZonedDateTime.of(2026, month, day, hour, minute, 0, 0, ZoneId.of("Europe/London")).toInstant())
+    }
+
+    @Test
     void resolveDueScheduledFireTimeStillAnswersOnlyFiresNotAfterNow() {
         Map automation = [scheduleExpr: "0 15 2 * * ?", windowTimeZone: "America/Los_Angeles",
                           nextScheduledFireTime: la(11, 28, 2, 15)]

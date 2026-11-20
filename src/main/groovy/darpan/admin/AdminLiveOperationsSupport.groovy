@@ -48,7 +48,7 @@ class AdminLiveOperationsSupport {
         }
         List<Map<String, Object>> failures = guarded("failures", unavailable, []) { recentFailures(ec, now, naming) }
         List<Map<String, Object>> overdue = guarded("automations", unavailable, []) {
-            overdueAutomations(automations, runningExecutions, tenantLabels, now)
+            overdueAutomations(ec, automations, runningExecutions, tenantLabels, now)
         }
         List<Map<String, Object>> retrying = pendingExecutions.findAll { ((it.retryCount ?: 0) as Integer) > 0 }.collect {
             it + [name: automations[it.automationId]?.automationName ?: it.automationId,
@@ -175,25 +175,31 @@ class AdminLiveOperationsSupport {
     }
 
     /**
-     * Active automations whose fire time has passed by more than a tick. The concurrency cap defers
+     * Active automations whose start has passed by more than a tick. The concurrency cap defers
      * them WITHOUT writing a PENDING row, so this lateness is the only queue the scheduler has.
      * An automation still running its previous fire is excluded: it is late, but not for want of a slot.
+     * DAR-BE-328: the start is the scheduler's own peak-aware one (a peak-period move or hold), so a run waiting
+     * for peak hours to end is not late; dueAt is that start.
      */
-    private static List<Map<String, Object>> overdueAutomations(Map<String, Map> automations, List<Map> runningExecutions,
+    private static List<Map<String, Object>> overdueAutomations(def ec, Map<String, Map> automations, List<Map> runningExecutions,
                                                                 Map<String, String> tenantLabels, Timestamp now) {
         Set<String> busy = runningExecutions*.automationId.toSet()
+        Map<String, Object> peakTick = AutomationExecutionSupport.newPeakTick(now)
         return automations.values().findAll { Map automation ->
-            Timestamp due = automation.nextScheduledFireTime as Timestamp
-            automation.isActive != "N" && due != null && now.time - due.time > OVERDUE_LIST_MS && !busy.contains(automation.automationId)
+            Timestamp fire = automation.nextScheduledFireTime as Timestamp
+            automation.isActive != "N" && fire != null && now.time - fire.time > OVERDUE_LIST_MS && !busy.contains(automation.automationId)
         }.collect { Map automation ->
-            Timestamp due = automation.nextScheduledFireTime as Timestamp
+            Timestamp fire = automation.nextScheduledFireTime as Timestamp
+            Timestamp due = Timestamp.from(AutomationExecutionSupport.peakStart(ec, peakTick, fire.toInstant(),
+                    automation.automationId as String, automation.companyUserGroupId as String, true,
+                    automation.lastScheduledFireTime as Timestamp, automation))
             [automationId     : automation.automationId,
              name             : automation.automationName,
              tenantUserGroupId: automation.companyUserGroupId,
              tenantLabel      : tenantLabels[automation.companyUserGroupId] ?: automation.companyUserGroupId,
              dueAt            : due,
              lateMs           : now.time - due.time]
-        }.sort { -(it.lateMs as Long) }
+        }.findAll { (it.lateMs as Long) > OVERDUE_LIST_MS }.sort { -(it.lateMs as Long) }
     }
 
     private static List<Map> executionsWithStatus(def ec, String statusEnumId) {
@@ -218,7 +224,10 @@ class AdminLiveOperationsSupport {
                     companyUserGroupId   : readField(row, "companyUserGroupId"),
                     savedRunId           : readField(row, "savedRunId"),
                     isActive             : readField(row, "isActive"),
-                    nextScheduledFireTime: readField(row, "nextScheduledFireTime")]]
+                    nextScheduledFireTime: readField(row, "nextScheduledFireTime"),
+                    // DAR-BE-328: what the peak-aware start needs (the move-once-a-date rule, the read-window bound).
+                    lastScheduledFireTime: readField(row, "lastScheduledFireTime"),
+                    windowTimeZone       : readField(row, "windowTimeZone")]]
         }
     }
 

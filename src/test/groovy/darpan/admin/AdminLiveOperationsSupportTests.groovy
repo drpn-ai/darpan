@@ -1,11 +1,16 @@
 package darpan.admin
 
+import darpan.peak.PeakWindow
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNull
@@ -134,6 +139,36 @@ class AdminLiveOperationsSupportTests {
         assertEquals(minutesAgo(30), byId.RR_F1.recoveredAt, "a later success recovers it")
         assertNull(byId.RR_F2.recoveredAt, "a success BEFORE the failure does not")
         assertEquals(["Month close automation failed"], live.warnings.findAll { it.code == "RUN_FAILED" }*.title)
+    }
+
+    @AfterEach
+    void resetPeakSeams() {
+        AutomationExecutionSupport.peakWindowsLoader = null
+        AutomationExecutionSupport.tenantZoneLoader = null
+    }
+
+    @Test
+    void aRunHeldForPeakHoursIsNotOverdueButAGenuinelyLateOneStillIs() {
+        // DAR-BE-328: RAILS is inside its peak hours (09:00-12:00 UTC) at NOW (10:00): its 09:20 fire waits for 12:00.
+        AutomationExecutionSupport.peakWindowsLoader = { def e, String tenantId, LocalDate d ->
+            tenantId == "RAILS" ? [new PeakWindow("P1", "Sale", LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 31),
+                    LocalTime.of(9, 0), LocalTime.of(12, 0), [])] : []
+        }
+        AutomationExecutionSupport.tenantZoneLoader = { def e, String tenantId -> ZoneId.of("UTC") }
+        Map finders = baseFinders()
+        finders["darpan.reconciliation.ReconciliationAutomation"] = new FinderStub(listResult: [
+                [automationId: "AUT_A", automationName: "Month close", companyUserGroupId: "GORJANA", savedRunId: "RS_A",
+                 isActive: "Y", nextScheduledFireTime: minutesAgo(40)],
+                [automationId: "AUT_H", automationName: "Held", companyUserGroupId: "RAILS", savedRunId: "RS_H",
+                 isActive: "Y", nextScheduledFireTime: minutesAgo(40), windowTimeZone: "UTC"],
+        ])
+        def ec = superAdminEc(finders)
+
+        Map live = board(ec)
+
+        assertEquals(["AUT_A"], live.overdue*.automationId, "the held run starts at 12:00; it is not late")
+        assertEquals(40 * 60_000L, live.overdue[0].lateMs)
+        assertEquals(["critical"], live.warnings.findAll { it.code == "AUTOMATIONS_OVERDUE" }*.severity)
     }
 
     @Test

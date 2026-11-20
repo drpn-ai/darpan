@@ -1053,7 +1053,7 @@ class AutomationExecutionSupport {
                     def automation = entry.automation
                     Instant start = peakStart(ec, peakTick, fire.toInstant(), normalize(readField(automation, "automationId")),
                             normalize(readField(automation, "companyUserGroupId")), true,
-                            toTimestamp(readField(automation, "lastScheduledFireTime")))
+                            toTimestamp(readField(automation, "lastScheduledFireTime")), automation)
                     if (!start.isAfter(now.toInstant())) return true
                     if (!fire.after(now)) {
                         peakHeldResults << [automationId: normalize(readField(automation, "automationId")),
@@ -1180,9 +1180,13 @@ class AutomationExecutionSupport {
      * that date has run yet, so a move cannot start every later fire of the same day too), then peak hours: a start inside
      * them waits until they end, and so does one that would happen now while now is inside them. With no peak periods,
      * or if reading them fails, the fire itself: a peak-period bug never stops scheduling.
+     * A run moved earlier never starts before its fire's date has begun in the automation's windowTimeZone, when its
+     * read window has closed (see readWindowEnd), or it would read orders still to come; with an automation in another
+     * zone than the tenant that can be hours after the move. Callers that apply moves pass the automation; without it
+     * no bound is applied.
      */
     static Instant peakStart(def ec, Map<String, Object> tick, Instant fire, String automationId, String tenantId,
-                                       boolean applyMoves, Timestamp lastFire = null) {
+                                       boolean applyMoves, Timestamp lastFire = null, def automation = null) {
         List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
         if (!windows) return fire
         try {
@@ -1191,6 +1195,10 @@ class AutomationExecutionSupport {
             boolean moves = applyMoves && (lastFire == null ||
                     lastFire.toInstant().atZone(zone).toLocalDate() != fire.atZone(zone).toLocalDate())
             Instant start = PeakPeriodSupport.effectiveStart(fire, automationId, windows, zone, moves)
+            if (moves && automation != null && start.isBefore(fire)) {
+                Instant windowEnd = readWindowEnd(automation, fire)
+                if (start.isBefore(windowEnd)) start = PeakPeriodSupport.effectiveStart(windowEnd, automationId, windows, zone, false)
+            }
             if (start.isAfter(now)) return start
             Instant fromNow = PeakPeriodSupport.effectiveStart(now, automationId, windows, zone, false)
             return fromNow.isAfter(now) ? fromNow : start
@@ -1199,6 +1207,18 @@ class AutomationExecutionSupport {
                     tenantId, automationId, peakError)
             return fire
         }
+    }
+
+    /**
+     * DAR-BE-328: the earliest a moved-earlier run of this fire may start: the start of the fire's own date in the
+     * automation's windowTimeZone, never after the fire. Every relative read window (last days, previous day, week or
+     * month) has closed by then. resolveWindows is not used: an audit's check reads the audit's window (a service call per
+     * automation per tick), which runs to the end of the report day, so it would forbid every earlier move of an audit.
+     */
+    private static Instant readWindowEnd(def automation, Instant fire) {
+        ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
+        Instant dayStart = fire.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()
+        return dayStart.isAfter(fire) ? fire : dayStart
     }
 
     /**
@@ -1220,7 +1240,7 @@ class AutomationExecutionSupport {
             Map<String, Object> result = [:]
             if (fire != null) {
                 Instant start = peakStart(ec, tick, fire.toInstant(), normalize(readField(automation, "automationId")), tenantId,
-                        true, toTimestamp(readField(automation, "lastScheduledFireTime")))
+                        true, toTimestamp(readField(automation, "lastScheduledFireTime")), automation)
                 result.effectiveNextStart = Timestamp.from(start)
                 if (start != fire.toInstant()) {
                     PeakWindow period = PeakPeriodSupport.activeOn(windows, fire.toInstant().atZone(zone).toLocalDate()) ?:

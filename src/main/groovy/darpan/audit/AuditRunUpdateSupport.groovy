@@ -304,7 +304,7 @@ class AuditRunUpdateSupport {
         Timestamp fire = AutomationExecutionSupport.resolveCandidateFireTime(automation, now)
         if (fire == null) return false
         Instant start = AutomationExecutionSupport.peakStart(ec, peakTick, fire.toInstant(), automation.automationId as String,
-                automation.companyUserGroupId as String, true, automation.lastScheduledFireTime as Timestamp)
+                automation.companyUserGroupId as String, true, automation.lastScheduledFireTime as Timestamp, automation)
         if (start.isAfter(now.toInstant())) return !fire.after(now)
         return now.time - start.toEpochMilli() < STILL_DUE_MS
     }

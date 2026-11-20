@@ -506,6 +506,8 @@ class ReconciliationOutputSupport {
      *   <li>never a generated result file ({@link OutputPathSupport#isGeneratedResultFile}, the files the 15-day
      *   purge#GeneratedOutputFiles owns), even though a saved run writes its result into the same folder.</li>
      * </ul>
+     * The scan also descends one level into {@code file1-api}, {@code file2-api} (interactive extracts and copy slices)
+     * and {@code lookups} (lookup captures), with the same age rule and the same result-file exclusion.
      * A folder left empty is removed. Database rows (RunResult, AutomationExecution, findings) are untouched; their
      * stored extract paths simply stop resolving, which the download descriptor and replay already report in words.
      */
@@ -550,8 +552,8 @@ class ReconciliationOutputSupport {
                 statusMessage: statusMessage]
     }
 
-    /** The interactive extract folders inside an extract folder (DAR-BE-318). */
-    static final java.util.regex.Pattern API_EXTRACT_FOLDER = ~/^file[12]-api$/
+    /** The folders inside an extract folder that are purged like extracts (DAR-BE-318): interactive extracts and copy slices (file1-api, file2-api) and lookup captures (lookups). */
+    static final java.util.regex.Pattern API_EXTRACT_FOLDER = ~/^(file[12]-api|lookups)$/
 
     /** ExtractReplaySupport's extract folders: a run timestamp, then optionally -FILE_1/-FILE_2, then optionally -recheck. */
     static final java.util.regex.Pattern EXTRACT_FOLDER = ~/^\d{8}-\d{9}(-FILE_[12])?(-recheck)?$/

@@ -154,7 +154,7 @@ class ExtractRetentionPurgeTests {
     }
 
     @Test
-    void resultAndDiffFilesAreNeverPurged() {
+    void resultFilesAndOtherFoldersAreNeverPurged() {
         long old = System.currentTimeMillis() - 10L * 86400000L
         File resultInApi = extractFile("RS_PURGE_T7/20261101-101010101/file1-api/RS_PURGE_T7_result.json", old)
         File resultInFolder = extractFile("RS_PURGE_T7/20261101-101010101/RS_PURGE_T7_result.json", old)
@@ -171,6 +171,32 @@ class ExtractRetentionPurgeTests {
         for (File f : [resultInApi, resultInFolder, otherApiFolder, lookalike, notExtractFolder, deeper]) {
             assertTrue(f.exists(), "must be kept: " + f.path)
         }
+    }
+
+    @Test
+    void anOldLookupCaptureIsPurged() {
+        long old = System.currentTimeMillis() - 10L * 86400000L
+        File cap = extractFile("RS_PURGE_T8/20261101-101010101/lookups/lookup-orders-1761990000000.json", old)
+        File result = extractFile("RS_PURGE_T8/20261101-101010101/lookups/RS_PURGE_T8_result.json", old)
+
+        ec.service.sync().name("reconciliation.ReconciliationGenericServices.purge#ExtractFiles")
+                .parameters([retentionDays: 7]).disableAuthz().call()
+
+        assertFalse(cap.exists())
+        assertTrue(result.exists(), "result files are never purged")
+    }
+
+    @Test
+    void aYoungLookupCaptureIsKept() {
+        File cap = extractFile("RS_PURGE_T9/20261118-101010101/lookups/lookup-orders-1763460000000.json", System.currentTimeMillis() - 2L * 86400000L)
+        File old = extractFile("RS_PURGE_T10/20261101-101010101/lookups/lookup-a-1.json", System.currentTimeMillis() - 10L * 86400000L)
+
+        ec.service.sync().name("reconciliation.ReconciliationGenericServices.purge#ExtractFiles")
+                .parameters([retentionDays: 7]).disableAuthz().call()
+
+        assertTrue(cap.exists())
+        assertFalse(old.exists())
+        assertFalse(new File(runsDir, "RS_PURGE_T10/20261101-101010101").exists(), "an emptied lookups folder is removed")
     }
 
     private File extractFile(String relative, long lastModified) {

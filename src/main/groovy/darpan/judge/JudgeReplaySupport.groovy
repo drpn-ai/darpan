@@ -245,14 +245,6 @@ class JudgeReplaySupport {
         }.sort { File f -> new BigInteger(CAPTURED_LOOKUP.matcher(f.name).with { it.matches(); it.group(2) }) }
     }
 
-    static File capturedLookupFile(File lookupsDir, String name) {
-        if (lookupsDir == null || !name || !lookupsDir.isDirectory()) return null
-        return (lookupsDir.listFiles() ?: []).findAll { File f ->
-            def m = CAPTURED_LOOKUP.matcher(f.name)
-            f.isFile() && m.matches() && m.group(1) == name
-        }.max { File f -> new BigInteger(CAPTURED_LOOKUP.matcher(f.name).with { it.matches(); it.group(2) }) }
-    }
-
     private static Map<String, Map<String, Map>> copyOf(Map<String, Map<String, Map>> readBack) {
         return readBack.collectEntries { String side, Map<String, Map> records -> [(side): new LinkedHashMap(records)] }
                 as Map<String, Map<String, Map>>

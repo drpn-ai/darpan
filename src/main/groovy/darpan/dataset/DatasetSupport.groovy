@@ -28,23 +28,12 @@ class DatasetSupport {
         return value
     }
 
-    /** &lt;root&gt;/datasets/&lt;safe tenant&gt;/&lt;safe datasetId&gt;/, with the same safe-token rule as the run folders. */
+    /**
+     * &lt;root&gt;/datasets/&lt;safe tenant&gt;/&lt;safe datasetId&gt;/, with the same safe-token rule as the run folders. Main code
+     * passes the data manager root through DatasetRefreshSupport.datasetDir(ec, ...), which honours overrides (ruling P3a-7).
+     */
     static File datasetDir(File root, String tenantId, String datasetId) {
         return new File(new File(new File(root, "datasets"), DataManagerSupport.safeToken(tenantId, "tenant")),
                 DataManagerSupport.safeToken(datasetId, "dataset"))
-    }
-
-    /** The configured data manager root (darpan.data.manager.location, default runtime://datamanager). */
-    static File datasetDir(String tenantId, String datasetId) {
-        return datasetDir(dataManagerRoot(), tenantId, datasetId)
-    }
-
-    static File dataManagerRoot() {
-        String location = DataManagerSupport.resolveDataManagerLocation(null)
-        if (location.startsWith("runtime://")) {
-            String runtime = System.getProperty("moqui.runtime") ?: System.getProperty("moqui_runtime") ?: "runtime"
-            return new File(runtime, location.substring("runtime://".length()))
-        }
-        return new File(location.startsWith("file://") ? location.substring("file://".length()) : location)
     }
 }

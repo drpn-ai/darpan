@@ -66,11 +66,21 @@ class RunConclusionStep {
             String tenantId = normalize(scope?.companyUserGroupId)
             // DAR-BE-318 (ruling P2-24): a replay hands its own fetcher, which answers only from captured lookups and never
             // calls a system. Every other caller passes none and gets today's live fetchLookup.
-            Closure lookupFetcher = (Closure) args.get("lookupFetcher") ?: RunConclusionStep.&fetchLookup
+            // DAR-BE-318 plan 3a: a live pass keeps what it asked in <run>/lookups; a replay (its own fetcher) writes nothing.
+            File lookupsDir = capturesDirFor(args)
+            Closure lookupFetcher = (Closure) args.get("lookupFetcher") ?: { def e, Map l, List<String> i, String t, List<String> w ->
+                fetchLookup(e, l, i, t, w, lookupsDir)
+            }
             String kind = brainKind(scope?.conclusionBrain)
             // Ruling P2-27: with its own fetcher (a replay) the brain neither reads nor writes the answers live runs share.
             Map brain = kind ? [kind: kind, tenantId: tenantId, shareAnswers: sharesBrainAnswers(args),
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
+                    // Answers the shared store serves are never fetched, so they are kept here (live passes only; a replay shares nothing).
+                    captureServed: lookupsDir == null ? null : { String question, Map<String, Map> served ->
+                        Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
+                                RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
+                        if (lookup != null) captureServed(lookupsDir, lookup, served, lookupWarnings)
+                    },
                     fetchQuestion: { String question, List<String> ids ->
                         Map lookup = questionLookup(question, lookups, hotwaxSourceConfigId(args.get("file1Source"),
                                 RunVerificationSupport.resolveConnector(ec, args.get("file1Source"))))
@@ -78,7 +88,9 @@ class RunConclusionStep {
                         int before = lookupWarnings.size()
                         Map found = (Map) lookupFetcher.call(ec, lookup, ids, tenantId, lookupWarnings)
                         // A failed lookup must not be remembered as "nothing found".
-                        if (lookupWarnings.size() > before) throw new IllegalStateException(lookupWarnings.last())
+                        // A capture that could not be written is a note, not a failed answer.
+                        List<String> failures = lookupWarnings.subList(before, lookupWarnings.size()).findAll { !it.contains(NOT_CAPTURED) }
+                        if (failures) throw new IllegalStateException(failures.last())
                         return found
                     }] : null
             Map result = RunConclusionSupport.concludeRun([
@@ -106,6 +118,55 @@ class RunConclusionStep {
             RunObservability.endStep(ec, step, RunObservability.STATUS_FAILED,
                     [errorMessage: "Conclusions not drawn: ${normalize(t.message) ?: t.class.simpleName}".toString()])
             return [ran: false, warning: t.message]
+        }
+    }
+
+    /** Marks a warning that only says a capture was not kept; the answer it belongs to stands. */
+    static final String NOT_CAPTURED = " not captured: "
+    static final String LOOKUPS_FOLDER = "lookups"
+    static final java.util.regex.Pattern CAPTURABLE_NAME = ~/[A-Za-z0-9_]+/
+
+    /**
+     * DAR-BE-318 plan 3a: where this pass keeps the lookups it asks, <run>/lookups (args.lookupsDir overrides). Null for a
+     * replay (ruling P2-27: a call that hands its own lookupFetcher writes no captures).
+     */
+    static File capturesDirFor(Map args) {
+        if (args?.get("lookupFetcher") != null) return null
+        File given = (File) args?.get("lookupsDir")
+        if (given != null) return given
+        File runDir = ((File) args?.get("diffFile"))?.parentFile
+        return runDir == null ? null : new File(runDir, LOOKUPS_FOLDER)
+    }
+
+    /**
+     * Keeps answers the brain store served as <lookupsDir>/lookup-<name>-<millis>.json ({metadata, records}), the file
+     * JudgeReplaySupport.capturedFetcher reads. Nothing found for an id adds no record. A write that fails, or a name the
+     * capture pattern cannot hold, is a warning and no file, never a failure.
+     */
+    static void captureServed(File lookupsDir, Map lookup, Map<String, Map> served, List<String> warnings) {
+        String name = lookup?.name as String
+        if (!(name ==~ CAPTURABLE_NAME)) {
+            warnings.add("Lookup ${name}${NOT_CAPTURED}its name is outside [A-Za-z0-9_]+".toString())
+            return
+        }
+        List records = []
+        (served ?: [:]).values().each { Object answer ->
+            if (answer instanceof List) records.addAll((List) answer.findAll { it != null })
+            else if (answer != null) records.add(answer)
+        }
+        if (!records) return
+        try {
+            lookupsDir.mkdirs()
+            long millis = System.currentTimeMillis()
+            File target = new File(lookupsDir, "lookup-${name}-${millis}.json")
+            // Never the same name twice: the replay reads the newest by its number, and an older file must not be overwritten.
+            while (target.exists()) target = new File(lookupsDir, "lookup-${name}-${++millis}.json")
+            File partial = new File(lookupsDir, "${target.name}.partial")
+            partial.setText(JsonOutput.toJson([metadata: [lookup: name, systemEnumId: lookup.systemEnumId, servedFromStore: true,
+                                                          recordCount: records.size()], records: records]), "UTF-8")
+            java.nio.file.Files.move(partial.toPath(), target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        } catch (Throwable t) {
+            warnings.add("Lookup ${name}${NOT_CAPTURED}${normalize(t.message) ?: t.class.simpleName}".toString())
         }
     }
 
@@ -153,8 +214,14 @@ class RunConclusionStep {
      * does not declare lookupKeys is never called (it would read a whole window). A failed lookup is a warning and
      * attaches nothing, so those findings keep the conclusion they reach without it.
      */
-    static Map<String, Map> fetchLookup(def ec, Map lookup, List<String> ids, String tenantId, List<String> warnings) {
+    static Map<String, Map> fetchLookup(def ec, Map lookup, List<String> ids, String tenantId, List<String> warnings, File lookupsDir = null) {
         try {
+            // DAR-BE-318 plan 3a: with a folder, the extract writes its answer there (lookup-<name>-<millis>.json), so a replay can read it.
+            boolean capture = lookupsDir != null
+            if (capture && !((lookup.name as String) ==~ CAPTURABLE_NAME)) {
+                warnings.add("Lookup ${lookup.name}${NOT_CAPTURED}its name is outside [A-Za-z0-9_]+".toString())
+                capture = false
+            }
             Map connector = SourceSystemConnectorSupport.resolveBySystemEnumId(ec, (String) lookup.systemEnumId)
             String service = normalize(connector?.extractServiceName)
             String configParameter = normalize(connector?.configParameterName)
@@ -169,7 +236,8 @@ class RunConclusionStep {
                           (normalize(connector.dateToParameterName) ?: "windowEnd")  : ec.user.nowTimestamp]
             // DAR-BE-205: conclusionLookup tells an extract that declares it (HotWax orders) to answer for every id named,
             // with none of a comparison's built-in exclusions; an audit re-check by key never sends it.
-            Map out = ec.service.sync().name(service).parameters(options + window + [(configParameter): lookup.sourceConfigId,
+            if (capture) lookupsDir.mkdirs()
+            Map out = ec.service.sync().name(service).parameters(options + window + (capture ? [outputLocation: lookupsDir.absolutePath] : [:]) + [(configParameter): lookup.sourceConfigId,
                     lookupKeys: ids, lookupKeyField: lookup.keyField, conclusionLookup: true, companyUserGroupId: tenantId, systemEnumId: connector.systemEnumId,
                     fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
             List errors = (List) (out?.errors ?: (ec.message.hasError() ? ec.message.errors : []))

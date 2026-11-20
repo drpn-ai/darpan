@@ -23,6 +23,8 @@ class BrainAskPlanner {
                     Map<String, Map<String, Map>> fromFacts = null, boolean useStore = true) {
         Map<String, LinkedHashSet<String>> toFetch = [:]
         Map<String, Map<String, Map>> answered = [:]
+        // DAR-BE-318 plan 3a: the answers the store served (not facts, not fetched), so a live run can keep them with its run.
+        Map<String, Map<String, Map>> fromStore = [:]
         int dropped = 0
         int reused = 0
         int factAnswers = 0
@@ -53,7 +55,9 @@ class BrainAskPlanner {
                 return
             }
             if (useStore && BrainAnswerStore.has(tenantId, ask.question, id)) {
-                answered.computeIfAbsent(ask.question, { [:] }).put(id, BrainAnswerStore.get(tenantId, ask.question, id))
+                Map served = BrainAnswerStore.get(tenantId, ask.question, id)
+                answered.computeIfAbsent(ask.question, { [:] }).put(id, served)
+                fromStore.computeIfAbsent(ask.question, { [:] }).put(id, served)
                 reused++
                 count(ask.question, "reused")
                 return
@@ -62,7 +66,7 @@ class BrainAskPlanner {
         }
         // Sorted: a session hands its facts back in no fixed order, and a run must ask the same way every time.
         return [toFetch : toFetch.collectEntries { String q, Set ids -> [(q): (ids as List<String>).sort()] },
-                answered: answered, dropped: dropped, reused: reused, fromFacts: factAnswers, byQuestion: byQuestion]
+                answered: answered, fromStore: fromStore, dropped: dropped, reused: reused, fromFacts: factAnswers, byQuestion: byQuestion]
     }
 
     /** An order's id, a product's (DAR-BE-186), a replacement's return's (DAR-BE-192), or a Shopify order's (DAR-BE-204). */

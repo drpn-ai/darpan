@@ -35,6 +35,8 @@ class BrainConclude {
         boolean shareAnswers = args.shareAnswers != false
         String tenantId = (String) args.tenantId
         Closure fetchQuestion = (Closure) args.fetchQuestion
+        // Optional (question, id -> answer): called for answers BrainAnswerStore served, live passes only.
+        Closure captureServed = (Closure) args.captureServed
         Closure labelFor = (Closure) (args.labelFor ?: { String c -> c })
         BrainEngine engine = BrainEngine.forPacks((List<String>) (args.packs ?: PILOT_PACKS))
         List<List<Map>> batches = batches(kind, (List<Map>) (args.findings ?: []))
@@ -72,6 +74,10 @@ class BrainConclude {
                 tally(q, "reused", c.reused ?: 0); tally(q, "dropped", c.dropped ?: 0); tally(q, "answeredFromFacts", c.fromFacts ?: 0)
             }
             dropped += (plan.dropped ?: 0) as int
+            // DAR-BE-318 plan 3a: a live run keeps the answers the store served too, beside the ones it fetched, so a replay has them.
+            if (shareAnswers && captureServed != null) {
+                ((Map<String, Map<String, Map>>) (plan.fromStore ?: [:])).each { String q, Map<String, Map> served -> captureServed.call(q, served) }
+            }
             Set<String> gained = [] as Set
             ((Map<String, Map>) plan.answered).each { String q, Map byId ->
                 Map<String, Map> store = answers.get(q)

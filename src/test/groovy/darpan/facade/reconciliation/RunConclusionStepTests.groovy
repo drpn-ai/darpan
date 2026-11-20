@@ -1,9 +1,16 @@
 package darpan.facade.reconciliation
 
+import darpan.conclusion.brain.BrainAnswerStore
+import darpan.conclusion.brain.BrainConclude
+import darpan.judge.JudgeReplaySupport
+import groovy.json.JsonSlurper
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -166,5 +173,144 @@ class RunConclusionStepTests {
                 RunConclusionStep.hotwaxSourceConfigId(automationSource, connector)).sourceConfigId)
         assertEquals("cfg9", RunConclusionStep.hotwaxSourceConfigId([sourceConfigId: "cfg9"], connector), "a run's own source keeps its column")
         assertNull(RunConclusionStep.hotwaxSourceConfigId([safeMetadataJson: "{}"], connector))
+    }
+
+    // ---- DAR-BE-318 plan 3a, task 1: live lookup and brain answers are kept in <run>/lookups ----
+
+    @TempDir File tmp
+
+    @BeforeEach
+    void clearStore() { BrainAnswerStore.clear() }
+
+    private static final Map LOOKUP = [name: "orderInNetsuite", subject: "FILE_1", idField: "orderId", systemEnumId: "NETSUITE",
+                                       sourceConfigId: "NS1", keyField: "orderId"]
+
+    /** An ec whose connector row, extract service and call are stubs; the extract writes {metadata, records} where outputLocation says. */
+    private Expando stubEc(List<Map> answerRecords, Map seen) {
+        Map row = [systemEnumId: "NETSUITE", extractServiceName: "stub.extract#Orders", configParameterName: "configId"]
+        Expando service = new Expando(
+                getServiceDefinition: { String n -> [inParameterNameList: ["lookupKeys", "outputLocation"]] },
+                sync: {
+                    Map params = [:]
+                    Expando call = new Expando()
+                    call.name = { String n -> call }
+                    call.parameters = { Map p -> params.putAll(p); seen.putAll(p); call }
+                    call.call = {
+                        File dir = params.outputLocation ? new File((String) params.outputLocation) : new File(tmp, "default-extract")
+                        dir.mkdirs()
+                        File f = new File(dir, (String) params.fileName)
+                        f.setText(groovy.json.JsonOutput.toJson([metadata: [recordCount: answerRecords.size()], records: answerRecords]), "UTF-8")
+                        return [fileLocation: f.absolutePath, dataAvailable: true]
+                    }
+                    return call
+                })
+        Expando query = new Expando()
+        query.condition = { String a, Object b -> query }
+        query.useCache = { boolean b -> query }
+        query.one = { row }
+        return new Expando(
+                entity: new Expando(find: { String e -> query }),
+                service: service,
+                user: new Expando(nowTimestamp: new java.sql.Timestamp(1000L)),
+                message: new Expando(hasError: { false }, errors: [], validationErrors: []),
+                logger: new Expando(info: { String m -> }))
+    }
+
+    private static List<File> captures(File runDir) {
+        File dir = new File(runDir, "lookups")
+        return dir.isDirectory() ? (dir.listFiles() as List<File>).findAll { it.isFile() } : []
+    }
+
+    @Test
+    void aLiveLookupLandsInTheRunFolder() {
+        File run = new File(tmp, "run")
+        List<Map> answer = [[orderId: "A1", status: "OPEN"], [orderId: "B2", status: "DONE"]]
+        List<String> warnings = []
+        Map found = RunConclusionStep.fetchLookup(stubEc(answer, [:]), LOOKUP, ["A1", "B2"], "T1", warnings, new File(run, "lookups"))
+        assertEquals([:], warnings.isEmpty() ? [:] : [w: warnings])
+        assertEquals(["A1", "B2"], found.keySet().sort())
+        List<File> files = captures(run)
+        assertEquals(1, files.size())
+        assertTrue(JudgeReplaySupport.CAPTURED_LOOKUP.matcher(files[0].name).matches(), files[0].name)
+        Map doc = new JsonSlurper().parse(files[0]) as Map
+        assertEquals(answer, doc.records)
+        assertNotNull(doc.metadata)
+    }
+
+    @Test
+    void aCaptureReplaysThroughTheCapturedFetcher() {
+        File run = new File(tmp, "run")
+        List<Map> answer = [[orderId: "A1", status: "OPEN"], [orderId: "B2", status: "DONE"]]
+        Map live = RunConclusionStep.fetchLookup(stubEc(answer, [:]), LOOKUP, ["A1", "B2"], "T1", [], new File(run, "lookups"))
+        Set<String> notCaptured = [] as Set
+        Closure replay = JudgeReplaySupport.capturedFetcher(new File(run, "lookups"), "the run", "Lookup", notCaptured)
+        List<String> warnings = []
+        Map replayed = (Map) replay.call(null, LOOKUP, ["A1", "B2"], "T1", warnings)
+        assertEquals(live, replayed)
+        assertEquals(answer, replayed.keySet().sort().collect { replayed[it] })
+        assertTrue(notCaptured.isEmpty() && warnings.isEmpty())
+    }
+
+    @Test
+    void aStoreServedBrainAnswerIsCapturedToo() {
+        File lookupsDir = new File(tmp, "run/lookups")
+        Map payments = [orderId: "M1088731", grandTotal: 371.54, paymentPreferenceSlotsFull: false, paymentPreferences: []]
+        BrainAnswerStore.put("GORJANA", "orderPayments", "M1088731", payments)
+        Map lookup = RunConclusionStep.questionLookup("orderPayments", [], "HW1")
+        List<String> warnings = []
+        List asked = []
+        Map out = BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", labelFor: { String c -> c },
+                findings: [[key: "M1088731\u001F01", bucket: "MISSING_FROM_FILE_2", sides: [
+                        FILE_1: [presence: "KEPT", record: [omsOrderId: "M1088731", orderItemSeqId: "01", orderGrandTotal: 371.54]],
+                        FILE_2: [presence: "ABSENT", firstFieldPresence: "ABSENT"]]]],
+                fetchQuestion: { String q, List ids -> asked << ids; [:] },
+                captureServed: { String q, Map served -> RunConclusionStep.captureServed(lookupsDir, lookup, served, warnings) }])
+        assertEquals(1, out.reused)
+        assertEquals([], asked, "served from the store, never fetched")
+        assertEquals([], warnings)
+        List<File> files = captures(new File(tmp, "run"))
+        assertEquals(1, files.size())
+        assertTrue(JudgeReplaySupport.CAPTURED_LOOKUP.matcher(files[0].name).matches(), files[0].name)
+        assertEquals([payments], (new JsonSlurper().parse(files[0]) as Map).records)
+        // and the replay reads it back by the lookup's key
+        Map replayed = (Map) JudgeReplaySupport.capturedFetcher(lookupsDir, "the run", "Lookup", [] as Set)
+                .call(null, lookup, ["M1088731"], "GORJANA", [])
+        assertEquals(payments, replayed.M1088731)
+    }
+
+    @Test
+    void aReplayWritesNoCapture() {
+        File diff = new File(tmp, "run/diff.json")
+        diff.parentFile.mkdirs()
+        Closure own = { Object[] a -> [:] }
+        assertNull(RunConclusionStep.capturesDirFor([diffFile: diff, lookupFetcher: own]), "a replay has no capture folder")
+        assertEquals(new File(tmp, "run/lookups"), RunConclusionStep.capturesDirFor([diffFile: diff]))
+        assertEquals(new File(tmp, "x"), RunConclusionStep.capturesDirFor([diffFile: diff, lookupsDir: new File(tmp, "x")]))
+        // a replay's brain (shareAnswers false) is never handed the store's answers, so it has nothing to capture
+        BrainAnswerStore.put("GORJANA", "orderPayments", "M1088731", [orderId: "M1088731"])
+        List served = []
+        BrainConclude.run([kind: "orderLine", tenantId: "GORJANA", labelFor: { String c -> c }, shareAnswers: false,
+                findings: [[key: "M1088731\u001F01", bucket: "MISSING_FROM_FILE_2", sides: [
+                        FILE_1: [presence: "KEPT", record: [omsOrderId: "M1088731", orderItemSeqId: "01", orderGrandTotal: 371.54]],
+                        FILE_2: [presence: "ABSENT", firstFieldPresence: "ABSENT"]]]],
+                fetchQuestion: { String q, List ids -> [:] }, captureServed: { String q, Map m -> served << q }])
+        assertEquals([], served)
+        assertFalse(new File(tmp, "run/lookups").exists())
+    }
+
+    @Test
+    void aLookupNameOutsideThePatternIsWarnedNotCaptured() {
+        File run = new File(tmp, "run")
+        Map odd = LOOKUP + [name: "order-info"]
+        List<String> warnings = []
+        Map found = RunConclusionStep.fetchLookup(stubEc([[orderId: "A1"]], [:]), odd, ["A1"], "T1", warnings, new File(run, "lookups"))
+        assertEquals(1, warnings.size())
+        assertTrue(warnings[0].contains("order-info"), warnings[0])
+        assertEquals(["A1"], found.keySet() as List, "the answer itself stands")
+        assertEquals([], captures(run))
+        List<String> w2 = []
+        RunConclusionStep.captureServed(new File(run, "lookups"), odd, [A1: [orderId: "A1"]], w2)
+        assertTrue(w2[0].contains("order-info"))
+        assertEquals([], captures(run))
     }
 }

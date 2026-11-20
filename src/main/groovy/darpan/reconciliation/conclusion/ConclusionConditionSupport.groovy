@@ -70,6 +70,8 @@ class ConclusionConditionSupport {
             case "GT_ZERO": return isPositive(value)
             // DAR-BE-094 R4: more than the condition's one number ("more than $5 unapplied"); a blank or non-number is not.
             case "GT": return isAbove(value, wanted ? wanted[0] : null)
+            // DAR-BE-327 (Aditi 2026-11-20): less than the one number, e.g. a return date (epoch millis) before go-live.
+            case "LT": return isBelow(value, wanted ? wanted[0] : null)
             // Aditi 2026-10-24: a time within the last N hours (a fulfilled item NetSuite bills within 24 hours).
             case "WITHIN_HOURS": return isWithinHours(value, wanted ? wanted[0] : null)
             case "BLANK": return !value
@@ -79,11 +81,20 @@ class ConclusionConditionSupport {
     }
 
     private static boolean isAbove(String value, String floor) {
-        if (!value || !floor) return false
+        return compared(value, floor) > 0
+    }
+
+    private static boolean isBelow(String value, String ceiling) {
+        return compared(value, ceiling) < 0
+    }
+
+    /** value compared with bound as numbers; 0 (neither above nor below) when either is blank or not a number. */
+    private static int compared(String value, String bound) {
+        if (!value || !bound) return 0
         try {
-            return new BigDecimal(value) > new BigDecimal(floor)
+            return new BigDecimal(value) <=> new BigDecimal(bound)
         } catch (NumberFormatException ignored) {
-            return false
+            return 0
         }
     }
 

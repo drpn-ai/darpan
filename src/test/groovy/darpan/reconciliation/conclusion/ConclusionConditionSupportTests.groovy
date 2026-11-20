@@ -52,6 +52,20 @@ class ConclusionConditionSupportTests {
         }
     }
 
+    /** DAR-BE-327, Aditi 2026-11-20: a gorjana return dated before go-live (2024-10-08 00:00 PDT) never reaches NetSuite. */
+    @Test
+    void ltHoldsBelowItsNumberSoADateBeforeGoLiveMatches() {
+        Map c = cond(fieldExpression: "returnDate", operator: "LT", conditionValues: ["1728370800000"])
+        Map before = ConclusionConditionSupport.check(c, [presence: "KEPT", record: [returnDate: 1668844800000L]]) // 2022-11-19
+        assertTrue(before.passed)
+        assertEquals("1668844800000", before.value)
+        [1728370800000L, 1795103893708L, "", null, "n/a"].each { Object v ->
+            assertFalse(ConclusionConditionSupport.check(c, [presence: "KEPT", record: [returnDate: v]]).passed, "${v} is not before go-live")
+        }
+        assertTrue(ConclusionConditionSupport.check(cond(fieldExpression: "unapplied", operator: "LT", conditionValues: ["5"]),
+                [presence: "KEPT", record: [unapplied: "-1.5"]]).passed, "plain numbers too")
+    }
+
     /** Aditi 2026-10-24: "it takes a fulfilled item 24 hrs to be billed... outside that timeline it is an issue". */
     @Test
     void withinHoursHoldsForATimeInsideTheLastHoursOnly() {

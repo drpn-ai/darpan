@@ -110,6 +110,8 @@ class RunConclusionAuthoringSmokeTests {
                 [tree: [ok + [conditions: [[field: "unapplied", operator: "GT", checkLabel: "x"]]]], says: "one number"],
                 [tree: [ok + [conditions: [[field: "unapplied", operator: "GT", values: ["five"], checkLabel: "x"]]]], says: "one number"],
                 [tree: [ok + [conditions: [[field: "unapplied", operator: "GT", values: ["5", "6"], checkLabel: "x"]]]], says: "one number"],
+                [tree: [ok + [conditions: [[field: "returnDate", operator: "LT", checkLabel: "x"]]]], says: "one number"],
+                [tree: [ok + [conditions: [[field: "returnDate", operator: "LT", values: ["2024-10-08"], checkLabel: "x"]]]], says: "one number"],
                 [tree: [ok, ok + [key: "b", parent: "a"], ok + [key: "c", parent: "b"], ok + [key: "d", parent: "c"]], says: "levels deep"],
                 [tree: [ok, ok], says: "share the key"],
         ].each { Map c ->

@@ -4,9 +4,11 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
+import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.sql.Timestamp
 import java.time.Instant
+import java.util.zip.GZIPOutputStream
 
 import static org.junit.jupiter.api.Assertions.*
 
@@ -101,6 +103,82 @@ class KeptCopyStoreTests {
 
     @Test void aReplaceThatFailsWhileWritingLeavesCurrentUnchanged() {
         assertFailsMidWriteLeavesCopyAlone { replace(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z"), rec("3", "2026-10-06T00:00:00Z")]) }
+    }
+
+    /** Ruling P3a-15: a merge or a replace that fails while writing closes the old version it was reading. */
+    @Test void aMergeOrReplaceThatFailsWhileWritingClosesTheOldVersion() {
+        // three old records, so the merge still holds the old version open when the second line fails
+        merge(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z"), rec("3", "2026-10-03T14:22:01Z")])
+        int before = KeptCopyStore.openReaders()
+        int[] lines = [0]
+        KeptCopyStore.lineWrittenHook = { if (++lines[0] == 2) throw new IllegalStateException("disk full") }
+        assertThrows(IllegalStateException) { merge(dir, [rec("4", "2026-10-06T00:00:00Z")]) }
+        assertEquals(2, lines[0], "the merge failed mid-write")
+        assertEquals(before, KeptCopyStore.openReaders(), "the merge closed the old version")
+        lines[0] = 0
+        assertThrows(IllegalStateException) {
+            replace(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z"), rec("4", "2026-10-06T00:00:00Z")])
+        }
+        assertEquals(2, lines[0], "the replace failed mid-write")
+        assertEquals(before, KeptCopyStore.openReaders(), "the replace closed the old version")
+        KeptCopyStore.lineWrittenHook = null
+        assertEquals(["1", "2", "3"], byId().keySet().sort())
+    }
+
+    /** Ruling P3a-15: an old version that breaks mid-file fails the merge or replace and is closed, not left to GC. */
+    @Test void aCorruptOldVersionFailsMergeAndReplaceAndIsClosed() {
+        String version = merge(dir, [rec("1", "2026-10-03T14:22:01Z")]).version
+        File gz = new File(new File(dir, version), "records.jsonl.gz")
+        gz.withOutputStream { OutputStream os ->
+            new GZIPOutputStream(os).withWriter("UTF-8") { Writer w ->
+                w.write('{"id":"1","stamp":"2026-10-03T14:22:01Z","record":{"id":"1"}}\n{not json\n{"id":"3","stamp":null,"record":{}}\n')
+            }
+        }
+        int before = KeptCopyStore.openReaders()
+        assertThrows(RuntimeException) { replace(dir, [rec("1", "2026-10-03T14:22:01Z")]) }
+        assertEquals(before, KeptCopyStore.openReaders(), "the replace closed the old version")
+        assertThrows(RuntimeException) { merge(dir, [rec("4", "2026-10-06T00:00:00Z")]) }
+        assertEquals(before, KeptCopyStore.openReaders(), "the merge closed the old version")
+        assertEquals(version, KeptCopyStore.manifest(dir).version, "the current version is untouched")
+        assertEquals([], dir.listFiles().findAll { it.name.startsWith(".tmp-") })
+    }
+
+    /** Ruling P3a-15: an empty records file fails in the gzip header read, and the file it opened is closed there. */
+    @Test void anEmptyVersionFileThrowsAndLeavesNoStreamOpen() {
+        String version = merge(dir, [rec("1", "2026-10-03T14:22:01Z")]).version
+        new File(new File(dir, version), "records.jsonl.gz").bytes = new byte[0]
+        int readersBefore = KeptCopyStore.openReaders()
+        long fdsBefore = openFileDescriptors()
+        50.times {
+            assertThrows(EOFException) { KeptCopyStore.records(dir) }
+            assertThrows(EOFException) { KeptCopyStore.withRecords(dir) { Iterator<Map> copy -> copy.hasNext() } }
+        }
+        long grown = openFileDescriptors() - fdsBefore
+        assertTrue(grown < 10, "100 failed opens left ${grown} file descriptors open")
+        assertEquals(readersBefore, KeptCopyStore.openReaders())
+    }
+
+    private static long openFileDescriptors() {
+        return ((com.sun.management.UnixOperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean()).getOpenFileDescriptorCount()
+    }
+
+    /** The manifest records what the copy covers: a full read sets it, a merge carries it, another idField drops it. */
+    @Test void theManifestRecordsWhatTheCopyCovers() {
+        merge(dir, [rec("1", "2026-10-03T14:22:01Z")])
+        assertNull(KeptCopyStore.manifest(dir).coveredFrom, "a merge onto nothing covers nothing")
+        replace(dir, [rec("1", "2026-10-03T14:22:01Z")], "2026-09-01T00:00:00Z")
+        Map full = KeptCopyStore.manifest(dir)
+        assertEquals(ts("2026-09-01T00:00:00Z"), full.coveredFrom)
+        assertEquals(["id", "updatedAt", "createdAt"], [full.idField, full.stampField, full.windowField])
+        merge(dir, [rec("2", "2026-10-05T00:00:00Z")])
+        Map merged = KeptCopyStore.manifest(dir)
+        assertEquals(ts("2026-09-01T00:00:00Z"), merged.coveredFrom, "a merge carries coverage forward")
+        assertEquals(["id", "updatedAt", "createdAt"], [merged.idField, merged.stampField, merged.windowField])
+        KeptCopyStore.merge(dir, [rec("3", "2026-10-06T00:00:00Z", [legacy: "L3"])].iterator(), "legacy", "updatedAt",
+                ts("2026-11-02T00:00:00Z"), ts("2026-11-02T00:00:05Z"))
+        Map rekeyed = KeptCopyStore.manifest(dir)
+        assertNull(rekeyed.coveredFrom, "a merge keyed another way covers nothing")
+        assertNull(rekeyed.idField)
     }
 
     @Test void anOrphanVersionNeverDisplacesThePrevious() {

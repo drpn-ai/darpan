@@ -45,6 +45,8 @@ class DatasetServicesTests {
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.loadSeedData(ec, "classpath://data/EntityTypeData.xml", "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/DatasetSeedData.xml")
+        // store#Dataset checks the system's connector and its extract service (I1)
+        ec.entity.makeDataLoader().location("component://darpan/data/SourceSystemConnectorSeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert("moqui.security.UserGroup", [userGroupId: B, description: "Gorjana",
                                             groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
@@ -134,6 +136,32 @@ class DatasetServicesTests {
         assertEquals(10, reads.size())
         assertEquals("012", reads[0].readSeqId)
         assertEquals("003", reads[9].readSeqId)
+    }
+
+    /**
+     * I1: a dataset reads by its own window field, so its system's extract service must take windowFieldName. Shopify line
+     * units' does not (Moqui would drop the parameter and window on createdAt): an active dataset of it is refused, as is
+     * a system no connector reads. A paused one may be stored, but not switched on.
+     */
+    @Test
+    void aSystemWhoseExtractorTakesNoWindowFieldIsRefused() {
+        Map lineUnits = base("conn-lu", [:]) + [systemEnumId: "SHOPIFY_ORDER_LINE_UNITS"]
+        Map refused = call("store#Dataset", lineUnits)
+        assertTrue(refused.errors.any { it.contains("A dataset of SHOPIFY_ORDER_LINE_UNITS cannot be kept") &&
+                it.contains("extract#ShopifyOrderLineUnits takes no windowFieldName") }, refused.errors.toString())
+        assertEquals(0, ec.entity.find("darpan.dataset.Dataset").condition("sourceConfigId", "conn-lu").disableAuthz().count())
+
+        Map unknown = call("store#Dataset", base("conn-nope", [:]) + [systemEnumId: "NO_SUCH_SYSTEM"])
+        assertTrue(unknown.errors.any { it.contains("No source connector reads NO_SUCH_SYSTEM") }, unknown.errors.toString())
+
+        // control: Shopify orders' extract service takes it
+        assertEquals([], call("store#Dataset", base("conn-orders", [:])).errors)
+
+        Map paused = call("store#Dataset", lineUnits + [statusId: "DST_PAUSED"])
+        assertEquals([], paused.errors)
+        assertTrue(call("store#Dataset", lineUnits + [statusId: "DST_ACTIVE"]).errors.any { it.contains("cannot be kept") })
+        assertTrue(call("store#Dataset", lineUnits).errors.isEmpty(), "a settings update to the paused dataset is not refused")
+        assertEquals("DST_PAUSED", find("darpan.dataset.Dataset", [datasetId: paused.out.datasetId]).statusId)
     }
 
     @Test

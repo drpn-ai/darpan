@@ -8,7 +8,10 @@
 
     <service verb="store" noun="Dataset" allow-remote="false">
         <description>Finds or creates the active tenant's dataset for (system, connection, options). The same key always returns
-            the same datasetId; a repeat call updates the settings it is given (statusId, margins, horizon, read hour).</description>
+            the same datasetId; a repeat call updates the settings it is given (statusId, margins, horizon, read hour). An
+            active dataset is refused for a system whose connector's extract service declares no windowFieldName (it could
+            not read by the dataset's fields). Changing idField, stampField, windowField or horizonDays makes the next refresh
+            a full read; the copy is not served until that read has rebuilt it (serving checks the copy's own manifest).</description>
         <in-parameters>
             <parameter name="systemEnumId" required="true"/>
             <parameter name="sourceConfigId" required="true"/>
@@ -47,9 +50,25 @@
                 <econdition field-name="sourceConfigId" from="sourceConfigId"/>
                 <econdition field-name="optionsHash" from="optionsHash"/>
             </entity-find>
+            <!-- I1: a paused dataset may still be stored (pausing one during a deploy skew must work); refresh#Dataset checks again -->
+            <set field="effectiveStatusId" from="statusId ?: (existingList ? existingList[0].statusId : 'DST_ACTIVE')"/>
+            <if condition="effectiveStatusId != 'DST_PAUSED'">
+                <set field="connectorProblem" from="darpan.dataset.DatasetRefreshSupport.datasetConnectorProblem(ec, systemEnumId)"/>
+                <if condition="connectorProblem">
+                    <return error="true" message="A dataset of ${systemEnumId} cannot be kept: ${connectorProblem}"/></if>
+            </if>
             <if condition="existingList">
                 <then>
                     <set field="existing" from="existingList[0]"/>
+                    <!-- I2: a copy built under other settings is never served (KeptCopySupport checks its manifest); the next
+                         refresh reads in full to rebuild it -->
+                    <set field="settingsChanged" from="existing.idField != idField || existing.stampField != stampField ||
+                            existing.windowField != windowField ||
+                            (horizonDays != null &amp;&amp; (existing.horizonDays as Long) != (horizonDays as Long))"/>
+                    <if condition="settingsChanged">
+                        <set field="existing.lastFullReadAt" from="null"/>
+                        <log level="info" message="Dataset ${existing.datasetId}: idField, stampField, windowField or horizonDays changed; the next refresh reads in full, and the copy is not served until it does"/>
+                    </if>
                     <set field="existing.idField" from="idField"/>
                     <set field="existing.stampField" from="stampField"/>
                     <set field="existing.windowField" from="windowField"/>
@@ -175,6 +194,9 @@
                     </entity-find>
                     <set field="updates" from="darpan.dataset.DatasetRefreshSupport.failureUpdates(ec, lockOut.dataset,
                             priorReadList*.statusId, result.error as String, ec.user.nowTimestamp)"/>
+                    <!-- I1: an extractor that stopped taking the window field warns at once, not only after maxRetries -->
+                    <if condition="result.warningText &amp;&amp; !updates.warningText">
+                        <set field="updates.warningText" from="result.warningText"/></if>
                     <script>read.putAll([statusId:'DRS_FAILED', errorText:result.error])</script>
                     <service-call name="dataset.DatasetServices.finish#DatasetRefresh" out-map="finishOut"
                             in-map="[datasetId:datasetId, tenantId:tenantId, readSeqId:readSeqId, token:startedAt, read:read, updates:updates]"/>
@@ -249,7 +271,7 @@
             <set field="dataset" from="row.getMap()"/>
             <service-call name="create#darpan.dataset.DatasetRead" in-map="[datasetId:datasetId, readSeqId:readSeqId,
                     companyUserGroupId:tenantId, statusId:'DRS_RUNNING', readThru:now,
-                    readKindEnumId:darpan.dataset.DatasetRefreshSupport.readKind(dataset, [:], forceFull == true, now)]"/>
+                    readKindEnumId:darpan.dataset.DatasetRefreshSupport.predictedReadKind(ec, dataset, forceFull == true, now)]"/>
         </actions>
     </service>
 

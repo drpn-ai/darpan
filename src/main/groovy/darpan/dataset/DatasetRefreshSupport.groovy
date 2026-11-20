@@ -33,12 +33,47 @@ class DatasetRefreshSupport {
     static final String INCREMENTAL = "DRK_INCREMENTAL"
     static final String READS_FOLDER = "reads"
     static final String LOCK_TAKEN_OVER = "lock taken over: another refresh holds this dataset now"
+    /** The extract parameter a dataset read windows by: its stampField (daily) or windowField (full). */
+    static final String WINDOW_FIELD_PARAMETER = "windowFieldName"
     private static final long DAY = 86_400_000L
 
     /** The dataset's folder under the data manager root, which honours darpan.data.manager.location (ruling P3a-7). */
     static File datasetDir(def ec, String tenantId, String datasetId) {
         File root = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveDataManagerLocation(ec), true)
         return DatasetSupport.datasetDir(root, tenantId, datasetId)
+    }
+
+    /**
+     * The connector a dataset of {@code systemEnumId} reads through, or an IllegalStateException that says why it cannot
+     * keep a copy: no connector, an extract service outside the extractor shape, a service that is not installed, or one
+     * that declares no windowFieldName. Moqui drops an undeclared parameter, so such a service would silently window on
+     * its own default field (createdAt) and every daily read would miss changes to older records.
+     */
+    static Map<String, Object> datasetConnector(def ec, String systemEnumId) {
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, systemEnumId)
+        String serviceName = connector?.extractServiceName
+        if (!serviceName) throw new IllegalStateException("No source connector reads ${systemEnumId}".toString())
+        // The same fence the live dispatchers keep: a registry row cannot aim the read at an arbitrary service.
+        if (!SourceSystemConnectorSupport.isAllowedExtractorServiceShape(serviceName)) {
+            throw new IllegalStateException("The connector for ${systemEnumId} names an invalid extract service".toString())
+        }
+        def definition = ec.service.getServiceDefinition(serviceName)
+        if (definition == null) throw new IllegalStateException("${serviceName} is not installed".toString())
+        if (!(WINDOW_FIELD_PARAMETER in (definition.getInParameterNames() ?: []))) {
+            throw new IllegalStateException(("${serviceName} takes no ${WINDOW_FIELD_PARAMETER}, so a read of ${systemEnumId} " +
+                    "cannot be windowed on the dataset's fields").toString())
+        }
+        return connector
+    }
+
+    /** {@link #datasetConnector}'s refusal as text, or null when the system can keep a copy. For store#Dataset. */
+    static String datasetConnectorProblem(def ec, String systemEnumId) {
+        try {
+            datasetConnector(ec, systemEnumId)
+            return null
+        } catch (IllegalStateException e) {
+            return e.message
+        }
     }
 
     /** Where one read's extract lands, in the data-manager location form the extractors take: .../datasets/T/D/reads/N. */
@@ -65,16 +100,23 @@ class DatasetRefreshSupport {
             if (extractor != null && !(extractor instanceof Closure)) {
                 throw new IllegalArgumentException("extractor must be a closure (serviceName, params) -> result")
             }
-            File dir = datasetDir(ec, dataset.companyUserGroupId as String, dataset.datasetId as String)
-            kind = readKind(dataset, KeptCopyStore.manifest(dir), forceFull, startedAt)
-            fromStamp = kind == FULL ?
-                    new Timestamp(startedAt.time - ((dataset.horizonDays ?: 62) as long) * DAY) :
-                    new Timestamp(((Timestamp) dataset.readThru).time - ((dataset.marginDays ?: 2) as long) * DAY)
-            // the tenant's zone, as the live paths resolve it (refresh runs under the dataset's tenant)
-            String zone = TenantAccessSupport.resolveActiveTenantTimeZone(ec)
-            result = read(ec, dataset, dir, readSeqId, kind, fromStamp, startedAt, zone, (Closure) extractor,
-                    ownerGuard(ec, dataset.datasetId as String, dataset.companyUserGroupId as String, startedAt))
-            if (!result.error) result.nextReadDate = nextReadAt(startedAt, zone, dataset.readHourLocal as Integer)
+            // I1: checked before anything is read, so a deploy that leaves the extractor behind fails loudly with a warning
+            String connectorProblem = datasetConnectorProblem(ec, dataset.systemEnumId as String)
+            if (connectorProblem) {
+                String warning = "Not read: ${connectorProblem}".toString()
+                result = [error: connectorProblem, warningText: warning.length() > 255 ? warning.substring(0, 252) + "..." : warning]
+            } else {
+                File dir = datasetDir(ec, dataset.companyUserGroupId as String, dataset.datasetId as String)
+                kind = readKind(dataset, KeptCopyStore.manifest(dir), forceFull, startedAt)
+                fromStamp = kind == FULL ?
+                        new Timestamp(startedAt.time - ((dataset.horizonDays ?: 62) as long) * DAY) :
+                        new Timestamp(((Timestamp) dataset.readThru).time - ((dataset.marginDays ?: 2) as long) * DAY)
+                // the tenant's zone, as the live paths resolve it (refresh runs under the dataset's tenant)
+                String zone = TenantAccessSupport.resolveActiveTenantTimeZone(ec)
+                result = read(ec, dataset, dir, readSeqId, kind, fromStamp, startedAt, zone, (Closure) extractor,
+                        ownerGuard(ec, dataset.datasetId as String, dataset.companyUserGroupId as String, startedAt))
+                if (!result.error) result.nextReadDate = nextReadAt(startedAt, zone, dataset.readHourLocal as Integer)
+            }
         } catch (Throwable t) {
             logger.warn("Dataset ${dataset?.datasetId} read ${readSeqId} failed", t)
             result = [error: t.message ?: t.toString()]
@@ -89,16 +131,50 @@ class DatasetRefreshSupport {
     }
 
     /**
-     * FULL when asked, when there is no current version (or no readThru to read on from), or when the last full read is
-     * fullReadDays old. Half a day of slack, so the daily read on the seventh day is the full one even when it starts a
-     * little earlier in the day than the last full read did.
+     * FULL when asked, when there is no current version (or no readThru to read on from), when the copy does not cover the
+     * dataset's settings ({@link #copyCovers}: store#Dataset changed one, or the copy predates coverage), or when the last
+     * full read is fullReadDays old. Half a day of slack, so the daily read on the seventh day is the full one even when it
+     * starts a little earlier in the day than the last full read did.
      */
     static String readKind(Map dataset, Map manifest, boolean forceFull, Timestamp now) {
         if (forceFull || manifest == null || !dataset.currentVersion || dataset.readThru == null || dataset.lastFullReadAt == null) {
             return FULL
         }
+        if (!copyCovers(dataset, manifest, now)) return FULL
         long fullEvery = ((dataset.fullReadDays ?: 7) as long) * DAY - 12 * 3_600_000L
         return now.time - ((Timestamp) dataset.lastFullReadAt).time >= fullEvery ? FULL : INCREMENTAL
+    }
+
+    /**
+     * The kind lock#DatasetRefresh writes on the RUNNING read before refresh() decides it for good. Never throws (the lock
+     * must not fail on an unreadable copy): FULL when the manifest cannot be read, as refresh() would then read.
+     */
+    static String predictedReadKind(def ec, Map dataset, boolean forceFull, Timestamp now) {
+        try {
+            return readKind(dataset, KeptCopyStore.manifest(datasetDir(ec, dataset.companyUserGroupId as String,
+                    dataset.datasetId as String)), forceFull, now)
+        } catch (Throwable t) {
+            logger.warn("Dataset ${dataset?.datasetId}: copy manifest unreadable; the read is expected to be full", t)
+            return FULL
+        }
+    }
+
+    /**
+     * Whether the copy (its manifest) was built under the dataset's idField, stampField and windowField and covers its
+     * whole horizon back from {@code now}: coveredFrom at or before now minus horizonDays. False for a manifest that
+     * records no coverage.
+     */
+    static boolean copyCovers(Map dataset, Map manifest, Timestamp now) {
+        Timestamp coveredFrom = manifest?.coveredFrom as Timestamp
+        if (coveredFrom == null || !sameSettings(dataset, manifest)) return false
+        return coveredFrom.time <= now.time - ((dataset.horizonDays ?: 62) as long) * DAY
+    }
+
+    /** The manifest's idField, stampField and windowField equal the dataset's. */
+    static boolean sameSettings(Map dataset, Map manifest) {
+        return manifest != null && ["idField", "stampField", "windowField"].every { String f ->
+            manifest.get(f) && manifest.get(f) == dataset?.get(f)
+        }
     }
 
     /**
@@ -189,13 +265,8 @@ class DatasetRefreshSupport {
             boolean full = readKindEnumId == FULL
             String tenantId = dataset.companyUserGroupId
             String datasetId = dataset.datasetId
-            Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)
-            String serviceName = connector?.extractServiceName
-            if (!serviceName) throw new IllegalStateException("No source connector reads ${dataset.systemEnumId}")
-            // The same fence the live dispatchers keep: a registry row cannot aim the read at an arbitrary service.
-            if (!SourceSystemConnectorSupport.isAllowedExtractorServiceShape(serviceName)) {
-                throw new IllegalStateException("The connector for ${dataset.systemEnumId} names an invalid extract service")
-            }
+            Map<String, Object> connector = datasetConnector(ec, dataset.systemEnumId as String)
+            String serviceName = connector.extractServiceName
 
             String location = readLocation(ec, tenantId, datasetId, readSeqId)
             DataManagerSupport.resolveDirectoryFile(ec, location, true)
@@ -266,14 +337,12 @@ class DatasetRefreshSupport {
 
     /**
      * The real extractor: the connector's extract service, called as the current user (no disableAuthz). The scan runs it
-     * under the job's anonymous-all grant. A service that throws leaves its error on the message facade and answers an
-     * empty map (DAR-BE-130), so those errors are taken off and thrown here.
+     * under the job's anonymous-all grant. {@link #read} has already checked the service is installed and takes the window
+     * field ({@link #datasetConnector}). A service that throws leaves its error on the message facade and answers an empty
+     * map (DAR-BE-130), so those errors are taken off and thrown here.
      */
     static Closure liveExtractor(def ec) {
         return { String serviceName, Map params ->
-            if (ec.service.getServiceDefinition(serviceName) == null) {
-                throw new IllegalStateException("${serviceName} is not installed")
-            }
             int errorsBefore = ((ec.message.getErrors() ?: []) as List).size()
             Map result = (ec.service.sync().name(serviceName).parameters(params.findAll { it.value != null }).call() ?: [:]) as Map
             List added = ((ec.message.getErrors() ?: []) as List).drop(errorsBefore)

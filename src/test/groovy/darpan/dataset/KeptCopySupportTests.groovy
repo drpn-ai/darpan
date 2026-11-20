@@ -226,7 +226,7 @@ class KeptCopySupportTests {
     @Test
     void aWindowBeforeTheHorizonReadsLive() {
         String id = dataset("conn-old", [horizonDays: 10])
-        copy(A, id, [order("old", "2026-11-10T12:00:00Z")])
+        copy(A, id, [order("old", "2026-11-10T12:00:00Z")], 10)
         Timestamp horizon = new Timestamp(READ_THRU.time - 10 * DAY)
         Timestamp tooEarly = new Timestamp(horizon.time - 1)
 
@@ -239,6 +239,76 @@ class KeptCopySupportTests {
         Map atHorizon = direct("conn-old", horizon, END, "old-edge")
         assertTrue(atHorizon.served as boolean, atHorizon.reason as String)
         assertEquals(["old"], json(atHorizon.extractFile as File).records*.id)
+    }
+
+    /**
+     * I2: raising horizonDays does not widen serving: the copy covers from its last full read's horizon start (its
+     * manifest's coveredFrom), so older windows read live until the full read the change forces has run.
+     */
+    @Test
+    void raisingTheHorizonStopsServingOlderWindowsUntilAFullRead() {
+        String id = dataset("conn-raise", [horizonDays: 10])
+        List<Map> records = [order("recent", "2026-11-15T12:00:00Z"), order("older", "2026-11-01T12:00:00Z")]
+        copy(A, id, [records[0]], 10)
+        Timestamp twentyBack = new Timestamp(READ_THRU.time - 20 * DAY)
+        Timestamp tenBack = new Timestamp(READ_THRU.time - 10 * DAY)
+        assertEquals(KeptCopySupport.BEFORE_HORIZON, direct("conn-raise", twentyBack, END, "raise-0").reason)
+        def before = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().useCache(false).one()
+        before.set("lastFullReadAt", READ_AT)
+        before.update()
+
+        // the operator raises the horizon to 30 days
+        assertEquals([], underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "SHOPIFY",
+                sourceConfigId: "conn-raise", options: [:], idField: "id", stampField: "updatedAt", windowField: "createdAt",
+                horizonDays: 30]).errors)
+        def row = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().useCache(false).one()
+        assertEquals(30, row.horizonDays as int)
+        assertNull(row.lastFullReadAt, "the next refresh reads in full")
+        Map manifest = KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id))
+        assertEquals("DRK_FULL", DatasetRefreshSupport.readKind(row.getMap() + [lastFullReadAt: READ_THRU],
+                manifest, false, new Timestamp(READ_THRU.time + DAY)), "the copy does not cover 30 days, so the read is full")
+
+        // the row says 30 days, the copy covers 10: a window 20 days back is still not served, a recent one still is
+        Map stillOld = direct("conn-raise", twentyBack, END, "raise-1")
+        assertFalse(stillOld.served as boolean)
+        assertEquals(KeptCopySupport.BEFORE_HORIZON, stillOld.reason)
+        Map recent = direct("conn-raise", tenBack, READ_THRU, "raise-2")
+        assertTrue(recent.served as boolean, recent.reason as String)
+
+        // the full read over 30 days lands: the older window is served, with the order the old copy never held
+        copy(A, id, records, 30)
+        Map served = direct("conn-raise", twentyBack, READ_THRU, "raise-3")
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals(["older", "recent"] as Set, json(served.extractFile as File).records*.id as Set)
+    }
+
+    /** I2: an old manifest that records no coverage reads as covering nothing, and the next refresh is full. */
+    @Test
+    void aCopyWithoutCoverageFieldsIsNotServed() {
+        String id = dataset("conn-legacy")
+        copy(A, id, [order("l1", "2026-11-10T12:00:00Z")])
+        assertTrue(direct("conn-legacy", START, END, "legacy-0").served as boolean, "control: the copy as written serves")
+        File dir = DatasetRefreshSupport.datasetDir(ec, A, id)
+        File manifestFile = new File(new File(dir, KeptCopyStore.manifest(dir).version as String), KeptCopyStore.MANIFEST_FILE)
+        Map written = (Map) new JsonSlurper().parse(manifestFile, "UTF-8")
+
+        // the same settings recorded, but no coveredFrom: not covering
+        manifestFile.setText(JsonOutput.toJson(written.findAll { it.key != "coveredFrom" }), "UTF-8")
+        Map noFrom = direct("conn-legacy", START, END, "legacy-1")
+        assertFalse(noFrom.served as boolean)
+        assertEquals(KeptCopySupport.BEFORE_HORIZON, noFrom.reason)
+
+        // a manifest written before coverage was recorded at all
+        manifestFile.setText(JsonOutput.toJson(written.subMap(["version", "readThru", "readAt", "recordCount"])), "UTF-8")
+        Map legacy = direct("conn-legacy", START, END, "legacy-2")
+        assertFalse(legacy.served as boolean)
+        assertEquals(KeptCopySupport.OTHER_SETTINGS, legacy.reason)
+        def row = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().useCache(false).one()
+        assertEquals("DRK_FULL", DatasetRefreshSupport.readKind(row.getMap() + [lastFullReadAt: READ_THRU],
+                KeptCopyStore.manifest(dir), false, new Timestamp(READ_THRU.time + DAY)))
+        ["legacy-1", "legacy-2"].each { String token ->
+            assertFalse(new File(locationFile(runLocation(token)), "slice.json").exists(), "nothing written for ${token}")
+        }
     }
 
     @Test
@@ -441,9 +511,11 @@ class KeptCopySupportTests {
         return id
     }
 
-    private void copy(String tenant, String datasetId, List<Map> records) {
+    /** A full read into the copy, as refresh#Dataset makes one: it covers horizonDays back from READ_THRU. */
+    private void copy(String tenant, String datasetId, List<Map> records, int horizonDays = 62, String idField = "id") {
         File dir = DatasetRefreshSupport.datasetDir(ec, tenant, datasetId)
-        KeptCopyStore.replace(dir, records.iterator(), "id", "updatedAt", "createdAt", null, READ_THRU, READ_AT, 2)
+        KeptCopyStore.replace(dir, records.iterator(), idField, "updatedAt", "createdAt",
+                new Timestamp(READ_THRU.time - horizonDays * DAY), READ_THRU, READ_AT, 2)
     }
 
     private String runLocation(String token) {

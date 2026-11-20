@@ -2,6 +2,7 @@ package darpan.dataset
 
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.AfterAll
@@ -217,6 +218,96 @@ class DatasetRefreshTests {
         row = find("darpan.dataset.Dataset", [datasetId: id])
         assertEquals(0, row.lastMissCount as int)
         assertNull(row.warningText)
+    }
+
+    /**
+     * I2: changing idField keeps no copy built under the old one in service. The copy is refused at once (its manifest
+     * names the old idField), the next refresh is full, and the rebuilt copy, keyed the new way, serves again.
+     */
+    @Test
+    void changingTheIdFieldForcesAFullReadAndStopsServing() {
+        // the test data manager outlives the test DB: no slice of an earlier run may stand in for this one's
+        ["id-0", "id-1", "id-2"].each { locationFile(sliceLocation(it)).deleteDir() }
+        String id = dataset("id-change")
+        List<Map> records = [order(1, 3, 3) + [legacyResourceId: "L1"], order(2, 2, 1) + [legacyResourceId: "L2"]]
+        assertEquals([], refresh(id, stub([], records)).errors)
+        assertEquals("DRK_INCREMENTAL", refresh(id, stub([], [records[1]])).out.readKindEnumId)
+        Timestamp start = new Timestamp(System.currentTimeMillis() - 4 * DAY)
+        Closure<Map> sliceFor = { String token ->
+            Timestamp end = find("darpan.dataset.Dataset", [datasetId: id]).readThru as Timestamp
+            KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
+                    [shopifyAuthConfigId: "conn-id-change", outputLocation: sliceLocation(token), fileName: "slice.json"],
+                    [tenantId: A, windowStart: start, windowEnd: end]))
+        }
+        Map control = sliceFor("id-0")
+        assertTrue(control.served as boolean, control.reason as String)
+        assertEquals(["1", "2"], json(control.extractFile as File).records*.id.sort())
+
+        Map changed = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-id-change", options: [:],
+                idField: "legacyResourceId", stampField: "updatedAt", windowField: "createdAt"])
+        assertEquals([], changed.errors)
+        assertEquals(id, changed.out.datasetId)
+        assertNull(find("darpan.dataset.Dataset", [datasetId: id]).lastFullReadAt, "the next refresh reads in full")
+        Map refused = sliceFor("id-1")
+        assertFalse(refused.served as boolean)
+        assertEquals(KeptCopySupport.OTHER_SETTINGS, refused.reason)
+        assertFalse(new File(locationFile(sliceLocation("id-1")), "slice.json").exists(), "nothing written")
+
+        List<Map> calls = []
+        Map full = refresh(id, stub(calls, records))
+        assertEquals([], full.errors)
+        assertEquals("DRK_FULL", full.out.readKindEnumId)
+        assertEquals("createdAt", calls[0].params.windowFieldName)
+        Map manifest = KeptCopyStore.manifest(dir(id))
+        assertEquals("legacyResourceId", manifest.idField)
+        assertEquals(["L1", "L2"], KeptCopyStore.records(dir(id)).collect { it.id }.sort(), "keyed the new way, no duplicates")
+        Map served = sliceFor("id-2")
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals(["1", "2"], json(served.extractFile as File).records*.id.sort())
+    }
+
+    /**
+     * I1: an extract service that takes no windowFieldName (a deploy that leaves the extractor behind) would window the
+     * daily read on createdAt and keep a stale copy. The refresh fails before reading, says why, and warns at once;
+     * store#Dataset refuses to keep an active dataset of that system.
+     */
+    @Test
+    void aRefreshFailsWhenTheExtractorStopsTakingTheWindowField() {
+        String id = dataset("skew")
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5)])).errors)
+        String versionBefore = KeptCopyStore.manifest(dir(id)).version
+        def connector = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "SHOPIFY").disableAuthz().one()
+        // the line-units extract service declares no windowFieldName
+        String lineUnits = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderLineUnits"
+        assertNotNull(ec.service.getServiceDefinition(lineUnits), "test precondition: shopify-darpan is installed")
+        assertFalse("windowFieldName" in ec.service.getServiceDefinition(lineUnits).getInParameterNames())
+        connector.set("extractServiceName", lineUnits)
+        connector.update()
+        try {
+            List<Map> calls = []
+            Map res = refresh(id, stub(calls, [order(1, 5, 1)]))
+            assertTrue(res.errors.any { it.contains("${lineUnits} takes no windowFieldName") }, res.errors.toString())
+            assertEquals(0, calls.size(), "nothing is read")
+            def row = find("darpan.dataset.Dataset", [datasetId: id])
+            assertNotNull(row.warningText, "the first failure already warns")
+            assertTrue(row.warningText.contains("takes no windowFieldName"), row.warningText)
+            assertNull(row.refreshingSince)
+            def read = find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"])
+            assertEquals("DRS_FAILED", read.statusId)
+            assertTrue(read.errorText.contains("takes no windowFieldName"), read.errorText)
+            assertEquals(versionBefore, KeptCopyStore.manifest(dir(id)).version, "the copy is untouched")
+
+            Map store = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-skew", options: [:],
+                    idField: "id", stampField: "updatedAt", windowField: "createdAt"])
+            assertTrue(store.errors.any { it.contains("cannot be kept") && it.contains("takes no windowFieldName") }, store.errors.toString())
+            // pausing it still works
+            assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-skew", options: [:],
+                    idField: "id", stampField: "updatedAt", windowField: "createdAt", statusId: "DST_PAUSED"]).errors)
+            assertEquals("DST_PAUSED", find("darpan.dataset.Dataset", [datasetId: id]).statusId)
+        } finally {
+            connector.set("extractServiceName", SHOPIFY_EXTRACT)
+            connector.update()
+        }
     }
 
     @Test
@@ -578,6 +669,18 @@ class DatasetRefreshTests {
         String tenant = find("darpan.dataset.Dataset", [datasetId: id]).companyUserGroupId
         File root = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveDataManagerLocation(ec), true)
         return DatasetSupport.datasetDir(root, tenant, id)
+    }
+
+    private String sliceLocation(String token) {
+        return DataManagerSupport.resolveReconciliationRunLocation(ec, "dr-${token}", "20261120-000000000")
+    }
+
+    private File locationFile(String location) {
+        return location.startsWith("/") ? new File(location) : ec.resource.getLocationReference(location).getFile()
+    }
+
+    private static Map json(File f) {
+        return (Map) new groovy.json.JsonSlurper().parse(f, "UTF-8")
     }
 
     private List reads(String id) {

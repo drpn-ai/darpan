@@ -26,15 +26,21 @@ class KeptCopyStore {
     static final String MANIFEST_FILE = "manifest.json"
     static final String CURRENT_FILE = "current.json"
 
-    /** [version, readThru, readAt, recordCount] of the current version, or null when there is none. */
+    /**
+     * [version, readThru, readAt, recordCount, coveredFrom, idField, stampField, windowField] of the current version, or
+     * null when there is none. The last four say what the copy covers: every record created (windowField) at or after
+     * coveredFrom, keyed by idField and stamped by stampField. A version written before they were recorded has them null,
+     * which reads as covering nothing.
+     */
     static Map manifest(File datasetDir) {
         String version = currentVersion(datasetDir)
         if (version == null) return null
         File file = new File(new File(datasetDir, version), MANIFEST_FILE)
         if (!file.isFile()) return null
         Map m = (Map) new JsonSlurper().parse(file, "UTF-8")
-        return [version: version, readThru: toTimestamp(m.get("readThru")), readAt: toTimestamp(m.get("readAt")),
-                recordCount: ((Number) (m.get("recordCount") ?: 0)).longValue()]
+        return [version    : version, readThru: toTimestamp(m.get("readThru")), readAt: toTimestamp(m.get("readAt")),
+                recordCount: ((Number) (m.get("recordCount") ?: 0)).longValue(), coveredFrom: toTimestamp(m.get("coveredFrom")),
+                idField    : m.get("idField") ?: null, stampField: m.get("stampField") ?: null, windowField: m.get("windowField") ?: null]
     }
 
     /** Streams the current version; each element is [id, stamp, readAt, record: Map]. Empty when there is none. */
@@ -65,9 +71,18 @@ class KeptCopyStore {
 
     private static final java.util.concurrent.atomic.AtomicInteger OPEN_READERS = new java.util.concurrent.atomic.AtomicInteger()
 
-    /** Merges the changed records into the copy: an equal or newer stamp replaces, a new id is appended. */
+    /**
+     * Merges the changed records into the copy: an equal or newer stamp replaces, a new id is appended. The new version
+     * covers what the one it builds on covered (coveredFrom and windowField carry forward), but only while it is keyed and
+     * stamped the same way: a merge under another idField or stampField, or onto a copy that records no coverage, writes a
+     * version that covers nothing until a full read replaces it.
+     */
     static Map merge(File datasetDir, Iterator<Map> changed, String idField, String stampField,
                      Timestamp readThru, Timestamp readAt, Closure swapGuard = null) {
+        Map oldManifest = manifest(datasetDir)
+        Map coverage = oldManifest?.coveredFrom != null && oldManifest.idField == idField && oldManifest.stampField == stampField ?
+                [coveredFrom: oldManifest.coveredFrom, idField: idField, stampField: stampField, windowField: oldManifest.windowField] :
+                [:]
         Map<String, Map> changes = new LinkedHashMap<String, Map>()
         long recordsRead = 0
         while (changed.hasNext()) {
@@ -80,25 +95,27 @@ class KeptCopyStore {
         }
         long changedCount = 0
         long addedCount = 0
-        Map out = writeVersion(datasetDir, readThru, readAt, swapGuard) { Writer w ->
+        Map out = writeVersion(datasetDir, readThru, readAt, coverage, swapGuard) { Writer w ->
             long count = 0
-            Iterator<Map> old = records(datasetDir)
-            while (old.hasNext()) {
-                Map e = old.next()
-                String id = String.valueOf(e.get("id"))
-                Map repl = changes.get(id)
-                if (repl != null) {
-                    changes.remove(id)
-                    if (compareStamps(repl.get("stamp"), e.get("stamp")) >= 0) {
-                        writeLine(w, repl)
-                        changedCount++
+            // ruling P3a-15: the old version is closed however the write ends
+            withRecords(datasetDir) { Iterator<Map> old ->
+                while (old.hasNext()) {
+                    Map e = old.next()
+                    String id = String.valueOf(e.get("id"))
+                    Map repl = changes.get(id)
+                    if (repl != null) {
+                        changes.remove(id)
+                        if (compareStamps(repl.get("stamp"), e.get("stamp")) >= 0) {
+                            writeLine(w, repl)
+                            changedCount++
+                        } else {
+                            writeLine(w, e)
+                        }
                     } else {
                         writeLine(w, e)
                     }
-                } else {
-                    writeLine(w, e)
+                    count++
                 }
-                count++
             }
             for (Map e : changes.values()) {
                 writeLine(w, e)
@@ -114,7 +131,8 @@ class KeptCopyStore {
      * Replaces the copy with a full read. Records created before horizonStart are dropped. Counts, per ruling 3a-8:
      * a miss is the same stamp with a different content hash, or a record absent from the old copy that was created
      * before the old readThru minus marginDays (never read); a record in the old copy that the full read lacks, inside
-     * the horizon, is removed, not a miss.
+     * the horizon, is removed, not a miss. The new version covers every record created (createdField) at or after
+     * horizonStart, keyed by idField and stamped by stampField; a null horizonStart records no coverage.
      */
     static Map replace(File datasetDir, Iterator<Map> full, String idField, String stampField, String createdField,
                        Timestamp horizonStart, Timestamp readThru, Timestamp readAt, int marginDays, Closure swapGuard = null) {
@@ -124,14 +142,18 @@ class KeptCopyStore {
         Instant horizon = horizonStart?.toInstant()
         // id -> [stamp, hash, created]: the only thing held in heap
         Map<String, List> index = new HashMap<String, List>()
-        Iterator<Map> old = records(datasetDir)
-        while (old.hasNext()) {
-            Map e = old.next()
-            Map rec = (Map) e.get("record")
-            index.put(String.valueOf(e.get("id")), [e.get("stamp"), contentHash(rec, stampField), rec?.get(createdField)])
+        // ruling P3a-15: the old version is closed however the read ends
+        withRecords(datasetDir) { Iterator<Map> old ->
+            while (old.hasNext()) {
+                Map e = old.next()
+                Map rec = (Map) e.get("record")
+                index.put(String.valueOf(e.get("id")), [e.get("stamp"), contentHash(rec, stampField), rec?.get(createdField)])
+            }
         }
         long recordsRead = 0, changedCount = 0, addedCount = 0, missCount = 0
-        Map out = writeVersion(datasetDir, readThru, readAt, swapGuard) { Writer w ->
+        Map coverage = horizonStart == null ? [:] :
+                [coveredFrom: horizonStart, idField: idField, stampField: stampField, windowField: createdField]
+        Map out = writeVersion(datasetDir, readThru, readAt, coverage, swapGuard) { Writer w ->
             long count = 0
             Set<String> written = new HashSet<String>()
             while (full.hasNext()) {
@@ -196,7 +218,8 @@ class KeptCopyStore {
      * returns its result, or false without calling it to refuse: a caller that lost its lock refuses, and the whole new
      * version is deleted. Null swaps unconditionally.
      */
-    private static Map writeVersion(File datasetDir, Timestamp readThru, Timestamp readAt, Closure swapGuard, Closure<Long> body) {
+    private static Map writeVersion(File datasetDir, Timestamp readThru, Timestamp readAt, Map coverage, Closure swapGuard,
+                                    Closure<Long> body) {
         datasetDir.mkdirs()
         File tmp = new File(datasetDir, ".tmp-" + UUID.randomUUID().toString())
         tmp.mkdirs()
@@ -204,12 +227,20 @@ class KeptCopyStore {
             long count
             new File(tmp, RECORDS_FILE).withOutputStream { OutputStream os ->
                 Writer w = new BufferedWriter(new OutputStreamWriter(new GZIPOutputStream(os, 65536), StandardCharsets.UTF_8))
-                count = body.call(w)
-                w.close()
+                boolean closed = false
+                try {
+                    count = body.call(w)
+                    w.close()
+                    closed = true
+                } finally {
+                    // a failed write still frees its Deflater; the body's own error is the one that propagates
+                    if (!closed) try { w.close() } catch (Throwable ignored) { }
+                }
             }
             String version = freshVersionName(datasetDir)
             new File(tmp, MANIFEST_FILE).setText(JsonOutput.toJson([version: version, readThru: iso(readThru),
-                    readAt: iso(readAt), recordCount: count]), "UTF-8")
+                    readAt: iso(readAt), recordCount: count, coveredFrom: iso((Timestamp) coverage?.coveredFrom),
+                    idField: coverage?.idField, stampField: coverage?.stampField, windowField: coverage?.windowField]), "UTF-8")
             File target = new File(datasetDir, version)
             Closure<Boolean> swap = { ->
                 Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
@@ -291,7 +322,14 @@ class KeptCopyStore {
         private boolean closed
 
         RecordReader(File file) {
-            reader = new BufferedReader(new InputStreamReader(new GZIPInputStream(new FileInputStream(file), 65536), StandardCharsets.UTF_8))
+            FileInputStream input = new FileInputStream(file)
+            try {
+                reader = new BufferedReader(new InputStreamReader(new GZIPInputStream(input, 65536), StandardCharsets.UTF_8))
+            } catch (Throwable t) {
+                // an empty or corrupt file fails in the gzip header read: the file is closed here, nothing else holds it
+                input.close()
+                throw t
+            }
             OPEN_READERS.incrementAndGet()
             try {
                 next = reader.readLine()

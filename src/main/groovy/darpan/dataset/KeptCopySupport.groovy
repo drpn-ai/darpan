@@ -24,8 +24,11 @@ import static darpan.common.ValueSupport.normalize
  * {metadata, records}, with the side's source filters applied and the set-aside records in the usual .excluded.json.
  * Not served: the reason comes back, and the caller reads live exactly as before.
  *
- * <p>The copy is read only through {@link KeptCopyStore}: the version and readThru that decide serving come from its
- * manifest (current.json), never from the Dataset row, which can lag the copy (ruling P3a-12).</p>
+ * <p>The copy is read only through {@link KeptCopyStore}: the version, readThru and coverage that decide serving come
+ * from its manifest (current.json), never from the Dataset row, which can lag the copy (ruling P3a-12). The copy serves
+ * only while its manifest was built under the dataset's current idField, stampField and windowField, and only windows
+ * that start at or after the manifest's coveredFrom: a setting changed through store#Dataset stops serving until the
+ * full read it forces has rebuilt the copy.</p>
  *
  * <p><b>The options key</b> ({@code find#ServingDataset}'s options) is the run side's extract options its connector
  * declares (SourceExtractOptionsSupport.declaredOptions), read off the parameters the dispatcher built, with false and
@@ -39,7 +42,6 @@ class KeptCopySupport {
 
     static final String FIND_SERVICE = "dataset.DatasetServices.find#ServingDataset"
     static final String DEFAULT_WINDOW_FIELD = "createdAt"
-    private static final long DAY = 86_400_000L
 
     static final String BY_KEYS = "the side reads by key"
     static final String NO_WINDOW = "the side has no window"
@@ -48,7 +50,8 @@ class KeptCopySupport {
     static final String OTHER_WINDOW_FIELD = "the side windows on another field than the dataset"
     static final String NO_VERSION = "the dataset has no current version"
     static final String PAST_READ_THRU = "the window ends after the copy's readThru"
-    static final String BEFORE_HORIZON = "the window starts before the copy's horizon"
+    static final String BEFORE_HORIZON = "the window starts before what the copy covers"
+    static final String OTHER_SETTINGS = "the copy was built under other dataset settings; the next full read rebuilds it"
     static final String COPY_CHANGED = "the copy changed while it was opened"
 
     /**
@@ -150,9 +153,12 @@ class KeptCopySupport {
             Timestamp readThru = manifest?.readThru as Timestamp
             if (!manifest?.version || readThru == null) return notServed(NO_VERSION)
             // Review Focus 3: the whole window lies inside what the copy holds, or nothing is served.
+            // a copy keyed, stamped or windowed otherwise than the dataset now is (or that records none of it) is not this copy
+            if (!DatasetRefreshSupport.sameSettings(dataset, manifest)) return notServed(OTHER_SETTINGS)
             if (end.time > readThru.time) return notServed(PAST_READ_THRU)
-            long horizonDays = ((dataset.horizonDays ?: 62) as Number).longValue()
-            if (start.time < readThru.time - horizonDays * DAY) return notServed(BEFORE_HORIZON)
+            // what the copy covers, from its manifest: the last full read's horizon start, carried through merges
+            Timestamp coveredFrom = manifest.coveredFrom as Timestamp
+            if (coveredFrom == null || start.time < coveredFrom.time) return notServed(BEFORE_HORIZON)
 
             return slice(ec, side, dataset, dir, manifest, windowField)
         } catch (Throwable t) {

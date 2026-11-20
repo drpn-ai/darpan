@@ -5,6 +5,7 @@ import darpan.common.DarpanEntityConstants
 import java.time.ZoneId
 import java.time.DateTimeException
 import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 
 import darpan.facade.auth.PasswordResetSupport
 import darpan.facade.auth.TwoFactorSupport
@@ -13,6 +14,9 @@ import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.sanitizeFileToken
 
 class TenantAccessSupport {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(TenantAccessSupport)
+    /** tenantId|zone pairs already warned about, so a bad TenantSetting.timeZone is logged once, not every scan tick. */
+    private static final Set<String> WARNED_BAD_ZONES = ConcurrentHashMap.newKeySet()
     /**
      * Fallback active tenant for server-side entry points that have no interactive user (the
      * reconciliation scheduler). Set only through {@link #withSystemTenant}, never from a service
@@ -602,6 +606,25 @@ class TenantAccessSupport {
     protected static String normalizeTimeZoneId(Object rawTimeZone) {
         if (rawTimeZone instanceof TimeZone) return normalize(rawTimeZone.ID)
         return normalize(rawTimeZone)
+    }
+
+    /**
+     * DAR-BE-328. The zone of one named tenant (TenantSetting.timeZone), for a scheduler thread: it needs no active tenant,
+     * and has no user or l10n fallback, because a cron has no user. UTC when unset; an id that is not a zone reads as UTC
+     * and is logged once at warn.
+     */
+    static ZoneId tenantTimeZoneFor(def ec, String tenantId) {
+        String tenant = normalize(tenantId)
+        String raw = tenant ? normalizeTimeZoneId(findTenantSettingsForTenant(ec, tenant)?.timeZone) : null
+        if (!raw) return ZoneId.of(DEFAULT_TIME_ZONE)
+        try {
+            return ZoneId.of(raw)
+        } catch (DateTimeException ignored) {
+            if (WARNED_BAD_ZONES.add("${tenant}|${raw}".toString())) {
+                logger.warn("Tenant {} has time zone '{}', which is not a zone id; scheduling reads it as UTC", tenant, raw)
+            }
+            return ZoneId.of(DEFAULT_TIME_ZONE)
+        }
     }
 
     protected static def findTenantSettingsForTenant(def ec, String tenantId) {

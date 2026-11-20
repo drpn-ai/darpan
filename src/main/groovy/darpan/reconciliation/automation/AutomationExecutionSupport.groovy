@@ -40,6 +40,9 @@ import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
 import darpan.reconciliation.flowchart.RunFlowchartSupport
+import darpan.peak.PeakPeriodLoader
+import darpan.peak.PeakPeriodSupport
+import darpan.peak.PeakWindow
 import static darpan.common.ValueSupport.fileNameFromPath
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.normalizeInt
@@ -1031,14 +1034,33 @@ class AutomationExecutionSupport {
         Timestamp now = toTimestamp(input.nowTimestamp) ?: nowTimestamp(ec)
         int limit = normalizeInt(input.limit) ?: 100
 
+        // DAR-BE-328: an automation is due when its peak-period start (a run-time move, then peak hours) has come, which
+        // can be before its fire (moved earlier) or after it (moved later, or held out of peak hours). It always runs
+        // with the fire it was waiting on as scheduledFireTime, so its read window and execution row never change; one
+        // that is not due yet keeps its schedule, as a deferral does.
+        Map<String, Object> peakTick = newPeakTick(now)
+        List<Map<String, Object>> peakHeldResults = []
         List<Map<String, Object>> dueAutomationEntries = loadActiveAutomations(ec)
                 .collect { automation ->
                     [
                             automation       : automation,
-                            scheduledFireTime: resolveDueScheduledFireTime(automation, now),
+                            scheduledFireTime: resolveCandidateFireTime(automation, now),
                     ]
                 }
-                .findAll { entry -> entry.scheduledFireTime != null }
+                .findAll { entry ->
+                    Timestamp fire = (Timestamp) entry.scheduledFireTime
+                    if (fire == null) return false
+                    def automation = entry.automation
+                    Instant start = peakStart(ec, peakTick, fire.toInstant(), normalize(readField(automation, "automationId")),
+                            normalize(readField(automation, "companyUserGroupId")), true,
+                            toTimestamp(readField(automation, "lastScheduledFireTime")))
+                    if (!start.isAfter(now.toInstant())) return true
+                    if (!fire.after(now)) {
+                        peakHeldResults << [automationId: normalize(readField(automation, "automationId")),
+                                            scheduledFireTime: fire, peakHeldUntil: Timestamp.from(start)]
+                    }
+                    return false
+                }
                 .sort { left, right ->
                     ((Timestamp) left.scheduledFireTime) <=> ((Timestamp) right.scheduledFireTime)
                 }
@@ -1110,7 +1132,7 @@ class AutomationExecutionSupport {
         }
 
         List<Map<String, Object>> retryResults = reprocessDueRetries(ec, now, limit, input,
-                submissionBudget - scanResults.size())
+                submissionBudget - scanResults.size(), peakTick)
 
         // Only the cap deferrals are a saturation signal; a refused submission already logged its own
         // error above, and saying "in flight" about it would misattribute the cause.
@@ -1128,7 +1150,81 @@ class AutomationExecutionSupport {
                 deferredResults: deferredResults,
                 retryDueCount  : retryResults.size(),
                 retryResults   : retryResults,
+                peakHeldCount  : peakHeldResults.size(),
+                peakHeldResults: peakHeldResults,
         ]
+    }
+
+    /** DAR-BE-328: a tenant's peak windows; tests set their own, as setRunAdmission. Null restores the default. */
+    private static final Closure<List<PeakWindow>> DEFAULT_PEAK_WINDOWS_LOADER = { def ec, String tenantId, LocalDate fromDate ->
+        PeakPeriodLoader.load(ec, tenantId, fromDate)
+    }
+    /** DAR-BE-328: a tenant's own zone (TenantSetting.timeZone, else UTC); tests set their own. Null restores the default. */
+    private static final Closure<ZoneId> DEFAULT_TENANT_ZONE_LOADER = { def ec, String tenantId ->
+        TenantAccessSupport.tenantTimeZoneFor(ec, tenantId)
+    }
+    static Closure<List<PeakWindow>> peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
+    static Closure<ZoneId> tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
+
+    static void setPeakWindowsLoader(Closure<List<PeakWindow>> loader) { peakWindowsLoader = loader ?: DEFAULT_PEAK_WINDOWS_LOADER }
+
+    static void setTenantZoneLoader(Closure<ZoneId> loader) { tenantZoneLoader = loader ?: DEFAULT_TENANT_ZONE_LOADER }
+
+    /** DAR-BE-328: one scan tick's per-tenant peak windows and zones, each loaded at most once and never kept past the tick. */
+    protected static Map<String, Object> newPeakTick(Timestamp now) {
+        return [now: now, windows: [:], zones: [:]] as Map<String, Object>
+    }
+
+    /**
+     * DAR-BE-328: when a run of this fire may start. A run-time move for the fire's date (applyMoves; only while no fire of
+     * that date has run yet, so a move cannot start every later fire of the same day too), then peak hours: a start inside
+     * them waits until they end, and so does one that would happen now while now is inside them. With no peak periods,
+     * or if reading them fails, the fire itself: a peak-period bug never stops scheduling.
+     */
+    protected static Instant peakStart(def ec, Map<String, Object> tick, Instant fire, String automationId, String tenantId,
+                                       boolean applyMoves, Timestamp lastFire = null) {
+        List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
+        if (!windows) return fire
+        try {
+            ZoneId zone = peakZoneOf(ec, tick, tenantId)
+            Instant now = ((Timestamp) tick.now).toInstant()
+            boolean moves = applyMoves && (lastFire == null ||
+                    lastFire.toInstant().atZone(zone).toLocalDate() != fire.atZone(zone).toLocalDate())
+            Instant start = PeakPeriodSupport.effectiveStart(fire, automationId, windows, zone, moves)
+            if (start.isAfter(now)) return start
+            Instant fromNow = PeakPeriodSupport.effectiveStart(now, automationId, windows, zone, false)
+            return fromNow.isAfter(now) ? fromNow : start
+        } catch (Throwable peakError) {
+            logger.error("Peak periods of tenant {} could not be applied to automation {}; it starts at its normal time",
+                    tenantId, automationId, peakError)
+            return fire
+        }
+    }
+
+    private static List<PeakWindow> peakWindowsOf(def ec, Map<String, Object> tick, String tenantId) {
+        Map<String, List<PeakWindow>> cache = (Map<String, List<PeakWindow>>) tick.windows
+        String key = tenantId ?: ""
+        if (cache.containsKey(key)) return cache[key]
+        List<PeakWindow> windows = []
+        if (tenantId) {
+            try {
+                // UTC date less a day: the loader adds its own day back for peak hours that cross midnight in any zone.
+                LocalDate fromDate = ((Timestamp) tick.now).toInstant().atZone(ZoneId.of("UTC")).toLocalDate().minusDays(1)
+                windows = (peakWindowsLoader.call(ec, tenantId, fromDate) ?: []) as List<PeakWindow>
+            } catch (Throwable loadError) {
+                logger.error("Could not read the peak periods of tenant {}; its runs start at their normal time this tick",
+                        tenantId, loadError)
+                windows = []
+            }
+        }
+        cache[key] = windows
+        return windows
+    }
+
+    private static ZoneId peakZoneOf(def ec, Map<String, Object> tick, String tenantId) {
+        Map<String, ZoneId> cache = (Map<String, ZoneId>) tick.zones
+        if (!cache.containsKey(tenantId)) cache[tenantId] = (tenantZoneLoader.call(ec, tenantId) ?: ZoneId.of("UTC")) as ZoneId
+        return cache[tenantId]
     }
 
     /**
@@ -1171,7 +1267,8 @@ class AutomationExecutionSupport {
      * Dead-lettering costs no worker and is never budget-gated.</p>
      */
     protected static List<Map<String, Object>> reprocessDueRetries(def ec, Timestamp now, int limit, Map<String, Object> input,
-            Integer submissionBudget = null) {
+            Integer submissionBudget = null, Map<String, Object> peakTick = null) {
+        Map<String, Object> tick = peakTick ?: newPeakTick(now)
         int remainingBudget = submissionBudget != null ? Math.max(0, submissionBudget) :
                 remainingSubmissionBudget(countInFlightExecutions(ec))
         List pendingRows = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
@@ -1221,6 +1318,13 @@ class AutomationExecutionSupport {
             }
 
             String tenantId = normalize(readField(row, "companyUserGroupId"))
+            // DAR-BE-328: a retry inside peak hours waits for them to end, unclaimed (retryCount and nextRetryDate as
+            // they are), and re-reads its original window when it runs. Moves never apply to a retry.
+            Instant retryStart = peakStart(ec, tick, (scheduledDate ?: now).toInstant(), automationId, tenantId, false)
+            if (retryStart.isAfter(now.toInstant())) {
+                results << [automationExecutionId: execId, automationId: automationId, peakHeldUntil: Timestamp.from(retryStart)]
+                return
+            }
             if (remainingBudget <= 0 || !runAdmission.canStartNow(tenantId)) {
                 // Do NOT claim what cannot be submitted: leaving retryCount and nextRetryDate untouched
                 // means the next tick re-drives this exact row without having burnt a retry on it.
@@ -1920,10 +2024,21 @@ class AutomationExecutionSupport {
         }
     }
 
+    /** The fire this automation waits on, if it has come (callers outside the scan; the scan asks the candidate). */
     static Timestamp resolveDueScheduledFireTime(def automation, Timestamp now) {
         Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())
+        Timestamp candidate = resolveCandidateFireTime(automation, nowValue)
+        return candidate != null && !candidate.after(nowValue) ? candidate : null
+    }
+
+    /**
+     * DAR-BE-328: the fire this automation is waiting on, past or future: nextScheduledFireTime when set, else the last
+     * cron or duration fire not yet run. A peak-period move may start it before it is due.
+     */
+    static Timestamp resolveCandidateFireTime(def automation, Timestamp now) {
+        Timestamp nowValue = now ?: new Timestamp(System.currentTimeMillis())
         Timestamp nextFire = toTimestamp(readField(automation, "nextScheduledFireTime"))
-        if (nextFire != null) return nextFire.after(nowValue) ? null : nextFire
+        if (nextFire != null) return nextFire
 
         String scheduleExpr = normalize(readField(automation, "scheduleExpr"))
         if (!scheduleExpr) return null

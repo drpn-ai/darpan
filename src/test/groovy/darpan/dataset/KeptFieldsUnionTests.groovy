@@ -110,6 +110,13 @@ class KeptFieldsUnionTests {
             ${side('KU_SU', 'FILE_1', 'ku-unread')}
             ${keyField('KU_SU', 'FILE_1', 'unreadable')}
 
+            ${scope('KU_RSI', 'KU_SI')}
+            ${side('KU_SI', 'FILE_1', 'ku-idless')}
+            ${keyField('KU_SI', 'FILE_1', 'a')}
+            ${scope('KU_RSV', 'KU_SV')}
+            ${side('KU_SV', 'FILE_1', 'ku-windowless')}
+            ${keyField('KU_SV', 'FILE_1', 'a')}
+
             ${scope('KU_RSW', 'KU_SW')}
             ${side('KU_SW', 'FILE_1', 'ku-whole')}
             <darpan.rule.Rule ruleId="KU_RAW" ruleSetId="KU_RSW" sequenceNum="1" ruleText="raw" expression="{}" enabled="Y"/>
@@ -199,6 +206,22 @@ class KeptFieldsUnionTests {
         assertNull(DatasetSupport.unionFields(ec, row(rolling("ku-nobody")).getMap() as Map), "no source reads it: whole records")
     }
 
+    /**
+     * Final review I1(b): a trim that would drop the dataset's own id or window field keeps whole records instead, so a copy
+     * is never built without the fields that key and window it (the made-up read cannot keep a field named unread*).
+     */
+    @Test
+    void aTrimThatWouldDropTheIdKeepsWholeRecords() {
+        String control = rolling("ku-idless")
+        assertEquals(["id", "createdAt", "a"], DatasetSupport.keptFields(ec, row(control).getMap() as Map) as List,
+                "test precondition: the same sources with a keepable id trim to a keep list")
+        String idless = rolling("ku-idless", "unreadId")
+        assertNull(DatasetSupport.unionFields(ec, row(idless).getMap() as Map), "the read cannot keep the id: whole records")
+        assertNull(DatasetSupport.keptFields(ec, row(idless).getMap() as Map))
+        String windowless = rolling("ku-windowless", "id", "unreadAt")
+        assertNull(DatasetSupport.unionFields(ec, row(windowless).getMap() as Map), "the read cannot keep the window field: whole records")
+    }
+
     /** A7: tenant B's run and automation sources on a connection of the same name never touch tenant A's union. */
     @Test
     void anOtherTenantsSourcesNeverWidenTheUnion() {
@@ -217,9 +240,9 @@ class KeptFieldsUnionTests {
 
     // ------------------------------------------------------------------------------------------------------------ helpers
 
-    private String rolling(String conn) {
+    private String rolling(String conn, String idField = "id", String windowField = "createdAt") {
         Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "KC_PROJ", sourceConfigId: conn,
-                options: [:], idField: "id", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"])
+                options: [:], idField: idField, windowField: windowField, readRuleEnumId: "DRR_ROLLING"])
         assertEquals([], stored.errors)
         return stored.out.datasetId as String
     }

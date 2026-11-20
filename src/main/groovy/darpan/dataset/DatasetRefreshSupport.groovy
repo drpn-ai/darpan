@@ -348,7 +348,7 @@ class DatasetRefreshSupport {
             // KeptCopyStore deletes its new version.
             CopyIdCheck idCheck = new CopyIdCheck()
             Closure swapAndPrune = { Closure swap ->
-                // a record missing an id part, or two with one copy id, fails the read before anything is swapped in
+                // a record without its id (or part of it), or one copy id with two contents, fails the read before anything is swapped in
                 idCheck.assertClean(dataset.idField as String)
                 return ownerGuard.call({ ->
                     swap.call()
@@ -360,7 +360,8 @@ class DatasetRefreshSupport {
             boolean rolling = isRolling(dataset)
             // A composite idField keys the copy by a derived _copyId written into each record (ruling 3b1-3); the manifest
             // keeps the dataset's own idField list so serving matches it. A single field is left alone. Either way a record
-            // the read repeats with identical content is one record, and one id with two contents fails the read (P3b1-15).
+            // without its id fails the read (P3b1-3), a record the read repeats with identical content is one record, and one id
+            // with two contents fails the read (P3b1-15): the store sees each id once.
             RecordFileIterator records = new RecordFileIterator(file)
             Iterator<Map> source = onePerCopyId(records, idFields(dataset.idField as String), idCheck)
             Map counts
@@ -400,7 +401,7 @@ class DatasetRefreshSupport {
     /**
      * {@code records}, one per copy id (ruling P3b1-15): a record whose copy id this read already gave, with identical content
      * (the same page read twice), is dropped; under a composite idField each record kept gets {@link KeptCopyStore#COPY_ID}.
-     * What {@code check} saw (a missing id part, one id with two contents) fails the read at {@link CopyIdCheck#assertClean}.
+     * What {@code check} saw (a missing id or id part, one id with two contents) fails the read at {@link CopyIdCheck#assertClean}.
      */
     private static Iterator<Map> onePerCopyId(Iterator<Map> records, List<String> idParts, CopyIdCheck check) {
         boolean composite = idParts.size() > 1
@@ -428,12 +429,12 @@ class DatasetRefreshSupport {
     }
 
     /**
-     * What a read saw of its copy ids (rulings P3b1-3, P3b1-15): records with a missing or blank part of a composite id, and
-     * ids given twice with different content. Either would collapse a record into another one in the copy, so
-     * {@link #assertClean} fails the read instead (a configuration fault: the extractor does not supply a declared id field,
-     * or the fields do not identify a record). An id given twice with identical content is the same record read twice, and
-     * is dropped. A single-field record with no id is passed on as before. Holds a content hash per id, the same order of
-     * heap as KeptCopyStore.replace's index.
+     * What a read saw of its copy ids (rulings P3b1-3, P3b1-15): records with a missing or blank id, or part of one, whatever
+     * the id's arity, and ids given twice with different content. Either would collapse a record into another one in the
+     * copy, so {@link #assertClean} fails the read instead (a configuration fault: the extractor does not supply a declared
+     * id field, or the fields do not identify a record). An id given twice with identical content is the same record read
+     * twice, and is dropped. Neither a record without its id nor a repeat goes on, so KeptCopyStore sees each id once. Holds
+     * a content hash per id, the same order of heap as KeptCopyStore.replace's index.
      */
     static class CopyIdCheck {
         long missing = 0
@@ -444,14 +445,15 @@ class DatasetRefreshSupport {
         private final Map<String, String> seen = new HashMap<String, String>()
         private static final Logger LOG = LoggerFactory.getLogger(DatasetRefreshSupport)
 
-        /** True when the record goes on into the copy; false for a repeat (dropped, or a collision that fails the read). */
+        /**
+         * True when the record goes on into the copy; false for a record without its id (which fails the read) and for a
+         * repeat (dropped, or a collision that fails the read).
+         */
         boolean see(Map record, List<String> idParts, String id) {
             boolean blankPart = idParts.any { String f -> record.get(f) == null || String.valueOf(record.get(f)).trim().isEmpty() }
             if (blankPart) {
-                if (idParts.size() > 1 && missing++ == 0) {
-                    firstMissing = idParts.collect { String f -> "${f}=${record.get(f)}".toString() }.join(", ")
-                }
-                return true
+                if (missing++ == 0) firstMissing = idParts.collect { String f -> "${f}=${record.get(f)}".toString() }.join(", ")
+                return false
             }
             String hash = contentHash(record)
             String prior = seen.putIfAbsent(id, hash)
@@ -466,7 +468,7 @@ class DatasetRefreshSupport {
 
         void assertClean(String idField) {
             if (missing > 0) {
-                throw new IllegalStateException(("${missing} records lack a value for part of the id ${idField}; the first has " +
+                throw new IllegalStateException(("${missing} records lack a value for the id ${idField}, or part of it; the first has " +
                         "${firstMissing}. The extractor must supply every declared id field").toString())
             }
             if (duplicates > 0) {

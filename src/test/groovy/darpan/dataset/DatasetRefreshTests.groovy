@@ -438,6 +438,39 @@ class DatasetRefreshTests {
         assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"]).statusId)
     }
 
+    /**
+     * Final review I1, on a made-up system: a single-field id is guarded like a composite one (P3b1-3). Records without the
+     * id used to key as "null" and collapse into one served record; now the read fails naming the count and the first
+     * offender, on a full read and a changed-since one alike, and the copy stays as it was. An idField the records do not
+     * carry (misnamed) fails the first read, and nothing is swapped in.
+     */
+    @Test
+    void aSingleFieldRecordWithoutItsIdFailsTheRead() {
+        String id = madeUpDataset("single-no-id", "id")
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5), order(2, 4, 4)])).errors)
+        Map before = KeptCopyStore.manifest(dir(id))
+        Map missing = order(3, 3, 3)
+        missing.remove("id")
+        Map blank = order(4, 3, 3)
+        blank.id = " "
+        Map full = refresh(id, stub([], [order(1, 5, 5), missing, blank, order(2, 4, 4)]), true)
+        assertTrue(full.errors.any { it.contains("2 records lack a value for the id id") && it.contains("the first has id=null.") },
+                full.errors.toString())
+        assertEquals(before.version, KeptCopyStore.manifest(dir(id)).version, "the copy is as it was")
+        assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"]).statusId)
+        Map changedSince = refresh(id, stub([], [blank]))
+        assertTrue(changedSince.errors.any { it.contains("1 records lack a value for the id id") && it.contains("id= ") },
+                changedSince.errors.toString())
+        assertEquals(before.version, KeptCopyStore.manifest(dir(id)).version, "a merge is refused too")
+        assertEquals(["1", "2"], KeptCopyStore.records(dir(id)).collect { it.id }.sort())
+
+        String misnamed = madeUpDataset("single-misnamed", "orderNumber")
+        Map res = refresh(misnamed, stub([], [order(1, 5, 5), order(2, 4, 4)]))
+        assertTrue(res.errors.any { it.contains("2 records lack a value for the id orderNumber") }, res.errors.toString())
+        assertNull(KeptCopyStore.manifest(dir(misnamed)), "nothing was swapped in")
+        assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: misnamed, readSeqId: "000001"]).statusId)
+    }
+
     /** A made-up system (no real system's row): its extract is the test-only one; the stub stands in for it. */
     private String madeUpDataset(String conn, String idField) {
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">

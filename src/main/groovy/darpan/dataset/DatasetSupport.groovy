@@ -9,6 +9,8 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import groovy.json.JsonOutput
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.security.MessageDigest
 
@@ -16,6 +18,7 @@ import static darpan.common.ValueSupport.normalize
 
 /** DAR-BE-318 plan 3a: helpers for the kept copy of a dataset (the hashing and folder ones are pure). */
 class DatasetSupport {
+    private static final Logger logger = LoggerFactory.getLogger(DatasetSupport)
 
     /** {@link #unionFields}' keep list: the fields a dataset's copy keeps of each record, in order; null for whole records. */
     static Set<String> keptFields(def ec, Map dataset) {
@@ -38,6 +41,8 @@ class DatasetSupport {
      * Null when the connector names no projection service (servingProjectionServiceName, ruling P3b1-9) or takes no keep
      * fields, when no source matches, when any matching source keeps whole records (no projection; every current automation
      * source, which sends none), or when the active tenant is not the dataset's. Only the dataset tenant's rows are read (A7).
+     * Null too, logged, when the trim would drop the dataset's own id, stamp or window field or leave nothing to keep: a copy
+     * without them cannot be keyed, stamped or windowed, so it keeps whole records.
      */
     static Map<String, Set<String>> unionFields(def ec, Map dataset) {
         String tenantId = normalize(dataset?.companyUserGroupId)
@@ -99,11 +104,19 @@ class DatasetSupport {
             }
         }
         if (matched == 0) return null
-        keep.addAll(DatasetRefreshSupport.idFields(dataset.idField as String))
-        [dataset.stampField, dataset.windowField].each { String f = normalize(it); if (f) keep.add(f) }
+        Set<String> own = new LinkedHashSet<String>(DatasetRefreshSupport.idFields(dataset.idField as String))
+        [dataset.stampField, dataset.windowField].each { String f = normalize(it); if (f) own.add(f) }
+        keep.addAll(own)
         Set<String> keepable = keepableFields(ec, connector, keep)
         if (keepable == null) return null
-        return [keep: keep.findAll { it in keepable } as LinkedHashSet<String>, read: read]
+        Set<String> trimmed = keep.findAll { it in keepable } as LinkedHashSet<String>
+        List<String> ownDropped = own.findAll { !(it in keepable) } as List<String>
+        if (ownDropped || trimmed.isEmpty()) {
+            logger.warn("Dataset ${dataset.datasetId} on ${systemEnumId} keeps whole records: its read cannot keep " +
+                    (ownDropped ? "its own field(s) ${ownDropped.join(', ')}" : "any of ${keep.join(', ')}"))
+            return null
+        }
+        return [keep: trimmed, read: read]
     }
 
     /** A rule set or automation that still runs: active and not archived. */
@@ -113,8 +126,8 @@ class DatasetSupport {
 
     /**
      * The fields of {@code fields} the connector's projection service says its read can keep (project#KeptRecords called
-     * with unionFields); null, so whole records, when the service is missing or fails. Leaves the message facade as it
-     * found it.
+     * with unionFields); null, so whole records, when the service is missing or fails (a failure is logged). Leaves the
+     * message facade as it found it.
      */
     private static Set<String> keepableFields(def ec, Map<String, Object> connector, Set<String> fields) {
         String serviceName = normalize(connector.servingProjectionServiceName)
@@ -126,9 +139,14 @@ class DatasetSupport {
         try {
             Map out = ec.service.sync().name(serviceName).parameters([systemEnumId: connector.systemEnumId,
                     unionFields: new ArrayList<String>(fields)]).call() ?: [:]
-            if (ec.message.hasError()) return null
+            if (ec.message.hasError()) {
+                logger.warn("The kept-fields union call ${serviceName} for ${connector.systemEnumId} failed; the copy keeps whole " +
+                        "records: ${ec.message.getErrorsString()}")
+                return null
+            }
             return out.keepableFields instanceof Collection ? (out.keepableFields as Collection).collect { it as String } as Set<String> : null
         } catch (Throwable t) {
+            logger.warn("The kept-fields union call ${serviceName} for ${connector.systemEnumId} failed; the copy keeps whole records", t)
             return null
         } finally {
             ec.message.clearErrors()

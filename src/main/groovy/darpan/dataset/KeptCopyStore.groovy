@@ -106,7 +106,8 @@ class KeptCopyStore {
      * Merges the changed records into the copy: an equal or newer stamp replaces, a new id is appended. The new version
      * covers what the one it builds on covered (coveredFrom and windowField carry forward), but only while it is keyed and
      * stamped the same way: a merge under another idField or stampField, or onto a copy that records no coverage, writes a
-     * version that covers nothing until a full read replaces it.
+     * version that covers nothing until a full read replaces it. {@code changed} gives each id once, with a value
+     * (DatasetRefreshSupport's copy id check, rulings P3b1-3 and P3b1-15).
      */
     static Map merge(File datasetDir, Iterator<Map> changed, String idField, String stampField,
                      Timestamp readThru, Timestamp readAt, Closure swapGuard = null) {
@@ -122,8 +123,6 @@ class KeptCopyStore {
             Map rec = changed.next()
             recordsRead++
             String id = keyOf(rec, idField)
-            Map prior = changes.get(id)
-            if (prior != null && compareStamps(prior.get("stamp"), rec.get(stampField)) > 0) continue
             changes.put(id, entry(id, rec.get(stampField), readAt, rec))
         }
         long changedCount = 0
@@ -172,7 +171,8 @@ class KeptCopyStore {
      * each record by its _copyId. {@code copyInfo} (plan 3b-1): keptFields, the field list the read was sent (null: whole
      * records), recorded in the manifest with the fields the records carry; readFields, what it was asked to read besides;
      * sideFiles, the files the read wrote beside its
-     * records by name (kept with the version; absent: not recorded).
+     * records by name (kept with the version; absent: not recorded). {@code full} gives each id once, with a value
+     * (DatasetRefreshSupport's copy id check, rulings P3b1-3 and P3b1-15).
      */
     static Map replace(File datasetDir, Iterator<Map> full, String idField, String stampField, String createdField,
                        Timestamp horizonStart, Timestamp readThru, Timestamp readAt, int marginDays, Closure swapGuard = null,
@@ -200,7 +200,6 @@ class KeptCopyStore {
                                heldFields: held, sideFiles: copyInfo?.sideFiles instanceof Map ? copyInfo.sideFiles : null]
         Map out = writeVersion(datasetDir, readThru, readAt, info, swapGuard) { Writer w ->
             long count = 0
-            Set<String> written = new HashSet<String>()
             while (full.hasNext()) {
                 Map rec = full.next()
                 recordsRead++
@@ -217,7 +216,7 @@ class KeptCopyStore {
                     addedCount++
                     if (countMisses && neverReadBefore != null && created != null && created.isBefore(neverReadBefore)) missCount++
                 }
-                if (droppedByHorizon || !written.add(id)) continue
+                if (droppedByHorizon) continue
                 Map e = entry(id, rec.get(stampField), readAt, rec)
                 writeLine(w, e)
                 holdKeys(held, e)

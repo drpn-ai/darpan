@@ -575,7 +575,7 @@ class KeptCopySupportTests {
         assertEquals(true, scheduled.requestMetadata?.servedFromCopy, scheduled.toString())
         assertArrayEquals(interactiveFile.bytes, locationFile(scheduled.fileLocation as String).bytes, "the same slice on both paths")
 
-        // --- a whole-days source: a test-only row shaped as NETSUITE_SUITEQL (no NetSuite extractor keeps a copy yet)
+        // --- a whole-days source: a made-up row whose read sends calendar days (windowDateOnly), with its own day window field
         loadDaysConnector()
         String daysId = datasetOf("KC_DAYS", "conn-days", "id", "trandate")
         copyOf(A, daysId, [[id: "nov-10", trandate: "2026-11-10"], [id: "nov-09", trandate: "2026-11-09"],

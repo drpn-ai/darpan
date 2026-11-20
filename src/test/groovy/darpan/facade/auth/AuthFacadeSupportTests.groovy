@@ -596,11 +596,14 @@ class AuthFacadeSupportTests {
         }
     }
 
-    /** The refusal reasons are a contract the UIs switch on (DAR-BE-270 spec, API as built): this is the whole set. */
+    /** The refusal reasons are a contract the UIs switch on (DAR-BE-270 spec, API as built): this is the whole set.
+     *  DAR-BE-301's passkey-first sign-in added PASSKEY_REFUSED, TOO_MANY_ATTEMPTS and PASSWORD_CHANGE_REQUIRED
+     *  (begin/finish#PasskeyFirstSignIn in the API contract). */
     @Test
     void refusalReasonsAreTheDocumentedSet() {
         assertEquals(["CODE", "PASSKEY", "PROOF_NEEDED", "PASSWORD", "CHALLENGE_ENDED", "SETUP_EXPIRED", "PASSKEYS_UNAVAILABLE",
-                      "PASSKEY_LIMIT", "PASSKEY_EXISTS", "ACCOUNT_CANNOT_SIGN_IN", "SIGN_IN_FIRST"] as Set,
+                      "PASSKEY_LIMIT", "PASSKEY_EXISTS", "ACCOUNT_CANNOT_SIGN_IN", "SIGN_IN_FIRST",
+                      "PASSKEY_REFUSED", "TOO_MANY_ATTEMPTS", "PASSWORD_CHANGE_REQUIRED"] as Set,
                 TwoFactorRefusal.values()*.reason.findAll { it } as Set)
     }
 

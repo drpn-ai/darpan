@@ -183,8 +183,9 @@ class KeptCopyParityTests {
         assertEquals(copyVersion, json(new File(run.result.fileLocation as String)).metadata.copyVersion)
 
         // the copy moves on: an order created inside the window arrives and is merged
-        Map res = refresh(id, stub([], [order("5009001", "2026-11-10T12:00:00Z", "2026-11-19T12:00:00Z")]))
+        Map res = atCopyClock(1) { refresh(id, stub([], [order("5009001", "2026-11-10T12:00:00Z", "2026-11-19T12:00:00Z")])) }
         assertEquals([], res.errors)
+        assertEquals("DRK_INCREMENTAL", res.out.readKindEnumId)
         assertNotEquals(copyVersion, KeptCopyStore.manifest(datasetDir).version, "the copy has a newer version")
 
         // a run started now is served the newer copy ...
@@ -224,20 +225,17 @@ class KeptCopyParityTests {
         assertEquals(true, json(servedExtract).metadata.servedFromCopy)
         placeSide2("KCP_EXEC_S")
 
-        // KCP_EXEC_L: the same side 1 read live (the dataset paused), landed where a live execution lands it
+        // KCP_EXEC_L: the same side 1 read live by the same dispatcher (the dataset paused), in an execution folder of its own
+        List<Map> liveCalls = []
         setStatus(id, "DST_PAUSED")
         Map live
         try {
-            live = interactive("conn-judge", [], "judge-live")
+            live = automationSlice("conn-judge", DataManagerSupport.childLocation(runsLocation, "KCP_EXEC_L/${STAMP}".toString()), liveCalls)
         } finally {
             setStatus(id, "DST_ACTIVE")
         }
-        assertEquals([], live.errors)
-        File liveExtract = new File(live.result.fileLocation as String)
-        File liveStampDir = new File(dataManagerRoot, "${DataManagerSupport.RECONCILIATION_RUNS_PATH}/KCP_EXEC_L/${STAMP}")
-        liveStampDir.mkdirs()
-        Files.copy(liveExtract.toPath(), new File(liveStampDir, servedExtract.name).toPath())
-        Files.copy(sidecarOf(live).toPath(), new File(liveStampDir, ExcludedRecordsSidecar.fileNameFor(servedExtract.name)).toPath())
+        assertEquals(1, liveCalls.size(), "the paused dataset reads live through the dispatcher")
+        File liveStampDir = locationFile(live.fileLocation as String).parentFile
         placeSide2("KCP_EXEC_L")
         assertEquals(servedExtract.parentFile.list().sort() as List, liveStampDir.list().sort() as List, "both run folders hold the same files")
 
@@ -258,6 +256,16 @@ class KeptCopyParityTests {
         assertTrue(onServed.out.oldFindings.size() >= 2, "findings exist: ${onServed.out.oldFindings}")
         assertEquals(START_ORDER, onServed.out.oldFindings*.recordKey.sort().find { it == START_ORDER })
         assertEquals(JsonOutput.toJson(onLive.out.oldFindings), JsonOutput.toJson(onServed.out.oldFindings))
+        // the judge ran (its decisions over the slice): findings exist and are the live read's, record for record
+        List<Map> judgedServed = onServed.out.judgedFindings
+        assertTrue(judgedServed.size() >= 2, "the judge found something, or this proves nothing: ${judgedServed}")
+        assertTrue(judgedServed*.recordKey.contains(START_ORDER), judgedServed*.recordKey.toString())
+        assertEquals(["S1"], judgedServed*.statementCode.unique())
+        assertEquals(["NO_OMS_ORDER"], judgedServed*.claimOutcomeId.unique())
+        assertEquals(JsonOutput.toJson(onLive.out.judgedFindings), JsonOutput.toJson(judgedServed))
+        assertEquals(onLive.out.judgedPairCounts, onServed.out.judgedPairCounts)
+        assertTrue((onServed.out.judgedPairCounts.matched as int) > 0 && (onServed.out.judgedPairCounts.missing as int) > 0, "${onServed.out.judgedPairCounts}")
+        assertTrue(new File(replayDir, "judged-findings.json").isFile())
         Map servedDiff = json(new File(replayDir, "diff.json"))
         Map liveDiff = json(new File(dataManagerRoot, "${onLive.out.replayFolder}/diff.json".toString()))
         assertEquals(JsonOutput.toJson(liveDiff.differences), JsonOutput.toJson(servedDiff.differences))
@@ -267,6 +275,42 @@ class KeptCopyParityTests {
         Map liveResult = json(new File(dataManagerRoot, "${onLive.out.replayFolder}/result.json".toString()))
         ["replayOfRunFolder"].each { servedResult.remove(it); liveResult.remove(it) }
         assertEquals(JsonOutput.toJson(new TreeMap(liveResult)), JsonOutput.toJson(new TreeMap(servedResult)))
+    }
+
+    /** The scheduled dispatcher, like the interactive one: ACTIVE serves, PAUSED reads live, and the compare cannot tell. */
+    @Test
+    void anAutomationRunServedMatchesTheSameRunReadLive() {
+        String id = keptDataset("conn-auto")
+        String runsLocation = DataManagerSupport.resolveReconciliationRunsLocation(ec)
+        List<Map> servedCalls = []
+        Map served = automationSlice("conn-auto", DataManagerSupport.childLocation(runsLocation, "KCP_EXEC_AS/${STAMP}".toString()), servedCalls)
+        assertEquals(0, servedCalls.size(), "a served automation side never calls the live extractor")
+        assertEquals(true, served.requestMetadata?.servedFromCopy)
+
+        List<Map> liveCalls = []
+        setStatus(id, "DST_PAUSED")
+        Map live
+        try {
+            live = automationSlice("conn-auto", DataManagerSupport.childLocation(runsLocation, "KCP_EXEC_AL/${STAMP}".toString()), liveCalls)
+        } finally {
+            setStatus(id, "DST_ACTIVE")
+        }
+        assertEquals(1, liveCalls.size())
+        assertEquals(null, live.requestMetadata?.servedFromCopy)
+        assertEquals(served.fileName, live.fileName)
+
+        File servedFile = locationFile(served.fileLocation as String)
+        File liveFile = locationFile(live.fileLocation as String)
+        assertEquals(17, json(servedFile).records.size())
+        assertEquals(JsonOutput.toJson(json(liveFile).records), JsonOutput.toJson(json(servedFile).records))
+        assertEquals(new File(liveFile.parentFile, ExcludedRecordsSidecar.fileNameFor(liveFile.name)).getText("UTF-8"),
+                new File(servedFile.parentFile, ExcludedRecordsSidecar.fileNameFor(servedFile.name)).getText("UTF-8"))
+        Map servedOut = compareAndWrite([result: [fileLocation: servedFile.absolutePath, fileName: servedFile.name]], "auto-served")
+        Map liveOut = compareAndWrite([result: [fileLocation: liveFile.absolutePath, fileName: liveFile.name]], "auto-live")
+        ["diff.json", "result.json"].each { String name ->
+            assertTrue(servedOut[name].length > 0, name)
+            assertArrayEquals(liveOut[name], servedOut[name], "${name} differs between the served and the live automation side")
+        }
     }
 
     // --------------------------------------------------------------------------------------------------------- the runs
@@ -287,7 +331,7 @@ class KeptCopyParityTests {
     }
 
     /** The scheduled dispatcher, as a job runs it, with the run's side landing in outputLocation. */
-    private Map automationSlice(String conn, String outputLocation) {
+    private Map automationSlice(String conn, String outputLocation, List<Map> liveCalls = null) {
         Map automation = [automationId: "KCP_AUTO", companyUserGroupId: A, relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
         Map source = [automationId: "KCP_AUTO", fileSide: "FILE_1", systemEnumId: "SHOPIFY", companyUserGroupId: A,
                       sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
@@ -297,9 +341,10 @@ class KeptCopyParityTests {
         try {
             Map result = (Map) TenantAccessSupport.withSystemTenant(A) {
                 AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, source,
-                        [childWindowStartDate: START, childWindowEndDate: END], [automationExecutionId: "KCP_EXEC", sideOutputLocation: outputLocation])
+                        [childWindowStartDate: START, childWindowEndDate: END], [automationExecutionId: "KCP_EXEC", sideOutputLocation: outputLocation] +
+                        (liveCalls != null ? [liveExtractor: liveExtractor(liveCalls)] : [:]))
             }
-            assertEquals(true, result.requestMetadata?.servedFromCopy, result.toString())
+            if (liveCalls == null) assertEquals(true, result.requestMetadata?.servedFromCopy, result.toString())
             return result
         } finally {
             actAs(EDITOR_USERNAME, A)
@@ -317,7 +362,10 @@ class KeptCopyParityTests {
     private Closure liveExtractor(List<Map> calls) {
         return { String service, Map params ->
             calls << [service: service, params: new LinkedHashMap(params)]
-            Instant from = Instant.parse(params.windowStart as String), to = Instant.parse(params.windowEnd as String)
+            // the interactive path sends ISO instants, the scheduled one raw Timestamps
+            Closure<Instant> instantOf = { Object v -> v instanceof Timestamp ? ((Timestamp) v).toInstant() : Instant.parse(v as String) }
+            Instant from = instantOf(params.windowStart), to = instantOf(params.windowEnd)
+            String fileName = (params.fileName ?: "shopify-${from.toEpochMilli()}-${to.toEpochMilli()}.json") as String
             String field = (params.windowFieldName ?: "createdAt") as String
             List<Map> inWindow = fixtureRecords().findAll { Map r ->
                 Instant at = Instant.parse(r[field] as String)
@@ -325,14 +373,14 @@ class KeptCopyParityTests {
             }
             Map applied = SourceFilterSupport.applyToRecords(inWindow, SourceFilterSupport.parseRules(params.sourceFilters as List))
             File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
-            File out = new File(dir, params.fileName as String)
-            out.setText(JsonOutput.toJson([metadata: [live: true, windowStart: params.windowStart, windowEnd: params.windowEnd,
+            File out = new File(dir, fileName)
+            out.setText(JsonOutput.toJson([metadata: [live: true, windowStart: from.toString(), windowEnd: to.toString(),
                                                       filters: applied.configuredExclusions],
                                            records : applied.records]), "UTF-8")
             if (applied.excludedCollector) {
-                ExcludedRecordsSidecar.writeBeside(ec, (Map) applied.excludedCollector, params.outputLocation as String, params.fileName as String, dir)
+                ExcludedRecordsSidecar.writeBeside(ec, (Map) applied.excludedCollector, params.outputLocation as String, fileName, dir)
             }
-            return [fileLocation: out.absolutePath, fileName: params.fileName, recordCount: ((List) applied.records).size()]
+            return [fileLocation: DataManagerSupport.childLocation(params.outputLocation as String, fileName), fileName: fileName, recordCount: ((List) applied.records).size()]
         }
     }
 
@@ -354,18 +402,23 @@ class KeptCopyParityTests {
         assertEquals([], stored.errors)
         String id = stored.out.datasetId
         datasetIds[conn] = id
-        ec.user.setEffectiveTime(Timestamp.from(COPY_READ_AT))
-        try {
-            Map res = refresh(id, stub([]))
-            assertEquals([], res.errors)
-            assertEquals("DRK_FULL", res.out.readKindEnumId)
-        } finally {
-            ec.user.setEffectiveTime(null)
-        }
+        Map res = atCopyClock(0) { refresh(id, stub([])) }
+        assertEquals([], res.errors)
+        assertEquals("DRK_FULL", res.out.readKindEnumId)
         Map manifest = KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id))
         assertEquals(30, manifest.recordCount)
         assertEquals(COPY_READ_AT, (manifest.readThru as Timestamp).toInstant(), "the copy reads through the day the fixture ends")
         return id
+    }
+
+    /** Runs work with the clock at the copy's day (plus days), so no read depends on the wall clock; restored after. */
+    private Map atCopyClock(int plusDays, Closure<Map> work) {
+        ec.user.setEffectiveTime(Timestamp.from(COPY_READ_AT.plusSeconds(plusDays * 86400L)))
+        try {
+            return work.call()
+        } finally {
+            ec.user.setEffectiveTime(null)
+        }
     }
 
     private Map refresh(String id, Closure extractor) {
@@ -424,8 +477,9 @@ class KeptCopyParityTests {
     }
 
     private Map replay(String executionId) {
+        // judgeWithDecisions left at the service's default: the judge runs
         return underFacadeGrant("judge.JudgeReplayServices.replay#CheckJudgement", [checkId: checkId,
-                runFolder: "${DataManagerSupport.RECONCILIATION_RUNS_PATH}/${executionId}".toString(), judgeWithDecisions: false])
+                runFolder: "${DataManagerSupport.RECONCILIATION_RUNS_PATH}/${executionId}".toString()])
     }
 
     // ------------------------------------------------------------------------------------------------------------ setup
@@ -463,6 +517,60 @@ class KeptCopyParityTests {
                 savedRunId: "KCP_RS", automationId: "KCP_AUTO", file1RecordType: "order", file2RecordType: "order"])
         insert("darpan.audit.AuditStatementCheck", [checkId: checkId, statementId: "KCP_S1", companyUserGroupId: A, sequenceNum: 1,
                 diffTypes: "MISSING_IN_FILE_2"])
+        seedDecisions()
+    }
+
+    /**
+     * The judge's config for the check, as JudgeReplayTests seeds it: a Must hold decision (NO_OMS_ORDER: the OMS holds no record)
+     * that statement S1 promises, and an Explains decision (a partly refunded order is EXPECTED, the rest UNEXPLAINED).
+     */
+    private void seedDecisions() {
+        actAs(EDITOR_USERNAME, A)
+        Map generated = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", [checkId: checkId,
+                file1SystemEnumId: "SHOPIFY", file2SystemEnumId: "NETSUITE",
+                sampleKeys: [file1: ["legacyResourceId", "displayFinancialStatus"], file2: ["externalOrderId", "total"]]]))
+        factTypeId = generated.factTypeId
+        String mustHold = createDecision("N", ["NO_OMS_ORDER"])
+        storeRule(mustHold, "no OMS order", 10, [line("01", "netsuite_presence", "ENTCO_NOT_EQUALS", "KEPT")], "NO_OMS_ORDER")
+        meaning(mustHold, "NO_OMS_ORDER", "JOK_FINDING", "The OMS holds no order")
+        String explains = createDecision("Y", ["PARTLY_REFUNDED", "UNEXPLAINED"])
+        storeRule(explains, "partly refunded", 10, [line("01", "claim", "ENTCO_EQUALS", "NO_OMS_ORDER"),
+                line("02", "shopify_displayFinancialStatus", "ENTCO_EQUALS", "PARTIALLY_REFUNDED")], "PARTLY_REFUNDED")
+        meaning(explains, "PARTLY_REFUNDED", "JOK_EXPECTED", "Partly refunded, not in the OMS")
+        meaning(explains, "UNEXPLAINED", "JOK_FINDING", "Unexplained")
+        insert("darpan.judge.CheckDecision", [checkId: checkId, stageEnumId: "CDS_MUST_HOLD", companyUserGroupId: A, ruleSetId: mustHold])
+        insert("darpan.judge.CheckDecision", [checkId: checkId, stageEnumId: "CDS_EXPLAINS", companyUserGroupId: A, ruleSetId: explains])
+        def statement = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "KCP_S1").disableAuthz().useCache(false).one()
+        statement.setAll([claimRuleSetId: mustHold, claimOutcomeId: "NO_OMS_ORDER"])
+        statement.update()
+    }
+
+    private String factTypeId
+
+    private String createDecision(String firstMatchOnly, List<String> outcomeIds) {
+        Map created = ok(underFacadeGrant("create#rules.RuleSet", [description: "Parity decision", firstMatchOnly: firstMatchOnly,
+                factTypes: [[factTypeId: factTypeId]], outcomes: outcomeIds.collect { [outcomeId: it] }]))
+        return created.ruleSetId as String
+    }
+
+    private String storeRule(String ruleSetId, String ruleName, int priority, List<Map> lines, String outcomeId) {
+        return ok(underFacadeGrant("moqui.rules.RuleServices.store#Rule", [ruleSetId: ruleSetId, ruleName: ruleName, priority: priority,
+                conditions: lines, actions: [[actionTypeId: "RAT_OUTCOME", outcomeId: outcomeId]]])).ruleId as String
+    }
+
+    private Map line(String seq, String fieldName, String operatorEnumId, String compareValue) {
+        return [conditionSeqId: seq, conditionTypeId: "RCT_COMPARE", factTypeId: factTypeId, fieldName: fieldName,
+                operatorEnumId: operatorEnumId, compareValue: compareValue]
+    }
+
+    private void meaning(String ruleSetId, String outcomeId, String kind, String label) {
+        ok(underFacadeGrant("judge.JudgeConfigServices.store#DecisionOutcome", [ruleSetId: ruleSetId, outcomeId: outcomeId,
+                outcomeKindEnumId: kind, label: label]))
+    }
+
+    private static Map ok(Map result) {
+        assertEquals([], result.errors, "call failed")
+        return result.out as Map
     }
 
     private File fixtureFile(String name) {

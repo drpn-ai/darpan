@@ -2219,7 +2219,10 @@ class AutomationExecutionSupport {
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
         // Counted first: only an error this call adds is its failure (a side's login can leave one of its own).
         int errorsBefore = ((ec.message.getErrors() ?: []) as List).size()
-        Map<String, Object> result = (call.call() ?: [:]) as Map<String, Object>
+        // A caller's own live extractor (params.liveExtractor, a Closure(serviceName, serviceParams)), for tests, as
+        // RunExtractSupport.extractApiSource takes its serviceCaller; absent in production, which calls the service.
+        Closure liveExtractor = params?.liveExtractor instanceof Closure ? (Closure) params.liveExtractor : null
+        Map<String, Object> result = ((liveExtractor != null ? liveExtractor.call(serviceName, serviceParams) : call.call()) ?: [:]) as Map<String, Object>
         List<String> errors = (result.errors instanceof Collection ? (Collection) result.errors : [])
                 .collect { Object error -> normalize(error) }
                 .findAll { String error -> error } as List<String>

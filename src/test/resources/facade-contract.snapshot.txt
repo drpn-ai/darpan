@@ -1851,7 +1851,9 @@ SERVICE save PeakPeriod
   allow-remote: true
   IN:
     fromDate : Date
+    hotwaxReadSharePct : Integer
     isActive : Boolean
+    netsuiteSerial : Boolean
     peakHoursEnd : String
     peakHoursStart : String
     peakPeriodId : String

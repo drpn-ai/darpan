@@ -23952,6 +23952,12 @@
                     "peakHoursEnd": {
                         "type": "string"
                     },
+                    "hotwaxReadSharePct": {
+                        "type": "integer"
+                    },
+                    "netsuiteSerial": {
+                        "type": "boolean"
+                    },
                     "isActive": {
                         "type": "boolean"
                     }

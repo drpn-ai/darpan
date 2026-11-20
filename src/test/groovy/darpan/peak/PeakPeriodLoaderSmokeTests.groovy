@@ -40,6 +40,7 @@ class PeakPeriodLoaderSmokeTests {
                                             groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
 
         period("PA_ACTIVE", A, "2026-11-24", "2026-12-01", "Y", "08:00", "23:00")
+        create("darpan.peak.PeakPeriod", [peakPeriodId: "PA_ACTIVE", hotwaxReadSharePct: 25, netsuiteSerial: "Y"])
         period("PA_INACTIVE", A, "2026-11-24", "2026-12-01", "N", "08:00", "23:00")
         period("PA_PAST", A, "2026-10-01", "2026-10-31", "Y", null, null)
         period("PA_BAD_HOURS", A, "2026-12-10", "2026-12-12", "Y", "8am", "23:00")
@@ -112,6 +113,20 @@ class PeakPeriodLoaderSmokeTests {
         assertEquals(ZoneId.of("America/Los_Angeles"), TenantAccessSupport.tenantTimeZoneFor(ec, A))
         assertEquals(ZoneId.of("UTC"), TenantAccessSupport.tenantTimeZoneFor(ec, B), "an invalid zone reads as UTC")
         assertEquals(ZoneId.of("UTC"), TenantAccessSupport.tenantTimeZoneFor(ec, "NO_SUCH_TENANT"))
+    }
+
+    @Test
+    void readLimitsCoversEveryDateOfTheActivePeriodOnly() {
+        ReadLimits on = new ReadLimits(25, true)
+        assertEquals(on, PeakPeriodLoader.readLimits(ec, A, LocalDate.of(2026, 11, 24)))
+        assertEquals(on, PeakPeriodLoader.readLimits(ec, A, LocalDate.of(2026, 12, 1)))
+        assertEquals(ReadLimits.NONE, PeakPeriodLoader.readLimits(ec, A, LocalDate.of(2026, 11, 23)))
+        assertEquals(ReadLimits.NONE, PeakPeriodLoader.readLimits(ec, A, LocalDate.of(2026, 12, 2)))
+        assertEquals(ReadLimits.NONE, PeakPeriodLoader.readLimits(ec, "NO_SUCH_TENANT", LocalDate.of(2026, 11, 25)))
+        assertEquals(ReadLimits.NONE, PeakPeriodLoader.readLimits(ec, B, LocalDate.of(2026, 11, 25)), "B's period carries no limits")
+        // PA_INACTIVE overlaps the same dates but is off: it never adds limits (it has none here anyway).
+        create("darpan.peak.PeakPeriod", [peakPeriodId: "PA_INACTIVE", hotwaxReadSharePct: 10, netsuiteSerial: "Y"])
+        assertEquals(on, PeakPeriodLoader.readLimits(ec, A, LocalDate.of(2026, 11, 25)), "an inactive period is ignored")
     }
 
     private void period(String id, String tenant, String from, String thru, String active, String start, String end) {

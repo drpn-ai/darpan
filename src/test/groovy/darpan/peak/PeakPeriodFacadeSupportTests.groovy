@@ -180,4 +180,19 @@ class PeakPeriodFacadeSupportTests {
         assertEquals(['Run A1'], PeakPeriodFacadeSupport.heldRuns(scheduled, w, LA)*.targetLabel,
                 'the audit moved to 06:00 every day is no longer held; A1 is held on the days it is not moved')
     }
+
+    @Test
+    void shareOutOfRangeRefused() {
+        ['0', '101', 'abc', '-5', '12.5', 0, 101].each { bad ->
+            assertEquals(['HotWax share must be a whole number from 1 to 100.'],
+                    PeakPeriodFacadeSupport.validatePeriod(BLACK_FRIDAY + [hotwaxReadSharePct: bad], []), "share ${bad}")
+        }
+    }
+
+    @Test
+    void shareBlankIsNormal() {
+        [null, '', '  ', 1, 100, '25'].each { ok ->
+            assertEquals([], PeakPeriodFacadeSupport.validatePeriod(BLACK_FRIDAY + [hotwaxReadSharePct: ok], []), "share ${ok}")
+        }
+    }
 }

@@ -70,6 +70,27 @@ class PeakPeriodLoader {
         return windows.findAll { it.fromDate != null }.sort { PeakWindow w -> w.fromDate }
     }
 
+    /**
+     * The read limits of the tenant's active period covering tenantDate (both ends inclusive), else NONE. Periods may not
+     * overlap, so at most one applies; if bad data makes two, the tighter share (lower number) and any serial win.
+     */
+    static ReadLimits readLimits(def ec, String tenantId, LocalDate tenantDate) {
+        String tenant = normalize(tenantId)
+        if (!tenant || tenantDate == null) return ReadLimits.NONE
+        Integer share = null
+        boolean serial = false
+        (rows(ec, "darpan.peak.PeakPeriod", tenant).list() ?: []).each { period ->
+            LocalDate from = toLocalDate(period.get("fromDate"))
+            LocalDate thru = toLocalDate(period.get("thruDate"))
+            if (normalize(period.get("isActive")) == "N" || from == null || thru == null) return
+            if (tenantDate.isBefore(from) || tenantDate.isAfter(thru)) return
+            Integer pct = period.get("hotwaxReadSharePct") as Integer
+            if (pct != null && (share == null || pct < share)) share = pct
+            if (normalize(period.get("netsuiteSerial")) == "Y") serial = true
+        }
+        return (share == null && !serial) ? ReadLimits.NONE : new ReadLimits(share, serial)
+    }
+
     private static RunTimeMove moveOf(def ec, String tenant, def runTime, Map<String, Set<String>> auditAutomations) {
         String runTimeId = normalize(runTime.get("runTimeId"))
         LocalTime at

@@ -91,6 +91,8 @@
             <parameter name="thruDate" type="Date"/>
             <parameter name="peakHoursStart"/>
             <parameter name="peakHoursEnd"/>
+            <parameter name="hotwaxReadSharePct" type="Integer"/>
+            <parameter name="netsuiteSerial" type="Boolean"/>
             <parameter name="isActive" type="Boolean"/>
         </in-parameters>
         <out-parameters>
@@ -112,7 +114,7 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="isActiveValue" from="isActive == null ? (existingPeriod?.isActive ?: 'Y') : (isActive ? 'Y' : 'N')"/>
-                <set field="periodMap" from="[periodName: ((periodName)?.toString()?.trim()) ?: null, fromDate: fromDate, thruDate: thruDate, peakHoursStart: ((peakHoursStart)?.toString()?.trim()) ?: null, peakHoursEnd: ((peakHoursEnd)?.toString()?.trim()) ?: null, isActive: isActiveValue]"/>
+                <set field="periodMap" from="[periodName: ((periodName)?.toString()?.trim()) ?: null, fromDate: fromDate, thruDate: thruDate, peakHoursStart: ((peakHoursStart)?.toString()?.trim()) ?: null, peakHoursEnd: ((peakHoursEnd)?.toString()?.trim()) ?: null, hotwaxReadSharePct: hotwaxReadSharePct, isActive: isActiveValue]"/>
                 <set field="otherPeriods" from="darpan.peak.PeakPeriodFacadeSupport.periodsOf(ec, tenantId).findAll { it.peakPeriodId != peakPeriodIdValue }"/>
                 <set field="validationErrors" from="darpan.peak.PeakPeriodFacadeSupport.validatePeriod(periodMap, otherPeriods)"/>
                 <iterate list="validationErrors" entry="validationError"><message error="true">${validationError}</message></iterate>
@@ -122,6 +124,9 @@
                 <!-- Set explicitly: null is the intended value when peak hours are cleared, and findAll strips nulls. -->
                 <set field="ignoreStart" from="storeMap.put('peakHoursStart', periodMap.peakHoursStart)"/>
                 <set field="ignoreEnd" from="storeMap.put('peakHoursEnd', periodMap.peakHoursEnd)"/>
+                <!-- Blank share = no HotWax limit (null). Serial: absent keeps the stored value on update, 'N' on create. -->
+                <set field="ignoreShare" from="storeMap.put('hotwaxReadSharePct', hotwaxReadSharePct)"/>
+                <set field="ignoreSerial" from="storeMap.put('netsuiteSerial', netsuiteSerial == null ? (existingPeriod?.netsuiteSerial ?: 'N') : (netsuiteSerial ? 'Y' : 'N'))"/>
                 <service-call name="store#darpan.peak.PeakPeriod" in-map="storeMap" out-map="storeResult"/>
                 <if condition="!ec.message.hasError()"><set field="peakPeriodId" from="peakPeriodIdValue ?: ((storeResult?.peakPeriodId)?.toString()?.trim())"/></if>
                 <if condition="!ec.message.hasError()"><message>Saved peak period.</message></if>

@@ -51,6 +51,11 @@ class PeakPeriodFacadeSupport {
             else if (s == e) errors << "Peak hours cannot start and end at the same time."
         }
 
+        Object share = period?.get("hotwaxReadSharePct")
+        if (share != null && share.toString().trim() && !validShare(share)) {
+            errors << "HotWax share must be a whole number from 1 to 100."
+        }
+
         boolean selfActive = normalize(period?.get("isActive")) != "N"
         if (errors.isEmpty() && selfActive) {
             for (Map other in (otherActivePeriods ?: [])) {
@@ -65,6 +70,15 @@ class PeakPeriodFacadeSupport {
             }
         }
         return errors
+    }
+
+    private static boolean validShare(Object share) {
+        try {
+            BigDecimal n = new BigDecimal(share.toString().trim())
+            return n.stripTrailingZeros().scale() <= 0 && n >= 1 && n <= 100
+        } catch (NumberFormatException ignored) {
+            return false
+        }
     }
 
     /** Error sentences for a run time about to be saved. tenantTargetIds: the tenant's own automation and audit ids. */

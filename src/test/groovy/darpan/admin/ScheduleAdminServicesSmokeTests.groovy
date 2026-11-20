@@ -114,7 +114,7 @@ class ScheduleAdminServicesSmokeTests {
         }
         List<Map> jobs = ok(svc("get#ServiceJobs", [:])).result.jobs
         List<Map> mine = jobs.findAll { it.defaultCronExpression != null }
-        assertEquals(10, mine.size(), mine*.jobName.toString())
+        assertEquals(11, mine.size(), mine*.jobName.toString())
         mine.each { Map j ->
             assertTrue(j.editable, j.jobName)
             assertFalse(j.edited, j.jobName)

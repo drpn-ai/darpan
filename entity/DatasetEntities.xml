@@ -27,7 +27,7 @@
         <field name="readThru" type="date-time"/>
         <field name="lastReadAt" type="date-time"/>
         <field name="lastFullReadAt" type="date-time"/>
-        <field name="nextReadDate" type="date"/>
+        <field name="nextReadDate" type="date-time"><description>When the scan next starts a read: the day after the last read, at readHourLocal in the tenant's timezone. Empty: due now.</description></field>
         <field name="recordCount" type="number-integer"/>
         <field name="lastMissCount" type="number-integer"/>
         <field name="warningText" type="text-medium"/>

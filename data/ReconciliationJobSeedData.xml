@@ -55,4 +55,13 @@
             serviceName="retention.RetentionServices.run#Retention"
             defaultCronExpression="0 30 3 * * ?"
             defaultPaused="Y" minIntervalMinutes="360" resumePreviewService="retention.RetentionServices.dryRun#Retention"/>
+
+    <!-- DAR-BE-318 plan 3a: refresh the kept copy of datasets (dataset.DatasetServices). Seeded PAUSED: nothing reads a
+         source for a dataset until the job is switched on, and only ACTIVE datasets are read. -->
+    <moqui.service.job.ServiceJob
+            jobName="scan_DueDatasets_30m"
+            description="Start the due refreshes of the kept copy of datasets, each as its dataset's tenant."
+            serviceName="dataset.DatasetServices.scan#DueDatasets"
+            defaultCronExpression="0 0/30 * * * ?"
+            defaultPaused="Y" minIntervalMinutes="15"/>
 </entity-facade-xml>

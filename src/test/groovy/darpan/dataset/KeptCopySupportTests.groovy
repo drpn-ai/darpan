@@ -568,15 +568,10 @@ class KeptCopySupportTests {
         assertArrayEquals(interactiveFile.bytes, locationFile(scheduled.fileLocation as String).bytes, "the same slice on both paths")
 
         // --- a whole-days source: a test-only row shaped as NETSUITE_SUITEQL (no NetSuite extractor keeps a copy yet)
-        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_DAYS" extractServiceName="${RETURNS_EXTRACT}"
-                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_DAYS_TYPE"
-                configParameterName="omsRestSourceConfigId" preserveWindowInstants="N" windowDateOnly="Y" windowFieldName="trandate"
-                enabled="Y"/>
-        </entity-facade-xml>""").dummyFks(true).load()
+        loadDaysConnector()
         String daysId = datasetOf("KC_DAYS", "conn-days", "id", "trandate")
         copyOf(A, daysId, [[id: "nov-10", trandate: "2026-11-10"], [id: "nov-09", trandate: "2026-11-09"],
-                           [id: "nov-11", trandate: "2026-11-11"], [id: "undated"]], "id", "trandate")
+                           [id: "nov-11", trandate: "2026-11-11"]], "id", "trandate")
         List<Map> dayCalls = []
         Map dayRun = interactiveSide([systemEnumId: "KC_DAYS", sourceConfigType: "KC_DAYS_TYPE", sourceConfigId: "conn-days",
                                       fileSide: "FILE_1"], window, dayCalls)
@@ -638,6 +633,11 @@ class KeptCopySupportTests {
         assertTrue(served.served as boolean, served.reason as String)
         assertEquals("entryDate", served.metadata.windowFieldName)
         assertEquals(["r1"], json(served.extractFile as File).records*.returnId)
+        // the same side asking its source to keep only some fields reads live: the slice holds whole records
+        Map keeping = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-own-field", [location: runLocation("own-keep"), runToken: "k"],
+                START, END, "slice.json", ["returnId", "entryDate"], null, null, "UTC")
+        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, keeping,
+                [tenantId: A, windowStart: START, windowEnd: END])).reason)
 
         // the same source kept on another field than its extractor windows on
         String other = datasetOf("OMS_RETURNS_GQL", "conn-other-field", "returnId", "returnDate")
@@ -680,7 +680,54 @@ class KeptCopySupportTests {
         assertEquals(KeptCopySupport.ROUNDS_TO_DAYS, refs.reason)
     }
 
+    /**
+     * Ruling P3b1-6: a slice drops a record only when it places it outside the window. An OMS order-item unit carries
+     * omsOrderDate, never the orderDate its connector windows on (the server filters on the order's date), so a unit copy
+     * cannot be placed and the side reads live; it is never served an empty slice. A whole-days record with no date reads
+     * live the same way.
+     */
+    @Test
+    void aRecordTheSliceCannotPlaceMakesTheSideReadLive() {
+        Map units = SourceSystemConnectorSupport.resolve(ec, "OMS_ORDER_ITEMS_GQL")
+        assertEquals("orderDate", units.windowFieldName, "the seeded row")
+        String id = datasetOf("OMS_ORDER_ITEMS_GQL", "conn-units", "unitId", "orderDate")
+        copyOf(A, id, [[unitId: "u1", orderId: "o1", omsOrderDate: "2026-11-10T09:00:00Z"],
+                       [unitId: "u2", orderId: "o1", omsOrderDate: "2026-11-10T09:00:00Z"]], "unitId", "orderDate")
+        List<Map> calls = []
+        Map run = interactiveSide([systemEnumId: "OMS_ORDER_ITEMS_GQL", sourceConfigType: "HOTWAX_OMS_GQL_ORDER_ITEMS",
+                                   sourceConfigId: "conn-units", fileSide: "FILE_1"], [windowStartDate: START, windowEndDate: END, timeZone: "UTC"], calls)
+        assertEquals([], run.errors)
+        assertEquals(1, calls.size(), "read live, never served an empty slice")
+        assertEquals("orderDate", calls[0].params.windowFieldName)
+        Map params = RunExtractSupport.buildExtractParams(units, "FILE_1", "conn-units", [location: runLocation("units"), runToken: "units"],
+                START, END, "slice.json", null, null, null, "UTC")
+        params.outputLocation = runLocation("units")
+        params.fileName = "slice.json"
+        Map direct = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(units, params, [tenantId: A, windowStart: START, windowEnd: END]))
+        assertFalse(direct.served as boolean)
+        assertTrue((direct.reason as String).contains("has no orderDate"), direct.reason as String)
+        assertFalse(new File(locationFile(runLocation("units")), "slice.json").exists(), "nothing is left behind")
+
+        loadDaysConnector()
+        String daysId = datasetOf("KC_DAYS", "conn-days-undated", "id", "trandate")
+        copyOf(A, daysId, [[id: "nov-10", trandate: "2026-11-10"], [id: "undated"]], "id", "trandate")
+        Map window = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-11-10T00:00:00Z"), ts("2026-11-11T00:00:00Z"), TENANT_ZONE)
+        Map undated = daySide("conn-days-undated", window, "days-undated")
+        assertFalse(undated.served as boolean)
+        assertTrue((undated.reason as String).contains("has no trandate"), undated.reason as String)
+    }
+
     private static final String LIVE_TEXT = '{"metadata":{"live":true},"records":[{"id":"live-1"}]}'
+
+    /** A test-only connector row shaped as NETSUITE_SUITEQL (whole days, a DATE field), on an extractor that keeps copies. */
+    private void loadDaysConnector() {
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_DAYS" extractServiceName="${RETURNS_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_DAYS_TYPE"
+                configParameterName="omsRestSourceConfigId" preserveWindowInstants="N" windowDateOnly="Y" windowFieldName="trandate"
+                enabled="Y"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+    }
 
     /** An OMS return as the GraphQL extract writes it: entryDate in epoch milliseconds (OmsGqlReturnAssembler). */
     private static Map omsReturn(String id, String entryDate) {

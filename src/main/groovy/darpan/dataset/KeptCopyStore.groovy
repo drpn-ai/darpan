@@ -379,8 +379,16 @@ class KeptCopyStore {
         return i == null ? null : Timestamp.from(i)
     }
 
-    private static Instant parseInstant(Object value) {
+    /**
+     * A record's date or stamp as an instant: ISO-8601 text (an instant or an offset date-time), or integral epoch
+     * milliseconds, as the HotWax extracts write entryDate and orderDate. Null when absent or unreadable. KeptCopySupport
+     * reads a served side's window values with this same parser.
+     */
+    static Instant parseInstant(Object value) {
         if (value == null) return null
+        if (value instanceof Long || value instanceof Integer || value instanceof BigInteger) {
+            return Instant.ofEpochMilli(((Number) value).longValue())
+        }
         String s = value.toString().trim()
         if (!s) return null
         try { return Instant.parse(s) } catch (Exception ignored) { }

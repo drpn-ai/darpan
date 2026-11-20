@@ -263,6 +263,25 @@ class KeptCopyStoreTests {
         assertEquals(0, r2.removedCount)
     }
 
+    /** OMS-shaped copies (DAR-BE-318 Task 2b): dates and stamps in epoch milliseconds are compared as instants. */
+    @Test void epochMillisDatesAndStampsAreInstants() {
+        long oct3 = ts("2026-10-03T14:22:01Z").time
+        Closure<Map> oms = { String id, long stamp, long created, String total ->
+            [id: id, updatedAt: stamp, createdAt: created, total: total] }
+        merge(dir, [oms("1", oct3, oct3, "10.00"), oms("2", oct3, oct3, "20.00")])
+        // a later stamp replaces, an earlier one does not
+        Map r = merge(dir, [oms("1", oct3 + 1000, oct3, "11.00"), oms("2", oct3 - 1000, oct3, "99.00")])
+        assertEquals(1, r.changedCount)
+        assertEquals("11.00", byId()["1"].record.total)
+        assertEquals("20.00", byId()["2"].record.total)
+        // a full read: a change under an unmoved stamp is a miss, and a record created before the horizon is dropped
+        long june = ts("2026-06-01T00:00:00Z").time
+        Map full = replace(dir, [oms("1", oct3 + 1000, oct3, "12.00"), oms("2", oct3, oct3, "20.00"), oms("old", june, june, "1.00")])
+        assertEquals(1, full.missCount)
+        assertEquals(["1", "2"], byId().keySet().sort())
+        assertEquals(2L, KeptCopyStore.manifest(dir).recordCount)
+    }
+
     @Test void pruneKeepsTwoVersions() {
         List<String> made = (1..4).collect { merge(dir, [rec("r" + it, "2026-10-03T14:22:01Z")]).version }
         KeptCopyStore.prune(dir)

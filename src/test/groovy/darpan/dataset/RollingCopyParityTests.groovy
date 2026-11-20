@@ -3,6 +3,8 @@ package darpan.dataset
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.RunExtractSupport
+import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.source.SourceFilterSupport
@@ -41,6 +43,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * connector row is the seeded one (Task 2b, ruling 3b1-9): OMS_RETURNS_GQL names no windowFieldName and no
  * preserveWindowInstants, so the side's field is its extractor's own (entryDate) and the slice is cut on the very instants
  * the live call sends.
+ *
+ * A side that sends keepRecordFields (every interactive side with a compare scope) reads live: the copy holds whole
+ * records and the extractor's projection is out of the slice's reach. So the served run here is the scheduled one, which
+ * sends no keep fields, and the interactive one is pinned to read live. Each fixture return carries returnDate, a field
+ * outside the connector's keepFieldsBase, and the live stub projects as the real extractor does (keep fields plus items).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RollingCopyParityTests {
@@ -93,6 +100,12 @@ class RollingCopyParityTests {
             <darpan.rule.RuleSetCompareSource compareScopeId="RCP_SCOPE" fileSide="FILE_2" systemEnumId="NETSUITE" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="returnId" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RCP_SCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].returnChannelEnumId" operator="EXCLUDE_IN" filterValues="POS_RTN_CHANNEL" companyUserGroupId="${A}"/>
+            <darpan.reconciliation.ReconciliationAutomation automationId="RCP_AUTO" automationName="returns copy" companyUserGroupId="${A}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="RCP_RS"/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="RCP_AUTO" fileSide="FILE_1" companyUserGroupId="${A}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="OMS_RETURNS_GQL"/>
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="RCP_AUTO" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].returnChannelEnumId" operator="EXCLUDE_IN" filterValues="POS_RTN_CHANNEL" companyUserGroupId="${A}"/>
         </entity-facade-xml>""").dummyFks(true).load()
         // the other side: NetSuite lacks R004 (the start return), holds R017 (the end return, outside the window) and a stranger
@@ -155,7 +168,7 @@ class RollingCopyParityTests {
         assertEquals([], atCopyClock(0) { refresh(id, stub([])) }.errors)
 
         List<Map> servedCalls = []
-        Map served = interactive(servedCalls, "served")
+        Map served = scheduled(servedCalls, "served")
         assertEquals([], served.errors)
         assertEquals(0, servedCalls.size(), "the served run never calls the live extractor")
 
@@ -163,16 +176,16 @@ class RollingCopyParityTests {
         List<Map> liveCalls = []
         Map live
         try {
-            live = interactive(liveCalls, "live")
+            live = scheduled(liveCalls, "live")
         } finally {
             setStatus(id, "DST_ACTIVE")
         }
         assertEquals([], live.errors)
         assertEquals(1, liveCalls.size(), "the paused dataset reads live, once")
         assertFalse(liveCalls[0].params.containsKey("windowFieldName"), "the live call names no field: its extractor windows on entryDate")
-        assertEquals(START.toInstant().toString(), liveCalls[0].params.windowStart, "the live call is sent the window's instants")
-        assertEquals(END.toInstant().toString(), liveCalls[0].params.windowEnd)
-        assertEquals(served.result.fileName, live.result.fileName)
+        assertFalse(liveCalls[0].params.containsKey("keepRecordFields"), "a scheduled side keeps whole records")
+        assertEquals(START, liveCalls[0].params.windowStart, "the live call is sent the window's instants")
+        assertEquals(END, liveCalls[0].params.windowEnd)
 
         Map servedDoc = json(new File(served.result.fileLocation as String))
         Map liveDoc = json(new File(live.result.fileLocation as String))
@@ -183,12 +196,15 @@ class RollingCopyParityTests {
         assertFalse(keptIds.contains("R017"), "a return exactly at the window end is out")
         assertEquals(["R002", "R003"].intersect(keptIds), [], "the filtered channel is not read")
         assertTrue(keptIds.size() >= 8, keptIds.toString())
+        assertTrue(servedDoc.records.every { it.returnDate != null }, "whole records, as the scheduled live read keeps them")
         assertEquals(JsonOutput.toJson(liveDoc.records), JsonOutput.toJson(servedDoc.records))
         assertFalse(JsonOutput.toJson(servedDoc.records).contains("_copyId"), "no derived id leaks into a slice")
         File servedSide = sidecarOf(served)
         File liveSide = sidecarOf(live)
         assertTrue(servedSide.isFile() && liveSide.isFile(), "the filtered returns are set aside in both")
-        assertEquals(liveSide.getText("UTF-8"), servedSide.getText("UTF-8"))
+        // each side file names its own extract, whose name a scheduled read leaves to the extractor; the rest is equal
+        Closure<String> sideText = { File f -> JsonOutput.toJson(json(f).findAll { it.key != "sourceFileName" }) }
+        assertEquals(sideText(liveSide), sideText(servedSide))
 
         Map servedOut = compareAndWrite(served, "served")
         Map liveOut = compareAndWrite(live, "live")
@@ -201,6 +217,44 @@ class RollingCopyParityTests {
         assertEquals("MISSING_IN_FILE_2", typeById["R004"], "the start return is in the window and NetSuite lacks it")
         assertEquals("MISSING_IN_FILE_1", typeById["R017"], "NetSuite holds the end return, which the window leaves out")
         assertEquals("MISSING_IN_FILE_1", typeById["R999"])
+    }
+
+    /**
+     * An interactive side with a compare scope sends keepRecordFields, narrower than the records (no returnDate). The
+     * slice cannot project as the extractor does, so with the dataset active the side still reads live, and its diff.json
+     * is the paused dataset's live run's, byte for byte.
+     */
+    @Test
+    void aSideThatKeepsFewerFieldsReadsLiveAndMatchesTheLiveRun() {
+        String id = rollingReturns(CONN + "-keep")
+        assertEquals([], atCopyClock(0) { refresh(id, stub([])) }.errors)
+
+        List<Map> activeCalls = []
+        Map active = interactive(activeCalls, "keep-active", CONN + "-keep")
+        assertEquals([], active.errors)
+        assertEquals(1, activeCalls.size(), "a side that asks for kept fields reads live although its copy is active")
+        List keep = activeCalls[0].params.keepRecordFields as List
+        assertTrue(keep.contains("returnId") && !keep.contains("returnDate"), keep.toString())
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.side(connector, activeCalls[0].params as Map,
+                [tenantId: A, windowStart: START, windowEnd: END]).liveOnly)
+        Map activeDoc = json(new File(active.result.fileLocation as String))
+        assertTrue(activeDoc.records.every { !it.containsKey("returnDate") }, "projected by the extractor")
+
+        setStatus(id, "DST_PAUSED", CONN + "-keep")
+        List<Map> liveCalls = []
+        Map live
+        try {
+            live = interactive(liveCalls, "keep-live", CONN + "-keep")
+        } finally {
+            setStatus(id, "DST_ACTIVE", CONN + "-keep")
+        }
+        assertEquals(1, liveCalls.size())
+        Map activeOut = compareAndWrite(active, "keep-active")
+        Map liveOut = compareAndWrite(live, "keep-live")
+        ["diff.json", "result.json"].each { String name ->
+            assertArrayEquals(liveOut[name], activeOut[name], "${name} differs")
+        }
     }
 
     @Test
@@ -235,9 +289,9 @@ class RollingCopyParityTests {
     // --------------------------------------------------------------------------------------------------------- the runs
 
     /** One interactive FILE_1 side through RunExtractSupport.extractApiSource; the live extractor is the stub below. */
-    private Map interactive(List<Map> calls, String token) {
+    private Map interactive(List<Map> calls, String token, String conn = CONN) {
         String runToken = "p${++seq}"
-        Map source = [systemEnumId: "OMS_RETURNS_GQL", sourceConfigType: "HOTWAX_OMS_GQL_RETURNS", sourceConfigId: CONN, fileSide: "FILE_1",
+        Map source = [systemEnumId: "OMS_RETURNS_GQL", sourceConfigType: "HOTWAX_OMS_GQL_RETURNS", sourceConfigId: conn, fileSide: "FILE_1",
                       compareScopeId: "RCP_SCOPE", sourceFilters: FILTERS]
         Map artifact = [location: DataManagerSupport.resolveReconciliationRunLocation(ec, "rcp-${token}-${runToken}", STAMP), runToken: "parity"]
         ec.message.clearAll()
@@ -246,6 +300,35 @@ class RollingCopyParityTests {
         List<String> errors = ec.message.errors.collect { it.toString() }
         ec.message.clearAll()
         return [result: result, artifact: artifact, source: source, errors: errors]
+    }
+
+    /**
+     * One scheduled FILE_1 side through AutomationExecutionSupport.callConfiguredSourceExtractor; the live extractor is the
+     * stub below. The result is the extract's file, under one compare label for both runs.
+     */
+    private Map scheduled(List<Map> calls, String token) {
+        Map automation = [automationId: "RCP_AUTO", companyUserGroupId: A, compareScopeId: "RCP_SCOPE",
+                          relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
+        Map source = [automationId: "RCP_AUTO", fileSide: "FILE_1", systemEnumId: "OMS_RETURNS_GQL", companyUserGroupId: A,
+                      sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
+                      safeMetadataJson: JsonOutput.toJson([extractServiceName: RETURNS_EXTRACT, parameters: [omsRestSourceConfigId: CONN]])]
+        String location = DataManagerSupport.resolveReconciliationRunLocation(ec, "rcp-${token}-s${++seq}", STAMP)
+        ec.message.clearAll()
+        Map out = null
+        List<String> errors = []
+        try {
+            out = AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, source,
+                    [childWindowStartDate: START, childWindowEndDate: END],
+                    [automationExecutionId: "RCP_EXEC_${seq}".toString(), sideOutputLocation: location, liveExtractor: liveExtractor(calls)])
+        } catch (Exception e) {
+            errors << e.toString()
+        }
+        errors += ec.message.errors.collect { it.toString() }
+        ec.message.clearAll()
+        String loc = out?.fileLocation as String
+        File file = loc == null ? null : (loc.startsWith("/") ? new File(loc) : ec.resource.getLocationReference(loc).getFile())
+        return [result: [fileLocation: file?.absolutePath, fileName: "oms-returns.json", requestMetadata: out?.requestMetadata],
+                errors: errors]
     }
 
     /** What a live OMS returns read answers for the window: the returns with entryDate in [start, end), the side's filters applied. */
@@ -260,6 +343,12 @@ class RollingCopyParityTests {
                 !e.isBefore(from) && e.isBefore(to)
             }
             Map applied = SourceFilterSupport.applyToRecords(inWindow, SourceFilterSupport.parseRules(params.sourceFilters as List))
+            // as OmsReturnsSourceSupport.projectRecord: after the filters, keep the asked fields and items
+            List keepFields = params.keepRecordFields as List
+            if (keepFields) {
+                Set<String> keep = (keepFields.collect { it.toString() } + ["items"]) as Set<String>
+                applied.records = ((List<Map>) applied.records).collect { Map r -> r.findAll { k, v -> (k as String) in keep } }
+            }
             File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
             new File(dir, fileName).setText(JsonOutput.toJson([metadata: [live: true, windowStart: from.toString(), windowEnd: to.toString(),
                                                                           filters: applied.configuredExclusions],
@@ -304,9 +393,9 @@ class RollingCopyParityTests {
         return underFacadeGrant("dataset.DatasetServices.refresh#Dataset", [datasetId: id, extractor: extractor, forceFull: false])
     }
 
-    private void setStatus(String id, String statusId) {
+    private void setStatus(String id, String statusId, String conn = CONN) {
         assertEquals([], underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: statusId,
-                systemEnumId: "OMS_RETURNS_GQL", sourceConfigId: CONN, options: [:], idField: "returnId", windowField: "entryDate"]).errors)
+                systemEnumId: "OMS_RETURNS_GQL", sourceConfigId: conn, options: [:], idField: "returnId", windowField: "entryDate"]).errors)
     }
 
     private static Instant instantOf(Object v) {
@@ -344,7 +433,8 @@ class RollingCopyParityTests {
     // ------------------------------------------------------------------------------------------------------------ fixture
 
     private static Map ret(String id, String entryDate, String channel = "ECOM_RTN_CHANNEL") {
-        return [returnId: id, statusId: "RETURN_REQUESTED", entryDate: Instant.parse(entryDate).toEpochMilli(), externalId: "SHR${id.substring(1)}".toString(),
+        return [returnId: id, statusId: "RETURN_REQUESTED", entryDate: Instant.parse(entryDate).toEpochMilli(),
+                returnDate: Instant.parse(entryDate).minusSeconds(86400).toEpochMilli(), externalId: "SHR${id.substring(1)}".toString(),
                 returnChannelEnumId: channel, currencyUomId: "USD", returnTotal: 10]
     }
 

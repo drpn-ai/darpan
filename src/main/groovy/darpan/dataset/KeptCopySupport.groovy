@@ -41,18 +41,20 @@ import static darpan.common.ValueSupport.normalize
  *     text, AutomationExecutionSupport.applyWindowParameters the Timestamps). Its extractor reads them half-open, unless it
  *     declares preserveWindowInstants: then it has a mode that rounds them to whole days in its own zone, and the side reads
  *     live. The sent bounds must be the run's instants; a record value is an ISO instant or epoch milliseconds (the HotWax
- *     extracts write those), and any other value stops serving rather than being skipped;</li>
+ *     extracts write those), and any other value, or none, stops serving rather than being skipped (ruling P3b1-6: a
+ *     record is dropped only when it is placed outside the window);</li>
  * <li>a whole-days connector (windowDateOnly, NetSuite) is sent calendar days, read in the window's zone by the live code
  *     (ReconciliationApiWindowSupport.calendarDateIn). Its source keeps records whose day falls in [from, to) (SuiteQL's
  *     {@code >= TO_DATE(from) AND < TO_DATE(to)}), so a record dated as a plain yyyy-MM-dd day is compared as that day. A
- *     record dated any other way is not placed on a day here, because the source compares days in its own zone, which no
+ *     record dated any other way, or not at all, is not placed on a day here, because the source compares days in its own zone, which no
  *     setting names, and the side reads live. For the same reason the copy must have read each day after it ended in every
  *     zone (readThru at or after the last day's end at UTC-12) and cover each from its start in every zone (the first day on
  *     or after coveredFrom's date at UTC+14).</li>
  * </ul>
  * The side's field is the connector's windowFieldName, which the dispatchers send; else the field the extractor windows on
  * by itself, its windowFieldName parameter's default-value (ruling 3b1-4); else, for a plan 3a connector only, createdAt.
- * No field, no serving.</p>
+ * No field, no serving. A side that sends its connector's keep-fields parameter reads live: the copy holds whole
+ * records, and each extractor's projection lives in its own repo, out of reach here.</p>
  *
  * <p><b>The options key</b> ({@code find#ServingDataset}'s options) is the run side's extract options its connector
  * declares (SourceExtractOptionsSupport.declaredOptions), read off the parameters the dispatcher built, with false and
@@ -91,6 +93,7 @@ class KeptCopySupport {
     static final String ROUNDS_TO_DAYS = "the source rounds its window to whole days in its own zone unless its connector keeps the instants"
     static final String DAYS_PAST_READ_THRU = "the window's last day may end after the copy's readThru in the source's zone"
     static final String DAYS_BEFORE_HORIZON = "the window's first day may start before what the copy covers in the source's zone"
+    static final String KEEPS_FIELDS = "the side asks its source to keep only some fields, and a slice holds whole copy records"
 
     /**
      * Parameters a dispatcher sets that never change which raw records a read returns (or that the side checks on its
@@ -143,6 +146,10 @@ class KeptCopySupport {
         else if (connector?.windowed == false) liveOnly = "the source reads its whole population, with no window"
         else if (statusName && present(p.get(statusName))) liveOnly = "the side reads by status"
         else if (present(p.get("readFields"))) liveOnly = "the side asks its source for extra fields"
+        // each extractor projects in its own way (OMS returns keep items too, a data definition its keepWith companions);
+        // that code lives in the connector's repo, out of reach here, so a projected side is never served whole records
+        else if (normalize(connector?.keepFieldsParameterName) && present(p.get(normalize(connector.keepFieldsParameterName))))
+            liveOnly = KEEPS_FIELDS
         else if (undeclared) liveOnly = "the side sends parameters no dataset is keyed by: ${undeclared.sort().join(', ')}".toString()
 
         return [
@@ -330,8 +337,11 @@ class KeptCopySupport {
                             // half-open, as instants: [windowStart, windowEnd)
                             if (at == null || at.isBefore(from) || !at.isBefore(to)) continue
                         } else if (blank(value)) {
-                            // a record with no value is outside any window the source applies
-                            continue
+                            // ruling P3b1-6: a record is dropped only when it is placed outside the window. One with no
+                            // value may be dated by a field the source filters on and the record never carries (an OMS
+                            // order-item unit has omsOrderDate, the server filters on its order's orderDate).
+                            unplaceable = "a record has no ${windowField}, so the slice cannot place it in or out of the window".toString()
+                            break
                         } else if (windowMode == CALENDAR_DAYS) {
                             LocalDate day = calendarDay(value)
                             if (day == null) {
@@ -447,10 +457,7 @@ class KeptCopySupport {
 
     /** A record's window value read as an instant: ISO-8601 text, or integral epoch milliseconds; else null. */
     private static Instant recordInstant(Object value) {
-        if (value instanceof Long || value instanceof Integer || value instanceof BigInteger) {
-            return Instant.ofEpochMilli(((Number) value).longValue())
-        }
-        return value instanceof CharSequence ? instant(value) : null
+        return value instanceof CharSequence || value instanceof Number ? KeptCopyStore.parseInstant(value) : null
     }
 
     /** A plain calendar day, yyyy-MM-dd, as a whole-days source is sent its window and dates a DATE column; else null. */

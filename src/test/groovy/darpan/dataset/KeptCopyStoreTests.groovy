@@ -289,4 +289,22 @@ class KeptCopyStoreTests {
         assertEquals(nested, back)
         assertEquals("2026-10-03T14:22:01Z", byId()["1"].stamp)
     }
+
+    @Test void replaceWithoutMissCountingStillCountsChangedAddedRemoved() {
+        replace(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z"), rec("3", "2026-10-03T14:22:01Z")])
+        // 1 silently changed (a miss when counted), 2 absent (removed), 3 newer stamp (changed), 4 new from before the old readThru
+        Map r = KeptCopyStore.replace(dir, [rec("1", "2026-10-03T14:22:01Z", [total: "99.00"]), rec("3", "2026-10-05T00:00:00Z"),
+                                           rec("4", "2026-10-03T00:00:00Z", [createdAt: "2026-09-10T00:00:00Z"])].iterator(),
+                "id", "updatedAt", "createdAt", ts("2026-09-01T00:00:00Z"), ts("2026-11-09T00:00:00Z"), ts("2026-11-09T00:00:05Z"), 2, null, false)
+        assertNull(r.missCount)
+        assertEquals(2, r.changedCount)
+        assertEquals(1, r.addedCount)
+        assertEquals(1, r.removedCount)
+        assertEquals(["1", "3", "4"], byId().keySet().sort())
+        // the same read with counting on does count the misses
+        replace(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z")])
+        Map counted = KeptCopyStore.replace(dir, [rec("1", "2026-10-03T14:22:01Z", [total: "99.00"]), rec("2", "2026-10-03T14:22:01Z")].iterator(),
+                "id", "updatedAt", "createdAt", ts("2026-09-01T00:00:00Z"), ts("2026-11-09T00:00:00Z"), ts("2026-11-09T00:00:05Z"), 2)
+        assertEquals(1, counted.missCount)
+    }
 }

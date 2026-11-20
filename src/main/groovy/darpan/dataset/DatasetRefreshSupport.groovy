@@ -31,6 +31,8 @@ class DatasetRefreshSupport {
 
     static final String FULL = "DRK_FULL"
     static final String INCREMENTAL = "DRK_INCREMENTAL"
+    static final String ROLLING = "DRR_ROLLING"
+    static final int ROLLING_HORIZON_DAYS = 60
     static final String READS_FOLDER = "reads"
     static final String LOCK_TAKEN_OVER = "lock taken over: another refresh holds this dataset now"
     /** The extract parameter a dataset read windows by: its stampField (daily) or windowField (full). */
@@ -109,7 +111,7 @@ class DatasetRefreshSupport {
                 File dir = datasetDir(ec, dataset.companyUserGroupId as String, dataset.datasetId as String)
                 kind = readKind(dataset, KeptCopyStore.manifest(dir), forceFull, startedAt)
                 fromStamp = kind == FULL ?
-                        new Timestamp(startedAt.time - ((dataset.horizonDays ?: 62) as long) * DAY) :
+                        new Timestamp(startedAt.time - horizonDays(dataset) * DAY) :
                         new Timestamp(((Timestamp) dataset.readThru).time - ((dataset.marginDays ?: 2) as long) * DAY)
                 // the tenant's zone, as the live paths resolve it (refresh runs under the dataset's tenant)
                 String zone = TenantAccessSupport.resolveActiveTenantTimeZone(ec)
@@ -137,6 +139,8 @@ class DatasetRefreshSupport {
      * starts a little earlier in the day than the last full read did.
      */
     static String readKind(Map dataset, Map manifest, boolean forceFull, Timestamp now) {
+        // a rolling dataset re-reads its whole window every day (ruling 3b1-1)
+        if (isRolling(dataset)) return FULL
         if (forceFull || manifest == null || !dataset.currentVersion || dataset.readThru == null || dataset.lastFullReadAt == null) {
             return FULL
         }
@@ -167,7 +171,32 @@ class DatasetRefreshSupport {
     static boolean copyCovers(Map dataset, Map manifest, Timestamp now) {
         Timestamp coveredFrom = manifest?.coveredFrom as Timestamp
         if (coveredFrom == null || !sameSettings(dataset, manifest)) return false
-        return coveredFrom.time <= now.time - ((dataset.horizonDays ?: 62) as long) * DAY
+        return coveredFrom.time <= now.time - horizonDays(dataset) * DAY
+    }
+
+    /** The dataset's horizon in days: its own, else 60 for a rolling dataset (ruling 3b1-1) and 62 for a changed-since one. */
+    static long horizonDays(Map dataset) {
+        return (dataset.horizonDays ?: (isRolling(dataset) ? ROLLING_HORIZON_DAYS : 62)) as long
+    }
+
+    static boolean isRolling(Map dataset) {
+        return dataset?.readRuleEnumId == ROLLING
+    }
+
+    /**
+     * The fields a composite idField names, in order: "orderId, orderItemSeqId" -> [orderId, orderItemSeqId]. A single
+     * field gives a one-element list (ruling 3b1-3).
+     */
+    static List<String> idFields(String idField) {
+        return (idField ?: "").split(",").collect { it.trim() }.findAll { it } as List<String>
+    }
+
+    /**
+     * The derived copy id of a record under a composite idField: the field values in order, joined by '|' (a missing value
+     * is empty). A one-field list gives that field's value alone.
+     */
+    static String copyId(Map record, List<String> idFields) {
+        return idFields.collect { String f -> record.get(f) == null ? "" : String.valueOf(record.get(f)) }.join("|")
     }
 
     /** The manifest's idField, stampField and windowField equal the dataset's. */
@@ -290,14 +319,20 @@ class DatasetRefreshSupport {
                     return true
                 })
             }
-            RecordFileIterator records = new RecordFileIterator(file)
+            boolean rolling = isRolling(dataset)
+            // A composite idField keys the copy by a derived _copyId written into each record (ruling 3b1-3); the manifest
+            // keeps the dataset's own idField list so serving matches it. A single field is left alone.
+            Iterator<Map> source = new RecordFileIterator(file)
+            RecordFileIterator records = (RecordFileIterator) source
+            List<String> idParts = idFields(dataset.idField as String)
+            if (idParts.size() > 1) source = withCopyId(records, idParts)
             Map counts
             try {
                 counts = full ?
-                        KeptCopyStore.replace(datasetDir, records, dataset.idField as String, dataset.stampField as String,
+                        KeptCopyStore.replace(datasetDir, source, dataset.idField as String, dataset.stampField as String,
                                 dataset.windowField as String, fromStamp, readThru, readAt, (dataset.marginDays ?: 2) as int,
-                                swapAndPrune) :
-                        KeptCopyStore.merge(datasetDir, records, dataset.idField as String, dataset.stampField as String,
+                                swapAndPrune, !rolling) :
+                        KeptCopyStore.merge(datasetDir, source, dataset.idField as String, dataset.stampField as String,
                                 readThru, readAt, swapAndPrune)
             } catch (IllegalStateException e) {
                 if (e.message?.contains("the swap was refused")) throw new IllegalStateException(LOCK_TAKEN_OVER)
@@ -309,10 +344,23 @@ class DatasetRefreshSupport {
             return [readAt      : readAt, version: counts.version, recordCount: manifest?.recordCount,
                     recordsRead : counts.recordsRead ?: 0, changedCount: counts.changedCount ?: 0,
                     addedCount  : counts.addedCount ?: 0, removedCount: counts.removedCount ?: 0,
-                    missCount   : counts.missCount ?: 0]
+                    missCount   : rolling ? null : (counts.missCount ?: 0)]
         } catch (Throwable t) {
             logger.warn("Dataset ${dataset?.datasetId} read ${readSeqId} failed", t)
             return [error: t.message ?: t.toString()]
+        }
+    }
+
+    /** {@code records} with {@link KeptCopyStore#COPY_ID} set on each record from its {@code idParts} values. */
+    private static Iterator<Map> withCopyId(Iterator<Map> records, List<String> idParts) {
+        return new Iterator<Map>() {
+            boolean hasNext() { return records.hasNext() }
+
+            Map next() {
+                Map r = records.next()
+                r.put(KeptCopyStore.COPY_ID, copyId(r, idParts))
+                return r
+            }
         }
     }
 

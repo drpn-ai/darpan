@@ -10,14 +10,18 @@
         <description>Finds or creates the active tenant's dataset for (system, connection, options). The same key always returns
             the same datasetId; a repeat call updates the settings it is given (statusId, margins, horizon, read hour). An
             active dataset is refused for a system whose connector's extract service declares no windowFieldName (it could
-            not read by the dataset's fields). Changing idField, stampField, windowField or horizonDays makes the next refresh
+            not read by the dataset's fields). readRuleEnumId is DRR_CHANGED_SINCE (default) or DRR_ROLLING: a rolling dataset
+            re-reads its whole window every day (horizonDays defaults to 60), counts no misses, and needs no stampField (it
+            stamps by windowField). idField may name several fields, comma-separated; the copy keys each record by a derived
+            _copyId then. Changing idField, stampField, windowField or horizonDays makes the next refresh
             a full read; the copy is not served until that read has rebuilt it (serving checks the copy's own manifest).</description>
         <in-parameters>
             <parameter name="systemEnumId" required="true"/>
             <parameter name="sourceConfigId" required="true"/>
             <parameter name="options" type="Map"/>
             <parameter name="idField" required="true"/>
-            <parameter name="stampField" required="true"/>
+            <parameter name="stampField"><description>Required for DRR_CHANGED_SINCE; DRR_ROLLING defaults it to windowField.</description></parameter>
+            <parameter name="readRuleEnumId" default-value="DRR_CHANGED_SINCE"/>
             <parameter name="windowField" required="true"/>
             <parameter name="statusId"/>
             <parameter name="marginDays" type="Integer"/>
@@ -32,6 +36,12 @@
             <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
             <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
                 <return error="true" message="No active tenant"/></if>
+            <if condition="!(readRuleEnumId in ['DRR_CHANGED_SINCE', 'DRR_ROLLING'])">
+                <return error="true" message="Dataset read rule ${readRuleEnumId} is not one of DRR_CHANGED_SINCE, DRR_ROLLING"/></if>
+            <set field="rolling" from="readRuleEnumId == 'DRR_ROLLING'"/>
+            <if condition="!stampField &amp;&amp; !rolling">
+                <return error="true" message="stampField is required for a DRR_CHANGED_SINCE dataset"/></if>
+            <if condition="!stampField"><set field="stampField" from="windowField"/></if>
             <if condition="statusId">
                 <entity-find entity-name="moqui.basic.Enumeration" list="statusList">
                     <econdition field-name="enumId" from="statusId"/>
@@ -64,11 +74,13 @@
                          refresh reads in full to rebuild it -->
                     <set field="settingsChanged" from="existing.idField != idField || existing.stampField != stampField ||
                             existing.windowField != windowField ||
-                            (horizonDays != null &amp;&amp; (existing.horizonDays as Long) != (horizonDays as Long))"/>
+                            (horizonDays != null &amp;&amp; (existing.horizonDays as Long) != (horizonDays as Long)) ||
+                            existing.readRuleEnumId != readRuleEnumId"/>
                     <if condition="settingsChanged">
                         <set field="existing.lastFullReadAt" from="null"/>
                         <log level="info" message="Dataset ${existing.datasetId}: idField, stampField, windowField or horizonDays changed; the next refresh reads in full, and the copy is not served until it does"/>
                     </if>
+                    <set field="existing.readRuleEnumId" from="readRuleEnumId"/>
                     <set field="existing.idField" from="idField"/>
                     <set field="existing.stampField" from="stampField"/>
                     <set field="existing.windowField" from="windowField"/>
@@ -83,9 +95,9 @@
                 <else>
                     <service-call name="create#darpan.dataset.Dataset" out-map="created" in-map="[companyUserGroupId:tenantId,
                             systemEnumId:systemEnumId, sourceConfigId:sourceConfigId, optionsJson:optionsJson, optionsHash:optionsHash,
-                            statusId:statusId ?: 'DST_ACTIVE', readRuleEnumId:'DRR_CHANGED_SINCE', idField:idField, stampField:stampField,
+                            statusId:statusId ?: 'DST_ACTIVE', readRuleEnumId:readRuleEnumId, idField:idField, stampField:stampField,
                             windowField:windowField, marginDays:marginDays ?: 2, fullReadDays:fullReadDays ?: 7,
-                            horizonDays:horizonDays ?: 62, readHourLocal:readHourLocal != null ? readHourLocal : 4]"/>
+                            horizonDays:horizonDays ?: (rolling ? 60 : 62), readHourLocal:readHourLocal != null ? readHourLocal : 4]"/>
                     <set field="datasetId" from="created.datasetId"/>
                 </else>
             </if>
@@ -204,12 +216,13 @@
                     <return error="true" message="Dataset ${datasetId} read ${readSeqId} failed: ${result.error}"/>
                 </then>
             </if>
-            <set field="missCount" from="(result.missCount ?: 0) as Integer"/>
+            <!-- a rolling read counts no misses: result.missCount is null and stays null (no warning) -->
+            <set field="missCount" from="result.missCount != null ? (result.missCount as Integer) : null"/>
             <script>read.putAll([statusId:'DRS_DONE', readAt:result.readAt, recordsRead:result.recordsRead,
                     changedCount:result.changedCount, addedCount:result.addedCount, removedCount:result.removedCount,
                     missCount:missCount])</script>
             <set field="warningText" from="null"/>
-            <if condition="missCount &gt; 0">
+            <if condition="missCount != null &amp;&amp; missCount &gt; 0">
                 <set field="warningText" value="Read ${readSeqId} found ${missCount} records the earlier reads missed"/></if>
             <set field="updates" from="[currentVersion:result.version, readThru:startedAt, lastReadAt:result.readAt,
                     recordCount:result.recordCount, lastMissCount:missCount, nextReadDate:result.nextReadDate, warningText:warningText]"/>

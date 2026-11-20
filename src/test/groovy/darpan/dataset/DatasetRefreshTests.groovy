@@ -220,6 +220,106 @@ class DatasetRefreshTests {
         assertNull(row.warningText)
     }
 
+    @Test
+    void aRollingDatasetReadsInFullEveryDay() {
+        String id = rolling("roll-daily")
+        assertEquals("DRR_ROLLING", find("darpan.dataset.Dataset", [datasetId: id]).readRuleEnumId)
+        List<Map> calls = []
+        Map first = refresh(id, stub(calls, [order(1, 5, 5), order(2, 4, 4)]))
+        assertEquals([], first.errors)
+        assertEquals("DRK_FULL", first.out.readKindEnumId)
+        // the next day's read is full again: the whole window by the window field, 60 days back
+        calls.clear()
+        Map second = refresh(id, stub(calls, [order(2, 4, 4), order(3, 1, 1)]))
+        assertEquals([], second.errors)
+        assertEquals("DRK_FULL", second.out.readKindEnumId)
+        assertEquals("createdAt", calls[0].params.windowFieldName)
+        Timestamp readThru = find("darpan.dataset.Dataset", [datasetId: id]).readThru as Timestamp
+        assertEquals(readThru.toInstant().minus(60, ChronoUnit.DAYS).toString(), calls[0].params.windowStart)
+        // a full read that lacks order 1 drops it from the copy
+        assertEquals(["2", "3"], KeptCopyStore.records(dir(id)).collect { it.id }.sort())
+        assertEquals("DRK_FULL", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"]).readKindEnumId)
+        // nextReadDate is still the next day at the read hour
+        ZoneId zone = ZoneId.of(A_ZONE)
+        Instant expectedNext = readThru.toInstant().atZone(zone).toLocalDate().plusDays(1).atTime(4, 0).atZone(zone).toInstant()
+        assertEquals(expectedNext, (find("darpan.dataset.Dataset", [datasetId: id]).nextReadDate as Timestamp).toInstant())
+    }
+
+    /** Review Focus 1: a rolling dataset changes every day, so a changed record is not a miss and no warning is set. */
+    @Test
+    void aRollingReadCountsNoMissesAndSetsNoWarning() {
+        String id = rolling("roll-miss")
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5), order(2, 4, 4)])).errors)
+        // order 1 changes under an unchanged stamp, and order 9 appears from before the old readThru: both are misses on a changed-since dataset
+        Map res = refresh(id, stub([], [order(1, 5, 5, "#1 changed"), order(2, 4, 4), order(9, 30, 30)]))
+        assertEquals([], res.errors)
+        assertNull(res.out.missCount)
+        def row = find("darpan.dataset.Dataset", [datasetId: id])
+        assertNull(row.lastMissCount)
+        assertNull(row.warningText)
+        def read = find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"])
+        assertNull(read.missCount)
+        assertEquals(1, read.addedCount as int)
+        assertEquals(1, read.changedCount as int)
+        assertEquals(0, read.removedCount as int)
+    }
+
+    @Test
+    void aRollingDatasetNeedsNoStampField() {
+        Map res = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-roll-nostamp", options: [:],
+                idField: "id", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"])
+        assertEquals([], res.errors)
+        def row = find("darpan.dataset.Dataset", [datasetId: res.out.datasetId])
+        assertEquals("createdAt", row.stampField)
+        assertEquals([], refresh(res.out.datasetId as String, stub([], [order(1, 5, 5)])).errors)
+        // a changed-since dataset still requires one
+        Map bad = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-cs-nostamp", options: [:],
+                idField: "id", windowField: "createdAt"])
+        assertFalse(bad.errors.isEmpty())
+    }
+
+    @Test
+    void aRollingDatasetDefaultsToSixtyDays() {
+        assertEquals(60, find("darpan.dataset.Dataset", [datasetId: rolling("roll-default")]).horizonDays as int)
+        assertEquals(30, find("darpan.dataset.Dataset", [datasetId: rolling("roll-30", [horizonDays: 30])]).horizonDays as int)
+        assertEquals(62, find("darpan.dataset.Dataset", [datasetId: dataset("cs-default")]).horizonDays as int)
+    }
+
+    /** Review Focus 2: two units of one order share orderId and line, and stay two copy records. */
+    @Test
+    void twoUnitsOfOneOrderStayTwoCopyRecords() {
+        String id = dataset("composite", [idField: "orderId,orderItemSeqId,unitSeq"])
+        assertEquals([], refresh(id, stub([], [unit(1, 1, 1, 5, 5), unit(1, 1, 2, 5, 5), unit(2, 1, 1, 4, 4)])).errors)
+        Map byId = KeptCopyStore.records(dir(id)).collectEntries { [(it.id): it.record] }
+        assertEquals(["1|1|1", "1|1|2", "2|1|1"], byId.keySet().sort())
+        assertEquals("1|1|2", byId["1|1|2"]._copyId)
+        assertEquals(3, find("darpan.dataset.Dataset", [datasetId: id]).recordCount as int)
+        // the manifest names the dataset's own idField list, so serving matches it
+        assertEquals("orderId,orderItemSeqId,unitSeq", KeptCopyStore.manifest(dir(id)).idField)
+        assertTrue(DatasetRefreshSupport.sameSettings(find("darpan.dataset.Dataset", [datasetId: id]).getMap(),
+                KeptCopyStore.manifest(dir(id))))
+        // a merge changes one unit and leaves its sibling alone
+        Map res = refresh(id, stub([], [unit(1, 1, 2, 5, 0, "changed")]))
+        assertEquals([], res.errors)
+        assertEquals("DRK_INCREMENTAL", res.out.readKindEnumId)
+        byId = KeptCopyStore.records(dir(id)).collectEntries { [(it.id): it.record] }
+        assertEquals(3, byId.size())
+        assertEquals("changed", byId["1|1|2"].name)
+        assertEquals("unit", byId["1|1|1"].name)
+    }
+
+    @Test
+    void aSingleFieldIdIsUnchanged() {
+        String id = dataset("single-id")
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5), order(2, 4, 4)])).errors)
+        Map manifest = KeptCopyStore.manifest(dir(id))
+        assertEquals("id", manifest.idField)
+        assertEquals(["1", "2"], KeptCopyStore.records(dir(id)).collect { it.id }.sort())
+        assertFalse(KeptCopyStore.records(dir(id)).any { it.record.containsKey("_copyId") })
+        assertEquals("1|2|3", DatasetRefreshSupport.copyId([a: 1, b: "2", c: 3], ["a", "b", "c"]))
+        assertEquals("7", DatasetRefreshSupport.copyId([id: 7], ["id"]))
+    }
+
     /**
      * I2: changing idField keeps no copy built under the old one in service. The copy is refused at once (its manifest
      * names the old idField), the next refresh is full, and the rebuilt copy, keyed the new way, serves again.
@@ -652,6 +752,21 @@ class DatasetRefreshTests {
             if (writtenAt != null) out.setLastModified(writtenAt)
             return [fileLocation: out.absolutePath, recordCount: records.size(), dataAvailable: !records.isEmpty()]
         }
+    }
+
+    private String rolling(String conn, Map extra = [:]) {
+        Map res = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-${conn}".toString(), options: [:],
+                idField: "id", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"] + extra)
+        assertEquals([], res.errors)
+        return res.out.datasetId
+    }
+
+    /** One unit of an order line: its copy id is orderId|orderItemSeqId|unitSeq. */
+    private static Map unit(int orderId, int seq, int unitSeq, int createdDaysAgo, int updatedDaysAgo, String name = "unit") {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        return [orderId: "${orderId}".toString(), orderItemSeqId: "${seq}".toString(), unitSeq: "${unitSeq}".toString(), name: name,
+                createdAt: now.minus(createdDaysAgo, ChronoUnit.DAYS).toString(),
+                updatedAt: now.minus(updatedDaysAgo, ChronoUnit.DAYS).toString()]
     }
 
     private String dataset(String conn, Map extra = [:]) {

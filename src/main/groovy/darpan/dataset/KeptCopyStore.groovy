@@ -25,6 +25,13 @@ class KeptCopyStore {
     static final String RECORDS_FILE = "records.jsonl.gz"
     static final String MANIFEST_FILE = "manifest.json"
     static final String CURRENT_FILE = "current.json"
+    /** The field a composite idField's records carry their derived key in ({@link DatasetRefreshSupport#copyId}). */
+    static final String COPY_ID = "_copyId"
+
+    /** The record's copy key: its own idField value, or its derived _copyId when idField names several fields. */
+    private static String keyOf(Map rec, String idField) {
+        return String.valueOf(rec.get(idField.contains(",") ? COPY_ID : idField))
+    }
 
     /**
      * [version, readThru, readAt, recordCount, coveredFrom, idField, stampField, windowField] of the current version, or
@@ -88,7 +95,7 @@ class KeptCopyStore {
         while (changed.hasNext()) {
             Map rec = changed.next()
             recordsRead++
-            String id = String.valueOf(rec.get(idField))
+            String id = keyOf(rec, idField)
             Map prior = changes.get(id)
             if (prior != null && compareStamps(prior.get("stamp"), rec.get(stampField)) > 0) continue
             changes.put(id, entry(id, rec.get(stampField), readAt, rec))
@@ -132,10 +139,14 @@ class KeptCopyStore {
      * a miss is the same stamp with a different content hash, or a record absent from the old copy that was created
      * before the old readThru minus marginDays (never read); a record in the old copy that the full read lacks, inside
      * the horizon, is removed, not a miss. The new version covers every record created (createdField) at or after
-     * horizonStart, keyed by idField and stamped by stampField; a null horizonStart records no coverage.
+     * horizonStart, keyed by idField and stamped by stampField; a null horizonStart records no coverage. With
+     * countMisses false (a rolling dataset, which re-reads its whole window daily) nothing is a miss: missCount is null,
+     * and changedCount, addedCount and removedCount are counted as before. An idField naming several fields (comma) keys
+     * each record by its _copyId.
      */
     static Map replace(File datasetDir, Iterator<Map> full, String idField, String stampField, String createdField,
-                       Timestamp horizonStart, Timestamp readThru, Timestamp readAt, int marginDays, Closure swapGuard = null) {
+                       Timestamp horizonStart, Timestamp readThru, Timestamp readAt, int marginDays, Closure swapGuard = null,
+                       boolean countMisses = true) {
         Map oldManifest = manifest(datasetDir)
         Instant neverReadBefore = oldManifest?.readThru == null ? null :
                 ((Timestamp) oldManifest.readThru).toInstant().minusSeconds(marginDays * 86400L)
@@ -159,7 +170,7 @@ class KeptCopyStore {
             while (full.hasNext()) {
                 Map rec = full.next()
                 recordsRead++
-                String id = String.valueOf(rec.get(idField))
+                String id = keyOf(rec, idField)
                 List prior = index.remove(id)
                 Instant created = parseInstant(rec.get(createdField))
                 boolean droppedByHorizon = horizon != null && created != null && created.isBefore(horizon)
@@ -167,10 +178,10 @@ class KeptCopyStore {
                     boolean sameStamp = compareStamps(prior[0], rec.get(stampField)) == 0
                     boolean sameHash = prior[1] == contentHash(rec, stampField)
                     if (!sameStamp || !sameHash) changedCount++
-                    if (sameStamp && !sameHash) missCount++
+                    if (countMisses && sameStamp && !sameHash) missCount++
                 } else if (!droppedByHorizon) {
                     addedCount++
-                    if (neverReadBefore != null && created != null && created.isBefore(neverReadBefore)) missCount++
+                    if (countMisses && neverReadBefore != null && created != null && created.isBefore(neverReadBefore)) missCount++
                 }
                 if (droppedByHorizon || !written.add(id)) continue
                 writeLine(w, entry(id, rec.get(stampField), readAt, rec))
@@ -183,7 +194,7 @@ class KeptCopyStore {
             horizon == null || created == null || !created.isBefore(horizon)
         }
         return [version: out.version, recordsRead: recordsRead, changedCount: changedCount, addedCount: addedCount,
-                removedCount: removedCount, missCount: missCount]
+                removedCount: removedCount, missCount: countMisses ? missCount : null]
     }
 
     /** SHA-256 hex of the record as canonical JSON (keys sorted at every depth) without its stamp field. */

@@ -27,6 +27,11 @@ class KeptCopyStore {
     static final String CURRENT_FILE = "current.json"
     /** The field a composite idField's records carry their derived key in ({@link DatasetRefreshSupport#copyId}). */
     static final String COPY_ID = "_copyId"
+    /** The read's exchange-manifest side file, kept beside the version's records (plan 3b-1). */
+    static final String EXCHANGE_MANIFEST_FILE = "exchange-manifest.json"
+    /** The manifest's exchangeManifest: the read wrote a side file (kept as EXCHANGE_MANIFEST_FILE), or none (no exchanges). */
+    static final String EXCHANGE_MANIFEST_KEPT = "KEPT"
+    static final String EXCHANGE_MANIFEST_NONE = "NONE"
 
     /** The record's copy key: its own idField value, or its derived _copyId when idField names several fields. */
     private static String keyOf(Map rec, String idField) {
@@ -34,10 +39,13 @@ class KeptCopyStore {
     }
 
     /**
-     * [version, readThru, readAt, recordCount, coveredFrom, idField, stampField, windowField] of the current version, or
-     * null when there is none. The last four say what the copy covers: every record created (windowField) at or after
-     * coveredFrom, keyed by idField and stamped by stampField. A version written before they were recorded has them null,
-     * which reads as covering nothing.
+     * [version, readThru, readAt, recordCount, coveredFrom, idField, stampField, windowField, keptFields, heldFields,
+     * exchangeManifest] of the current version, or null when there is none. coveredFrom..windowField say what the copy
+     * covers: every record created (windowField) at or after coveredFrom, keyed by idField and stamped by stampField. A
+     * version written before they were recorded has them null, which reads as covering nothing. keptFields is the field list
+     * the read was sent (null: whole records), heldFields the top-level fields its records carry (null when not recorded),
+     * exchangeManifest whether the read's exchange-manifest side file is kept (KEPT), the read wrote none (NONE), or the read
+     * writes no such file (null).
      */
     static Map manifest(File datasetDir) {
         String version = currentVersion(datasetDir)
@@ -47,7 +55,17 @@ class KeptCopyStore {
         Map m = (Map) new JsonSlurper().parse(file, "UTF-8")
         return [version    : version, readThru: toTimestamp(m.get("readThru")), readAt: toTimestamp(m.get("readAt")),
                 recordCount: ((Number) (m.get("recordCount") ?: 0)).longValue(), coveredFrom: toTimestamp(m.get("coveredFrom")),
-                idField    : m.get("idField") ?: null, stampField: m.get("stampField") ?: null, windowField: m.get("windowField") ?: null]
+                idField    : m.get("idField") ?: null, stampField: m.get("stampField") ?: null, windowField: m.get("windowField") ?: null,
+                keptFields : m.get("keptFields") instanceof List ? (List<String>) m.get("keptFields") : null,
+                heldFields : m.get("heldFields") instanceof List ? (List<String>) m.get("heldFields") : null,
+                exchangeManifest: m.get("exchangeManifest") ?: null]
+    }
+
+    /** One of the current version's side files by name (EXCHANGE_MANIFEST_FILE), or null when it has none. */
+    static File sideFile(File datasetDir, String name) {
+        String version = currentVersion(datasetDir)
+        File f = version == null ? null : new File(new File(datasetDir, version), name)
+        return f != null && f.isFile() ? f : null
     }
 
     /** Streams the current version; each element is [id, stamp, readAt, record: Map]. Empty when there is none. */
@@ -87,7 +105,9 @@ class KeptCopyStore {
     static Map merge(File datasetDir, Iterator<Map> changed, String idField, String stampField,
                      Timestamp readThru, Timestamp readAt, Closure swapGuard = null) {
         Map oldManifest = manifest(datasetDir)
-        Map coverage = oldManifest?.coveredFrom != null && oldManifest.idField == idField && oldManifest.stampField == stampField ?
+        // a merge reads whole records: onto a copy that kept only some fields it would mix the two, so it covers nothing
+        Map coverage = oldManifest?.coveredFrom != null && oldManifest.idField == idField && oldManifest.stampField == stampField &&
+                oldManifest.keptFields == null ?
                 [coveredFrom: oldManifest.coveredFrom, idField: idField, stampField: stampField, windowField: oldManifest.windowField] :
                 [:]
         Map<String, Map> changes = new LinkedHashMap<String, Map>()
@@ -102,7 +122,8 @@ class KeptCopyStore {
         }
         long changedCount = 0
         long addedCount = 0
-        Map out = writeVersion(datasetDir, readThru, readAt, coverage, swapGuard) { Writer w ->
+        Set<String> held = new TreeSet<String>()
+        Map out = writeVersion(datasetDir, readThru, readAt, coverage + [heldFields: held], swapGuard) { Writer w ->
             long count = 0
             // ruling P3a-15: the old version is closed however the write ends
             withRecords(datasetDir) { Iterator<Map> old ->
@@ -110,22 +131,22 @@ class KeptCopyStore {
                     Map e = old.next()
                     String id = String.valueOf(e.get("id"))
                     Map repl = changes.get(id)
+                    Map kept = e
                     if (repl != null) {
                         changes.remove(id)
                         if (compareStamps(repl.get("stamp"), e.get("stamp")) >= 0) {
-                            writeLine(w, repl)
+                            kept = repl
                             changedCount++
-                        } else {
-                            writeLine(w, e)
                         }
-                    } else {
-                        writeLine(w, e)
                     }
+                    writeLine(w, kept)
+                    holdKeys(held, kept)
                     count++
                 }
             }
             for (Map e : changes.values()) {
                 writeLine(w, e)
+                holdKeys(held, e)
                 addedCount++
                 count++
             }
@@ -142,11 +163,13 @@ class KeptCopyStore {
      * horizonStart, keyed by idField and stamped by stampField; a null horizonStart records no coverage. With
      * countMisses false (a rolling dataset, which re-reads its whole window daily) nothing is a miss: missCount is null,
      * and changedCount, addedCount and removedCount are counted as before. An idField naming several fields (comma) keys
-     * each record by its _copyId.
+     * each record by its _copyId. {@code copyInfo} (plan 3b-1): keptFields, the field list the read was sent (null: whole
+     * records), recorded in the manifest with the fields the records carry; exchangeManifest, a File (the read's side file,
+     * kept beside the records), false (the read wrote none) or absent (the read writes no such file).
      */
     static Map replace(File datasetDir, Iterator<Map> full, String idField, String stampField, String createdField,
                        Timestamp horizonStart, Timestamp readThru, Timestamp readAt, int marginDays, Closure swapGuard = null,
-                       boolean countMisses = true) {
+                       boolean countMisses = true, Map copyInfo = null) {
         Map oldManifest = manifest(datasetDir)
         Instant neverReadBefore = oldManifest?.readThru == null ? null :
                 ((Timestamp) oldManifest.readThru).toInstant().minusSeconds(marginDays * 86400L)
@@ -164,7 +187,13 @@ class KeptCopyStore {
         long recordsRead = 0, changedCount = 0, addedCount = 0, missCount = 0
         Map coverage = horizonStart == null ? [:] :
                 [coveredFrom: horizonStart, idField: idField, stampField: stampField, windowField: createdField]
-        Map out = writeVersion(datasetDir, readThru, readAt, coverage, swapGuard) { Writer w ->
+        Set<String> held = new TreeSet<String>()
+        Object exchange = copyInfo?.exchangeManifest
+        Map info = coverage + [keptFields: copyInfo?.keptFields == null ? null : new ArrayList(copyInfo.keptFields as Collection),
+                               heldFields: held, exchangeManifest: exchange instanceof File ? EXCHANGE_MANIFEST_KEPT :
+                (exchange == false ? EXCHANGE_MANIFEST_NONE : null),
+                               files     : exchange instanceof File ? [(EXCHANGE_MANIFEST_FILE): exchange] : [:]]
+        Map out = writeVersion(datasetDir, readThru, readAt, info, swapGuard) { Writer w ->
             long count = 0
             Set<String> written = new HashSet<String>()
             while (full.hasNext()) {
@@ -184,7 +213,9 @@ class KeptCopyStore {
                     if (countMisses && neverReadBefore != null && created != null && created.isBefore(neverReadBefore)) missCount++
                 }
                 if (droppedByHorizon || !written.add(id)) continue
-                writeLine(w, entry(id, rec.get(stampField), readAt, rec))
+                Map e = entry(id, rec.get(stampField), readAt, rec)
+                writeLine(w, e)
+                holdKeys(held, e)
                 count++
             }
             return count
@@ -231,6 +262,7 @@ class KeptCopyStore {
      */
     private static Map writeVersion(File datasetDir, Timestamp readThru, Timestamp readAt, Map coverage, Closure swapGuard,
                                     Closure<Long> body) {
+        // coverage also carries keptFields, heldFields (filled by body as it writes), exchangeManifest and files to keep
         datasetDir.mkdirs()
         File tmp = new File(datasetDir, ".tmp-" + UUID.randomUUID().toString())
         tmp.mkdirs()
@@ -249,9 +281,17 @@ class KeptCopyStore {
                 }
             }
             String version = freshVersionName(datasetDir)
-            new File(tmp, MANIFEST_FILE).setText(JsonOutput.toJson([version: version, readThru: iso(readThru),
+            ((coverage?.files ?: [:]) as Map<String, File>).each { String name, File source ->
+                Files.copy(source.toPath(), new File(tmp, name).toPath())
+            }
+            Map manifestJson = [version: version, readThru: iso(readThru),
                     readAt: iso(readAt), recordCount: count, coveredFrom: iso((Timestamp) coverage?.coveredFrom),
-                    idField: coverage?.idField, stampField: coverage?.stampField, windowField: coverage?.windowField]), "UTF-8")
+                    idField: coverage?.idField, stampField: coverage?.stampField, windowField: coverage?.windowField]
+            // plan 3b-1: only when known, so a version written without them reads exactly as before
+            if (coverage?.keptFields != null) manifestJson.keptFields = coverage.keptFields
+            if (coverage?.heldFields != null) manifestJson.heldFields = new ArrayList((Collection) coverage.heldFields)
+            if (coverage?.exchangeManifest) manifestJson.exchangeManifest = coverage.exchangeManifest
+            new File(tmp, MANIFEST_FILE).setText(JsonOutput.toJson(manifestJson), "UTF-8")
             File target = new File(datasetDir, version)
             Closure<Boolean> swap = { ->
                 Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
@@ -317,6 +357,12 @@ class KeptCopyStore {
 
     private static Map entry(String id, Object stamp, Timestamp readAt, Map record) {
         return [id: id, stamp: stamp, readAt: iso(readAt), record: record]
+    }
+
+    /** The top-level fields of an entry's record, into {@code held}. */
+    private static void holdKeys(Set<String> held, Map entry) {
+        Object record = entry?.get("record")
+        if (record instanceof Map) ((Map) record).keySet().each { Object k -> if (k != null && k != COPY_ID) held.add(k.toString()) }
     }
 
     private static void writeLine(Writer w, Map entry) {

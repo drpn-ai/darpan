@@ -45,10 +45,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * preserveWindowInstants, so the side's field is its extractor's own (entryDate) and the slice is cut on the very instants
  * the live call sends.
  *
- * A side that sends keepRecordFields (every interactive side with a compare scope) reads live: the copy holds whole
- * records and the extractor's projection is out of the slice's reach. So the served run here is the scheduled one, which
- * sends no keep fields, and the interactive one is pinned to read live. Each fixture return carries returnDate, a field
- * outside the connector's keepFieldsBase, and the live stub projects as the real extractor does (keep fields plus items).
+ * A side that sends keepRecordFields (every interactive side with a compare scope) is served projected, by the function the
+ * extractor projects with (KeptFieldsProjection, ruling P3b1-8). Each fixture return carries returnDate, a field outside the
+ * connector's keepFieldsBase, and the live stub projects as the real extractor does (keep fields plus items).
+ *
+ * <p>Task 3: HotWax ORDERS kept as a rolling copy that holds the union of the fields its checks read (ruling 3b1-7). The
+ * orders fixture is built the same way (O001..O020 around the same window, by orderDate in epoch milliseconds), with two
+ * exchange orders the read sets aside into its exchange manifest and a cancelled one a source filter drops; the OMS stub
+ * filters, sets exchanges aside and projects as extract#HotWaxOmsGqlOrders does.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RollingCopyParityTests {
@@ -66,6 +70,11 @@ class RollingCopyParityTests {
     private static final String STAMP = "20261120-000000000"
     private static final String CONN = "rcp-hw"
     private static final List<Map> FILTERS = [[sequenceNum: 1, fieldExpression: "returnChannelEnumId", operator: "EXCLUDE_IN", filterValues: "POS_RTN_CHANNEL"]]
+    private static final String B = "GORJANA"
+    private static final String ORDERS_EXTRACT = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+    /** The OMS_GQL connector's keepFieldsBase, as seeded: every orders side keeps at least these. */
+    private static final List<String> ORDER_BASE = ["orderId", "orderName", "externalId", "grandTotal", "orderDate", "statusId",
+                                                    "currencyUomId", "billToCustomer", "shipGroups"]
 
     private ExecutionContext ec
     private File dataManagerRoot
@@ -109,6 +118,7 @@ class RollingCopyParityTests {
             <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="RCP_AUTO" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].returnChannelEnumId" operator="EXCLUDE_IN" filterValues="POS_RTN_CHANNEL" companyUserGroupId="${A}"/>
         </entity-facade-xml>""").dummyFks(true).load()
+        ordersSetup()
         // the other side: NetSuite lacks R004 (the start return), holds R017 (the end return, outside the window) and a stranger
         List<Map> netsuite = returns().findAll { it.returnId != "R004" && it.returnId in ["R001", "R005", "R006", "R007", "R017"] }.collect {
             [returnId: it.returnId] } + [[returnId: "R999"]]
@@ -223,27 +233,34 @@ class RollingCopyParityTests {
     }
 
     /**
-     * An interactive side with a compare scope sends keepRecordFields, narrower than the records (no returnDate). The
-     * slice cannot project as the extractor does, so with the dataset active the side still reads live (KEEPS_FIELDS) and
-     * gets the extractor's projected records.
+     * An interactive side with a compare scope sends keepRecordFields, narrower than the records (no returnDate). The slice
+     * projects with the extractor's own function (ruling P3b1-8), so the served side gets the records its live read writes.
      */
     @Test
-    void aSideThatKeepsFewerFieldsReadsLiveThoughItsCopyIsActive() {
+    void aSideThatKeepsFewerFieldsIsServedTheExtractorsProjection() {
         String id = rollingReturns(CONN + "-keep")
         assertEquals([], atCopyClock(0) { refresh(id, stub([])) }.errors)
 
-        List<Map> activeCalls = []
-        Map active = interactive(activeCalls, "keep-active", CONN + "-keep")
-        assertEquals([], active.errors)
-        assertEquals(1, activeCalls.size(), "a side that asks for kept fields reads live although its copy is active")
-        List keep = activeCalls[0].params.keepRecordFields as List
+        List<Map> servedCalls = []
+        Map served = interactive(servedCalls, "keep-served", CONN + "-keep")
+        assertEquals([], served.errors)
+        assertEquals(0, servedCalls.size(), "a side that asks for kept fields is served from the copy")
+        setStatus(id, "DST_PAUSED", CONN + "-keep")
+        List<Map> liveCalls = []
+        Map live
+        try {
+            live = interactive(liveCalls, "keep-live", CONN + "-keep")
+        } finally {
+            setStatus(id, "DST_ACTIVE", CONN + "-keep")
+        }
+        assertEquals(1, liveCalls.size())
+        List keep = liveCalls[0].params.keepRecordFields as List
         assertTrue(keep.contains("returnId") && !keep.contains("returnDate"), keep.toString())
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
-        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.side(connector, activeCalls[0].params as Map,
-                [tenantId: A, windowStart: START, windowEnd: END]).liveOnly)
-        Map activeDoc = json(new File(active.result.fileLocation as String))
-        assertFalse(activeDoc.metadata.containsKey("servedFromCopy"), "the live file, not a slice")
-        assertTrue(activeDoc.records.every { !it.containsKey("returnDate") }, "projected by the extractor")
+        Map servedDoc = json(new File(served.result.fileLocation as String))
+        Map liveDoc = json(new File(live.result.fileLocation as String))
+        assertEquals(true, servedDoc.metadata.servedFromCopy)
+        assertTrue(servedDoc.records.every { !it.containsKey("returnDate") }, "projected as the extractor does")
+        assertEquals(JsonOutput.toJson(liveDoc.records), JsonOutput.toJson(servedDoc.records))
     }
 
     @Test
@@ -273,6 +290,166 @@ class RollingCopyParityTests {
         assertFalse(byId.containsKey("R001"))
         assertEquals("RETURN_COMPLETED", byId["R005"].statusId)
         assertEquals(20, byId.size())
+    }
+
+    // ------------------------------------------------------------------------------------------- Task 3: orders on a copy
+
+    /** Ruling 3b1-7: the copy keeps the union of what every matching source reads, in order; a source on another connection adds nothing. */
+    @Test
+    void keptFieldsIsTheUnionOverEveryMatchingSource() {
+        String id = rollingOrders("rcp-oms-union")
+        List<String> expected = ORDER_BASE + ["productStoreId", "statusFlowId", "salesChannelEnumId"]
+        assertEquals(expected, keptFieldsOf(id), "keep fields, ask id fields and filter fields of both sources, then the dataset's own")
+
+        List<Map> calls = []
+        assertEquals([], atCopyClock(0) { refresh(id, omsStub(calls)) }.errors)
+        assertEquals(ORDERS_EXTRACT, calls[0].service)
+        assertEquals(expected, calls[0].params.keepRecordFields, "the read keeps the union")
+        assertEquals("orderDate", calls[0].params.windowFieldName)
+        assertEquals(DatasetRefreshSupport.DATASET_EXCHANGE_MANIFEST_MAX, calls[0].params.exchangeManifestMaxEntries)
+        Map manifest = KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id))
+        assertEquals(expected, manifest.keptFields)
+        assertEquals(KeptCopyStore.EXCHANGE_MANIFEST_KEPT, manifest.exchangeManifest)
+        assertTrue((manifest.heldFields as List).contains("productStoreId"), "the records carry what the copy keeps")
+        assertFalse((manifest.heldFields as List).contains("paymentPreferences"), "and nothing it does not: ${manifest.heldFields}")
+        def row = datasetRow(id)
+        assertEquals(JsonOutput.toJson(expected), row.keptFieldsJson)
+    }
+
+    /** A source whose rules cannot be projected, or an automation source (which keeps whole records), makes the copy whole. */
+    @Test
+    void aSourceThatCannotProjectMakesTheCopyKeepWholeRecords() {
+        String raw = rollingOrders("rcp-oms-whole")
+        assertNull(keptFieldsOf(raw), "a rule with no field path on either side reads whole records")
+        String auto = rollingOrders("rcp-oms-auto")
+        assertNull(keptFieldsOf(auto), "an automation source reads whole records")
+
+        List<Map> calls = []
+        assertEquals([], atCopyClock(0) { refresh(raw, omsStub(calls)) }.errors)
+        assertFalse(calls[0].params.containsKey("keepRecordFields"), "a whole read sends no keep fields")
+        Map manifest = KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, raw))
+        assertNull(manifest.keptFields)
+        assertTrue((manifest.heldFields as List).containsAll(["productStoreId", "paymentPreferences"]), manifest.heldFields.toString())
+        assertNull(datasetRow(raw).keptFieldsJson)
+    }
+
+    /** A7: tenant B's sources on a connection of the same name, run and automation alike, never touch tenant A's union. */
+    @Test
+    void anOtherTenantsSourcesNeverWidenTheUnion() {
+        String id = rollingOrders("rcp-oms-union")
+        List<String> kept = keptFieldsOf(id)
+        assertNotNull(kept, "B's automation source on the same connection name does not make A's copy whole")
+        assertFalse(kept.contains("orderItemCount"), "B's key field is not in A's union: ${kept}")
+        // and as tenant B, A's dataset has no union at all
+        actAs(EDITOR_USERNAME, B)
+        try {
+            assertEquals(B, TenantAccessSupport.currentActiveTenantUserGroupId(ec), "test precondition: acting as B")
+            assertNull(DatasetSupport.keptFields(ec, datasetRow(id).getMap() as Map))
+        } finally {
+            actAs(EDITOR_USERNAME, A)
+        }
+    }
+
+    /**
+     * Review Focus 3: a check that now filters on a field the copy lacks reads live, logged, and the dataset is queued for
+     * the read that keeps it; once that read has run, the side is served, and its filter sees the field. A filter field is
+     * not kept, so only the copy's own field list can tell the slice it lacks it.
+     */
+    @Test
+    void aSideNeedingAFieldTheCopyLacksReadsLiveAndQueuesARebuild() {
+        String conn = "rcp-oms-lack"
+        String id = rollingOrders(conn)
+        assertEquals([], atCopyClock(0) { refresh(id, omsStub([])) }.errors)
+        List<Map> before = []
+        assertEquals([], ordersRun(before, "lack-before", conn, "RCP_OLACK").errors)
+        assertEquals(0, before.size(), "served while the copy holds every field the side reads")
+        assertFalse(KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id)).keptFields.contains("salesChannelEnumId"))
+
+        // the check now sets POS orders aside on this side
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RCP_OLACK" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].salesChannelEnumId" operator="EXCLUDE_IN" filterValues="POS_SALES_CHANNEL" companyUserGroupId="${A}"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        try {
+            def row = datasetRow(id)
+            row.nextReadDate = new Timestamp(System.currentTimeMillis() + 30 * 86_400_000L)
+            row.update()
+            List<Map> lacking = []
+            Map run = ordersRun(lacking, "lack-live", conn, "RCP_OLACK")
+            assertEquals([], run.errors)
+            assertEquals(1, lacking.size(), "the side reads live: the copy lacks salesChannelEnumId")
+            assertFalse((lacking[0].params.keepRecordFields as List).contains("salesChannelEnumId"), "a filter field, not a kept one")
+            assertEquals(["salesChannelEnumId"], (lacking[0].params.sourceFilters as List)*.fieldExpression)
+            assertFalse(json(new File(run.result.fileLocation as String)).records*.orderId.contains("O008"), "the POS order is set aside")
+            assertTrue((datasetRow(id).nextReadDate as Timestamp).time <= System.currentTimeMillis(), "the dataset is due now")
+
+            // the next scan's read keeps the field, and the side is served again: its filter sees the field
+            assertEquals([], atCopyClock(0) { refresh(id, omsStub([])) }.errors)
+            assertTrue(KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, A, id)).keptFields.contains("salesChannelEnumId"))
+            List<Map> after = []
+            Map served = ordersRun(after, "lack-after", conn, "RCP_OLACK")
+            assertEquals(0, after.size(), "served once the copy keeps the field")
+            Map servedDoc = json(new File(served.result.fileLocation as String))
+            assertEquals(json(new File(run.result.fileLocation as String)).records, servedDoc.records, "the live read's records")
+            assertEquals([1, 0], [servedDoc.metadata.filters.configuredExclusions[0].excludedCount,
+                                  servedDoc.metadata.filters.configuredExclusions[0].fieldAbsentCount], "O008 set aside on its field")
+        } finally {
+            ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", "RCP_OLACK").disableAuthz().deleteAll()
+        }
+    }
+
+    /**
+     * An interactive orders run served from the rolling copy is the run read live: the same records (projected from a copy
+     * that keeps more fields than this side), the same exchange manifest beside them, the same diff and result.
+     */
+    @Test
+    void aServedOrdersRunMatchesALiveRun() {
+        String conn = "rcp-oms"
+        String id = rollingOrders(conn)
+        List<Map> refreshCalls = []
+        assertEquals([], atCopyClock(0) { refresh(id, omsStub(refreshCalls)) }.errors)
+        List keptByCopy = refreshCalls[0].params.keepRecordFields as List
+        assertEquals(ORDER_BASE + ["productStoreId"], keptByCopy, "the wider source widens the copy")
+
+        List<Map> servedCalls = []
+        Map served = ordersRun(servedCalls, "orders-served", conn, "RCP_OSCOPE")
+        assertEquals([], served.errors)
+        assertEquals(0, servedCalls.size(), "the served run never calls the OMS")
+
+        setStatus(id, "DST_PAUSED", conn, "OMS_GQL", "orderId", "orderDate")
+        List<Map> liveCalls = []
+        Map live
+        try {
+            live = ordersRun(liveCalls, "orders-live", conn, "RCP_OSCOPE")
+        } finally {
+            setStatus(id, "DST_ACTIVE", conn, "OMS_GQL", "orderId", "orderDate")
+        }
+        assertEquals([], live.errors)
+        assertEquals(1, liveCalls.size())
+        assertEquals(ORDER_BASE, liveCalls[0].params.keepRecordFields, "the side keeps fewer fields than the copy")
+
+        Map servedDoc = json(new File(served.result.fileLocation as String))
+        Map liveDoc = json(new File(live.result.fileLocation as String))
+        assertEquals(true, servedDoc.metadata.servedFromCopy)
+        List<String> ids = servedDoc.records*.orderId
+        assertTrue(ids.contains("O004") && !ids.contains("O017"), "half-open on orderDate: ${ids}")
+        assertFalse(ids.contains("O003"), "the cancelled order is filtered")
+        assertFalse(ids.contains("O006") || ids.contains("O009"), "exchange orders are set aside")
+        assertTrue(servedDoc.records.every { !it.containsKey("productStoreId") }, "projected to the side's own fields")
+        assertEquals(JsonOutput.toJson(liveDoc.records), JsonOutput.toJson(servedDoc.records))
+
+        Map servedManifest = json(exchangeManifestOf(served))
+        Map liveManifest = json(exchangeManifestOf(live))
+        assertEquals(["O006", "O009"], servedManifest.manifest*.omsOrderId.sort())
+        assertEquals(liveManifest.manifest.sort { it.omsOrderId }, servedManifest.manifest.sort { it.omsOrderId })
+        assertEquals(liveManifest.truncated, servedManifest.truncated)
+
+        Map servedOut = compareOrders(served, "orders-served")
+        Map liveOut = compareOrders(live, "orders-live")
+        ["diff.json", "result.json"].each { String name ->
+            assertTrue(servedOut[name].length > 0, name)
+            assertArrayEquals(liveOut[name], servedOut[name], "${name} differs between the served run and the live run")
+        }
     }
 
     // --------------------------------------------------------------------------------------------------------- the runs
@@ -381,13 +558,214 @@ class RollingCopyParityTests {
         return underFacadeGrant("dataset.DatasetServices.refresh#Dataset", [datasetId: id, extractor: extractor, forceFull: false])
     }
 
-    private void setStatus(String id, String statusId, String conn = CONN) {
+    private void setStatus(String id, String statusId, String conn = CONN, String system = "OMS_RETURNS_GQL",
+                           String idField = "returnId", String windowField = "entryDate") {
         assertEquals([], underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: statusId,
-                systemEnumId: "OMS_RETURNS_GQL", sourceConfigId: conn, options: [:], idField: "returnId", windowField: "entryDate"]).errors)
+                systemEnumId: system, sourceConfigId: conn, options: [:], idField: idField, windowField: windowField]).errors)
     }
 
     private static Instant instantOf(Object v) {
         return v instanceof Timestamp ? ((Timestamp) v).toInstant() : Instant.parse(v as String)
+    }
+
+    // ----------------------------------------------------------------------------------------------------- orders helpers
+
+    /** The orders rule sets and sources Task 3's tests read, for tenant A and (A7) tenant B. */
+    private void ordersSetup() {
+        insert("moqui.security.UserGroup", [userGroupId: B, description: "Gorjana", groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
+        insert("moqui.security.UserGroupMember", [userGroupId: B, userId: EDITOR_ID, fromDate: FROM_DATE])
+        insert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: B, userId: EDITOR_ID,
+                permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM_DATE])
+        Closure<String> omsSide = { String scope, String side, String conn, String tenant = A ->
+            """<darpan.rule.RuleSetCompareSource compareScopeId="${scope}" fileSide="${side}" systemEnumId="OMS_GQL" fileTypeEnumId="DftJson"
+                sourceConfigId="${conn}" sourceConfigType="HOTWAX_OMS_GQL" recordRootExpression="records" primaryIdExpression="orderId"
+                companyUserGroupId="${tenant}"/>"""
+        }
+        Closure<String> scope = { String ruleSet, String scopeId, String tenant = A ->
+            """<darpan.rule.RuleSet ruleSetId="${ruleSet}" ruleSetName="${ruleSet}" companyUserGroupId="${tenant}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="${scopeId}" ruleSetId="${ruleSet}" objectType="ORDER" companyUserGroupId="${tenant}"/>"""
+        }
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            ${scope('RCP_ORS', 'RCP_OSCOPE')}
+            ${omsSide('RCP_OSCOPE', 'FILE_1', 'rcp-oms')}
+            <darpan.rule.RuleSetCompareSource compareScopeId="RCP_OSCOPE" fileSide="FILE_2" systemEnumId="NETSUITE" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RCP_OSCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].statusId" operator="EXCLUDE_IN" filterValues="ORDER_CANCELLED" companyUserGroupId="${A}"/>
+            ${scope('RCP_OWRS', 'RCP_OWIDE')}
+            ${omsSide('RCP_OWIDE', 'FILE_1', 'rcp-oms')}
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RCP_OWIDE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="productStoreId" companyUserGroupId="${A}"/>
+
+            ${scope('RCP_OLRS', 'RCP_OLACK')}
+            ${omsSide('RCP_OLACK', 'FILE_1', 'rcp-oms-lack')}
+
+            ${scope('RCP_URS1', 'RCP_OU1')}
+            ${omsSide('RCP_OU1', 'FILE_1', 'rcp-oms-union')}
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RCP_OU1" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="productStoreId" companyUserGroupId="${A}"/>
+            <darpan.audit.AuditCheck checkId="RCP_CHK" companyUserGroupId="${A}" checkCode="RCP" label="orders" savedRunId="RCP_URS1"/>
+            <darpan.judge.CheckAsk checkId="RCP_CHK" askName="flow" companyUserGroupId="${A}" subjectSide="FILE_1" idField="statusFlowId"
+                systemEnumId="NETSUITE" sourceConfigId="ns" keyField="flowId"/>
+            <darpan.judge.CheckAsk checkId="RCP_CHK" askName="other" companyUserGroupId="${A}" subjectSide="FILE_2" idField="orderItemCount"
+                systemEnumId="NETSUITE" sourceConfigId="ns" keyField="x"/>
+            ${scope('RCP_URS2', 'RCP_OU2')}
+            ${omsSide('RCP_OU2', 'FILE_2', 'rcp-oms-union')}
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RCP_OU2" fileSide="FILE_2" sequenceNum="1"
+                fieldExpression="\$.records[*].salesChannelEnumId" operator="EXCLUDE_IN" filterValues="POS_SALES_CHANNEL" companyUserGroupId="${A}"/>
+            ${scope('RCP_URS3', 'RCP_OU3')}
+            ${omsSide('RCP_OU3', 'FILE_1', 'rcp-oms-elsewhere')}
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RCP_OU3" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="orderItemCount" companyUserGroupId="${A}"/>
+
+            ${scope('RCP_BRS', 'RCP_BSCOPE', B)}
+            ${omsSide('RCP_BSCOPE', 'FILE_1', 'rcp-oms-union', B)}
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RCP_BSCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="orderItemCount" companyUserGroupId="${B}"/>
+            <darpan.reconciliation.ReconciliationAutomation automationId="RCP_BAUTO" automationName="B orders" companyUserGroupId="${B}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="RCP_BRS"/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="RCP_BAUTO" fileSide="FILE_1" companyUserGroupId="${B}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="OMS_GQL"
+                safeMetadataJson='{"parameters":{"omsRestSourceConfigId":"rcp-oms-union"}}'/>
+
+            ${scope('RCP_WRS', 'RCP_OWHOLE')}
+            ${omsSide('RCP_OWHOLE', 'FILE_1', 'rcp-oms-whole')}
+            <darpan.rule.Rule ruleId="RCP_RAW_RULE" ruleSetId="RCP_WRS" sequenceNum="1" ruleText="raw" expression="{}" enabled="Y"/>
+            ${scope('RCP_ARS', 'RCP_OAUTO')}
+            ${omsSide('RCP_OAUTO', 'FILE_1', 'rcp-oms-auto')}
+            <darpan.reconciliation.ReconciliationAutomation automationId="RCP_AAUTO" automationName="A orders" companyUserGroupId="${A}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="RCP_ARS"/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="RCP_AAUTO" fileSide="FILE_1" companyUserGroupId="${A}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="OMS_GQL"
+                safeMetadataJson='{"parameters":{"omsRestSourceConfigId":"rcp-oms-auto"}}'/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        List<Map> netsuite = orders().findAll { it.orderId in ["O001", "O005", "O007", "O017"] }.collect { [orderId: it.orderId] } +
+                [[orderId: "O999"]]
+        new File(fixtures, "ns-orders.json").setText(JsonOutput.toJson([records: netsuite]), "UTF-8")
+    }
+
+    private String rollingOrders(String conn) {
+        Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "OMS_GQL", sourceConfigId: conn,
+                options: [:], idField: "orderId", windowField: "orderDate", readRuleEnumId: "DRR_ROLLING"])
+        assertEquals([], stored.errors)
+        return stored.out.datasetId as String
+    }
+
+    private def datasetRow(String id) {
+        return ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().useCache(false).one()
+    }
+
+    private List<String> keptFieldsOf(String id) {
+        Set<String> kept = DatasetSupport.keptFields(ec, datasetRow(id).getMap() as Map)
+        return kept == null ? null : new ArrayList<String>(kept)
+    }
+
+    /** One interactive FILE_1 orders side, its source the stored row, through RunExtractSupport.extractApiSource. */
+    private Map ordersRun(List<Map> calls, String token, String conn, String scopeId) {
+        def row = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", scopeId).condition("fileSide", "FILE_1")
+                .disableAuthz().useCache(false).one()
+        assertEquals(conn, row.sourceConfigId)
+        Map source = new LinkedHashMap(row.getMap())
+        Map artifact = [location: DataManagerSupport.resolveReconciliationRunLocation(ec, "rcp-${token}-p${++seq}", STAMP), runToken: "parity"]
+        ec.message.clearAll()
+        Map result = RunExtractSupport.extractApiSource(ec, source, "FILE_1", "File 1", artifact,
+                [windowStartDate: START, windowEndDate: END, timeZone: "UTC"], null, omsStub(calls))
+        List<String> errors = ec.message.errors.collect { it.toString() }
+        ec.message.clearAll()
+        return [result: result, errors: errors]
+    }
+
+    /**
+     * The OMS as extract#HotWaxOmsGqlOrders answers, for the refresh and for the live read alike: orders with orderDate in
+     * [windowStart, windowEnd), exchange orders set aside into the exchange manifest (at most exchangeManifestMaxEntries,
+     * 500 by default), the side's filters applied, then each record trimmed with the extractor's projection.
+     */
+    private Closure omsStub(List<Map> calls) {
+        return { String service, Map params ->
+            calls << [service: service, params: new LinkedHashMap(params)]
+            Instant from = instantOf(params.windowStart), to = instantOf(params.windowEnd)
+            String fileName = (params.fileName ?: "oms-orders-${from.toEpochMilli()}-${to.toEpochMilli()}.json") as String
+            List<Map> inWindow = orders().findAll { Map o ->
+                Instant d = Instant.ofEpochMilli(o.orderDate as long)
+                !d.isBefore(from) && d.isBefore(to)
+            }
+            List<Map> exchanges = inWindow.findAll { it.orderItemAssocs }
+            Map applied = SourceFilterSupport.applyToRecords(inWindow - exchanges, SourceFilterSupport.parseRules(params.sourceFilters as List))
+            ExcludedRecordsSidecar.discard((Map) applied.excludedCollector)
+            Set<String> keep = KeptFieldsProjection.keptBy(KeptFieldsProjection.OMS_ORDERS, params.keepRecordFields)
+            List<Map> records = ((List<Map>) applied.records).collect { keep == null ? it : KeptFieldsProjection.project(it, keep) }
+            File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
+            new File(dir, fileName).setText(JsonOutput.toJson([records: records, metadata: [live: true]]), "UTF-8")
+            String manifestLocation = null
+            if (exchanges) {
+                int cap = (params.exchangeManifestMaxEntries ?: 500) as int
+                String manifestName = fileName.replaceAll(/\.json$/, "") + ".exchange-manifest.json"
+                new File(dir, manifestName).setText(JsonOutput.toJson([manifest: exchanges.take(cap).collect { Map o ->
+                    [omsOrderId: o.orderId, externalId: o.externalId, orderName: o.orderName, toOrderId: o.orderItemAssocs[0].toOrderId,
+                     grandTotal: o.grandTotal, orderDate: o.orderDate, statusId: o.statusId] }, truncated: exchanges.size() > cap,
+                                                                      sourceFileName: fileName]), "UTF-8")
+                manifestLocation = DataManagerSupport.childLocation(params.outputLocation as String, manifestName)
+            }
+            return [fileLocation: DataManagerSupport.childLocation(params.outputLocation as String, fileName), fileName: fileName,
+                    recordCount: records.size(), exchangeManifestFileLocation: manifestLocation]
+        }
+    }
+
+    private File exchangeManifestOf(Map run) {
+        File extract = new File(run.result.fileLocation as String)
+        File f = new File(extract.parentFile, extract.name.replaceAll(/\.json$/, "") + ".exchange-manifest.json")
+        assertTrue(f.isFile(), "no exchange manifest beside ${extract}")
+        return f
+    }
+
+    private Map compareOrders(Map run, String tag) {
+        Map called = underFacadeGrant("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
+                ruleSetId: "RCP_ORS", compareScopeId: "RCP_OSCOPE", file1Location: run.result.fileLocation,
+                file2Location: new File(fixtures, "ns-orders.json").absolutePath, file1Name: "oms-orders.json",
+                file2Name: "ns-orders.json", sparkAppName: "RollingCopyParityTests"])
+        assertEquals([], called.errors, tag)
+        Map out = called.out
+        try {
+            File dir = new File(dataManagerRoot, "rcp-out/${tag}")
+            dir.deleteDir()
+            Map written = ReconciliationServices.writeDiffDatasetOutput(ec, (Dataset) out.diffDf, dir.absolutePath, "diff.json", "diff.json",
+                    [timestamp: "fixed", ruleSetId: out.ruleSetId, compareScopeId: out.compareScopeId],
+                    [totalDifferences: out.differenceCount], (List) out.validationErrors, (List) out.processingWarnings)
+            new File(dir, "result.json").setText(JsonOutput.toJson(new TreeMap(out.findAll { k, v ->
+                !(v instanceof Dataset) && k != "persistedSources" })), "UTF-8")
+            return ["diff.json": new File(written.diffLocation as String).bytes, "result.json": new File(dir, "result.json").bytes]
+        } finally {
+            ReconciliationServices.unpersistDatasets((List) (out?.persistedSources ?: []))
+        }
+    }
+
+    private static Map order(String id, String orderDate, Map extra = [:]) {
+        long at = Instant.parse(orderDate).toEpochMilli()
+        return [orderId: id, orderName: "#${id}".toString(), externalId: "SH${id.substring(1)}".toString(), statusId: "ORDER_COMPLETED",
+                orderTypeId: "SALES_ORDER", orderDate: at, grandTotal: 25.5, currencyUomId: "USD", productStoreId: "STORE",
+                salesChannelEnumId: "WEB_SALES_CHANNEL", billToCustomer: [firstName: "Ann", lastName: id],
+                shipGroups: [[shipGroupSeqId: "00001", facilityId: "WH"]], hasPaymentPreference: "Y",
+                paymentMethodTypeIds: "CREDIT_CARD", paymentPreferenceSlotsFull: false, isCompleted: "Y",
+                paymentPreferences: [[paymentMethodTypeId: "CREDIT_CARD", statusId: "PAYMENT_SETTLED", maxAmount: 25.5]]] + extra
+    }
+
+    /**
+     * 20 synthetic orders around the window [2026-11-10T08:00Z, 2026-11-11T08:00Z): O006 and O009 exchanges, O003 cancelled,
+     * O008 sold at the POS.
+     */
+    private static List<Map> orders() {
+        Map exchange = [orderItemAssocs: [[orderItemAssocTypeId: "EXCHANGE", toOrderId: "EXC1"]]]
+        return [
+                order("O001", "2026-10-02T09:00:00Z"), order("O002", "2026-11-10T09:30:00Z"),
+                order("O003", "2026-11-10T22:00:00Z", [statusId: "ORDER_CANCELLED"]), order("O004", "2026-11-10T08:00:00Z"),
+                order("O005", "2026-11-10T08:00:01Z"), order("O006", "2026-11-10T11:00:00Z", exchange),
+                order("O007", "2026-11-10T13:15:00Z"), order("O008", "2026-11-10T15:45:00Z", [salesChannelEnumId: "POS_SALES_CHANNEL"]),
+                order("O009", "2026-11-10T18:00:00Z", exchange), order("O010", "2026-11-10T20:30:00Z"),
+                order("O011", "2026-11-11T00:10:00Z"), order("O012", "2026-11-11T03:00:00Z"), order("O013", "2026-11-11T07:59:59Z"),
+                order("O014", "2026-11-10T07:59:59Z"), order("O015", "2026-11-09T12:00:00Z", exchange),
+                order("O016", "2026-11-12T12:00:00Z"), order("O017", "2026-11-11T08:00:00Z"), order("O018", "2026-11-15T12:00:00Z"),
+                order("O019", "2026-11-18T12:00:00Z"), order("O020", "2026-10-25T12:00:00Z"),
+        ]
     }
 
     // ------------------------------------------------------------------------------------------------------- the compare

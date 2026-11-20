@@ -53,10 +53,19 @@ import static darpan.common.ValueSupport.normalize
  * </ul>
  * The side's field is the connector's windowFieldName, which the dispatchers send; else the field the extractor windows on
  * by itself, its windowFieldName parameter's default-value (ruling 3b1-4); else, for a plan 3a connector only, createdAt.
- * No field, no serving. A side that sends its connector's keep-fields parameter reads live: the copy holds whole
- * records, and each extractor's projection lives in its own repo, out of reach here. The excluded-records side file is
- * written exactly when the live extractor writes one (ExcludedRecordsSidecar.WRITTEN_BY, ruling P3b1-7); a filtering side
- * whose connector is in neither of its sets reads live.</p>
+ * No field, no serving. The excluded-records side file is written exactly when the live extractor writes one
+ * (ExcludedRecordsSidecar.WRITTEN_BY, ruling P3b1-7); a filtering side whose connector is in neither of its sets reads live.</p>
+ *
+ * <p><b>Kept fields</b> (plan 3b-1, rulings 3b1-7 and P3b1-8). A connector whose extractor projects with
+ * {@link KeptFieldsProjection} (it has a spec there) is served projected: the slice trims each copy record with the very
+ * function the extractor trims with, and only when the copy can stand in for the live read
+ * ({@link KeptFieldsProjection#servingProblem}: it holds every field the side keeps, filters on and windows on, was read
+ * the same way for the fields whose values depend on it, and in the same order). A side the copy cannot serve reads live,
+ * logged, and when the dataset's next read would keep other fields than the copy holds, the dataset is queued for that read
+ * now (queue#DatasetRefresh). Such a side's readFields only shape its read, so they are checked there, not refused. Any
+ * other connector's side that sends keep fields or readFields reads live, as before. An extractor that writes an
+ * exchange-manifest side file has it written beside the slice from the copy's own, with the excluded exchange orders the
+ * window holds; a copy whose read cut its list short, or that kept none, reads live.</p>
  *
  * <p><b>The options key</b> ({@code find#ServingDataset}'s options) is the run side's extract options its connector
  * declares (SourceExtractOptionsSupport.declaredOptions), read off the parameters the dispatcher built, with false and
@@ -97,6 +106,10 @@ class KeptCopySupport {
     static final String DAYS_BEFORE_HORIZON = "the window's first day may start before what the copy covers in the source's zone"
     static final String SIDE_FILE_UNDECLARED = "the side filters, and whether its source writes the excluded-records side file is not declared"
     static final String KEEPS_FIELDS = "the side asks its source to keep only some fields, and a slice holds whole copy records"
+    static final String EXTRA_FIELDS = "the side asks its source for extra fields"
+    static final String NO_EXCHANGE_MANIFEST = "the copy kept no exchange manifest, which the live read writes"
+    static final String EXCHANGE_MANIFEST_CUT = "the copy's exchange manifest was cut short"
+    static final String QUEUE_SERVICE = "dataset.DatasetServices.queue#DatasetRefresh"
 
     /**
      * Parameters a dispatcher sets that never change which raw records a read returns (or that the side checks on its
@@ -124,17 +137,18 @@ class KeptCopySupport {
         String configName = normalize(connector?.configParameterName) ?: "sourceConfigId"
         String filterName = normalize(connector?.filterParameterName)
         String statusName = normalize(connector?.statusParameterName)
+        String keepName = normalize(connector?.keepFieldsParameterName)
         Set<String> declared = SourceExtractOptionsSupport.declaredOptions(connector)*.name as Set<String>
+        // plan 3b-1: a connector whose extractor projects with KeptFieldsProjection is served projected
+        KeptFieldsProjection.Spec spec = KeptFieldsProjection.specFor(normalize(connector?.systemEnumId))
 
-        Map<String, Object> options = new TreeMap<String, Object>()
+        Map<String, Object> options = optionsKey(connector, p)
         List<String> undeclared = []
         p.each { Object k, Object v ->
             String name = k as String
-            if (name in declared) {
-                if (present(v)) options.put(name, v)
-            } else if (!(name in DISPATCH_PARAMETERS) && name != configName && name != filterName && name != statusName &&
-                    name != normalize(connector?.keepFieldsParameterName) && name != normalize(connector?.dateFromParameterName) &&
-                    name != normalize(connector?.dateToParameterName) && present(v)) {
+            if (!(name in declared) && !(name in DISPATCH_PARAMETERS) && name != configName && name != filterName &&
+                    name != statusName && name != keepName && name != normalize(connector?.dateFromParameterName) &&
+                    name != normalize(connector?.dateToParameterName) && !(spec != null && name == "readFields") && present(v)) {
                 undeclared << name
             }
         }
@@ -148,11 +162,10 @@ class KeptCopySupport {
         if (run?.stateMode) liveOnly = "the side reads by status, with no window"
         else if (connector?.windowed == false) liveOnly = "the source reads its whole population, with no window"
         else if (statusName && present(p.get(statusName))) liveOnly = "the side reads by status"
-        else if (present(p.get("readFields"))) liveOnly = "the side asks its source for extra fields"
-        // each extractor projects in its own way (OMS returns keep items too, a data definition its keepWith companions);
-        // that code lives in the connector's repo, out of reach here, so a projected side is never served whole records
-        else if (normalize(connector?.keepFieldsParameterName) && present(p.get(normalize(connector.keepFieldsParameterName))))
-            liveOnly = KEEPS_FIELDS
+        // a connector without a projection spec projects in code out of reach here (a data definition keeps its keepWith
+        // companions), and its readFields change what it reads: such a side is never served copy records
+        else if (spec == null && present(p.get("readFields"))) liveOnly = EXTRA_FIELDS
+        else if (spec == null && keepName && present(p.get(keepName))) liveOnly = KEEPS_FIELDS
         else if (undeclared) liveOnly = "the side sends parameters no dataset is keyed by: ${undeclared.sort().join(', ')}".toString()
 
         return [
@@ -170,12 +183,30 @@ class KeptCopySupport {
                 sentWindowStart: dateFromName ? p.get(dateFromName) : null,
                 sentWindowEnd  : dateToName ? p.get(dateToName) : null,
                 filters        : filterName ? p.get(filterName) : null,
+                // the fields the side asks its source to keep (null: whole records) and to read, for a projecting connector
+                keepFields     : spec != null && keepName && present(p.get(keepName)) ? new ArrayList((Collection) p.get(keepName)) : null,
+                readFields     : spec != null && present(p.get("readFields")) ? new ArrayList((Collection) p.get("readFields")) : null,
                 byKeys         : p.get("lookupKeys") != null,
                 outputLocation : normalize(p.outputLocation),
                 fileName       : normalize(p.fileName),
                 outputRunId    : normalize(run?.outputRunId),
                 liveOnly       : liveOnly,
         ] as Map<String, Object>
+    }
+
+    /**
+     * The options key of a side about to be sent {@code params}: the extract options its connector declares, with false
+     * and blank values dropped (absent IS the default), sorted. find#ServingDataset hashes it to find the side's dataset,
+     * and DatasetSupport.keptFields to find the sources that read a dataset (ruling P3b1-1: one function). Pure.
+     */
+    static Map<String, Object> optionsKey(Map<String, Object> connector, Map<String, Object> params) {
+        Set<String> declared = SourceExtractOptionsSupport.declaredOptions(connector)*.name as Set<String>
+        Map<String, Object> options = new TreeMap<String, Object>()
+        (params ?: [:]).each { Object k, Object v ->
+            String name = k as String
+            if (name in declared && present(v)) options.put(name, v)
+        }
+        return options
     }
 
     /**
@@ -230,7 +261,23 @@ class KeptCopySupport {
                 }
             }
 
-            return slice(ec, side, dataset, dir, manifest, windowField, live)
+            // plan 3b-1: a projecting connector's side is served projected, when the copy can stand in for its live read
+            KeptFieldsProjection.Spec spec = KeptFieldsProjection.specFor(side.systemEnumId)
+            if (spec != null) {
+                Map problem = KeptFieldsProjection.servingProblem(spec, manifest, [keepFields: side.keepFields,
+                        filterFields: SourceFilterSupport.parseRules(side.filters).collect { normalize(it.fieldExpression) },
+                        readFields: side.readFields, windowField: windowField])
+                if (problem != null) {
+                    queueRebuildIfFieldsChanged(ec, dataset, manifest, problem.reason as String)
+                    return notServed(problem.reason as String)
+                }
+                if (spec.exchangeManifestMax != null && !(manifest.exchangeManifest in [KeptCopyStore.EXCHANGE_MANIFEST_KEPT,
+                                                                                         KeptCopyStore.EXCHANGE_MANIFEST_NONE])) {
+                    return notServed(NO_EXCHANGE_MANIFEST)
+                }
+            }
+
+            return slice(ec, side, dataset, dir, manifest, windowField, live, spec)
         } catch (Throwable t) {
             logger.warn("Kept copy not served for ${side?.systemEnumId} ${side?.sourceConfigId}", t)
             return notServed("the copy could not be read: ${t.message ?: t}".toString())
@@ -239,7 +286,7 @@ class KeptCopySupport {
 
     /** A served slice as an extractor's result map, for the automation path (what callConfiguredSourceExtractor returns). */
     static Map<String, Object> extractResult(Map served) {
-        return [dataAvailable  : ((served.recordCount ?: 0) as long) > 0,
+        Map<String, Object> result = [dataAvailable  : ((served.recordCount ?: 0) as long) > 0,
                 fileLocation   : served.fileLocation,
                 fileName       : served.fileName,
                 fileTypeEnumId : "DftJson",
@@ -247,6 +294,35 @@ class KeptCopySupport {
                 requestMetadata: served.metadata,
                 warnings       : served.warnings ?: [],
                 errors         : []] as Map<String, Object>
+        // an extractor that writes an exchange manifest answers its location (null when the window held no exchange)
+        if (served.containsKey("exchangeManifestFileLocation")) result.exchangeManifestFileLocation = served.exchangeManifestFileLocation
+        return result
+    }
+
+    /**
+     * A side the copy could not serve: when the dataset's next read would keep other fields than the copy holds (a check
+     * now reads a field the copy lacks), the dataset is queued for that read now. Logged either way; never throws, and
+     * leaves the message facade as it found it.
+     */
+    private static void queueRebuildIfFieldsChanged(def ec, Map dataset, Map manifest, String reason) {
+        try {
+            Map<String, Object> connector = darpan.reconciliation.automation.SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)
+            List<String> next = DatasetRefreshSupport.keepFieldsForRead(ec, dataset, connector)
+            List<String> held = manifest?.keptFields as List<String>
+            if (next == held) {
+                logger.info("Dataset ${dataset.datasetId} not served: ${reason}; its next read keeps the same fields")
+                return
+            }
+            logger.info("Dataset ${dataset.datasetId} not served: ${reason}; queued for a read that keeps ${next == null ? 'whole records' : next}")
+            ec.service.sync().name(QUEUE_SERVICE).parameters([datasetId: dataset.datasetId, reason: reason]).call()
+        } catch (Throwable t) {
+            logger.warn("Dataset ${dataset?.datasetId}: could not queue its rebuild", t)
+        } finally {
+            if (ec.message.hasError()) {
+                logger.warn("Dataset ${dataset?.datasetId}: queuing its rebuild failed: ${ec.message.getErrors()}")
+                ec.message.clearErrors()
+            }
+        }
     }
 
     private static Map notServed(String reason) {
@@ -293,7 +369,8 @@ class KeptCopySupport {
         return out.dataset instanceof Map ? (Map) out.dataset : null
     }
 
-    private static Map slice(def ec, Map side, Map dataset, File dir, Map manifest, String windowField, Map live) {
+    private static Map slice(def ec, Map side, Map dataset, File dir, Map manifest, String windowField, Map live,
+                             KeptFieldsProjection.Spec spec = null) {
         Timestamp start = side.windowStart as Timestamp
         Timestamp end = side.windowEnd as Timestamp
         Instant from = start.toInstant(), to = end.toInstant()
@@ -323,6 +400,24 @@ class KeptCopySupport {
         LocalDate fromDay = live.fromDay as LocalDate, toDay = live.toDay as LocalDate
         // a record whose window value the live read would place but this slice cannot: nothing is served
         String unplaceable = null
+        // plan 3b-1: the fields the live extractor trims each record to (null: whole records)
+        Set<String> projection = spec == null ? null : KeptFieldsProjection.keptBy(spec, side.keepFields)
+        // the excluded exchange orders the window holds, from the copy's own exchange manifest
+        List exchangeEntries = null
+        if (spec?.exchangeManifestMax != null) {
+            Map kept = exchangeManifestOf(dir, manifest)
+            if (kept == null || kept.truncated == true) return notServed(EXCHANGE_MANIFEST_CUT)
+            exchangeEntries = ((kept.manifest ?: []) as List).findAll { Object entry ->
+                Instant at = recordInstant(entry instanceof Map ? ((Map) entry).get(windowField) : null)
+                at != null && !at.isBefore(from) && at.isBefore(to)
+            }
+            if (((kept.manifest ?: []) as List).any { Object entry -> recordInstant(entry instanceof Map ? ((Map) entry).get(windowField) : null) == null }) {
+                return notServed("an exchange order in the copy's manifest has no ${windowField}".toString())
+            }
+            // the live read lists at most so many and says it cut the list: a slice cannot say which it would have kept
+            if (exchangeEntries.size() > spec.exchangeManifestMax) return notServed(EXCHANGE_MANIFEST_CUT)
+        }
+        String exchangeFileName = exchangeEntries ? fileName.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json" : null
         try {
             DataManagerSupport.ensureDirectory(outDir, "kept copy slice")
             recordsWork = File.createTempFile("kept-copy-records-", ".partial", outDir)
@@ -378,7 +473,8 @@ class KeptCopySupport {
                             continue
                         }
                         if (kept > 0) w.write(",")
-                        w.write(JsonOutput.toJson(record))
+                        // projected after the filters, as the extractor does (they read fields it may not keep)
+                        w.write(JsonOutput.toJson(projection == null ? record : KeptFieldsProjection.project(record, projection)))
                         kept++
                     }
                 }
@@ -426,10 +522,26 @@ class KeptCopySupport {
                 // advisory, as every extractor treats it
                 warnings.add("Excluded-records sidecar not written: ${sidecarError.message}".toString())
             }
+            Map<String, Object> exchange = [:]
+            if (spec?.exchangeManifestMax != null) {
+                // as the live read: a file only when the window held an excluded exchange order, its location answered
+                exchange.exchangeManifestFileLocation = null
+                if (exchangeFileName) {
+                    File work = File.createTempFile("kept-copy-exchange-", ".partial", outDir)
+                    try {
+                        work.setText(JsonOutput.toJson([manifest: exchangeEntries, truncated: false, sourceFileName: fileName]), "UTF-8")
+                        String exchangeLocation = DataManagerSupport.childLocation(location, exchangeFileName)
+                        DataManagerSupport.moveIntoLocation(ec, work, exchangeLocation)
+                        exchange.exchangeManifestFileLocation = exchangeLocation
+                    } finally {
+                        work.delete()
+                    }
+                }
+            }
             File extractFile = ec.resource.getLocationReference(fileLocation)?.getFile() ?: new File(outDir, fileName)
             served = true
             return [served: true, extractFile: extractFile, reason: null, fileLocation: fileLocation, fileName: fileName,
-                    recordCount: kept, metadata: metadata, warnings: warnings]
+                    recordCount: kept, metadata: metadata, warnings: warnings] + exchange
         } finally {
             recordsWork?.delete()
             documentWork?.delete()
@@ -439,10 +551,20 @@ class KeptCopySupport {
                 if (wroteDocument) {
                     new File(outDir, fileName).delete()
                     new File(outDir, ExcludedRecordsSidecar.fileNameFor(fileName)).delete()
+                    if (exchangeFileName) new File(outDir, exchangeFileName).delete()
                 }
                 createdDirs.each { File d -> if (d.list()?.length == 0) d.delete() }
             }
         }
+    }
+
+    /** The copy's exchange manifest as the read wrote it ({manifest, truncated}); an empty one when the read wrote none. */
+    private static Map exchangeManifestOf(File dir, Map manifest) {
+        if (manifest?.exchangeManifest == KeptCopyStore.EXCHANGE_MANIFEST_NONE) return [manifest: [], truncated: false]
+        File file = KeptCopyStore.sideFile(dir, KeptCopyStore.EXCHANGE_MANIFEST_FILE)
+        if (file == null) return null
+        Object parsed = new groovy.json.JsonSlurper().parse(file, "UTF-8")
+        return parsed instanceof Map ? (Map) parsed : null
     }
 
     private static boolean present(Object v) {

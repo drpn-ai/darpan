@@ -239,12 +239,40 @@
                 <set field="warningText" value="Read ${readSeqId} found ${missCount} records the earlier reads missed"/></if>
             <set field="updates" from="[currentVersion:result.version, readThru:startedAt, lastReadAt:result.readAt,
                     recordCount:result.recordCount, lastMissCount:missCount, nextReadDate:result.nextReadDate, warningText:warningText]"/>
+            <!-- plan 3b-1: what a full read kept of each record (the copy's manifest holds the same); empty for whole records -->
+            <if condition="readKindEnumId == 'DRK_FULL'"><set field="updates.keptFieldsJson" from="result.keptFieldsJson"/></if>
             <if condition="readKindEnumId == 'DRK_FULL'"><set field="updates.lastFullReadAt" from="result.readAt"/></if>
             <service-call name="dataset.DatasetServices.finish#DatasetRefresh" out-map="finishOut"
                     in-map="[datasetId:datasetId, tenantId:tenantId, readSeqId:readSeqId, token:startedAt, read:read, updates:updates]"/>
             <check-errors/>
             <if condition="!finishOut.owned">
                 <return error="true" message="Dataset ${datasetId} read ${readSeqId} failed: lock taken over: another refresh holds this dataset now"/></if>
+        </actions>
+    </service>
+
+    <service verb="queue" noun="DatasetRefresh" transaction="force-new" allow-remote="false">
+        <description>Plan 3b-1 (ruling 3b1-7): the active tenant's dataset is due now, so the next scan#DueDatasets rebuilds
+            it. A served side asked for a field its copy lacks, and the dataset's next read would keep it (KeptCopySupport).
+            A dataset already due keeps its time; another tenant's datasetId does not exist.</description>
+        <in-parameters>
+            <parameter name="datasetId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <entity-find entity-name="darpan.dataset.Dataset" list="queueList" for-update="true">
+                <econdition field-name="datasetId" from="datasetId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!tenantId || !queueList">
+                <return error="true" message="Dataset ${datasetId} does not exist"/></if>
+            <set field="row" from="queueList[0]"/>
+            <set field="now" from="ec.user.nowTimestamp"/>
+            <if condition="row.nextReadDate != null &amp;&amp; row.nextReadDate.time &gt; now.time">
+                <set field="row.nextReadDate" from="now"/>
+                <entity-update value-field="row"/>
+            </if>
+            <log level="info" message="Dataset ${datasetId} is due now: ${reason}"/>
         </actions>
     </service>
 

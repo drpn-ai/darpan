@@ -634,11 +634,17 @@ class KeptCopySupportTests {
         assertTrue(served.served as boolean, served.reason as String)
         assertEquals("entryDate", served.metadata.windowFieldName)
         assertEquals(["r1"], json(served.extractFile as File).records*.returnId)
-        // the same side asking its source to keep only some fields reads live: the slice holds whole records
+        // the same side asking its source to keep only some fields is served projected, as the returns extractor projects
+        // (ruling P3b1-8: keep fields plus items)
         Map keeping = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-own-field", [location: runLocation("own-keep"), runToken: "k"],
                 START, END, "slice.json", ["returnId", "entryDate"], null, null, "UTC")
-        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, keeping,
-                [tenantId: A, windowStart: START, windowEnd: END])).reason)
+        Map projected = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, keeping, [tenantId: A, windowStart: START, windowEnd: END]))
+        assertTrue(projected.served as boolean, projected.reason as String)
+        assertEquals([[returnId: "r1", entryDate: ts("2026-11-10T12:00:00Z").time]], json(projected.extractFile as File).records,
+                "statusId is not kept")
+        // a connector without a projection spec still reads live when its side keeps fields
+        Map noSpec = connector + [systemEnumId: "KC_NO_SPEC"]
+        assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.side(noSpec, keeping, [tenantId: A, windowStart: START, windowEnd: END]).liveOnly)
 
         // the same source kept on another field than its extractor windows on
         String other = datasetOf("OMS_RETURNS_GQL", "conn-other-field", "returnId", "returnDate")

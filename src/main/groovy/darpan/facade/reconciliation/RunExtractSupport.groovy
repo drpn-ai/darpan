@@ -220,12 +220,7 @@ class RunExtractSupport {
         String token = sideToken(fileSide)
         String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
 
-        List<String> keepFields = null
-        if (normalize(connector.keepFieldsParameterName)) {
-            keepFields = ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, source, connector.keepFieldsBase)
-            // DAR-BE-151: a scope in the conclusion brain keeps the fields the brain's facts read (null stays null: full records).
-            if (keepFields != null) keepFields = (keepFields + brainRecordFields(ec, source)).unique()
-        }
+        List<String> keepFields = sideKeepFields(ec, source, connector)
         List<Map<String, Object>> excludeFilters = null
         if (normalize(connector.filterParameterName)) {
             excludeFilters = ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
@@ -275,6 +270,19 @@ class RunExtractSupport {
         }
         return sourceResultForLocation(ec, source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
                 extractedLocation, normalizeInt(extraction.recordCount, null))
+    }
+
+    /**
+     * The keep fields one compare source's side sends its extractor: the rule set's (ReconciliationSavedRunSupport
+     * .resolveExtractKeepFields) and the conclusion brain's; null for whole records, or when the connector takes no keep
+     * fields. The interactive read and a dataset's kept-fields union (DatasetSupport.keptFields) both use this.
+     */
+    static List<String> sideKeepFields(def ec, Object source, Map<String, Object> connector) {
+        if (!normalize(connector?.keepFieldsParameterName)) return null
+        List<String> keepFields = ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, source, connector.keepFieldsBase)
+        // DAR-BE-151: a scope in the conclusion brain keeps the fields the brain's facts read (null stays null: full records).
+        if (keepFields != null) keepFields = (keepFields + brainRecordFields(ec, source)).unique()
+        return keepFields
     }
 
     /** DAR-BE-151: the record fields the conclusion brain reads on this source's side of its scope; none when the scope is not in it. */

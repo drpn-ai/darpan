@@ -32,6 +32,9 @@
         <field name="lastMissCount" type="number-integer"/>
         <field name="warningText" type="text-medium"/>
         <field name="refreshingSince" type="date-time"><description>The refresh lock: set while a refresh runs.</description></field>
+        <field name="keptFieldsJson" type="text-long"><description>DAR-BE-318 plan 3b-1: the fields the last read kept of each
+            record, as a JSON list (DatasetSupport.keptFields: the union of what the tenant's checks on this source read). Empty:
+            whole records. The copy's own manifest says what it holds; this row can lag it.</description></field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="DATASET_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>

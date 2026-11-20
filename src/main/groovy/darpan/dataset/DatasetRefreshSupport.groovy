@@ -37,6 +37,14 @@ class DatasetRefreshSupport {
     static final String LOCK_TAKEN_OVER = "lock taken over: another refresh holds this dataset now"
     /** The extract parameter a dataset read windows by: its stampField (daily) or windowField (full). */
     static final String WINDOW_FIELD_PARAMETER = "windowFieldName"
+    /**
+     * Plan 3b-1: an extractor that lists excluded exchange orders in a side file takes how many to list; a dataset read asks
+     * for every one of its 60 days, so a slice can list a day's as the day's live read would.
+     */
+    static final String EXCHANGE_MANIFEST_MAX_PARAMETER = "exchangeManifestMaxEntries"
+    static final int DATASET_EXCHANGE_MANIFEST_MAX = 50_000
+    /** The out-parameter an extractor answers its exchange-manifest side file's location in. */
+    static final String EXCHANGE_MANIFEST_LOCATION = "exchangeManifestFileLocation"
     private static final long DAY = 86_400_000L
 
     /** The dataset's folder under the data manager root, which honours darpan.data.manager.location (ruling P3a-7). */
@@ -115,9 +123,15 @@ class DatasetRefreshSupport {
                         new Timestamp(((Timestamp) dataset.readThru).time - ((dataset.marginDays ?: 2) as long) * DAY)
                 // the tenant's zone, as the live paths resolve it (refresh runs under the dataset's tenant)
                 String zone = TenantAccessSupport.resolveActiveTenantTimeZone(ec)
+                // plan 3b-1 (ruling 3b1-7): the fields the tenant's checks on this source read, when the read can keep only those
+                List<String> keptFields = kind == FULL ?
+                        keepFieldsForRead(ec, dataset, SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)) : null
                 result = read(ec, dataset, dir, readSeqId, kind, fromStamp, startedAt, zone, (Closure) extractor,
-                        ownerGuard(ec, dataset.datasetId as String, dataset.companyUserGroupId as String, startedAt))
-                if (!result.error) result.nextReadDate = nextReadAt(startedAt, zone, dataset.readHourLocal as Integer)
+                        ownerGuard(ec, dataset.datasetId as String, dataset.companyUserGroupId as String, startedAt), keptFields)
+                if (!result.error) {
+                    result.nextReadDate = nextReadAt(startedAt, zone, dataset.readHourLocal as Integer)
+                    result.keptFieldsJson = keptFields == null ? null : groovy.json.JsonOutput.toJson(keptFields)
+                }
             }
         } catch (Throwable t) {
             logger.warn("Dataset ${dataset?.datasetId} read ${readSeqId} failed", t)
@@ -181,6 +195,19 @@ class DatasetRefreshSupport {
 
     static boolean isRolling(Map dataset) {
         return dataset?.readRuleEnumId == ROLLING
+    }
+
+    /**
+     * Plan 3b-1 (ruling 3b1-7): the field list the dataset's next read sends its extractor, or null for whole records. Only a
+     * rolling dataset projects (each read replaces the whole copy, so its records never mix two projections), and only
+     * through a connector that takes keep fields and whose projection a slice reproduces (KeptFieldsProjection).
+     */
+    static List<String> keepFieldsForRead(def ec, Map dataset, Map<String, Object> connector) {
+        if (!isRolling(dataset) || !connector?.keepFieldsParameterName || KeptFieldsProjection.specFor(dataset.systemEnumId) == null) {
+            return null
+        }
+        Set<String> kept = DatasetSupport.keptFields(ec, dataset)
+        return kept == null ? null : new ArrayList<String>(kept)
     }
 
     /**
@@ -289,7 +316,8 @@ class DatasetRefreshSupport {
      * @param readThru the moment the read started; the window end
      */
     static Map read(def ec, Map dataset, File datasetDir, String readSeqId, String readKindEnumId,
-                    Timestamp fromStamp, Timestamp readThru, String timeZone, Closure extractor, Closure ownerGuard) {
+                    Timestamp fromStamp, Timestamp readThru, String timeZone, Closure extractor, Closure ownerGuard,
+                    List<String> keptFields = null) {
         try {
             boolean full = readKindEnumId == FULL
             String tenantId = dataset.companyUserGroupId
@@ -300,7 +328,14 @@ class DatasetRefreshSupport {
             String location = readLocation(ec, tenantId, datasetId, readSeqId)
             DataManagerSupport.resolveDirectoryFile(ec, location, true)
             Map<String, Object> params = extractParams(connector, dataset, location, readSeqId,
-                    full ? dataset.windowField as String : dataset.stampField as String, fromStamp, readThru, timeZone)
+                    full ? dataset.windowField as String : dataset.stampField as String, fromStamp, readThru, timeZone,
+                    full ? keptFields : null)
+            def definition = ec.service.getServiceDefinition(serviceName)
+            if (EXCHANGE_MANIFEST_MAX_PARAMETER in (definition?.getInParameterNames() ?: [])) {
+                params.put(EXCHANGE_MANIFEST_MAX_PARAMETER, DATASET_EXCHANGE_MANIFEST_MAX)
+            }
+            // an extractor that answers an exchange-manifest location writes the side file only when it saw an exchange
+            boolean writesExchangeManifest = EXCHANGE_MANIFEST_LOCATION in (definition?.getOutParameterNames() ?: [])
 
             Map out = ((extractor ?: liveExtractor(ec)).call(serviceName, params) ?: [:]) as Map
             List errors = (out.errors instanceof Collection ? (Collection) out.errors : []).findAll { it } as List
@@ -308,6 +343,14 @@ class DatasetRefreshSupport {
             File file = resolveFile(ec, out.fileLocation as String)
             if (file == null || !file.isFile()) throw new IllegalStateException("The read returned no file")
             Timestamp readAt = new Timestamp(file.lastModified())
+            Map copyInfo = [keptFields: full ? keptFields : null]
+            if (full && writesExchangeManifest) {
+                File exchange = out.get(EXCHANGE_MANIFEST_LOCATION) ? resolveFile(ec, out.get(EXCHANGE_MANIFEST_LOCATION) as String) : null
+                if (out.get(EXCHANGE_MANIFEST_LOCATION) && (exchange == null || !exchange.isFile())) {
+                    throw new IllegalStateException("The read named an exchange manifest it did not write")
+                }
+                copyInfo.exchangeManifest = exchange ?: false
+            }
 
             // The swap and the prune run together under the owner guard: a refresh that lost its lock does neither, and
             // KeptCopyStore deletes its new version.
@@ -334,7 +377,7 @@ class DatasetRefreshSupport {
                 counts = full ?
                         KeptCopyStore.replace(datasetDir, source, dataset.idField as String, dataset.stampField as String,
                                 dataset.windowField as String, fromStamp, readThru, readAt, (dataset.marginDays ?: 2) as int,
-                                swapAndPrune, !rolling) :
+                                swapAndPrune, !rolling, copyInfo) :
                         KeptCopyStore.merge(datasetDir, source, dataset.idField as String, dataset.stampField as String,
                                 readThru, readAt, swapAndPrune)
             } catch (IllegalStateException e) {
@@ -404,13 +447,15 @@ class DatasetRefreshSupport {
     /**
      * The extract parameters, built the way the interactive path builds them (RunExtractSupport.buildExtractParams: the
      * connector's parameter names, ISO instants, preserveWindowInstants), with the read's own folder and window field, no
-     * filters and no keepFields, and the dataset's options as a run passes its stored ones.
+     * filters, and the dataset's options as a run passes its stored ones. {@code keepFields} (plan 3b-1): the dataset's
+     * kept-fields union, sent under the connector's keep-fields parameter; null sends none (whole records).
      */
     static Map<String, Object> extractParams(Map<String, Object> connector, Map dataset, String location, String readSeqId,
-                                             String windowFieldName, Timestamp fromStamp, Timestamp readThru, String timeZone) {
+                                             String windowFieldName, Timestamp fromStamp, Timestamp readThru, String timeZone,
+                                             List<String> keepFields = null) {
         Map<String, Object> params = RunExtractSupport.buildExtractParams(connector, ReconciliationSavedRunSupport.FILE_SIDE_1,
                 dataset.sourceConfigId as String, [location: location, runToken: "read-${readSeqId}".toString()],
-                fromStamp, readThru, "dataset-read.json", null, null, null, timeZone)
+                fromStamp, readThru, "dataset-read.json", keepFields, null, null, timeZone)
         params.outputLocation = location
         params.fileName = "read-${readSeqId}.json".toString()
         params.windowFieldName = windowFieldName

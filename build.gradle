@@ -193,8 +193,9 @@ ext.darpanTestPools = { ->
 
 test {
     // MySQL-backed tests (@Tag("mysql")) need real InnoDB locking semantics and stay opt-in via
-    // the mysqlTest task below, so everyday `./gradlew test` keeps running H2-fast.
-    useJUnitPlatform { excludeTags 'mysql' }
+    // the mysqlTest task below, so everyday `./gradlew test` keeps running H2-fast. @Tag("perf") throughput probes
+    // (DAR-BE-318) are likewise opt-in, through perfTest below.
+    useJUnitPlatform { excludeTags 'mysql', 'perf' }
     // Still one test class per JVM — see darpanTestForks above for why the width is safe.
     maxParallelForks = darpanTestForks
     forkEvery = 1
@@ -258,7 +259,7 @@ tasks.register('unitTest', Test) {
     description = 'Run only the darpan test classes that do not boot Moqui (fast subset of `test`).'
     def pools = darpanTestPools
 
-    useJUnitPlatform { excludeTags 'mysql' }
+    useJUnitPlatform { excludeTags 'mysql', 'perf' }
     // Excluding the smoke classes (rather than listing the unit ones) means a newly added unit
     // test joins this pool on its own, with no list to update.
     exclude pools.smoke
@@ -291,7 +292,7 @@ tasks.register('smokeTest', Test) {
     description = 'Run only the darpan test classes that boot Moqui (one JVM each).'
     def pools = darpanTestPools
 
-    useJUnitPlatform { excludeTags 'mysql' }
+    useJUnitPlatform { excludeTags 'mysql', 'perf' }
     include pools.smoke
     filter { failOnNoMatchingTests = true }
 
@@ -371,12 +372,37 @@ tasks.register('mysqlTest', Test) {
     jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
 }
 
+// Opt-in throughput probes (@Tag("perf")): never part of test, unitTest, smokeTest or testAll, which all exclude the tag.
+// Run with `./gradlew :runtime:component:darpan:perfTest`; each probe writes its report line under build/.
+// ADDING A NEW @Tag("perf") CLASS MEANS ADDING IT TO THE include BELOW, or it never runs (failOnNoMatchingTests keeps a
+// stale pattern from passing green).
+tasks.register('perfTest', Test) {
+    group = 'verification'
+    description = 'Run the opt-in @Tag("perf") throughput probes (JudgeThroughputProbe). Never run by test or CI.'
+    useJUnitPlatform { includeTags 'perf' }
+    include '**/JudgeThroughputProbe.class'
+    filter {
+        includeTestsMatching '*JudgeThroughputProbe'
+        failOnNoMatchingTests = true
+    }
+    maxParallelForks = 1
+    forkEvery = 1
+    maxHeapSize = '3g'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
+    testLogging { showStandardStreams = true }
+    outputs.upToDateWhen { false }
+}
+
 // Coverage measurement + enforced ratchet floor (MACH P1, code quality). Floors sit ~2 points
 // below the measured baseline so they catch regressions without blocking normal work; raise
 // them as coverage grows. CI runs jacocoCoverageVerification right after :test (reuses the
 // same execution data, no test rerun).
 apply plugin: 'jacoco'
 jacoco { toolVersion = '0.8.12' }
+// The Jacoco agent instruments every class and would be charged to both sides of a perfTest timing.
+tasks.named('perfTest') { jacoco { enabled = false } }
 jacocoTestReport {
     dependsOn test
     reports {

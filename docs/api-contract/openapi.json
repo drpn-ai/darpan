@@ -6203,7 +6203,7 @@
                     },
                     "sendWelcome": {
                         "type": "boolean",
-                        "description": "DAR-BE-290. Queue the tenant welcome\n                email (DARPAN_TENANT_WELCOME) after the grant. Skipped, without failing the grant, when the account\n                has no email address or is disabled."
+                        "description": "DAR-BE-290. Send the tenant welcome\n                email (DARPAN_TENANT_WELCOME) after the grant, with the user's temporary password while one is kept\n                (DAR-BE-325). Skipped, without failing the grant, when the account has no email address or is\n                disabled; a mail server that refuses it never fails the grant either."
                     }
                 },
                 "required": [
@@ -6220,9 +6220,13 @@
                         "type": "boolean",
                         "description": "True when the member was added."
                     },
-                    "welcomeQueued": {
+                    "welcomeSent": {
                         "type": "boolean",
-                        "description": "True when the welcome email was queued."
+                        "description": "True when the mail server accepted the welcome email."
+                    },
+                    "welcomeWithPassword": {
+                        "type": "boolean",
+                        "description": "True when that email carried the temporary password."
                     }
                 }
             },
@@ -6389,18 +6393,22 @@
                     "userId",
                     "tenantUserGroupId"
                 ],
-                "description": "DAR-BE-290. Send the tenant welcome email (DARPAN_TENANT_WELCOME, from the SYSTEM email server) to a\n            current member of a tenant: which tenant, their role, their username and where to sign in. Never a\n            password. add#TenantMember already sends it on a grant; this is the re-send, and the backfill for members\n            granted before it existed. Queued async: ok means queued, not delivered (a failed send is an EmailMessage\n            that never reaches ES_SENT)."
+                "description": "DAR-BE-290. Send the tenant welcome email (DARPAN_TENANT_WELCOME, from the SYSTEM email server) to a\n            current member of a tenant: which tenant, their role, their username, where to sign in, and their temporary\n            password while one is kept (DAR-BE-325). add#TenantMember already sends it on a grant; this is the re-send,\n            and the backfill for members granted before it existed. Waits for the mail server: a refused send is an\n            error, ok means it was accepted (not that it reached the inbox)."
             },
             "SendTenantWelcomeResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
                         "type": "boolean",
-                        "description": "True when the email was queued."
+                        "description": "True when the mail server accepted the email."
                     },
                     "emailAddress": {
                         "type": "string",
                         "description": "Where it was sent."
+                    },
+                    "withPassword": {
+                        "type": "boolean",
+                        "description": "True when it carried the temporary password."
                     }
                 }
             },
@@ -10426,7 +10434,7 @@
                     "username",
                     "tempPassword"
                 ],
-                "description": "Create a user with a temporary password (change forced at first login) and\n            DARPAN_USER group membership. Credentials are shared out-of-band; there is no email invite."
+                "description": "Create a user with a temporary password (change forced at first login) and\n            DARPAN_USER group membership. The temporary password is kept encrypted for the user's tenant welcome\n            emails (DAR-BE-325, darpan.admin.TempPasswordKeeper) until they set their own or the keep period ends."
             },
             "CreateUserAccountResult": {
                 "type": "object",
@@ -11075,7 +11083,7 @@
                     "userId",
                     "tempPassword"
                 ],
-                "description": "Set a temporary password for a user (change forced at next login) and revoke\n            their live login keys. The temp password is shared out-of-band."
+                "description": "Set a temporary password for a user (change forced at next login) and revoke\n            their live login keys. The temporary password is kept encrypted for their tenant welcome emails\n            (DAR-BE-325), replacing an earlier one."
             },
             "ResetPasswordResult": {
                 "type": "object",

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-290 tenant welcome. The sign-in address is plain text. Never a password: a new user's temporary password reaches the admin.
+<!-- DAR-BE-290 tenant welcome. The sign-in address is plain text. DAR-BE-325 (Aditi 2026-11-20: "include the temporary password in the
+     email always"): tempPassword, when TempPasswordKeeper still holds a usable one, sits in its own dp-code box, never in a copy
+     block, so a copy edit cannot drop or move it; such a send keeps no EmailMessage copy.
      DAR-BE-298: wears EmailFrame (the app's light theme, like the audit email) and the VOICE_GUIDE.md voice (Aditi
      2026-11-18: "there still is no personality here" / "keep it short still... but making the user smile"); the darpan-email skill holds the rules. No bold. The only
      links are the user guide's (EmailFrame.guides: docs.drpn.ai pages, address shown; never a sign-in or action page). -->
@@ -10,6 +12,7 @@
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · WELCOME')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
         <set field="copyVars" from="[firstName: firstName, tenantLabel: tenantLabel, rolePhrase: rolePhrase, appBaseUrl: appBaseUrl, username: username]"/>
+        <set field="hasPassword" from="tempPassword as boolean"/>
         <set field="smile" from="darpan.email.EmailSmile.line(ec, &quot;DARPAN_TENANT_WELCOME&quot;, darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;smile&quot;, copyVars))"/>
         <set field="copyVars" from="copyVars + [smile: smile]"/>
         <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;greeting&quot;, copyVars)"/>
@@ -17,12 +20,13 @@
         <set field="copyNext" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;next&quot;, copyVars)"/>
         <set field="copySigninWith" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;signin.with&quot;, copyVars)"/>
         <set field="copySigninWithout" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;signin.without&quot;, copyVars)"/>
+        <set field="copyPassword" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;password&quot;, copyVars)"/>
         <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_TENANT_WELCOME&quot;, &quot;note&quot;, copyVars)"/>
         <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_TENANT_WELCOME&quot;)"/>
         <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
         <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
         <!-- DAR-BE-315: the plain-text part is these same copy blocks, one per paragraph, never cut or dropped; template/email/EmailText.ftl keeps the labels above out of it (stock text macros cut each at 132 columns and drop fail-widgets branches). -->
-        <set field="emailText" from="darpan.email.EmailFrame.textOf([copyGreeting, copyBody, copyNext, (appBaseUrl ? copySigninWith : copySigninWithout), copyNote, '— Darpan'])"/>
+        <set field="emailText" from="darpan.email.EmailFrame.textOf([copyGreeting, copyBody, copyNext, (appBaseUrl ? copySigninWith : copySigninWithout)] + (hasPassword ? [copyPassword, tempPassword] : []) + [copyNote, '— Darpan'])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
@@ -32,6 +36,12 @@
         <section name="SignInWhere" condition="appBaseUrl">
             <widgets><container style="dp-p"><label text="${copySigninWith}"/></container></widgets>
             <fail-widgets><container style="dp-p"><label text="${copySigninWithout}"/></container></fail-widgets>
+        </section>
+        <section name="TempPassword" condition="hasPassword">
+            <widgets>
+                <container style="dp-p"><label text="${copyPassword}"/></container>
+                <container style="dp-code"><label text="${tempPassword}"/></container>
+            </widgets>
         </section>
         <container style="dp-note"><label text="${copyNote}"/></container>
         <container style="dp-sign"><label text="— Darpan"/></container>

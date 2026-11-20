@@ -4,7 +4,8 @@
 
     <service verb="create" noun="UserAccount" allow-remote="true">
         <description>Create a user with a temporary password (change forced at first login) and
-            DARPAN_USER group membership. Credentials are shared out-of-band; there is no email invite.</description>
+            DARPAN_USER group membership. The temporary password is kept encrypted for the user's tenant welcome
+            emails (DAR-BE-325, darpan.admin.TempPasswordKeeper) until they set their own or the keep period ends.</description>
         <in-parameters>
             <parameter name="username" required="true"><description>Login username.</description></parameter>
             <parameter name="userFullName"><description>Display name.</description></parameter>
@@ -33,6 +34,7 @@
             <set field="userId" from="createdAccount.userId"/>
             <service-call name="create#moqui.security.UserGroupMember" in-map="[userGroupId: darpan.admin.AdminUserSupport.DARPAN_USER_GROUP_ID,
                     userId: createdAccount.userId, fromDate: ec.user.nowTimestamp]"/>
+            <script>darpan.admin.TempPasswordKeeper.keep(ec, (String) createdAccount.userId, tempPassword)</script>
             <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
                     serviceName: 'admin.UserAdminServices.create#UserAccount', targetType: 'User', targetId: (String) createdAccount.userId,
                     detailText: 'Created user ' + username.trim() + '.', auditTimestamp: ec.user.nowTimestamp]"/>
@@ -116,7 +118,8 @@
 
     <service verb="reset" noun="Password" allow-remote="true">
         <description>Set a temporary password for a user (change forced at next login) and revoke
-            their live login keys. The temp password is shared out-of-band.</description>
+            their live login keys. The temporary password is kept encrypted for their tenant welcome emails
+            (DAR-BE-325), replacing an earlier one.</description>
         <in-parameters>
             <parameter name="userId" required="true"><description>User whose password resets.</description></parameter>
             <parameter name="tempPassword" required="true"><description>Temporary password.</description></parameter>
@@ -133,6 +136,7 @@
                  a refused password adds an error there, which stops this service before any revocation. -->
             <service-call name="org.moqui.impl.UserServices.update#PasswordInternal" in-map="[userId: userId,
                     newPassword: tempPassword, newPasswordVerify: tempPassword, requirePasswordChange: 'Y']"/>
+            <script>darpan.admin.TempPasswordKeeper.keep(ec, userId, tempPassword)</script>
             <!-- ok turns true once the framework call succeeds, as it always has: a later write that
                  fails surfaces through ec.message (and rolls the call back), not through ok. -->
             <set field="ok" from="true"/>

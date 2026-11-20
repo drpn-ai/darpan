@@ -559,6 +559,27 @@ class EmailTemplatesRenderTests {
         assertTrue(reads > 50, "the scan found the reads (${reads})")
     }
 
+    /** DAR-BE-325: with a temporary password the welcome shows it in its own code box after the sign-in line, in both
+     *  parts; without one (the goldens above) there is no password line at all. */
+    @Test
+    void theWelcomeCarriesATemporaryPasswordInACodeBoxOnlyWhenThereIsOne() {
+        String password = "AR6Yu<lK58Q?WlvM1"
+        Map params = OTHER.TenantWelcome + [tempPassword: password]
+        String html = render("TenantWelcome", params, "html")
+        String text = render("TenantWelcome", params, "text")
+        Files.writeString(previews.resolve("TenantWelcomePassword.html"), html)
+        String line = "Your temporary password is below. Darpan asks you to swap it for your own the first time you sign in."
+        assertTrue(html.contains(line), html)
+        assertTrue(html.contains("dp-code"), "the password sits in a code box")
+        assertTrue(html.contains("AR6Yu&lt;lK58Q?WlvM1"), "encoded like every value in a label")
+        assertFalse(html.contains(password), "never raw html")
+        assertTrue(html.indexOf("tenant menu") < html.indexOf(line), "after the sign-in line")
+        assertTrue(text.contains(line + "\n\n" + password), text)
+        [render("TenantWelcome", OTHER.TenantWelcome, "html"), render("TenantWelcome", OTHER.TenantWelcome, "text")].each { String bare ->
+            assertFalse(bare.contains("temporary password"), bare)
+        }
+    }
+
     private String render(String screen, Map params, String mode) {
         ec.context.push()
         try {

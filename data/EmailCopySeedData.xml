@@ -34,6 +34,7 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="next" defaultText="Your systems each keep their own books. Darpan reads them all and tells you where they don't line up."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="signin.with" defaultText="Sign in at ${appBaseUrl} with your Darpan username (${username}) and pick ${tenantLabel} from the tenant menu."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="signin.without" defaultText="Sign in to Darpan with your username (${username}) and pick ${tenantLabel} from the tenant menu."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="password" defaultText="Your temporary password is below. Darpan asks you to swap it for your own the first time you sign in."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="note" defaultText="Questions? Just reply. A real person reads this. ${smile}"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="smile" defaultText="(Usually with coffee.)"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_TENANT_WELCOME" blockId="guides" defaultText="Quickstart|quickstart&#10;Find your way around|getting-started/ask-darpan-navigation"/>

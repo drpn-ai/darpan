@@ -81,6 +81,9 @@ class AdminServicesSmokeTests {
 
     private int uniqueCounter = 0
     private Closure originalSendEmail
+    private Closure originalSendWelcomeEmail
+    /** What the stubbed mail server answers a welcome send (DAR-BE-325 sends wait for it). */
+    private volatile boolean mailAccepts = true
     private List<Map> sent = Collections.synchronizedList([])
 
     @BeforeAll
@@ -105,19 +108,27 @@ class AdminServicesSmokeTests {
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
-    /** Mail never leaves the JVM: PasswordResetSupport.sendEmail is the seam the welcome email goes through. */
+    /** Mail never leaves the JVM: AdminMembershipSupport.sendWelcomeEmail is the seam the welcome email goes through
+     *  (keepCopy false = no EmailMessage row), PasswordResetSupport.sendEmail the one for the notices. */
     @BeforeEach
     void recordMail() {
         originalSendEmail = PasswordResetSupport.sendEmail
+        originalSendWelcomeEmail = AdminMembershipSupport.sendWelcomeEmail
         sent.clear()
+        mailAccepts = true
         PasswordResetSupport.sendEmail = { def ecArg, String templateId, String to, Map params ->
             sent << [templateId: templateId, to: to, params: params]
+        }
+        AdminMembershipSupport.sendWelcomeEmail = { def ecArg, String to, Map params, boolean keepCopy ->
+            sent << [templateId: AdminMembershipSupport.TEMPLATE_TENANT_WELCOME, to: to, params: params, keepCopy: keepCopy]
+            return mailAccepts
         }
     }
 
     @AfterEach
     void restoreMail() {
         PasswordResetSupport.sendEmail = originalSendEmail
+        AdminMembershipSupport.sendWelcomeEmail = originalSendWelcomeEmail
     }
 
     @BeforeEach
@@ -125,7 +136,7 @@ class AdminServicesSmokeTests {
         // initMoqui leaves the main thread with authz disabled, so these writes are unrestricted.
         ["darpan.auth.TenantSetting", "darpan.auth.TenantUserPermissionGroupMember",
          "moqui.security.UserPreference", "moqui.security.UserLoginKey",
-         "moqui.security.UserGroupMember"].each { String entityName ->
+         "moqui.security.UserGroupMember", TempPasswordKeeper.ENTITY].each { String entityName ->
             ec.entity.find(entityName).disableAuthz().deleteAll()
         }
         AuditLogTestSupport.wipe(ec)
@@ -611,8 +622,9 @@ class AdminServicesSmokeTests {
         assertEquals(groupRows[0].fromDate, permissionRows[0].fromDate,
                 "both rows must share one fromDate so history stays joinable")
         assertAudit("admin.MembershipAdminServices.add#TenantMember", "Membership", "${DELTA}:${PLAIN_ID}",
-                "Added ${PLAIN_ID} to ${DELTA} as DARPAN_COMPANY_EDITOR. Welcome email queued.")
-        assertEquals(true, out.result.welcomeQueued)
+                "Added ${PLAIN_ID} to ${DELTA} as DARPAN_COMPANY_EDITOR. Welcome email sent.")
+        assertEquals(true, out.result.welcomeSent)
+        assertEquals(false, out.result.welcomeWithPassword)
         assertEquals(1, sent.size(), "one welcome email per grant")
         assertEquals(AdminMembershipSupport.TEMPLATE_TENANT_WELCOME, sent[0].templateId)
         assertEquals("admsvc.plain@example.com", sent[0].to)
@@ -621,7 +633,9 @@ class AdminServicesSmokeTests {
         assertEquals("beta lower", sent[0].params.tenantLabel)
         assertEquals("as an Editor", sent[0].params.rolePhrase)
         assertTrue(sent[0].params.containsKey("appBaseUrl"))
-        assertFalse(sent[0].params.values().any { it?.toString()?.contains(STRONG_PASSWORD) }, "never a password")
+        // No temporary password is kept for this account, so none goes out, and the send keeps its EmailMessage copy.
+        assertNull(sent[0].params.tempPassword)
+        assertEquals(true, sent[0].keepCopy)
     }
 
     @Test
@@ -630,7 +644,7 @@ class AdminServicesSmokeTests {
                 [userId: PLAIN_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_USER", sendWelcome: false])
         assertNoErrors(quiet)
         assertEquals(true, quiet.result.ok)
-        assertEquals(false, quiet.result.welcomeQueued)
+        assertEquals(false, quiet.result.welcomeSent)
         assertAudit("admin.MembershipAdminServices.add#TenantMember", "Membership", "${DELTA}:${PLAIN_ID}",
                 "Added ${PLAIN_ID} to ${DELTA} as DARPAN_TENANT_USER.")
 
@@ -643,7 +657,7 @@ class AdminServicesSmokeTests {
         [dormant, noEmail].each { Map out ->
             assertNoErrors(out)
             assertEquals(true, out.result.ok)
-            assertEquals(false, out.result.welcomeQueued)
+            assertEquals(false, out.result.welcomeSent)
         }
         assertEquals(1, activePermissionRows(DORMANT_ID, DELTA).size())
         assertEquals(1, activePermissionRows(TARGET_ID, DELTA).size())
@@ -666,7 +680,108 @@ class AdminServicesSmokeTests {
         // The active role, not the expired view-only row ALPHA also holds for this user.
         assertEquals("as a User", sent[0].params.rolePhrase)
         assertAudit("admin.MembershipAdminServices.send#TenantWelcome", "Membership", "${ALPHA}:${TARGET_ID}",
-                "Welcome email for ${ALPHA} queued to admsvc.target@example.com.")
+                "Welcome email for ${ALPHA} sent to admsvc.target@example.com.")
+        assertEquals(false, out.result.withPassword)
+    }
+
+    // ---------------------------------------------------------------- DAR-BE-325: the temporary password in the welcome
+
+    @Test
+    void aNewUsersWelcomeCarriesTheirTemporaryPasswordOnEveryGrantAndKeepsNoEmailCopy() {
+        String userId = createdUser()
+        def kept = find(TempPasswordKeeper.ENTITY, [userId: userId])
+        assertEquals(STRONG_PASSWORD, kept.tempPassword, "kept for the welcome")
+        assertTrue(ec.entity.getEntityDefinition(TempPasswordKeeper.ENTITY).getFieldInfo("tempPassword").encrypt,
+                "kept encrypted, like every other secret")
+
+        Map grant = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: userId, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_USER"])
+        assertNoErrors(grant)
+        assertEquals(true, grant.result.welcomeSent)
+        assertEquals(true, grant.result.welcomeWithPassword)
+        assertEquals(STRONG_PASSWORD, sent[0].params.tempPassword)
+        assertEquals(false, sent[0].keepCopy, "a welcome with a password leaves no EmailMessage copy of its body")
+        assertEquals("Added ${userId} to ${DELTA} as DARPAN_TENANT_USER. Welcome email sent, with the temporary password.".toString(),
+                onlyAuditOf("admin.MembershipAdminServices.add#TenantMember").detailText)
+
+        // A later grant (the admin app grants after create) and a re-send carry the same password.
+        Map second = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: userId, tenantUserGroupId: ALPHA, permissionUserGroupId: "DARPAN_COMPANY_EDITOR"])
+        Map resend = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: userId, tenantUserGroupId: DELTA])
+        assertNoErrors(second)
+        assertNoErrors(resend)
+        assertEquals(true, resend.result.withPassword)
+        assertEquals([STRONG_PASSWORD] * 3, sent*.params*.tempPassword)
+
+        // An admin reset replaces it.
+        String newTemp = "Reset#Pass5678"
+        assertNoErrors(callAs(SUPER_USERNAME, "admin.UserAdminServices.reset#Password", [userId: userId, tempPassword: newTemp]))
+        callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome", [userId: userId, tenantUserGroupId: DELTA])
+        assertEquals(newTemp, sent[-1].params.tempPassword)
+    }
+
+    @Test
+    void theKeptPasswordGoesOnceTheUserSetsTheirOwn() {
+        String userId = createdUser()
+        assertNoErrors(callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: userId, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_USER"]))
+
+        // The person changes it themselves at first sign-in (not signed in yet: username + the temporary password). This,
+        // the forgot-password reset and the signed-in change all end in update#PasswordInternal with requirePasswordChange
+        // N; its commit fires the drop.
+        String username = find("moqui.security.UserAccount", [userId: userId]).username
+        assertNoErrors(callAs(null, "org.moqui.impl.UserServices.update#Password",
+                [username: username, oldPassword: STRONG_PASSWORD, newPassword: "Mine#Own98765", newPasswordVerify: "Mine#Own98765"]))
+        assertEquals("N", find("moqui.security.UserAccount", [userId: userId]).requirePasswordChange)
+        assertNull(find(TempPasswordKeeper.ENTITY, [userId: userId]))
+
+        Map resend = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome", [userId: userId, tenantUserGroupId: DELTA])
+        assertNoErrors(resend)
+        assertEquals(false, resend.result.withPassword)
+        assertNull(sent[-1].params.tempPassword)
+        assertEquals(true, sent[-1].keepCopy)
+    }
+
+    @Test
+    void aKeptPasswordThatExpiredOrIsNoLongerTheAccountsIsNeverSentAndIsDeleted() {
+        String userId = createdUser()
+        assertNoErrors(callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: userId, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_USER", sendWelcome: false]))
+
+        // Past darpan.admin.tempPasswordKeepDays (default 7).
+        upsert(TempPasswordKeeper.ENTITY, [userId: userId, keptDate: new Timestamp(System.currentTimeMillis() - 8 * 86_400_000L)])
+        callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome", [userId: userId, tenantUserGroupId: DELTA])
+        assertNull(sent[-1].params.tempPassword)
+        assertNull(find(TempPasswordKeeper.ENTITY, [userId: userId]))
+
+        // Still in the keep period, but some other path set a different temporary password (still Y, so no drop).
+        upsert(TempPasswordKeeper.ENTITY, [userId: userId, tempPassword: STRONG_PASSWORD, keptDate: ec.user.nowTimestamp])
+        ec.service.sync().name("org.moqui.impl.UserServices.update#PasswordInternal").parameters([userId: userId,
+                newPassword: "Other#Temp4321", newPasswordVerify: "Other#Temp4321", requirePasswordChange: "Y"]).call()
+        assertNotNull(find(TempPasswordKeeper.ENTITY, [userId: userId]))
+        callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome", [userId: userId, tenantUserGroupId: DELTA])
+        assertNull(sent[-1].params.tempPassword, "a password that no longer opens the account is never sent")
+        assertNull(find(TempPasswordKeeper.ENTITY, [userId: userId]))
+    }
+
+    @Test
+    void aMailServerThatRefusesTheWelcomeNeverFailsTheGrantButFailsTheResend() {
+        mailAccepts = false
+        Map grant = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.add#TenantMember",
+                [userId: PLAIN_ID, tenantUserGroupId: DELTA, permissionUserGroupId: "DARPAN_TENANT_USER"])
+        assertNoErrors(grant)
+        assertEquals(true, grant.result.ok)
+        assertEquals(false, grant.result.welcomeSent)
+        assertEquals(1, activePermissionRows(PLAIN_ID, DELTA).size(), "the grant stands")
+        assertAudit("admin.MembershipAdminServices.add#TenantMember", "Membership", "${DELTA}:${PLAIN_ID}",
+                "Added ${PLAIN_ID} to ${DELTA} as DARPAN_TENANT_USER. Welcome email not sent: the mail server did not accept it.")
+
+        AuditLogTestSupport.wipe(ec)
+        Map resend = callAs(SUPER_USERNAME, "admin.MembershipAdminServices.send#TenantWelcome",
+                [userId: PLAIN_ID, tenantUserGroupId: DELTA])
+        assertEquals(["The mail server did not accept the welcome email to admsvc.plain@example.com."], resend.errors)
+        assertNoAudit()
     }
 
     @Test
@@ -1062,8 +1177,11 @@ class AdminServicesSmokeTests {
         Thread worker = new Thread({
             ExecutionContext tec = Moqui.getExecutionContextFactory().getExecutionContext()
             try {
-                if (!tec.user.internalLoginUser(username)) throw new IllegalStateException("could not log in ${username}")
-                assertTrue(tec.user.username == username)
+                // username null = nobody signed in (the first-sign-in password change form).
+                if (username != null) {
+                    if (!tec.user.internalLoginUser(username)) throw new IllegalStateException("could not log in ${username}")
+                    assertTrue(tec.user.username == username)
+                }
                 def call = tec.service.sync().name(serviceName).parameters(new LinkedHashMap(params))
                 if (bypassFence) call.disableAuthz()
                 try {
@@ -1111,6 +1229,22 @@ class AdminServicesSmokeTests {
         assertEquals(targetId.toString(), row.targetId)
         assertEquals(detailText.toString(), row.detailText)
         assertNotNull(row.auditTimestamp)
+    }
+
+    /** A new user made through the admin service with STRONG_PASSWORD as the temporary password. */
+    private String createdUser() {
+        String username = uniqueUsername()
+        Map out = callAs(SUPER_USERNAME, "admin.UserAdminServices.create#UserAccount",
+                [username: username, userFullName: "Kept Person", emailAddress: "${username}@created.example.org".toString(),
+                 tempPassword: STRONG_PASSWORD])
+        assertNoErrors(out)
+        return (String) out.result.userId
+    }
+
+    private Map onlyAuditOf(String serviceName) {
+        List rows = ec.entity.find("darpan.admin.AdminAuditLog").condition("serviceName", serviceName).disableAuthz().useCache(false).list()
+        assertEquals(1, rows.size(), "one ${serviceName} audit row expected, got ${rows}")
+        return rows[0]
     }
 
     private void assertNoAudit() {

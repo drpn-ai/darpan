@@ -3,6 +3,8 @@ package darpan.admin
 import darpan.facade.auth.PasswordResetSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.transform.CompileDynamic
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 /** Tenant membership for the admin app: the role allowlist shared by add#TenantMember and
  *  update#TenantMemberRole (service/admin/MembershipAdminServices.xml), and the tenant welcome email (DAR-BE-290).
@@ -11,6 +13,7 @@ import groovy.transform.CompileDynamic
  *  and they silently diverge if either is written alone. Those XML services are the ONLY writers. */
 @CompileDynamic
 class AdminMembershipSupport {
+    private static final Logger logger = LoggerFactory.getLogger(AdminMembershipSupport)
 
     static final List<String> ASSIGNABLE_TENANT_ROLES = [
         "DARPAN_TENANT_ADMIN", "DARPAN_TENANT_USER", "DARPAN_COMPANY_EDITOR", "DARPAN_COMPANY_VIEW_ONLY",
@@ -26,18 +29,46 @@ class AdminMembershipSupport {
         DARPAN_COMPANY_VIEW_ONLY: "with view-only access",
     ].asImmutable()
 
-    /** Queues the welcome email for a member of a tenant. The caller has already checked the membership and that
-     *  the account is enabled and has an email address. No password ever goes in it: a new user's temporary
-     *  password reaches the admin, not the inbox. Sent through PasswordResetSupport.sendEmail (async), so a mail
-     *  failure never fails or holds up the grant, and tests record the send instead of making it. */
-    static void queueWelcome(def ec, def account, def tenantGroup, String permissionUserGroupId) {
-        PasswordResetSupport.sendEmail(ec, TEMPLATE_TENANT_WELCOME, (String) account.emailAddress, [
-            firstName  : PasswordResetSupport.firstName(account),
-            username   : (String) account.username,
-            tenantLabel: (String) (tenantGroup.description ?: tenantGroup.userGroupId),
-            rolePhrase : ROLE_PHRASES[permissionUserGroupId] ?: "",
+    /** Sends one welcome email and says whether the mail server accepted it (send#EmailTemplate returns a messageId
+     *  only then, and logs any failure). Its own transaction, so SMTP time never sits in the grant's. keepCopy false
+     *  sends without the EmailMessage row, which would hold the rendered body and so the password. Tests replace it. */
+    static Closure<Boolean> sendWelcomeEmail = { def ec, String toAddress, Map bodyParameters, boolean keepCopy ->
+        Map result = ec.service.sync().name("org.moqui.impl.EmailServices.send#EmailTemplate").requireNewTransaction(true)
+                .parameters([emailTemplateId: TEMPLATE_TENANT_WELCOME, toAddresses: toAddress, bodyParameters: bodyParameters,
+                             createEmailMessage: keepCopy])
+                .call()
+        return result?.messageId as boolean
+    }
+
+    /** Sends the welcome email to a member of a tenant: which tenant, their role, their username, where to sign in,
+     *  and (DAR-BE-325, Aditi 2026-11-20: "include the temporary password in the email always") the temporary password
+     *  an admin set, while TempPasswordKeeper still holds a usable one. The caller has already checked the membership
+     *  and that the account is enabled and has an email address. Call it after every write: it waits for the mail
+     *  server, and a failed send never fails the caller (its errors are dropped, sent comes back false).
+     *  Returns [sent: Boolean, withPassword: Boolean]. */
+    static Map<String, Boolean> sendWelcome(def ec, def account, def tenantGroup, String permissionUserGroupId) {
+        String tempPassword = TempPasswordKeeper.forWelcome(ec, account)
+        Map params = [
+            firstName   : PasswordResetSupport.firstName(account),
+            username    : (String) account.username,
+            tenantLabel : (String) (tenantGroup.description ?: tenantGroup.userGroupId),
+            rolePhrase  : ROLE_PHRASES[permissionUserGroupId] ?: "",
             // Null when the instance has no app address configured: the email then says "sign in to Darpan".
-            appBaseUrl : TenantNotificationSupport.resolveAppBaseUrl(ec),
-        ])
+            appBaseUrl  : TenantNotificationSupport.resolveAppBaseUrl(ec),
+            // Null when there is none to send: the email then has no password lines.
+            tempPassword: tempPassword,
+        ]
+        boolean sent = false
+        ec.message.pushErrors()
+        try {
+            sent = sendWelcomeEmail(ec, ((String) account.emailAddress).trim(), params, tempPassword == null)
+        } catch (Throwable t) {
+            logger.warn("Welcome email for {} to user {} failed: {}", params.tenantLabel, account.userId, t.toString())
+        } finally {
+            if (ec.message.hasError()) logger.warn("Welcome email for user {} not sent: {}", account.userId, ec.message.errorsString)
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+        return [sent: sent, withPassword: sent && tempPassword != null]
     }
 }

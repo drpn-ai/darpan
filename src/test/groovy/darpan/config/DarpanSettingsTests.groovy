@@ -48,7 +48,7 @@ class DarpanSettingsTests {
 
     @Test void everyCatalogEntryParsesAndItsDefaultIsValid() {
         Map<String, SettingDefinition> cat = DarpanSettings.catalog()
-        assertEquals(33, cat.size(), "darpan catalog keys (DAR-BE-306 added the seven retention and purge keys, DAR-BE-320 the five audit-read keys, DAR-BE-318 the three dataset back-off keys; the agent keys live in darpan-agent): ${cat.keySet()}")
+        assertEquals(34, cat.size(), "darpan catalog keys (DAR-BE-306 added the seven retention and purge keys, DAR-BE-320 the five audit-read keys, DAR-BE-318 the three dataset back-off keys, DAR-BE-325 the temporary-password keep days; the agent keys live in darpan-agent): ${cat.keySet()}")
         cat.each { String k, SettingDefinition d ->
             assertNull(DarpanSettings.problem(k, d.defaultValue), "default of ${k}")
             assertTrue(d.unit in ['minutes', 'days', 'percent', 'count', 'runs', 'usd', 'factor', 'switch'], "unit of ${k}: ${d.unit}")
@@ -195,9 +195,10 @@ class DarpanSettingsTests {
             DarpanSettings.rowLoader = { -> [:] as Map<String, Map> }
             List<String> areas = DarpanSettings.describeAll().collect { it.area as String }.with { new ArrayList<String>(new LinkedHashSet<String>(it)) }
             int twoFactor = areas.indexOf('Two-factor')
-            assertEquals(['Agent \u00B7 Router', 'Agent \u00B7 Investigator', 'Agent \u00B7 Author', 'Agent \u00B7 Writers', 'Agent \u00B7 Gateway'],
-                    areas.subList(twoFactor + 1, twoFactor + 6))
-            assertEquals('Retention', areas[twoFactor + 6])
+            // DAR-BE-325: Accounts (the kept temporary password) sits between Two-factor and the agent areas.
+            assertEquals(['Accounts', 'Agent \u00B7 Router', 'Agent \u00B7 Investigator', 'Agent \u00B7 Author', 'Agent \u00B7 Writers', 'Agent \u00B7 Gateway'],
+                    areas.subList(twoFactor + 1, twoFactor + 7))
+            assertEquals('Retention', areas[twoFactor + 7])
         } finally {
             Thread.currentThread().contextClassLoader = saved
             DarpanSettings.resetForTest()

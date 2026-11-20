@@ -132,4 +132,17 @@
         <index name="PWDRST_USER_FROM"><index-field name="userId"/><index-field name="fromDate"/></index>
         <index name="PWDRST_IP_FROM"><index-field name="requestIp"/><index-field name="fromDate"/></index>
     </entity>
+
+    <entity entity-name="TempPasswordKeep" package="darpan.auth" use="transactional" cache="never">
+        <description>DAR-BE-325 — the temporary password an admin last set for a person (admin create#UserAccount,
+            reset#Password), kept encrypted so the tenant welcome email can carry it (Aditi 2026-11-20). One row per user.
+            darpan.admin.TempPasswordKeeper is the only reader and writer: a welcome carries it only while it still matches
+            the account's password hash and the account must still change it. Deleted when the person sets their own
+            password (SECA on update#PasswordInternal), when read after darpan.admin.tempPasswordKeepDays, and by every
+            new keep (all expired rows). Global, not tenant-scoped. /transfer never exports it.</description>
+        <field name="userId" type="id" is-pk="true"/>
+        <field name="tempPassword" type="text-medium" encrypt="true"/>
+        <field name="keptDate" type="date-time"/>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+    </entity>
 </entities>

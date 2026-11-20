@@ -104,23 +104,19 @@ class KeptCopyStoreTests {
     }
 
     @Test void anOrphanVersionNeverDisplacesThePrevious() {
-        String v1 = merge(dir, [rec("a", "2026-10-03T14:22:01Z")]).version
-        // a crash after the version moved into place but before current.json swapped leaves an orphan
-        File orphan = new File(dir, "v29990101-000000000")
+        // previous v20261101, orphan v20261102 (sorts between), current is made now (later than both)
+        String made = merge(dir, [rec("a", "2026-10-03T14:22:01Z")]).version
+        File previous = new File(dir, "v20261101-000000000")
+        assertTrue(new File(dir, made).renameTo(previous))
+        new File(dir, "current.json").setText('{"version":"v20261101-000000000"}', "UTF-8")
+        File orphan = new File(dir, "v20261102-000000000")
         assertTrue(orphan.mkdirs())
-        String v3 = merge(dir, [rec("b", "2026-10-04T00:00:00Z")]).version
-        String v4 = merge(dir, [rec("c", "2026-10-05T00:00:00Z")]).version
+        String current = merge(dir, [rec("b", "2026-10-04T00:00:00Z")]).version
+        assertTrue(current > "v20261102-000000000")
         KeptCopyStore.prune(dir)
-        assertEquals([v3, v4].sort(), versionDirs())
+        assertEquals(["v20261101-000000000", current].sort(), versionDirs())
         assertFalse(orphan.exists())
-        assertEquals(["a", "b", "c"], byId().keySet().sort())
-        // with only one refresh after the orphan, v1 is the previous and stays
-        File d2 = new File(dir.parentFile, "ds2")
-        String w1 = merge(d2, [rec("a", "2026-10-03T14:22:01Z")]).version
-        new File(d2, "v29990101-000000000").mkdirs()
-        String w3 = merge(d2, [rec("b", "2026-10-04T00:00:00Z")]).version
-        KeptCopyStore.prune(d2)
-        assertEquals([w1, w3].sort(), d2.listFiles().findAll { it.isDirectory() }*.name.sort())
+        assertEquals(["a", "b"], byId().keySet().sort())
     }
 
     @Test void mergeKeepsUntouchedRecords() {

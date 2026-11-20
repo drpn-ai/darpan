@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-318 plan 3a: the kept copy's vocabulary (entity/DatasetEntities.xml), kept apart from AuditSeedData.xml,
+     whose contract (AuditCatalogContractTests) pins only the audit-run vocabulary. -->
+<entity-facade-xml type="darpan-seed">
+    <moqui.basic.EnumerationType enumTypeId="DatasetStatus" description="Dataset status"/>
+    <moqui.basic.Enumeration enumId="DST_ACTIVE" enumTypeId="DatasetStatus" enumCode="active" description="Active" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="DST_PAUSED" enumTypeId="DatasetStatus" enumCode="paused" description="Paused" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="DatasetReadRule" description="Dataset read rule"/>
+    <moqui.basic.Enumeration enumId="DRR_CHANGED_SINCE" enumTypeId="DatasetReadRule" enumCode="changedSince" description="Changed since the last read" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="DRR_ROLLING" enumTypeId="DatasetReadRule" enumCode="rolling" description="Rolling window (plan 3b)" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="DatasetReadKind" description="Dataset read kind"/>
+    <moqui.basic.Enumeration enumId="DRK_INCREMENTAL" enumTypeId="DatasetReadKind" enumCode="incremental" description="Incremental" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="DRK_FULL" enumTypeId="DatasetReadKind" enumCode="full" description="Full" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="DatasetReadStatus" description="Dataset read status"/>
+    <moqui.basic.Enumeration enumId="DRS_DONE" enumTypeId="DatasetReadStatus" enumCode="done" description="Done" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="DRS_FAILED" enumTypeId="DatasetReadStatus" enumCode="failed" description="Failed" sequenceNum="2"/>
+</entity-facade-xml>

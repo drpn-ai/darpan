@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-318 plan 3a. A tenant's kept copy of a source read (entity/DatasetEntities.xml). Every read finds by an explicit
+         companyUserGroupId condition as well as the DARPAN_ACTIVE_COMPANY_SCOPE filter, never by a bare primary key:
+         another tenant's datasetId reads as "does not exist". No service disables authz. -->
+
+    <service verb="store" noun="Dataset" allow-remote="false">
+        <description>Finds or creates the active tenant's dataset for (system, connection, options). The same key always returns
+            the same datasetId; a repeat call updates the settings it is given (statusId, margins, horizon, read hour).</description>
+        <in-parameters>
+            <parameter name="systemEnumId" required="true"/>
+            <parameter name="sourceConfigId" required="true"/>
+            <parameter name="options" type="Map"/>
+            <parameter name="idField" required="true"/>
+            <parameter name="stampField" required="true"/>
+            <parameter name="windowField" required="true"/>
+            <parameter name="statusId"/>
+            <parameter name="marginDays" type="Integer"/>
+            <parameter name="fullReadDays" type="Integer"/>
+            <parameter name="horizonDays" type="Integer"/>
+            <parameter name="readHourLocal" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="datasetId"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <if condition="!tenantId || tenantId == '__NO_ACTIVE_TENANT__'">
+                <return error="true" message="No active tenant"/></if>
+            <if condition="statusId">
+                <entity-find entity-name="moqui.basic.Enumeration" list="statusList">
+                    <econdition field-name="enumId" from="statusId"/>
+                    <econdition field-name="enumTypeId" value="DatasetStatus"/>
+                </entity-find>
+                <if condition="!statusList">
+                    <return error="true" message="Dataset status ${statusId} is not one of DST_ACTIVE, DST_PAUSED"/></if>
+            </if>
+            <script>
+                optionsJson = darpan.dataset.DatasetSupport.canonicalJson(options)
+                optionsHash = darpan.dataset.DatasetSupport.optionsHash(options ?: [:])
+            </script>
+            <entity-find entity-name="darpan.dataset.Dataset" list="existingList">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="systemEnumId" from="systemEnumId"/>
+                <econdition field-name="sourceConfigId" from="sourceConfigId"/>
+                <econdition field-name="optionsHash" from="optionsHash"/>
+            </entity-find>
+            <if condition="existingList">
+                <then>
+                    <set field="existing" from="existingList[0]"/>
+                    <set field="existing.idField" from="idField"/>
+                    <set field="existing.stampField" from="stampField"/>
+                    <set field="existing.windowField" from="windowField"/>
+                    <if condition="statusId"><set field="existing.statusId" from="statusId"/></if>
+                    <if condition="marginDays != null"><set field="existing.marginDays" from="marginDays"/></if>
+                    <if condition="fullReadDays != null"><set field="existing.fullReadDays" from="fullReadDays"/></if>
+                    <if condition="horizonDays != null"><set field="existing.horizonDays" from="horizonDays"/></if>
+                    <if condition="readHourLocal != null"><set field="existing.readHourLocal" from="readHourLocal"/></if>
+                    <script>existing.update()</script>
+                    <set field="datasetId" from="existing.datasetId"/>
+                </then>
+                <else>
+                    <service-call name="create#darpan.dataset.Dataset" out-map="created" in-map="[companyUserGroupId:tenantId,
+                            systemEnumId:systemEnumId, sourceConfigId:sourceConfigId, optionsJson:optionsJson, optionsHash:optionsHash,
+                            statusId:statusId ?: 'DST_ACTIVE', readRuleEnumId:'DRR_CHANGED_SINCE', idField:idField, stampField:stampField,
+                            windowField:windowField, marginDays:marginDays ?: 2, fullReadDays:fullReadDays ?: 7,
+                            horizonDays:horizonDays ?: 62, readHourLocal:readHourLocal != null ? readHourLocal : 4]"/>
+                    <set field="datasetId" from="created.datasetId"/>
+                </else>
+            </if>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Dataset" allow-remote="false">
+        <description>One of the active tenant's datasets and its last ten reads, newest first. Another tenant's datasetId does not exist.</description>
+        <in-parameters>
+            <parameter name="datasetId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dataset" type="Map"/>
+            <parameter name="reads" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <entity-find entity-name="darpan.dataset.Dataset" list="datasetList">
+                <econdition field-name="datasetId" from="datasetId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!tenantId || !datasetList">
+                <return error="true" message="Dataset ${datasetId} does not exist"/></if>
+            <set field="dataset" from="datasetList[0].getMap()"/>
+            <entity-find entity-name="darpan.dataset.DatasetRead" list="readList" limit="10">
+                <econdition field-name="datasetId" from="datasetId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <order-by field-name="-readSeqId"/>
+            </entity-find>
+            <set field="reads" from="readList.collect { it.getMap() }"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="ServingDataset" allow-remote="false">
+        <description>The active tenant's ACTIVE dataset for (system, connection, options), or null: a paused dataset, or one of
+            another tenant, does not serve.</description>
+        <in-parameters>
+            <parameter name="systemEnumId" required="true"/>
+            <parameter name="sourceConfigId" required="true"/>
+            <parameter name="options" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dataset" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <set field="dataset" from="null"/>
+            <if condition="tenantId &amp;&amp; tenantId != '__NO_ACTIVE_TENANT__'">
+                <script>optionsHash = darpan.dataset.DatasetSupport.optionsHash(options ?: [:])</script>
+                <entity-find entity-name="darpan.dataset.Dataset" list="servingList">
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    <econdition field-name="systemEnumId" from="systemEnumId"/>
+                    <econdition field-name="sourceConfigId" from="sourceConfigId"/>
+                    <econdition field-name="optionsHash" from="optionsHash"/>
+                    <econdition field-name="statusId" value="DST_ACTIVE"/>
+                </entity-find>
+                <if condition="servingList"><set field="dataset" from="servingList[0].getMap()"/></if>
+            </if>
+        </actions>
+    </service>
+</services>

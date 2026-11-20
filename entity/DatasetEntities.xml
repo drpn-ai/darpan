@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-318 plan 3a. A tenant's kept copy of one source read (a Dataset) and the log of its reads (DatasetRead).
+         The copy's files live under <datamanager>/datasets/<tenant>/<datasetId>/ (darpan.dataset.DatasetSupport).
+         Each row carries companyUserGroupId (filter DARPAN_ACTIVE_COMPANY_SCOPE, group DARPAN_APP). Neither entity has a
+         config-change EECA or a TransferSpecs kind: a dataset is instance-local state, not tenant config to move. -->
+
+    <entity entity-name="Dataset" package="darpan.dataset" use="configuration">
+        <description>One tenant's kept copy of one source read: the same system, connection and options always find the same row.</description>
+        <field name="datasetId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="systemEnumId" type="id" not-null="true"/>
+        <field name="sourceConfigId" type="id" not-null="true"/>
+        <field name="optionsJson" type="text-long"><description>The read's options as canonical JSON (sorted keys).</description></field>
+        <field name="optionsHash" type="text-medium" not-null="true"><description>SHA-256 hex of optionsJson (64 characters).</description></field>
+        <field name="statusId" type="id" not-null="true"><description>Enumeration of type DatasetStatus: DST_ACTIVE serves runs, DST_PAUSED does not.</description></field>
+        <field name="readRuleEnumId" type="id" not-null="true"><description>Enumeration of type DatasetReadRule: DRR_CHANGED_SINCE (3a); DRR_ROLLING is declared for plan 3b.</description></field>
+        <field name="idField" type="text-medium" not-null="true"/>
+        <field name="stampField" type="text-medium" not-null="true"/>
+        <field name="windowField" type="text-medium" not-null="true"/>
+        <field name="marginDays" type="number-integer"><description>Default 2.</description></field>
+        <field name="fullReadDays" type="number-integer"><description>Default 7.</description></field>
+        <field name="horizonDays" type="number-integer"><description>Default 62.</description></field>
+        <field name="readHourLocal" type="number-integer"><description>Hour of day in the tenant's timezone the daily read starts. Default 4.</description></field>
+        <field name="currentVersion" type="text-short"/>
+        <field name="readThru" type="date-time"/>
+        <field name="lastReadAt" type="date-time"/>
+        <field name="lastFullReadAt" type="date-time"/>
+        <field name="nextReadDate" type="date"/>
+        <field name="recordCount" type="number-integer"/>
+        <field name="lastMissCount" type="number-integer"/>
+        <field name="warningText" type="text-medium"/>
+        <field name="refreshingSince" type="date-time"><description>The refresh lock: set while a refresh runs.</description></field>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="DATASET_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="DATASET_STATUS">
+            <key-map field-name="statusId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="ReadRule" related="moqui.basic.Enumeration" fk-name="DATASET_READ_RULE">
+            <key-map field-name="readRuleEnumId" related="enumId"/>
+        </relationship>
+        <index name="DATASET_KEY" unique="true">
+            <index-field name="companyUserGroupId"/><index-field name="systemEnumId"/>
+            <index-field name="sourceConfigId"/><index-field name="optionsHash"/>
+        </index>
+    </entity>
+
+    <entity entity-name="DatasetRead" package="darpan.dataset" use="configuration">
+        <description>One read of a dataset's source: when, from which stamp, what it found and how it ended.</description>
+        <field name="datasetId" type="id" is-pk="true"/>
+        <field name="readSeqId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="readKindEnumId" type="id" not-null="true"><description>Enumeration of type DatasetReadKind: DRK_INCREMENTAL or DRK_FULL.</description></field>
+        <field name="fromStamp" type="date-time"/>
+        <field name="readThru" type="date-time"/>
+        <field name="readAt" type="date-time"><description>The moment the extract file was written.</description></field>
+        <field name="recordsRead" type="number-integer"/>
+        <field name="changedCount" type="number-integer"/>
+        <field name="addedCount" type="number-integer"/>
+        <field name="removedCount" type="number-integer"/>
+        <field name="missCount" type="number-integer"/>
+        <field name="statusId" type="id" not-null="true"><description>Enumeration of type DatasetReadStatus: DRS_DONE or DRS_FAILED.</description></field>
+        <field name="errorText" type="text-long"/>
+        <relationship type="one" related="darpan.dataset.Dataset" fk-name="DSREAD_DATASET">
+            <key-map field-name="datasetId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="DSREAD_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="ReadKind" related="moqui.basic.Enumeration" fk-name="DSREAD_KIND">
+            <key-map field-name="readKindEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="DSREAD_STATUS">
+            <key-map field-name="statusId" related="enumId"/>
+        </relationship>
+    </entity>
+</entities>

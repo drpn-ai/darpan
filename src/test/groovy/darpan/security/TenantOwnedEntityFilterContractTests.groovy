@@ -112,6 +112,8 @@ class TenantOwnedEntityFilterContractTests {
             "DARPAN_SCOPE_JUDGE_CHECK_PARAMETER_SET": "darpan.judge.CheckParameterSet",
             "DARPAN_SCOPE_JUDGE_CHECK_PARAMETER": "darpan.judge.CheckParameter",
             "DARPAN_SCOPE_JUDGE_CHECK_ASK": "darpan.judge.CheckAsk",
+            "DARPAN_SCOPE_DATASET": "darpan.dataset.Dataset",
+            "DARPAN_SCOPE_DATASET_READ": "darpan.dataset.DatasetRead",
             "DARPAN_SCOPE_RULES_FACT_TYPE": "rules.FactType",
             "DARPAN_SCOPE_RULES_FACT_FIELD": "rules.FactField",
             "DARPAN_SCOPE_RULES_FACT_NODE": "rules.FactNode",

@@ -95,6 +95,9 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.judge.CheckParameterSet" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.judge.CheckParameter" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.judge.CheckAsk" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <!-- DAR-BE-318 plan 3a: the kept copy of datasets (entity/DatasetEntities.xml). -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.dataset.Dataset" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.dataset.DatasetRead" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 
@@ -478,6 +481,9 @@
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_PARAMETER_SET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckParameterSet" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_PARAMETER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckParameter" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_ASK" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckAsk" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <!-- DAR-BE-318 plan 3a: the kept copy of datasets. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DATASET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.dataset.Dataset" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DATASET_READ" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.dataset.DatasetRead" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <!-- DAR-BE-318 (D2): every moqui-rules row belongs to one tenant. A child row carries its parent's tenant, stamped by
          script/rules/RulesTenantGuard.xml, so each entity is filtered on its own column. The filter covers reads; the guard covers writes. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULES_FACT_TYPE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="rules.FactType" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>

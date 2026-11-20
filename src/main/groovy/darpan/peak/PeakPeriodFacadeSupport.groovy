@@ -217,6 +217,16 @@ class PeakPeriodFacadeSupport {
         return [targets: targets, ids: ids, scheduled: scheduled]
     }
 
+    /** The tenant's peak periods as maps (explicit companyUserGroupId condition). */
+    static List<Map> periodsOf(def ec, String tenantId) {
+        return (rows(ec, "darpan.peak.PeakPeriod", tenantId).list() ?: []).collect { it.getMap() }
+    }
+
+    /** Deletes every run time of one of the tenant's periods. */
+    static void deleteRunTimesOf(def ec, String tenantId, String peakPeriodId) {
+        rows(ec, "darpan.peak.PeakPeriodRunTime", tenantId).condition("peakPeriodId", peakPeriodId).deleteAll()
+    }
+
     static def rows(def ec, String entityName, String tenantId) {
         return TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
     }

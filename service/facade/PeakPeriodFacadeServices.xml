@@ -19,8 +19,8 @@
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="today" from="java.time.LocalDate.now(darpan.facade.common.TenantAccessSupport.tenantTimeZoneFor(ec, tenantId))"/>
-            <set field="periodRows" from="tenantId ? (ec.entity.find('darpan.peak.PeakPeriod').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list() ?: []) : []"/>
-            <set field="peakPeriods" from="darpan.peak.PeakPeriodFacadeSupport.listRows(periodRows*.getMap(), today)"/>
+            <set field="periodRows" from="tenantId ? darpan.peak.PeakPeriodFacadeSupport.periodsOf(ec, tenantId) : []"/>
+            <set field="peakPeriods" from="darpan.peak.PeakPeriodFacadeSupport.listRows(periodRows, today)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -113,7 +113,7 @@
             <if condition="!ec.message.hasError()">
                 <set field="isActiveValue" from="isActive == null ? (existingPeriod?.isActive ?: 'Y') : (isActive ? 'Y' : 'N')"/>
                 <set field="periodMap" from="[periodName: ((periodName)?.toString()?.trim()) ?: null, fromDate: fromDate, thruDate: thruDate, peakHoursStart: ((peakHoursStart)?.toString()?.trim()) ?: null, peakHoursEnd: ((peakHoursEnd)?.toString()?.trim()) ?: null, isActive: isActiveValue]"/>
-                <set field="otherPeriods" from="(ec.entity.find('darpan.peak.PeakPeriod').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list() ?: []).findAll { it.peakPeriodId != peakPeriodIdValue }.collect { it.getMap() }"/>
+                <set field="otherPeriods" from="darpan.peak.PeakPeriodFacadeSupport.periodsOf(ec, tenantId).findAll { it.peakPeriodId != peakPeriodIdValue }"/>
                 <set field="validationErrors" from="darpan.peak.PeakPeriodFacadeSupport.validatePeriod(periodMap, otherPeriods)"/>
                 <iterate list="validationErrors" entry="validationError"><message error="true">${validationError}</message></iterate>
             </if>
@@ -123,7 +123,7 @@
                 <set field="ignoreStart" from="storeMap.put('peakHoursStart', periodMap.peakHoursStart)"/>
                 <set field="ignoreEnd" from="storeMap.put('peakHoursEnd', periodMap.peakHoursEnd)"/>
                 <service-call name="store#darpan.peak.PeakPeriod" in-map="storeMap" out-map="storeResult"/>
-                <set field="peakPeriodId" from="peakPeriodIdValue ?: ((storeResult?.peakPeriodId)?.toString()?.trim())"/>
+                <if condition="!ec.message.hasError()"><set field="peakPeriodId" from="peakPeriodIdValue ?: ((storeResult?.peakPeriodId)?.toString()?.trim())"/></if>
                 <if condition="!ec.message.hasError()"><message>Saved peak period.</message></if>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -152,7 +152,7 @@
                 <message error="true">Peak period '${peakPeriodIdValue}' was not found.</message>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreRunTimes" from="ec.entity.find('darpan.peak.PeakPeriodRunTime').condition('peakPeriodId', peakPeriodIdValue).condition('companyUserGroupId', tenantId).disableAuthz().deleteAll()"/>
+                <set field="ignoreRunTimes" from="darpan.peak.PeakPeriodFacadeSupport.deleteRunTimesOf(ec, tenantId, peakPeriodIdValue)"/>
                 <set field="ignoreDelete" from="periodRow.delete()"/>
                 <message>Deleted peak period.</message>
             </if>
@@ -209,7 +209,7 @@
                 <set field="ignoreAudit" from="storeMap.put('auditId', auditIdValue)"/>
                 <set field="ignoreOnDate" from="storeMap.put('onDate', onDate)"/>
                 <service-call name="store#darpan.peak.PeakPeriodRunTime" in-map="storeMap" out-map="storeResult"/>
-                <set field="runTimeId" from="runTimeIdValue ?: ((storeResult?.runTimeId)?.toString()?.trim())"/>
+                <if condition="!ec.message.hasError()"><set field="runTimeId" from="runTimeIdValue ?: ((storeResult?.runTimeId)?.toString()?.trim())"/></if>
                 <if condition="!ec.message.hasError()"><message>Saved run time.</message></if>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>

@@ -132,10 +132,12 @@
          full Shopify read takes minutes); the lock and the closing writes each run in their own short transaction. -->
 
     <service verb="refresh" noun="Dataset" transaction="ignore" allow-remote="false">
-        <description>One read of the active tenant's dataset into its kept copy. Takes the lock (refused while another refresh
-            holds it), reads FULL (asked, no current version, or the last full read is fullReadDays old: createdAt over the
-            horizon) or INCREMENTAL (updatedAt from readThru minus marginDays), merges or replaces the copy and logs a
-            DatasetRead. A failed read logs a FAILED DatasetRead, clears the lock, leaves the copy as it was, and fails.</description>
+        <description>One read of the active tenant's dataset into its kept copy. Takes the lock and mints the read (a RUNNING
+            DatasetRead) in one transaction, refused while another refresh holds the lock. Reads FULL (asked, no current
+            version, or the last full read is fullReadDays old: createdAt over the horizon) or INCREMENTAL (updatedAt from
+            readThru minus marginDays), merges or replaces the copy, and closes the read. A failed read is closed FAILED with
+            a back-off on nextReadDate, clears the lock, leaves the copy as it was, and fails. A refresh whose lock was taken
+            over (it ran past six hours) swaps, prunes and updates nothing, and is closed FAILED. Call it outside a transaction.</description>
         <in-parameters>
             <parameter name="datasetId" required="true"/>
             <parameter name="forceFull" type="Boolean" default-value="false"/>
@@ -155,26 +157,26 @@
                 <return error="true" message="No active tenant"/></if>
             <set field="startedAt" from="ec.user.nowTimestamp"/>
             <service-call name="dataset.DatasetServices.lock#DatasetRefresh" out-map="lockOut"
-                    in-map="[datasetId:datasetId, tenantId:tenantId, now:startedAt]"/>
+                    in-map="[datasetId:datasetId, tenantId:tenantId, now:startedAt, forceFull:forceFull == true]"/>
             <check-errors/>
-            <set field="dataset" from="lockOut.dataset"/>
-
-            <!-- ruling P3a-8: six digits, so newest-first by readSeqId holds past 99 reads -->
-            <entity-find entity-name="darpan.dataset.DatasetRead" list="lastReadList" limit="1">
-                <econdition field-name="datasetId" from="datasetId"/>
-                <econdition field-name="companyUserGroupId" from="tenantId"/>
-                <order-by field-name="-readSeqId"/>
-            </entity-find>
-            <set field="readSeqId" from="String.format('%06d', (lastReadList ? (lastReadList[0].readSeqId as Integer) : 0) + 1)"/>
-
-            <set field="result" from="darpan.dataset.DatasetRefreshSupport.refresh(ec, dataset, readSeqId, forceFull == true, startedAt, extractor)"/>
+            <!-- From here on nothing may throw before finish#DatasetRefresh: refresh() and failureUpdates() never throw. -->
+            <set field="readSeqId" from="lockOut.readSeqId"/>
+            <set field="result" from="darpan.dataset.DatasetRefreshSupport.refresh(ec, lockOut.dataset, readSeqId, forceFull == true, startedAt, extractor)"/>
             <set field="readKindEnumId" from="result.readKindEnumId"/>
-            <set field="read" from="[readSeqId:readSeqId, readKindEnumId:readKindEnumId, fromStamp:result.fromStamp, readThru:startedAt]"/>
+            <set field="read" from="[readKindEnumId:readKindEnumId, fromStamp:result.fromStamp]"/>
             <if condition="result.error">
                 <then>
+                    <entity-find entity-name="darpan.dataset.DatasetRead" list="priorReadList" limit="20">
+                        <econdition field-name="datasetId" from="datasetId"/>
+                        <econdition field-name="companyUserGroupId" from="tenantId"/>
+                        <econdition field-name="readSeqId" operator="not-equals" from="readSeqId"/>
+                        <order-by field-name="-readSeqId"/>
+                    </entity-find>
+                    <set field="updates" from="darpan.dataset.DatasetRefreshSupport.failureUpdates(ec, lockOut.dataset,
+                            priorReadList*.statusId, result.error as String, ec.user.nowTimestamp)"/>
                     <script>read.putAll([statusId:'DRS_FAILED', errorText:result.error])</script>
-                    <service-call name="dataset.DatasetServices.finish#DatasetRefresh"
-                            in-map="[datasetId:datasetId, tenantId:tenantId, read:read, updates:[:]]"/>
+                    <service-call name="dataset.DatasetServices.finish#DatasetRefresh" out-map="finishOut"
+                            in-map="[datasetId:datasetId, tenantId:tenantId, readSeqId:readSeqId, token:startedAt, read:read, updates:updates]"/>
                     <check-errors/>
                     <return error="true" message="Dataset ${datasetId} read ${readSeqId} failed: ${result.error}"/>
                 </then>
@@ -189,22 +191,28 @@
             <set field="updates" from="[currentVersion:result.version, readThru:startedAt, lastReadAt:result.readAt,
                     recordCount:result.recordCount, lastMissCount:missCount, nextReadDate:result.nextReadDate, warningText:warningText]"/>
             <if condition="readKindEnumId == 'DRK_FULL'"><set field="updates.lastFullReadAt" from="result.readAt"/></if>
-            <service-call name="dataset.DatasetServices.finish#DatasetRefresh"
-                    in-map="[datasetId:datasetId, tenantId:tenantId, read:read, updates:updates]"/>
+            <service-call name="dataset.DatasetServices.finish#DatasetRefresh" out-map="finishOut"
+                    in-map="[datasetId:datasetId, tenantId:tenantId, readSeqId:readSeqId, token:startedAt, read:read, updates:updates]"/>
+            <check-errors/>
+            <if condition="!finishOut.owned">
+                <return error="true" message="Dataset ${datasetId} read ${readSeqId} failed: lock taken over: another refresh holds this dataset now"/></if>
         </actions>
     </service>
 
     <service verb="lock" noun="DatasetRefresh" transaction="force-new" allow-remote="false">
-        <description>Internal to refresh#Dataset. Takes the refresh lock in its own transaction: the row is read for update,
-            so a second caller waits for the first to commit and then sees its lock. refreshingSince is set only when empty
-            or older than six hours (a holder that crashed); otherwise the call is refused with the holder's start.</description>
+        <description>Internal to refresh#Dataset. In one transaction: reads the Dataset row for update (a second caller waits
+            for the first to commit, then sees its lock), refuses while refreshingSince is under six hours old, otherwise
+            sets refreshingSince to this refresh's start (its lock token), mints the next readSeqId and writes the read as
+            DRS_RUNNING. Taking over a stale lock closes the old holder's RUNNING reads as FAILED.</description>
         <in-parameters>
             <parameter name="datasetId" required="true"/>
             <parameter name="tenantId" required="true"/>
             <parameter name="now" type="Timestamp" required="true"/>
+            <parameter name="forceFull" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="dataset" type="Map"/>
+            <parameter name="readSeqId"/>
         </out-parameters>
         <actions>
             <entity-find entity-name="darpan.dataset.Dataset" list="lockList" for-update="true">
@@ -218,21 +226,49 @@
                 <return error="true" message="Dataset ${datasetId} is already refreshing since ${row.refreshingSince.toInstant()}"/></if>
             <set field="row.refreshingSince" from="now"/>
             <entity-update value-field="row"/>
+
+            <entity-find entity-name="darpan.dataset.DatasetRead" list="runningList">
+                <econdition field-name="datasetId" from="datasetId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="statusId" value="DRS_RUNNING"/>
+            </entity-find>
+            <iterate list="runningList" entry="abandoned">
+                <set field="abandoned.statusId" value="DRS_FAILED"/>
+                <set field="abandoned.errorText" value="Abandoned: its lock went stale and a later refresh took it over"/>
+                <entity-update value-field="abandoned"/>
+            </iterate>
+            <!-- ruling P3a-8: six digits, so newest-first by readSeqId holds past 99 reads -->
+            <entity-find entity-name="darpan.dataset.DatasetRead" list="lastReadList" limit="1">
+                <econdition field-name="datasetId" from="datasetId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <order-by field-name="-readSeqId"/>
+            </entity-find>
+            <set field="lastSeq" from="lastReadList ? lastReadList[0].readSeqId : null"/>
+            <set field="readSeqId" from="String.format('%06d', (lastSeq &amp;&amp; lastSeq ==~ /\d+/ ? (lastSeq as Integer) : 0) + 1)"/>
             <set field="dataset" from="row.getMap()"/>
+            <service-call name="create#darpan.dataset.DatasetRead" in-map="[datasetId:datasetId, readSeqId:readSeqId,
+                    companyUserGroupId:tenantId, statusId:'DRS_RUNNING', readThru:now,
+                    readKindEnumId:darpan.dataset.DatasetRefreshSupport.readKind(dataset, [:], forceFull == true, now)]"/>
         </actions>
     </service>
 
     <service verb="finish" noun="DatasetRefresh" transaction="force-new" allow-remote="false">
-        <description>Internal to refresh#Dataset. In one transaction: writes the read's DatasetRead row, applies the read's
-            updates to the Dataset (none for a failed read) and clears the refresh lock.</description>
+        <description>Internal to refresh#Dataset. In one transaction, with the Dataset row read for update: when the row's
+            refreshingSince still equals this refresh's token, applies the read's updates and clears the lock; when it does
+            not (the lock was taken over), touches the Dataset not at all. Either way closes the read's DatasetRead row, as
+            DRS_FAILED "lock taken over" when the lock was lost.</description>
         <in-parameters>
             <parameter name="datasetId" required="true"/>
             <parameter name="tenantId" required="true"/>
+            <parameter name="readSeqId" required="true"/>
+            <parameter name="token" type="Timestamp" required="true"/>
             <parameter name="read" type="Map" required="true"/>
             <parameter name="updates" type="Map"/>
         </in-parameters>
+        <out-parameters>
+            <parameter name="owned" type="Boolean"/>
+        </out-parameters>
         <actions>
-            <service-call name="create#darpan.dataset.DatasetRead" in-map="read + [datasetId:datasetId, companyUserGroupId:tenantId]"/>
             <entity-find entity-name="darpan.dataset.Dataset" list="finishList" for-update="true">
                 <econdition field-name="datasetId" from="datasetId"/>
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
@@ -240,9 +276,28 @@
             <if condition="!finishList">
                 <return error="true" message="Dataset ${datasetId} does not exist"/></if>
             <set field="row" from="finishList[0]"/>
-            <if condition="updates"><entity-set value-field="row" map="updates" include="nonpk" set-if-empty="true"/></if>
-            <set field="row.refreshingSince" from="null"/>
-            <entity-update value-field="row"/>
+            <set field="owned" from="row.refreshingSince != null &amp;&amp; row.refreshingSince.time == token.time"/>
+            <if condition="owned">
+                <then>
+                    <if condition="updates"><entity-set value-field="row" map="updates" include="nonpk" set-if-empty="true"/></if>
+                    <set field="row.refreshingSince" from="null"/>
+                    <entity-update value-field="row"/>
+                </then>
+                <else>
+                    <set field="read.statusId" value="DRS_FAILED"/>
+                    <set field="read.errorText" from="darpan.dataset.DatasetRefreshSupport.LOCK_TAKEN_OVER + (read.errorText ? '; ' + read.errorText : '')"/>
+                </else>
+            </if>
+            <entity-find entity-name="darpan.dataset.DatasetRead" list="readList" for-update="true">
+                <econdition field-name="datasetId" from="datasetId"/>
+                <econdition field-name="readSeqId" from="readSeqId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!readList">
+                <return error="true" message="Dataset ${datasetId} read ${readSeqId} does not exist"/></if>
+            <set field="readRow" from="readList[0]"/>
+            <entity-set value-field="readRow" map="read" include="nonpk" set-if-empty="true"/>
+            <entity-update value-field="readRow"/>
         </actions>
     </service>
 

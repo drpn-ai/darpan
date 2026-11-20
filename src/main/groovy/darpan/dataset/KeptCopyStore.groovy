@@ -46,7 +46,7 @@ class KeptCopyStore {
 
     /** Merges the changed records into the copy: an equal or newer stamp replaces, a new id is appended. */
     static Map merge(File datasetDir, Iterator<Map> changed, String idField, String stampField,
-                     Timestamp readThru, Timestamp readAt) {
+                     Timestamp readThru, Timestamp readAt, Closure swapGuard = null) {
         Map<String, Map> changes = new LinkedHashMap<String, Map>()
         long recordsRead = 0
         while (changed.hasNext()) {
@@ -59,7 +59,7 @@ class KeptCopyStore {
         }
         long changedCount = 0
         long addedCount = 0
-        Map out = writeVersion(datasetDir, readThru, readAt) { Writer w ->
+        Map out = writeVersion(datasetDir, readThru, readAt, swapGuard) { Writer w ->
             long count = 0
             Iterator<Map> old = records(datasetDir)
             while (old.hasNext()) {
@@ -96,7 +96,7 @@ class KeptCopyStore {
      * the horizon, is removed, not a miss.
      */
     static Map replace(File datasetDir, Iterator<Map> full, String idField, String stampField, String createdField,
-                       Timestamp horizonStart, Timestamp readThru, Timestamp readAt, int marginDays) {
+                       Timestamp horizonStart, Timestamp readThru, Timestamp readAt, int marginDays, Closure swapGuard = null) {
         Map oldManifest = manifest(datasetDir)
         Instant neverReadBefore = oldManifest?.readThru == null ? null :
                 ((Timestamp) oldManifest.readThru).toInstant().minusSeconds(marginDays * 86400L)
@@ -110,7 +110,7 @@ class KeptCopyStore {
             index.put(String.valueOf(e.get("id")), [e.get("stamp"), contentHash(rec, stampField), rec?.get(createdField)])
         }
         long recordsRead = 0, changedCount = 0, addedCount = 0, missCount = 0
-        Map out = writeVersion(datasetDir, readThru, readAt) { Writer w ->
+        Map out = writeVersion(datasetDir, readThru, readAt, swapGuard) { Writer w ->
             long count = 0
             Set<String> written = new HashSet<String>()
             while (full.hasNext()) {
@@ -170,7 +170,12 @@ class KeptCopyStore {
 
     // ---- internals ----
 
-    private static Map writeVersion(File datasetDir, Timestamp readThru, Timestamp readAt, Closure<Long> body) {
+    /**
+     * swapGuard, when given, is called with the swap (a closure that names the new version current and returns true) and
+     * returns its result, or false without calling it to refuse: a caller that lost its lock refuses, and the whole new
+     * version is deleted. Null swaps unconditionally.
+     */
+    private static Map writeVersion(File datasetDir, Timestamp readThru, Timestamp readAt, Closure swapGuard, Closure<Long> body) {
         datasetDir.mkdirs()
         File tmp = new File(datasetDir, ".tmp-" + UUID.randomUUID().toString())
         tmp.mkdirs()
@@ -185,12 +190,18 @@ class KeptCopyStore {
             new File(tmp, MANIFEST_FILE).setText(JsonOutput.toJson([version: version, readThru: iso(readThru),
                     readAt: iso(readAt), recordCount: count]), "UTF-8")
             File target = new File(datasetDir, version)
-            Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
-            try {
-                writeCurrent(datasetDir, version)
-            } catch (Throwable t) {
-                deleteTree(target)
-                throw t
+            Closure<Boolean> swap = { ->
+                Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+                try {
+                    writeCurrent(datasetDir, version)
+                } catch (Throwable t) {
+                    deleteTree(target)
+                    throw t
+                }
+                return true
+            }
+            if ((swapGuard == null ? swap.call() : swapGuard.call(swap)) != true) {
+                throw new IllegalStateException("The new version was not made current: the swap was refused")
             }
             return [version: version]
         } finally {

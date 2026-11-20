@@ -310,6 +310,126 @@ class DatasetRefreshTests {
     }
 
     @Test
+    void aTakenOverRefreshNeitherSwapsNorPrunesNorClearsTheNewLock() {
+        String id = dataset("takeover")
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5), order(2, 4, 4)])).errors)
+        File d = dir(id)
+
+        // 1. A slow refresh started seven hours ago; while it reads, a later refresh finds its lock stale, takes it over and
+        //    finishes. The slow one then must not swap, prune or touch the Dataset.
+        List<String> laterErrors = []
+        Closure slow = { String svc, Map p ->
+            ec.user.setEffectiveTime(null)
+            ec.message.clearAll()
+            ec.service.sync().name("${SERVICES}.refresh#Dataset".toString()).parameters([datasetId: id,
+                    extractor: stub([], [order(1, 5, 1, "#1 by the later refresh"), order(2, 4, 4), order(3, 1, 1)])]).call()
+            laterErrors.addAll(ec.message.errors.collect { it.toString() })
+            ec.message.clearAll()
+            return stub([], [order(1, 5, 0, "#1 by the slow refresh")]).call(svc, p)
+        }
+        Map slowRes = startedHoursAgo(7) { refresh(id, slow) }
+        assertEquals([], laterErrors)
+        assertTrue(slowRes.errors.any { it.contains("lock taken over") }, slowRes.errors.toString())
+        def row = find("darpan.dataset.Dataset", [datasetId: id])
+        def later = find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000003"])
+        assertEquals("DRS_DONE", later.statusId)
+        def slowRead = find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"])
+        assertEquals("DRS_FAILED", slowRead.statusId)
+        assertTrue(slowRead.errorText.contains("lock taken over"), slowRead.errorText)
+        assertEquals(3, reads(id).size(), "one row per read: no primary-key collision")
+        assertEquals(KeptCopyStore.manifest(d).version, row.currentVersion, "the row names the version that is current")
+        assertEquals(later.readThru, row.readThru, "the Dataset holds the later refresh's read, not the slow one's")
+        Map names = KeptCopyStore.records(d).collectEntries { [(it.id): it.record.name] }
+        assertEquals(["1": "#1 by the later refresh", "2": "#2", "3": "#3"], names)
+        assertNull(row.refreshingSince)
+        assertEquals(2, versionFolders(d).size(), "current and previous only: the slow refresh's version was deleted")
+        assertTrue(d.listFiles().every { !it.name.startsWith(".tmp-") })
+
+        // 2. The same, but the later refresh still holds the lock when the slow one ends: the slow one leaves its lock, and
+        //    prunes nothing (a stray version folder and an old read folder survive).
+        File orphan = new File(d, "v20200101-000000000")
+        orphan.mkdirs()
+        File oldRead = new File(new File(d, "reads"), "000001")
+        oldRead.mkdirs()
+        String versionBefore = KeptCopyStore.manifest(d).version
+        Timestamp[] newLock = new Timestamp[1]
+        Closure slowAgain = { String svc, Map p ->
+            ec.user.setEffectiveTime(null)
+            ec.service.sync().name("${SERVICES}.lock#DatasetRefresh".toString())
+                    .parameters([datasetId: id, tenantId: A, now: ec.user.nowTimestamp]).call()
+            newLock[0] = find("darpan.dataset.Dataset", [datasetId: id]).refreshingSince as Timestamp
+            return stub([], [order(1, 5, 0, "#1 by the slow refresh")]).call(svc, p)
+        }
+        Map again = startedHoursAgo(7) { refresh(id, slowAgain) }
+        assertTrue(again.errors.any { it.contains("lock taken over") }, again.errors.toString())
+        assertNotNull(newLock[0])
+        assertTrue(newLock[0].time > System.currentTimeMillis() - HOUR, "the new holder's lock is recent")
+        assertEquals(newLock[0], find("darpan.dataset.Dataset", [datasetId: id]).refreshingSince, "the new lock is left to its holder")
+        assertEquals(versionBefore, KeptCopyStore.manifest(d).version)
+        assertTrue(orphan.isDirectory(), "the slow refresh pruned nothing")
+        assertTrue(oldRead.isDirectory(), "the slow refresh pruned no read folder")
+        assertEquals("DRS_FAILED", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000004"]).statusId)
+        assertEquals("DRS_RUNNING", find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000005"]).statusId)
+    }
+
+    @Test
+    void aFailedReadBacksOff() {
+        String id = dataset("backoff")
+        assertFailsWithNextReadIn(id, 30)
+        assertFailsWithNextReadIn(id, 60)
+        def row = find("darpan.dataset.Dataset", [datasetId: id])
+        assertNull(row.warningText, "backing off is not yet a warning")
+        assertNull(row.refreshingSince)
+    }
+
+    @Test
+    void afterMaxRetriesItWaitsForTomorrowWithAWarning() {
+        String id = dataset("give-up")
+        assertFailsWithNextReadIn(id, 30)
+        assertFailsWithNextReadIn(id, 60)
+        assertFailsTillTomorrow(id)
+        def row = find("darpan.dataset.Dataset", [datasetId: id])
+        assertTrue(row.warningText.contains("3 times") && row.warningText.contains("token revoked"), row.warningText)
+        // a fourth failure, tomorrow, waits another day rather than starting the back-off again
+        assertFailsTillTomorrow(id)
+        assertTrue(find("darpan.dataset.Dataset", [datasetId: id]).warningText.contains("4 times"))
+    }
+
+    @Test
+    void aSuccessResetsTheBackoff() {
+        String id = dataset("reset")
+        assertFailsWithNextReadIn(id, 30)
+        assertFailsWithNextReadIn(id, 60)
+        assertEquals([], refresh(id, stub([], [order(1, 5, 5)])).errors)
+        def row = find("darpan.dataset.Dataset", [datasetId: id])
+        ZoneId zone = ZoneId.of(A_ZONE)
+        assertEquals(readHourNextDay(row.readThru as Timestamp, zone), (row.nextReadDate as Timestamp).toInstant())
+        assertNull(row.warningText)
+        assertFailsWithNextReadIn(id, 30)
+    }
+
+    @Test
+    void tenantBCannotRefreshTenantAsDataset() {
+        String idA = dataset("cross-tenant")
+        assertEquals([], refresh(idA, stub([], [order(1, 5, 5)])).errors)
+        Timestamp live = new Timestamp(System.currentTimeMillis() - HOUR)
+        update("darpan.dataset.Dataset", [datasetId: idA, refreshingSince: live])
+        Map rowBefore = find("darpan.dataset.Dataset", [datasetId: idA]).getMap()
+        Map manifestBefore = KeptCopyStore.manifest(dir(idA))
+        int readsBefore = reads(idA).size()
+
+        actAs(EDITOR_USERNAME, B)
+        List<Map> calls = []
+        Map res = refresh(idA, stub(calls, [order(9, 1, 1)]), true)
+        assertTrue(res.errors.any { it.contains("Dataset ${idA} does not exist") }, res.errors.toString())
+        assertEquals(0, calls.size(), "the extractor is never called")
+        assertEquals(readsBefore, reads(idA).size(), "no read row is written")
+        assertEquals(rowBefore, find("darpan.dataset.Dataset", [datasetId: idA]).getMap(), "A's row and lock are untouched")
+        assertEquals(manifestBefore, KeptCopyStore.manifest(dir(idA)))
+        update("darpan.dataset.Dataset", [datasetId: idA, refreshingSince: null])
+    }
+
+    @Test
     void scanRunsOnlyDueActiveDatasetsEachUnderItsTenant() {
         Timestamp past = new Timestamp(System.currentTimeMillis() - HOUR)
         Timestamp future = new Timestamp(System.currentTimeMillis() + DAY)
@@ -378,8 +498,45 @@ class DatasetRefreshTests {
         assertEquals(foldersBefore, versionFolders(d), "no partial version is left")
         def row = find("darpan.dataset.Dataset", [datasetId: id])
         assertNull(row.refreshingSince, "the lock is cleared")
-        ["currentVersion", "readThru", "lastReadAt", "lastFullReadAt", "recordCount", "nextReadDate"].each {
+        // nextReadDate is not among them: a failed read backs it off on purpose (aFailedReadBacksOff)
+        ["currentVersion", "readThru", "lastReadAt", "lastFullReadAt", "recordCount"].each {
             assertEquals(rowBefore[it], row[it], it)
+        }
+    }
+
+    /** A failing read; asserts the next read is backed off by about {@code minutes}. */
+    private void assertFailsWithNextReadIn(String id, int minutes) {
+        long before = System.currentTimeMillis()
+        Map res = refresh(id, { String svc, Map p -> throw new IllegalStateException("token revoked") } as Closure)
+        long after = System.currentTimeMillis()
+        assertTrue(res.errors.any { it.contains("token revoked") }, res.errors.toString())
+        long next = (find("darpan.dataset.Dataset", [datasetId: id]).nextReadDate as Timestamp).time
+        assertTrue(next >= before + minutes * 60_000L - 1000 && next <= after + minutes * 60_000L + 1000,
+                "next read about ${minutes} minutes out, was ${(next - after) / 60_000.0} minutes")
+    }
+
+    /** A failing read after maxRetries failures: the next read is tomorrow at the read hour, in the tenant's zone. */
+    private void assertFailsTillTomorrow(String id) {
+        ZoneId zone = ZoneId.of(A_ZONE)
+        Instant before = readHourNextDay(new Timestamp(System.currentTimeMillis()), zone)
+        Map res = refresh(id, { String svc, Map p -> throw new IllegalStateException("token revoked") } as Closure)
+        Instant after = readHourNextDay(new Timestamp(System.currentTimeMillis()), zone)
+        assertTrue(res.errors.any { it.contains("token revoked") }, res.errors.toString())
+        Instant next = (find("darpan.dataset.Dataset", [datasetId: id]).nextReadDate as Timestamp).toInstant()
+        assertTrue(next == before || next == after, "next read ${next}, expected ${after}")
+    }
+
+    private static Instant readHourNextDay(Timestamp from, ZoneId zone) {
+        return from.toInstant().atZone(zone).toLocalDate().plusDays(1).atTime(4, 0).atZone(zone).toInstant()
+    }
+
+    /** Runs work as a refresh that started {@code hours} ago: its lock token is that old, so a later refresh may take it over. */
+    private Map startedHoursAgo(int hours, Closure<Map> work) {
+        ec.user.setEffectiveTime(new Timestamp(System.currentTimeMillis() - hours * HOUR))
+        try {
+            return work.call()
+        } finally {
+            ec.user.setEffectiveTime(null)
         }
     }
 

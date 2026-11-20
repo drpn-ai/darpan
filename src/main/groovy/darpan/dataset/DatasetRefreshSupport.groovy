@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.core.JsonToken
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import darpan.config.DarpanSettings
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
@@ -31,6 +32,7 @@ class DatasetRefreshSupport {
     static final String FULL = "DRK_FULL"
     static final String INCREMENTAL = "DRK_INCREMENTAL"
     static final String READS_FOLDER = "reads"
+    static final String LOCK_TAKEN_OVER = "lock taken over: another refresh holds this dataset now"
     private static final long DAY = 86_400_000L
 
     /** The dataset's folder under the data manager root, which honours darpan.data.manager.location (ruling P3a-7). */
@@ -50,14 +52,19 @@ class DatasetRefreshSupport {
     /**
      * Everything refresh#Dataset does while it holds the lock, short of writing rows: decide the read kind and window,
      * read, merge. Never throws, so the service always reaches the step that writes the read row and clears the lock.
+     * {@code startedAt} is also the lock token: the copy is swapped and pruned only while the Dataset's refreshingSince
+     * still equals it ({@link #ownerGuard}).
      *
      * @return [readKindEnumId, fromStamp] plus either the read's results and nextReadDate, or [error: text]
      */
-    static Map refresh(def ec, Map dataset, String readSeqId, boolean forceFull, Timestamp startedAt, Closure extractor) {
+    static Map refresh(def ec, Map dataset, String readSeqId, boolean forceFull, Timestamp startedAt, Object extractor) {
         String kind = FULL
         Timestamp fromStamp = null
         Map result
         try {
+            if (extractor != null && !(extractor instanceof Closure)) {
+                throw new IllegalArgumentException("extractor must be a closure (serviceName, params) -> result")
+            }
             File dir = datasetDir(ec, dataset.companyUserGroupId as String, dataset.datasetId as String)
             kind = readKind(dataset, KeptCopyStore.manifest(dir), forceFull, startedAt)
             fromStamp = kind == FULL ?
@@ -65,7 +72,8 @@ class DatasetRefreshSupport {
                     new Timestamp(((Timestamp) dataset.readThru).time - ((dataset.marginDays ?: 2) as long) * DAY)
             // the tenant's zone, as the live paths resolve it (refresh runs under the dataset's tenant)
             String zone = TenantAccessSupport.resolveActiveTenantTimeZone(ec)
-            result = read(ec, dataset, dir, readSeqId, kind, fromStamp, startedAt, zone, extractor)
+            result = read(ec, dataset, dir, readSeqId, kind, fromStamp, startedAt, zone, (Closure) extractor,
+                    ownerGuard(ec, dataset.datasetId as String, dataset.companyUserGroupId as String, startedAt))
             if (!result.error) result.nextReadDate = nextReadAt(startedAt, zone, dataset.readHourLocal as Integer)
         } catch (Throwable t) {
             logger.warn("Dataset ${dataset?.datasetId} read ${readSeqId} failed", t)
@@ -114,6 +122,51 @@ class DatasetRefreshSupport {
         }
     }
 
+    /**
+     * The lock-ownership guard (I1): calls {@code action} inside a new transaction that holds the Dataset row for update and
+     * only while refreshingSince still equals {@code token}; otherwise returns false without calling it. A refresh whose
+     * lock was taken over (it ran past the six-hour stale mark) therefore never swaps the copy or prunes, and holding the
+     * row lock across the action means a takeover cannot slip in between the check and the swap.
+     */
+    static Closure ownerGuard(def ec, String datasetId, String tenantId, Timestamp token) {
+        return { Closure action ->
+            return ec.transaction.runRequireNew(null, "Dataset ${datasetId} lock check failed".toString()) {
+                // list(), not one(): one() drops a non-PK condition beside the full PK, and with it the tenant pin
+                def row = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", datasetId)
+                        .condition("companyUserGroupId", tenantId).forUpdate(true).useCache(false).list().find()
+                Timestamp held = row?.refreshingSince as Timestamp
+                if (held == null || token == null || held.time != token.time) return false
+                return action.call()
+            }
+        }
+    }
+
+    /**
+     * What a failed read sets on the Dataset (ruling P3a-10). {@code priorStatuses} are the dataset's earlier reads, newest
+     * first; the leading DRS_FAILED ones and this failure are the consecutive failures n. Below maxRetries the next read is
+     * now + base * 2^(n-1) minutes, capped; at maxRetries it waits for the next day's read hour and the warning names the
+     * failure. The limits are settings (darpan.dataset.refresh.*), editable in prod. Never throws.
+     */
+    static Map failureUpdates(def ec, Map dataset, List<String> priorStatuses, String error, Timestamp now) {
+        int failures = 1 + ((priorStatuses ?: []).takeWhile { it == "DRS_FAILED" }.size())
+        try {
+            int maxRetries = Math.max(1, DarpanSettings.intValue("darpan.dataset.refresh.maxRetries"))
+            if (failures >= maxRetries) {
+                String zone = TenantAccessSupport.resolveActiveTenantTimeZone(ec)
+                String warning = "Reads failed ${failures} times in a row; the next try is tomorrow. Last error: ${error}".toString()
+                return [nextReadDate: nextReadAt(now, zone, dataset.readHourLocal as Integer),
+                        warningText : warning.length() > 255 ? warning.substring(0, 252) + "..." : warning]
+            }
+            long base = Math.max(1, DarpanSettings.intValue("darpan.dataset.refresh.retryBackoffBaseMinutes"))
+            long cap = Math.max(base, (long) DarpanSettings.intValue("darpan.dataset.refresh.retryBackoffCapMinutes"))
+            long minutes = Math.min(cap, base * (1L << Math.min(failures - 1, 20)))
+            return [nextReadDate: new Timestamp(now.time + minutes * 60_000L)]
+        } catch (Throwable t) {
+            logger.warn("Dataset ${dataset?.datasetId}: back-off settings unreadable; waiting a day", t)
+            return [nextReadDate: new Timestamp(now.time + DAY)]
+        }
+    }
+
     /** The day after {@code from}, at {@code hour} o'clock, in {@code zoneId}. */
     static Timestamp nextReadAt(Timestamp from, String zoneId, Integer hour) {
         ZoneId zone = ZoneId.of(zoneId ?: "UTC")
@@ -131,7 +184,7 @@ class DatasetRefreshSupport {
      * @param readThru the moment the read started; the window end
      */
     static Map read(def ec, Map dataset, File datasetDir, String readSeqId, String readKindEnumId,
-                    Timestamp fromStamp, Timestamp readThru, String timeZone, Closure extractor) {
+                    Timestamp fromStamp, Timestamp readThru, String timeZone, Closure extractor, Closure ownerGuard) {
         try {
             boolean full = readKindEnumId == FULL
             String tenantId = dataset.companyUserGroupId
@@ -156,19 +209,31 @@ class DatasetRefreshSupport {
             if (file == null || !file.isFile()) throw new IllegalStateException("The read returned no file")
             Timestamp readAt = new Timestamp(file.lastModified())
 
+            // The swap and the prune run together under the owner guard: a refresh that lost its lock does neither, and
+            // KeptCopyStore deletes its new version.
+            Closure swapAndPrune = { Closure swap ->
+                return ownerGuard.call({ ->
+                    swap.call()
+                    KeptCopyStore.prune(datasetDir)
+                    pruneReads(datasetDir, readSeqId)
+                    return true
+                })
+            }
             RecordFileIterator records = new RecordFileIterator(file)
             Map counts
             try {
                 counts = full ?
                         KeptCopyStore.replace(datasetDir, records, dataset.idField as String, dataset.stampField as String,
-                                dataset.windowField as String, fromStamp, readThru, readAt, (dataset.marginDays ?: 2) as int) :
+                                dataset.windowField as String, fromStamp, readThru, readAt, (dataset.marginDays ?: 2) as int,
+                                swapAndPrune) :
                         KeptCopyStore.merge(datasetDir, records, dataset.idField as String, dataset.stampField as String,
-                                readThru, readAt)
+                                readThru, readAt, swapAndPrune)
+            } catch (IllegalStateException e) {
+                if (e.message?.contains("the swap was refused")) throw new IllegalStateException(LOCK_TAKEN_OVER)
+                throw e
             } finally {
                 records.close()
             }
-            KeptCopyStore.prune(datasetDir)
-            pruneReads(datasetDir, readSeqId)
             Map manifest = KeptCopyStore.manifest(datasetDir)
             return [readAt      : readAt, version: counts.version, recordCount: manifest?.recordCount,
                     recordsRead : counts.recordsRead ?: 0, changedCount: counts.changedCount ?: 0,

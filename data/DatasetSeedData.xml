@@ -14,4 +14,5 @@
     <moqui.basic.EnumerationType enumTypeId="DatasetReadStatus" description="Dataset read status"/>
     <moqui.basic.Enumeration enumId="DRS_DONE" enumTypeId="DatasetReadStatus" enumCode="done" description="Done" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="DRS_FAILED" enumTypeId="DatasetReadStatus" enumCode="failed" description="Failed" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="DRS_RUNNING" enumTypeId="DatasetReadStatus" enumCode="running" description="Running" sequenceNum="3"/>
 </entity-facade-xml>

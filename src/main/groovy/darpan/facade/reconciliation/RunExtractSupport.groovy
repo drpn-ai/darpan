@@ -1,8 +1,12 @@
 package darpan.facade.reconciliation
 
+import darpan.dataset.KeptCopySupport
 import darpan.facade.common.DataManagerSupport
+import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
 
@@ -51,6 +55,7 @@ import static darpan.common.ValueSupport.normalizeInt
  * silent, both production.
  */
 class RunExtractSupport {
+    private static final Logger logger = LoggerFactory.getLogger(RunExtractSupport)
 
     /** Interactive artifact naming: FILE_1 -> "file1", anything else -> "file2". */
     static String sideToken(String fileSide) {
@@ -249,6 +254,15 @@ class RunExtractSupport {
             extractParams.lookupKeys = byKeys.lookupKeys
             extractParams.lookupKeyField = byKeys.lookupKeyField
         }
+        // DAR-BE-318 plan 3a: the window from the tenant's kept copy when the copy covers it; otherwise the live read below.
+        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, extractParams, [
+                tenantId   : TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                windowStart: apiWindow?.windowStartDate, windowEnd: apiWindow?.windowEndDate]))
+        if (served.served) {
+            return sourceResultForLocation(ec, source, fileSide, extractParams.fileName as String, served.fileLocation as String,
+                    served.recordCount as Integer)
+        }
+        logger.info("${label} reads live, not from a kept copy: ${served.reason}")
 
         Map extraction = (serviceCaller.call(extractServiceName, extractParams) ?: [:]) as Map
         ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }

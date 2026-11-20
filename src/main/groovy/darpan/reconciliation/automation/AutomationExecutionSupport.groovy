@@ -7,6 +7,7 @@ import darpan.config.DarpanSettings
 import darpan.audit.AuditRecheckSupport
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
+import darpan.dataset.KeptCopySupport
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.SharedConfigAccessSupport
@@ -2203,8 +2204,18 @@ class AutomationExecutionSupport {
                 serviceParams.lookupWithinWindow = true
             }
         }
+        // DAR-BE-318 plan 3a: the window from the tenant's kept copy when the copy covers it; otherwise the live read below.
+        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connectorForService, serviceParams, [
+                tenantId   : serviceParams.companyUserGroupId, windowStart: serviceParams.windowStartDate,
+                windowEnd  : serviceParams.windowEndDate, stateMode: isStateWindowMode(automation) && connectorForService?.supportsStateExtract,
+                outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId]))
+        if (served.served) {
+            return KeptCopySupport.extractResult(served) + [readWindowFrom: serviceParams.windowStartDate,
+                                                            readWindowThru: serviceParams.windowEndDate]
+        }
+        logger.info("${serviceParams.fileSide} reads live, not from a kept copy: ${served.reason}")
 
-        def call = ec.service.sync().name(serviceName).parameters(serviceParams)
+        def call =ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
         // Counted first: only an error this call adds is its failure (a side's login can leave one of its own).
         int errorsBefore = ((ec.message.getErrors() ?: []) as List).size()

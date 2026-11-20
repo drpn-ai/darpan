@@ -167,6 +167,24 @@ class RunPathParityGateTest {
         }
     }
 
+    /**
+     * DAR-BE-318 plan 3a: both live extract dispatchers offer the side to the kept copy, through the one shared seam,
+     * before their live call. One path alone would serve a manual run from the copy and read the scheduled one live (or
+     * the other way round), and the same window would compare different data.
+     */
+    @Test
+    void bothExtractDispatchersOfferTheSideToTheKeptCopy() {
+        String seam = "KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side("
+        ["facade/reconciliation/RunExtractSupport.groovy", SCHEDULED_PATH].each { String rel ->
+            String code = codeOf(rel)
+            assertEquals(1, code.count(seam), "${rel} must offer its side to the kept copy exactly once, through ${seam}")
+            int offered = code.indexOf(seam)
+            int live = rel == SCHEDULED_PATH ? code.indexOf("def call = ec.service.sync().name(serviceName)") :
+                    code.indexOf("serviceCaller.call(extractServiceName, extractParams)")
+            assertTrue(live > 0 && offered < live, "${rel} must offer the side to the kept copy before its live call")
+        }
+    }
+
     // -------------------------------------------------------------------------------------------
 
     private static Path srcRoot() {

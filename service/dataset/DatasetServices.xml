@@ -102,7 +102,8 @@
 
     <service verb="find" noun="ServingDataset" allow-remote="false">
         <description>The active tenant's ACTIVE dataset for (system, connection, options), or null: a paused dataset, or one of
-            another tenant, does not serve.</description>
+            another tenant, does not serve. The active tenant is the user's, or on a scheduled run (no user) the tenant
+            TenantAccessSupport.withSystemTenant published.</description>
         <in-parameters>
             <parameter name="systemEnumId" required="true"/>
             <parameter name="sourceConfigId" required="true"/>
@@ -112,7 +113,7 @@
             <parameter name="dataset" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="tenantId" from="ec.user.context.activeTenantUserGroupId"/>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="dataset" from="null"/>
             <if condition="tenantId &amp;&amp; tenantId != '__NO_ACTIVE_TENANT__'">
                 <script>optionsHash = darpan.dataset.DatasetSupport.optionsHash(options ?: [:])</script>

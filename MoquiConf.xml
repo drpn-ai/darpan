@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
+    <!-- DAR-BE-323: Jakarta Mail builds each Message-ID from mail.from's domain, else the machine's hostname
+         (the pod name, which spam filters read as a stray server). commons-email seeds its mail session
+         from System properties, so this puts every Message-ID on the sending domain. -->
+    <default-property name="mail.from" value="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}"/>
     <webapp-list>
         <webapp name="webroot">
             <before-request>

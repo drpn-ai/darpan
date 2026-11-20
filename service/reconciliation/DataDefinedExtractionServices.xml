@@ -24,6 +24,9 @@
             <parameter name="windowStart"><description>Window start, under the connector's dateFromParameterName
                 (windowStart when blank).</description></parameter>
             <parameter name="windowEnd"><description>Window end (excluded), under dateToParameterName.</description></parameter>
+            <parameter name="windowFieldName"><description>The field the window is on, when the caller names it (a dataset
+                refresh does). Only the definition's own window field is accepted; any other is refused. Blank is the
+                definition's own, as before.</description></parameter>
             <parameter name="lookupKeys" type="List"><description>Read only these records by key, instead of the window.</description>
                 <parameter name="lookupKey"/></parameter>
             <parameter name="lookupKeyField"><description>The field lookupKeys are values of; the definition says which it

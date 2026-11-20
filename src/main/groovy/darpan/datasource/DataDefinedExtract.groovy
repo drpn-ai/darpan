@@ -215,6 +215,9 @@ class DataDefinedExtract {
             return [errors: ["The definition ${definitionId} cannot run: ${e.message}".toString()]]
         }
 
+        String windowFieldProblem = windowFieldProblem(systemEnumId, definition, context.get("windowFieldName"))
+        if (windowFieldProblem) return [errors: [windowFieldProblem]]
+
         List<String> errors = []
         Map request
         Long fromMillis = null, thruMillis = null
@@ -251,6 +254,22 @@ class DataDefinedExtract {
         return [connector: connector, definitionRow: [id: definitionId, version: row.definitionVersion, protocol: row.protocol],
                 definition: definition, configId: configId, connectionRecord: record, request: request,
                 fromMillis: fromMillis, thruMillis: thruMillis]
+    }
+
+    /**
+     * DAR-BE-318 (3b1-4, 3b1-8). A dataset refresh names the field it windows on. A data-defined read windows on its
+     * definition's own bind.window.field and nothing else, so any other name is refused in words rather than ignored (the
+     * read would window on the definition's field and the copy would miss every change to older records). Blank or absent is
+     * today's read, unchanged. Null when the field is acceptable.
+     */
+    static String windowFieldProblem(String systemEnumId, Map definition, Object requested) {
+        String wanted = requested?.toString()?.trim()
+        if (!wanted) return null
+        Map bind = (Map) (((Map) ((List) definition.steps)[0]).bind ?: [:])
+        String own = bind.window instanceof Map ? ((Map) bind.window).field?.toString() : null
+        if (own == wanted) return null
+        if (own) return "${systemEnumId} windows on ${own} only, not '${wanted}'.".toString()
+        return "${systemEnumId} reads with no window, so it takes no window field ('${wanted}').".toString()
     }
 
     /**

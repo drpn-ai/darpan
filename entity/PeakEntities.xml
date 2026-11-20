@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-328 plan 1: peak periods. A tenant's date-bound window (for example a holiday sale) with its own run
+         times. Every row carries companyUserGroupId (filter DARPAN_ACTIVE_COMPANY_SCOPE, group DARPAN_APP). -->
+
+    <entity entity-name="PeakPeriod" package="darpan.peak" use="configuration">
+        <description>One tenant peak period: a date range, the hours it is busy, and how runs behave inside it.
+            hotwaxReadSharePct and netsuiteSerial are stored now and take effect in plan 2 (DAR-BE-328).</description>
+        <field name="peakPeriodId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="periodName" type="text-medium" not-null="true"/>
+        <field name="fromDate" type="date" not-null="true"/>
+        <field name="thruDate" type="date" not-null="true"/>
+        <field name="peakHoursStart" type="text-short">
+            <description>HH:mm, start of the busy hours.</description>
+        </field>
+        <field name="peakHoursEnd" type="text-short">
+            <description>HH:mm, end of the busy hours.</description>
+        </field>
+        <field name="hotwaxReadSharePct" type="number-integer">
+            <description>Share of HotWax read capacity a run may use in the period. Takes effect in plan 2 (DAR-BE-328).</description>
+        </field>
+        <field name="netsuiteSerial" type="text-indicator" default="'N'">
+            <description>Y runs NetSuite reads one at a time in the period. Takes effect in plan 2 (DAR-BE-328).</description>
+        </field>
+        <field name="isActive" type="text-indicator" default="'Y'"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="PEAKPER_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="PEAKPER_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
+    <entity entity-name="PeakPeriodRunTime" package="darpan.peak" use="configuration">
+        <description>A run time a peak period adds for an automation or audit, on one date or on every day of the period.</description>
+        <field name="runTimeId" type="id" is-pk="true"/>
+        <field name="peakPeriodId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="automationId" type="id"/>
+        <field name="auditId" type="id"/>
+        <field name="onDate" type="date"/>
+        <field name="runTime" type="text-short" not-null="true">
+            <description>HH:mm.</description>
+        </field>
+        <relationship type="one" related="darpan.peak.PeakPeriod" fk-name="PEAKRT_PERIOD">
+            <key-map field-name="peakPeriodId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="PEAKRT_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.reconciliation.ReconciliationAutomation" fk-name="PEAKRT_AUTOMATION">
+            <key-map field-name="automationId"/>
+        </relationship>
+        <relationship type="one" related="darpan.audit.Audit" fk-name="PEAKRT_AUDIT">
+            <key-map field-name="auditId"/>
+        </relationship>
+        <index name="PEAKRT_PERIOD"><index-field name="peakPeriodId"/></index>
+    </entity>
+</entities>

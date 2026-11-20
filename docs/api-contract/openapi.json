@@ -585,6 +585,24 @@
                                         "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeletePeakPeriodRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DeletePeakPeriodRunTimeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetPeakPeriodRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListPeakPeriodsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SavePeakPeriodRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SavePeakPeriodRunTimeRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ArchiveAutomationRequest"
                                     },
                                     {
@@ -1120,6 +1138,12 @@
                                         "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery": "#/components/schemas/PreviewNsSuiteQlSourceQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery": "#/components/schemas/RunNsSuiteQlAgentQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
+                                        "facade.PeakPeriodFacadeServices.delete#PeakPeriod": "#/components/schemas/DeletePeakPeriodRequest",
+                                        "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime": "#/components/schemas/DeletePeakPeriodRunTimeRequest",
+                                        "facade.PeakPeriodFacadeServices.get#PeakPeriod": "#/components/schemas/GetPeakPeriodRequest",
+                                        "facade.PeakPeriodFacadeServices.list#PeakPeriods": "#/components/schemas/ListPeakPeriodsRequest",
+                                        "facade.PeakPeriodFacadeServices.save#PeakPeriod": "#/components/schemas/SavePeakPeriodRequest",
+                                        "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime": "#/components/schemas/SavePeakPeriodRunTimeRequest",
                                         "facade.ReconciliationFacadeServices.archive#Automation": "#/components/schemas/ArchiveAutomationRequest",
                                         "facade.ReconciliationFacadeServices.archive#SavedRun": "#/components/schemas/ArchiveSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "#/components/schemas/CancelReconciliationRunRequest",
@@ -1811,6 +1835,24 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeletePeakPeriodResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeletePeakPeriodRunTimeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetPeakPeriodResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListPeakPeriodsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SavePeakPeriodResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SavePeakPeriodRunTimeResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ArchiveAutomationResponse"
@@ -23380,6 +23422,736 @@
                     "result"
                 ]
             },
+            "DeletePeakPeriodParams": {
+                "type": "object",
+                "properties": {
+                    "peakPeriodId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "peakPeriodId"
+                ],
+                "description": "Delete a peak period and its run times."
+            },
+            "DeletePeakPeriodResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DeletePeakPeriodRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.delete#PeakPeriod",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.delete#PeakPeriod",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.delete#PeakPeriod"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeletePeakPeriodParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeletePeakPeriodResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.delete#PeakPeriod. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeletePeakPeriodResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DeletePeakPeriodRunTimeParams": {
+                "type": "object",
+                "properties": {
+                    "runTimeId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "runTimeId"
+                ],
+                "description": "Delete one run-time move of a peak period."
+            },
+            "DeletePeakPeriodRunTimeResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DeletePeakPeriodRunTimeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeletePeakPeriodRunTimeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeletePeakPeriodRunTimeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeletePeakPeriodRunTimeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetPeakPeriodParams": {
+                "type": "object",
+                "properties": {
+                    "peakPeriodId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "peakPeriodId"
+                ],
+                "description": "One peak period with its run-time moves, the runs its peak hours hold, and the runs a move can name."
+            },
+            "GetPeakPeriodResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "peakPeriod": {
+                        "type": "object",
+                        "properties": {
+                            "peakPeriodId": {
+                                "type": "string"
+                            },
+                            "periodName": {
+                                "type": "string"
+                            },
+                            "fromDate": {
+                                "type": "string"
+                            },
+                            "thruDate": {
+                                "type": "string"
+                            },
+                            "peakHoursStart": {
+                                "type": "string"
+                            },
+                            "peakHoursEnd": {
+                                "type": "string"
+                            },
+                            "hotwaxReadSharePct": {
+                                "type": "integer"
+                            },
+                            "netsuiteSerial": {
+                                "type": "string"
+                            },
+                            "isActive": {
+                                "type": "string"
+                            },
+                            "state": {
+                                "type": "string"
+                            },
+                            "timeZone": {
+                                "type": "string"
+                            },
+                            "createdByUserId": {
+                                "type": "string"
+                            },
+                            "lastUpdatedDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            }
+                        }
+                    },
+                    "runTimes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "runTimeId": {
+                                    "type": "string"
+                                },
+                                "automationId": {
+                                    "type": "string"
+                                },
+                                "auditId": {
+                                    "type": "string"
+                                },
+                                "targetLabel": {
+                                    "type": "string"
+                                },
+                                "onDate": {
+                                    "type": "string"
+                                },
+                                "runTime": {
+                                    "type": "string"
+                                },
+                                "normalTime": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "heldRuns": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "targetLabel": {
+                                    "type": "string"
+                                },
+                                "normalTime": {
+                                    "type": "string"
+                                },
+                                "startsAt": {
+                                    "type": "string"
+                                },
+                                "reason": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "targets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "automationId": {
+                                    "type": "string"
+                                },
+                                "auditId": {
+                                    "type": "string"
+                                },
+                                "label": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetPeakPeriodRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.get#PeakPeriod",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.get#PeakPeriod",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.get#PeakPeriod"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetPeakPeriodParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetPeakPeriodResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.get#PeakPeriod. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetPeakPeriodResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListPeakPeriodsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "List the active tenant's peak periods with their state (upcoming, on, off, ended) in the tenant's local today."
+            },
+            "ListPeakPeriodsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "peakPeriods": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "peakPeriodId": {
+                                    "type": "string"
+                                },
+                                "periodName": {
+                                    "type": "string"
+                                },
+                                "fromDate": {
+                                    "type": "string"
+                                },
+                                "thruDate": {
+                                    "type": "string"
+                                },
+                                "isActive": {
+                                    "type": "string"
+                                },
+                                "state": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "ListPeakPeriodsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.list#PeakPeriods",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.list#PeakPeriods",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.list#PeakPeriods"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListPeakPeriodsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListPeakPeriodsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.list#PeakPeriods. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListPeakPeriodsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SavePeakPeriodParams": {
+                "type": "object",
+                "properties": {
+                    "peakPeriodId": {
+                        "type": "string"
+                    },
+                    "periodName": {
+                        "type": "string"
+                    },
+                    "fromDate": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "thruDate": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "peakHoursStart": {
+                        "type": "string"
+                    },
+                    "peakHoursEnd": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "boolean"
+                    }
+                },
+                "description": "Create or update one peak period for the active tenant. Peak hours are both set or both blank; active periods may not overlap."
+            },
+            "SavePeakPeriodResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "peakPeriodId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SavePeakPeriodRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.save#PeakPeriod",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.save#PeakPeriod",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.save#PeakPeriod"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SavePeakPeriodParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SavePeakPeriodResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.save#PeakPeriod. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SavePeakPeriodResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SavePeakPeriodRunTimeParams": {
+                "type": "object",
+                "properties": {
+                    "runTimeId": {
+                        "type": "string"
+                    },
+                    "peakPeriodId": {
+                        "type": "string"
+                    },
+                    "automationId": {
+                        "type": "string"
+                    },
+                    "auditId": {
+                        "type": "string"
+                    },
+                    "onDate": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "runTime": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "peakPeriodId"
+                ],
+                "description": "Create or update one run-time move of a peak period: a run (an automation or an audit) starts at runTime on onDate, or on every day of the period when onDate is blank."
+            },
+            "SavePeakPeriodRunTimeResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "runTimeId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SavePeakPeriodRunTimeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SavePeakPeriodRunTimeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SavePeakPeriodRunTimeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SavePeakPeriodRunTimeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ArchiveAutomationParams": {
                 "type": "object",
                 "properties": {
@@ -39415,6 +40187,12 @@
         "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery": "PreviewNsSuiteQlSourceQuery",
         "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery": "RunNsSuiteQlAgentQuery",
         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
+        "facade.PeakPeriodFacadeServices.delete#PeakPeriod": "DeletePeakPeriod",
+        "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime": "DeletePeakPeriodRunTime",
+        "facade.PeakPeriodFacadeServices.get#PeakPeriod": "GetPeakPeriod",
+        "facade.PeakPeriodFacadeServices.list#PeakPeriods": "ListPeakPeriods",
+        "facade.PeakPeriodFacadeServices.save#PeakPeriod": "SavePeakPeriod",
+        "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime": "SavePeakPeriodRunTime",
         "facade.ReconciliationFacadeServices.archive#Automation": "ArchiveAutomation",
         "facade.ReconciliationFacadeServices.archive#SavedRun": "ArchiveSavedRun",
         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "CancelReconciliationRun",

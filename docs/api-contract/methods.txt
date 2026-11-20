@@ -185,6 +185,12 @@ facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries
 facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery
 facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery
 facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery
+facade.PeakPeriodFacadeServices.delete#PeakPeriod
+facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime
+facade.PeakPeriodFacadeServices.get#PeakPeriod
+facade.PeakPeriodFacadeServices.list#PeakPeriods
+facade.PeakPeriodFacadeServices.save#PeakPeriod
+facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime
 facade.ReconciliationFacadeServices.archive#Automation
 facade.ReconciliationFacadeServices.archive#SavedRun
 facade.ReconciliationFacadeServices.cancel#ReconciliationRun

@@ -2,6 +2,7 @@ package darpan.dataset
 
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.RunExtractSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
@@ -20,6 +21,7 @@ import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.sql.Timestamp
+import java.time.OffsetDateTime
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -45,6 +47,10 @@ class KeptCopySupportTests {
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
     private static final String SHOPIFY_EXTRACT = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
+    private static final String RETURNS_EXTRACT = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+    private static final String DATA_DEFINED_EXTRACT = "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource"
+    /** A tenant east of UTC, so a day read in UTC is not the tenant's day. */
+    private static final String TENANT_ZONE = "Asia/Kolkata"
     private static final long DAY = 86_400_000L
 
     /** The copy's own readThru and readAt (its manifest). */
@@ -504,7 +510,238 @@ class KeptCopySupportTests {
         assertEquals(["1", "2"], out*.sub)
     }
 
+    // ------------------------------------------------------------------- plan 3b-1, Task 2b: the live call's own window
+
+    /**
+     * Ruling 3b1-9. A run of one day, Nov 10 in the tenant's zone, is served exactly the days its live read would fetch, on
+     * both paths and with the seeded connector rows:
+     * - OMS returns (no preserveWindowInstants, no windowFieldName) are sent the instants the live window code anchored at
+     *   the tenant's midnights, and read them half-open: 23:59 on Nov 10 is in, 00:00 on Nov 11 is out;
+     * - a whole-days source (windowDateOnly, as NetSuite) is sent the calendar days the live code read in the tenant's zone,
+     *   and reads them half-open on whole days: Nov 10 is in, Nov 11 is out. A record it dates by instant is not placed on
+     *   a day here (the source compares days in its own zone), so that copy is not served.
+     */
+    @Test
+    void aDayWindowSourceIsServedTheSameDaysTheLiveReadSends() {
+        // the run's day as each path's live code anchors it
+        Map window = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-11-10T00:00:00Z"), ts("2026-11-11T00:00:00Z"), TENANT_ZONE)
+        Map automation = [automationId: "KC_DAYS_AUTO", companyUserGroupId: A, windowTimeZone: TENANT_ZONE,
+                          relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
+        Map autoWindow = AutomationExecutionSupport.resolveWindows(automation, [scheduledFireTime: ts("2026-11-11T04:30:00Z")])[0]
+        assertEquals(ts("2026-11-09T18:30:00Z"), window.windowStartDate)
+        assertEquals(ts("2026-11-10T18:30:00Z"), window.windowEndDate)
+        assertEquals([window.windowStartDate, window.windowEndDate], [autoWindow.childWindowStartDate, autoWindow.childWindowEndDate])
+
+        // --- OMS returns: the seeded row, sent instants, no window field
+        Map returnsConnector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        assertFalse(returnsConnector.preserveWindowInstants as boolean, "the seeded row, unchanged")
+        assertFalse(returnsConnector.windowDateOnly as boolean)
+        assertNull(returnsConnector.windowFieldName)
+        String returnsId = datasetOf("OMS_RETURNS_GQL", "conn-days-returns", "returnId", "entryDate")
+        copyOf(A, returnsId, [
+                omsReturn("first-minute", "2026-11-10T00:00:00+05:30"),
+                omsReturn("day-before", "2026-11-09T23:59:59+05:30"),
+                omsReturn("last-minute", "2026-11-10T23:59:00+05:30"),
+                omsReturn("next-midnight", "2026-11-11T00:00:00+05:30"),
+                omsReturn("utc-day-before", "2026-11-09T20:00:00Z"),
+        ], "returnId", "entryDate")
+        List<Map> calls = []
+        Map run = interactiveSide([systemEnumId: "OMS_RETURNS_GQL", sourceConfigType: "HOTWAX_OMS_GQL_RETURNS",
+                                   sourceConfigId: "conn-days-returns", fileSide: "FILE_1"], window, calls)
+        assertEquals([], run.errors)
+        assertEquals(0, calls.size(), "served: the live extractor is never called")
+        File interactiveFile = locationFile(run.result.fileLocation as String)
+        assertEquals(["first-minute", "last-minute", "utc-day-before"] as Set, json(interactiveFile).records*.returnId as Set)
+        // what the live call would have sent: the same instants, and no window field (its extractor windows on entryDate)
+        Map sent = RunExtractSupport.buildExtractParams(returnsConnector, "FILE_1", "conn-days-returns", run.artifact as Map,
+                (Timestamp) window.windowStartDate, (Timestamp) window.windowEndDate, "f.json", null, null, null, window.timeZone)
+        assertEquals("2026-11-09T18:30:00Z", sent.windowStart)
+        assertEquals("2026-11-10T18:30:00Z", sent.windowEnd)
+        assertFalse(sent.containsKey("windowFieldName"))
+
+        Map scheduled = scheduledAs(A) {
+            AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, automationSource("OMS_RETURNS_GQL", RETURNS_EXTRACT,
+                    [omsRestSourceConfigId: "conn-days-returns"]), autoWindow,
+                    [automationExecutionId: "KC_DAYS_EXEC", sideOutputLocation: runLocation("days-returns-auto")])
+        }
+        assertEquals(true, scheduled.requestMetadata?.servedFromCopy, scheduled.toString())
+        assertArrayEquals(interactiveFile.bytes, locationFile(scheduled.fileLocation as String).bytes, "the same slice on both paths")
+
+        // --- a whole-days source: a test-only row shaped as NETSUITE_SUITEQL (no NetSuite extractor keeps a copy yet)
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_DAYS" extractServiceName="${RETURNS_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_DAYS_TYPE"
+                configParameterName="omsRestSourceConfigId" preserveWindowInstants="N" windowDateOnly="Y" windowFieldName="trandate"
+                enabled="Y"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        String daysId = datasetOf("KC_DAYS", "conn-days", "id", "trandate")
+        copyOf(A, daysId, [[id: "nov-10", trandate: "2026-11-10"], [id: "nov-09", trandate: "2026-11-09"],
+                           [id: "nov-11", trandate: "2026-11-11"], [id: "undated"]], "id", "trandate")
+        List<Map> dayCalls = []
+        Map dayRun = interactiveSide([systemEnumId: "KC_DAYS", sourceConfigType: "KC_DAYS_TYPE", sourceConfigId: "conn-days",
+                                      fileSide: "FILE_1"], window, dayCalls)
+        assertEquals([], dayRun.errors)
+        assertEquals(0, dayCalls.size(), "served")
+        File dayFile = locationFile(dayRun.result.fileLocation as String)
+        assertEquals(["nov-10"], json(dayFile).records*.id, "the day the live read sends, and only it")
+        Map daySent = RunExtractSupport.buildExtractParams(SourceSystemConnectorSupport.resolve(ec, "KC_DAYS"), "FILE_1", "conn-days",
+                dayRun.artifact as Map, (Timestamp) window.windowStartDate, (Timestamp) window.windowEndDate, "f.json", null, null, null,
+                window.timeZone)
+        assertEquals(["2026-11-10", "2026-11-11"], [daySent.windowStart, daySent.windowEnd])
+        Map dayScheduled = scheduledAs(A) {
+            AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, automationSource("KC_DAYS", RETURNS_EXTRACT,
+                    [omsRestSourceConfigId: "conn-days"]), autoWindow,
+                    [automationExecutionId: "KC_DAYS_EXEC2", sideOutputLocation: runLocation("days-auto")])
+        }
+        assertEquals(true, dayScheduled.requestMetadata?.servedFromCopy, dayScheduled.toString())
+        assertArrayEquals(dayFile.bytes, locationFile(dayScheduled.fileLocation as String).bytes)
+
+        // a copy that dates a record by instant cannot be cut on the source's days: read live
+        String instantId = datasetOf("KC_DAYS", "conn-days-instant", "id", "trandate")
+        copyOf(A, instantId, [[id: "i1", trandate: "2026-11-10"], [id: "i2", trandate: "2026-11-10T12:00:00Z"]], "id", "trandate")
+        Map byInstant = daySide("conn-days-instant", window, "days-instant")
+        assertFalse(byInstant.served as boolean)
+        assertTrue((byInstant.reason as String).contains("calendar day"), byInstant.reason as String)
+        assertFalse(new File(locationFile(runLocation("days-instant")), "slice.json").exists(), "nothing is left behind")
+
+        // the last day is not past the copy's readThru in every zone (Nov 20 ends at 12:00Z west of UTC): read live,
+        // although the run's own end (Nov 19 18:30Z, the tenant's midnight) is before it
+        Map late = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-11-19T00:00:00Z"), ts("2026-11-20T00:00:00Z"), TENANT_ZONE)
+        assertTrue((late.windowEndDate as Timestamp).time <= READ_THRU.time, "test precondition")
+        assertEquals(KeptCopySupport.DAYS_PAST_READ_THRU, daySide("conn-days", late, "days-late").reason)
+        // the copy covers from Sep 21 12:00Z, which is already Sep 22 east of UTC: a run of Sep 21, anchored at 12:00Z by a
+        // tenant at UTC-12, starts inside the copy as an instant but its day may not all be in it, so it reads live
+        String edgeId = datasetOf("KC_DAYS", "conn-days-edge", "id", "trandate")
+        copyOf(A, edgeId, [[id: "e1", trandate: "2026-09-21"]], "id", "trandate", ts("2026-09-21T12:00:00Z"))
+        Map early = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-09-21T00:00:00Z"), ts("2026-09-22T00:00:00Z"), "Etc/GMT+12")
+        assertEquals(ts("2026-09-21T12:00:00Z"), early.windowStartDate, "test precondition")
+        assertEquals(KeptCopySupport.DAYS_BEFORE_HORIZON, daySide("conn-days-edge", early, "days-early").reason)
+        Map nextDay = ReconciliationApiWindowSupport.normalizeCalendarWindow(ts("2026-09-22T00:00:00Z"), ts("2026-09-23T00:00:00Z"), "Etc/GMT+12")
+        assertTrue(daySide("conn-days-edge", nextDay, "days-next").served as boolean, "the next day is wholly in the copy")
+    }
+
+    /**
+     * Ruling 3b1-4 / 3b1-9. The seeded OMS returns row names no windowFieldName, so the dispatchers send none and its
+     * extractor windows on its own declared field, entryDate: that is the side's field. A dataset kept on another field is
+     * not served; an extractor that declares no field of its own is never served without the connector naming one.
+     */
+    @Test
+    void aSourceWithNoWindowFieldNameUsesItsExtractorsField() {
+        assertEquals("entryDate", ec.service.getServiceDefinition(RETURNS_EXTRACT).getInParameter("windowFieldName")?.attribute("default-value"),
+                "the extractor declares its own window field")
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        String id = datasetOf("OMS_RETURNS_GQL", "conn-own-field", "returnId", "entryDate")
+        copyOf(A, id, [omsReturn("r1", "2026-11-10T12:00:00Z"), omsReturn("r2", "2026-11-12T12:00:00Z")], "returnId", "entryDate")
+        Map side = returnsSide(connector, "conn-own-field", "own-field")
+        assertNull(side.windowFieldName, "nothing is sent")
+        Map served = KeptCopySupport.sliceIfServed(ec, side)
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals("entryDate", served.metadata.windowFieldName)
+        assertEquals(["r1"], json(served.extractFile as File).records*.returnId)
+
+        // the same source kept on another field than its extractor windows on
+        String other = datasetOf("OMS_RETURNS_GQL", "conn-other-field", "returnId", "returnDate")
+        copyOf(A, other, [omsReturn("r1", "2026-11-10T12:00:00Z") + [returnDate: ts("2026-11-10T12:00:00Z").time]], "returnId", "returnDate")
+        assertEquals(KeptCopySupport.OTHER_WINDOW_FIELD, KeptCopySupport.sliceIfServed(ec, returnsSide(connector, "conn-other-field", "other-field")).reason)
+
+        // an extractor with no field of its own (a data-defined read windows on its definition's), and no connector field
+        assertNull(ec.service.getServiceDefinition(DATA_DEFINED_EXTRACT).getInParameter("windowFieldName")?.attribute("default-value"))
+        Map noField = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side([systemEnumId: "KC_NOFIELD", extractServiceName: DATA_DEFINED_EXTRACT,
+                dateFromParameterName: "windowStart", dateToParameterName: "windowEnd", preserveWindowInstants: false],
+                [sourceConfigId: "conn-nofield", windowStart: START.toInstant().toString(), windowEnd: END.toInstant().toString(),
+                 outputLocation: runLocation("nofield"), fileName: "slice.json"], [tenantId: A, windowStart: START, windowEnd: END]))
+        assertFalse(noField.served as boolean)
+        assertEquals(KeptCopySupport.NO_WINDOW_FIELD, noField.reason)
+    }
+
+    /**
+     * Plan 3a stays as it was: a Shopify orders side defaults its field to createdAt, its slice skips a record whose
+     * createdAt is not an ISO instant (never an abort), and a source whose extractor rounds its window to whole days
+     * unless told to keep instants (Shopify return refs, preserveWindowInstants N) reads live.
+     */
+    @Test
+    void shopifyOrdersServingIsUnchanged() {
+        String id = dataset("conn-unchanged")
+        copy(A, id, [order("iso", "2026-11-10T09:00:00Z"), [id: "millis", createdAt: ts("2026-11-10T10:00:00Z").time, updatedAt: "2026-11-10T10:00:00Z"],
+                     [id: "other-format", createdAt: "11/10/2026 11:00", updatedAt: "2026-11-10T11:00:00Z"]])
+        Map side = KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
+                [shopifyAuthConfigId: "conn-unchanged", outputLocation: runLocation("unchanged"), fileName: "slice.json"],
+                [tenantId: A, windowStart: START, windowEnd: END])
+        assertEquals("createdAt", side.windowFieldName)
+        assertNull(side.liveOnly)
+        Map served = KeptCopySupport.sliceIfServed(ec, side)
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals(["iso"], json(served.extractFile as File).records*.id)
+
+        Map refs = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS"),
+                [shopifyAuthConfigId: "conn-refs", windowStart: START.toInstant().toString(), windowEnd: END.toInstant().toString(),
+                 outputLocation: runLocation("refs"), fileName: "slice.json"], [tenantId: A, windowStart: START, windowEnd: END]))
+        assertFalse(refs.served as boolean)
+        assertEquals(KeptCopySupport.ROUNDS_TO_DAYS, refs.reason)
+    }
+
     private static final String LIVE_TEXT = '{"metadata":{"live":true},"records":[{"id":"live-1"}]}'
+
+    /** An OMS return as the GraphQL extract writes it: entryDate in epoch milliseconds (OmsGqlReturnAssembler). */
+    private static Map omsReturn(String id, String entryDate) {
+        return [returnId: id, statusId: "RETURN_REQUESTED", entryDate: OffsetDateTime.parse(entryDate).toInstant().toEpochMilli()]
+    }
+
+    /** A rolling dataset of the active tenant (stampField = windowField). */
+    private String datasetOf(String systemEnumId, String conn, String idField, String windowField) {
+        Map res = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: systemEnumId, sourceConfigId: conn,
+                options: [:], idField: idField, windowField: windowField, readRuleEnumId: "DRR_ROLLING"])
+        assertEquals([], res.errors)
+        return res.out.datasetId as String
+    }
+
+    /** A full read into a rolling copy, covering 60 days back from READ_THRU. */
+    private void copyOf(String tenant, String datasetId, List<Map> records, String idField, String windowField,
+                        Timestamp coveredFrom = new Timestamp(READ_THRU.time - 60 * DAY)) {
+        KeptCopyStore.replace(DatasetRefreshSupport.datasetDir(ec, tenant, datasetId), records.iterator(), idField, windowField, windowField,
+                coveredFrom, READ_THRU, READ_AT, 2, null, false)
+    }
+
+    /** The interactive dispatcher's own parameters for an OMS returns side over START..END, as the side is built from them. */
+    private Map returnsSide(Map connector, String conn, String token) {
+        Map params = RunExtractSupport.buildExtractParams(connector, "FILE_1", conn, [location: runLocation(token), runToken: token],
+                START, END, "slice.json", null, null, null, "UTC")
+        return KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START, windowEnd: END])
+    }
+
+    /** A KC_DAYS side over the given window, built from the interactive dispatcher's own parameters. */
+    private Map daySide(String conn, Map window, String token) {
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_DAYS")
+        Map params = RunExtractSupport.buildExtractParams(connector, "FILE_1", conn, [location: runLocation(token), runToken: token],
+                (Timestamp) window.windowStartDate, (Timestamp) window.windowEndDate, "slice.json", null, null, null, window.timeZone)
+        params.outputLocation = runLocation(token)
+        params.fileName = "slice.json"
+        return KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, params,
+                [tenantId: A, windowStart: window.windowStartDate, windowEnd: window.windowEndDate]))
+    }
+
+    private static Map automationSource(String systemEnumId, String serviceName, Map parameters) {
+        return [automationId: "KC_DAYS_AUTO", fileSide: "FILE_1", systemEnumId: systemEnumId, companyUserGroupId: A,
+                sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
+                safeMetadataJson: JsonOutput.toJson([extractServiceName: serviceName, parameters: parameters])]
+    }
+
+    /** One interactive side of any source through RunExtractSupport.extractApiSource, over an anchored window (with its zone). */
+    private Map interactiveSide(Map source, Map apiWindow, List<Map> calls) {
+        String token = "i${++seq}"
+        Map artifact = [location: runLocation(token), runToken: token]
+        Closure stub = { String service, Map params ->
+            String location = DataManagerSupport.childLocation(params.outputLocation as String, params.fileName as String)
+            DataManagerSupport.writeText(ec, location, LIVE_TEXT)
+            calls << [service: service, params: new LinkedHashMap(params), location: location]
+            return [fileLocation: location, fileName: params.fileName, recordCount: 1]
+        }
+        ec.message.clearAll()
+        Map result = RunExtractSupport.extractApiSource(ec, source, "FILE_1", "File 1", artifact, apiWindow, null, stub)
+        List<String> errors = ec.message.errors.collect { it.toString() }
+        ec.message.clearAll()
+        return [result: result, artifact: artifact, source: source, errors: errors]
+    }
 
     private static Timestamp ts(String iso) {
         return Timestamp.from(java.time.Instant.parse(iso))

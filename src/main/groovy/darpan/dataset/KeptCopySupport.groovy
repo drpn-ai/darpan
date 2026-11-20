@@ -12,7 +12,9 @@ import org.slf4j.LoggerFactory
 import java.nio.charset.StandardCharsets
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 import static darpan.common.ValueSupport.normalize
 
@@ -30,6 +32,28 @@ import static darpan.common.ValueSupport.normalize
  * that start at or after the manifest's coveredFrom: a setting changed through store#Dataset stops serving until the
  * full read it forces has rebuilt the copy.</p>
  *
+ * <p><b>The window the live call sends</b> (plan 3b-1, ruling 3b1-9). A slice selects what the live read would, so it is
+ * cut on the window the dispatcher is about to send, read off the very parameters it built, never re-derived:
+ * <ul>
+ * <li>a connector that keeps exact instants (preserveWindowInstants, plan 3a): the run's instants, half-open, on the side's
+ *     field (createdAt when it names none);</li>
+ * <li>any other windowed connector is sent the run's instants as they are (RunExtractSupport.buildExtractParams sends ISO
+ *     text, AutomationExecutionSupport.applyWindowParameters the Timestamps). Its extractor reads them half-open, unless it
+ *     declares preserveWindowInstants: then it has a mode that rounds them to whole days in its own zone, and the side reads
+ *     live. The sent bounds must be the run's instants; a record value is an ISO instant or epoch milliseconds (the HotWax
+ *     extracts write those), and any other value stops serving rather than being skipped;</li>
+ * <li>a whole-days connector (windowDateOnly, NetSuite) is sent calendar days, read in the window's zone by the live code
+ *     (ReconciliationApiWindowSupport.calendarDateIn). Its source keeps records whose day falls in [from, to) (SuiteQL's
+ *     {@code >= TO_DATE(from) AND < TO_DATE(to)}), so a record dated as a plain yyyy-MM-dd day is compared as that day. A
+ *     record dated any other way is not placed on a day here, because the source compares days in its own zone, which no
+ *     setting names, and the side reads live. For the same reason the copy must have read each day after it ended in every
+ *     zone (readThru at or after the last day's end at UTC-12) and cover each from its start in every zone (the first day on
+ *     or after coveredFrom's date at UTC+14).</li>
+ * </ul>
+ * The side's field is the connector's windowFieldName, which the dispatchers send; else the field the extractor windows on
+ * by itself, its windowFieldName parameter's default-value (ruling 3b1-4); else, for a plan 3a connector only, createdAt.
+ * No field, no serving.</p>
+ *
  * <p><b>The options key</b> ({@code find#ServingDataset}'s options) is the run side's extract options its connector
  * declares (SourceExtractOptionsSupport.declaredOptions), read off the parameters the dispatcher built, with false and
  * blank values dropped (absent IS the default, as the run side stores them) and readByOtherSideKeys never in it. That is
@@ -43,6 +67,16 @@ class KeptCopySupport {
     static final String FIND_SERVICE = "dataset.DatasetServices.find#ServingDataset"
     static final String DEFAULT_WINDOW_FIELD = "createdAt"
 
+    /** How the live call sends a side's window: the connector keeps exact instants (plan 3a), it is sent the run's instants
+     *  as they are, or it is sent calendar days (windowDateOnly). */
+    static final String EXACT_INSTANTS = "EXACT_INSTANTS"
+    static final String SENT_INSTANTS = "SENT_INSTANTS"
+    static final String CALENDAR_DAYS = "CALENDAR_DAYS"
+    /** The zones whose days start first and end last: a day read in an unnamed zone lies inside both bounds. */
+    private static final ZoneOffset EARLIEST_DAY_ZONE = ZoneOffset.ofHours(14)
+    private static final ZoneOffset LATEST_DAY_ZONE = ZoneOffset.ofHours(-12)
+    private static final String PRESERVE_PARAMETER = "preserveWindowInstants"
+
     static final String BY_KEYS = "the side reads by key"
     static final String NO_WINDOW = "the side has no window"
     static final String NO_DATASET = "the tenant has no ACTIVE dataset for this source, connection and options"
@@ -53,6 +87,10 @@ class KeptCopySupport {
     static final String BEFORE_HORIZON = "the window starts before what the copy covers"
     static final String OTHER_SETTINGS = "the copy was built under other dataset settings; the next full read rebuilds it"
     static final String COPY_CHANGED = "the copy changed while it was opened"
+    static final String NO_WINDOW_FIELD = "the side names no window field, and its extractor declares none of its own"
+    static final String ROUNDS_TO_DAYS = "the source rounds its window to whole days in its own zone unless its connector keeps the instants"
+    static final String DAYS_PAST_READ_THRU = "the window's last day may end after the copy's readThru in the source's zone"
+    static final String DAYS_BEFORE_HORIZON = "the window's first day may start before what the copy covers in the source's zone"
 
     /**
      * Parameters a dispatcher sets that never change which raw records a read returns (or that the side checks on its
@@ -71,7 +109,7 @@ class KeptCopySupport {
      *
      * @param connector the connector map the dispatcher resolved (SourceSystemConnectorSupport)
      * @param params the extractor parameters, complete, as they would be sent
-     * @param run tenantId (the run's owner), windowStart and windowEnd (Timestamps: the instants the read covers),
+     * @param run tenantId (the run's owner), windowStart and windowEnd (Timestamps: the instants the run covers),
      *        stateMode (an automation read by status with no window), outputRunId (the folder name an extractor uses
      *        when params carry no outputLocation)
      */
@@ -95,11 +133,14 @@ class KeptCopySupport {
             }
         }
 
+        String windowMode = connector?.windowDateOnly == true ? CALENDAR_DAYS :
+                (connector?.preserveWindowInstants ? EXACT_INSTANTS : SENT_INSTANTS)
+        String dateFromName = normalize(connector?.dateFromParameterName)
+        String dateToName = normalize(connector?.dateToParameterName)
+
         String liveOnly = null
         if (run?.stateMode) liveOnly = "the side reads by status, with no window"
         else if (connector?.windowed == false) liveOnly = "the source reads its whole population, with no window"
-        else if (connector?.windowDateOnly == true) liveOnly = "the source reads whole days"
-        else if (!connector?.preserveWindowInstants) liveOnly = "the source does not read the exact window instants"
         else if (statusName && present(p.get(statusName))) liveOnly = "the side reads by status"
         else if (present(p.get("readFields"))) liveOnly = "the side asks its source for extra fields"
         else if (undeclared) liveOnly = "the side sends parameters no dataset is keyed by: ${undeclared.sort().join(', ')}".toString()
@@ -111,7 +152,13 @@ class KeptCopySupport {
                 options        : options,
                 windowStart    : run?.windowStart,
                 windowEnd      : run?.windowEnd,
-                windowFieldName: normalize(p.windowFieldName) ?: DEFAULT_WINDOW_FIELD,
+                // none sent: the extractor's own field, resolved by sliceIfServed (plan 3a's connectors keep createdAt)
+                windowFieldName: normalize(p.windowFieldName) ?: (windowMode == EXACT_INSTANTS ? DEFAULT_WINDOW_FIELD : null),
+                windowMode     : windowMode,
+                extractServiceName: normalize(connector?.extractServiceName),
+                // the window exactly as the live call sends it, under the connector's own parameter names
+                sentWindowStart: dateFromName ? p.get(dateFromName) : null,
+                sentWindowEnd  : dateToName ? p.get(dateToName) : null,
                 filters        : filterName ? p.get(filterName) : null,
                 byKeys         : p.get("lookupKeys") != null,
                 outputLocation : normalize(p.outputLocation),
@@ -137,6 +184,9 @@ class KeptCopySupport {
             Timestamp end = side.windowEnd as Timestamp
             if (start == null || end == null) return notServed(NO_WINDOW)
             if (!side.tenantId || !side.systemEnumId || !side.sourceConfigId) return notServed(NO_DATASET)
+            // the window and field the live call would read, or why a slice cannot reproduce them
+            Map live = side.windowMode == EXACT_INSTANTS || side.windowMode == null ? [field: side.windowFieldName] : liveWindow(ec, side)
+            if (live.reason) return notServed(live.reason as String)
             // a service called with errors on the facade does not run, and its silence would read as "no dataset"
             if (ec.message.hasError()) return notServed("errors are already on the message facade")
 
@@ -146,7 +196,7 @@ class KeptCopySupport {
             // differ from the automation's).
             if (normalize(dataset.companyUserGroupId) != side.tenantId) return notServed(OTHER_TENANT)
             String windowField = normalize(dataset.windowField)
-            if (side.windowFieldName != windowField) return notServed(OTHER_WINDOW_FIELD)
+            if (live.field != windowField) return notServed(OTHER_WINDOW_FIELD)
 
             File dir = DatasetRefreshSupport.datasetDir(ec, dataset.companyUserGroupId as String, dataset.datasetId as String)
             Map manifest = KeptCopyStore.manifest(dir)
@@ -159,8 +209,18 @@ class KeptCopySupport {
             // what the copy covers, from its manifest: the last full read's horizon start, carried through merges
             Timestamp coveredFrom = manifest.coveredFrom as Timestamp
             if (coveredFrom == null || start.time < coveredFrom.time) return notServed(BEFORE_HORIZON)
+            if (side.windowMode == CALENDAR_DAYS) {
+                // the source's days are in a zone no setting names: read only once the last day has ended everywhere, and
+                // covered only from the first day that starts after coveredFrom everywhere
+                if (readThru.toInstant().isBefore(((LocalDate) live.toDay).atStartOfDay(LATEST_DAY_ZONE).toInstant())) {
+                    return notServed(DAYS_PAST_READ_THRU)
+                }
+                if (((LocalDate) live.fromDay).isBefore(coveredFrom.toInstant().atZone(EARLIEST_DAY_ZONE).toLocalDate())) {
+                    return notServed(DAYS_BEFORE_HORIZON)
+                }
+            }
 
-            return slice(ec, side, dataset, dir, manifest, windowField)
+            return slice(ec, side, dataset, dir, manifest, windowField, live)
         } catch (Throwable t) {
             logger.warn("Kept copy not served for ${side?.systemEnumId} ${side?.sourceConfigId}", t)
             return notServed("the copy could not be read: ${t.message ?: t}".toString())
@@ -183,6 +243,34 @@ class KeptCopySupport {
         return [served: false, extractFile: null, reason: reason]
     }
 
+    /**
+     * For a side whose connector does not keep exact instants: the field the live read windows on and the window it is sent
+     * ([field] for the run's instants, [field, fromDay, toDay] for calendar days), or [reason] when a slice cannot
+     * reproduce it. Reads the extractor's service definition only.
+     */
+    private static Map liveWindow(def ec, Map side) {
+        def definition = side.extractServiceName ? ec.service.getServiceDefinition(side.extractServiceName as String) : null
+        if (definition == null) return [reason: "the side's extractor is not installed"]
+        // an extractor with a rounding mode rounds unless told to keep the instants, which this connector does not
+        if (side.windowMode != CALENDAR_DAYS && PRESERVE_PARAMETER in (definition.getInParameterNames() ?: [])) {
+            return [reason: ROUNDS_TO_DAYS]
+        }
+        String field = side.windowFieldName ?:
+                normalize(definition.getInParameter(DatasetRefreshSupport.WINDOW_FIELD_PARAMETER)?.attribute("default-value"))
+        if (!field) return [reason: NO_WINDOW_FIELD]
+        if (side.windowMode == CALENDAR_DAYS) {
+            LocalDate fromDay = calendarDay(side.sentWindowStart), toDay = calendarDay(side.sentWindowEnd)
+            if (fromDay == null || toDay == null) return [reason: "the side is not sent its window as calendar days"]
+            if (!fromDay.isBefore(toDay)) return [reason: "the side is sent no whole day"]
+            return [field: field, fromDay: fromDay, toDay: toDay]
+        }
+        Instant from = sentInstant(side.sentWindowStart), to = sentInstant(side.sentWindowEnd)
+        if (from == null || to == null || from != (side.windowStart as Timestamp).toInstant() || to != (side.windowEnd as Timestamp).toInstant()) {
+            return [reason: "the side is not sent the run's own window instants"]
+        }
+        return [field: field]
+    }
+
     /** find#ServingDataset, leaving the message facade as it found it; a failed lookup throws (and reads live). */
     private static Map findServing(def ec, Map side) {
         Map out = (ec.service.sync().name(FIND_SERVICE).parameters([systemEnumId: side.systemEnumId,
@@ -195,7 +283,7 @@ class KeptCopySupport {
         return out.dataset instanceof Map ? (Map) out.dataset : null
     }
 
-    private static Map slice(def ec, Map side, Map dataset, File dir, Map manifest, String windowField) {
+    private static Map slice(def ec, Map side, Map dataset, File dir, Map manifest, String windowField, Map live) {
         Timestamp start = side.windowStart as Timestamp
         Timestamp end = side.windowEnd as Timestamp
         Instant from = start.toInstant(), to = end.toInstant()
@@ -216,6 +304,10 @@ class KeptCopySupport {
         Map<String, Integer> excludedCounts = [:], absentCounts = [:]
         File recordsWork = null
         File documentWork = null
+        String windowMode = side.windowMode ?: EXACT_INSTANTS
+        LocalDate fromDay = live.fromDay as LocalDate, toDay = live.toDay as LocalDate
+        // a record whose window value the live read would place but this slice cannot: nothing is served
+        String unplaceable = null
         try {
             DataManagerSupport.ensureDirectory(outDir, "kept copy slice")
             recordsWork = File.createTempFile("kept-copy-records-", ".partial", outDir)
@@ -232,9 +324,32 @@ class KeptCopySupport {
                             record = new LinkedHashMap(record)
                             record.remove(KeptCopyStore.COPY_ID)
                         }
-                        Instant at = instant(record?.get(windowField))
-                        // half-open, as instants: [windowStart, windowEnd)
-                        if (at == null || at.isBefore(from) || !at.isBefore(to)) continue
+                        Object value = record?.get(windowField)
+                        if (windowMode == EXACT_INSTANTS) {
+                            Instant at = instant(value)
+                            // half-open, as instants: [windowStart, windowEnd)
+                            if (at == null || at.isBefore(from) || !at.isBefore(to)) continue
+                        } else if (blank(value)) {
+                            // a record with no value is outside any window the source applies
+                            continue
+                        } else if (windowMode == CALENDAR_DAYS) {
+                            LocalDate day = calendarDay(value)
+                            if (day == null) {
+                                unplaceable = ("a record's ${windowField} is not a calendar day, and the source compares whole " +
+                                        "days in its own zone").toString()
+                                break
+                            }
+                            // half-open, as whole days: [from, to)
+                            if (day.isBefore(fromDay) || !day.isBefore(toDay)) continue
+                        } else {
+                            Instant at = recordInstant(value)
+                            if (at == null) {
+                                unplaceable = "a record's ${windowField} is neither an ISO instant nor epoch milliseconds".toString()
+                                break
+                            }
+                            // half-open, as instants: [windowStart, windowEnd), as the extractor reads what it is sent
+                            if (at.isBefore(from) || !at.isBefore(to)) continue
+                        }
                         inWindow++
                         Map<String, Object> verdict = SourceFilterSupport.evaluate(record, rules)
                         if (verdict != null) {
@@ -251,6 +366,7 @@ class KeptCopySupport {
                 }
                 return true
             }
+            if (unplaceable) return notServed(unplaceable)
             if (!sameVersion) return notServed(COPY_CHANGED)
             Map<String, Object> metadata = [
                     servedFromCopy      : true,
@@ -262,6 +378,9 @@ class KeptCopySupport {
                     sourceConfigId      : side.sourceConfigId,
                     windowStart         : from.toString(),
                     windowEnd           : to.toString(),
+                    // a whole-days source's days, as the live call sends them
+                    windowFromDay       : fromDay?.toString(),
+                    windowToDay         : toDay?.toString(),
                     windowFieldName     : windowField,
                     extractedRecordCount: inWindow,
                     keptRecordCount     : kept,
@@ -314,6 +433,31 @@ class KeptCopySupport {
         if (v instanceof Collection) return !((Collection) v).isEmpty()
         if (v instanceof Map) return !((Map) v).isEmpty()
         return true
+    }
+
+    private static boolean blank(Object v) {
+        return v == null || (v instanceof CharSequence && !v.toString().trim())
+    }
+
+    /** A window bound as a dispatcher sends instants: a Timestamp (automation) or ISO-8601 text (interactive); else null. */
+    private static Instant sentInstant(Object value) {
+        if (value instanceof Date) return ((Date) value).toInstant()
+        return value instanceof CharSequence ? instant(value) : null
+    }
+
+    /** A record's window value read as an instant: ISO-8601 text, or integral epoch milliseconds; else null. */
+    private static Instant recordInstant(Object value) {
+        if (value instanceof Long || value instanceof Integer || value instanceof BigInteger) {
+            return Instant.ofEpochMilli(((Number) value).longValue())
+        }
+        return value instanceof CharSequence ? instant(value) : null
+    }
+
+    /** A plain calendar day, yyyy-MM-dd, as a whole-days source is sent its window and dates a DATE column; else null. */
+    private static LocalDate calendarDay(Object value) {
+        String s = value instanceof CharSequence ? value.toString().trim() : null
+        if (!(s ==~ /\d{4}-\d{2}-\d{2}/)) return null
+        try { return LocalDate.parse(s) } catch (Exception ignored) { return null }
     }
 
     /** An ISO-8601 instant or offset date-time, as KeptCopyStore compares them; null when absent or unreadable. */

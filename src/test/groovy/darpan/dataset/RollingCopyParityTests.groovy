@@ -37,9 +37,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * source filter excludes, and a few days before and after. The stub extractor stands in for extract#HotWaxOmsGqlReturns for
  * the refresh and for the live read, so no OMS is ever called.
  *
- * Serving a returns side needs two connector settings the seed does not carry yet (the live dispatchers send the connector's
- * windowFieldName, and OMS_RETURNS_GQL reads whole days until preserveWindowInstants is Y). This class sets both on its own
- * test DB's connector row, which is what a later change makes real.
+ * The returns carry entryDate in epoch milliseconds, as the GraphQL extract writes them (OmsGqlReturnAssembler). The
+ * connector row is the seeded one (Task 2b, ruling 3b1-9): OMS_RETURNS_GQL names no windowFieldName and no
+ * preserveWindowInstants, so the side's field is its extractor's own (entryDate) and the slice is cut on the very instants
+ * the live call sends.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RollingCopyParityTests {
@@ -83,12 +84,6 @@ class RollingCopyParityTests {
         ec.entity.makeDataLoader().location("component://darpan/data/SourceSystemConnectorSeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])
-        // the two connector settings serving a returns side needs (see the class comment): this test DB only
-        def connector = ec.entity.find("darpan.reconciliation.SourceSystemConnector").condition("systemEnumId", "OMS_RETURNS_GQL")
-                .disableAuthz().useCache(false).one()
-        assertNotNull(connector)
-        connector.setAll([windowFieldName: "entryDate", preserveWindowInstants: "Y"])
-        connector.update()
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
             <darpan.rule.RuleSet ruleSetId="RCP_RS" ruleSetName="HotWax returns vs NetSuite" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="RCP_SCOPE" ruleSetId="RCP_RS" objectType="RETURN" companyUserGroupId="${A}"
@@ -148,7 +143,14 @@ class RollingCopyParityTests {
     }
 
     @Test
-    void aServedReturnsRunMatchesALiveRun() {
+    void aServedReturnsRunMatchesALiveRunWithSeededConnectorRows() {
+        // the seeded row, unchanged: no window field, no exact-instants flag, not a whole-days source
+        def connector = ec.entity.find("darpan.reconciliation.SourceSystemConnector").condition("systemEnumId", "OMS_RETURNS_GQL")
+                .disableAuthz().useCache(false).one()
+        assertNotNull(connector)
+        assertNull(connector.windowFieldName)
+        assertEquals("N", connector.preserveWindowInstants)
+        assertFalse(connector.windowDateOnly == "Y")
         String id = rollingReturns(CONN)
         assertEquals([], atCopyClock(0) { refresh(id, stub([])) }.errors)
 
@@ -167,7 +169,9 @@ class RollingCopyParityTests {
         }
         assertEquals([], live.errors)
         assertEquals(1, liveCalls.size(), "the paused dataset reads live, once")
-        assertEquals("entryDate", liveCalls[0].params.windowFieldName)
+        assertFalse(liveCalls[0].params.containsKey("windowFieldName"), "the live call names no field: its extractor windows on entryDate")
+        assertEquals(START.toInstant().toString(), liveCalls[0].params.windowStart, "the live call is sent the window's instants")
+        assertEquals(END.toInstant().toString(), liveCalls[0].params.windowEnd)
         assertEquals(served.result.fileName, live.result.fileName)
 
         Map servedDoc = json(new File(served.result.fileLocation as String))
@@ -252,7 +256,7 @@ class RollingCopyParityTests {
             Instant from = at(params.windowStart), to = at(params.windowEnd)
             String fileName = (params.fileName ?: "oms-returns-${from.toEpochMilli()}-${to.toEpochMilli()}.json") as String
             List<Map> inWindow = returns().findAll { Map r ->
-                Instant e = Instant.parse(r.entryDate as String)
+                Instant e = Instant.ofEpochMilli(r.entryDate as long)
                 !e.isBefore(from) && e.isBefore(to)
             }
             Map applied = SourceFilterSupport.applyToRecords(inWindow, SourceFilterSupport.parseRules(params.sourceFilters as List))
@@ -340,7 +344,7 @@ class RollingCopyParityTests {
     // ------------------------------------------------------------------------------------------------------------ fixture
 
     private static Map ret(String id, String entryDate, String channel = "ECOM_RTN_CHANNEL") {
-        return [returnId: id, statusId: "RETURN_REQUESTED", entryDate: entryDate, externalId: "SHR${id.substring(1)}".toString(),
+        return [returnId: id, statusId: "RETURN_REQUESTED", entryDate: Instant.parse(entryDate).toEpochMilli(), externalId: "SHR${id.substring(1)}".toString(),
                 returnChannelEnumId: channel, currencyUomId: "USD", returnTotal: 10]
     }
 

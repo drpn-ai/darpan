@@ -125,6 +125,54 @@ class ExtractRetentionPurgeTests {
         assertEquals(false, withoutFile.canDownload)
     }
 
+    @Test
+    void anOldInteractiveExtractIsPurged() {
+        long old = System.currentTimeMillis() - 10L * 86400000L
+        File json = extractFile("RS_PURGE_T5/20261101-101010101/file1-api/RS_PURGE_T5_file1.json", old)
+        File records = extractFile("RS_PURGE_T5/20261101-101010101/file1-api/RS_PURGE_T5_file1.records.jsonl", old)
+        File excluded = extractFile("RS_PURGE_T5/20261101-101010101/file1-api/RS_PURGE_T5_file1.excluded.json", old)
+        File side2 = extractFile("RS_PURGE_T5/20261101-101010101/file2-api/RS_PURGE_T5_file2.json", old)
+
+        ec.service.sync().name("reconciliation.ReconciliationGenericServices.purge#ExtractFiles")
+                .parameters([retentionDays: 7]).disableAuthz().call()
+
+        for (File f : [json, records, excluded, side2]) assertFalse(f.exists(), "should be purged: " + f.path)
+        assertFalse(new File(runsDir, "RS_PURGE_T5/20261101-101010101").exists(), "emptied api and extract folders are removed")
+    }
+
+    @Test
+    void aYoungInteractiveExtractIsKept() {
+        long fresh = System.currentTimeMillis() - 2L * 86400000L
+        File json = extractFile("RS_PURGE_T6/20261118-101010101/file1-api/RS_PURGE_T6_file1.json", fresh)
+        File records = extractFile("RS_PURGE_T6/20261118-101010101/file1-api/RS_PURGE_T6_file1.records.jsonl", fresh)
+
+        ec.service.sync().name("reconciliation.ReconciliationGenericServices.purge#ExtractFiles")
+                .parameters([retentionDays: 7]).disableAuthz().call()
+
+        assertTrue(json.exists())
+        assertTrue(records.exists())
+    }
+
+    @Test
+    void resultAndDiffFilesAreNeverPurged() {
+        long old = System.currentTimeMillis() - 10L * 86400000L
+        File resultInApi = extractFile("RS_PURGE_T7/20261101-101010101/file1-api/RS_PURGE_T7_result.json", old)
+        File resultInFolder = extractFile("RS_PURGE_T7/20261101-101010101/RS_PURGE_T7_result.json", old)
+        File otherApiFolder = extractFile("RS_PURGE_T7/20261101-101010101/file3-api/RS_PURGE_T7_file3.json", old)
+        File lookalike = extractFile("RS_PURGE_T7/20261101-101010101/myfile1-api/x.json", old)
+        File notExtractFolder = extractFile("RS_PURGE_T7/notes/file1-api/old.json", old)
+        File deeper = extractFile("RS_PURGE_T7/20261101-101010101/file1-api/sub/deep.json", old)
+        File oldExtract = extractFile("RS_PURGE_T7/20261101-101010101/file1-api/RS_PURGE_T7_file1.json", old)
+
+        ec.service.sync().name("reconciliation.ReconciliationGenericServices.purge#ExtractFiles")
+                .parameters([retentionDays: 7]).disableAuthz().call()
+
+        assertFalse(oldExtract.exists())
+        for (File f : [resultInApi, resultInFolder, otherApiFolder, lookalike, notExtractFolder, deeper]) {
+            assertTrue(f.exists(), "must be kept: " + f.path)
+        }
+    }
+
     private File extractFile(String relative, long lastModified) {
         File f = new File(runsDir, relative)
         f.parentFile.mkdirs()

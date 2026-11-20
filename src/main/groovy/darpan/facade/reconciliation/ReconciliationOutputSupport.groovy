@@ -518,16 +518,24 @@ class ReconciliationOutputSupport {
         if (runsDir != null && runsDir.isDirectory()) {
             runsDir.listFiles()?.findAll { it.isDirectory() }?.each { File runDir ->
                 runDir.listFiles()?.findAll { it.isDirectory() && EXTRACT_FOLDER.matcher(it.name).matches() }?.each { File extractDir ->
-                    extractDir.listFiles()?.findAll { it.isFile() }?.each { File file ->
-                        if (OutputPathSupport.isGeneratedResultFile(file.name)) return
-                        scanned++
-                        if (file.lastModified() > cutoffMillis) { retained++; return }
-                        try {
-                            if (file.delete()) deleted++
-                            else failed.add([fileName: "${runDir.name}/${extractDir.name}/${file.name}".toString(), errorMessage: "Delete returned false"])
-                        } catch (Exception e) {
-                            failed.add([fileName: "${runDir.name}/${extractDir.name}/${file.name}".toString(), errorMessage: e.message ?: "Delete failed"])
+                    // DAR-BE-318: interactive extracts and copy slices sit one level deeper, in <ts>/file1-api and file2-api.
+                    List<File> scanDirs = [extractDir]
+                    extractDir.listFiles()?.findAll { it.isDirectory() && API_EXTRACT_FOLDER.matcher(it.name).matches() }
+                            ?.each { scanDirs.add(it) }
+                    scanDirs.each { File scanDir ->
+                        scanDir.listFiles()?.findAll { it.isFile() }?.each { File file ->
+                            String shown = "${runDir.name}/${extractDir.name}/${scanDir == extractDir ? '' : scanDir.name + '/'}${file.name}".toString()
+                            if (OutputPathSupport.isGeneratedResultFile(file.name)) return
+                            scanned++
+                            if (file.lastModified() > cutoffMillis) { retained++; return }
+                            try {
+                                if (file.delete()) deleted++
+                                else failed.add([fileName: shown, errorMessage: "Delete returned false"])
+                            } catch (Exception e) {
+                                failed.add([fileName: shown, errorMessage: e.message ?: "Delete failed"])
+                            }
                         }
+                        if (scanDir != extractDir && !scanDir.listFiles() && scanDir.delete()) foldersRemoved++
                     }
                     if (!extractDir.listFiles() && extractDir.delete()) foldersRemoved++
                 }
@@ -541,6 +549,9 @@ class ReconciliationOutputSupport {
                 deletedCount: deleted, retainedCount: retained, foldersRemovedCount: foldersRemoved, failedFiles: failed,
                 statusMessage: statusMessage]
     }
+
+    /** The interactive extract folders inside an extract folder (DAR-BE-318). */
+    static final java.util.regex.Pattern API_EXTRACT_FOLDER = ~/^file[12]-api$/
 
     /** ExtractReplaySupport's extract folders: a run timestamp, then optionally -FILE_1/-FILE_2, then optionally -recheck. */
     static final java.util.regex.Pattern EXTRACT_FOLDER = ~/^\d{8}-\d{9}(-FILE_[12])?(-recheck)?$/

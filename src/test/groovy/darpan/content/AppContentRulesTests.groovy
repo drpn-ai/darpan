@@ -146,6 +146,13 @@ class AppContentRulesTests {
             '^audit posts to: .+$': 'audit posts to: ops',
             '^open conclusion .+$': 'open conclusion 2',
             '^restore version .+$': 'restore version 3',
+            '^open peak period .+$': 'open peak period 3 pm',
+            '^change this line: .+$': 'change this line: netsuite billing_status is one of pending billing',
+            '^change name: .+$': 'change name: shipped, not billed',
+            '^change what it explains: .+$': 'change what it explains: the rules hold',
+            '^change the question: .+$': 'change the question: is netsuite waiting to bill it?',
+            '^change how it shows: .+$': 'change how it shows: shown',
+            '^change the fix: .+$': 'change the fix: none',
     ]
 
     @Test

@@ -298,6 +298,23 @@ class KeptCopyStoreTests {
         assertEquals(["never-read", "new", "seen"], byId().keySet().sort(), "the record before the horizon is dropped")
     }
 
+    /** A horizon that is not at midnight: a day string is compared by day, so the horizon's own day stays. */
+    @Test void aDayStringOnTheHorizonDayIsKeptAndTheDayBeforeIsDropped() {
+        Closure<Map> day = { String id, String created -> [id: id, updatedAt: "2026-10-20T00:00:00Z", madeUpDay: created] }
+        Closure<Map> full = { List<Map> recs ->
+            KeptCopyStore.replace(dir, recs.iterator(), "id", "updatedAt", "madeUpDay", ts("2026-09-20T15:30:00Z"),
+                    ts("2026-11-08T00:00:00Z"), ts("2026-11-08T00:00:05Z"), 2)
+        }
+        Map r = full([day("boundary", "2026-09-20"), day("before", "2026-09-19"), day("after", "2026-09-21")])
+        assertEquals(["after", "boundary"], byId().keySet().sort(), "the horizon's own day is kept, the day before dropped")
+        assertEquals(2, r.addedCount)
+        assertEquals(0, r.removedCount)
+        // the copy now holds both; a full read lacking them removes the boundary day but not the one a prior drop never held
+        Map r2 = full([day("after", "2026-09-21")])
+        assertEquals(1, r2.removedCount)
+        assertEquals(["after"], byId().keySet().sort())
+    }
+
     @Test void aRecordMissingFromTheFullReadIsRemovedNotMissed() {
         merge(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z")])
         Map r = replace(dir, [rec("1", "2026-10-03T14:22:01Z")])

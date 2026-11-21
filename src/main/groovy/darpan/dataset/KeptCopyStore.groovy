@@ -207,8 +207,8 @@ class KeptCopyStore {
                 recordsRead++
                 String id = keyOf(rec, idField)
                 List prior = index.remove(id)
-                Instant created = createdInstant(rec.get(createdField))
-                boolean droppedByHorizon = horizon != null && created != null && created.isBefore(horizon)
+                Object createdValue = rec.get(createdField)
+                boolean droppedByHorizon = horizon != null && createdBefore(createdValue, horizon)
                 if (prior != null) {
                     boolean sameStamp = compareStamps(prior[0], rec.get(stampField)) == 0
                     boolean sameHash = prior[1] == contentHash(rec, stampField)
@@ -216,7 +216,7 @@ class KeptCopyStore {
                     if (countMisses && sameStamp && !sameHash) missCount++
                 } else if (!droppedByHorizon) {
                     addedCount++
-                    if (countMisses && neverReadBefore != null && created != null && created.isBefore(neverReadBefore)) missCount++
+                    if (countMisses && neverReadBefore != null && createdBefore(createdValue, neverReadBefore)) missCount++
                 }
                 if (droppedByHorizon) continue
                 Map e = entry(id, rec.get(stampField), readAt, rec)
@@ -227,8 +227,7 @@ class KeptCopyStore {
             return count
         }
         long removedCount = index.values().count { List p ->
-            Instant created = createdInstant(p[2])
-            horizon == null || created == null || !created.isBefore(horizon)
+            horizon == null || !createdBefore(p[2], horizon)
         }
         return [version: out.version, recordsRead: recordsRead, changedCount: changedCount, addedCount: addedCount,
                 removedCount: removedCount, missCount: countMisses ? missCount : null]
@@ -454,16 +453,19 @@ class KeptCopyStore {
     }
 
     /**
-     * A record's created date as replace places it against the horizon and the never-read line: {@link #parseInstant}, or a
-     * plain yyyy-MM-dd day (a DATE column) as that day's start in UTC; marginDays absorbs the zone skew. Only here: a
-     * slice's window values and the stamps stay instants, since a day there would be placed in a zone no setting names.
+     * Whether a record's created value is before a bound (the horizon or the never-read line). A full instant compares as an
+     * instant; a plain yyyy-MM-dd day (a DATE column) compares by day, before only when its day is before the bound's UTC date,
+     * so the bound's own day is never before it; marginDays absorbs the zone skew. An absent or unparseable value is not
+     * before. Only here: a slice's window values and the stamps stay instants, since a day there would be placed in a zone no
+     * setting names.
      */
-    private static Instant createdInstant(Object value) {
+    private static boolean createdBefore(Object value, Instant bound) {
         Instant at = parseInstant(value)
-        if (at != null || !(value instanceof CharSequence)) return at
+        if (at != null) return at.isBefore(bound)
+        if (!(value instanceof CharSequence)) return false
         String s = value.toString().trim()
-        if (!(s ==~ /\d{4}-\d{2}-\d{2}/)) return null
-        try { return LocalDate.parse(s).atStartOfDay(ZoneOffset.UTC).toInstant() } catch (Exception ignored) { return null }
+        if (!(s ==~ /\d{4}-\d{2}-\d{2}/)) return false
+        try { return LocalDate.parse(s).isBefore(bound.atZone(ZoneOffset.UTC).toLocalDate()) } catch (Exception ignored) { return false }
     }
 
     /** Compares two stamps as instants; an absent or unparseable stamp sorts oldest. */

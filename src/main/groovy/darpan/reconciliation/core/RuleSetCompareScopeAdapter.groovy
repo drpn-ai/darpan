@@ -226,94 +226,138 @@ class RuleSetCompareScopeAdapter {
         spark.conf().set("spark.sql.shuffle.partitions",
                 (System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16"))
 
-        Map<String, Object> ingestBySide = activeSides.collectEntries { String fileSide ->
-            Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
-            Map<String, Object> config = (Map<String, Object>) plan.config
-            try {
-                [(fileSide): ReconciliationServices.ingestFile(
-                        ec, spark, (String) plan.fileLocation, (String) plan.fileType, (List) plan.idSpecs,
-                        hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
-                        (String) config.schemaFileName)]
-            } catch (Exception e) {
-                // DAR-BE-031: the ID field is not in this tenant's records; say so, not as a Spark struct error.
-                String plain = CompareFieldErrors.plainMessage(e, (String) plan.label)
-                // No cause attached: Moqui adds every cause's message as an error of its own, which would put the raw
-                // Spark text back in front of the person. The server log keeps it.
-                if (plain) { logger.warn("Compare scope {} {}: {}", compareScopeId, fileSide, e.toString()); throw new IllegalArgumentException(plain) }
-                throw e
+        // DAR-BE-318 (plan 3b-2b, Task 11): each side's Keep (KeepPlanSupport.sideKeep), keyed FILE_1/FILE_2. It runs at ingest,
+        // before the id restriction, keys out and duplicate split below, so those see kept records only. A side with no entry,
+        // or whose Keep is not Spark's, is ingested as before. Live runs pass none until Tasks 13 and 14.
+        Map keepBySide = (Map) context.get("keepBySide")
+        // The Keep step's persisted frames: the caller's to release, and released here if the compare fails before returning.
+        List<Dataset> keepPersisted = []
+        Map<String, Object> ingestBySide = [:]
+        try {
+            activeSides.each { String fileSide ->
+                Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
+                Map<String, Object> config = (Map<String, Object>) plan.config
+                Map ingest
+                try {
+                    ingest = ReconciliationServices.ingestFile(
+                            ec, spark, (String) plan.fileLocation, (String) plan.fileType, (List) plan.idSpecs,
+                            hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
+                            (String) config.schemaFileName, (Map) keepBySide?.get(fileSide))
+                } catch (Exception e) {
+                    // DAR-BE-031: the ID field is not in this tenant's records; say so, not as a Spark struct error.
+                    String plain = CompareFieldErrors.plainMessage(e, (String) plan.label)
+                    // No cause attached: Moqui adds every cause's message as an error of its own, which would put the raw
+                    // Spark text back in front of the person. The server log keeps it.
+                    if (plain) { logger.warn("Compare scope {} {}: {}", compareScopeId, fileSide, e.toString()); throw new IllegalArgumentException(plain) }
+                    throw e
+                }
+                keepPersisted.addAll((List<Dataset>) ingest.persisted ?: [])
+                ingestBySide.put(fileSide, ingest)
             }
-        }
-        // DAR-UI-048: a flowchart child asks only about its parent's branch, and reports what it asked about.
-        String includeIdsLocation = ReconciliationServices.normalize(context.get("file1IncludeIdsLocation"))
-        if (includeIdsLocation) {
-            Map<String, Object> restricted = restrictSideToIdFile(ingestBySide, "FILE_1", includeIdsLocation)
-            ingestBySide = (Map<String, Object>) restricted.ingestBySide
-            String keyWarning = keyMismatchWarning(singleSided, restricted, compareScopeLabel)
-            if (keyWarning) processingWarnings.add(keyWarning)
-        }
-        String keysOutLocation = ReconciliationServices.normalize(context.get("file1KeysOutLocation"))
-        if (keysOutLocation) writeSideIds(ingestBySide, "FILE_1", keysOutLocation)
-        // DAR-BE-091. The other side's keys too, so an audit run's examined records cover both systems: a finding whose
-        // record now exists only on FILE_2 was looked at, and may close.
-        String file2KeysOutLocation = ReconciliationServices.normalize(context.get("file2KeysOutLocation"))
-        if (file2KeysOutLocation && !singleSided) writeSideIds(ingestBySide, "FILE_2", file2KeysOutLocation)
-        // DAR-BE-165: every repeated key on either side is reported as findings (DAR-BE-063's FINDING, now the only
-        // behaviour) and leaves the compare on BOTH sides. It used to fail a ruled run outright, so a month-wide run
-        // with one order twice in HotWax showed nothing, and to collapse silently into a match on a base-diff run.
-        // An evaluate run never joins on compare_id, so its repeated ids are its findings and pass through untouched.
-        Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :
-                splitDuplicateKeys(ingestBySide)
-        ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
-        ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
-            if (count > 0) processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} " +
-                    "(${((Map) sidePlanBySide[fileSide]).label}) has ${count} key(s) on more than one record; " +
-                    "every record under them is reported as a duplicate finding and left out of the compare.".toString())
-        }
-        Map<String, Object> ingest1 = (Map<String, Object>) ingestBySide.FILE_1
-        Map<String, Object> ingest2 = (Map<String, Object>) ingestBySide.FILE_2
+            // What each Keep side set aside, keyed file1/file2, read before anything below narrows the frames. A compare id held
+            // by a kept and a set-aside record (review M8) is in both: the kept record takes part in the compare, and the id is
+            // still named here, as the extractor's side file names every record it set aside.
+            Map<String, Set<String>> setAsideBySide = [:]
+            Map<String, Map> keepSummaryBySide = [:]
+            activeSides.each { String fileSide ->
+                Map ingest = (Map) ingestBySide[fileSide]
+                if (ingest.keepSummary == null) return
+                keepSummaryBySide.put(SIDE_PREFIX_BY_SIDE[fileSide], (Map) ingest.keepSummary)
+                setAsideBySide.put(SIDE_PREFIX_BY_SIDE[fileSide], compareIdSet((Dataset) ingest.asideIdDf))
+            }
+            // DAR-UI-048: a flowchart child asks only about its parent's branch, and reports what it asked about.
+            String includeIdsLocation = ReconciliationServices.normalize(context.get("file1IncludeIdsLocation"))
+            if (includeIdsLocation) {
+                Map<String, Object> restricted = restrictSideToIdFile(ingestBySide, "FILE_1", includeIdsLocation)
+                ingestBySide = (Map<String, Object>) restricted.ingestBySide
+                String keyWarning = keyMismatchWarning(singleSided, restricted, compareScopeLabel)
+                if (keyWarning) processingWarnings.add(keyWarning)
+            }
+            String keysOutLocation = ReconciliationServices.normalize(context.get("file1KeysOutLocation"))
+            if (keysOutLocation) writeSideIds(ingestBySide, "FILE_1", keysOutLocation)
+            // DAR-BE-091. The other side's keys too, so an audit run's examined records cover both systems: a finding whose
+            // record now exists only on FILE_2 was looked at, and may close.
+            String file2KeysOutLocation = ReconciliationServices.normalize(context.get("file2KeysOutLocation"))
+            if (file2KeysOutLocation && !singleSided) writeSideIds(ingestBySide, "FILE_2", file2KeysOutLocation)
+            // DAR-BE-165: every repeated key on either side is reported as findings (DAR-BE-063's FINDING, now the only
+            // behaviour) and leaves the compare on BOTH sides. It used to fail a ruled run outright, so a month-wide run
+            // with one order twice in HotWax showed nothing, and to collapse silently into a match on a base-diff run.
+            // An evaluate run never joins on compare_id, so its repeated ids are its findings and pass through untouched.
+            Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :
+                    splitDuplicateKeys(ingestBySide)
+            ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
+            ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
+                if (count > 0) processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} " +
+                        "(${((Map) sidePlanBySide[fileSide]).label}) has ${count} key(s) on more than one record; " +
+                        "every record under them is reported as a duplicate finding and left out of the compare.".toString())
+            }
+            Map<String, Object> ingest1 = (Map<String, Object>) ingestBySide.FILE_1
+            Map<String, Object> ingest2 = (Map<String, Object>) ingestBySide.FILE_2
 
-        // Audit 2026-06-11 #16: the legacy reconcileUnifiedFiles path persists its id frames, but the
-        // RuleSet path returned un-cached Datasets that the XML orchestration then re-reads and
-        // re-parses across many independent Spark actions (two anti-joins, two missing-diff joins, the
-        // matched-id join, the matched-pair join, plus counts). Persist the four ingested frames to
-        // disk once so those actions reuse them. They are returned in `persistedSources` so the
-        // outermost owner (reconcileGenericFiles) can unpersist them in a finally — no block leak.
-        Dataset file1IdDf = ((Dataset) ingest1.idDf)?.persist(StorageLevel.DISK_ONLY())
-        Dataset file2IdDf = ((Dataset) ingest2?.idDf)?.persist(StorageLevel.DISK_ONLY())
-        Dataset file1DataDf = ((Dataset) ingest1.dataDf)?.persist(StorageLevel.DISK_ONLY())
-        Dataset file2DataDf = ((Dataset) ingest2?.dataDf)?.persist(StorageLevel.DISK_ONLY())
-        Dataset file1DuplicateDataDf = ((Dataset) ((Map) duplicateSplit.duplicateDataBySide).FILE_1)?.persist(StorageLevel.DISK_ONLY())
-        Dataset file2DuplicateDataDf = ((Dataset) ((Map) duplicateSplit.duplicateDataBySide).FILE_2)?.persist(StorageLevel.DISK_ONLY())
+            // Audit 2026-06-11 #16: the legacy reconcileUnifiedFiles path persists its id frames, but the
+            // RuleSet path returned un-cached Datasets that the XML orchestration then re-reads and
+            // re-parses across many independent Spark actions (two anti-joins, two missing-diff joins, the
+            // matched-id join, the matched-pair join, plus counts). Persist the four ingested frames to
+            // disk once so those actions reuse them. They are returned in `persistedSources` so the
+            // outermost owner (reconcileGenericFiles) can unpersist them in a finally — no block leak.
+            Dataset file1IdDf = ((Dataset) ingest1.idDf)?.persist(StorageLevel.DISK_ONLY())
+            Dataset file2IdDf = ((Dataset) ingest2?.idDf)?.persist(StorageLevel.DISK_ONLY())
+            Dataset file1DataDf = ((Dataset) ingest1.dataDf)?.persist(StorageLevel.DISK_ONLY())
+            Dataset file2DataDf = ((Dataset) ingest2?.dataDf)?.persist(StorageLevel.DISK_ONLY())
+            Dataset file1DuplicateDataDf = ((Dataset) ((Map) duplicateSplit.duplicateDataBySide).FILE_1)?.persist(StorageLevel.DISK_ONLY())
+            Dataset file2DuplicateDataDf = ((Dataset) ((Map) duplicateSplit.duplicateDataBySide).FILE_2)?.persist(StorageLevel.DISK_ONLY())
 
-        return [
-                ruleSetId        : ruleSetId,
-                compareScopeId   : compareScopeId,
-                compareScopeDescription: compareScopeLabel,
-                objectType       : ReconciliationServices.normalize(compareScope.objectType),
-                scopeMode        : singleSided ? SCOPE_MODE_EVALUATE : SCOPE_MODE_COMPARE,
-                file1Type        : file1Plan.fileType,
-                file2Type        : file2Plan?.fileType,
-                file1SystemEnumId: file1Config.systemEnumId,
-                file2SystemEnumId: file2Config?.systemEnumId,
-                file1SchemaFileName: file1Config.schemaFileName,
-                file2SchemaFileName: file2Config?.schemaFileName,
-                file1IdExpression: file1IdSpecs.collect { it.idExpr }.join(' + '),
-                file2IdExpression: file2IdSpecs ? file2IdSpecs.collect { it.idExpr }.join(' + ') : null,
-                file1IdNormalizer: file1IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null,
-                file2IdNormalizer: file2IdSpecs ? (file2IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null) : null,
-                file1Label       : file1Plan.label,
-                file2Label       : file2Plan?.label,
-                file1IdDf        : file1IdDf,
-                file2IdDf        : file2IdDf,
-                file1DataDf      : file1DataDf,
-                file2DataDf      : file2DataDf,
-                file1DuplicateDataDf: file1DuplicateDataDf,
-                file2DuplicateDataDf: file2DuplicateDataDf,
-                persistedSources : ([file1IdDf, file2IdDf, file1DataDf, file2DataDf, file1DuplicateDataDf, file2DuplicateDataDf] +
-                        ((List) duplicateSplit.persistedFrames)).findAll { it != null },
-                validationErrors : validationErrors,
-                processingWarnings: processingWarnings
-        ]
+            Map<String, Object> prepared = [
+                    ruleSetId        : ruleSetId,
+                    compareScopeId   : compareScopeId,
+                    compareScopeDescription: compareScopeLabel,
+                    objectType       : ReconciliationServices.normalize(compareScope.objectType),
+                    scopeMode        : singleSided ? SCOPE_MODE_EVALUATE : SCOPE_MODE_COMPARE,
+                    file1Type        : file1Plan.fileType,
+                    file2Type        : file2Plan?.fileType,
+                    file1SystemEnumId: file1Config.systemEnumId,
+                    file2SystemEnumId: file2Config?.systemEnumId,
+                    file1SchemaFileName: file1Config.schemaFileName,
+                    file2SchemaFileName: file2Config?.schemaFileName,
+                    file1IdExpression: file1IdSpecs.collect { it.idExpr }.join(' + '),
+                    file2IdExpression: file2IdSpecs ? file2IdSpecs.collect { it.idExpr }.join(' + ') : null,
+                    file1IdNormalizer: file1IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null,
+                    file2IdNormalizer: file2IdSpecs ? (file2IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null) : null,
+                    file1Label       : file1Plan.label,
+                    file2Label       : file2Plan?.label,
+                    file1IdDf        : file1IdDf,
+                    file2IdDf        : file2IdDf,
+                    file1DataDf      : file1DataDf,
+                    file2DataDf      : file2DataDf,
+                    file1DuplicateDataDf: file1DuplicateDataDf,
+                    file2DuplicateDataDf: file2DuplicateDataDf,
+                    persistedSources : ([file1IdDf, file2IdDf, file1DataDf, file2DataDf, file1DuplicateDataDf, file2DuplicateDataDf] +
+                            ((List) duplicateSplit.persistedFrames) + keepPersisted).findAll { it != null },
+                    validationErrors : validationErrors,
+                    processingWarnings: processingWarnings
+            ]
+            // Set only when a side kept in Spark, so a compare without Keep returns exactly what it did before.
+            if (keepSummaryBySide) {
+                prepared.setAsideBySide = setAsideBySide
+                prepared.keepSummaryBySide = keepSummaryBySide
+            }
+            return prepared
+        } catch (Throwable failure) {
+            keepPersisted.each { Dataset frame -> frame.unpersist() }
+            throw failure
+        }
+    }
+
+    /** DAR-BE-318. The distinct compare ids of an id frame. */
+    private static Set<String> compareIdSet(Dataset idDf) {
+        Set<String> ids = new TreeSet<String>()
+        if (idDf == null) return ids
+        Iterator<Row> it = idDf.select("compare_id").distinct().toLocalIterator()
+        while (it.hasNext()) {
+            Object value = it.next().get(0)
+            if (value != null) ids.add(value.toString())
+        }
+        return ids
     }
 
     /**

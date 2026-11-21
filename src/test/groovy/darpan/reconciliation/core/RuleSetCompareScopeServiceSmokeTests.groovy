@@ -761,6 +761,186 @@ class RuleSetCompareScopeServiceSmokeTests {
         }
     }
 
+    /*
+     * DAR-BE-318 (plan 3b-2b, Task 11). The compare takes each side's Keep (keepBySide) and reports what it set aside. Made-up
+     * system ACME, keyed on the extract's records array. FILE_1 holds A1..A4, with A2 and one of two A4s VOID; FILE_2 holds A1..A5.
+     * Keep on FILE_1 sets aside status VOID.
+     */
+    private static final String KEEP_RULE_SET = "DARPAN_TEST_KEEP_RS"
+    private static final String KEEP_SCOPE = "DARPAN_TEST_KEEP_SCOPE"
+    private boolean keepScopeSeeded = false
+
+    private void seedKeepScope() {
+        if (keepScopeSeeded) return
+        Closure<String> source = { String side ->
+            """<darpan.rule.RuleSetCompareSource compareScopeId="${KEEP_SCOPE}" fileSide="${side}" systemEnumId="ACME"
+                fileTypeEnumId="DftJson" recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="KREWE"/>"""
+        }
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.rule.RuleSet ruleSetId="${KEEP_RULE_SET}" ruleSetName="Keep compare" companyUserGroupId="KREWE"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="${KEEP_SCOPE}" ruleSetId="${KEEP_RULE_SET}" objectType="ORDER" companyUserGroupId="KREWE"/>
+            ${source('FILE_1')}
+            ${source('FILE_2')}
+        </entity-facade-xml>""").dummyFks(true).load()
+        keepScopeSeeded = true
+    }
+
+    private static Map<String, File> keepExtracts(File folder) {
+        File file1 = new File(folder, "acme-one.json")
+        file1.setText(groovy.json.JsonOutput.toJson([metadata: [system: "ACME"], records: [
+                [id: "A1", status: "OPEN"], [id: "A2", status: "VOID"], [id: "A3", status: "OPEN"],
+                [id: "A4", status: "VOID"], [id: "A4", status: "OPEN"]]]), "UTF-8")
+        File file2 = new File(folder, "acme-two.json")
+        file2.setText(groovy.json.JsonOutput.toJson([metadata: [system: "ACME"], records: [
+                [id: "A1"], [id: "A2"], [id: "A3"], [id: "A4"], [id: "A5"]]]), "UTF-8")
+        return [file1: file1, file2: file2]
+    }
+
+    /** FILE_1's Keep: set aside status VOID (a tenant EXCLUDE_IN filter, front-end A). */
+    private static Map voidKeep() {
+        return [placement   : darpan.reconciliation.source.KeepPlanSupport.SPARK, readFilters: [],
+                rules       : darpan.reconciliation.source.SourceFilterSupport.toKeepRules([
+                        [sequenceNum: 1, fieldExpression: "status", operator: "EXCLUDE_IN", values: ["VOID"]]] as List<Map<String, Object>>),
+                writeSidecar: false, fields: ["status"] as Set]
+    }
+
+    private Map<String, Object> reconcileKeepScope(Map<String, File> extracts, Map extra) {
+        seedKeepScope()
+        Map<String, Object> parameters = [ruleSetId     : KEEP_RULE_SET, compareScopeId: KEEP_SCOPE,
+                                          file1Location : extracts.file1.absolutePath, file2Location: extracts.file2.absolutePath,
+                                          file1Label    : "ACME one", file2Label: "ACME two",
+                                          sparkMaster   : "local[1]", sparkAppName: "RuleSetCompareScopeServiceSmokeTests-Keep"]
+        parameters.putAll(extra)
+        Map<String, Object> result = ec.service.sync().name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                .parameters(parameters).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        return result
+    }
+
+    private static void release(Map<String, Object> result) {
+        ((List<Dataset>) result?.persistedSources ?: []).each { Dataset frame -> frame.unpersist() }
+    }
+
+    /**
+     * A set-aside record leaves the compare: A2 is not MISSING_IN_FILE_2 (FILE_2's A2 reads missing in FILE_1, as when the
+     * extractor drops it today), and A4 is not a duplicate. Review M8: a compare id held by one kept and one set-aside record
+     * (A4) is in the compare through the kept record, which wins: it matches FILE_2's A4. The id is still named in
+     * setAsideBySide, as today's side file names every record it set aside; the judge reads KEPT for a side that holds the record.
+     */
+    @Test
+    void aSetAsideRecordIsNeitherMissingNorADuplicate() {
+        File folder = java.nio.file.Files.createTempDirectory("keep-compare").toFile()
+        Map<String, Object> result = null
+        try {
+            result = reconcileKeepScope(keepExtracts(folder), [keepBySide: [FILE_1: voidKeep()]])
+            List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
+            assertEquals([], diffs.findAll { it.diffType == "MISSING_IN_FILE_2" }.collect { it.primaryId }, "no set-aside record is missing")
+            assertEquals(["A2", "A5"], diffs.findAll { it.diffType == "MISSING_IN_FILE_1" }.collect { it.primaryId as String }.sort())
+            assertEquals([], diffs.findAll { (it.diffType as String)?.startsWith("DUPLICATE") }, "A4 is kept once, so it is no duplicate")
+            assertEquals(0L, result.duplicateDifferenceCount)
+            assertEquals(3L, result.matchedPairCount, "A1, A3, and A4 through its kept record")
+            assertEquals(0L, result.missingInFile2Count)
+            assertEquals(2L, result.missingInFile1Count)
+            assertTrue(((Set) ((Map) result.setAsideBySide).file1).contains("A4"), "the set-aside A4 is still named")
+        } finally {
+            release(result)
+            folder.deleteDir()
+        }
+    }
+
+    /** DAR-BE-091 keys out are the records the run examined: kept ones only, as when the extractor drops the rest today. */
+    @Test
+    void keysOutHoldOnlyKeptRecords() {
+        File folder = java.nio.file.Files.createTempDirectory("keep-keys").toFile()
+        Map<String, Object> result = null
+        try {
+            File keys1 = new File(folder, "file1-keys.txt")
+            File keys2 = new File(folder, "file2-keys.txt")
+            result = reconcileKeepScope(keepExtracts(folder), [keepBySide: [FILE_1: voidKeep()],
+                    file1KeysOutLocation: keys1.absolutePath, file2KeysOutLocation: keys2.absolutePath])
+            assertEquals(["A1", "A3", "A4"], keys1.readLines("UTF-8")*.trim().findAll { it }.sort())
+            assertEquals(["A1", "A2", "A3", "A4", "A5"], keys2.readLines("UTF-8")*.trim().findAll { it }.sort())
+        } finally {
+            release(result)
+            folder.deleteDir()
+        }
+    }
+
+    /**
+     * setAsideBySide names each Keep side's set-aside compare ids, keyed file1/file2; a side without Spark Keep has no entry.
+     * keepSummaryBySide carries the summary written beside the extract, and the Keep step's persisted frame is in
+     * persistedSources for the caller to release.
+     */
+    @Test
+    void setAsideBySideNamesTheCompareIds() {
+        File folder = java.nio.file.Files.createTempDirectory("keep-aside").toFile()
+        Map<String, Object> result = null
+        try {
+            Map<String, File> extracts = keepExtracts(folder)
+            result = reconcileKeepScope(extracts, [keepBySide: [FILE_1: voidKeep()]])
+            assertEquals([file1: ["A2", "A4"] as Set], result.setAsideBySide)
+            Map summary = (Map) ((Map) result.keepSummaryBySide).file1
+            assertEquals([file1: summary], result.keepSummaryBySide, "only the Keep side has a summary")
+            assertEquals(3L, summary.keptCount)
+            assertEquals(2L, summary.setAsideCount)
+            assertEquals(groovy.json.JsonOutput.toJson(summary),
+                    groovy.json.JsonOutput.toJson(darpan.reconciliation.source.KeepArtifacts.readSummary(extracts.file1)), "the summary written")
+            assertTrue(((List<Dataset>) result.persistedSources).any { Dataset frame ->
+                (frame.columns() as List).contains(darpan.reconciliation.source.KeepRules.REASON_COLUMN)
+            }, "the Keep step's persisted frame goes back to the caller")
+            assertNull(darpan.reconciliation.source.KeepArtifacts.readSummary(extracts.file2), "FILE_2 had no Keep")
+        } finally {
+            release(result)
+            folder.deleteDir()
+        }
+    }
+
+    /**
+     * Live runs pass no keepBySide until Tasks 13 and 14. Without one, and with sides whose Keep is not Spark's, the diff and
+     * every result value are what the compare gave before Keep reached it (the literals were recorded from the code before this
+     * change), no Keep output is set and nothing is written beside an extract.
+     */
+    @Test
+    void noKeepBySideIsByteIdentical() {
+        File folder = java.nio.file.Files.createTempDirectory("keep-none").toFile()
+        List<Map<String, Object>> results = []
+        try {
+            Map<String, File> extracts = keepExtracts(folder)
+            Map readKeep = [placement: darpan.reconciliation.source.KeepPlanSupport.READ, readFilters: [], rules: [], writeSidecar: false, fields: [] as Set]
+            [[:], [keepBySide: [:]], [keepBySide: [FILE_1: null, FILE_2: readKeep]]].each { Map extra ->
+                results.add(reconcileKeepScope(extracts, extra))
+            }
+            results.each { Map<String, Object> result ->
+                List<String> diff = ((Dataset) result.diffDf).toJSON().collectAsList().sort()
+                assertEquals(NO_KEEP_DIFF.collect { groovy.json.JsonOutput.toJson(it) }.sort(), diff)
+                Map scalars = result.findAll { key, value -> !(value instanceof Dataset) && key != "persistedSources" }
+                assertEquals(groovy.json.JsonOutput.toJson(new TreeMap(NO_KEEP_RESULT)), groovy.json.JsonOutput.toJson(new TreeMap(scalars)))
+                assertEquals(7, ((List) result.persistedSources).size(), "the frames the compare persisted before Keep")
+            }
+            assertEquals(["acme-one.json", "acme-two.json"], folder.list().toList().sort(), "no Keep artifact")
+        } finally {
+            results.each { release(it) }
+            folder.deleteDir()
+        }
+    }
+
+    /** The no-Keep compare of the Keep fixture, recorded from the code before Task 11: A4 twice on FILE_1 is a duplicate. */
+    private static final List<Map> NO_KEEP_DIFF = [
+            [diffType : "DUPLICATE_IN_FILE_1", compareScopeId: KEEP_SCOPE, objectType: "ORDER", primaryId: "A4", presentIn: "ACME one",
+             missingIn: "", data: '{"id":"A4","status":"OPEN"}', message: "Duplicated in ACME one: more than one record shares this key"],
+            [diffType : "DUPLICATE_IN_FILE_1", compareScopeId: KEEP_SCOPE, objectType: "ORDER", primaryId: "A4", presentIn: "ACME one",
+             missingIn: "", data: '{"id":"A4","status":"VOID"}', message: "Duplicated in ACME one: more than one record shares this key"],
+            [diffType : "MISSING_IN_FILE_1", compareScopeId: KEEP_SCOPE, objectType: "ORDER", primaryId: "A5", presentIn: "ACME two",
+             missingIn: "ACME one", data: '{"id":"A5"}', message: "Present in ACME two, missing in ACME one"]]
+    private static final Map NO_KEEP_RESULT = [
+            compareScopeDescription: KEEP_SCOPE, compareScopeId: KEEP_SCOPE, differenceCount: 3, duplicateDifferenceCount: 2,
+            file1Label: "ACME one", file1Type: "JSON", file2Label: "ACME two", file2Type: "JSON", firedRuleCount: 0, matchedPairCount: 3,
+            missingInFile1Count: 1, missingInFile2Count: 0, missingObjectDifferenceCount: 1, objectType: "ORDER",
+            processingWarnings: ["Compare scope 'DARPAN_TEST_KEEP_SCOPE' FILE_1 (ACME one) has 1 key(s) on more than one record; " +
+                    "every record under them is reported as a duplicate finding and left out of the compare."],
+            ruleCount: 0, ruleDifferenceCount: 0, ruleDifferenceFields: [], ruleErrors: [], ruleExecutionFailed: false,
+            ruleSetId: KEEP_RULE_SET, validationErrors: []]
+
     private static List<String> collectCompareIds(Dataset dataset) {
         return dataset.collectAsList()
                 .collect { row -> row.getAs("compare_id")?.toString() }

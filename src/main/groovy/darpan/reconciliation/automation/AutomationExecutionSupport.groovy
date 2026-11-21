@@ -40,6 +40,7 @@ import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
 import darpan.reconciliation.flowchart.RunFlowchartSupport
+import darpan.peak.AllowanceSpec
 import darpan.peak.PeakPeriodLoader
 import darpan.peak.PeakPeriodSupport
 import darpan.peak.PeakWindow
@@ -1163,16 +1164,28 @@ class AutomationExecutionSupport {
     private static final Closure<ZoneId> DEFAULT_TENANT_ZONE_LOADER = { def ec, String tenantId ->
         TenantAccessSupport.tenantTimeZoneFor(ec, tenantId)
     }
+    /** DAR-BE-328 plan 3: a tenant's sync lag allowances by automationId (active sync pairs); tests set their own. Null restores the default. */
+    private static final Closure<Map<String, AllowanceSpec>> DEFAULT_PEAK_ALLOWANCES_LOADER = { def ec, String tenantId ->
+        PeakPeriodLoader.allowances(ec, tenantId)
+    }
     static Closure<List<PeakWindow>> peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
     static Closure<ZoneId> tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
+    static Closure<Map<String, AllowanceSpec>> peakAllowancesLoader = DEFAULT_PEAK_ALLOWANCES_LOADER
+
+    static void setPeakAllowancesLoader(Closure<Map<String, AllowanceSpec>> loader) {
+        peakAllowancesLoader = loader ?: DEFAULT_PEAK_ALLOWANCES_LOADER
+    }
 
     static void setPeakWindowsLoader(Closure<List<PeakWindow>> loader) { peakWindowsLoader = loader ?: DEFAULT_PEAK_WINDOWS_LOADER }
 
     static void setTenantZoneLoader(Closure<ZoneId> loader) { tenantZoneLoader = loader ?: DEFAULT_TENANT_ZONE_LOADER }
 
-    /** DAR-BE-328: one scan tick's per-tenant peak windows and zones, each loaded at most once and never kept past the tick. */
+    /**
+     * DAR-BE-328: one scan tick's per-tenant peak windows, zones and sync lag allowances, each loaded at most once and
+     * never kept past the tick.
+     */
     static Map<String, Object> newPeakTick(Timestamp now) {
-        return [now: now, windows: [:], zones: [:]] as Map<String, Object>
+        return [now: now, windows: [:], zones: [:], allowances: [:]] as Map<String, Object>
     }
 
     /**
@@ -1184,11 +1197,16 @@ class AutomationExecutionSupport {
      * read window has closed (see readWindowEnd), or it would read orders still to come; with an automation in another
      * zone than the tenant that can be hours after the move. Callers that apply moves pass the automation; without it
      * no bound is applied.
+     * Plan 3: an automation with an active sync pair never starts before its read window's end plus the sync lag
+     * allowance in force on the fire's tenant-local date (PeakPeriodSupport.effectiveAllowance), with or without peak
+     * periods. That bound only raises the start, after the window clamp and before the peak hold; the fire, and so the
+     * read window, never changes. Only applied when the automation is passed (a retry's never is).
      */
     static Instant peakStart(def ec, Map<String, Object> tick, Instant fire, String automationId, String tenantId,
                                        boolean applyMoves, Timestamp lastFire = null, def automation = null) {
         List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
-        if (!windows) return fire
+        AllowanceSpec allowance = automation != null ? peakAllowanceOf(ec, tick, tenantId, automationId) : null
+        if (!windows && allowance == null) return fire
         try {
             ZoneId zone = peakZoneOf(ec, tick, tenantId)
             Instant now = ((Timestamp) tick.now).toInstant()
@@ -1199,11 +1217,16 @@ class AutomationExecutionSupport {
                 Instant windowEnd = readWindowEnd(automation, fire)
                 if (start.isBefore(windowEnd)) start = PeakPeriodSupport.effectiveStart(windowEnd, automationId, windows, zone, false)
             }
+            if (allowance != null) {
+                int minutes = PeakPeriodSupport.effectiveAllowance(allowance, windows, fire.atZone(zone).toLocalDate())
+                Instant allowed = readWindowEnd(automation, fire).plus(Duration.ofMinutes(minutes))
+                if (start.isBefore(allowed)) start = PeakPeriodSupport.effectiveStart(allowed, automationId, windows, zone, false)
+            }
             if (start.isAfter(now)) return start
             Instant fromNow = PeakPeriodSupport.effectiveStart(now, automationId, windows, zone, false)
             return fromNow.isAfter(now) ? fromNow : start
         } catch (Throwable peakError) {
-            logger.error("Peak periods of tenant {} could not be applied to automation {}; it starts at its normal time",
+            logger.error("Peak periods or the sync lag allowance of tenant {} could not be applied to automation {}; it starts at its normal time",
                     tenantId, automationId, peakError)
             return fire
         }
@@ -1214,8 +1237,9 @@ class AutomationExecutionSupport {
      * automation's windowTimeZone, never after the fire. Every relative read window (last days, previous day, week or
      * month) has closed by then. resolveWindows is not used: an audit's check reads the audit's window (a service call per
      * automation per tick), which runs to the end of the report day, so it would forbid every earlier move of an audit.
+     * Plan 3: also where a sync pair's allowance counts from (PeakPeriodFacadeSupport.heldRuns uses it too).
      */
-    private static Instant readWindowEnd(def automation, Instant fire) {
+    static Instant readWindowEnd(def automation, Instant fire) {
         ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
         Instant dayStart = fire.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()
         return dayStart.isAfter(fire) ? fire : dayStart
@@ -1233,13 +1257,15 @@ class AutomationExecutionSupport {
         if (fire != null) out.effectiveNextStart = fire
         try {
             String tenantId = normalize(readField(automation, "companyUserGroupId"))
+            String automationId = normalize(readField(automation, "automationId"))
             List<PeakWindow> windows = peakWindowsOf(ec, tick, tenantId)
-            if (!windows) return out
+            // Plan 3: a sync lag allowance moves the next run with no peak period at all.
+            if (!windows && peakAllowanceOf(ec, tick, tenantId, automationId) == null) return out
             ZoneId zone = peakZoneOf(ec, tick, tenantId)
             Instant until = PeakPeriodSupport.peakHoursEndIfInside(windows, ((Timestamp) tick.now).toInstant(), zone)
             Map<String, Object> result = [:]
             if (fire != null) {
-                Instant start = peakStart(ec, tick, fire.toInstant(), normalize(readField(automation, "automationId")), tenantId,
+                Instant start = peakStart(ec, tick, fire.toInstant(), automationId, tenantId,
                         true, toTimestamp(readField(automation, "lastScheduledFireTime")), automation)
                 result.effectiveNextStart = Timestamp.from(start)
                 if (start != fire.toInstant()) {
@@ -1288,6 +1314,26 @@ class AutomationExecutionSupport {
         }
         cache[key] = windows
         return windows
+    }
+
+    /**
+     * DAR-BE-328 plan 3: the automation's sync lag allowance, null when it has no active sync pair. The tenant's
+     * allowances load once per tick; if that read fails, none apply this tick (fail open, as peak periods do).
+     */
+    private static AllowanceSpec peakAllowanceOf(def ec, Map<String, Object> tick, String tenantId, String automationId) {
+        if (!tenantId || !automationId) return null
+        Map<String, Map<String, AllowanceSpec>> cache = (Map<String, Map<String, AllowanceSpec>>) tick.computeIfAbsent("allowances") { [:] }
+        if (!cache.containsKey(tenantId)) {
+            Map<String, AllowanceSpec> loaded = [:]
+            try {
+                loaded = (peakAllowancesLoader.call(ec, tenantId) ?: [:]) as Map<String, AllowanceSpec>
+            } catch (Throwable loadError) {
+                logger.error("Could not read the sync lag allowances of tenant {}; its runs start without them this tick",
+                        tenantId, loadError)
+            }
+            cache[tenantId] = loaded
+        }
+        return cache[tenantId][automationId]
     }
 
     private static ZoneId peakZoneOf(def ec, Map<String, Object> tick, String tenantId) {

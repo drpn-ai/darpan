@@ -129,6 +129,27 @@ class PeakPeriodLoaderSmokeTests {
         assertEquals(on, PeakPeriodLoader.readLimits(ec, A, LocalDate.of(2026, 11, 25)), "an inactive period is ignored")
     }
 
+    @Test
+    void allowancesOnlyForActivePairsOfThisTenant() {
+        automation("AUTO_PK_OFF", A)
+        automation("AUTO_PK_B", B)
+        create("darpan.pulse.SyncPair", [syncPairId: "SP_A", companyUserGroupId: A, automationId: "AUTO_PK_DIRECT",
+                                         upstreamSide: "FILE_1", allowanceMinutes: 120, isActive: "Y"])
+        create("darpan.pulse.SyncPair", [syncPairId: "SP_A_OFF", companyUserGroupId: A, automationId: "AUTO_PK_OFF",
+                                         upstreamSide: "FILE_1", allowanceMinutes: 300, isActive: "N"])
+        create("darpan.pulse.SyncPair", [syncPairId: "SP_B", companyUserGroupId: B, automationId: "AUTO_PK_B",
+                                         upstreamSide: "FILE_2", allowanceMinutes: 60, isActive: "Y"])
+        create("darpan.pulse.PeakPeriodSync", [peakPeriodId: "PA_ACTIVE", syncPairId: "SP_A", companyUserGroupId: A, allowanceMinutes: 360])
+        create("darpan.pulse.PeakPeriodSync", [peakPeriodId: "PA_PAST", syncPairId: "SP_A", companyUserGroupId: A, pulseEveryMinutes: 15])
+        create("darpan.pulse.PeakPeriodSync", [peakPeriodId: "PA_ACTIVE", syncPairId: "SP_A_OFF", companyUserGroupId: A, allowanceMinutes: 600])
+        create("darpan.pulse.PeakPeriodSync", [peakPeriodId: "PB_ACTIVE", syncPairId: "SP_B", companyUserGroupId: B, allowanceMinutes: 90])
+
+        assertEquals([AUTO_PK_DIRECT: new AllowanceSpec(120, [PA_ACTIVE: 360])], PeakPeriodLoader.allowances(ec, A),
+                "the inactive pair is left out, a period row with no allowance means normal, and B's pair never shows for A")
+        assertEquals([AUTO_PK_B: new AllowanceSpec(60, [PB_ACTIVE: 90])], PeakPeriodLoader.allowances(ec, B))
+        assertEquals([:], PeakPeriodLoader.allowances(ec, "NO_SUCH_TENANT"))
+    }
+
     private void period(String id, String tenant, String from, String thru, String active, String start, String end) {
         create("darpan.peak.PeakPeriod", [peakPeriodId: id, companyUserGroupId: tenant, periodName: id,
                                           fromDate: Date.valueOf(from), thruDate: Date.valueOf(thru), isActive: active,

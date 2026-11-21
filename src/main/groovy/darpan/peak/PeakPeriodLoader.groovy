@@ -91,6 +91,57 @@ class PeakPeriodLoader {
         return (share == null && !serial) ? ReadLimits.NONE : new ReadLimits(share, serial)
     }
 
+    /**
+     * DAR-BE-328 plan 3: the tenant's sync lag allowances keyed by automationId, from its active sync pairs (isActive Y),
+     * each with its peak periods' own values (PeakPeriodSync rows whose allowanceMinutes is set; null means normal).
+     * One pair per automation; if bad data gives an automation two, the larger allowance wins on every date, with a warn
+     * logged once per automation.
+     */
+    static Map<String, AllowanceSpec> allowances(def ec, String tenantId) {
+        String tenant = normalize(tenantId)
+        if (!tenant) return [:]
+        List pairs = (rows(ec, "darpan.pulse.SyncPair", tenant).list() ?: []).findAll { pair ->
+            (normalize(pair.get("isActive")) ?: "Y") == "Y" && normalize(pair.get("automationId"))
+        }
+        if (!pairs) return [:]
+        Map<String, Map<String, Integer>> periodsByPair = [:]
+        (rows(ec, "darpan.pulse.PeakPeriodSync", tenant).list() ?: []).each { row ->
+            Integer minutes = row.get("allowanceMinutes") as Integer
+            if (minutes == null) return
+            periodsByPair.computeIfAbsent(normalize(row.get("syncPairId"))) { [:] }
+                    .put(normalize(row.get("peakPeriodId")), Math.max(0, minutes))
+        }
+        Map<String, AllowanceSpec> byAutomation = [:]
+        pairs.each { pair ->
+            String automationId = normalize(pair.get("automationId"))
+            AllowanceSpec spec = new AllowanceSpec(Math.max(0, (pair.get("allowanceMinutes") as Integer) ?: 0),
+                    periodsByPair[normalize(pair.get("syncPairId"))] ?: [:])
+            AllowanceSpec other = byAutomation[automationId]
+            if (other != null) {
+                if (WARNED_DUPLICATE_PAIRS.add(tenant + "|" + automationId)) {
+                    logger.warn("Automation {} (tenant {}) has more than one active sync pair; the scheduler waits for the larger allowance",
+                            automationId, tenant)
+                }
+                spec = larger(spec, other)
+            }
+            byAutomation[automationId] = spec
+        }
+        return byAutomation
+    }
+
+    private static final Set<String> WARNED_DUPLICATE_PAIRS = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** The larger of two allowances on every date: a period one pair overrides is compared with the other's normal value. */
+    private static AllowanceSpec larger(AllowanceSpec a, AllowanceSpec b) {
+        Map<String, Integer> periods = [:]
+        ((a.periodMinutes.keySet() + b.periodMinutes.keySet()) as Set<String>).each { String id ->
+            Integer pa = a.periodMinutes[id]
+            Integer pb = b.periodMinutes[id]
+            periods[id] = Math.max(pa != null ? pa : a.normalMinutes, pb != null ? pb : b.normalMinutes)
+        }
+        return new AllowanceSpec(Math.max(a.normalMinutes, b.normalMinutes), periods)
+    }
+
     private static RunTimeMove moveOf(def ec, String tenant, def runTime, Map<String, Set<String>> auditAutomations) {
         String runTimeId = normalize(runTime.get("runTimeId"))
         LocalTime at

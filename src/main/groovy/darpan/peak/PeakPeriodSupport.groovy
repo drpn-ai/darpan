@@ -29,6 +29,16 @@ class PeakWindow {
     List<RunTimeMove> moves
 }
 
+/**
+ * DAR-BE-328 plan 3: one automation's sync lag allowance, in minutes: normalMinutes, or a peak period's own value
+ * (periodMinutes, keyed by peakPeriodId; a period with no value of its own is absent and means normal).
+ */
+@Immutable
+class AllowanceSpec {
+    int normalMinutes
+    Map<String, Integer> periodMinutes
+}
+
 /** Pure resolver: when may a scheduled run start, given a tenant's peak periods. No Moqui dependencies. */
 class PeakPeriodSupport {
     private static final int MAX_HOPS = 10
@@ -75,6 +85,14 @@ class PeakPeriodSupport {
             start = end
         }
         return start
+    }
+
+    /** The allowance in force on tenantDate: the active window's own value when it has one, else the normal one. */
+    static int effectiveAllowance(AllowanceSpec spec, List<PeakWindow> windows, LocalDate tenantDate) {
+        if (spec == null) return 0
+        PeakWindow w = activeOn(windows, tenantDate)
+        Integer periodMinutes = w != null ? spec.periodMinutes?.get(w.peakPeriodId) : null
+        return periodMinutes != null ? periodMinutes : spec.normalMinutes
     }
 
     static LocalTime parseHhMm(String s) {

@@ -5,6 +5,7 @@ import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.automation.AutomationExecutionSupport
 
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -109,9 +110,13 @@ class PeakPeriodFacadeSupport {
      * them (only to the first fire of a date): a run moved out of peak hours is not listed, one moved into them is, with
      * its moved time as normalTime. A run held at several times (a sub-daily schedule) shows "first–last" as normalTime
      * and its latest start. Scans the period's first HELD_RUN_SCAN_DAYS days plus every date a move names.
+     * Plan 3: allowances (PeakPeriodLoader.allowances, by automationId) hold a run with a sync pair until its read
+     * window's end plus the allowance in force in this period, after the moves and before peak hours, as the scheduler
+     * does. A run only the allowance moved reads "<HH:mm> waits for the sync lag allowance"; when peak hours give the
+     * final start, they are the reason.
      */
-    static List<Map> heldRuns(List<Map> automations, PeakWindow w, ZoneId tenantZone) {
-        if (w == null || w.peakStart == null || w.peakEnd == null) return []
+    static List<Map> heldRuns(List<Map> automations, PeakWindow w, ZoneId tenantZone, Map<String, AllowanceSpec> allowances = [:]) {
+        if (w == null || ((w.peakStart == null || w.peakEnd == null) && !allowances)) return []
         List<PeakWindow> withHours = [w]
         List<PeakWindow> movesOnly = [new PeakWindow(w.peakPeriodId, w.periodName, w.fromDate, w.thruDate, null, null, w.moves ?: [])]
         SortedSet<LocalDate> days = new TreeSet<LocalDate>()
@@ -126,6 +131,7 @@ class PeakPeriodFacadeSupport {
             String auditId = normalize(automation.get("auditId"))
             String label = auditId ? (normalize(automation.get("auditName")) ?: auditId) : (normalize(automation.get("label")) ?: automationId)
             String key = auditId ? "audit:" + auditId : "automation:" + automationId
+            AllowanceSpec allowance = automationId ? allowances?.get(automationId) : null
             int fires = 0
             for (LocalDate day in days) {
                 Instant dayEnd = day.plusDays(1).atStartOfDay(tenantZone).toInstant()
@@ -138,10 +144,17 @@ class PeakPeriodFacadeSupport {
                     fires++
                     Instant fire = next.toInstant()
                     Instant moved = PeakPeriodSupport.effectiveStart(fire, automationId, movesOnly, tenantZone, firstOfDay)
-                    Instant start = PeakPeriodSupport.effectiveStart(fire, automationId, withHours, tenantZone, firstOfDay)
                     firstOfDay = false
+                    Instant allowed = moved
+                    if (allowance != null) {
+                        Instant bound = AutomationExecutionSupport.readWindowEnd(automation, fire)
+                                .plus(Duration.ofMinutes(PeakPeriodSupport.effectiveAllowance(allowance, withHours, day)))
+                        if (allowed.isBefore(bound)) allowed = bound
+                    }
+                    Instant start = PeakPeriodSupport.effectiveStart(allowed, automationId, withHours, tenantZone, false)
                     if (start == moved) continue
-                    Map row = held.computeIfAbsent(key) { [label: label, times: new TreeSet<String>(), latest: null, latestOffset: null] }
+                    Map row = held.computeIfAbsent(key) { [label: label, times: new TreeSet<String>(), latest: null, latestOffset: null, peak: false] }
+                    if (start != allowed) row.peak = true
                     ((SortedSet<String>) row.times) << moved.atZone(tenantZone).format(HH_MM)
                     // Latest start by its distance from the start of the fire's day, so a start past midnight is later.
                     long offset = start.toEpochMilli() - day.atStartOfDay(tenantZone).toInstant().toEpochMilli()
@@ -155,7 +168,8 @@ class PeakPeriodFacadeSupport {
         return held.values().collect { Map row ->
             SortedSet<String> times = (SortedSet<String>) row.times
             String normalTime = times.size() == 1 ? times.first() : "${times.first()}–${times.last()}".toString()
-            [targetLabel: row.label, normalTime: normalTime, startsAt: row.latest, reason: "${normalTime} is in peak hours".toString()]
+            String why = row.peak ? "is in peak hours" : "waits for the sync lag allowance"
+            [targetLabel: row.label, normalTime: normalTime, startsAt: row.latest, reason: "${normalTime} ${why}".toString()]
         }.sort { Map r -> [r.normalTime, r.targetLabel] as List<String> } as List<Map>
     }
 

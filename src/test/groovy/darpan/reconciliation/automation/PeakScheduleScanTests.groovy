@@ -1,11 +1,13 @@
 package darpan.reconciliation.automation
 
+import darpan.peak.AllowanceSpec
 import darpan.peak.PeakWindow
 import darpan.peak.RunTimeMove
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -33,6 +35,7 @@ class PeakScheduleScanTests {
     void resetSeams() {
         AutomationExecutionSupport.peakWindowsLoader = null
         AutomationExecutionSupport.tenantZoneLoader = null
+        AutomationExecutionSupport.peakAllowancesLoader = null
     }
 
     private static Timestamp la(int month, int day, int hour, int minute) {
@@ -50,7 +53,104 @@ class PeakScheduleScanTests {
         windows = peakWindows
         AutomationExecutionSupport.peakWindowsLoader = loader
         AutomationExecutionSupport.tenantZoneLoader = { def ec, String tenantId -> LA }
+        AutomationExecutionSupport.peakAllowancesLoader = { def ec, String tenantId -> allowanceCalls++; allowances }
         return new FakeEc()
+    }
+
+    private int allowanceCalls = 0
+    private Map<String, AllowanceSpec> allowances = [:]
+
+    private static PeakWindow hoursOnly(LocalTime peakStart = LocalTime.of(8, 0), LocalTime peakEnd = LocalTime.of(23, 0)) {
+        new PeakWindow("P1", "Black Friday", LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), peakStart, peakEnd, [])
+    }
+
+    private static Instant startOf(FakeEc ec, FakeRow automation, Timestamp now) {
+        AutomationExecutionSupport.peakStart(ec, AutomationExecutionSupport.newPeakTick(now),
+                (automation.nextScheduledFireTime as Timestamp).toInstant(), automation.automationId as String, TENANT, true,
+                automation.lastScheduledFireTime as Timestamp, automation)
+    }
+
+    // --- DAR-BE-328 plan 3: a check with a sync pair waits for its read window's end plus the sync lag allowance ----------
+
+    @Test
+    void allowanceDelaysTheDailyCheck() {
+        FakeEc ec = ec([])
+        allowances = ["100518": new AllowanceSpec(360, [:])]
+        FakeRow automation = addAutomation(ec)
+
+        Map early = scan(ec, la(11, 28, 2, 16))
+
+        assertEquals(0, early.dueCount, "the Nov 27 window closed at 00:00; six hours of allowance run to 06:00")
+        assertTrue(executed(ec).isEmpty())
+        assertEquals(la(11, 28, 2, 15), automation.nextScheduledFireTime, "a run waiting on its allowance keeps its schedule")
+        assertEquals(1, allowanceCalls, "allowances load once per tenant per tick")
+        assertEquals(la(11, 28, 6, 0).toInstant(), startOf(ec, automation, la(11, 28, 2, 16)))
+
+        scan(ec, la(11, 28, 6, 1))
+
+        assertEquals(1, executed(ec).size())
+        assertEquals(la(11, 28, 2, 15), executed(ec)[0].scheduledFireTime, "the read window is the 02:15 one, never 06:00")
+        assertEquals(la(11, 29, 2, 15), automation.nextScheduledFireTime)
+    }
+
+    @Test
+    void allowanceBeatsAnEarlierMove() {
+        FakeEc ec = ec([window(LocalTime.of(5, 0))])
+        allowances = ["100518": new AllowanceSpec(360, [:])]
+        FakeRow automation = addAutomation(ec)
+
+        assertEquals(la(11, 28, 6, 0).toInstant(), startOf(ec, automation, la(11, 28, 1, 0)), "moved to 05:00, allowed from 06:00")
+
+        scan(ec, la(11, 28, 5, 1))
+        assertTrue(executed(ec).isEmpty())
+
+        scan(ec, la(11, 28, 6, 1))
+        assertEquals(1, executed(ec).size())
+        assertEquals(la(11, 28, 2, 15), executed(ec)[0].scheduledFireTime)
+    }
+
+    @Test
+    void allowanceThenPeakHold() {
+        FakeEc ec = ec([hoursOnly()])
+        allowances = ["100518": new AllowanceSpec(540, [:])]
+        FakeRow automation = addAutomation(ec)
+
+        assertEquals(la(11, 28, 23, 0).toInstant(), startOf(ec, automation, la(11, 28, 1, 0)),
+                "allowed from 09:00, which is inside peak hours 08:00-23:00: it waits for 23:00")
+    }
+
+    @Test
+    void periodAllowanceOverridesNormal() {
+        FakeEc ec = ec([new PeakWindow("P1", "Black Friday", LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), null, null, [])])
+        allowances = ["100518": new AllowanceSpec(120, [P1: 360])]
+        FakeRow inPeriod = addAutomation(ec)
+        assertEquals(la(11, 28, 6, 0).toInstant(), startOf(ec, inPeriod, la(11, 28, 0, 0)), "the period's six hours on Nov 28")
+
+        FakeRow before = addAutomation(ec, "100518", "0 15 2 * * ?", la(11, 23, 2, 15), la(11, 22, 2, 15))
+        assertEquals(la(11, 23, 2, 15).toInstant(), startOf(ec, before, la(11, 23, 0, 0)),
+                "Nov 23 is before the period: normal two hours, 00:00 + 2h is before the 02:15 fire")
+    }
+
+    @Test
+    void noPairNoChange() {
+        FakeEc ec = ec([])
+        allowances = ["OTHER": new AllowanceSpec(360, [:])]
+        FakeRow automation = addAutomation(ec)
+
+        assertEquals(la(11, 28, 2, 15).toInstant(), startOf(ec, automation, la(11, 28, 1, 0)))
+        scan(ec, la(11, 28, 2, 16))
+        assertEquals(1, executed(ec).size())
+    }
+
+    @Test
+    void aFailingAllowanceLoaderStartsRunsAtTheirNormalTime() {
+        FakeEc ec = ec([])
+        AutomationExecutionSupport.peakAllowancesLoader = { def e, String t -> throw new IllegalStateException("boom") }
+        addAutomation(ec)
+
+        scan(ec, la(11, 28, 2, 16))
+
+        assertEquals(1, executed(ec).size(), "an allowance bug never stops scheduling")
     }
 
     /** 100518: daily 02:15 Los Angeles, waiting on the Nov 28 02:15 fire. */

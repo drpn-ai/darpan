@@ -28,7 +28,7 @@
     </service>
 
     <service verb="get" noun="PeakPeriod" authz-action="view" allow-remote="true" authenticate="true">
-        <description>One peak period with its run-time moves, the runs its peak hours hold, and the runs a move can name.</description>
+        <description>One peak period with its run-time moves, the runs its peak hours or a sync lag allowance hold, and the runs a move can name.</description>
         <in-parameters><parameter name="peakPeriodId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -72,7 +72,7 @@
                 <set field="runTimeRows" from="darpan.peak.PeakPeriodFacadeSupport.rows(ec, 'darpan.peak.PeakPeriodRunTime', tenantId).condition('peakPeriodId', peakPeriodIdValue).orderBy(['onDate', 'runTime']).list() ?: []"/>
                 <set field="runTimes" from="runTimeRows.collect { rt -> [runTimeId: rt.runTimeId, automationId: rt.automationId, auditId: rt.auditId, targetLabel: labelById[rt.automationId ?: rt.auditId] ?: (rt.automationId ?: rt.auditId), onDate: rt.onDate?.toString(), runTime: rt.runTime, normalTime: normalTimes[rt.automationId ?: rt.auditId]] }"/>
                 <set field="peakWindow" from="darpan.peak.PeakPeriodFacadeSupport.windowOf(periodRow, runTimeRows, targetInfo.scheduled)"/>
-                <set field="heldRuns" from="darpan.peak.PeakPeriodFacadeSupport.heldRuns(targetInfo.scheduled, peakWindow, zone)"/>
+                <set field="heldRuns" from="darpan.peak.PeakPeriodFacadeSupport.heldRuns(targetInfo.scheduled, peakWindow, zone, darpan.peak.PeakPeriodLoader.allowances(ec, tenantId))"/>
                 <set field="targets" from="targetInfo.targets"/>
                 <set field="peakPeriod" from="[peakPeriodId: periodRow.peakPeriodId, periodName: periodRow.periodName, fromDate: fromLocal.toString(), thruDate: thruLocal.toString(), peakHoursStart: periodRow.peakHoursStart, peakHoursEnd: periodRow.peakHoursEnd, hotwaxReadSharePct: periodRow.hotwaxReadSharePct, netsuiteSerial: periodRow.netsuiteSerial ?: 'N', isActive: periodRow.isActive ?: 'Y', state: darpan.peak.PeakPeriodFacadeSupport.stateOf(periodRow.getMap(), today), timeZone: zone.getId(), createdByUserId: periodRow.createdByUserId, lastUpdatedDate: periodRow.lastUpdatedDate]"/>
             </if>

@@ -164,6 +164,24 @@ class PeakPeriodFacadeSupportTests {
     }
 
     @Test
+    void heldRunsNamesTheAllowance() {
+        Map<String, AllowanceSpec> allowances = [A1: new AllowanceSpec(360, [:]), A2: new AllowanceSpec(540, [:])]
+        List<Map> rows = PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 15 2 * * ?'), automation('A2', '0 15 2 * * ?'),
+                                                           automation('A3', '0 15 2 * * ?')], window(), LA, allowances)
+        assertEquals([[targetLabel: 'Run A1', normalTime: '02:15', startsAt: '06:00', reason: '02:15 waits for the sync lag allowance'],
+                      [targetLabel: 'Run A2', normalTime: '02:15', startsAt: '23:00', reason: '02:15 is in peak hours']], rows,
+                'A2 is allowed from 09:00, inside peak hours: peak hours give the final start, so they are the reason; A3 has no pair')
+    }
+
+    @Test
+    void heldRunsUsesThePeriodsOwnAllowance() {
+        PeakWindow noHours = new PeakWindow('P1', 'x', LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), null, null, [])
+        List<Map> rows = PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 15 2 * * ?')], noHours, LA,
+                [A1: new AllowanceSpec(60, [P1: 300])])
+        assertEquals([[targetLabel: 'Run A1', normalTime: '02:15', startsAt: '05:00', reason: '02:15 waits for the sync lag allowance']], rows)
+    }
+
+    @Test
     void windowOfCarriesMovesAndExpandsAuditsToTheirChecks() {
         Map periodRow = [peakPeriodId: 'P1', periodName: 'Black Friday sale', fromDate: '2026-11-24', thruDate: '2026-12-01',
                          peakHoursStart: '08:00', peakHoursEnd: '23:00']

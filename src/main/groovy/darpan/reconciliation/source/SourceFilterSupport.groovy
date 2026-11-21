@@ -197,6 +197,40 @@ class SourceFilterSupport {
     }
 
     /**
+     * DAR-BE-318 (plan 3b-2b, front-end A). The parsed rules in the one Keep rule shape (KeepRules), so Spark runs what
+     * {@link #evaluate} tests: id "A:<sequenceNum>", label = the field (what _excludedBy names), source TENANT, every test
+     * on the Groovy text of the value with the A_UPPER fold.
+     *   EXCLUDE_IN     [IN -> VALUE]
+     *   INCLUDE_IN     [IS_NULL -> FIELD_ABSENT, NOT_IN -> VALUE]
+     *   INCLUDE_PREFIX [IS_NULL -> FIELD_ABSENT, not STARTS_WITH_ANY -> VALUE]
+     * Takes parseRules' output (already reduced to record fields by toRecordFieldRules where the stored form is a path).
+     */
+    static List<Map> toKeepRules(List<Map<String, Object>> parsedRules) {
+        return (parsedRules ?: []).collect { Map<String, Object> rule ->
+            String field = (String) rule.get("fieldExpression")
+            List<String> values = new ArrayList<String>((List<String>) rule.get("values"))
+            Closure<Map> compare = { String op, List<String> listed ->
+                [kind: "compare", field: field, text: "GROOVY", op: op, values: listed, valueKind: "TEXT", fold: "A_UPPER"] as Map
+            }
+            List<Map> tests
+            switch (rule.get("operator")) {
+                case OPERATOR_INCLUDE_IN:
+                    tests = [[test: compare("IS_NULL", null), reason: REASON_FIELD_ABSENT],
+                             [test: compare("NOT_IN", values), reason: REASON_VALUE]]
+                    break
+                case OPERATOR_INCLUDE_PREFIX:
+                    tests = [[test: compare("IS_NULL", null), reason: REASON_FIELD_ABSENT],
+                             [test: [kind: "not", of: compare("STARTS_WITH_ANY", values)], reason: REASON_VALUE]]
+                    break
+                default:
+                    tests = [[test: compare("IN", values), reason: REASON_VALUE]]
+            }
+            return [id: "A:${rule.get('sequenceNum')}".toString(), sequenceNum: (rule.get("sequenceNum") as Integer), label: field,
+                    source: "TENANT", tests: tests] as Map
+        } as List<Map>
+    }
+
+    /**
      * Translate stored rules into the shape {@link #evaluate} actually tests.
      *
      * {@code fieldExpression} is STORED as the operator-facing expression the rules board writes — a

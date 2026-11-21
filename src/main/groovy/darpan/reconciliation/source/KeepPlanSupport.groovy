@@ -89,7 +89,7 @@ class KeepPlanSupport {
         } else if (where == SPARK) {
             List<Map> rules = []
             rules.addAll(KeepLineTranslator.declared(keepLines(ec, connector), extractOptions ?: [:]))
-            rules.addAll(tenantKeepRules(SourceFilterSupport.parseRules(rows)))
+            rules.addAll(SourceFilterSupport.toKeepRules(SourceFilterSupport.parseRules(rows)))
             KeepRules.validate(rules)
             out.rules = rules
             out.writeSidecar = normalize(connector.get("excludedRecordsSidecar"))?.toUpperCase() == "Y"
@@ -109,34 +109,5 @@ class KeepPlanSupport {
         String tenant = normalize(companyUserGroupId)
         if (!tenant) throw new IllegalArgumentException("A side's Keep plan is read for one named tenant; none was given.")
         return tenant
-    }
-
-    /**
-     * REPLACE AFTER TASK 5: SourceFilterSupport.toKeepRules(parsedRules) is front-end A's owner (Shared contracts, Task 5) and
-     * its parity suite. This adapter states SourceFilterSupport.evaluate in the Keep rule shape until it lands, then is deleted.
-     */
-    private static List<Map> tenantKeepRules(List<Map<String, Object>> parsedRules) {
-        return parsedRules.collect { Map<String, Object> rule ->
-            String field = rule.fieldExpression as String
-            List<String> values = new ArrayList<String>((List<String>) rule.values)
-            Closure<Map> compare = { String op, List<String> listed ->
-                [kind: "compare", field: field, text: "GROOVY", op: op, values: listed, valueKind: "TEXT", fold: "A_UPPER"] as Map
-            }
-            List<Map> tests
-            switch (rule.operator) {
-                case SourceFilterSupport.OPERATOR_INCLUDE_IN:
-                    tests = [[test: compare("IS_NULL", null), reason: SourceFilterSupport.REASON_FIELD_ABSENT],
-                             [test: compare("NOT_IN", values), reason: SourceFilterSupport.REASON_VALUE]]
-                    break
-                case SourceFilterSupport.OPERATOR_INCLUDE_PREFIX:
-                    tests = [[test: compare("IS_NULL", null), reason: SourceFilterSupport.REASON_FIELD_ABSENT],
-                             [test: [kind: "not", of: compare("STARTS_WITH_ANY", values)], reason: SourceFilterSupport.REASON_VALUE]]
-                    break
-                default:
-                    tests = [[test: compare("IN", values), reason: SourceFilterSupport.REASON_VALUE]]
-            }
-            return [id: "A:${rule.sequenceNum}".toString(), sequenceNum: rule.sequenceNum as Integer, label: field, source: "TENANT",
-                    tests: tests] as Map
-        }
     }
 }

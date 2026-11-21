@@ -293,6 +293,7 @@ class KeepLineTranslator {
     }
 
     /** moqui-rules convert#FactValue for the kinds Keep compares: [value] or [problem]. */
+    // A known copy (no ec here to call the service): it must track moqui-rules convert#FactValue (number text, whole-number bounds, yes/no words).
     private static Map convert(String kindId, Object value) {
         if (value == null) return [value: null]
         String text = value.toString().trim()

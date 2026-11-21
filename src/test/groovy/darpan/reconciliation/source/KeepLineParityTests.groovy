@@ -27,6 +27,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -264,6 +265,65 @@ class KeepLineParityTests {
                 [region: "north", limit: "11"] : ["OVER", "OVER"],
         ]
         expected.each { Map params, List<String> answers -> assertEquals(answers, parity(rules, records, params), params.toString()) }
+
+        // Every other operator on a param line, each against evaluate#RuleSet over a missing, a blank and some set values.
+        // [operator, compare value, normalizeText, answers for a missing and a blank param]
+        List<Map> regions = [[:], [region: ""], [region: "east"], [region: " West "], [region: "wren"], [region: "ss"], [region: "zulu"]]
+        paramOperators("param_region", regions, [
+                ["ENTCO_NOT_EQUALS", "east", null, ["HELD", "HELD"]],
+                ["ENTCO_IN", '["east", " West "]', null, [null, null]],
+                ["ENTCO_NOT_IN", '["east", " West "]', null, ["HELD", "HELD"]],
+                ["ENTCO_IS_NULL", null, null, ["HELD", null]],          // without normalizeText a blank text is a value
+                ["ENTCO_IS_NOT_NULL", null, null, [null, "HELD"]],
+                ["ENTCO_LESS", "m", null, ["HELD", "HELD"]],            // no value, and an empty text, order first
+                ["ENTCO_GREATER_EQ", "m", null, [null, null]],
+                ["ENTCO_NOT_LIKE", "w%", null, ["HELD", "HELD"]],
+                ["ENTCO_IN", '[" WEST ", "ß"]', "Y", [null, null]],    // with normalizeText a blank text is no value
+                ["ENTCO_NOT_IN", '[" WEST ", "ß"]', "Y", ["HELD", "HELD"]],
+                ["ENTCO_NOT_LIKE", "w%", "Y", ["HELD", "HELD"]],
+        ])
+        // A number param: a blank does not fit, so moqui-rules refuses the fact and the translator refuses the line (both, below).
+        List<Map> limits = [[:], [limit: "10.0"], [limit: "2.5"], [limit: "11"], [limit: "-1"]]
+        List<List> numberLines = [
+                ["ENTCO_NOT_EQUALS", "10", null, ["HELD"]],
+                ["ENTCO_IN", '["2.50", 10]', null, [null]],
+                ["ENTCO_NOT_IN", '["2.50", 10]', null, ["HELD"]],
+                ["ENTCO_LESS", "10", null, ["HELD"]],
+                ["ENTCO_GREATER_EQ", "10", null, [null]],
+                ["ENTCO_IS_NULL", null, null, ["HELD"]],
+                ["ENTCO_IS_NOT_NULL", null, null, [null]],
+        ]
+        paramOperators("param_limit", limits, numberLines)
+        numberLines.each { List spec ->
+            String ruleSetId = storeDecision(paramRules("param_limit", spec))
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
+                KeepLineTranslator.translate(decisionRules(ruleSetId), "acme", fieldKinds(), [limit: ""] as Map<String, Object>, recordKeys())
+            }
+            assertTrue(refused.message.contains("parameter value  does not fit field param_limit"), refused.message)
+            File source = recordsFile(ruleSetId, [[status: "a"]])
+            String moqui = moquiReasons(ruleSetId, source, [limit: ""])[0]
+            assertTrue(moqui?.startsWith(REFUSED) && moqui.contains("Value  does not fit field param_limit"), "${spec[0]}: ${moqui}")
+        }
+    }
+
+    /**
+     * One decision per line: the param line, and below it a record line that never holds (so the records file has a Keep
+     * column). Each param set is run both ways (parity asserts each record); the first answers are pinned, and each line
+     * must both hold and not hold across the sets, so no line passes on a constant.
+     */
+    private void paramOperators(String field, List<Map> paramSets, List<List> lines) {
+        lines.each { List spec ->
+            String ruleSetId = storeDecision(paramRules(field, spec))
+            List<String> answers = paramSets.collect { Map params -> parityOn(ruleSetId, [[status: "a"]], params)[0] }
+            String what = "${field} ${spec[0]} ${spec[1]} normalize ${spec[2]}: ${answers}"
+            assertEquals(spec[3], answers.take(((List) spec[3]).size()), what)
+            assertTrue(answers.contains("HELD") && answers.contains(null), what)
+        }
+    }
+
+    private List<Map> paramRules(String field, List spec) {
+        return [rule("param line", 20, "HELD", [cmp("01", field, spec[0] as String, spec[1] as String, null, spec[2] as String, false)]),
+                rule("record line", 10, "NEVER", [cmp("01", "status", "ENTCO_IS_NULL")])]
     }
 
     @Test
@@ -312,25 +372,42 @@ class KeepLineParityTests {
      * record and refuses none.
      */
     private List<String> parity(List<Map> ruleSpecs, List<Map> records, Map params = [:]) {
-        Map both = bothWays(ruleSpecs, records, params)
+        return parityOn(storeDecision(ruleSpecs), records, params)
+    }
+
+    /** [spark: reasons by record, moqui: "B:<ruleId>|<outcome>", null, or "REFUSED: ..." by record]. */
+    private Map bothWays(List<Map> ruleSpecs, List<Map> records, Map params = [:]) {
+        return bothWaysOn(storeDecision(ruleSpecs), records, params)
+    }
+
+    private Map bothWaysOn(String ruleSetId, List<Map> records, Map params) {
+        File source = recordsFile(ruleSetId, records)
+        return [spark: sparkReasons(ruleSetId, source, params, records.size()), moqui: moquiReasons(ruleSetId, source, params)]
+    }
+
+    /** parity over a decision already stored. */
+    private List<String> parityOn(String ruleSetId, List<Map> records, Map params) {
+        Map both = bothWaysOn(ruleSetId, records, params)
         records.eachWithIndex { Map record, int i ->
             assertEquals(both.moqui[i], both.spark[i], "record ${i} ${record} with params ${params}: moqui-rules vs Spark")
         }
         return outcomes((List<String>) both.spark)
     }
 
-    /** [spark: reasons by record, moqui: "B:<ruleId>|<outcome>", null, or "REFUSED: ..." by record]. */
-    private Map bothWays(List<Map> ruleSpecs, List<Map> records, Map params = [:]) {
-        String ruleSetId = storeDecision(ruleSpecs)
+    private File recordsFile(String ruleSetId, List<Map> records) {
         File source = new File(workDir, "decision-${ruleSetId}-${decisionCount++}.json")
         source.setText(JsonOutput.toJson([metadata: [:], records: records]), "UTF-8")
-        return [spark: sparkReasons(ruleSetId, source, params, records.size()), moqui: moquiReasons(ruleSetId, source, params)]
+        return source
+    }
+
+    /** fact field name to record key: generate#PairFactType keyNames.file1, inverted. */
+    private Map<String, String> recordKeys() {
+        return fieldOf.collectEntries { String key, String name -> [(name): key] } as Map<String, String>
     }
 
     /** The decision read back from moqui-rules, translated, and run over the records file in Spark. */
     private List<String> sparkReasons(String ruleSetId, File source, Map params, int count) {
-        Map translated = KeepLineTranslator.translate(decisionRules(ruleSetId), "acme", fieldKinds(), params as Map<String, Object>,
-                fieldOf.collectEntries { String key, String name -> [(name): key] } as Map<String, String>)
+        Map translated = KeepLineTranslator.translate(decisionRules(ruleSetId), "acme", fieldKinds(), params as Map<String, Object>, recordKeys())
         assertEquals([], translated.refusals)
         List<Map> rules = (List<Map>) translated.rules
         List<Map> injections = KeepRules.injections(rules)

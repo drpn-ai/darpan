@@ -39,6 +39,30 @@ class KeepPlanSupport {
     }
 
     /**
+     * Ruling 3b2b-23. Whether Spark runs the Keep of a side its connector places in Spark: only once the side's extract service
+     * no longer declares the connector's filter parameter. An extract that still takes it still filters at the read until its
+     * system's task (17–23) drops the parameter, and Spark Keep over that side would change live results: it cannot see fields
+     * the read overlays (HotWax unit grain filters on order fields), and where both filter it reports zero exclusions that the
+     * conclusions read as authoritative. Such a side keeps today's read (todaysRead). False for any other placement, and for an
+     * extract that is not installed.
+     *
+     * @param extractServiceDefinition the side's extract service definition (ec.service.getServiceDefinition), or null
+     */
+    static boolean sparkKeepsSide(Map connector, Object extractServiceDefinition) {
+        if (placement(connector) != SPARK || extractServiceDefinition == null) return false
+        Collection<String> declared = (Collection<String>) (extractServiceDefinition.inParameterNameList ?: [])
+        return !(normalize(connector.get("filterParameterName")) in declared)
+    }
+
+    /**
+     * The plan of a side that keeps today's read: the read gets the rows (getter shape), Spark runs nothing and writes no Keep
+     * artifact, and no field is added to any projection, so the read is sent exactly what it was before Keep moved into Spark.
+     */
+    static Map todaysRead(List<Map<String, Object>> recordFieldRows) {
+        return [placement: READ, readFilters: recordFieldRows ?: [], rules: [], writeSidecar: false, fields: new LinkedHashSet<String>()]
+    }
+
+    /**
      * The compare scope's filter rows for one side, owned by companyUserGroupId only, in sequenceNum order and getter shape
      * (SourceFilterSupport.toRecordFieldRules). The read is pinned to the named tenant whatever the caller's context: a
      * scheduled run has no active tenant, so the tenant filter cannot be relied on (Review Focus 4). A blank tenant throws.

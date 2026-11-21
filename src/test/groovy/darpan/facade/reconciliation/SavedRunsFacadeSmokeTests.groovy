@@ -3032,4 +3032,109 @@ end'''
                 .condition("fileSide", fileSide)
                 .orderBy("sequenceNum").disableAuthz().useCache(false).list() ?: []
     }
+
+    // ------------------------------------------------------------------------------------- DAR-BE-318 plan 3b-2b, Task 13
+
+    /**
+     * Review M6: Spark Keep runs inside the real run#SavedRunDiff, through Moqui, and the classes its UDFs live in are resolved
+     * where a deployed image keeps them. A made-up coded connector (KL_SMOKE) places Keep in Spark; its read (an extracted source,
+     * AUT_SRC_DB, so apiRuleSetRunFailsBeforeCompareSourceInsertWhenSourceTypeEnumIsMissing's AUT_SRC_API sweep leaves it alone) is sent no filters,
+     * and the run sets aside, at ingest, the record the scope's filter rejects (front-end A's case-fold is a UDF).
+     *
+     * What loaded the classes is recorded, not assumed (printed as "KEEP-CLASSLOADERS ..." in this test's output):
+     * <ul>
+     * <li>the driver: the loader that defines KeepColumnSupport$Fold when asked through Moqui's runtime loader (ec.classLoader).
+     *     Moqui's MClassLoader asks its parents first, so on the Gradle test classpath that is the application loader; in a
+     *     deployed image the darpan jar is on no parent, so it is MClassLoader itself;</li>
+     * <li>the Spark task threads, which deserialize the UDF: their context loader chain must reach Moqui's MClassLoader, the
+     *     one loader that can define darpan classes in a deployed image. This test asserts it does.</li>
+     * </ul>
+     */
+    @Test
+    void aSparkKeptSideRunsThroughRunSavedRunDiffAndItsKeepClassesResolveThroughMoqui() {
+        String service = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveRecords"
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KL_SMOKE" extractServiceName="${service}"
+                expectedSourceConfigType="KL_SMOKE_TYPE" configParameterName="projConfigId" dateFromParameterName="windowStart"
+                dateToParameterName="windowEnd" preserveWindowInstants="Y" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="Y" enabled="Y"/>
+            <moqui.basic.Enumeration enumId="KL_SMOKE" enumTypeId="DarpanSystemSource" description="Keep smoke (made up)"/>
+            <darpan.rule.RuleSet ruleSetId="KL_SMOKE_RS" ruleSetName="Keep smoke" companyUserGroupId="${KREWE}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="KL_SMOKE_RS" ruleSetId="KL_SMOKE_RS" objectType="ORDER"
+                companyUserGroupId="${KREWE}" description="Keep smoke"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KL_SMOKE_RS" fileSide="FILE_1" systemEnumId="KL_SMOKE"
+                sourceTypeEnumId="AUT_SRC_DB" sourceConfigId="kl-smoke" sourceConfigType="KL_SMOKE_TYPE" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${KREWE}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KL_SMOKE_RS" fileSide="FILE_2" systemEnumId="SHOPIFY" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${KREWE}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KL_SMOKE_RS" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].channel" operator="EXCLUDE_IN" filterValues="TEST" companyUserGroupId="${KREWE}"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        KeepLiveTestExtracts.RECORDS.put("kl-smoke", [[orderId: "S1", channel: "WEB"], [orderId: "S2", channel: " test"]])
+        KeepLiveTestExtracts.CALLS.clear()
+
+        Map out = ec.service.sync().name("facade.ReconciliationFacadeServices.run#SavedRunDiff").parameters([
+                savedRunId     : "KL_SMOKE_RS",
+                windowStartDate: Timestamp.valueOf("2026-11-10 00:00:00"),
+                windowEndDate  : Timestamp.valueOf("2026-11-11 00:00:00"),
+                file2Name      : "ledger.json",
+                file2Text      : groovy.json.JsonOutput.toJson([records: [[orderId: "S1"]]]),
+        ]).call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(0L, out.runResult.differenceCount as long, "S2 is set aside by Spark Keep, so the ledger's lack of it is no difference")
+
+        Map sent = KeepLiveTestExtracts.CALLS.find { it.projConfigId == "kl-smoke" }
+        assertNull(sent.sourceFilters, "the read is sent no filters: Keep runs in Spark")
+        File extract = new File(darpan.facade.common.DataManagerSupport.resolveDirectoryFile(ec, sent.outputLocation as String, false),
+                sent.fileName as String)
+        Map summary = darpan.reconciliation.source.KeepArtifacts.readSummary(extract)
+        assertEquals([1L, 1L], [summary.keptCount as long, summary.setAsideCount as long], "the Keep step ran inside the run: ${summary}")
+        assertEquals(["S2"], ((Map) new groovy.json.JsonSlurper().parse(new File(extract.parentFile,
+                darpan.reconciliation.conclusion.ExcludedRecordsSidecar.fileNameFor(extract.name)))).records*.orderId)
+
+        // the driver: which loader defines the UDF class when asked through Moqui's runtime loader
+        ClassLoader moqui = ec.factory.classLoader
+        Class fold = moqui.loadClass("darpan.reconciliation.source.KeepColumnSupport\$Fold")
+        // the task threads: the UDF is deserialized there, through their context loader
+        org.apache.spark.sql.SparkSession spark = org.apache.spark.sql.SparkSession.active()
+        Map task = (Map) new groovy.json.JsonSlurper().parseText(spark.range(1).map(new KeepLoaderProbe(),
+                org.apache.spark.sql.Encoders.STRING()).collectAsList()[0] as String)
+        Map record = [moquiLoader         : "${moqui.class.name}@${System.identityHashCode(moqui)}".toString(),
+                      driverFoldDefinedBy : fold.classLoader?.class?.name,
+                      driverFoldIsTestClass: fold.is(darpan.reconciliation.source.KeepColumnSupport.Fold),
+                      taskThread          : task.taskThread,
+                      taskContextChain    : task.contextChain,
+                      taskFoldDefinedBy   : task.foldDefinedBy,
+                      sparkUiEnabled      : spark.conf().get("spark.ui.enabled")]
+        println "KEEP-CLASSLOADERS ${groovy.json.JsonOutput.toJson(record)}"
+        assertTrue(((List<String>) task.contextChain).contains(record.moquiLoader as String),
+                "the Spark task threads resolve classes through Moqui's MClassLoader, where a deployed image keeps darpan: ${record}")
+        assertEquals(fold.classLoader?.class?.name, task.foldDefinedBy, "driver and task threads resolve the same class: ${record}")
+        assertEquals("false", record.sparkUiEnabled)
+    }
+
+    /** Runs on a Spark task thread: its context loader chain (class@identity) and who defines the Keep UDF class through it. */
+    static class KeepLoaderProbe implements org.apache.spark.api.java.function.MapFunction<Long, String> {
+        String call(Long ignored) {
+            ClassLoader context = Thread.currentThread().contextClassLoader
+            List<String> chain = []
+            for (ClassLoader l = context; l != null; l = parentOf(l)) chain << "${l.class.name}@${System.identityHashCode(l)}".toString()
+            Class fold = Class.forName("darpan.reconciliation.source.KeepColumnSupport\$Fold", false, context)
+            return groovy.json.JsonOutput.toJson([taskThread: Thread.currentThread().name, contextChain: chain,
+                                                  foldDefinedBy: fold.classLoader?.class?.name])
+        }
+
+        /** The loader's parent; Spark's ExecutorClassLoader has none of its own and delegates to its parentLoader field. */
+        private static ClassLoader parentOf(ClassLoader loader) {
+            if (loader.parent != null) return loader.parent
+            for (Class c = loader.class; c != null; c = c.superclass) {
+                java.lang.reflect.Field field = c.declaredFields.find { it.name == "parentLoader" }
+                if (field != null) {
+                    field.accessible = true
+                    return (ClassLoader) field.get(loader)
+                }
+            }
+            return null
+        }
+    }
 }

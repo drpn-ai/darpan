@@ -8,6 +8,8 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.ExtractReplaySupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.core.ReconciliationServices
+import darpan.reconciliation.source.KeepArtifacts
+import darpan.reconciliation.source.KeepPlanSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -45,6 +48,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * are compared byte for byte. None of them carries the extract's metadata (datasetId, copyVersion, copyReadAt, servedFromCopy
  * live only in the extract's own metadata), so no key needs removing. The extract itself differs in its metadata only:
  * its records and its .excluded.json side file are compared apart from it.
+ *
+ * DAR-BE-318 plan 3b-2b (Task 13): KC_ISO is a coded connector, so an interactive side's Keep runs in Spark at ingest. Neither
+ * the live read nor the slice filters; the compare runs the side's Keep (keepBySide) over each, and the kept records, the
+ * set-aside records, the Keep summary and the side file Spark writes are compared, served against live. KC_ISO's extract takes
+ * the Keep fields by name and no readFields (KeepLiveTestExtractionServices.xml): a side asking a non-projecting source for
+ * readFields is never served from the copy, so a readFields-declaring extract would leave nothing to compare.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class KeptCopyParityTests {
@@ -55,7 +64,7 @@ class KeptCopyParityTests {
     private static final String EDITOR_USERNAME = "test.customer"
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
-    private static final String ISO_EXTRACT = "reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRecords"
+    private static final String ISO_EXTRACT = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveRecords"
     private static final Timestamp START = Timestamp.from(Instant.parse("2026-11-10T08:00:00Z"))
     private static final Timestamp END = Timestamp.from(Instant.parse("2026-11-11T08:00:00Z"))
     private static final Instant COPY_READ_AT = Instant.parse("2026-11-20T00:00:00Z")
@@ -134,27 +143,29 @@ class KeptCopyParityTests {
         assertEquals(served.result.fileName, live.result.fileName)
         assertNotEquals(served.result.fileLocation, live.result.fileLocation)
 
-        // the extracts: the copy's metadata apart, the same records and the same set-aside records
+        // plan 3b-2b: the side's Keep runs in Spark, so neither read filters
+        assertEquals(KeepPlanSupport.SPARK, served.plan.placement)
+        assertEquals(live.plan, served.plan, "both sides carry the same Keep plan to the compare")
+        assertNull(liveCalls[0].params.sourceFilters, "the live read is sent no filters")
+        assertEquals(["madeUpStore"], liveCalls[0].params.keepRuleFields, "and is asked for the field Keep reads")
+
+        // the extracts: the copy's metadata apart, the same records, the filtered store's among them, and no side file yet
         Map servedDoc = json(new File(served.result.fileLocation as String))
         Map liveDoc = json(new File(live.result.fileLocation as String))
         assertEquals(true, servedDoc.metadata.servedFromCopy)
         assertEquals(id, servedDoc.metadata.datasetId)
         assertEquals(true, liveDoc.metadata.live)
         assertEquals(null, liveDoc.metadata.servedFromCopy)
-        List<String> keptIds = servedDoc.records*.legacyResourceId
-        assertEquals(17, keptIds.size(), "19 orders in the window, two of them from the filtered store")
-        assertTrue(keptIds.contains(START_ORDER), "an order exactly at the window start is in")
-        assertFalse(keptIds.contains(END_ORDER), "an order exactly at the window end is out")
-        assertTrue(keptIds.intersect(TEST_STORE_ORDERS).isEmpty(), "the filtered store is not read")
+        List<String> readIds = servedDoc.records*.legacyResourceId
+        assertEquals(19, readIds.size(), "19 orders in the window, the filtered store's two among them")
+        assertTrue(readIds.contains(START_ORDER), "an order exactly at the window start is in")
+        assertFalse(readIds.contains(END_ORDER), "an order exactly at the window end is out")
+        assertTrue(readIds.containsAll(TEST_STORE_ORDERS), "the filtered store is read: Spark sets it aside")
         assertEquals(JsonOutput.toJson(liveDoc.records), JsonOutput.toJson(servedDoc.records))
         assertEquals(liveDoc.records.size(), served.result.recordCount)
-        File servedSide = sidecarOf(served)
-        File liveSide = sidecarOf(live)
-        assertTrue(servedSide.isFile() && liveSide.isFile(), "the filtered orders are set aside in both")
-        assertEquals(TEST_STORE_ORDERS as Set, json(servedSide).records*.legacyResourceId as Set)
-        assertEquals(liveSide.getText("UTF-8"), servedSide.getText("UTF-8"))
+        assertFalse(sidecarOf(served).exists() || sidecarOf(live).exists(), "neither read set anything aside")
 
-        // the compare over each, and what it writes
+        // the compare over each, with the side's Keep, and what it writes
         Map servedOut = compareAndWrite(served, "served")
         Map liveOut = compareAndWrite(live, "live")
         ["diff.json", "result.json"].each { String name ->
@@ -163,12 +174,28 @@ class KeptCopyParityTests {
         }
         assertArrayEquals(recordsFileOf(live).bytes, recordsFileOf(served).bytes, "the compare's own records file differs")
 
+        // Spark Keep kept and set aside the same records on both: the Keep summary, the set-aside rows and the side file
+        File servedExtract = new File(served.result.fileLocation as String), liveExtract = new File(live.result.fileLocation as String)
+        Map servedKeep = KeepArtifacts.readSummary(servedExtract)
+        assertEquals([17L, 2L], [servedKeep.keptCount as long, servedKeep.setAsideCount as long], "${servedKeep}")
+        assertEquals(KeepArtifacts.readSummary(liveExtract), servedKeep)
+        assertEquals(KeepArtifacts.rowsFile(liveExtract).getText("UTF-8"), KeepArtifacts.rowsFile(servedExtract).getText("UTF-8"))
+        List<String> keptIds = []
+        KeepArtifacts.forEachKeptRecord(servedExtract) { Map r -> keptIds << (r.legacyResourceId as String) }
+        assertEquals(17, keptIds.size())
+        assertTrue(keptIds.intersect(TEST_STORE_ORDERS).isEmpty(), "the filtered store is not kept")
+        File servedSide = sidecarOf(served)
+        File liveSide = sidecarOf(live)
+        assertTrue(servedSide.isFile() && liveSide.isFile(), "the filtered orders are set aside in both, in a side file (KC_ISO says Y)")
+        assertEquals(TEST_STORE_ORDERS as Set, json(servedSide).records*.legacyResourceId as Set)
+        assertEquals(liveSide.getText("UTF-8"), servedSide.getText("UTF-8"))
+
         // the diff is the real thing, not two empty documents
         Map<String, String> typeById = ((List<Map>) json(new File(dataManagerRoot, "kcp-out/served/diff.json")).differences)
                 .collectEntries { [(it.primaryId as String): it.diffType as String] }
         assertEquals("MISSING_IN_FILE_2", typeById[START_ORDER], "the start order is in the window and the ledger lacks it")
         assertEquals("MISSING_IN_FILE_1", typeById[END_ORDER], "the ledger holds the end order, which the window leaves out")
-        assertEquals("MISSING_IN_FILE_1", typeById[TEST_STORE_ORDERS[0]], "the ledger holds a test-store order the filter drops")
+        assertEquals("MISSING_IN_FILE_1", typeById[TEST_STORE_ORDERS[0]], "the ledger holds a test-store order Keep sets aside")
         assertEquals("MISSING_IN_FILE_1", typeById["5009999"])
         assertTrue(typeById.values().count { it == "MISSING_IN_FILE_2" } >= 2, typeById.toString())
     }
@@ -365,11 +392,13 @@ class KeptCopyParityTests {
         // the same artifact file name for every run, in a folder of its own
         Map artifact = [location: DataManagerSupport.resolveReconciliationRunLocation(ec, "kcp-${token}-${runToken}", STAMP), runToken: "parity"]
         ec.message.clearAll()
+        // plan 3b-2b: the side's Keep plan, built as run#SavedRunDiff builds it, sent to the read and to the compare
+        Map plan = RunExtractSupport.sideKeep(ec, source, "FILE_1", RunExtractSupport.resolveExtractConnector(ec, source))
         Map result = RunExtractSupport.extractApiSource(ec, source, "FILE_1", "File 1", artifact,
-                [windowStartDate: START, windowEndDate: END, timeZone: "UTC"], null, liveExtractor(calls))
+                [windowStartDate: START, windowEndDate: END, timeZone: "UTC"], null, liveExtractor(calls), null, plan)
         List<String> errors = ec.message.errors.collect { it.toString() }
         ec.message.clearAll()
-        return [result: result, artifact: artifact, source: source, errors: errors]
+        return [result: result, artifact: artifact, source: source, errors: errors, plan: plan]
     }
 
     /** The scheduled dispatcher, as a job runs it, with the run's side landing in outputLocation. */
@@ -483,7 +512,9 @@ class KeptCopyParityTests {
         Map called = underFacadeGrant("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
                 ruleSetId: "KCP_RS", compareScopeId: "KCP_SCOPE", file1Location: run.result.fileLocation,
                 file2Location: new File(fixtures, "ledger-orders.json").absolutePath, file1Name: run.result.fileName,
-                file2Name: "ledger-orders.json", sparkAppName: "KeptCopyParityTests"])
+                file2Name: "ledger-orders.json", sparkAppName: "KeptCopyParityTests"] +
+                // plan 3b-2b: an interactive side carries its Keep plan; the compare runs it at ingest
+                (run.plan ? [keepBySide: [FILE_1: run.plan]] : [:]))
         assertEquals([], called.errors, tag)
         Map out = called.out
         try {

@@ -337,12 +337,30 @@ def resolveTenantApiWindow = {
 // service name, config parameter name, window parameter names, and preserveWindowInstants —
 // the same resolver the automation path uses, so connector dispatch lives in one place and
 // onboarding a new source needs no edit here.
-def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null, Map byKeys = null ->
-    // DAR-BE-163: a side the failed run already read comes back as it landed, with no call to the source system.
+// DAR-BE-318 (plan 3b-2b): each API side's Keep plan (RunExtractSupport.sideKeep), built once as the side is read, sent to its
+// read and kept here for the compare (keepBySide) and the other side's by-key read. keepInSpark false (an evaluate run, whose
+// compare takes no keepBySide) keeps its filters at the read. An upload has none.
+Map<String, Map> keepPlanBySide = [:]
+def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null, Map byKeys = null,
+                         boolean keepInSpark = true ->
+    Map sideKeep = RunExtractSupport.sideKeep(ec, source, fileSide, RunExtractSupport.resolveExtractConnector(ec, source), keepInSpark)
+    keepPlanBySide.put(fileSide, sideKeep)
+    // DAR-BE-163: a side the failed run already read comes back as it landed, with no call to the source system; it still
+    // gets its Keep at the compare.
     Map<String, Object> replayed = retryPlan ? RunRetrySupport.replayedSide(ec, retryPlan, source, fileSide) : null
     if (replayed != null) return replayed
     RunExtractSupport.extractApiSource(ec, source, fileSide, sourceLabel(source, fileSide), artifactContext,
-            (tenantApiWindow ?: resolveTenantApiWindow()), progressContext, runInternalService, byKeys)
+            (tenantApiWindow ?: resolveTenantApiWindow()), progressContext, runInternalService, byKeys, sideKeep)
+}
+// DAR-BE-318: each API side's Keep plan, keyed FILE_1/FILE_2, for the compare; null when no side has one (uploads only).
+def keepBySideOf = { ->
+    return keepPlanBySide ? new LinkedHashMap(keepPlanBySide) : null
+}
+// DAR-BE-318 (3b2b-11): a side's record count is what it kept: Keep's keptCount where Spark set records aside, else the extract's.
+def sideRecordCount = { Map serviceResult, String sideKey, Map fileResult ->
+    Object kept = ((Map) ((Map) serviceResult?.keepSummaryBySide)?.get(sideKey))?.get("keptCount")
+    if (kept instanceof Number) return kept
+    return fileResult?.recordCount instanceof Number ? fileResult.recordCount : null
 }
 // DAR-BE-192: a side read by the other side's keys (its run option readByOtherSideKeys), as the automation path reads it.
 def readsByOtherSideKeys = { Object source ->
@@ -356,11 +374,9 @@ def otherSideKeys = { Map otherResult, String compareScopeId, String otherSide, 
     String ownKey = darpan.audit.AuditRecheckSupport.firstKeyField(ec, compareScopeId, ownSide)
     if (!otherKey || !ownKey) { ec.message.addError("${ownSide} is read by ${otherSide}'s keys, and a side has no plain key field."); return [:] }
     File f = RunVerificationSupport.resolveLocationFile(ec, otherResult?.fileLocation as String)
-    Set<String> keys = new LinkedHashSet<String>()
-    if (f != null) darpan.reconciliation.conclusion.JsonRecordStream.forEachRecord(f, "records") { Map r ->
-        String v = r.get(otherKey)?.toString()?.trim()
-        if (v) keys.add(v)
-    }
+    // DAR-BE-318 (3b2b-11): only the keys of records the other side keeps; a record its Keep sets aside is not asked for.
+    Set<String> keys = f != null ? darpan.reconciliation.source.KeepStepSupport.keptValues(ec, f, keepPlanBySide.get(otherSide), otherKey) :
+            new LinkedHashSet<String>()
     return [lookupKeys: keys as List<String>, lookupKeyField: ownKey]
 }
 def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, String file2Label, Map artifactContext ->
@@ -469,9 +485,9 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
             file2Label         : file2Label,
             runOwnerUserGroupId: runOwnerUserGroupId,
             dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
-            // DAR-BE-320: each side's extract count (the share gate) and the scope (the lookup's id kind).
-            file1RecordCount   : file1Result?.recordCount instanceof Number ? file1Result.recordCount : null,
-            file2RecordCount   : file2Result?.recordCount instanceof Number ? file2Result.recordCount : null,
+            // DAR-BE-320: each side's extract count (the share gate) and the scope (the lookup's id kind). DAR-BE-318: what it kept.
+            file1RecordCount   : sideRecordCount(serviceResult, "file1", file1Result),
+            file2RecordCount   : sideRecordCount(serviceResult, "file2", file2Result),
             compareScopeId     : compareScopeId,
     ])
 }
@@ -706,7 +722,8 @@ try {
                             obsStage = RunObservability.STAGE_EXTRACT_FILE1
                             file1Result = file1UsesApiSource ?
                                     extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext,
-                                            [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE1]) :
+                                            [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE1],
+                                            null, false) :
                                     stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
@@ -895,10 +912,17 @@ try {
                                     file1Label         : file1Label,
                                     file2Label         : file2Label,
                                     hasHeader          : hasHeaderValue,
+                                    // DAR-BE-318 (plan 3b-2b): each API side's Keep, run at ingest (Spark sets aside; READ/NONE pass through)
+                                    keepBySide         : keepBySideOf(),
                                     sparkMaster        : sparkMaster,
                                     sparkAppName       : sparkAppName ?: "SavedRunDiff"
                                 ])
                                 ruleSetPersistedSources = (serviceResult.persistedSources ?: []) as List
+                                // DAR-BE-318: with Spark Keep the extracts hold set-aside records too; no data means nothing was kept.
+                                if (serviceResult.keepSummaryBySide) {
+                                    obsNoData = sideRecordCount(serviceResult, "file1", file1Result) == 0 &&
+                                            sideRecordCount(serviceResult, "file2", file2Result) == 0
+                                }
                                 if (!ec.message.hasError()) {
                                     obsRuleExecutionFailed = serviceResult.ruleExecutionFailed == true
                                     // The compare stage materializes its own output: the diffs stream

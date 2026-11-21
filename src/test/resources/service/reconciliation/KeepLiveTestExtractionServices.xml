@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Test only (on the test classpath, never shipped): made-up systems' extracts for DAR-BE-318 plan 3b-2b Task 13, so the
+         interactive run path is run end to end through run#SavedRunDiff with no system component installed. Each reads the
+         records a test placed for its config id and filters them by the sourceFilters it is sent, as a filtering extractor does
+         today (darpan.facade.reconciliation.KeepLiveTestExtracts holds the logic and records every call).
+         - KeepLiveRecords: a source that no longer filters (its system task done): takes the Keep fields by name
+           (keepRuleFields), no filters and no readFields. Its sides keep in Spark.
+         - KeepLiveSelectingRecords: no longer filters either; takes keepFields and readFields, and no keepRuleFields.
+         - KeepLiveFilteringRecords: shaped as every real extract is until Tasks 17-23: it still takes the filter parameter
+           (sourceFilters), so its sides keep today's read (Ruling 3b2b-23). -->
+    <service verb="extract" noun="KeepLiveRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="keepRuleFields" type="List"/>
+            <parameter name="madeUpCap" type="Integer"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="lookupWithinWindow" type="Boolean"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="systemEnumId"/>
+            <parameter name="companyUserGroupId"/>
+            <parameter name="reconciliationRunResultId"/>
+            <parameter name="progressStageCode"/>
+            <parameter name="expectedRecordCount"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions><script>context.putAll(darpan.facade.reconciliation.KeepLiveTestExtracts.extract(ec, context))</script></actions>
+    </service>
+    <service verb="extract" noun="KeepLiveSelectingRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="keepFields" type="List"/>
+            <parameter name="readFields" type="List"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="systemEnumId"/>
+            <parameter name="companyUserGroupId"/>
+            <parameter name="reconciliationRunResultId"/>
+            <parameter name="progressStageCode"/>
+            <parameter name="expectedRecordCount"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions><script>context.putAll(darpan.facade.reconciliation.KeepLiveTestExtracts.extract(ec, context))</script></actions>
+    </service>
+    <service verb="extract" noun="KeepLiveFilteringRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="keepFields" type="List"/>
+            <parameter name="readFields" type="List"/>
+            <parameter name="sourceFilters" type="List"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="systemEnumId"/>
+            <parameter name="companyUserGroupId"/>
+            <parameter name="reconciliationRunResultId"/>
+            <parameter name="progressStageCode"/>
+            <parameter name="expectedRecordCount"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions><script>context.putAll(darpan.facade.reconciliation.KeepLiveTestExtracts.extract(ec, context))</script></actions>
+    </service>
+</services>

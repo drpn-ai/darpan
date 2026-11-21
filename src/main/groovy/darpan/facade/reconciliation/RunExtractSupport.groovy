@@ -5,6 +5,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.source.KeepPlanSupport
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -40,9 +41,13 @@ import static darpan.common.ValueSupport.normalizeInt
  *  window value type      ISO-8601 instant STRING           raw java.sql.Timestamp
  *  missing service        ec.message error, returns [:]      THROWS IllegalStateException
  *  allowlist              shape check only                  allowedServiceNames + shape + installed
- *  exclusion filters      resolveExtractExcludeFilters       loadAutomationSourceFilters(automationId,
- *                         (source-level store)                fileSide) -- a DIFFERENT STORE, by design
- *                                                            (design §3.2, not a defect)
+ *  exclusion filters      sideKeep: the compare scope's      loadAutomationSourceFilters(automationId,
+ *                         rows for the active tenant           fileSide) -- a DIFFERENT STORE, by design
+ *                         (KeepPlanSupport). Spark Keep sets    (design §3.2, not a defect; kept in plan
+ *                         them aside at ingest; the read gets   3b-2b by Ruling 3b2b-15)
+ *                         them from a data-defined source, an
+ *                         extract still taking the filter
+ *                         parameter (3b2b-23), an evaluate run
  *  state window mode      not supported                     isStateWindowMode + supportsStateExtract
  *                                                            sends NO date parameters at all
  *  status parameter       absent                            applyStatusParameter
@@ -194,7 +199,8 @@ class RunExtractSupport {
                                                 Map<String, Object> apiWindow,
                                                 Map<String, Object> progressContext,
                                                 Closure serviceCaller,
-                                                Map<String, Object> byKeys = null) {
+                                                Map<String, Object> byKeys = null,
+                                                Map sideKeep = null) {
         String sourceConfigType = normalize(source?.sourceConfigType)
         Map<String, Object> connector = resolveExtractConnector(ec, source)
         String extractServiceName = connector == null ? null : normalize(connector.extractServiceName)
@@ -220,11 +226,14 @@ class RunExtractSupport {
         String token = sideToken(fileSide)
         String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
 
+        // DAR-BE-318 (plan 3b-2b): where this side's Keep runs (the caller's plan, which it hands the compare as keepBySide, or
+        // this side's own). SPARK sets records aside at ingest, so the read gets no filters; any other plan filters at the read.
+        // The fields Spark Keep reads join every projection.
+        if (sideKeep == null) sideKeep = RunExtractSupport.sideKeep(ec, source, fileSide, connector)
+        Collection<String> keepRuleFields = (Collection<String>) sideKeep.fields
         List<String> keepFields = sideKeepFields(ec, source, connector)
-        List<Map<String, Object>> excludeFilters = null
-        if (normalize(connector.filterParameterName)) {
-            excludeFilters = ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
-        }
+        if (keepFields != null && keepRuleFields) keepFields = (keepFields + keepRuleFields).unique()
+        List<Map<String, Object>> excludeFilters = (List<Map<String, Object>>) sideKeep.readFilters ?: null
 
         Map<String, Object> extractParams = buildExtractParams(connector, fileSide, configId, artifactContext,
                 (Timestamp) apiWindow?.windowStartDate, (Timestamp) apiWindow?.windowEndDate,
@@ -240,7 +249,15 @@ class RunExtractSupport {
         extractParams.remove(darpan.reconciliation.automation.AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS)
         // DAR-BE-239: the fields this side's rules read, as the scheduled path sends them.
         List<String> readFields = ReconciliationSavedRunSupport.extractReadFields(ec, extractServiceName, source?.compareScopeId, fileSide)
+        List<String> declaredParameters = (ec.service.getServiceDefinition(extractServiceName)?.inParameterNameList ?: []) as List<String>
+        if (keepRuleFields && ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER in declaredParameters) {
+            readFields = ((readFields ?: []) + keepRuleFields).unique()
+        }
         if (readFields) extractParams[ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER] = readFields
+        // The fields Spark Keep reads, to an extract that takes them by name (so it selects them though it no longer filters).
+        if (KeepPlanSupport.SPARK == sideKeep.placement && keepRuleFields && KeepPlanSupport.KEEP_FIELDS_PARAMETER in declaredParameters) {
+            extractParams[KeepPlanSupport.KEEP_FIELDS_PARAMETER] = new ArrayList<String>(keepRuleFields)
+        }
         if (byKeys != null) {
             if (!ec.service.getServiceDefinition(extractServiceName)?.inParameterNameList?.contains("lookupKeys")) {
                 ec.message.addError("${label} is read by the other side's keys, and its source cannot read by key.")
@@ -252,7 +269,7 @@ class RunExtractSupport {
         // DAR-BE-318 plan 3a: the window from the tenant's kept copy when the copy covers it; otherwise the live read below.
         Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, extractParams, [
                 tenantId   : TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                windowStart: apiWindow?.windowStartDate, windowEnd: apiWindow?.windowEndDate]))
+                windowStart: apiWindow?.windowStartDate, windowEnd: apiWindow?.windowEndDate, sideKeep: sideKeep]))
         if (served.served) {
             return sourceResultForLocation(ec, source, fileSide, extractParams.fileName as String, served.fileLocation as String,
                     served.recordCount as Integer)
@@ -270,6 +287,46 @@ class RunExtractSupport {
         }
         return sourceResultForLocation(ec, source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
                 extractedLocation, normalizeInt(extraction.recordCount, null))
+    }
+
+    /**
+     * DAR-BE-318 (plan 3b-2b, Task 13). One API side's Keep plan (KeepPlanSupport.sideKeep), read for the active tenant from the
+     * side's compare scope rows, with the side's own extract options (a built-in may apply unless one is set). The run builds it
+     * once per API side, sends it to extractApiSource and hands it to the compare as keepBySide, so whatever the read returned
+     * (live, a kept-copy slice, a retried run's landed file) gets the same Keep. An upload has no plan: it never gets filters.
+     *
+     * A SPARK side's filters stay at the read, exactly as before Keep moved into Spark, and Spark runs nothing for it
+     * (KeepPlanSupport.todaysRead), when:
+     * <ul>
+     * <li>its extract service still declares the connector's filter parameter (Ruling 3b2b-23, KeepPlanSupport.sparkKeepsSide):
+     *     the read still filters until its system's task (17–23) drops the parameter;</li>
+     * <li>keepInSpark is false: the run's compare takes no keepBySide (a single-sided evaluate run);</li>
+     * <li>the side is not keyed on top-level records (review M5/M6): Spark Keep numbers and reads the records array, so a side
+     *     whose record root is another array, or whose key runs through a nested array, would be set aside wrongly or fail.
+     *     Such a side keeps today's read; it needs a decision before its extractor stops filtering (Tasks 17–23).</li>
+     * </ul>
+     */
+    static Map sideKeep(def ec, Object source, String fileSide, Map<String, Object> connector, boolean keepInSpark = true) {
+        String tenant = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        String compareScopeId = normalize(source?.compareScopeId)
+        String side = normalize(fileSide) ?: normalize(source?.fileSide)
+        Map plan = KeepPlanSupport.sideKeep(ec, compareScopeId, side, tenant, connector,
+                SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)))
+        if (KeepPlanSupport.SPARK != plan.placement) return plan
+        def extractDefinition = normalize(connector?.extractServiceName) ? ec.service.getServiceDefinition(normalize(connector.extractServiceName)) : null
+        if (keepInSpark && KeepPlanSupport.sparkKeepsSide(connector, extractDefinition) && keyedOnRecords(ec, source, compareScopeId, side)) return plan
+        return KeepPlanSupport.todaysRead(KeepPlanSupport.tenantRuleRows(ec, compareScopeId, side, tenant))
+    }
+
+    /** True when the side's records are the extract's top-level records array and every key field is read off a record there. */
+    private static boolean keyedOnRecords(def ec, Object source, String compareScopeId, String side) {
+        String root = normalize(source?.recordRootExpression)
+        if (root && root.replaceFirst(/^\$\.?/, "").replaceFirst(/\[\*\]$/, "") != "records") return false
+        List<String> keys = (List<String>) RunConclusionStep.keySpecFor(ec, compareScopeId, side).keyFields
+        return keys.every { String expression ->
+            String path = normalize(darpan.reconciliation.core.CompareIdExpressionSupport.splitIdExpression(expression).idExpr) ?: ""
+            return !path.replaceFirst(/^\$\.?/, "").replaceFirst(/^records\[\*\]\./, "").contains("[")
+        }
     }
 
     /**

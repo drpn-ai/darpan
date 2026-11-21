@@ -111,6 +111,23 @@ class KeepPlanSupportTests {
         assertEquals(["BUILT_IN:1", "BUILT_IN:2", "A:1"], spark.rules*.id)
     }
 
+    /**
+     * Ruling 3b2b-23: Spark keeps a SPARK side only once its extract no longer declares the connector's filter parameter; an
+     * extract that still takes it filters at the read, and so does any side of another placement or with no extract installed.
+     */
+    @Test
+    void sparkKeepsASideOnlyOnceItsExtractStopsTakingTheFilterParameter() {
+        Map stillFilters = [inParameterNameList: ["sourceConfigId", "excludeFilters", "keepFields"]]
+        Map noLongerFilters = [inParameterNameList: ["sourceConfigId", "keepRuleFields"]]
+        assertFalse(KeepPlanSupport.sparkKeepsSide(connector("ACME"), stillFilters))
+        assertTrue(KeepPlanSupport.sparkKeepsSide(connector("ACME"), noLongerFilters))
+        assertFalse(KeepPlanSupport.sparkKeepsSide(connector("ACME"), null), "an extract that is not installed")
+        assertFalse(KeepPlanSupport.sparkKeepsSide(connector("ACME_DEFINED"), noLongerFilters), "a data-defined side keeps its read")
+        assertFalse(KeepPlanSupport.sparkKeepsSide(connector("ACME_UPLOAD"), noLongerFilters), "an upload gets no Keep at all")
+        assertEquals([placement: "READ", readFilters: [[sequenceNum: 1]], rules: [], writeSidecar: false, fields: [] as Set],
+                KeepPlanSupport.todaysRead([[sequenceNum: 1]]), "today's read: the rows to the read, nothing to Spark, no field added")
+    }
+
     /** Review Focus 4: a scheduled read for tenant A never sees tenant B's filter rows, with no active tenant. */
     @Test
     void aScopeOfAnotherTenantReadsAsNoRules() {

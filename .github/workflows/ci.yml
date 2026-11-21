@@ -160,6 +160,12 @@ jobs:
           path: darpan-backend/runtime/component/darpan/build/jacoco/test.exec
           if-no-files-found: ignore
 
+      # moqui-rules has no CI of its own, so its portable suite runs here once (DAR-BE-318).
+      - name: Run moqui-rules portable suite
+        if: matrix.shard == 1
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain :runtime:component:moqui-rules:test -Pspec=PortableSuite
+
       # Bitronix issues `XA RECOVER` when it initialises the datasource, and MySQL refuses that
       # statement without XA_RECOVER_ADMIN ON *.* — it comes back as XAER_RMERR and takes the whole
       # run down before a single test executes. We connect as the container's root account, which
@@ -242,6 +248,7 @@ jobs:
             darpan-backend/runtime/component/darpan/build/reports/tests/mysqlTest/
             darpan-backend/runtime/component/darpan/build/test-results/test/
             darpan-backend/runtime/component/darpan/build/test-results/mysqlTest/
+            darpan-backend/runtime/component/moqui-rules/build/test-results/
           if-no-files-found: ignore
 
   # DAR-OPS-015: the Jacoco floors, checked once over the four shards' execution data. It compiles darpan in the same

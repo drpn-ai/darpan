@@ -65,4 +65,28 @@ class SyncPulseFacadeSupportTests {
     void aChatSpaceOfAnotherTenantIsRefused() {
         assertEquals(["Choose a chat space of this tenant."], check(OK_INPUT, DAILY, "OMS_GQL", false, false))
     }
+
+    @Test
+    void flagsOnlyOrdersPastBeforeTheRunAndStillOpenAtItsStart() {
+        java.time.Instant start = java.time.Instant.parse("2026-11-21T08:00:00Z")
+        Closure<java.sql.Timestamp> t = { String z -> java.sql.Timestamp.from(java.time.Instant.parse(z)) }
+        List<Map> orders = [
+                [recordKey: "OPEN", firstPastStamp: t("2026-11-21T06:00:00Z"), closedStamp: null],
+                [recordKey: "CLOSED_AFTER", firstPastStamp: t("2026-11-21T06:30:00Z"), closedStamp: t("2026-11-21T09:00:00Z")],
+                [recordKey: "CLOSED_BEFORE", firstPastStamp: t("2026-11-21T05:00:00Z"), closedStamp: t("2026-11-21T07:00:00Z")],
+                [recordKey: "FLAGGED_LATER", firstPastStamp: t("2026-11-21T08:30:00Z"), closedStamp: null],
+                [recordKey: "NO_STAMP", firstPastStamp: null, closedStamp: null]]
+        assertEquals([OPEN: "2026-11-21T06:00:00Z", CLOSED_AFTER: "2026-11-21T06:30:00Z"], SyncPulseFacadeSupport.flagsFor(orders, start))
+        assertEquals([:], SyncPulseFacadeSupport.flagsFor(orders, null))
+    }
+
+    @Test
+    void reportedInRunIsTheNewestRunStartedAfterTheFlag() {
+        java.time.Instant a = java.time.Instant.parse("2026-11-21T06:00:00Z")
+        List<Map> runs = [[reconciliationRunResultId: "R3", start: a.plusSeconds(7200)], [reconciliationRunResultId: "R2", start: a.plusSeconds(3600)],
+                          [reconciliationRunResultId: "R0", start: a.minusSeconds(60)]]
+        assertEquals("R3", SyncPulseFacadeSupport.reportedInRun(runs, java.sql.Timestamp.from(a)))
+        assertEquals(null, SyncPulseFacadeSupport.reportedInRun(runs, java.sql.Timestamp.from(a.plusSeconds(9000))))
+        assertEquals(null, SyncPulseFacadeSupport.reportedInRun([], java.sql.Timestamp.from(a)))
+    }
 }

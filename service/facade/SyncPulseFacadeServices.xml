@@ -78,6 +78,34 @@
         </actions>
     </service>
 
+    <service verb="get" noun="RunPulseFlags" authz-action="view" allow-remote="true" authenticate="true">
+        <description>The records of one daily-check run that the sync pulse had already flagged past allowance before the run started and that were still open then: recordKey to the ISO time the pulse first flagged it. syncPairId is the run's sync pair; null with no flags when the run's check has no pair.</description>
+        <in-parameters><parameter name="reconciliationRunResultId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="syncPairId"/>
+            <parameter name="flags" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for sync pairs.</message></if>
+            <set field="runIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
+            <if condition="!ec.message.hasError()">
+                <set field="flagResult" from="runIdValue ? darpan.pulse.SyncPulseFacadeSupport.runFlags(ec, tenantId, runIdValue) : null"/>
+                <if condition="flagResult == null"><message error="true">Reconciliation run '${runIdValue}' was not found.</message></if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="syncPairId" from="flagResult.syncPairId"/>
+                <set field="flags" from="flagResult.flags"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="save" noun="SyncPair" allow-remote="true" authenticate="true">
         <description>Create or update one sync pair of the active tenant. A blank pulseEveryMinutes is pulse off and a blank chatSpaceId is no chat space (both stored null, never the old value); isActive and hourlySummary keep the stored value when omitted. One pair per automation; a pulse needs HotWax orders upstream.</description>
         <in-parameters>

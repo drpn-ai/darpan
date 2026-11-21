@@ -221,6 +221,88 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         assertNull(ec.entity.find("darpan.pulse.SyncPulseOrder").condition("pulseOrderId", "SPF_DEL_O").disableAuthz().useCache(false).one())
     }
 
+    private String seedRun(String id, String tenant, String automationId, String start) {
+        ec.entity.makeDataLoader().dummyFks(true).xmlText("""<entity-facade-xml type="test">
+            <moqui.basic.Enumeration enumId="AUT_STAT_SUCCESS" enumTypeId="AutomationStatus"/>
+            <moqui.basic.Enumeration enumId="AUT_STAT_PENDING" enumTypeId="AutomationStatus"/>
+            <darpan.reconciliation.ReconciliationRunResult reconciliationRunResultId="${id}" companyUserGroupId="${tenant}" startedDate="${Timestamp.from(Instant.parse(start))}"/>
+            <darpan.reconciliation.ReconciliationAutomationExecution automationExecutionId="${id}_X" automationId="${automationId}"
+                companyUserGroupId="${tenant}" reconciliationRunResultId="${id}"/></entity-facade-xml>""").load()
+        return id
+    }
+
+    private void seedFlag(String id, String key, String first, String closed) {
+        ec.entity.makeValue("darpan.pulse.SyncPulseOrder").setAll([pulseOrderId: id, syncPairId: pairA, companyUserGroupId: A, recordKey: key,
+                firstPastStamp: Timestamp.from(Instant.parse(first)), closedStamp: closed ? Timestamp.from(Instant.parse(closed)) : null]).createOrUpdate()
+    }
+
+    private void dropRuns(List<String> runIds, List<String> orderIds) {
+        runIds.each { id ->
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution").condition("automationExecutionId", id + "_X").disableAuthz().deleteAll()
+            ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("reconciliationRunResultId", id).disableAuthz().deleteAll()
+        }
+        orderIds.each { ec.entity.find("darpan.pulse.SyncPulseOrder").condition("pulseOrderId", it).disableAuthz().deleteAll() }
+    }
+
+    @Test
+    void runFlagsListOnlyOrdersFlaggedBeforeTheRunAndOpenAtItsStart() {
+        actAs(A)
+        seedRun("SPF_R1", A, "SPF_A_DAILY", "2026-11-21T08:00:00Z")
+        seedFlag("SPF_F_OPEN", "K_OPEN", "2026-11-21T06:00:00Z", null)
+        seedFlag("SPF_F_LATE", "K_LATE", "2026-11-21T09:00:00Z", null)
+        seedFlag("SPF_F_GONE", "K_GONE", "2026-11-21T05:00:00Z", "2026-11-21T07:00:00Z")
+        try {
+            Map r = call("get#RunPulseFlags", [reconciliationRunResultId: "SPF_R1"])
+            assertTrue(r.ok as boolean, "${r.errors}")
+            assertEquals(pairA, r.syncPairId)
+            assertEquals([K_OPEN: "2026-11-21T06:00:00Z"], r.flags)
+        } finally { dropRuns(["SPF_R1"], ["SPF_F_OPEN", "SPF_F_LATE", "SPF_F_GONE"]) }
+    }
+
+    @Test
+    void aRunWhoseCheckHasNoPairHasNoFlags() {
+        actAs(A)
+        seedRun("SPF_R2", A, "SPF_A_WEEKLY", "2026-11-21T08:00:00Z")
+        try {
+            Map r = call("get#RunPulseFlags", [reconciliationRunResultId: "SPF_R2"])
+            assertTrue(r.ok as boolean, "${r.errors}")
+            assertNull(r.syncPairId)
+            assertEquals([:], r.flags)
+        } finally { dropRuns(["SPF_R2"], []) }
+    }
+
+    @Test
+    void anotherTenantsRunIsRefused() {
+        actAs(A)
+        seedRun("SPF_R3", A, "SPF_A_DAILY", "2026-11-21T08:00:00Z")
+        try {
+            actAs(B)
+            Map r = call("get#RunPulseFlags", [reconciliationRunResultId: "SPF_R3"])
+            assertFalse(r.ok as boolean)
+            assertEquals(["Reconciliation run 'SPF_R3' was not found.".toString()], r.errors)
+            assertNull(r.flags)
+        } finally { dropRuns(["SPF_R3"], []) }
+    }
+
+    @Test
+    void reportedInRunIsTheNewestRunThatStartedAfterTheFlag() {
+        actAs(A)
+        seedRun("SPF_RB", A, "SPF_A_DAILY", "2026-11-21T05:00:00Z")
+        seedRun("SPF_RC", A, "SPF_A_DAILY", "2026-11-21T08:00:00Z")
+        seedRun("SPF_RD", A, "SPF_A_DAILY", "2026-11-21T10:00:00Z")
+        ec.entity.makeValue("darpan.pulse.SyncPulseOrder").setAll([pulseOrderId: "SPF_RO1", syncPairId: pairA, companyUserGroupId: A, recordKey: "RO1",
+                sourceCreatedStamp: Timestamp.from(Instant.parse("2026-11-21T03:00:00Z")), firstPastStamp: Timestamp.from(Instant.parse("2026-11-21T06:00:00Z"))]).createOrUpdate()
+        ec.entity.makeValue("darpan.pulse.SyncPulseOrder").setAll([pulseOrderId: "SPF_RO2", syncPairId: pairA, companyUserGroupId: A, recordKey: "RO2",
+                sourceCreatedStamp: Timestamp.from(Instant.parse("2026-11-21T04:00:00Z")), firstPastStamp: Timestamp.from(Instant.parse("2026-11-21T11:00:00Z"))]).createOrUpdate()
+        try {
+            Map got = call("get#SyncPair", [syncPairId: pairA])
+            Map o1 = ((List) got.pastOrders).find { it.recordKey == "RO1" }
+            Map o2 = ((List) got.pastOrders).find { it.recordKey == "RO2" }
+            assertEquals("SPF_RD", o1.reportedInRunId)
+            assertNull(o2.reportedInRunId, "no run has started since it was flagged")
+        } finally { dropRuns(["SPF_RB", "SPF_RC", "SPF_RD"], ["SPF_RO1", "SPF_RO2"]) }
+    }
+
     private Map call(String name, Map params, String service = "facade.SyncPulseFacadeServices") {
         ec.message.clearErrors()
         return (Map) ec.service.sync().name("${service}.${name}".toString()).parameters(params).disableAuthz().call()

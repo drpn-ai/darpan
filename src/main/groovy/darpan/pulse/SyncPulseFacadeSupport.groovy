@@ -186,13 +186,74 @@ class SyncPulseFacadeSupport {
             [sampleStamp: iso(s.get("sampleStamp")), waitingCount: s.get("waitingCount"), oldestWaitingMinutes: s.get("oldestWaitingMinutes"),
              pastAllowanceCount: s.get("pastAllowanceCount"), statusEnumId: s.get("statusEnumId")] as Map
         }
+        List<Map> runs = pairRuns(ec, tenantId, normalize(pair.get("automationId")))
         List<Map> past = (rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", id).condition("closedStamp", null)
                 .orderBy("sourceCreatedStamp").list() ?: []).collect { o ->
             Object created = o.get("sourceCreatedStamp") ?: o.get("firstPastStamp")
             long minutes = created instanceof Timestamp ? Math.max(0L, Duration.between(((Timestamp) created).toInstant(), now).toMinutes()) : 0L
             [recordKey: o.get("recordKey"), orderName: o.get("orderName"), otherSystemId: o.get("otherSystemId"),
-             sourceCreatedStamp: iso(o.get("sourceCreatedStamp")), waitingMinutes: minutes, reportedInRunId: null] as Map
+             sourceCreatedStamp: iso(o.get("sourceCreatedStamp")), waitingMinutes: minutes,
+             reportedInRunId: reportedInRun(runs, o.get("firstPastStamp"))] as Map
         }
         return [syncPair: syncPair, samplesToday: samples, pastOrders: past]
+    }
+
+    // ------------------------------------------------------------------------------------------- run links
+
+    private static Instant instantOf(Object v) {
+        return v instanceof Timestamp ? ((Timestamp) v).toInstant() : (v instanceof java.util.Date ? ((java.util.Date) v).toInstant() : null)
+    }
+
+    /** A run's start: when it began, else when it was created. */
+    private static Instant runStart(Map run) { return instantOf(run?.get("startedDate")) ?: instantOf(run?.get("createdDate")) }
+
+    /** The automation's run results the tenant owns, newest start first: [reconciliationRunResultId, start (Instant)]. */
+    static List<Map> pairRuns(def ec, String tenantId, String automationId) {
+        if (!automationId) return []
+        Set<String> ids = (rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationId", automationId).list() ?: [])
+                .collect { normalize(it.get("reconciliationRunResultId")) }.findAll { it } as Set<String>
+        if (ids.isEmpty()) return []
+        List<Map> out = (rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId)
+                .condition("reconciliationRunResultId", org.moqui.entity.EntityCondition.IN, ids as List).list() ?: []).collect { r ->
+            [reconciliationRunResultId: normalize(r.get("reconciliationRunResultId")), start: runStart(r.getMap())] as Map
+        }.findAll { it.start != null }
+        return out.sort { Map a, Map b -> (b.start as Instant) <=> (a.start as Instant) }
+    }
+
+    /** Newest run (runs newest first) that started after the order's firstPastStamp; null when none. */
+    static String reportedInRun(List<Map> runs, Object firstPastStamp) {
+        Instant flagged = instantOf(firstPastStamp)
+        if (flagged == null) return null
+        return runs?.find { (it.start as Instant).isAfter(flagged) }?.get("reconciliationRunResultId") as String
+    }
+
+    /** Orders the pulse had flagged before the run started and that were still open at its start: recordKey -> ISO firstPastStamp. */
+    static Map<String, String> flagsFor(List<Map> orders, Instant runStart) {
+        Map<String, String> flags = [:]
+        if (runStart == null) return flags
+        (orders ?: []).each { o ->
+            Instant first = instantOf(o.get("firstPastStamp"))
+            Instant closed = instantOf(o.get("closedStamp"))
+            String key = normalize(o.get("recordKey"))
+            if (key && first != null && first.isBefore(runStart) && (closed == null || closed.isAfter(runStart))) flags[key] = first.toString()
+        }
+        return flags
+    }
+
+    /**
+     * get#RunPulseFlags: null when the run is not the tenant's; else [syncPairId, flags] ([null, [:]] when its automation has no pair).
+     */
+    static Map runFlags(def ec, String tenantId, String runResultId) {
+        def run = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.reconciliation.ReconciliationRunResult", "reconciliationRunResultId",
+                runResultId, tenantId, WHY)
+        if (run == null) return null
+        Instant start = runStart(run.getMap())
+        String automationId = normalize((rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
+                .condition("reconciliationRunResultId", runResultId).list() ?: []).find()?.get("automationId"))
+        def pair = automationId ? (rows(ec, "darpan.pulse.SyncPair", tenantId).condition("automationId", automationId).list() ?: []).find() : null
+        if (pair == null) return [syncPairId: null, flags: [:]]
+        String pairId = normalize(pair.get("syncPairId"))
+        List<Map> orders = (rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", pairId).list() ?: []).collect { it.getMap() }
+        return [syncPairId: pairId, flags: flagsFor(orders, start)]
     }
 }

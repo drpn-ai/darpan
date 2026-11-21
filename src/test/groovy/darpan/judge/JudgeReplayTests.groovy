@@ -629,11 +629,12 @@ class JudgeReplayTests {
     }
 
     /**
-     * Review I1 (Task 10 review M5/M6): a side whose records are not the extract's top-level records array keeps today's read
-     * in the replay, as on the live path, even with a connector that keeps in Spark and a filter that would set a record aside.
+     * Review I1 (Task 10 review M5/M6) with Ruling 3b2b-25: Spark cannot keep a side whose records are not the extract's
+     * top-level records array. Where its extract no longer filters either, the replay fails with the live path's message rather
+     * than replaying it unfiltered; where its extract still filters, it replays as today.
      */
     @Test
-    void aSideNotKeyedOnTopLevelRecordsReplaysAsToday() {
+    void aSideNotKeyedOnTopLevelRecordsFailsOrReplaysAsToday() {
         insert("darpan.rule.RuleSet", [ruleSetId: "JRT_ROOT_RS", ruleSetName: "Orders under another root", companyUserGroupId: A])
         insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "JRT_ROOT_SCOPE", ruleSetId: "JRT_ROOT_RS", objectType: "ORDER",
                 description: "Orders under another root", companyUserGroupId: A])
@@ -659,7 +660,11 @@ class JudgeReplayTests {
         new File(side1, "acme-orders.json").text = '{"metadata":{},"orders":[{"orderId":"O1","status":"OPEN"},{"orderId":"O2","status":"CLOSED"}]}'
         new File(side2, "acme-ledger.json").text = '{"metadata":{},"records":[{"orderId":"O1"},{"orderId":"O2"}]}'
 
-        Map out = withConnectors([ACME_LEFT: "N"]) { ok(replay(checkRoot, "reconciliation-runs/JRT_EXEC_ROOT", false)) }
+        Map refused = withConnectors([ACME_LEFT: "N"]) { replay(checkRoot, "reconciliation-runs/JRT_EXEC_ROOT", false) }
+        assertEquals(["File 1 (ACME_LEFT) cannot be filtered: its source no longer filters at read and its records are not top-level, " +
+                "so Keep cannot run in Spark."], refused.errors)
+
+        Map out = withConnectors([ACME_LEFT: "N"], FILTERED_AT_READ) { ok(replay(checkRoot, "reconciliation-runs/JRT_EXEC_ROOT", false)) }
         File dir = replayDir(out.replayFolder as String)
         assertFalse(new File(dir, "extracts/FILE_1/acme-orders.keep.json").exists(), "no Keep ran on a side not keyed on records")
         Map result = new JsonSlurper().parse(new File(dir, "result.json")) as Map

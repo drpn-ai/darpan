@@ -318,8 +318,10 @@ class KeptCopyParityTests {
         File replayedExtract = new File(replayDir, "extracts/FILE_1/${servedExtract.name}")
         assertArrayEquals(servedExtract.bytes, replayedExtract.bytes, "the replay reads the run's own slice")
         assertEquals(true, json(replayedExtract).metadata.servedFromCopy)
-        assertEquals([ExcludedRecordsSidecar.fileNameFor(servedExtract.name)],
-                new File(replayDir, "extracts/FILE_1").list().findAll { it.endsWith(".excluded.json") } as List)
+        // the side's Keep runs in Spark (the dispatcher keeps in Spark, as the run loop does): whatever it leaves beside the
+        // replayed extract is what it leaves beside the live read's
+        File liveReplayDir = new File(dataManagerRoot, onLive.out.replayFolder as String)
+        assertEquals(new File(liveReplayDir, "extracts/FILE_1").list().sort() as List, new File(replayDir, "extracts/FILE_1").list().sort() as List)
 
         // and what it found is what the live read's replay found
         assertTrue(onServed.out.oldFindings.size() >= 2, "findings exist: ${onServed.out.oldFindings}")
@@ -370,10 +372,14 @@ class KeptCopyParityTests {
 
         File servedFile = locationFile(served.fileLocation as String)
         File liveFile = locationFile(live.fileLocation as String)
-        assertEquals(17, json(servedFile).records.size())
+        // the side keeps in Spark (the dispatcher says KEEP_IN_SPARK, as the run loop does), so neither read filters: all 19
+        // orders in the window, the two the filter rejects included; the compare's Keep sets them aside
+        assertEquals(19, json(servedFile).records.size())
         assertEquals(JsonOutput.toJson(json(liveFile).records), JsonOutput.toJson(json(servedFile).records))
-        assertEquals(new File(liveFile.parentFile, ExcludedRecordsSidecar.fileNameFor(liveFile.name)).getText("UTF-8"),
-                new File(servedFile.parentFile, ExcludedRecordsSidecar.fileNameFor(servedFile.name)).getText("UTF-8"))
+        File liveSide = new File(liveFile.parentFile, ExcludedRecordsSidecar.fileNameFor(liveFile.name))
+        File servedSide = new File(servedFile.parentFile, ExcludedRecordsSidecar.fileNameFor(servedFile.name))
+        assertEquals(liveSide.isFile(), servedSide.isFile())
+        if (liveSide.isFile()) assertEquals(liveSide.getText("UTF-8"), servedSide.getText("UTF-8"))
         Map servedOut = compareAndWrite([result: [fileLocation: servedFile.absolutePath, fileName: servedFile.name]], "auto-served")
         Map liveOut = compareAndWrite([result: [fileLocation: liveFile.absolutePath, fileName: liveFile.name]], "auto-live")
         ["diff.json", "result.json"].each { String name ->
@@ -403,7 +409,10 @@ class KeptCopyParityTests {
 
     /** The scheduled dispatcher, as a job runs it, with the run's side landing in outputLocation. */
     private Map automationSlice(String conn, String outputLocation, List<Map> liveCalls = null) {
-        Map automation = [automationId: "KCP_AUTO", companyUserGroupId: A, relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
+        // as the run loop dispatches it: the automation's compare scope (its keys and record root) and KEEP_IN_SPARK (every run
+        // loop sets it, Task 16b)
+        Map automation = [automationId: "KCP_AUTO", companyUserGroupId: A, compareScopeId: "KCP_SCOPE",
+                          relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
         Map source = [automationId: "KCP_AUTO", fileSide: "FILE_1", systemEnumId: "KC_ISO", companyUserGroupId: A,
                       sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
                       safeMetadataJson: JsonOutput.toJson([extractServiceName: ISO_EXTRACT, parameters: [projConfigId: conn]])]
@@ -412,7 +421,8 @@ class KeptCopyParityTests {
         try {
             Map result = (Map) TenantAccessSupport.withSystemTenant(A) {
                 AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, source,
-                        [childWindowStartDate: START, childWindowEndDate: END], [automationExecutionId: "KCP_EXEC", sideOutputLocation: outputLocation] +
+                        [childWindowStartDate: START, childWindowEndDate: END], [automationExecutionId: "KCP_EXEC", sideOutputLocation: outputLocation,
+                                                                                 (AutomationExecutionSupport.KEEP_IN_SPARK): true] +
                         (liveCalls != null ? [liveExtractor: liveExtractor(liveCalls)] : [:]))
             }
             if (liveCalls == null) assertEquals(true, result.requestMetadata?.servedFromCopy, result.toString())

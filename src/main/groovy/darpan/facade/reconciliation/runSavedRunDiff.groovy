@@ -348,7 +348,7 @@ def extractApiSource = { Object source, String fileSide, Map artifactContext, Ma
     boolean landedFiltered = replayed != null &&
             darpan.reconciliation.source.KeepArtifacts.filteredAtRead(RunVerificationSupport.resolveLocationFile(ec, replayed.fileLocation as String))
     Map sideKeep = RunExtractSupport.sideKeep(ec, source, fileSide, RunExtractSupport.resolveExtractConnector(ec, source),
-            !landedFiltered)
+            true, landedFiltered)
     keepPlanBySide.put(fileSide, sideKeep)
     if (replayed != null) return replayed
     RunExtractSupport.extractApiSource(ec, source, fileSide, sourceLabel(source, fileSide), artifactContext,

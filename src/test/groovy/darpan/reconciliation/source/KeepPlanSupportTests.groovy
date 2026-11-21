@@ -36,6 +36,10 @@ class KeepPlanSupportTests {
                       operatorEnumId: "ENTCO_EQUALS", compareValue: "true"]]],
     ])
 
+    /** Task 13's test-only extracts: one no longer declares sourceFilters (its system task done), one still does. */
+    private static final String NO_LONGER_FILTERS = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveRecords"
+    private static final String STILL_FILTERS = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveFilteringRecords"
+
     private ExecutionContext ec
 
     @BeforeAll
@@ -63,6 +67,14 @@ class KeepPlanSupportTests {
                 keepLinesJson="${keepLinesAttr}"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_BAD" extractServiceName="reconciliation.AcmeExtractionServices.extract#Bad"
                 filterParameterName="excludeFilters" keepLinesJson='[{"sequenceNum":1,"label":"Has lines","lines":[{"conditionSeqId":"01","conditionTypeId":"RCT_EXISTS","fieldName":"lines"}]}]'/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE" extractServiceName="${NO_LONGER_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="Y" keepLinesJson="${keepLinesAttr}"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_BUILT_IN" extractServiceName="${NO_LONGER_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="Y" keepLinesJson='[{"sequenceNum":1,"label":"Unkeyed lines","kinds":{"lineKind":"FVT_TEXT"},"lines":[{"conditionSeqId":"01","sequenceNum":1,"conditionTypeId":"RCT_COMPARE","fieldName":"lineKind","operatorEnumId":"ENTCO_EQUALS","compareValue":"UNKEYED"}]}]'/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_PLAIN" extractServiceName="${NO_LONGER_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="N"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_FILTERING" extractServiceName="${STILL_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="Y" keepLinesJson="${keepLinesAttr}"/>
             ${scope('KP_SCOPE_A', A)}
             ${scope('KP_SCOPE_B', B)}
             ${filter('KP_SCOPE_A', 'FILE_1', 2, 'channel', 'INCLUDE_IN', 'WEB,POS', A)}
@@ -147,9 +159,12 @@ class KeepPlanSupportTests {
         assertEquals([], spark.readFilters)
         Map today = KeepPlanSupport.todaysRead(rows)
         assertEquals(today, effective("ACME", stillFilters, "records", ["orderId"], true), "the extract still filters")
-        assertEquals(today, effective("ACME", noLongerFilters, "records", ["orderId"], false), "the compare takes no Keep")
-        assertEquals(today, effective("ACME", noLongerFilters, null, ['$.records[*].lines[*].lineId'], true), "a key through a nested array")
-        assertEquals(today, effective("ACME", noLongerFilters, "orders", ["orderId"], true), "records under another array")
+        // the compare taking no Keep, a key through a nested array and records under another array fail this side (it has
+        // rules and its read no longer filters, Ruling 3b2b-25): aSideNeitherTheReadNorSparkCanFilterFailsBeforeAnyRead
+        [[noLongerFilters, "records", ["orderId"], false], [noLongerFilters, null, ['$.records[*].lines[*].lineId'], true],
+         [noLongerFilters, "orders", ["orderId"], true]].each { List c ->
+            assertThrows(IllegalArgumentException) { effective("ACME", c[0], (String) c[1], (List<String>) c[2], (boolean) c[3]) }
+        }
         assertEquals(today, effective("ACME_BAD", stillFilters, null, ["orderId"], true), "a gated side never compiles its Keep lines")
         assertEquals("READ", effective("ACME_DEFINED", noLongerFilters, null, ["orderId"], true).placement)
         assertEquals(["other"] as Set, effective("ACME_DEFINED", noLongerFilters, null, ["orderId"], true).fields,
@@ -157,6 +172,75 @@ class KeepPlanSupportTests {
         assertEquals("NONE", effective("ACME_UPLOAD", noLongerFilters, null, ["orderId"], true).placement)
         assertTrue(KeepPlanSupport.keyedOnRecords(null, ["orderId", "\$.records[*].lineId|MADE_UP_NORMALIZER"]))
         assertFalse(KeepPlanSupport.keyedOnRecords("\$.records[*]", []), "no key at all")
+    }
+
+    /**
+     * Ruling 3b2b-25: a side whose extract no longer declares the connector's filter parameter cannot filter at the read (Moqui
+     * drops the undeclared parameter). When Spark cannot keep it either, a side with Keep rules fails before any read, naming
+     * the side and why; a side with none passes with nothing to filter; a side whose extract still declares the parameter keeps
+     * today's read. Real (test-only) extract definitions, as the run paths read them.
+     */
+    @Test
+    void aSideNeitherTheReadNorSparkCanFilterFailsBeforeAnyRead() {
+        List<Map<String, Object>> rows = KeepPlanSupport.tenantRuleRows(ec, "KP_SCOPE_A", "FILE_2", A)
+        assertEquals(["other"], rows*.fieldExpression, "test precondition: the side has a tenant rule")
+        Object noLongerFilters = ec.service.getServiceDefinition(NO_LONGER_FILTERS)
+        Object stillFilters = ec.service.getServiceDefinition(STILL_FILTERS)
+        assertTrue(KeepPlanSupport.sparkKeepsSide(connector("ACME_LIVE"), noLongerFilters), "test precondition: its read cannot filter")
+        assertFalse(KeepPlanSupport.sparkKeepsSide(connector("ACME_LIVE_FILTERING"), stillFilters), "test precondition: its read filters")
+        List<String> nested = ['$.records[*].lines[*].lineId']
+        Closure<Map> effective = { List<Map<String, Object>> sideRows, String system, Object definition, String root, List<String> keys,
+                                   boolean keepInSpark ->
+            KeepPlanSupport.effectiveSideKeep(ec, sideRows, connector(system), [:], definition, root, keys, keepInSpark, false, "FILE_2")
+        }
+
+        // a nested key with rules: the tenant's, or only the connector's built-ins
+        IllegalArgumentException nestedKey = assertThrows(IllegalArgumentException) { effective(rows, "ACME_LIVE", noLongerFilters, null, nested, true) }
+        assertEquals("File 2 (ACME_LIVE) cannot be filtered: its source no longer filters at read and its records are not top-level, " +
+                "so Keep cannot run in Spark.", nestedKey.message)
+        // a side whose ONLY Keep rule is a declared built-in drop (keepLinesJson, no tenant filter) fails exactly the same:
+        // without the check it would silently stop applying the drop its extractor no longer makes
+        assertEquals(["BUILT_IN:1"], KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector("ACME_LIVE_BUILT_IN"), [:]).rules*.id,
+                "test precondition: the side's one Keep rule is its connector's declared built-in")
+        IllegalArgumentException builtInOnly = assertThrows(IllegalArgumentException) { effective([], "ACME_LIVE_BUILT_IN", noLongerFilters, null, nested, true) }
+        assertEquals("File 2 (ACME_LIVE_BUILT_IN) cannot be filtered: its source no longer filters at read and its records are not top-level, " +
+                "so Keep cannot run in Spark.", builtInOnly.message)
+        assertThrows(IllegalArgumentException) { effective(null, "ACME_LIVE_BUILT_IN", noLongerFilters, "records", ["orderId"], false) }
+        assertThrows(IllegalArgumentException) { effective([], "ACME_LIVE", noLongerFilters, "orders", ["orderId"], true) }
+        assertThrows(IllegalArgumentException) { effective(rows, "ACME_LIVE_PLAIN", noLongerFilters, null, nested, true) }
+
+        // keepInSpark false with rules
+        IllegalArgumentException noKeep = assertThrows(IllegalArgumentException) { effective(rows, "ACME_LIVE", noLongerFilters, "records", ["orderId"], false) }
+        assertEquals("File 2 (ACME_LIVE) cannot be filtered: its source no longer filters at read and this run does not run Keep, " +
+                "so Keep cannot run in Spark.", noKeep.message)
+        IllegalArgumentException both = assertThrows(IllegalArgumentException) {
+            KeepPlanSupport.effectiveSideKeep(ec, rows, connector("ACME_LIVE"), [:], noLongerFilters, null, nested, false)
+        }
+        assertEquals("The ACME_LIVE side cannot be filtered: its source no longer filters at read and this run does not run Keep and " +
+                "its records are not top-level, so Keep cannot run in Spark.", both.message, "a caller that names no side")
+
+        // no rules: nothing to filter, so it passes and reads as today with no filters
+        Map nothing = KeepPlanSupport.todaysRead([])
+        assertEquals(nothing, effective([], "ACME_LIVE_PLAIN", noLongerFilters, null, nested, true))
+        assertEquals(nothing, effective([], "ACME_LIVE_PLAIN", noLongerFilters, "records", ["orderId"], false))
+        assertEquals(nothing, effective(null, "ACME_LIVE_PLAIN", noLongerFilters, "orders", ["orderId"], false))
+
+        // the extract still declares the parameter: today's read, unchanged, whatever Spark could do
+        Map today = KeepPlanSupport.todaysRead(rows)
+        assertEquals(today, effective(rows, "ACME_LIVE_FILTERING", stillFilters, null, nested, true))
+        assertEquals(today, effective(rows, "ACME_LIVE_FILTERING", stillFilters, "records", ["orderId"], false))
+        assertEquals(today, effective(rows, "ACME_LIVE", null, null, nested, false), "an extract that is not installed")
+
+        // data its read already filtered (a retried run's landed file, not read again): today's read, never the error
+        assertEquals(today, KeepPlanSupport.effectiveSideKeep(ec, rows, connector("ACME_LIVE"), [:], noLongerFilters, null, nested, false,
+                true, "FILE_2"))
+        assertEquals(KeepPlanSupport.todaysRead([]), KeepPlanSupport.effectiveSideKeep(ec, [], connector("ACME_LIVE_BUILT_IN"), [:],
+                noLongerFilters, "records", ["orderId"], true, true))
+
+        // control: Spark can keep it, so it keeps in Spark
+        Map spark = effective(rows, "ACME_LIVE", noLongerFilters, "records", ['$.records[*].orderId'], true)
+        assertEquals("SPARK", spark.placement)
+        assertEquals(["BUILT_IN:1", "BUILT_IN:2", "A:1"], spark.rules*.id)
     }
 
     /** Review Focus 4: a scheduled read for tenant A never sees tenant B's filter rows, with no active tenant. */

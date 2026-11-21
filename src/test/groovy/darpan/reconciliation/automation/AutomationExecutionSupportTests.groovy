@@ -3269,38 +3269,46 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void aCallerWhoseCompareTakesNoKeepKeepsTheFiltersAtTheRead() {
-        // A caller that does not say keepInSpark (its compare takes no keepBySide): a Spark side's read is sent its rows and
-        // filters, exactly as before Keep moved into Spark. Every run loop says it, an evaluate run's included (Task 16b).
+    void aCallerWhoseCompareTakesNoKeepFailsASideItsReadCanNoLongerFilter() {
+        // A caller that does not say keepInSpark (its compare takes no keepBySide; every run loop and the pulse say it, Task
+        // 16b). Its read can no longer filter (the extract stopped declaring sourceFilters), so the side would compare
+        // unfiltered: it fails before the extract is called (Ruling 3b2b-25).
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
         addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
         ec.service.declaredInParameters = ["keepRuleFields"]
 
-        Map extracted = acmeExtract(ec, "FILE_1", false)
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException) { acmeExtract(ec, "FILE_1", false) }
+        assertEquals("The ACME side cannot be filtered: its source no longer filters at read and this run does not run Keep, " +
+                "so Keep cannot run in Spark.", refused.message)
 
+        // an extract that still declares the filter parameter: such a caller's read is sent its rows, as before
+        ec.service.declaredInParameters = ["sourceFilters", "keepRuleFields"]
+        Map extracted = acmeExtract(ec, "FILE_1", false)
         assertEquals(["status"], ((List<Map>) extracted.params.sourceFilters)*.fieldExpression)
         assertEquals("READ", extracted.result.sideKeep.placement)
-        assertFalse(extracted.params.containsKey("keepRuleFields"))
     }
 
     @Test
-    void aSideNotKeyedOnTopLevelRecordsKeepsTodaysReadEvenWhereItsExtractNoLongerFilters() {
-        // KeepPlanSupport.effectiveSideKeep's records guard (review M5/M6), on the automation path too: Spark Keep numbers and
-        // reads the top-level records array, so a side keyed through a nested array keeps its filters at the read.
+    void aSideNotKeyedOnTopLevelRecordsFailsWhereItsExtractNoLongerFilters() {
+        // KeepPlanSupport.effectiveSideKeep's records guard (review M5/M6) with Ruling 3b2b-25, on the automation path too:
+        // Spark Keep numbers and reads the top-level records array, and the read no longer filters, so a side keyed through a
+        // nested array with Keep rules fails the run with the gate's message, before its extract is called.
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
         addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
         ec.service.declaredInParameters = ["keepRuleFields"]
         ec.entity.rows["darpan.rule.RuleSetCompareSourceKeyField"].find { it.fileSide == "FILE_1" }.put("fieldExpression", '$.records[*].lines[*].sku')
 
-        Map extracted = acmeExtract(ec, "FILE_1")
-
-        assertEquals(["status"], ((List<Map>) extracted.params.sourceFilters)*.fieldExpression, "the read still filters")
-        assertEquals("READ", extracted.result.sideKeep.placement)
-        assertFalse(extracted.params.containsKey("keepRuleFields"))
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException) { acmeExtract(ec, "FILE_1") }
+        assertTrue(refused.message.contains("its records are not top-level"), refused.message)
         Map run = runAcmeAutomation(ec, [:])
-        assertFalse(run.reconcile.params.containsKey("keepBySide"), "and Spark runs no Keep for it")
+        assertEquals(1, run.result.failedCount)
+        assertNull(run.reconcile, "no compare runs over an unfiltered side")
+        assertFalse(ec.service.calls.any { it.serviceName == ACME_EXTRACT && it.params.fileSide == "FILE_1" }, "the side is never read")
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
+        assertTrue(((execution.errorMessage ?: "") as String).contains("cannot be filtered"), "error: ${execution.errorMessage}")
     }
 
     @Test
@@ -3318,7 +3326,9 @@ class AutomationExecutionSupportTests {
 
         ec.entity.rows["darpan.rule.RuleSetCompareSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", "records")
-        assertEquals("READ", acmeExtract(ec, "FILE_1").result.sideKeep.placement, "the compare scope's root is another array: today's read")
+        // the compare scope's root is another array: Spark cannot keep it and its read no longer filters (Ruling 3b2b-25)
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException) { acmeExtract(ec, "FILE_1") }
+        assertTrue(refused.message.contains("its records are not top-level"), refused.message)
     }
 
     @Test

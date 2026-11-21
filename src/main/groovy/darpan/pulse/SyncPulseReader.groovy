@@ -318,19 +318,19 @@ class SyncPulseReader {
      * One read of source through the check's own dispatch, into location; lookupKeys reads by key. Answers the file it
      * wrote, or null when it found nothing and wrote none.
      *
-     * <p>DAR-BE-318: the dispatch is told this caller's compare takes Keep as the run's does (KEEP_IN_SPARK, !evaluateMode), so a
-     * side the shared gate puts in Spark is read as the check's run reads it (no filters, the Keep fields kept); the side's Keep
-     * then runs over the file here and leaves its set-aside artifact beside it, read by forEachPresentRecord. Any other side
-     * filters at the read as before and gets no artifact.</p>
+     * <p>DAR-BE-318: the dispatch is told this caller takes Keep as every run of the check does, an evaluate run's included
+     * (KEEP_IN_SPARK true, Task 16b), so a side the shared gate puts in Spark is read as the check's run reads it (no filters,
+     * the Keep fields kept); the side's Keep then runs over the file here and leaves its set-aside artifact beside it, read by
+     * forEachPresentRecord. Any other side filters at the read as before and gets no artifact; a side neither can filter fails
+     * the read with the gate's message (Ruling 3b2b-25).</p>
      *
      * @return [file: the file it wrote or null, kept: the keyField values of the records Keep kept (every record's without a
      *         Keep run), or null when no Keep ran or the key is not asked for]
      */
     private static Map extract(def ec, Map automation, def source, Map window, String location, List<String> lookupKeys,
                                String keyField, boolean wantKept) {
-        boolean keepInSpark = !AutomationExecutionSupport.isEvaluateScope(ec, automation)
         Map<String, Object> params = [automationExecutionId: null, sideOutputLocation: location,
-                                      (AutomationExecutionSupport.KEEP_IN_SPARK): keepInSpark] as Map<String, Object>
+                                      (AutomationExecutionSupport.KEEP_IN_SPARK): true] as Map<String, Object>
         Map<String, Object> defaults = AutomationExecutionSupport.resolveSourceExtractorConfigDefaults(ec, automation, [source])
         if (defaults) params.sourceExtractorConfigDefaults = defaults
         if (lookupKeys != null) params.lookupKeys = lookupKeys
@@ -344,7 +344,7 @@ class SyncPulseReader {
             return [file: null, kept: null]
         }
         // The plan the read was sent; a read served from a kept copy carries none, so it is worked out again, as the run does.
-        Map sideKeep = AutomationExecutionSupport.sideKeepOfResult(ec, automation, source, read, params, keepInSpark)
+        Map sideKeep = AutomationExecutionSupport.sideKeepOfResult(ec, automation, source, read, params, true)
         Set<String> kept = KeepStepSupport.applies(sideKeep) ? KeepStepSupport.keptValues(ec, file, sideKeep, keyField) : null
         return [file: file, kept: wantKept ? kept : null]
     }

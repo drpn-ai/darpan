@@ -301,13 +301,16 @@ class RunExtractSupport {
      * <ul>
      * <li>its extract service still declares the connector's filter parameter (Ruling 3b2b-23, KeepPlanSupport.sparkKeepsSide):
      *     the read still filters until its system's task (17–23) drops the parameter;</li>
-     * <li>keepInSpark is false: the run's compare takes no keepBySide (a single-sided evaluate run);</li>
-     * <li>the side is not keyed on top-level records (review M5/M6): Spark Keep numbers and reads the records array, so a side
-     *     whose record root is another array, or whose key runs through a nested array, would be set aside wrongly or fail.
-     *     Such a side keeps today's read; it needs a decision before its extractor stops filtering (Tasks 17–23).</li>
+     * <li>filteredAtRead: the side is a retried run's landed file its read already filtered (KeepArtifacts.filteredAtRead),
+     *     handed back without a new read.</li>
      * </ul>
+     * Every run's compare takes keepBySide, an evaluate run's included (Task 16b), so keepInSpark is true for every run path.
+     * A side whose extract no longer declares the parameter but that Spark cannot keep (keepInSpark false, or not keyed on
+     * top-level records: Spark Keep numbers and reads the records array, review M5/M6) fails before any read when it has Keep
+     * rules (Ruling 3b2b-25): neither its read nor Spark could filter it.
      */
-    static Map sideKeep(def ec, Object source, String fileSide, Map<String, Object> connector, boolean keepInSpark = true) {
+    static Map sideKeep(def ec, Object source, String fileSide, Map<String, Object> connector, boolean keepInSpark = true,
+                        boolean filteredAtRead = false) {
         String compareScopeId = normalize(source?.compareScopeId)
         String side = normalize(fileSide) ?: normalize(source?.fileSide)
         // the compare scope's rows, read for the active tenant; an upload or database side (NONE) takes none
@@ -318,7 +321,7 @@ class RunExtractSupport {
                 SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)),
                 extractServiceName ? ec.service.getServiceDefinition(extractServiceName) : null,
                 normalize(source?.recordRootExpression), (List<String>) RunConclusionStep.keySpecFor(ec, compareScopeId, side).keyFields,
-                keepInSpark)
+                keepInSpark, filteredAtRead, side)
     }
 
     /**

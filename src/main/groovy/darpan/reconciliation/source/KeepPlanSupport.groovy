@@ -41,31 +41,65 @@ class KeepPlanSupport {
 
     /**
      * The one decision on where a side's Keep runs (Ruling 3b2b-23 and the records guard; Task 13 review I2). Every path that
-     * places a side calls this: the interactive run (RunExtractSupport.sideKeep), replay, and the scheduled path. A side its
-     * connector places in Spark keeps in Spark only when all hold:
+     * places a side calls this: the interactive run (RunExtractSupport.sideKeep), replay, the scheduled path and the sync pulse.
+     * A side its connector places in Spark keeps in Spark only when all hold:
      * <ul>
-     * <li>keepInSpark: the run's compare takes the side's Keep (an evaluate run's does not);</li>
+     * <li>keepInSpark: the caller's compare takes the side's Keep (keepBySide). Every run path's does, an evaluate run's
+     *     included (Task 16b); a caller that does not say so is taken as one whose compare takes none;</li>
      * <li>sparkKeepsSide: its extract no longer declares the connector's filter parameter;</li>
      * <li>keyedOnRecords: its records are the extract's top-level records array and every key field is read off a record there
      *     (Spark Keep numbers and reads that array, review M5/M6).</li>
      * </ul>
-     * Otherwise it keeps today's read (todaysRead). The gate is checked before the Spark plan is built, so a connector's declared
-     * Keep lines are compiled only for a side that runs them. READ and NONE placements get their plan as before.
+     * A side whose extract still declares the filter parameter (or is not installed) keeps today's read (todaysRead), and so does
+     * a side whose data its read already filtered (filteredAtRead: a retried run's landed file, KeepArtifacts.filteredAtRead):
+     * it is not read again, and Spark Keep over it would find nothing left and write zero counts.
+     *
+     * Ruling 3b2b-25: a side whose extract no longer declares the parameter cannot filter at the read: Moqui drops an undeclared
+     * parameter, so its tenant rules would never arrive and its built-in drops are gone from the extractor. When Spark cannot
+     * keep it either (keepInSpark false, or not keyed on top-level records), its data was not already filtered at the read, and
+     * it has Keep rules (tenant rows, or declared built-ins that apply to its options: KeepLineTranslator.declared), it fails
+     * here, before any read, with a message naming the side and why. With no Keep rules there is nothing to filter, and it reads
+     * as today with no filters.
+     *
+     * The gate is checked before the Spark plan is built, so a connector's declared Keep lines are compiled only for a side that
+     * runs them or that the 3b2b-25 check has to weigh. READ and NONE placements get their plan as before.
      *
      * @param recordFieldRows the side's filter rows in getter shape, from whichever store the path reads (tenantRuleRows, or the
      *        automation's own, Ruling 3b2b-15)
      * @param extractServiceDefinition the side's extract service definition (ec.service.getServiceDefinition), or null
      * @param recordRootExpression the side's RuleSetCompareSource.recordRootExpression
      * @param keyExpressions the side's key field expressions (composite key fields, else its primaryIdExpression)
+     * @param filteredAtRead true when the side's data is a file its read already filtered and that is not read again
+     * @param fileSide the side (FILE_1 or FILE_2) the failure message names; optional
+     * @throws IllegalArgumentException when neither the read nor Spark can filter a side that has Keep rules (Ruling 3b2b-25).
+     *         A configuration error, not a passing fault: the scheduled path fails it at once (isPermanentFailure) rather than
+     *         queueing retries that would fail the same way.
      */
     static Map effectiveSideKeep(def ec, List<Map<String, Object>> recordFieldRows, Map connector, Map extractOptions,
                                  Object extractServiceDefinition, String recordRootExpression, List<String> keyExpressions,
-                                 boolean keepInSpark) {
-        if (placement(connector) == SPARK && !(keepInSpark && sparkKeepsSide(connector, extractServiceDefinition) &&
-                keyedOnRecords(recordRootExpression, keyExpressions))) {
-            return todaysRead(recordFieldRows)
+                                 boolean keepInSpark, boolean filteredAtRead = false, String fileSide = null) {
+        if (placement(connector) == SPARK) {
+            if (filteredAtRead || !sparkKeepsSide(connector, extractServiceDefinition)) return todaysRead(recordFieldRows)
+            List<String> sparkCannot = []
+            if (!keepInSpark) sparkCannot.add("this run does not run Keep")
+            if (!keyedOnRecords(recordRootExpression, keyExpressions)) sparkCannot.add("its records are not top-level")
+            if (sparkCannot) {
+                if (recordFieldRows || KeepLineTranslator.declared(keepLines(ec, connector), extractOptions ?: [:])) {
+                    throw new IllegalArgumentException(("${sideName(fileSide, connector)} cannot be filtered: its source no longer " +
+                            "filters at read and ${sparkCannot.join(' and ')}, so Keep cannot run in Spark.").toString())
+                }
+                return todaysRead(recordFieldRows)
+            }
         }
         return plan(ec, recordFieldRows ?: [], connector, extractOptions)
+    }
+
+    /** "File 2 (ACME)" for FILE_2 on connector ACME; "The ACME side" when the side is not given. */
+    private static String sideName(String fileSide, Map connector) {
+        String system = normalize(connector?.get("systemEnumId"))
+        String side = normalize(fileSide)?.replace("_", " ")?.toLowerCase()?.capitalize()
+        if (side) return system ? "${side} (${system})".toString() : side
+        return system ? "The ${system} side".toString() : "A side"
     }
 
     /**

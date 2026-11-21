@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -419,17 +420,21 @@ class KeepLiveParityTests {
     }
 
     /**
-     * Review M5/M6: Spark Keep reads the extract's top-level records array. A side keyed through a nested array, or whose records
-     * sit under another array, keeps today's filters at the read rather than being set aside wrongly or failing.
+     * Review M5/M6 with Ruling 3b2b-25: Spark Keep reads the extract's top-level records array, so it cannot keep a side keyed
+     * through a nested array, or whose records sit under another array. KL_SPARK's extract no longer takes the filters either,
+     * so such a side with Keep rules fails before any read, naming the side, rather than comparing unfiltered.
      */
     @Test
-    void aSideNotKeyedOnTopLevelRecordsKeepsItsFiltersAtTheRead() {
+    void aSideNotKeyedOnTopLevelRecordsFailsWhereItsReadCannotFilter() {
         ["FILE_1", "FILE_2"].each { String side ->
-            Map sent = sentBy("KL_RS_NEST", side, "KL_SPARK")
-            assertEquals(["channel"], (sent.sourceFilters as List<Map>)*.fieldExpression, side)
-            assertEquals(KeepPlanSupport.READ, sent.plan.placement, side)
-            assertFalse(sent.containsKey(KeepPlanSupport.KEEP_FIELDS_PARAMETER), side)
+            Map source = source("KL_RS_NEST", side)
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
+                RunExtractSupport.sideKeep(ec, source, side, RunExtractSupport.resolveExtractConnector(ec, source))
+            }
+            assertEquals(("${side == 'FILE_1' ? 'File 1' : 'File 2'} (KL_SPARK) cannot be filtered: its source no longer filters at read " +
+                    "and its records are not top-level, so Keep cannot run in Spark.").toString(), refused.message, side)
         }
+        assertEquals([], KeepLiveTestExtracts.CALLS, "no side is read")
     }
 
     /** An upload never gets Keep, even when its system's connector would place Keep in Spark. */

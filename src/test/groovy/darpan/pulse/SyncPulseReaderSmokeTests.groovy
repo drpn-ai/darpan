@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-BE-328 plan 3, Task 3. The reader through the check's own dispatch (callConfiguredSourceExtractor, the seeded
- * OMS_GQL and NETSUITE_SUITEQL connectors), its live extractor stubbed: the window and filters sent, the records read,
+ * made-up PULSE_FILTERED and PULSE_LEDGER connectors), its live extractor stubbed: the window and filters sent, the records read,
  * the target asked by key, failures answered, folders removed.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -33,8 +33,12 @@ class SyncPulseReaderSmokeTests {
     private static final String A = "KREWE"
     private static final String B = "PULSE_OTHER"
     private static final String AUTO = "PULSE_AUTO"
-    private static final String GQL = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
-    private static final String NS = "reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
+    /** Made-up systems (test-only extracts, AutomationKeepTestExtractionServices): FILTERED still takes its filter parameter and
+     *  so filters at the read; LEDGER takes no Keep and is read by key. */
+    private static final String FILTERED = "PULSE_FILTERED"
+    private static final String LEDGER = "PULSE_LEDGER"
+    private static final String GQL = "reconciliation.AutomationKeepTestExtractionServices.extract#ReadFilteredRecords"
+    private static final String NS = "reconciliation.AutomationKeepTestExtractionServices.extract#LedgerRecords"
     /** DAR-BE-318: a made-up system whose extract no longer takes its filter parameter, so its sides keep in Spark. */
     private static final String ACME = "ACME_PULSE"
     private static final String ACME_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkKeptRecords"
@@ -63,9 +67,9 @@ class SyncPulseReaderSmokeTests {
         ec.entity.makeDataLoader().dummyFks(true).xmlText("""<entity-facade-xml type="seed">
             <darpan.rule.RuleSet ruleSetId="PULSE_RS" ruleSetName="Pulse" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="PULSE_SCOPE" ruleSetId="PULSE_RS" objectType="ORDER" companyUserGroupId="${A}"/>
-            <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_SCOPE" fileSide="FILE_1" systemEnumId="OMS_GQL" fileTypeEnumId="DftJson"
+            <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_SCOPE" fileSide="FILE_1" systemEnumId="${FILTERED}" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${A}"/>
-            <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_SCOPE" fileSide="FILE_2" systemEnumId="NETSUITE_SUITEQL" fileTypeEnumId="DftJson"
+            <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_SCOPE" fileSide="FILE_2" systemEnumId="${LEDGER}" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="tranId" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="PULSE_SCOPE" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="orderName" companyUserGroupId="${A}"/>
@@ -75,13 +79,17 @@ class SyncPulseReaderSmokeTests {
                 inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="PULSE_RS" compareScopeId="PULSE_SCOPE"
                 relativeWindowTypeEnumId="${AutomationExecutionSupport.WINDOW_PREVIOUS_DAY}" windowTimeZone="UTC"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${AUTO}" fileSide="FILE_1" companyUserGroupId="${A}"
-                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="OMS_GQL"
-                safeMetadataJson='{"extractServiceName":"${GQL}","parameters":{"omsRestSourceConfigId":"pulse_oms"}}'/>
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${FILTERED}"
+                safeMetadataJson='{"extractServiceName":"${GQL}","parameters":{"pulseSourceConfigId":"pulse_up"}}'/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${AUTO}" fileSide="FILE_2" companyUserGroupId="${A}"
-                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="NETSUITE_SUITEQL"
-                safeMetadataJson='{"extractServiceName":"${NS}","parameters":{"nsSuiteQlSourceQueryId":"PULSE_Q"}}'/>
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${LEDGER}"
+                safeMetadataJson='{"extractServiceName":"${NS}","parameters":{"pulseQueryId":"PULSE_Q"}}'/>
             <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${AUTO}" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].productStoreId" operator="EXCLUDE_IN" filterValues="TEST_STORE" companyUserGroupId="${A}"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="${FILTERED}" extractServiceName="${GQL}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters" enabled="Y"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="${LEDGER}" extractServiceName="${NS}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" enabled="Y"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="${ACME}" extractServiceName="${ACME_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
                 excludedRecordsSidecar="Y" enabled="Y"/>
@@ -143,7 +151,7 @@ class SyncPulseReaderSmokeTests {
         assertEquals(Timestamp.from(FROM), sent.windowStartDate)
         assertEquals(Timestamp.from(THRU), sent.windowEndDate)
         assertEquals(A, sent.companyUserGroupId)
-        assertEquals("pulse_oms", sent.omsRestSourceConfigId)
+        assertEquals("pulse_up", sent.pulseSourceConfigId)
         assertEquals("FILE_1", sent.fileSide)
         List filters = sent.sourceFilters as List
         assertEquals(1, filters.size(), "the check's own filters, sent as the check sends them")
@@ -178,7 +186,7 @@ class SyncPulseReaderSmokeTests {
         calls.each { Map c ->
             assertEquals("otherRefNum", c.params.lookupKeyField, "read by the check's own FILE_2 key field")
             assertNull(c.params.lookupWithinWindow, "a pulse asks by key alone")
-            assertEquals("PULSE_Q", c.params.nsSuiteQlSourceQueryId)
+            assertEquals("PULSE_Q", c.params.pulseQueryId)
             assertEquals(A, c.params.companyUserGroupId)
         }
         assertEquals(1250, out.present.size(), "the target holds the even keys")
@@ -198,7 +206,7 @@ class SyncPulseReaderSmokeTests {
         assertTrue((out.warnings[0] as String).startsWith("1 key(s) not asked for"), out.warnings.toString())
         assertEquals(["x'); DROP"] as Set, out.unasked, "the skipped key comes back as unasked, so it is never read as absent")
 
-        SyncPulseReader.setLiveExtractor({ String service, Map params -> throw new RuntimeException("NetSuite timed out") })
+        SyncPulseReader.setLiveExtractor({ String service, Map params -> throw new RuntimeException("ledger timed out") })
         Map failed = SyncPulseReader.presentInTarget(ec, pair, automation, ["x'); DROP", "#GOR2"])
         assertEquals(false, failed.ok)
         assertEquals(["x'); DROP"] as Set, failed.unasked, "a failed read still says which keys it never asked")
@@ -251,18 +259,18 @@ class SyncPulseReaderSmokeTests {
     void extractorErrorIsReturnedNotThrown() {
         SyncPulseReader.setLiveExtractor({ String service, Map params ->
             calls << [service: service, params: params]
-            [errors: ["HotWax answered 503"]]
+            [errors: ["upstream answered 503"]]
         })
         Map up = SyncPulseReader.readUpstream(ec, pair, automation, FROM, THRU)
         assertEquals(false, up.ok)
         assertEquals([], up.records)
-        assertTrue(up.errors.any { (it as String).contains("HotWax answered 503") }, up.errors.toString())
+        assertTrue(up.errors.any { (it as String).contains("upstream answered 503") }, up.errors.toString())
 
-        SyncPulseReader.setLiveExtractor({ String service, Map params -> throw new RuntimeException("NetSuite timed out") })
+        SyncPulseReader.setLiveExtractor({ String service, Map params -> throw new RuntimeException("ledger timed out") })
         Map target = SyncPulseReader.presentInTarget(ec, pair, automation, ["#GOR2"])
         assertEquals(false, target.ok)
         assertEquals([] as Set, target.present)
-        assertTrue(target.errors.any { (it as String).contains("NetSuite timed out") }, target.errors.toString())
+        assertTrue(target.errors.any { (it as String).contains("ledger timed out") }, target.errors.toString())
         assertFalse(ec.message.hasError(), "nothing is left on the message facade for the caller's next call")
 
         Map otherTenant = SyncPulseReader.readUpstream(ec, pair + [companyUserGroupId: B], automation, FROM, THRU)
@@ -409,12 +417,12 @@ class SyncPulseReaderSmokeTests {
             if (params.lookupKeys) {
                 records = ((List<String>) params.lookupKeys).findAll { (it.replaceAll(/\D/, '') as long) % 2 == 0 }
                         .collect { [otherRefNum: it, tranId: "SO-${it}"] }
-                fileName = "netsuite-orders-by-key.json"
+                fileName = "ledger-orders-by-key.json"
             } else {
                 records = [[orderId: "O1", orderName: "#GOR1", orderDate: "2026-11-21T07:30:00Z", productStoreId: "STORE"],
                            [orderId: "O2", orderName: "#GOR2", orderDate: "2026-11-21T09:59:59Z", productStoreId: "STORE"],
                            [orderId: "O3", orderName: "#GOR3", productStoreId: "STORE"]]
-                fileName = "oms-gql-orders.json"
+                fileName = "filtered-orders.json"
             }
             File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
             new File(dir, fileName).setText(JsonOutput.toJson([metadata: [:], records: records]), "UTF-8")

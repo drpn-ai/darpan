@@ -114,6 +114,14 @@ class SftpAutomationSupport {
         retrySleeper = DEFAULT_RETRY_SLEEPER
     }
 
+    /** Restores every mutable static to its initial value (shared-Moqui test reset); never called from main. */
+    static void resetForTests() {
+        try {
+            resetClientFactory()
+            resetRetrySleeper()
+        } catch (Throwable ignored) { }
+    }
+
     static String resolveDefaultOutputLocation(def ec, Object runId, Object timestamp) {
         return DataManagerSupport.resolveReconciliationRunLocation(ec, runId, timestamp)
     }

@@ -59,6 +59,11 @@ class SlackOAuthSupport {
 
     static void resetExchangeHook() { exchangeHook = null }
 
+    /** Restores every mutable static to its initial value (shared-Moqui test reset); never called from main. */
+    static void resetForTests() {
+        try { resetExchangeHook() } catch (Throwable ignored) { }
+    }
+
     static String resolveClientId(def ec) {
         return firstConfigured(ec, CLIENT_ID_ENV, CLIENT_ID_PROPERTY)
     }

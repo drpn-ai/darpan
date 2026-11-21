@@ -59,6 +59,11 @@ class SlackApiClient {
 
     static void resetTransportHook() { transportHook = null }
 
+    /** Restores every mutable static to its initial value (shared-Moqui test reset); never called from main. */
+    static void resetForTests() {
+        try { resetTransportHook() } catch (Throwable ignored) { }
+    }
+
     /**
      * Posts a message and returns the {@code ts} handle on success.
      *

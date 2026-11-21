@@ -161,11 +161,11 @@ ext.sparkJava21Opens = [
 
 // Fork width for every Test task here. The old value was 1, which is stricter than the
 // isolation requirement actually is, and it left a multi-core machine running one JVM at a
-// time. The requirement is that a Moqui smoke test not SHARE a JVM (process-global ECFI,
-// Bitronix TM and Spark session all live in statics) — not that it be alone on the machine.
+// time. An unmarked Moqui-booting class still gets a JVM of its own (forkEvery = 1 in smokeTest);
+// a @SharedMoqui class reuses a JVM with its siblings (smokeSharedTest), see the pools below.
 // Nothing is shared between the concurrent forks: every initMoqui() call site passes its own
 // DB token, and that token names the H2 file, the txlog directory and the Bitronix serverId.
-// So forkEvery stays 1 and only the width opens up.
+// So the width can open up without the forks interfering.
 // Override with -PtestForks=N; -PtestForks=1 restores the old fully-serial behaviour.
 ext.darpanTestForks = ((project.findProperty('testForks')
         ?: Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))) as String) as int
@@ -175,15 +175,19 @@ ext.darpanTestForks = ((project.findProperty('testForks')
 // unit test that needs no isolation at all and is paying for a JVM it never uses.
 //
 // DAR-OPS-026 adds a third pool, `shared`: the smoke classes whose source contains `@SharedMoqui`.
-// Those classes opt in to JVM reuse (smokeSharedTest, forkEvery = 0): the shared harness resets the
-// database and the process-global statics (ECF, Bitronix, Spark) between classes, so they no longer
-// need a JVM each. Only marked classes join; an unmarked smoke class keeps its own JVM in smokeTest.
+// Those classes opt in to JVM reuse (smokeSharedTest, forkEvery = 0): the shared harness keeps ONE
+// ECF and ONE Bitronix TM per JVM; between classes it waits for background work to go quiet, resets
+// the database, clears the row caches and runs resetAll() over the registered statics. Spark is
+// never touched (a class that starts a Spark session cannot opt in). So they no longer need a JVM each. Only marked classes join; an unmarked smoke class keeps its own JVM in smokeTest.
 // `smoke` still lists EVERY Moqui-booting class (shared included), so unitTest, sharding and
 // select_tests.py see the same set as before; `shared` is a subset of it.
 //
 // The split is DERIVED from source rather than hand-listed, because a hand-listed pool is how
 // a test silently stops running (see mysqlTest below for what maintaining one by hand costs).
 // scripts/select_tests.py keys off this same marker set — keep them in step.
+// A class is smoke when its own source, an extended base class, OR a test-source helper class it
+// names (constructs / calls statically, e.g. `new TenantAttackHarness(...)`) contains a boot marker.
+// Only a real `@SharedMoqui` annotation line counts as the opt-in, not a comment mentioning it.
 // Scanned once, eagerly: ~100 small reads, and computing it here rather than inside the task
 // keeps it out of Groovy's dynamic-dispatch path where a Test task is the closure delegate.
 ext.darpanTestPools = { ->
@@ -192,6 +196,8 @@ ext.darpanTestPools = { ->
     // DAR-OPS-026 O7: a class that boots Moqui through a base class's lifecycle (TwoFactorTestSupport.boot())
     // has no marker of its own. So a class is smoke when its source has a marker OR it extends, transitively
     // (simple-name scan of `extends X` over every test source, base classes included), a class whose source does.
+    // DAR-OPS-026 I1: composition counts too. A helper is a test-source class that is not itself a test
+    // (name not ending Test/Tests); a class that names one whose source boots Moqui (transitively) is smoke.
     Map<String, String> sources = [:]      // simple class name -> source text
     Map<String, String> superOf = [:]      // simple class name -> simple superclass name
     List<File> candidates = []
@@ -204,14 +210,25 @@ ext.darpanTestPools = { ->
         if (m.find()) superOf[simple] = m.group(1)
         if (f.name.endsWith('Test.groovy') || f.name.endsWith('Tests.groovy')) candidates << f
     }
+    Set<String> helperNames = sources.keySet().findAll { !it.endsWith('Test') && !it.endsWith('Tests') } as Set<String>
+    Map<String, Set<String>> identsOf = [:]   // simple name -> helper names its source mentions (lazy)
     Closure<Boolean> boots
     boots = { String name, Set<String> seen ->
         String text = sources[name]
         if (text == null || !seen.add(name)) return false
         if (moquiBootMarkers.any { text.contains(it) }) return true
         String sup = superOf[name]
-        return sup != null && boots(sup, seen)
+        if (sup != null && boots(sup, seen)) return true
+        Set<String> used = identsOf.computeIfAbsent(name) { String n ->
+            Set<String> found = new HashSet<String>()
+            (sources[n] =~ /[A-Za-z_][A-Za-z0-9_]*/).each { found << (it as String) }
+            found.retainAll(helperNames)
+            found.remove(n)
+            found
+        }
+        return used.any { String h -> boots(h, seen) }
     }
+    java.util.regex.Pattern sharedMarker = ~/(?m)^\s*@SharedMoqui\b/
     List<String> smoke = [], unit = [], shared = []
     candidates.each { File f ->
         String classPattern = testSrc.toPath().relativize(f.toPath()).toString()
@@ -219,7 +236,7 @@ ext.darpanTestPools = { ->
         String simple = f.name.replaceFirst(/\.groovy$/, '')
         if (boots(simple, new HashSet<String>())) {
             smoke << classPattern
-            if (sources[simple].contains('@SharedMoqui')) shared << classPattern
+            if (sharedMarker.matcher(sources[simple]).find()) shared << classPattern
         } else {
             unit << classPattern
         }
@@ -230,6 +247,9 @@ ext.darpanTestPools = { ->
     }
     return [smoke: smoke.sort(), unit: unit.sort(), shared: shared.sort()]
 }()
+logger.lifecycle("darpan test pools: ${darpanTestPools.unit.size()} unit, " +
+        "${darpanTestPools.smoke.size() - darpanTestPools.shared.size()} smoke (own JVM), " +
+        "${darpanTestPools.shared.size()} shared (@SharedMoqui)")
 
 test {
     // MySQL-backed tests (@Tag("mysql")) need real InnoDB locking semantics and stay opt-in via

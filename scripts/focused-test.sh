@@ -21,8 +21,8 @@ DRY_RUN=""
 cd "$COMPONENT_DIR"
 SELECTION_JSON="$(python3 scripts/select_tests.py --base "$BASE" --format json --explain)"
 
-read -r RUN_ALL N_UNIT N_SMOKE <<<"$(
-  python3 -c 'import json,sys; d=json.load(sys.stdin); print(int(d["all"]), len(d["unit"]), len(d["smoke"]))' \
+read -r RUN_ALL N_UNIT N_SMOKE N_SHARED <<<"$(
+  python3 -c 'import json,sys; d=json.load(sys.stdin); print(int(d["all"]), len(d["unit"]), len(d["smoke"]), len(d["shared"]))' \
     <<<"$SELECTION_JSON"
 )"
 
@@ -42,13 +42,14 @@ for k in keys:
 if [[ "$RUN_ALL" == "1" ]]; then
   echo "Change set has no useful narrowing — running the full suite."
   CMD=("$BACKEND_DIR/gradlew" "$GRADLE_PATH:testAll")
-elif (( N_UNIT == 0 && N_SMOKE == 0 )); then
+elif (( N_UNIT == 0 && N_SMOKE == 0 && N_SHARED == 0 )); then
   echo "No test-relevant changes vs $BASE — nothing to run."
   exit 0
 else
-  # Route each half to its own pool rather than putting everything through `test`. Gradle binds
-  # a --tests option to the task name preceding it, so the two filters stay independent, and the
-  # unit half avoids the per-class fork it would pay under `test`.
+  # Route each pool to its own task rather than putting everything through `test`. Gradle binds
+  # a --tests option to the task name preceding it, so the filters stay independent. smokeTest
+  # excludes @SharedMoqui classes (failOnNoMatchingTests), so a shared class must go to
+  # smokeSharedTest or it would be skipped or fail the run. Each task only when non-empty.
   CMD=("$BACKEND_DIR/gradlew")
   if (( N_UNIT > 0 )); then
     collect_args unit
@@ -57,6 +58,10 @@ else
   if (( N_SMOKE > 0 )); then
     collect_args smoke
     CMD+=("$GRADLE_PATH:smokeTest" "${ARGS[@]}")
+  fi
+  if (( N_SHARED > 0 )); then
+    collect_args shared
+    CMD+=("$GRADLE_PATH:smokeSharedTest" "${ARGS[@]}")
   fi
 fi
 

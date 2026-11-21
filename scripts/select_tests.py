@@ -56,7 +56,8 @@ Output formats:
   --format list    one FQCN per line (default); the single token ALL means
                    "no useful narrowing, run everything"
   --format gradle  ready-to-paste `--tests a --tests b` argument string
-  --format json    {"all": bool, "unit": [...], "smoke": [...], "why": {...}}
+  --format json    {"all": bool, "unit": [...], "smoke": [...], "shared": [...], "why": {...}}
+                   (smoke = one-JVM-each classes, shared = @SharedMoqui classes; disjoint)
 """
 import argparse
 import json
@@ -83,6 +84,12 @@ SERVICE_ROOT = COMPONENT_ROOT / "service"
 # must run in its own JVM. build.gradle derives the smoke pool from the same
 # markers, so the two never drift.
 MOQUI_BOOT_MARKERS = ("initMoqui(", "Moqui.dynamicInit", "ExecutionContextFactoryImpl")
+
+# A class opts in to the shared-JVM pool with a real `@SharedMoqui` annotation line (a comment that
+# mentions it does not count). build.gradle uses the same regex.
+SHARED_MARKER = re.compile(r"^\s*@SharedMoqui\b", re.MULTILINE)
+EXTENDS = re.compile(r"^\s*(?:(?:public|abstract|final|static)\s+)*class\s+(\w+)\b[^{]*?\bextends\s+(\w+)",
+                    re.MULTILINE)
 
 # Paths whose blast radius is the entire suite.
 GLOBAL_IMPACT = ("component.xml", "MoquiConf.xml", "build.gradle", "build.xml")
@@ -116,7 +123,7 @@ def measured_times() -> dict:
     out: dict[str, float] = {}
     # Any of the three task result dirs will do, and a class may appear in more than one; keep the
     # fastest reading, since the slower one is usually a run that was competing with other forks.
-    for task_dir in ("unitTest", "smokeTest", "test"):
+    for task_dir in ("unitTest", "smokeTest", "smokeSharedTest", "test"):
         for xml in (results / task_dir).glob("TEST-*.xml"):
             try:
                 root = ET.parse(xml).getroot()
@@ -165,8 +172,33 @@ class Index:
                 "symbols": idents & set(self.main),
             }
 
-        for path in sorted(TEST_ROOT.rglob("*.groovy")):
-            raw = read(path)
+        # A class boots Moqui when its own source has a boot marker, OR an extended base does, OR a
+        # test-source helper it names (constructs / calls statically) does. Same rule as build.gradle.
+        test_files = sorted(TEST_ROOT.rglob("*.groovy"))
+        raws = {p.stem: read(p) for p in test_files}
+        super_of = {}
+        for stem, raw in raws.items():
+            for cls, sup in EXTENDS.findall(raw):
+                if cls == stem:
+                    super_of[stem] = sup
+        helpers = {s for s in raws if not s.endswith(("Test", "Tests"))}
+        boot_cache: dict[str, bool] = {}
+
+        def boots(name: str, seen: frozenset = frozenset()) -> bool:
+            if name in boot_cache:
+                return boot_cache[name]
+            raw = raws.get(name)
+            if raw is None or name in seen:
+                return False
+            seen = seen | {name}
+            result = (any(m in raw for m in MOQUI_BOOT_MARKERS)
+                      or (name in super_of and boots(super_of[name], seen))
+                      or any(boots(h, seen) for h in (set(IDENT.findall(raw)) & helpers) - {name}))
+            boot_cache[name] = result
+            return result
+
+        for path in test_files:
+            raw = raws[path.stem]
             if path.stem.endswith(("Test", "Tests")):
                 # @Tag("mysql") classes are excluded from the `test` task and only run under the
                 # opt-in mysqlTest task. Naming one in `--tests` would match the class, then have
@@ -177,7 +209,8 @@ class Index:
                     "path": path,
                     "idents": set(IDENT.findall(raw)),
                     "raw": raw,
-                    "smoke": any(m in raw for m in MOQUI_BOOT_MARKERS),
+                    "smoke": boots(path.stem),
+                    "shared": boots(path.stem) and bool(SHARED_MARKER.search(raw)),
                 }
             else:
                 self.supports[path.stem] = path
@@ -185,6 +218,10 @@ class Index:
     @property
     def smoke_tests(self) -> set:
         return {f for f, t in self.tests.items() if t["smoke"]}
+
+    @property
+    def shared_tests(self) -> set:
+        return {f for f, t in self.tests.items() if t["shared"]}
 
     @property
     def contract_tests(self) -> set:
@@ -388,7 +425,8 @@ def self_check(index: Index) -> int:
     indirect = sorted(n for n in index.main
                       if n not in orphans and not index.tests_mentioning({n}))
     print(f"main classes: {len(index.main)}   test classes: {len(index.tests)} "
-          f"({len(index.smoke_tests)} smoke / {len(index.tests) - len(index.smoke_tests)} unit)"
+          f"({len(index.smoke_tests)} smoke incl. {len(index.shared_tests)} shared"
+          f" / {len(index.tests) - len(index.smoke_tests)} unit)"
           f"   service files: {len(index.services)}")
     if indirect:
         print(f"\n{len(indirect)} main class(es) reached only through service XML "
@@ -431,14 +469,16 @@ def main() -> int:
 
     if not changed:
         if args.format == "json":
-            print(json.dumps({"all": False, "unit": [], "smoke": [], "why": {}}))
+            print(json.dumps({"all": False, "unit": [], "smoke": [], "shared": [], "why": {}}))
         elif args.format == "list":
             print("", end="")
         return 0
 
     sel = select(changed, index, args.base, args.depth)
     unit = sorted(f for f in sel.tests if not index.tests[f]["smoke"])
-    smoke = sorted(f for f in sel.tests if index.tests[f]["smoke"])
+    # Three disjoint pools, one Gradle task each: unitTest, smokeTest (own JVM), smokeSharedTest.
+    smoke = sorted(f for f in sel.tests if index.tests[f]["smoke"] and not index.tests[f]["shared"])
+    shared = sorted(f for f in sel.tests if index.tests[f]["shared"])
 
     if args.explain:
         print(f"changed files ({len(changed)}):", file=sys.stderr)
@@ -457,24 +497,24 @@ def main() -> int:
                 print(f"\nmeasured in-JVM time: {picked:.0f}s of {total:.0f}s ({pct:.0f}%) "
                       f"— excludes per-class JVM start, so the real saving is larger",
                       file=sys.stderr)
-            print(f"\nselected {len(unit)} unit + {len(smoke)} smoke "
+            print(f"\nselected {len(unit)} unit + {len(smoke)} smoke + {len(shared)} shared "
                   f"of {len(index.tests)} classes:", file=sys.stderr)
-            for f in unit + smoke:
-                kind = "smoke" if index.tests[f]["smoke"] else "unit "
+            for f in unit + smoke + shared:
+                kind = "shared" if index.tests[f]["shared"] else "smoke" if index.tests[f]["smoke"] else "unit "
                 print(f"  [{kind}] {f}", file=sys.stderr)
                 for r in sel.why[f]:
                     print(f"            <- {r}", file=sys.stderr)
 
     if args.format == "json":
-        print(json.dumps({"all": sel.all, "unit": unit, "smoke": smoke,
+        print(json.dumps({"all": sel.all, "unit": unit, "smoke": smoke, "shared": shared,
                           "why": sel.why, "allReasons": sel.all_reasons}))
     elif args.format == "gradle":
         if sel.all:
             print("ALL")
         else:
-            print(" ".join(f"--tests {f}" for f in unit + smoke))
+            print(" ".join(f"--tests {f}" for f in unit + smoke + shared))
     else:
-        print("ALL" if sel.all else "\n".join(unit + smoke))
+        print("ALL" if sel.all else "\n".join(unit + smoke + shared))
     return 0
 
 

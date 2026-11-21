@@ -30,9 +30,13 @@ class AuditChangePlanner {
     private static final String WHY = "agent proposal: tenant compared on the row"
 
     /** What the change would close and open, from landed data only; writes nothing (AuditChangeBacktest). */
-    static Closure backtest = { def ec, String tenantId, String kind, Map target, Map merged, Map current ->
+    private static final Closure DEFAULT_BACKTEST = { def ec, String tenantId, String kind, Map target, Map merged, Map current ->
         AuditChangeBacktest.run(ec, tenantId, kind, target, merged, current)
     }
+    static Closure backtest = DEFAULT_BACKTEST
+
+    /** Test seam: puts the real backtest back after a test swapped it. Idempotent; never throws. */
+    static void resetForTests() { backtest = DEFAULT_BACKTEST }
 
     // ---------------------------------------------------------------- create
 

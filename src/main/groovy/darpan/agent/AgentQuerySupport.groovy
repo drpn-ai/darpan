@@ -43,8 +43,16 @@ class AgentQuerySupport {
     static final String SHARED_CONNECTION_REFUSAL =
             "This connection is shared with your tenant; fresh queries run only on your own connections."
 
+    private static final long DEFAULT_TIMEOUT_MILLIS = 60_000L
+
     /** Wall clock for one query. Not final so a test can shorten it; production leaves it at 60 s. */
-    static volatile long timeoutMillis = 60_000L
+    static volatile long timeoutMillis = DEFAULT_TIMEOUT_MILLIS
+
+    /** Test seam: restores the timeout and the worker thread-name sequence to their initial values. Never throws. */
+    static void resetForTests() {
+        timeoutMillis = DEFAULT_TIMEOUT_MILLIS
+        WORKER_SEQ.set(0)
+    }
 
     /** A request the agent must change: thrown by a check or by the work, answered as code REFUSED. */
     static class AgentQueryRefused extends IllegalArgumentException {

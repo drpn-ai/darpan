@@ -9,6 +9,7 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.conclusion.RunConclusionSupport
+import darpan.reconciliation.source.KeepPlanSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -202,6 +203,93 @@ class KeptCopySupportTests {
         assertEquals(JsonOutput.toJson(expected.configuredExclusions), JsonOutput.toJson(doc.metadata.filters.configuredExclusions))
         assertEquals(5, doc.metadata.extractedRecordCount)
         assertEquals(2, served.recordCount)
+    }
+
+    private static final List<Map<String, Object>> KEEP_RULES = [
+            [sequenceNum: 1, fieldExpression: "sourceName", operator: "EXCLUDE_IN", filterValues: "POS"],
+            [sequenceNum: 2, fieldExpression: "displayFinancialStatus", operator: "INCLUDE_IN", filterValues: "PAID,PARTIALLY_REFUNDED"],
+    ]
+
+    private String keepDataset(String conn) {
+        String id = dataset(conn)
+        copy(A, id, [
+                order("web-paid", "2026-11-10T09:00:00Z", [sourceName: "web", displayFinancialStatus: "PAID"]),
+                order("pos-paid", "2026-11-10T10:00:00Z", [sourceName: " pos ", displayFinancialStatus: "PAID"]),
+                order("web-pending", "2026-11-10T11:00:00Z", [sourceName: "web", displayFinancialStatus: "PENDING"]),
+                order("web-nostatus", "2026-11-10T12:00:00Z", [sourceName: "web"]),
+                order("nosource-refunded", "2026-11-10T13:00:00Z", [displayFinancialStatus: "partially_refunded"]),
+        ])
+        return id
+    }
+
+    private Map keepSlice(String conn, String token, Map sideKeep) {
+        return KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "KC_ISO"),
+                [projConfigId: conn, sourceFilters: KEEP_RULES, outputLocation: runLocation(token), fileName: "keep.json"],
+                [tenantId: A, windowStart: START, windowEnd: END] + (sideKeep == null ? [:] : [sideKeep: sideKeep])))
+    }
+
+    private static Map sparkPlan() {
+        return [placement: KeepPlanSupport.SPARK, fields: ["sourceName", "displayFinancialStatus"] as LinkedHashSet]
+    }
+
+    /** Task 15: the caller says Spark Keep runs for this side (its plan places Keep in SPARK), so the slice filters nothing. */
+    @Test
+    void aServedSparkSideIsSlicedUnfiltered() {
+        keepDataset("conn-keep-spark")
+        Map served = keepSlice("conn-keep-spark", "keep-spark", sparkPlan())
+        assertTrue(served.served as boolean, served.reason as String)
+        Map doc = json(served.extractFile as File)
+        assertEquals(["web-paid", "pos-paid", "web-pending", "web-nostatus", "nosource-refunded"], doc.records*.id)
+        assertEquals(5, served.recordCount)
+        assertEquals(5, doc.metadata.extractedRecordCount)
+        assertNull(doc.metadata.filters, "no filter ran at the slice, so none is reported")
+        assertFalse(new File(served.extractFile.parentFile as File, ExcludedRecordsSidecar.fileNameFor("keep.json")).exists(),
+                "Spark Keep writes the set-aside records, not the slice")
+    }
+
+    /** A side with no Keep plan, or one whose Keep reads (a data-defined system), is filtered at the slice as it always was. */
+    @Test
+    void aDataDefinedSideIsStillFilteredAtTheSlice() {
+        keepDataset("conn-keep-read")
+        [null, [placement: KeepPlanSupport.READ, fields: ["sourceName"] as Set], [placement: KeepPlanSupport.NONE, fields: [] as Set]].each { Map plan ->
+            String token = "keep-read-${plan?.placement}".toString()
+            Map served = keepSlice("conn-keep-read", token, plan)
+            assertTrue(served.served as boolean, served.reason as String)
+            assertEquals(["web-paid", "nosource-refunded"], json(served.extractFile as File).records*.id, "plan ${plan}")
+            assertTrue(new File(served.extractFile.parentFile as File, ExcludedRecordsSidecar.fileNameFor("keep.json")).isFile())
+        }
+    }
+
+    /** What a Keep-in-Spark side gets, filtered by Keep afterwards, is the slice a filtering side gets (the full live parity waits for the Keep placement). */
+    @Test
+    void aServedRunMatchesALiveRunWithKeepInSpark() {
+        keepDataset("conn-keep-parity")
+        Map unfiltered = keepSlice("conn-keep-parity", "keep-parity-spark", sparkPlan())
+        Map filtered = keepSlice("conn-keep-parity", "keep-parity-read", null)
+        assertTrue(unfiltered.served as boolean, unfiltered.reason as String)
+        assertTrue(filtered.served as boolean, filtered.reason as String)
+        Map afterKeep = SourceFilterSupport.applyToRecords(json(unfiltered.extractFile as File).records as List<Map>,
+                SourceFilterSupport.parseRules(KEEP_RULES))
+        assertEquals(JsonOutput.toJson(json(filtered.extractFile as File).records), JsonOutput.toJson(afterKeep.records))
+    }
+
+    /** The projection is asked to keep the fields Spark Keep reads, beside the side's own. */
+    @Test
+    void theProjectionKeepsTheKeepFields() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        String id = datasetOf("KC_PROJ", "conn-proj-keep", "id", "createdAt")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z", a: 1, drop: "y"],
+                       [id: "p2", createdAt: "2026-11-10T10:00:00Z", a: 3, drop: "n"]], "id", "createdAt")
+        MadeUpKeptRecords.CALLS.clear()
+        Map params = projParams(connector, ["id", "a"], "proj-keep", [[sequenceNum: 1, fieldExpression: "drop", operator: "EXCLUDE_IN", filterValues: "y"]])
+        params.projConfigId = "conn-proj-keep"
+        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START,
+                windowEnd: END, sideKeep: [placement: KeepPlanSupport.SPARK, fields: ["drop"] as Set]]))
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals([[id: "p1", a: 1, drop: "y"], [id: "p2", a: 3, drop: "n"]], json(served.extractFile as File).records, "nothing filtered, the Keep field kept")
+        assertEquals(["id", "a", "drop"], MadeUpKeptRecords.CALLS[0].side.keepFields)
+        assertEquals(["drop"], MadeUpKeptRecords.CALLS[0].side.filterFields, "the copy must hold the field Keep reads")
     }
 
     /** Review Focus 3: "today so far" ends after the copy's readThru, so it reads live, never a partial slice. */

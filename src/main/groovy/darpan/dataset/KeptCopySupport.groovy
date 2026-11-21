@@ -5,6 +5,7 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
+import darpan.reconciliation.source.KeepPlanSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
 import org.slf4j.Logger
@@ -118,7 +119,7 @@ class KeptCopySupport {
             "lookupKeys", "lookupKeyField", "lookupWithinWindow", "reconciliationRunResultId", "progressStageCode",
             "expectedRecordCount", "automationId", "automationExecutionId", "companyUserGroupId", "fileSide",
             "sourceTypeEnumId", "windowStartDate", "windowEndDate", "windowStart", "windowEnd", "fromDate", "toDate",
-            AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS,
+            AutomationExecutionSupport.READ_BY_OTHER_SIDE_KEYS, KeepPlanSupport.KEEP_FIELDS_PARAMETER,
     ] as Set<String>).asImmutable()
 
     /**
@@ -128,7 +129,9 @@ class KeptCopySupport {
      * @param params the extractor parameters, complete, as they would be sent
      * @param run tenantId (the run's owner), windowStart and windowEnd (Timestamps: the instants the run covers),
      *        stateMode (an automation read by status with no window), outputRunId (the folder name an extractor uses
-     *        when params carry no outputLocation)
+     *        when params carry no outputLocation), sideKeep (optional: the side's Keep plan, KeepPlanSupport.sideKeep; when it
+     *        places Keep in SPARK, Spark Keep runs at ingest, so the slice leaves the filters to it and keeps the Keep fields.
+     *        Absent or any other placement: the slice filters as it always has. A caller passes it only where Spark Keep runs.)
      */
     static Map<String, Object> side(Map<String, Object> connector, Map<String, Object> params, Map<String, Object> run) {
         Map<String, Object> p = params ?: [:]
@@ -168,7 +171,11 @@ class KeptCopySupport {
         else if (!projects && keepName && present(p.get(keepName))) liveOnly = KEEPS_FIELDS
         else if (undeclared) liveOnly = "the side sends parameters no dataset is keyed by: ${undeclared.sort().join(', ')}".toString()
 
+        boolean keepInSpark = KeepPlanSupport.SPARK == ((Map) run?.get("sideKeep"))?.get("placement")
+        List<String> sparkKeepFields = keepInSpark ? (((Map) run.get("sideKeep")).get("fields") as Collection<String> ?: []) as List<String> : []
         return [
+                keepInSpark    : keepInSpark,
+                sparkKeepFields: sparkKeepFields,
                 tenantId       : normalize(run?.tenantId),
                 systemEnumId   : normalize(connector?.systemEnumId) ?: normalize(p.systemEnumId),
                 sourceConfigId : normalize(p.get(configName)),
@@ -385,8 +392,13 @@ class KeptCopySupport {
         Map params = [systemEnumId: side.systemEnumId,
                       copy        : [keptFields: manifest.keptFields, readFields: manifest.readFields, heldFields: manifest.heldFields,
                                      sideFiles : sideFiles == null ? null : sideFiles.collectEntries { k, v -> [(k): v.absolutePath] }],
-                      side        : [keepFields  : side.keepFields, readFields: side.readFields, windowField: windowField,
-                                     filterFields: SourceFilterSupport.parseRules(side.filters).collect { normalize(it.fieldExpression) }],
+                      // Spark Keep at ingest does the filtering, so the copy must hold the fields its rules read: they are kept
+                      // beside the side's own, and stand where the slice's own filter fields would
+                      side        : [keepFields  : side.keepFields == null ? null :
+                                             ((side.keepFields as List) + (side.sparkKeepFields ?: [])).unique(),
+                                     readFields: side.readFields, windowField: windowField,
+                                     filterFields: side.keepInSpark ? new ArrayList((side.sparkKeepFields ?: []) as Collection) :
+                                             SourceFilterSupport.parseRules(side.filters).collect { normalize(it.fieldExpression) }],
                       windowStart : side.windowStart, windowEnd: side.windowEnd] + extra
         Map out
         try {
@@ -413,7 +425,8 @@ class KeptCopySupport {
                 "${DataManagerSupport.safeToken(side.systemEnumId, 'source').toLowerCase()}-${start.time}-${end.time}.json".toString()
         String fileLocation = DataManagerSupport.childLocation(location, fileName)
         // parsed before the copy is opened, as the extractors do: a malformed rule fails here and the live read reports it
-        List<Map<String, Object>> rules = SourceFilterSupport.parseRules(side.filters)
+        // a side whose Keep runs in Spark is sliced unfiltered: Keep sets the records aside at ingest
+        List<Map<String, Object>> rules = side.keepInSpark ? [] : SourceFilterSupport.parseRules(side.filters)
         File outDir = DataManagerSupport.resolveDirectoryFile(ec, location, false)
         if (outDir == null) return notServed("the output location is not a folder")
         // the folders this slice creates, deepest first: an aborted slice removes them again when they are empty

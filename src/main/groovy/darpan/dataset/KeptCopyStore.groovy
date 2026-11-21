@@ -11,7 +11,9 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
@@ -205,7 +207,7 @@ class KeptCopyStore {
                 recordsRead++
                 String id = keyOf(rec, idField)
                 List prior = index.remove(id)
-                Instant created = parseInstant(rec.get(createdField))
+                Instant created = createdInstant(rec.get(createdField))
                 boolean droppedByHorizon = horizon != null && created != null && created.isBefore(horizon)
                 if (prior != null) {
                     boolean sameStamp = compareStamps(prior[0], rec.get(stampField)) == 0
@@ -225,7 +227,7 @@ class KeptCopyStore {
             return count
         }
         long removedCount = index.values().count { List p ->
-            Instant created = parseInstant(p[2])
+            Instant created = createdInstant(p[2])
             horizon == null || created == null || !created.isBefore(horizon)
         }
         return [version: out.version, recordsRead: recordsRead, changedCount: changedCount, addedCount: addedCount,
@@ -449,6 +451,19 @@ class KeptCopyStore {
         try { return Instant.parse(s) } catch (Exception ignored) { }
         try { return OffsetDateTime.parse(s).toInstant() } catch (Exception ignored) { }
         return null
+    }
+
+    /**
+     * A record's created date as replace places it against the horizon and the never-read line: {@link #parseInstant}, or a
+     * plain yyyy-MM-dd day (a DATE column) as that day's start in UTC; marginDays absorbs the zone skew. Only here: a
+     * slice's window values and the stamps stay instants, since a day there would be placed in a zone no setting names.
+     */
+    private static Instant createdInstant(Object value) {
+        Instant at = parseInstant(value)
+        if (at != null || !(value instanceof CharSequence)) return at
+        String s = value.toString().trim()
+        if (!(s ==~ /\d{4}-\d{2}-\d{2}/)) return null
+        try { return LocalDate.parse(s).atStartOfDay(ZoneOffset.UTC).toInstant() } catch (Exception ignored) { return null }
     }
 
     /** Compares two stamps as instants; an absent or unparseable stamp sorts oldest. */

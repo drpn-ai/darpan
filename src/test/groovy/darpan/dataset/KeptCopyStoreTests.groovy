@@ -280,6 +280,24 @@ class KeptCopyStoreTests {
         assertEquals(["1", "10", "9"], byId().keySet().sort())
     }
 
+    /**
+     * DAR-BE-318 I2, on a made-up whole-days source: a created field holding a plain yyyy-MM-dd day (a DATE column) is placed
+     * as that day's start in UTC, so a record the changed-since reads never saw is a miss, and one before the horizon drops.
+     */
+    @Test void aDayStringCreatedFieldIsPlacedSoANeverReadRecordIsAMiss() {
+        Closure<Map> day = { String id, String created -> [id: id, updatedAt: "2026-10-20T00:00:00Z", madeUpDay: created] }
+        Closure<Map> full = { List<Map> recs ->
+            KeptCopyStore.replace(dir, recs.iterator(), "id", "updatedAt", "madeUpDay", ts("2026-09-01T00:00:00Z"),
+                    ts("2026-11-08T00:00:00Z"), ts("2026-11-08T00:00:05Z"), 2)
+        }
+        KeptCopyStore.merge(dir, [day("seen", "2026-10-01")].iterator(), "id", "updatedAt", ts("2026-11-01T00:00:00Z"), ts("2026-11-01T00:00:05Z"))
+        // never-read: created Oct 10, before readThru Nov 1 less 2 days; new: created Oct 31, inside the margin; old: before the horizon
+        Map r = full([day("seen", "2026-10-01"), day("never-read", "2026-10-10"), day("new", "2026-10-31"), day("old", "2026-08-01")])
+        assertEquals(1, r.missCount, "the record the changed-since reads never saw")
+        assertEquals(2, r.addedCount)
+        assertEquals(["never-read", "new", "seen"], byId().keySet().sort(), "the record before the horizon is dropped")
+    }
+
     @Test void aRecordMissingFromTheFullReadIsRemovedNotMissed() {
         merge(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z")])
         Map r = replace(dir, [rec("1", "2026-10-03T14:22:01Z")])

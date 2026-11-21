@@ -724,6 +724,32 @@ class ConfigTransferSmokeTests {
         }
     }
 
+    // DAR-BE-332: prod's R9 bundle carried an existing check with no links; the import deleted its link to the bundle's R3
+    // and kept its automation, so every run after failed "tests no statement". save#AuditCheck refuses such a check; so must this.
+    @Test
+    void aCheckLeftTestingNoStatementBlocks() {
+        Map unlinked = copy(exportSource())
+        (bundleCheck(unlinked, "memos-open")).links = []
+
+        List<Map> onCreate = (importInto(DST, unlinked, [(AUTH_REF): "CREATE"]).result.plan.blocking as List<Map>)
+                .findAll { it.code == "CHECK_WITHOUT_STATEMENT" }
+        assertEquals(["CHECK:XFER_CHK2"], onCreate*.ref, "a new check with no statement: ${onCreate}")
+
+        Map first = applyPlan(DST, exportSource(), [(AUTH_REF): "CREATE"])
+        assertNoErrors(first)
+        String authId = first.result.idMap[AUTH_REF]
+        List<Map> onUpdate = (importInto(DST, unlinked, [(AUTH_REF): authId]).result.plan.blocking as List<Map>)
+                .findAll { it.code == "CHECK_WITHOUT_STATEMENT" }
+        assertEquals(["CHECK:XFER_CHK2"], onUpdate*.ref, "an existing check whose only links the bundle replaces: ${onUpdate}")
+        String checkId = first.result.idMap["CHECK:XFER_CHK2"]
+        assertTrue(ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", checkId).disableAuthz().count() > 0,
+                "a refused plan leaves the link in place")
+    }
+
+    private static Map bundleCheck(Map bundle, String checkCode) {
+        return (bundle.checks as List<Map>).find { it.fields.checkCode == checkCode }
+    }
+
     @Test
     void missingReferenceDataBlocks() {
         Map bundle = copy(exportSource())

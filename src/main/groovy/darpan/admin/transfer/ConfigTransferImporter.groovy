@@ -249,6 +249,7 @@ class ConfigTransferImporter {
         scopeGate(ctx)
         targetOnlyWarnings(ctx)
         rulesReplacedWarnings(ctx)
+        checksWithoutStatementBlocks(ctx)
         int knowledgeWrites = records(ctx, "knowledge").count { ctx.actions[it.ref] in [CREATE, "UPDATE"] } as int
         if (knowledgeWrites) {
             warn(ctx, "KNOWLEDGE_WRITTEN", null, "${knowledgeWrites} knowledge entries will be written to tenant ${tenantId}.".toString())
@@ -970,6 +971,24 @@ class ConfigTransferImporter {
                 warn(ctx, "TARGET_ONLY_CHILDREN", audit.ref, "Audit ${audit.label} keeps what the bundle does not carry, untouched: " +
                         ([extraStatements ? "statements ${extraStatements.join(', ')}" : null,
                           extraChecks ? "checks ${extraChecks.join(', ')}" : null].findAll { it }.join("; ")) + ".")
+            }
+        }
+    }
+
+    /**
+     * DAR-BE-332. A check tests at least one statement (save#AuditCheck refuses one that tests none). writeCheck replaces a
+     * check's links to the bundle's statements with the bundle's, so a check carried with no links, whose links all point at
+     * those statements, would test nothing while its automation kept running it, every ledger write failing.
+     */
+    private static void checksWithoutStatementBlocks(Map ctx) {
+        Set<String> replaced = records(ctx, "statements").collect { ctx.resolved[it.ref] as String }.findAll { it } as Set<String>
+        records(ctx, "checks").findAll { ctx.actions[it.ref] in [CREATE, "UPDATE"] && !it.links }.each { Map check ->
+            String checkId = ctx.resolved[check.ref] as String
+            boolean keepsOne = checkId && scoped(ctx, "darpan.audit.AuditStatementCheck").condition("checkId", checkId).list()
+                    .any { !((it.statementId as String) in replaced) }
+            if (!keepsOne) {
+                block(ctx, "CHECK_WITHOUT_STATEMENT", check.ref, "${check.label ?: check.ref} would test no statement: the " +
+                        "bundle carries it with no links. Link it to a statement, or leave it out of the bundle.")
             }
         }
     }

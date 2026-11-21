@@ -1,6 +1,7 @@
 package darpan.facade.auth
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*
  * with which parameters (including the code, which nothing else ever returns).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class PasswordResetServicesSmokeTests {
     private ExecutionContext ec
     private Closure originalSendEmail

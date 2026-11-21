@@ -2,6 +2,7 @@ package darpan.facade.reconciliation
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -43,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * stranger-denial test proving the second call site was fixed too, not left as a hopeful assumption.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class RuleSetRunNsRestletSharedConfigTests {
     private static final String GRANT_ENTITY_NAME = "darpan.auth.ConfigTenantAccess"
     private static final String CONFIG_TYPE = "SCFG_NS_RESTLET"

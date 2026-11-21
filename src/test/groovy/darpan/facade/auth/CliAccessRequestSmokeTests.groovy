@@ -2,6 +2,7 @@ package darpan.facade.auth
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*
  * user sees). Synthetic tenants T1/T2; VIEWER is view-only in both; STAFF is a Darpan super admin.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class CliAccessRequestSmokeTests {
     private static final String T1 = "CAR_T1"
     private static final String T2 = "CAR_T2"

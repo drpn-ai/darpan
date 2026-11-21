@@ -3,6 +3,7 @@ package darpan.facade.auth
 import darpan.admin.AdminAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*
  * viewer is refused by the admin fence and again by each service. Synthetic tenants and users.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class CliAccessAdminSmokeTests {
     private static final String SVC = "admin.CliAccessAdminServices"
     private static final List<String> SERVICES = ["list#CliAccessGrants", "create#CliAccessGrant", "update#CliAccessGrant",

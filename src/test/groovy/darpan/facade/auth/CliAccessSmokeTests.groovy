@@ -2,6 +2,7 @@ package darpan.facade.auth
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*
  * Tenants and users are synthetic. ANN is a tenant admin in ALPHA and view-only in BETA (spec decision 5); STAFF is a Darpan admin.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class CliAccessSmokeTests {
     private static final String ALPHA = "CLA_ALPHA"
     private static final String BETA = "CLA_BETA"

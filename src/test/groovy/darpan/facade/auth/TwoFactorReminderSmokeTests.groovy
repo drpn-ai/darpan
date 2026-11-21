@@ -2,6 +2,7 @@ package darpan.facade.auth
 
 import darpan.admin.AuditLogTestSupport
 import darpan.facade.auth.support.TwoFactorTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*
  * H2 with the mail seam recording what would be sent.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class TwoFactorReminderSmokeTests extends TwoFactorTestSupport {
     private static final String PASSWORD = "Tf-passw0rd-one!"
     private static final String TENANT = "TFR_TENANT"

@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * without letting them displace the config id or the window.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class RunSideOptionsSmokeTests {
 
     private ExecutionContext ec

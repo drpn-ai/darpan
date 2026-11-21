@@ -2,6 +2,7 @@ package darpan.facade.auth
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.*
  * CLI's next poll gets an ordinary Moqui login_key for that person, marked as a CLI session.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class CliLoginSmokeTests {
     private ExecutionContext ec
     private long clock = 1_800_000_000_000L

@@ -1,6 +1,7 @@
 package darpan.facade.auth
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import jakarta.websocket.server.HandshakeRequest
 import org.apache.shiro.crypto.hash.SimpleHash
 import org.junit.jupiter.api.AfterAll
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*
  * not reaching update#PasswordInternal; and a login key in a WebSocket handshake's query string still signing in.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class PasswordHashUpgradeSmokeTests {
     private ExecutionContext ec
 

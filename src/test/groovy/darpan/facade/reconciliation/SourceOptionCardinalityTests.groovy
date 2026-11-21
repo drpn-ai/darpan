@@ -4,6 +4,7 @@ import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.SourceEndpointAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * connection step rendered empty.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class SourceOptionCardinalityTests {
     private ExecutionContext ec
     private static final String CONFIG_ID = "cardinality-oms"

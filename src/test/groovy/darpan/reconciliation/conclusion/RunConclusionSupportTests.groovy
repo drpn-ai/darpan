@@ -389,7 +389,12 @@ class RunConclusionSupportTests {
                 [omsOrderId: "M1", orderItemSeqId: "01", statusId: "ITEM_COMPLETED", facilityId: "217"])])
         File ns = keepExtract("ns.json", [[orderId: "M1", orderLineId: "01", quantityShipped: "0", quantityBackordered: "1", status: "B"]],
                 [0], [KEEP_COUNTS])
-        KeepArtifacts.writeSidecar(ns, KeepArtifacts.readSummary(ns))
+        // the side file the Keep step writes: each set-aside record with _excludedBy "sequenceNum:label"
+        Map collector = ExcludedRecordsSidecar.newCollector()
+        KeepArtifacts.forEachSetAsideRecord(ns) { Map record, String ruleId ->
+            ExcludedRecordsSidecar.collect(collector, record, [sequenceNum: 1, fieldExpression: "quantityShipped"])
+        }
+        ExcludedRecordsSidecar.write(new File(ns.parentFile, ExcludedRecordsSidecar.fileNameFor(ns.name)), collector, ns.name)
         RunConclusionSupport.concludeRun(args(doc, BACKORDER_RULES, ns))
         Map netsuite = (Map) ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }
         assertEquals("CONC_NS_BACKORDERED", onlyConclusion(doc).code)

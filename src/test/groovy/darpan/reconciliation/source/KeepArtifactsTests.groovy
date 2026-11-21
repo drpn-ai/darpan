@@ -1,8 +1,6 @@
 package darpan.reconciliation.source
 
-import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
@@ -82,60 +80,12 @@ class KeepArtifactsTests {
     }
 
     @Test
-    void theSideFileHasTodaysShapeAndExcludedBy() {
-        File file = extract([[n: 0, salesChannelEnumId: "WEB"], [n: 1, salesChannelEnumId: "POS"], [n: 2, salesChannelEnumId: "POS"]])
-        KeepArtifacts.writeRows(file, [[1, "A:1"], [2, "A:1"]].iterator())
-
-        File side = KeepArtifacts.writeSidecar(file, summary())
-
-        assertEquals("acme-orders.excluded.json", side.name)
-        Map doc = (Map) new JsonSlurper().parse(side, "UTF-8")
-        assertEquals(["sourceFileName", "truncated", "total", "records"], doc.keySet().toList())
-        assertEquals("acme-orders.json", doc.sourceFileName)
-        assertEquals(false, doc.truncated)
-        assertEquals(2, doc.total)
-        assertEquals("1:salesChannelEnumId", doc.records[0]._excludedBy)
-        assertEquals(1, doc.records[0].n)
-        // The conclude pass finds it by name, as it finds today's.
-        assertTrue(ExcludedRecordsSidecar.read(file).present)
-    }
-
-    @Test
-    void noSideFileWhenNothingWasSetAside() {
-        File file = extract([[n: 0]])
-        KeepArtifacts.writeRows(file, [].iterator())
-
-        assertFalse(KeepArtifacts.rowsFile(file).exists())
-        assertNull(KeepArtifacts.writeSidecar(file, summary()))
-        assertFalse(new File(dir, "acme-orders.excluded.json").exists())
-    }
-
-    @Test
     void writingNoRowsRemovesAStaleRowsFile() {
         File file = extract([[n: 0]])
         KeepArtifacts.writeRows(file, [[0, "A:1"]].iterator())
         assertTrue(KeepArtifacts.rowsFile(file).exists())
         KeepArtifacts.writeRows(file, [].iterator())
         assertFalse(KeepArtifacts.rowsFile(file).exists())
-    }
-
-    @Test
-    void theSideFileTruncatesAtMaxEntriesAndKeepsTheTotal() {
-        int total = ExcludedRecordsSidecar.MAX_ENTRIES + 5
-        File file = new File(dir, "acme-orders.json")
-        file.withWriter("UTF-8") { Writer out ->
-            out.write('{"records":[')
-            for (int i = 0; i < total; i++) out.write((i > 0 ? "," : "") + '{"n":' + i + '}')
-            out.write(']}')
-        }
-        KeepArtifacts.writeRows(file, (0..<total).collect { [it, "A:1"] }.iterator())
-
-        File side = KeepArtifacts.writeSidecar(file, summary())
-
-        Map doc = (Map) new JsonSlurper().parse(side, "UTF-8")
-        assertEquals(true, doc.truncated)
-        assertEquals(total, doc.total)
-        assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES, doc.records.size())
     }
 
     @Test
@@ -178,14 +128,5 @@ class KeepArtifactsTests {
 
         assertTrue(closed[0])
         assertEquals(before, KeepArtifacts.OPEN_ROW_READERS.get())
-    }
-
-    @Test
-    void aSetAsideRuleMissingFromTheSummaryIsNamed() {
-        File file = extract([[n: 0]])
-        KeepArtifacts.writeRows(file, [[0, "A:404"]].iterator())
-        IllegalStateException thrown = assertThrows(IllegalStateException) { KeepArtifacts.writeSidecar(file, summary()) }
-        assertTrue(thrown.message.contains("unknown rule A:404"), thrown.message)
-        assertEquals(["acme-orders.json", "acme-orders.set-aside.rows"], dir.list().toList().sort())
     }
 }

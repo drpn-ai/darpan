@@ -1,6 +1,5 @@
 package darpan.reconciliation.source
 
-import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -14,7 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * DAR-BE-318 (plan 3b-2b). The set-aside artifact a Spark Keep writes beside an extract, read by name:
  * {@code <base>.keep.json} (the summary), {@code <base>.set-aside.rows} (one "row TAB rule id" per set-aside record,
- * ascending) and, where the connector asks for it, the {@code .excluded.json} side file. The extract keeps every
+ * ascending) and, where the connector asks for it, the {@code .excluded.json} side file (written by KeepStepSupport, which
+ * merges into a side file the extractor already wrote). The extract keeps every
  * record; these files say which were set aside. Everything streams: the records file is never held.
  */
 class KeepArtifacts {
@@ -122,32 +122,6 @@ class KeepArtifacts {
             }
         } finally {
             aside.close()
-        }
-    }
-
-    /**
-     * Writes {@code <base>.excluded.json} from the set-aside records, through ExcludedRecordsSidecar so the cap and
-     * shape are today's; {@code _excludedBy} is "sequenceNum:label". Null when nothing was set aside.
-     */
-    static File writeSidecar(File extract, Map summary) {
-        if (!rowsFile(extract).isFile()) return null
-        Map<String, Map> byId = [:]
-        for (Object rule : (summary?.get("rules") as List ?: [])) byId.put(((Map) rule).get("id") as String, (Map) rule)
-        Map collector = ExcludedRecordsSidecar.newCollector()
-        File target = new File(extract.getParentFile(), ExcludedRecordsSidecar.fileNameFor(extract.getName()))
-        File work = File.createTempFile("excluded-", ".partial", extract.getParentFile())
-        try {
-            forEachSetAsideRecord(extract) { Map record, String ruleId ->
-                Map rule = byId.get(ruleId)
-                if (rule == null) throw new IllegalStateException("Set-aside row names unknown rule ${ruleId}: it is not in the summary's rules.")
-                ExcludedRecordsSidecar.collect(collector, record, [sequenceNum: rule.get("sequenceNum"), fieldExpression: rule.get("label")])
-            }
-            ExcludedRecordsSidecar.write(work, collector, extract.getName())
-            Files.move(work.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            return target
-        } finally {
-            ExcludedRecordsSidecar.discard(collector)
-            work.delete()
         }
     }
 

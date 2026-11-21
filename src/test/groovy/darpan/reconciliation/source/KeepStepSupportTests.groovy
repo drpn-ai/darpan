@@ -215,6 +215,8 @@ class KeepStepSupportTests {
         File with = extract(sixRecords(), "acme-orders.json", new File(dir, "y"))
         ingest(with, sideKeep(rules(), true))
         Map sidecar = ExcludedRecordsSidecar.read(with)
+        // today's shape, found by name as the conclude pass finds it
+        assertEquals(["sourceFileName", "truncated", "total", "records"], (new groovy.json.JsonSlurper().parse(sidecarOf(with), "UTF-8") as Map).keySet() as List)
         assertEquals(true, sidecar.present)
         assertEquals(false, sidecar.truncated)
         assertEquals(["2", "3", "4", "5"], ((List<Map>) sidecar.records)*.id)

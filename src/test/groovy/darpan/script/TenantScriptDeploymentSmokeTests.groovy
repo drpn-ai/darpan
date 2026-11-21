@@ -3,6 +3,7 @@ package darpan.script
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * so each deployment must carry its own tenant. Chat delivery goes to TenantNotificationSupport's delivery hook.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class TenantScriptDeploymentSmokeTests {
 
     private static final String KREWE = "KREWE"

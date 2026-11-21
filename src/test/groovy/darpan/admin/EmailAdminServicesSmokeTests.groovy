@@ -3,6 +3,7 @@ package darpan.admin
 import darpan.email.EmailCopy
 import darpan.email.EmailSamples
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*
  * only a super admin gets in.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class EmailAdminServicesSmokeTests {
     private ExecutionContext ec
 

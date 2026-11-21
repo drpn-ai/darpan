@@ -4,6 +4,7 @@ import darpan.audit.AuditSettingsSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * tenantTimeZoneFor reads that tenant's own zone. Real Moqui, real entities.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class PeakPeriodLoaderSmokeTests {
     private static final String A = "KREWE"
     private static final String B = "GORJANA"

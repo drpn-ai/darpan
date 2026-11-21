@@ -1,6 +1,7 @@
 package darpan.security
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * check but was then content-denied — misleading and not a real grant. Only DARPAN_SUPER_ADMIN
  * (and framework ADMIN via DARPAN_APP_ADMIN) now have URL-level access.</p>
  */
+@SharedMoqui
 class ScreenUiAuthzTests {
     private static ExecutionContext ec
 

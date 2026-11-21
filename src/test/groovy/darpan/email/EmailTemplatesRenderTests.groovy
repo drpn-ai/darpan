@@ -3,6 +3,7 @@ package darpan.email
 import darpan.audit.AuditDigestSupport
 import darpan.audit.AuditRunMessage
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*
  * darpan-email skill's review step).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class EmailTemplatesRenderTests {
     private ExecutionContext ec
     private Path previews

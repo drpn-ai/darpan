@@ -1,6 +1,7 @@
 package darpan.common
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * value, and Moqui's shutdown then failed on it (an NPE in destroy(): CI on main 2026-11-11, ee0a7905).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class MoquiArtifactStatsConcurrencyTests {
 
     private static final String PREFIX = "darpan.test.StatsRace.hit"

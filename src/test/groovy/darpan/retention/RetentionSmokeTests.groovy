@@ -4,6 +4,7 @@ import darpan.admin.AuditLogTestSupport
 import darpan.config.DarpanSettings
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*
  * another tenant's. Synthetic tenants RET_A and RET_B, each with an old and a recent row of every table.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class RetentionSmokeTests {
     private static final String A = "RET_A"
     private static final String B = "RET_B"

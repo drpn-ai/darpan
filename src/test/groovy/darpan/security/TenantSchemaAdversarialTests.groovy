@@ -1,5 +1,7 @@
 package darpan.security
 
+import darpan.reconciliation.support.SharedMoqui
+
 import darpan.facade.common.DataManagerSupport
 import jsonschema.common.JsonSchemaUtil
 
@@ -16,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
  * name alone. Each test asserts the SECURE outcome: red = a confirmed hole, green = the boundary held.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class TenantSchemaAdversarialTests {
 
     static final String A = TenantAttackHarness.TENANT_A

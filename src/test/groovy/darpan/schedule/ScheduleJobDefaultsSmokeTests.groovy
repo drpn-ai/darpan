@@ -1,6 +1,7 @@
 package darpan.schedule
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*
  * default reaches an unedited job.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class ScheduleJobDefaultsSmokeTests {
     private static final String APPLY = "component://darpan/data/zzScheduleJobDefaultsApply.xml"
     private static final List<String> JOB_SEEDS = ["AuditSeedData", "ReconciliationJobSeedData", "TwoFactorSeedData",

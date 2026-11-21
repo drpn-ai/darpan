@@ -4,6 +4,7 @@ import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.core.RuleSetCompareScopeAdapter
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -41,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * KREWE user then attempts to access these foreign records through the typed-ec methods.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class Step3RealHarnessDenialTests {
 
     private static final String KREWE                  = "KREWE"

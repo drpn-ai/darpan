@@ -1,6 +1,7 @@
 package darpan.security
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.apache.logging.log4j.Level
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.core.LogEvent
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.*
  * NsAuthConfig, whose password, apiToken and privateKeyPem are encrypted, in this test's own H2.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class EncryptedFieldMaskingTests {
     private ExecutionContext ec
 

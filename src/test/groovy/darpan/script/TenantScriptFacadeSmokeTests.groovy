@@ -2,6 +2,7 @@ package darpan.script
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * tenant's script is invisible and cannot be run, changed or deleted.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class TenantScriptFacadeSmokeTests {
 
     private static final String KREWE = "KREWE"

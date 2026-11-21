@@ -4,6 +4,7 @@ import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * </ul>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class TenantOwnedEntityFilterRuntimeTests {
 
     private static final String KREWE = "KREWE"

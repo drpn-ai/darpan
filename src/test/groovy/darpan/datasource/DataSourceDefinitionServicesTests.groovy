@@ -1,6 +1,7 @@
 package darpan.datasource
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * user, the artifact fence bypassed, so the in-service super-admin gate is what decides.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class DataSourceDefinitionServicesTests {
 
     private ExecutionContext ec

@@ -1,5 +1,7 @@
 package darpan.security
 
+import darpan.reconciliation.support.SharedMoqui
+
 import darpan.facade.common.TenantAccessSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -21,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * <p>Each test asserts the SECURE outcome: red = a confirmed hole, green = the boundary held.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class TenantFilterAdversarialTests {
 
     static final String A = TenantAttackHarness.TENANT_A

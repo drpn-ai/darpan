@@ -1,6 +1,7 @@
 package darpan.common
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * byte-identical by design (fixed crypt-salt) — see the in-test comment.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class CryptRotationSmokeTests {
 
     /** Test plaintext for the round-trip proof — deliberately NOT secret-shaped (gitleaks-clean). */

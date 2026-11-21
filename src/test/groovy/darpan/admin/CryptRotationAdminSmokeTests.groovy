@@ -7,6 +7,7 @@ import darpan.facade.auth.TwoFactorRecords
 import darpan.facade.auth.TwoFactorSupport
 import darpan.facade.common.CliMethodAllowlist
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.*
  * rotated back under the original key before the conf is restored.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class CryptRotationAdminSmokeTests {
     private ExecutionContext ec
     private long clock = 1_800_000_000_000L

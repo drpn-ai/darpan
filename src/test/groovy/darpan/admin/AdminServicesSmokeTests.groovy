@@ -3,6 +3,7 @@ package darpan.admin
 import darpan.facade.auth.PasswordResetSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.*
  * tenant is ALPHA, and BRAVO's deactivated flag must still come back.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AdminServicesSmokeTests {
     private ExecutionContext ec
 

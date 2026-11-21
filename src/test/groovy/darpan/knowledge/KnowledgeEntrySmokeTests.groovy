@@ -5,6 +5,7 @@ import darpan.admin.transfer.ConfigTransferImporter
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*
  * and entries are synthetic.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class KnowledgeEntrySmokeTests {
 
     private static final String ENTRY = "darpan.knowledge.KnowledgeEntry"

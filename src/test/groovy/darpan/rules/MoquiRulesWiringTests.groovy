@@ -1,6 +1,7 @@
 package darpan.rules
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -12,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-BE-318. The moqui-rules component is on the build path; Darpan reaches it through services only. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class MoquiRulesWiringTests {
 
     private ExecutionContext ec

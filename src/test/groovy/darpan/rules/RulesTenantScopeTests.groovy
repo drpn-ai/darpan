@@ -2,6 +2,7 @@ package darpan.rules
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * create naming another tenant's row, off that tenant's rows.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class RulesTenantScopeTests {
 
     private static final String A = "KREWE"

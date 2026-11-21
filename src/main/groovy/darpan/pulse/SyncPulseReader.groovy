@@ -4,9 +4,11 @@ import darpan.audit.AuditRecheckSupport
 import darpan.dataset.KeptCopyStore
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.RunConclusionStep
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
+import darpan.reconciliation.conclusion.ConclusionKeySupport
 import darpan.reconciliation.conclusion.JsonRecordStream
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -268,9 +270,13 @@ class SyncPulseReader {
             }
         }
         String scopeId = normalize(readField(automation, "compareScopeId"))
-        String upstreamKey = AuditRecheckSupport.firstKeyField(ec, scopeId, upstreamSide)
-        String targetKey = AuditRecheckSupport.firstKeyField(ec, scopeId, targetSide)
-        if (!upstreamKey || !targetKey) throw new IllegalStateException("A side of the check has no plain key field to pair by.")
+        Map upstreamSpec = RunConclusionStep.keySpecFor(ec, scopeId, upstreamSide)
+        Map targetSpec = RunConclusionStep.keySpecFor(ec, scopeId, targetSide)
+        String block = SyncPulseFacadeSupport.pulseBlockFor(automation, upstreamSpec, targetSpec)
+        if (block) throw new IllegalStateException(block)
+        String upstreamKey = ConclusionKeySupport.plainField(((List<String>) upstreamSpec.keyFields)[0])
+        String targetKey = ConclusionKeySupport.plainField(((List<String>) targetSpec.keyFields)[0])
+        if (!upstreamKey || !targetKey) throw new IllegalStateException(SyncPulseFacadeSupport.E_KEY)
         return [upstream: upstream, target: target, upstreamKey: upstreamKey, targetKey: targetKey]
     }
 

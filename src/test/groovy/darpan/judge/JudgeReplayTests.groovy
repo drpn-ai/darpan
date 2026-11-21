@@ -404,8 +404,8 @@ class JudgeReplayTests {
     @Test
     void aNumberReadsTheSameFromSparkAndFromTheSidecar() {
         JsonSlurper slurper = new JsonSlurper()
-        Map spark = JudgeReplaySupport.flat((Map) slurper.parseText('{"a":24.0,"b":24,"c":1.2345678E7,"d":"24.00","e":"000123"}'))
-        Map raw = JudgeReplaySupport.flat((Map) slurper.parseText('{"a":24.00,"b":24,"c":12345678.00,"d":"24.00","e":"000123"}'))
+        Map spark = darpan.common.FactText.flat((Map) slurper.parseText('{"a":24.0,"b":24,"c":1.2345678E7,"d":"24.00","e":"000123"}'))
+        Map raw = darpan.common.FactText.flat((Map) slurper.parseText('{"a":24.00,"b":24,"c":12345678.00,"d":"24.00","e":"000123"}'))
         assertEquals([a: "24", b: "24", c: "12345678", d: "24.00", e: "000123"], spark, "numbers plain, text untouched")
         assertEquals(spark, raw)
 

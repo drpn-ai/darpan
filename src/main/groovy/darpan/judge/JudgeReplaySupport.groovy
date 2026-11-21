@@ -9,6 +9,7 @@ import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.conclusion.RunConclusionSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.audit.AuditAutomationSupport
+import darpan.common.FactText
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
@@ -147,7 +148,7 @@ class JudgeReplaySupport {
             } else if (records.containsKey(id)) {
                 repeated++
             } else {
-                records.put(id, flat(copy))
+                records.put(id, FactText.flat(copy))
             }
         }
         if (head.truncated == true) {
@@ -158,31 +159,6 @@ class JudgeReplaySupport {
         }
         if (repeated) warnings.add("${repeated} ${side} records set aside under a compare id already read back were not judged".toString())
         return [records: records, ids: ids]
-    }
-
-    /**
-     * A record as the pair fact holds it: text values, nested values as JSON text, nulls left out. A JSON number reads the same
-     * from both paths: Spark renders a kept record's 24.00 as 24.0 (and 12345678.00 as 1.2345678E7) while a read-back record
-     * keeps its raw 24.00, so every number is written as its plain value without trailing zeros (24, 12345678). Text, even
-     * text that looks like a number, is left as it is: both paths carry a JSON string unchanged, and an id like 000123 is not
-     * the number 123.
-     */
-    static Map<String, String> flat(Map record) {
-        Map<String, String> out = new LinkedHashMap<>()
-        (record ?: [:]).each { Object key, Object value ->
-            if (value == null) return
-            out.put(key as String, value instanceof Map || value instanceof List ? JsonOutput.toJson(value) :
-                    value instanceof Number ? numberText((Number) value) : value.toString())
-        }
-        return out
-    }
-
-    static String numberText(Number value) {
-        try {
-            return new BigDecimal(value.toString()).stripTrailingZeros().toPlainString()
-        } catch (NumberFormatException ignored) {
-            return value.toString()   // NaN, Infinity
-        }
     }
 
     // ------------------------------------------------------------------------------------------------ captured lookups (P2-24)
@@ -298,13 +274,13 @@ class JudgeReplaySupport {
                 String id = row.primaryId as String
                 SIDES.each { drop(it, id) }
                 count("matched")
-                return [compareId: id, file1: flat((Map) row.file1), file2: flat((Map) row.file2)]
+                return [compareId: id, file1: FactText.flat((Map) row.file1), file2: FactText.flat((Map) row.file2)]
             }
             while (missing.hasNext()) {
                 Map row = (Map) slurper.parseText(missing.next())
                 String type = row.diffType as String
                 String id = row.primaryId as String
-                Map data = row.data ? flat((Map) slurper.parseText(row.data as String)) : [:]
+                Map data = row.data ? FactText.flat((Map) slurper.parseText(row.data as String)) : [:]
                 if (type == "MISSING_IN_FILE_2") {
                     drop("file1", id)
                     return count("missing") + [compareId: id, file1: data, file2: readBack.file2?.remove(id)]

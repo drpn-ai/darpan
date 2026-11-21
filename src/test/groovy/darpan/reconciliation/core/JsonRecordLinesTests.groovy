@@ -1,8 +1,9 @@
 package darpan.reconciliation.core
 
-import darpan.judge.JudgeReplaySupport
+import darpan.common.FactText
 import darpan.reconciliation.source.KeepRules
 import groovy.json.JsonParserType
+import darpan.common.ValueSupport
 import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.types.DataTypes
@@ -164,14 +165,14 @@ class JsonRecordLinesTests {
 
     @Test
     void noInjectionsIsByteIdentical() {
-        File source = extract("plain.json", ORDERS)
-        List<Map> infos = paths('$.records[*].orderName')
-        byte[] before = JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile).bytes
-        byte[] empty = JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile, []).bytes
-        byte[] nulls = JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile, null).bytes
-        assertTrue(Arrays.equals(before, empty))
-        assertTrue(Arrays.equals(before, nulls))
-        assertTrue(!new String(before, "UTF-8").contains("_darpan"))
+        String golden = '{"id":"a","v":24.00,"n":{"x":[1,2.50,"s"]},"t":null,"b":true}\n{"id":"b"}\n'
+        File source = extract("plain.json", '{"metadata":{"records":"no"},"records":[{"id":"a","v":24.00,"n":{"x":[1,2.50,"s"]},"t":null,"b":true},"skip",{"id":"b"}]}')
+        List<Map> infos = paths('$.records[*].id')
+        for (List<Map> none : [null, [] as List<Map>]) {
+            File lines = none == null ? JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile) :
+                    JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile, none)
+            assertEquals(golden, lines.getText("UTF-8"))
+        }
     }
 
     @Test
@@ -179,15 +180,7 @@ class JsonRecordLinesTests {
         String json = '{"records":[{"id":"1","v":24.00},{"id":"2","v":1.0E7},{"id":"3","v":1.0E+7},{"id":"4","v":7},' +
                 '{"id":"5","v":true},{"id":"6","v":"x"},{"id":"7","v":[1, 2]},{"id":"8","v":{"a":1}}]}'
         List<Map> got = linesOf("groovy.json", json, inj("v", "GROOVY"))
-        List<Object> memory = (List<Object>) ((Map) new JsonSlurper().setType(JsonParserType.CHARACTER_SOURCE).parseText(json)).get("records")
-        got.eachWithIndex { Map line, int i ->
-            Object inMemory = ((Map) memory[i]).get("v")
-            String expected = i < 3 ? ["24.00", "1.0E7", "1.0E+7"][i] : darpan.common.ValueSupport.normalize(inMemory)
-            assertEquals(expected, line.get("_darpanKeep_0"), "record ${i}")
-        }
-        assertEquals("[1, 2]", got[6].get("_darpanKeep_0"))
-        assertEquals("{a=1}", got[7].get("_darpanKeep_0"))
-        assertEquals("true", got[4].get("_darpanKeep_0"))
+        assertEquals(["24.00", "1.0E7", "1.0E+7", "7", "true", "x", "[1, 2]", "{a=1}"], got.collect { it.get("_darpanKeep_0") })
     }
 
     @Test
@@ -197,7 +190,7 @@ class JsonRecordLinesTests {
         List<Map> got = linesOf("fact.json", json, inj("v", "FACT"))
         List<Map> memory = (List<Map>) ((Map) new JsonSlurper().parseText(json)).get("records")
         got.eachWithIndex { Map line, int i ->
-            assertEquals(JudgeReplaySupport.flat(memory[i]).get("v"), line.get("_darpanKeep_0"), "record ${i}")
+            assertEquals(FactText.flat(memory[i]).get("v"), line.get("_darpanKeep_0"), "record ${i}")
         }
         assertEquals("24", got[0].get("_darpanKeep_0"))
         assertEquals("10000000", got[1].get("_darpanKeep_0"))
@@ -246,5 +239,30 @@ class JsonRecordLinesTests {
         assertEquals(DataTypes.StringType, with.apply("_darpanKeep_0").dataType())
         assertEquals(DataTypes.LongType, with.apply("_darpanRow").dataType())
         assertNull(JsonRecordLines.recordSchema(null, infos, inj("v", "GROOVY")))
+    }
+
+    @Test
+    void aPaddedStringKeepsItsPaddingAndMatchesWhatEvaluateCompares() {
+        List<Map> got = linesOf("pad.json", '{"records":[{"id":"1","v":"  Ab c \\t"}]}', inj("v", "GROOVY"))
+        assertEquals("  Ab c \t", got[0].get("_darpanKeep_0"))
+        Map parsed = (Map) ((List) ((Map) new JsonSlurper().parseText('{"records":[{"v":"  Ab c \\t"}]}')).get("records"))[0]
+        assertEquals(ValueSupport.normalize(parsed.get("v")), ((String) got[0].get("_darpanKeep_0")).trim())
+    }
+
+    @Test
+    void aDoubleInsideAContainerIsPinnedByLiteral() {
+        String json = '{"records":[{"id":"1","v":{"a":24.00,"b":[1.0E+7,2.50]}}]}'
+        assertEquals("{a=24.00, b=[1.0E+7, 2.50]}", linesOf("dbl.json", json, inj("v", "GROOVY"))[0].get("_darpanKeep_0"))
+        assertEquals('{"a":24.00,"b":[1.0E+7,2.50]}', linesOf("dbl2.json", json, inj("v", "FACT"))[0].get("_darpanKeep_0"))
+        Object inMemory = ((Map) ((List) ((Map) new JsonSlurper().setType(JsonParserType.CHARACTER_SOURCE).parseText(json)).get("records"))[0]).get("v")
+        assertEquals(ValueSupport.normalize(inMemory), linesOf("dbl3.json", json, inj("v", "GROOVY"))[0].get("_darpanKeep_0"))
+    }
+
+    @Test
+    void thePaddedKeyBeforeThePlainKeyWinsInRecordOrder() {
+        String json = '{"records":[{"id":"1"," status ":"first","status":"second"}]}'
+        assertEquals("first", linesOf("order.json", json, inj("status", "GROOVY"))[0].get("_darpanKeep_0"))
+        Map row = (Map) ((List) ((Map) new JsonSlurper().parseText(json)).get("records"))[0]
+        assertEquals(ValueSupport.normalize(row.find { k, v -> ValueSupport.normalize(k) == "status" }?.value), "first")
     }
 }

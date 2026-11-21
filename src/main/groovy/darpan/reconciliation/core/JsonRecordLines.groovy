@@ -7,7 +7,7 @@ import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.core.JsonToken
 import com.fasterxml.jackson.core.io.SerializedString
 import darpan.facade.common.DataManagerSupport
-import darpan.judge.JudgeReplaySupport
+import darpan.common.FactText
 import darpan.reconciliation.source.KeepRules
 import groovy.json.JsonParserType
 import groovy.json.JsonSlurper
@@ -173,8 +173,8 @@ class JsonRecordLines {
      */
     private static void copyRecord(JsonParser parser, JsonGenerator generator, Map<String, List<Map>> byField, long row) {
         int depth = 0
-        Set<String> matched = new HashSet<String>()
-        Map<String, String> texts = new LinkedHashMap<String, String>()
+        Set<String> matched = byField != null ? new HashSet<String>() : null
+        Map<String, String> texts = byField != null ? new LinkedHashMap<String, String>() : null
         String pending = null
         String capturing = null
         StringWriter captureText = null
@@ -241,7 +241,7 @@ class JsonRecordLines {
             String column = injection.get("column") as String
             if ("FACT" == injection.get("text")) {
                 Object fact = value instanceof BigDecimalText ? ((BigDecimalText) value).value() : value
-                texts.put(column, JudgeReplaySupport.flat([(injection.get("field")): fact] as Map).values().first())
+                texts.put(column, FactText.flat([(injection.get("field")): fact] as Map).values().first())
             } else {
                 texts.put(column, groovyText)
             }

@@ -25,11 +25,14 @@ class ReadLimits {
 /**
  * "What read limits does tenant T have right now": the active peak period covering the tenant's local today, cached per
  * tenant for 60 seconds (so a period starting or ending is seen within a minute). Fails open: any error reads as NONE,
- * so a broken lookup never stops a read. Callable from pool threads without an ec via limitsFor(String).
+ * so a broken lookup never stops a read; that NONE is cached for 15 seconds, so a failing lookup is not retried on every
+ * read (a page loop, a gate check) while it is down. Callable from pool threads without an ec via limitsFor(String).
  */
 class PeakReadPolicy {
     private static final Logger logger = LoggerFactory.getLogger(PeakReadPolicy)
     static final long CACHE_MS = 60_000L
+    /** How long a failed load's NONE is served before the next load is tried. */
+    static final long FAILED_CACHE_MS = 15_000L
     private static final long WARN_EVERY_MS = 60_000L
 
     /** Seams for tests. */
@@ -39,7 +42,8 @@ class PeakReadPolicy {
     private static final class Entry {
         final ReadLimits limits
         final long loadedAtMs
-        Entry(ReadLimits limits, long loadedAtMs) { this.limits = limits; this.loadedAtMs = loadedAtMs }
+        final long ttlMs
+        Entry(ReadLimits limits, long loadedAtMs, long ttlMs) { this.limits = limits; this.loadedAtMs = loadedAtMs; this.ttlMs = ttlMs }
     }
 
     private static final ConcurrentHashMap<String, Entry> CACHE = new ConcurrentHashMap<String, Entry>()
@@ -51,15 +55,17 @@ class PeakReadPolicy {
     static ReadLimits limitsFor(def ec, String tenantId) {
         String tenant = normalize(tenantId)
         if (!tenant) return ReadLimits.NONE
+        Long nowMs = null
         try {
-            long nowMs = clock.call()
+            nowMs = clock.call()
             Entry hit = CACHE.get(tenant)
-            if (hit != null && nowMs - hit.loadedAtMs < CACHE_MS && nowMs >= hit.loadedAtMs) return hit.limits
+            if (hit != null && nowMs - hit.loadedAtMs < hit.ttlMs && nowMs >= hit.loadedAtMs) return hit.limits
             ReadLimits loaded = limitsLoader.call(ec, tenant) ?: ReadLimits.NONE
-            CACHE.put(tenant, new Entry(loaded, nowMs))
+            CACHE.put(tenant, new Entry(loaded, nowMs, CACHE_MS))
             return loaded
         } catch (Throwable t) {
             warnOnce(tenant, t)
+            if (nowMs != null) CACHE.put(tenant, new Entry(ReadLimits.NONE, nowMs, FAILED_CACHE_MS))
             return ReadLimits.NONE
         }
     }

@@ -67,6 +67,38 @@ class PeakReadPolicyTests {
     }
 
     @Test
+    void sixtySecondBoundary() {
+        PeakReadPolicy.limitsFor(null, 'A')
+        now += 59_999   // still inside the 60 s
+        PeakReadPolicy.limitsFor(null, 'A')
+        assertEquals(1, calls['A'])
+        now += 1        // exactly 60 s after the load: reloads
+        PeakReadPolicy.limitsFor(null, 'A')
+        assertEquals(2, calls['A'])
+    }
+
+    @Test
+    void failedLoadIsCachedBriefly() {
+        int failures = 0
+        PeakReadPolicy.limitsLoader = { def ec, String tenantId -> failures++; throw new IllegalStateException('db down') }
+        assertSame(ReadLimits.NONE, PeakReadPolicy.limitsFor(null, 'A'))
+        assertEquals(1, failures)
+        now += 14_999   // within 15 s: the failed NONE is served, the loader is not asked again
+        assertSame(ReadLimits.NONE, PeakReadPolicy.limitsFor(null, 'A'))
+        assertEquals(1, failures)
+        now += 1_001    // 16 s after the failure: tried again
+        assertSame(ReadLimits.NONE, PeakReadPolicy.limitsFor(null, 'A'))
+        assertEquals(2, failures)
+        // a recovered lookup is cached the full 60 s again
+        PeakReadPolicy.limitsLoader = { def ec, String tenantId -> calls[tenantId] = (calls[tenantId] ?: 0) + 1; answer }
+        now += 16_000
+        assertEquals(new ReadLimits(25, true), PeakReadPolicy.limitsFor(null, 'A'))
+        now += 59_000
+        assertEquals(new ReadLimits(25, true), PeakReadPolicy.limitsFor(null, 'A'))
+        assertEquals(1, calls['A'])
+    }
+
+    @Test
     void ecFreeOverloadSharesTheCache() {
         assertEquals(new ReadLimits(25, true), PeakReadPolicy.limitsFor('A'))
         PeakReadPolicy.limitsFor(null, 'A')

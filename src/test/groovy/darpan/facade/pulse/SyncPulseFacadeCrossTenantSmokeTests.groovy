@@ -299,6 +299,8 @@ class SyncPulseFacadeCrossTenantSmokeTests {
             Map o1 = ((List) got.pastOrders).find { it.recordKey == "RO1" }
             Map o2 = ((List) got.pastOrders).find { it.recordKey == "RO2" }
             assertEquals("SPF_RD", o1.reportedInRunId)
+            assertEquals("SPF_RS", o1.reportedInSavedRunId)
+            assertNull(o2.reportedInSavedRunId)
             assertNull(o2.reportedInRunId, "no run has started since it was flagged")
         } finally { dropRuns(["SPF_RB", "SPF_RC", "SPF_RD"], ["SPF_RO1", "SPF_RO2"]) }
     }

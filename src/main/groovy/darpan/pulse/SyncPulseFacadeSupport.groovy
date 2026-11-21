@@ -190,10 +190,11 @@ class SyncPulseFacadeSupport {
         List<Map> past = (rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", id).condition("closedStamp", null)
                 .orderBy("sourceCreatedStamp").list() ?: []).collect { o ->
             Object created = o.get("sourceCreatedStamp") ?: o.get("firstPastStamp")
+            String reportedId = reportedInRun(runs, o.get("firstPastStamp"))
             long minutes = created instanceof Timestamp ? Math.max(0L, Duration.between(((Timestamp) created).toInstant(), now).toMinutes()) : 0L
             [recordKey: o.get("recordKey"), orderName: o.get("orderName"), otherSystemId: o.get("otherSystemId"),
              sourceCreatedStamp: iso(o.get("sourceCreatedStamp")), waitingMinutes: minutes,
-             reportedInRunId: reportedInRun(runs, o.get("firstPastStamp"))] as Map
+             reportedInRunId: reportedId, reportedInSavedRunId: reportedId ? normalize(automation?.get("savedRunId")) : null] as Map
         }
         return [syncPair: syncPair, samplesToday: samples, pastOrders: past]
     }

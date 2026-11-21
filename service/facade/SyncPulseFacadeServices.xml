@@ -46,7 +46,7 @@
             </parameter>
             <parameter name="pastOrders" type="List">
                 <parameter name="recordKey"/><parameter name="orderName"/><parameter name="otherSystemId"/>
-                <parameter name="sourceCreatedStamp"/><parameter name="waitingMinutes"/><parameter name="reportedInRunId"/>
+                <parameter name="sourceCreatedStamp"/><parameter name="waitingMinutes"/><parameter name="reportedInRunId"/><parameter name="reportedInSavedRunId"/>
             </parameter>
             <parameter name="automations" type="List">
                 <parameter name="automationId"/><parameter name="label"/>

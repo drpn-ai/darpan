@@ -66,6 +66,14 @@ class CliMethodAllowlist {
             "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery",
             "facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery",
 
+            // DAR-BE-328: peak-period and sync-pulse reads; write nothing, return no credential (chat spaces by id only).
+            "facade.PeakPeriodFacadeServices.get#PeakPeriod",
+            "facade.PeakPeriodFacadeServices.list#PeakPeriods",
+
+            "facade.SyncPulseFacadeServices.get#RunPulseFlags",
+            "facade.SyncPulseFacadeServices.get#SyncPair",
+            "facade.SyncPulseFacadeServices.list#SyncPairs",
+
             "facade.ReconciliationFacadeServices.cancel#ReconciliationRun",
             "facade.ReconciliationFacadeServices.get#ActiveRunResult",
             "facade.ReconciliationFacadeServices.get#Automation",
@@ -327,6 +335,16 @@ class CliMethodAllowlist {
             "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema",
 
             "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery",
+
+            // DAR-BE-328: peak-period and sync-pulse writes; saving or deleting them is the app's, as with save#Automation.
+            "facade.PeakPeriodFacadeServices.delete#PeakPeriod",
+            "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime",
+            "facade.PeakPeriodFacadeServices.delete#PeakPeriodSync",
+            "facade.PeakPeriodFacadeServices.save#PeakPeriod",
+            "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime",
+            "facade.PeakPeriodFacadeServices.save#PeakPeriodSync",
+            "facade.SyncPulseFacadeServices.delete#SyncPair",
+            "facade.SyncPulseFacadeServices.save#SyncPair",
 
             "facade.ReconciliationFacadeServices.archive#Automation",
             "facade.ReconciliationFacadeServices.archive#SavedRun",

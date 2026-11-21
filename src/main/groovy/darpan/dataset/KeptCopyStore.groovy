@@ -259,7 +259,7 @@ class KeptCopyStore {
     static Closure lineWrittenHook = null
 
     /** DAR-OPS-026: clears the test hook. Test-only. */
-    static void resetForTests() { lineWrittenHook = null }
+    static void resetForTests() { lineWrittenHook = null; OPEN_READERS.set(0) }
 
     // ---- internals ----
 

@@ -391,6 +391,7 @@ class EmailCopy {
             seedDefaultsCache = null
             seedSubjectsCache = null
             LOGGED.clear()
+            DRAFT.remove()
         } catch (Throwable ignored) { }
     }
 

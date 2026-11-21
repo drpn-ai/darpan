@@ -107,7 +107,7 @@ class RunNotificationVoice {
     }
 
     /** Test-harness reset: restores every mutable static (picker, cycles, last-dealt). Never called from src/main. */
-    static void resetForTests() { resetLinePicker() }
+    static void resetForTests() { resetLinePicker(); resetLineHistory() }
 
     /**
      * Deals a line, pinned by tests through {@link #setLinePicker}.

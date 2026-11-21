@@ -18,7 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *   - a `static` field that is not `final` (seam, hook, clock, counter, lazy cache), or
  *   - a `static final` field that is a mutable shared container: type Atomic*, Concurrent*, ThreadLocal, a Cache/Queue/Deque,
  *     a name SHARED, or an initializer that builds one (`new ...`, an empty `[:]`/`[]` literal, boundedXxx(...))
- * and has no `static void resetForTests()`. Constants (literal lists/maps/sets, loggers, patterns, mappers) pass.
+ * and has no `static void resetForTests()`, or whose resetForTests() body (plus the same-class methods it calls, one level)
+ * never mentions the field name. Multi-line declarations and an `@Field` on the previous line are joined before matching. Constants (literal lists/maps/sets, loggers, patterns, mappers) pass.
  * Text scan, no Moqui: runs in the unit pool.
  */
 class StaticSeamResetGuardTests {
@@ -39,7 +40,7 @@ class StaticSeamResetGuardTests {
             '(?:([\\w.]+(?:<.*>)?(?:\\[\\])*)\\s+)?(\\w+)\\s*(?:=\\s*(.*))?$')
     private static final Pattern RESET = Pattern.compile('static\\s+(?:synchronized\\s+)?void\\s+resetForTests\\s*\\(\\s*\\)')
     private static final Pattern MUTABLE_TYPE = Pattern.compile('(^|[.])(Atomic\\w+|Concurrent\\w+|ThreadLocal|InheritableThreadLocal|\\w*Cache|\\w*Queue|\\w*Deque)(<|$)')
-    private static final Pattern MUTABLE_INIT = Pattern.compile('^(new\\s+(?:java\\.util\\.(?:concurrent\\.)?)?\\w*(?:Map|List|Set|Queue|Deque|Cache|Atomic\\w*|Counter|Stack|Vector|Array|Collection)\\b|\\[:?\\]\\s*(as\\b.*)?$|bounded\\w+\\(|Collections\\.synchronized|\\w+\\.SHARED\\b)')
+    private static final Pattern MUTABLE_INIT = Pattern.compile('^(new\\s+(?:java\\.util\\.(?:concurrent\\.)?)?\\w*(?:Map|List|Set|Queue|Deque|Cache|Atomic\\w*|Counter|Stack|Vector|Array|Collection)\\b|\\[:?\\]\\s*(as\\b.*)?$|bounded\\w+\\(|Collections\\.synchronized\\w*|Collections\\.newSetFromMap|(?:[\\w.]*\\.)?Concurrent\\w+\\.|(?:[\\w.]*\\.)?newKeySet\\b|\\w+\\.SHARED\\b)')
 
     @Test
     void everyMutableStaticSeamHasResetForTests() {
@@ -60,6 +61,8 @@ class StaticSeamResetGuardTests {
                     if (ALLOWLIST.containsKey(key)) { used << key; return }
                     if (!hasReset) {
                         violations << "${root.relativize(file)}:${f.line} ${f.kind} static '${f.name}' but ${cls} has no static void resetForTests()".toString()
+                    } else if (!resetMentions(text, f.name as String)) {
+                        violations << "${root.relativize(file)}:${f.line} ${cls}.${f.name} is a ${f.kind} static that ${cls}.resetForTests() never touches".toString()
                     }
                 }
             }
@@ -102,11 +105,25 @@ class Sample {
     /** Mutable static fields of one source text: [name, kind, line]. */
     static List<Map> scan(String text) {
         List<Map> found = []
-        int n = 0
-        for (String line : text.readLines()) {
-            n++
+        List<String> lines = text.readLines()
+        String prevNonBlank = ''
+        for (int i = 0; i < lines.size(); i++) {
+            int n = i + 1
+            String line = lines[i]
             String t = line.trim()
             if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) continue
+            if (t.isEmpty()) continue
+            String before = prevNonBlank
+            prevNonBlank = t
+            if (!(line =~ /\bstatic\b/)) continue
+            // join continuation lines: a declaration ending in '=' or leaving a '(' / '[' open
+            int guard = 0
+            while (i + 1 < lines.size() && guard++ < 40 && continues(line)) {
+                i++
+                line = '    ' + line.trim() + ' ' + lines[i].trim()
+            }
+            // an annotation alone on the line above (@Field)
+            if (before.matches(/^@\w+(\([^)]*\))?$/)) line = '    ' + before + ' ' + line.trim()
             Matcher m = FIELD.matcher(line)
             if (!m.matches()) continue
             String mods = (m.group(1) ?: '') + ' ' + (m.group(2) ?: '')
@@ -124,6 +141,95 @@ class Sample {
             }
         }
         return found
+    }
+
+    private static boolean continues(String line) {
+        String t = line.replaceAll(/\s*\/\/.*$/, '').trim()
+        if (t.endsWith('=')) return true
+        if (t.contains('{')) return false
+        int open = 0
+        for (char c : t.toCharArray()) {
+            if (c == ('(' as char) || c == ('[' as char)) open++
+            else if (c == (')' as char) || c == (']' as char)) open--
+        }
+        return open > 0
+    }
+
+    /** Body (between the braces) of the first method declared by `header`, comments stripped; null when absent. */
+    private static String bodyOf(String text, Pattern header) {
+        Matcher m = header.matcher(text)
+        if (!m.find()) return null
+        int open = text.indexOf('{', m.end())
+        if (open < 0) return null
+        int depth = 0
+        for (int i = open; i < text.length(); i++) {
+            char c = text.charAt(i)
+            if (c == ('{' as char)) depth++
+            else if (c == ('}' as char) && --depth == 0) {
+                return text.substring(open + 1, i).replaceAll(/(?s)\/\*.*?\*\//, '').replaceAll(/\/\/[^\n]*/, '')
+            }
+        }
+        return null
+    }
+
+    /** True when resetForTests() (or a same-class method it calls by name, one level) mentions the field. */
+    static boolean resetMentions(String text, String field) {
+        String body = bodyOf(text, RESET)
+        if (body == null) return false
+        StringBuilder all = new StringBuilder(body)
+        Matcher calls = Pattern.compile('\\b(\\w+)\\s*\\(').matcher(body)
+        Set<String> seen = [] as Set
+        while (calls.find()) {
+            String callee = calls.group(1)
+            if (callee == 'resetForTests' || !seen.add(callee)) continue
+            String sub = bodyOf(text, Pattern.compile('static\\s+(?:synchronized\\s+)?[\\w.<>\\[\\]]+\\s+' + Pattern.quote(callee) + '\\s*\\([^)]*\\)'))
+            if (sub != null) all.append('\n').append(sub)
+        }
+        return Pattern.compile('\\b' + Pattern.quote(field) + '\\b').matcher(all).find()
+    }
+
+    @Test
+    void scannerCatchesKeySetMultiLineAndFieldOnPreviousLine() {
+        String sample = '''
+class S {
+    private static final Set<String> WARNED = ConcurrentHashMap.newKeySet()
+    private static final Set<String> VIA = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    static final Set<String> SW = Collections.newSetFromMap(new java.util.WeakHashMap())
+    static final Map<String, String> MULTI =
+        new HashMap<String, String>()
+    static final Map<String, String> BRACKET = Collections.synchronizedMap(
+        new HashMap<String, String>())
+    static final Map<String, String> CONSTANT =
+        [a: "b"]
+    @Field
+    static final Map<String, Object> ANNOTATED = [:]
+    static String describe(
+        def x) { return null }
+}
+'''
+        assertEquals(['WARNED', 'VIA', 'SW', 'MULTI', 'BRACKET', 'ANNOTATED'], scan(sample).collect { it.name })
+    }
+
+    @Test
+    void resetBodyMustMentionEveryFlaggedField() {
+        String missing = '''
+class R {
+    static Closure hook = null
+    static final Map<String, String> CACHE = new HashMap<String, String>()
+    static void resetForTests() { hook = null }
+}
+'''
+        assertTrue(resetMentions(missing, 'hook'))
+        assertTrue(!resetMentions(missing, 'CACHE'))
+        String delegated = '''
+class R {
+    static final Map<String, String> CACHE = new HashMap<String, String>()
+    static void resetForTests() { clearCache() }
+    static void clearCache() { CACHE.clear() }
+}
+'''
+        assertTrue(resetMentions(delegated, 'CACHE'))
+        assertTrue(!resetMentions('class R { static int n = 1 }', 'n'))
     }
 
     private static Path findMainGroovy() {

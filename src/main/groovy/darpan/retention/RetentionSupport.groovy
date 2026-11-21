@@ -117,6 +117,11 @@ class RetentionSupport {
 
     private static final Set<String> warnedStored = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+    /** Test-harness reset: forgets which stored periods were already warned about. Never called from src/main. */
+    static void resetForTests() {
+        try { warnedStored.clear() } catch (Throwable ignored) { }
+    }
+
     /**
      * A tenant row written outside the service (data load, DB console) may hold a period the service would refuse. A value outside
      * 1 to 3650 days must never reach the cutoff maths (0 or less puts the cutoff at or after now and deletes today's rows too):

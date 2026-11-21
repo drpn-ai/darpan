@@ -31,6 +31,7 @@ class TenantAccessSupport {
     static void resetForTests() {
         SYSTEM_TENANT_USER_GROUP_ID.remove()
         REQUESTED_TENANT_USER_GROUP_ID.remove()
+        try { WARNED_BAD_ZONES.clear() } catch (Throwable ignored) { }
     }
 
     /** Request header naming the tenant for this one request (value = tenant userGroupId). */

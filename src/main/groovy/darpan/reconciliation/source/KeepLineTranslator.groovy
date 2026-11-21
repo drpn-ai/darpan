@@ -41,17 +41,19 @@ class KeepLineTranslator {
     /**
      * decisionRules: the Keep decision's rules, each [ruleId, ruleName, priority, outcomeId (or actions with an outcomeId),
      * conditions: RuleSetCondition maps]. fieldKinds: fact field name to FVT_* (a field not named is text, as the pair fact
-     * type generates it). params: the check's parameters by name. recordKeys (optional): fact field name to the record key
-     * it was named from (generate#PairFactType keyNames, inverted); without it the key is the field less "<sidePrefix>_".
+     * type generates it). params: the check's parameters by name. recordKeys (required): this side's fact field name to the
+     * record key it was named from (generate#PairFactType keyNames, inverted). A field's key is never derived from its name:
+     * nameKeys rewrites characters, cuts at 40 and adds _2 on a case clash, so a record field missing from recordKeys throws.
      *
      * Rules come out in moqui-rules' firing order (highest priority first), id "B:<ruleId>", sequenceNum the priority,
      * label the rule name, reason the outcome. A rule with a refused line is left out and its refusals listed: the caller
      * treats any refusal as an error, since leaving a rule out changes which rule owns a record.
      */
     static Map translate(List<Map> decisionRules, String sidePrefix, Map<String, String> fieldKinds, Map<String, Object> params,
-                         Map<String, String> recordKeys = null) {
+                         Map<String, String> recordKeys) {
         if (!sidePrefix) throw new IllegalArgumentException("Keep lines need the side's prefix.")
-        Scope scope = new Scope(sidePrefix: sidePrefix, fieldKinds: fieldKinds ?: [:], params: params ?: [:], recordKeys: recordKeys ?: [:])
+        if (recordKeys == null) throw new IllegalArgumentException("Keep lines need the record key of each ${sidePrefix} fact field.".toString())
+        Scope scope = new Scope(sidePrefix: sidePrefix, fieldKinds: fieldKinds ?: [:], params: params ?: [:], recordKeys: recordKeys)
         List<Map> ordered = (decisionRules ?: []).sort(false) { Map a, Map b ->
             ((b.priority ?: 0) as Integer) <=> ((a.priority ?: 0) as Integer) ?: (a.ruleName as String) <=> (b.ruleName as String) }
         List<Map> rules = []
@@ -71,7 +73,7 @@ class KeepLineTranslator {
     /** One refusal per line Keep cannot run, in line order; empty when Keep can run every line. Used at save (Task 8). */
     static List<String> refusals(List<Map> lines, String sidePrefix, Map<String, String> fieldKinds) {
         if (!sidePrefix) throw new IllegalArgumentException("Keep lines need the side's prefix.")
-        return refusalsIn(lines ?: [], new Scope(sidePrefix: sidePrefix, fieldKinds: fieldKinds ?: [:], params: [:], recordKeys: [:]))
+        return refusalsIn(lines ?: [], new Scope(sidePrefix: sidePrefix, fieldKinds: fieldKinds ?: [:], params: [:]))
     }
 
     /**
@@ -98,7 +100,7 @@ class KeepLineTranslator {
             }
             if (skipped) continue
             Integer sequenceNum = (entry.sequenceNum ?: 0) as Integer
-            Scope scope = new Scope(sidePrefix: null, fieldKinds: ((entry.kinds ?: [:]) as Map<String, String>), params: [:], recordKeys: [:])
+            Scope scope = new Scope(sidePrefix: null, fieldKinds: ((entry.kinds ?: [:]) as Map<String, String>), params: [:])
             List<Map> lines = (entry.lines ?: []) as List<Map>
             List<String> entryRefusals = refusalsIn(lines, scope)
             if (entryRefusals) {
@@ -114,7 +116,7 @@ class KeepLineTranslator {
 
     // ---------------------------------------------------------------------------------------------------------- fields
 
-    /** sidePrefix null = a declared entry: every field is a plain record field. */
+    /** sidePrefix null = a declared entry: every field is a plain record field, named by its record key. */
     private static class Scope {
         String sidePrefix
         Map<String, String> fieldKinds
@@ -133,9 +135,12 @@ class KeepLineTranslator {
             return "OTHER"
         }
 
-        String recordKeyOf(String field) {
+        /** A declared field is its record key; a decision's field maps only through recordKeys. */
+        String recordKeyOf(String seq, String field) {
             if (sidePrefix == null) return field
-            return recordKeys.get(field) ?: field.substring(sidePrefix.length() + 1)
+            String key = recordKeys?.get(field)
+            if (!key) throw new IllegalArgumentException("Keep line ${seq}: fact field ${field} has no record key on the ${sidePrefix} side".toString())
+            return key
         }
     }
 
@@ -244,7 +249,7 @@ class KeepLineTranslator {
         if (scope.roleOf(field) == "PARAM") {
             return [kind: "const", holds: paramHolds(seq, field, kindId, op, normalize, values, scope.params.get(field.substring(PARAM_PREFIX.length())))]
         }
-        return [kind: "compare", field: scope.recordKeyOf(field), text: "FACT", op: op,
+        return [kind: "compare", field: scope.recordKeyOf(seq, field), text: "FACT", op: op,
                 values: values == null ? null : values.collect { valueText(it) }, valueKind: valueKind, fold: fold]
     }
 

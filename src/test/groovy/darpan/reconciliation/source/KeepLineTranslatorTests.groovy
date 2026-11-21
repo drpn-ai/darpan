@@ -1,5 +1,6 @@
 package darpan.reconciliation.source
 
+import darpan.judge.PairFactSupport
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.Test
 
@@ -25,8 +26,14 @@ class KeepLineTranslatorTests {
         return [ruleId: ruleId, ruleName: "rule " + ruleId, priority: priority, outcomeId: "OUT_" + ruleId, conditions: conditions] + more
     }
 
+    /** Fact field to record key for plain keys (no character nameKeys rewrites), as generate#PairFactType names them. */
+    private static Map<String, String> keysOf(List<Map> conditions) {
+        Collection<String> keys = conditions*.fieldName.findAll { it?.startsWith("acme_") }.collect { (it as String).substring(5) }
+        return PairFactSupport.nameKeys("acme", [:], keys).collectEntries { key, name -> [(name): key] } as Map<String, String>
+    }
+
     /** The one test of a translated single-rule decision. */
-    private static Map testOf(List<Map> conditions, Map<String, String> kinds = [:], Map params = [:], Map recordKeys = null) {
+    private static Map testOf(List<Map> conditions, Map<String, String> kinds = [:], Map params = [:], Map recordKeys = keysOf(conditions)) {
         Map out = KeepLineTranslator.translate([rule("R1", 1, conditions)], "acme", kinds, params, recordKeys)
         assertEquals([], out.refusals)
         return (Map) ((List<Map>) ((List<Map>) out.rules)[0].tests)[0].test
@@ -89,7 +96,7 @@ class KeepLineTranslatorTests {
     @Test
     void aRuleWithARefusedLineIsLeftOutAndItsRefusalListed() {
         Map out = KeepLineTranslator.translate([rule("R1", 2, [cmp("01", "ask_x_y", "ENTCO_EQUALS", "Z")]),
-                                                rule("R2", 1, [cmp("01", "acme_status", "ENTCO_EQUALS", "Z")])], "acme", [:], [:])
+                                                rule("R2", 1, [cmp("01", "acme_status", "ENTCO_EQUALS", "Z")])], "acme", [:], [:], [acme_status: "status"])
         assertEquals(["Keep line 01: ask_x_y comes from an ask, which runs after Keep"], out.refusals)
         assertEquals(["B:R2"], ((List<Map>) out.rules)*.id)
     }
@@ -126,7 +133,7 @@ class KeepLineTranslatorTests {
         [cmp("01", "acme_amount", "ENTCO_EQUALS", "1e2"), cmp("01", "acme_qty", "ENTCO_EQUALS", "1.5"),
          cmp("01", "acme_paid", "ENTCO_EQUALS", "1"), cmp("01", "acme_amount", "ENTCO_LIKE", "1%"),
          cmp("01", "acme_status", "ENTCO_BETWEEN", "a"), cmp("01", "acme_status", "ENTCO_EQUALS", null)].each { Map bad ->
-            assertThrows(IllegalArgumentException) { KeepLineTranslator.translate([rule("R1", 1, [bad])], "acme", kinds, [:]) }
+            assertThrows(IllegalArgumentException) { KeepLineTranslator.translate([rule("R1", 1, [bad])], "acme", kinds, [:], keysOf([bad])) }
         }
     }
 
@@ -146,15 +153,15 @@ class KeepLineTranslatorTests {
 
         ['"x"', '[]', '[null]', '[{"a": 1}]', 'not json'].each { String bad ->
             assertThrows(IllegalArgumentException) {
-                KeepLineTranslator.translate([rule("R1", 1, [cmp("01", "acme_code", "ENTCO_IN", bad)])], "acme", kinds, [:])
+                KeepLineTranslator.translate([rule("R1", 1, [cmp("01", "acme_code", "ENTCO_IN", bad)])], "acme", kinds, [:], [acme_code: "code"])
             }
         }
         // a number string with an exponent is not a number; a yes/no list takes no number
         assertThrows(IllegalArgumentException) {
-            KeepLineTranslator.translate([rule("R1", 1, [cmp("01", "acme_amount", "ENTCO_IN", '["1e2"]')])], "acme", kinds, [:])
+            KeepLineTranslator.translate([rule("R1", 1, [cmp("01", "acme_amount", "ENTCO_IN", '["1e2"]')])], "acme", kinds, [:], [acme_amount: "amount"])
         }
         assertThrows(IllegalArgumentException) {
-            KeepLineTranslator.translate([rule("R1", 1, [cmp("01", "acme_paid", "ENTCO_IN", '[1]')])], "acme", kinds, [:])
+            KeepLineTranslator.translate([rule("R1", 1, [cmp("01", "acme_paid", "ENTCO_IN", '[1]')])], "acme", kinds, [:], [acme_paid: "paid"])
         }
     }
 
@@ -175,7 +182,7 @@ class KeepLineTranslatorTests {
          cmp("01", "acme_code", "ENTCO_IN", '["a", "  "]', y),
          cmp("01", "acme_code", "ENTCO_EQUALS", "a", [normalizeText: "X"])].each { Map bad ->
             assertThrows(IllegalArgumentException) {
-                KeepLineTranslator.translate([rule("R1", 1, [bad])], "acme", [acme_amount: "FVT_DECIMAL"], [:])
+                KeepLineTranslator.translate([rule("R1", 1, [bad])], "acme", [acme_amount: "FVT_DECIMAL"], [:], keysOf([bad]))
             }
         }
     }
@@ -232,12 +239,40 @@ class KeepLineTranslatorTests {
     }
 
     @Test
+    void aRecordFieldReadsOnlyTheRecordKeyItsFactFieldMapsTo() {
+        List<Map> one = [cmp("01", "acme_status", "ENTCO_EQUALS", "X")]
+        // no recordKeys at all: refused, never guessed from the name
+        IllegalArgumentException absent = assertThrows(IllegalArgumentException) {
+            KeepLineTranslator.translate([rule("R1", 1, one)], "acme", [:], [:], null)
+        }
+        assertTrue(absent.message.contains("acme"), absent.message)
+        // a field the map does not name: refused, naming the field
+        IllegalArgumentException missing = assertThrows(IllegalArgumentException) {
+            KeepLineTranslator.translate([rule("R1", 1, one)], "acme", [:], [:], [acme_other: "other"])
+        }
+        assertTrue(missing.message.contains("acme_status") && missing.message.contains("Keep line 01"), missing.message)
+
+        // names as generate#PairFactType makes them: cut at 40 characters, and _2 on a case clash
+        String longKey = "shipment.destination.facility.identifier.code"
+        Map<String, String> names = PairFactSupport.nameKeys("acme", [:], [longKey, "Status", "status"])
+        String longName = names.get(longKey)
+        assertEquals(40, longName.length())
+        assertEquals("acme_Status", names.get("Status"))
+        assertEquals("acme_status_2", names.get("status"))
+        Map<String, String> keys = names.collectEntries { key, name -> [(name): key] } as Map<String, String>
+
+        assertEquals(compareTest(longKey, "EQ", ["F1"]), testOf([cmp("01", longName, "ENTCO_EQUALS", "F1")], [:], [:], keys))
+        assertEquals(compareTest("status", "EQ", ["open"]), testOf([cmp("01", "acme_status_2", "ENTCO_EQUALS", "open")], [:], [:], keys))
+        assertEquals(compareTest("Status", "EQ", ["Open"]), testOf([cmp("01", "acme_Status", "ENTCO_EQUALS", "Open")], [:], [:], keys))
+    }
+
+    @Test
     void rulesKeepPriorityOrderAndNameTheirOutcome() {
         List<Map> decision = [
                 rule("R10", 10, [cmp("01", "acme_a", "ENTCO_EQUALS", "A")], [outcomeId: null, actions: [[actionTypeId: "X"], [outcomeId: "VOIDED"]]]),
                 rule("R30", 30, [cmp("01", "acme_b", "ENTCO_EQUALS", "B")]),
                 rule("R20", 20, [cmp("01", "acme_c", "ENTCO_EQUALS", "C")])]
-        List<Map> rules = (List<Map>) KeepLineTranslator.translate(decision, "acme", [:], [:]).rules
+        List<Map> rules = (List<Map>) KeepLineTranslator.translate(decision, "acme", [:], [:], [acme_a: "a", acme_b: "b", acme_c: "c"]).rules
 
         // moqui-rules fires the highest priority first
         assertEquals(["B:R30", "B:R20", "B:R10"], rules*.id)

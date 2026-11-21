@@ -41,6 +41,11 @@ class RunConclusionSupport {
      * (the present record and the other side's first-field presence only), so the pass stays bounded. Tunable for tests.
      */
     static int maxBrainFindings = 20_000
+
+    /** Restores the tunable cap (DAR-OPS-026 shared-Moqui harness). */
+    static void resetForTests() {
+        maxBrainFindings = 20_000
+    }
     /** DAR-BE-118: ids per lookup call. */
     static final int LOOKUP_BATCH = 500
     static Map concludeRun(Map args) {

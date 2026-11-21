@@ -70,6 +70,18 @@ class KnowledgeSupport {
     private static final LinkedHashMap<String, KnowledgeIndex> TENANT_INDEXES =
             new LinkedHashMap<String, KnowledgeIndex>(TENANT_INDEX_CACHE_SIZE, 0.75f, true)
 
+    /** Drops the loaded product tier, tenant generations and cached tenant indexes (DAR-OPS-026 shared-Moqui harness). */
+    static void resetForTests() {
+        synchronized (PRODUCT_LOCK) { product = null }
+        synchronized (TENANT_LOCK) {
+            GENERATIONS.clear()
+            for (KnowledgeIndex idx : new ArrayList<KnowledgeIndex>(TENANT_INDEXES.values())) {
+                try { idx.close() } catch (Throwable ignored) { }
+            }
+            TENANT_INDEXES.clear()
+        }
+    }
+
     // ---------------------------------------------------------------- reads
 
     /**

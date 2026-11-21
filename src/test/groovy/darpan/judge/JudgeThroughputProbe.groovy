@@ -42,11 +42,24 @@ class JudgeThroughputProbe {
 
     private static final int PAIRS = 125602
     private static final int BATCH = 500
+    private static final int POOL = 2000
     private static final String A = "KREWE"
     private static final String PREF_KEY = TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY
     private static final String EDITOR_USERNAME = "test.customer"
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
     private static final String OLD_RULE_SET = "JTP_OLD_RS"
+
+    /**
+     * The 13 fields each side carries besides flag and amount, with the moqui-rules value kind each is declared as. 15 per side,
+     * 30 across both: no captured two-sided production run holds a wider pair (widest single side seen: 21 NetSuite order fields;
+     * the other side is not captured), so the width is the 30 the plan names. No rule reads these.
+     */
+    private static final Map<String, String> FIELD_KINDS = [
+            customer_name: "FVT_TEXT", ship_method: "FVT_TEXT", location: "FVT_TEXT", status: "FVT_TEXT",
+            qty: "FVT_INTEGER", line_count: "FVT_INTEGER", item_id: "FVT_INTEGER",
+            tax: "FVT_DECIMAL", shipping: "FVT_DECIMAL", discount: "FVT_DECIMAL",
+            gift: "FVT_BOOLEAN",
+            created_at: "FVT_DATE_TIME", updated_at: "FVT_DATE_TIME"] as LinkedHashMap
 
     private ExecutionContext ec
     private String factTypeId
@@ -56,6 +69,10 @@ class JudgeThroughputProbe {
     @BeforeAll
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "judge-throughput-probe")
+        // MoquiDevConf persists every service hit; the shipped default (MoquiDefaultConf) does not. At 30 fields the rule engine makes
+        // millions of convert#FactValue calls, so the dev setting queues them until the 3 GB heap dies. Probe like production.
+        def hitFlags = ec.factory.@artifactPersistHitByTypeEnum
+        hitFlags.put(ArtifactExecutionInfo.ArtifactType.AT_SERVICE, Boolean.FALSE)
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.loadSeedData(ec, "classpath://data/EntityTypeData.xml",
                 "component://moqui-rules/data/RuleSeedData.xml", "component://darpan/data/AuditSeedData.xml", "component://darpan/data/JudgeSeedData.xml",
@@ -80,10 +97,17 @@ class JudgeThroughputProbe {
         // The new side: a check, its pair fact type, and one Must hold decision (firstMatchOnly N).
         String checkId = ec.entity.sequencedIdPrimary("darpan.audit.AuditCheck", null, null)
         insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: A, checkCode: "throughput", label: "throughput probe"])
-        Map generated = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType",
-                [checkId: checkId, sampleKeys: [file1: ["flag", "amount"], file2: ["flag", "amount"]]]))
+        // Width: 15 fields per side, 30 across both (see FIELD_KINDS), the two the rules read plus 13 the rules never touch.
+        List<String> sideKeys = ["flag", "amount"] + FIELD_KINDS.keySet().toList()
+        Map sampleKeys = [file1: sideKeys, file2: sideKeys]
+        Map generated = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", [checkId: checkId, sampleKeys: sampleKeys]))
         factTypeId = generated.factTypeId
         keyNames = generated.keyNames
+        // Declare the value kinds the way a typed fact type holds them (the first call names every field as text).
+        Map kindOverrides = [:]
+        ["file1", "file2"].each { String side -> FIELD_KINDS.each { String key, String kind -> kindOverrides.put(keyNames[side][key], kind) } }
+        kindOverrides.put(keyNames.file1.amount, "FVT_DECIMAL"); kindOverrides.put(keyNames.file2.amount, "FVT_DECIMAL")
+        ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", [checkId: checkId, sampleKeys: sampleKeys, kindOverrides: kindOverrides]))
         Map created = ok(underFacadeGrant("create#rules.RuleSet", [description: "throughput probe", firstMatchOnly: "N",
                 factTypes: [[factTypeId: factTypeId]], outcomes: [[outcomeId: "NOT_REQUIRED"], [outcomeId: "AMOUNT_OFF"]]]))
         decisionId = created.ruleSetId
@@ -142,8 +166,11 @@ class JudgeThroughputProbe {
         println notes
 
         if (ratio > 3.0d) {
-            String profile = "ratio ${String.format('%.2f', ratio)} is above 3\n\nNEW path top frames:\n" + profile { runNew(pairs) } +
-                    "\nOLD path top frames:\n" + profile { runOld(pairs) }
+            // The profile re-runs on a slice: the full 30-wide set plus a second pass overran the 3 GB test heap, so it profiles the first 5,000 pairs.
+            List<Map> sample = pairs.take(5000)
+            System.gc()
+            String profile = "ratio ${String.format('%.2f', ratio)} is above 3\n\nNEW path top frames:\n" + profile { runNew(sample) } +
+                    "\nOLD path top frames:\n" + profile { runOld(sample) }
             new File("build/judge-throughput-profile.txt").text = profile
             println profile
         }
@@ -182,6 +209,9 @@ class JudgeThroughputProbe {
     /** Pairs are [compareId, file1, file2]. Roughly 8% break "requires", roughly 6% break the amount within 1.00. */
     private static List<Map> generatePairs(int count, String idPrefix) {
         Random random = new Random(318L)
+        Random filler = new Random(3180L)   // its own stream: the extra fields never move the draws that decide the broken promises
+        // The extra values come from a pool of 2000 rows so 125,602 wide pairs fit the 3 GB test heap; each pair still holds its own 15 entries per side.
+        List<Map> pool = (0..<POOL).collect { int k -> extraFields(filler, k) }
         List<Map> pairs = new ArrayList<>(count)
         for (int i = 0; i < count; i++) {
             boolean flag1 = random.nextInt(100) < 50
@@ -189,10 +219,21 @@ class JudgeThroughputProbe {
             BigDecimal amount = new BigDecimal(1000 + random.nextInt(900000)).movePointLeft(2)
             BigDecimal other = random.nextInt(100) < 6 ? amount.add(new BigDecimal(3 + random.nextInt(40))) : amount.add(new BigDecimal(random.nextInt(50)).movePointLeft(2))
             pairs.add([compareId: "${idPrefix}${i}".toString(),
-                       file1    : [flag: flag1 ? "Y" : "N", amount: amount.toPlainString()],
-                       file2    : [flag: flag2 ? "Y" : "N", amount: other.toPlainString()]] as Map)
+                       file1    : [flag: flag1 ? "Y" : "N", amount: amount.toPlainString()] + pool[filler.nextInt(POOL)],
+                       file2    : [flag: flag2 ? "Y" : "N", amount: other.toPlainString()] + pool[filler.nextInt(POOL)]] as Map)
         }
         return pairs
+    }
+
+    /** The 13 extra fields, one value of each declared kind; the rules never read them. */
+    private static Map extraFields(Random r, int i) {
+        long base = 1_700_000_000_000L + r.nextInt(86_400_000)
+        return [customer_name: "Customer ${r.nextInt(50000)}".toString(), ship_method: "METHOD_${r.nextInt(12)}".toString(),
+                location: "LOC${r.nextInt(40)}".toString(), status: r.nextBoolean() ? "ORDER_APPROVED" : "ORDER_COMPLETED",
+                qty: (long) (1 + r.nextInt(8)), line_count: (long) (1 + r.nextInt(5)), item_id: (long) r.nextInt(900000),
+                tax: new BigDecimal(r.nextInt(5000)).movePointLeft(2), shipping: new BigDecimal(r.nextInt(2500)).movePointLeft(2),
+                discount: new BigDecimal(r.nextInt(3000)).movePointLeft(2), gift: r.nextInt(10) == 0,
+                created_at: new Timestamp(base), updated_at: new Timestamp(base + r.nextInt(3_600_000))] as Map
     }
 
     private static boolean brokenRequires(Map pair) { pair.file1.flag == "Y" && pair.file2.flag != "Y" }

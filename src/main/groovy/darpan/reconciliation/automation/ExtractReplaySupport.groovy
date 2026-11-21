@@ -33,9 +33,10 @@ class ExtractReplaySupport {
     /**
      * Sidecars and outputs written beside an extract, never the extract itself: the OMS exchange manifest, the rows a
      * source filter dropped (ExcludedRecordsSidecar, "<extract>.excluded.json", found by name by the conclude pass, so a
-     * replay of the extract carries it), and compare outputs.
+     * replay of the extract carries it), the Keep set-aside artifact (KeepArtifacts: ".keep.json" and ".set-aside.rows"), and
+     * compare outputs.
      */
-    static final Pattern NOT_AN_EXTRACT = ~/(?i).*(manifest\.json|\.excluded\.json|[-_.](result|diff)[-_.].*|[-_.](result|diff)\.json)$/
+    static final Pattern NOT_AN_EXTRACT = ~/(?i).*(manifest\.json|\.excluded\.json|\.keep\.json|\.set-aside\.rows|[-_.](result|diff)[-_.].*|[-_.](result|diff)\.json)$/
     private static final String WHY = "extract replay: explicit companyUserGroupId condition applied"
 
     /**

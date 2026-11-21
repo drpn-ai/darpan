@@ -73,4 +73,14 @@ class ExtractReplaySupportTests {
 
         assertEquals("oms-items.json", picked.files.FILE_1.fileName, picked.error as String)
     }
+
+    @Test
+    void aReplayNeverTakesKeepArtifactsForAnExtract() {
+        // Plan 3b-2b: the Keep summary and the set-aside rows sit beside the extract and are found by name.
+        write("20261027-152223914", "acme-orders.json", "acme-orders.keep.json", "acme-orders.set-aside.rows")
+
+        Map picked = ExtractReplaySupport.pickFromRunFolder(runDir, RUN, false)
+
+        assertEquals("acme-orders.json", picked.files.FILE_1.fileName, picked.error as String)
+    }
 }

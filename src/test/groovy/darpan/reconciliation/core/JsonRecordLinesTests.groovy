@@ -215,6 +215,14 @@ class JsonRecordLinesTests {
         assertEquals(big, fact[2])
     }
 
+    @Test
+    void aNullAndTheKeyOrderInsideACapturedContainerKeepTheirText() {
+        String json = '{"records":[{"id":"1","v":{"a":null,"b":[null,1]}},{"id":"2","v":{"z":1,"a":{"y":2,"b":3},"m":"s"}}]}'
+        List<String> got = JsonRecordLines.forRecordArray(extract("nullorder.json", json).absolutePath, paths('$.records[*].id'),
+                dir.parentFile, inj("v", "GROOVY")).readLines("UTF-8").findAll { it }.collect { String line -> keepText(line) }
+        assertEquals(["{a=null, b=[null, 1]}", "{z=1, a={y=2, b=3}, m=s}"], got)
+    }
+
     /** The Keep column's text from a lines-file row, read with Jackson so a big integer elsewhere on the line cannot skew it. */
     private static String keepText(String line) {
         return (String) ((Map) JsonRecordStream.parseText(line)).get("_darpanKeep_0")

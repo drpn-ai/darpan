@@ -9,8 +9,7 @@ import com.fasterxml.jackson.core.io.SerializedString
 import darpan.facade.common.DataManagerSupport
 import darpan.common.FactText
 import darpan.reconciliation.source.KeepRules
-import groovy.json.JsonParserType
-import groovy.json.JsonSlurper
+import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.transform.CompileStatic
 import org.apache.spark.sql.types.ArrayType
 import org.apache.spark.sql.types.DataTypes
@@ -216,7 +215,7 @@ class JsonRecordLines {
             else if (token == JsonToken.END_OBJECT || token == JsonToken.END_ARRAY) depth--
             if (capture != null && depth == 1) {
                 capture.close()
-                Object value = new JsonSlurper().setType(JsonParserType.CHARACTER_SOURCE).parseText(captureText.toString())
+                Object value = JsonRecordStream.parseText(captureText.toString())
                 record(byField.get(capturing), String.valueOf(value), value, texts)
                 capture = null
                 captureText = null

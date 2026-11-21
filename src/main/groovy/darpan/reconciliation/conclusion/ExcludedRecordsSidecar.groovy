@@ -2,7 +2,6 @@ package darpan.reconciliation.conclusion
 
 import darpan.facade.common.DataManagerSupport
 import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -85,8 +84,7 @@ class ExcludedRecordsSidecar {
         flush(collector)
         File spill = (File) collector?.spill
         if (spill == null || !spill.exists()) return []
-        JsonSlurper slurper = new JsonSlurper()
-        return spill.readLines("UTF-8").findAll { it }.collect { (Map) slurper.parseText(it) }
+        return spill.readLines("UTF-8").findAll { it }.collect { (Map) JsonRecordStream.parseText(it) }
     }
 
     /** Streams the sidecar document out of the spill, then deletes the spill. */

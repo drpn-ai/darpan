@@ -2,6 +2,7 @@ package darpan.reconciliation.core
 
 import darpan.common.FactText
 import darpan.reconciliation.source.KeepRules
+import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.json.JsonParserType
 import darpan.common.ValueSupport
 import groovy.json.JsonSlurper
@@ -195,6 +196,28 @@ class JsonRecordLinesTests {
         assertEquals("24", got[0].get("_darpanKeep_0"))
         assertEquals("10000000", got[1].get("_darpanKeep_0"))
         assertEquals("000123", got[2].get("_darpanKeep_0"))
+    }
+
+    @Test
+    void anIntegerBeyondLongInsideAContainerKeepsItsExactText() {
+        String big = "123456789012345678901"
+        String json = '{"records":[{"id":"1","v":[' + big + ',2.50]},{"id":"2","v":{"a":' + big + ',"b":{"c":[' + big + ']}}},{"id":"3","v":' + big + '}]}'
+        File source = extract("big.json", json)
+        List<Map> infos = paths('$.records[*].id')
+        List<String> groovy = JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile, inj("v", "GROOVY"))
+                .readLines("UTF-8").findAll { it }.collect { String line -> keepText(line) }
+        assertEquals(["[123456789012345678901, 2.50]", "{a=123456789012345678901, b={c=[123456789012345678901]}}", big], groovy)
+
+        File factSource = extract("bigfact.json", json)
+        List<String> fact = JsonRecordLines.forRecordArray(factSource.absolutePath, infos, dir.parentFile, inj("v", "FACT"))
+                .readLines("UTF-8").findAll { it }.collect { String line -> keepText(line) }
+        assertTrue(fact[0].contains(big) && fact[1].contains(big), "FACT text keeps the digits: ${fact}")
+        assertEquals(big, fact[2])
+    }
+
+    /** The Keep column's text from a lines-file row, read with Jackson so a big integer elsewhere on the line cannot skew it. */
+    private static String keepText(String line) {
+        return (String) ((Map) JsonRecordStream.parseText(line)).get("_darpanKeep_0")
     }
 
     @Test

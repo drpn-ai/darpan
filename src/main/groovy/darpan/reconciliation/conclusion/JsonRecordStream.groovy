@@ -10,12 +10,22 @@ import com.fasterxml.jackson.databind.ObjectMapper
  * one record, never the file (production runs on a small JVM; an extract or sidecar parsed whole is several times its
  * size on disk). Every other top-level field is read whole and returned: they are the small ones (metadata, counts).
  *
- * Numbers read as JsonSlurper reads them (decimals as BigDecimal), so a record streamed here equals one parsed whole.
+ * Numbers read as JsonSlurper reads them (decimals as BigDecimal), so a record streamed here equals one parsed whole,
+ * except an integer beyond the Long range, which JsonSlurper corrupts and this keeps exactly as a BigInteger.
  */
 class JsonRecordStream {
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+
+    /**
+     * One JSON value from text, read as the stream reads a record: a decimal as BigDecimal, an integer as Integer, Long or,
+     * beyond the Long range, an exact BigInteger. JsonSlurper turns such an integer into a wrapped negative Long or null
+     * (DAR-BE-318), so a record reader must not use it.
+     */
+    static Object parseText(String text) {
+        return MAPPER.readValue(text, Object)
+    }
 
     /**
      * Calls visit(Map) for each object in the array named arrayField (or in a top-level array) and returns the document's

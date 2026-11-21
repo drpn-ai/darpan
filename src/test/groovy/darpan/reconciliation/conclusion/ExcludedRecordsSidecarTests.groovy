@@ -54,6 +54,29 @@ class ExcludedRecordsSidecarTests {
     }
 
     @Test
+    void anIntegerBeyondLongRoundTripsExactly() {
+        BigInteger big = new BigInteger("123456789012345678901")
+        File extract = new File(dir, "big.json")
+        extract.text = '{"records":[]}'
+        Map c = ExcludedRecordsSidecar.newCollector()
+        ExcludedRecordsSidecar.collect(c, [id: big, nested: [n: big, list: [big, 2.5]], d: 1.5, s: "x", l: 42L], RULE)
+        Map spilled = ExcludedRecordsSidecar.records(c)[0]
+        assertEquals(big, spilled.id, "the spill reader")
+        ExcludedRecordsSidecar.write(new File(dir, ExcludedRecordsSidecar.fileNameFor("big.json")), c, "big.json")
+
+        List<Map> seen = []
+        Map head = ExcludedRecordsSidecar.forEachRecord(extract) { Map r -> seen.add(r) }
+        assertTrue(head.present as boolean)
+        Map record = seen[0]
+        assertEquals(big, record.id)
+        assertEquals(big, ((Map) record.nested).n)
+        assertEquals([big, new BigDecimal("2.5")], ((Map) record.nested).list)
+        assertEquals(new BigDecimal("1.5"), record.d)
+        assertEquals("x", record.s)
+        assertEquals(42, record.l)
+    }
+
+    @Test
     void aCorruptSidecarReadsAsAbsentNotEmpty() {
         File extract = new File(dir, "ns.json")
         extract.text = '{}'

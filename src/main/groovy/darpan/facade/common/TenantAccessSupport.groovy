@@ -27,6 +27,12 @@ class TenantAccessSupport {
     /** Per-request tenant for non-web callers and tests; see {@link #withRequestedTenant}. */
     private static final ThreadLocal<String> REQUESTED_TENANT_USER_GROUP_ID = new ThreadLocal<String>()
 
+    /** Test-harness reset: drops the calling thread's tenant overrides. Never called from src/main. */
+    static void resetForTests() {
+        SYSTEM_TENANT_USER_GROUP_ID.remove()
+        REQUESTED_TENANT_USER_GROUP_ID.remove()
+    }
+
     /** Request header naming the tenant for this one request (value = tenant userGroupId). */
     static final String REQUESTED_TENANT_HEADER = "X-Darpan-Tenant"
     static final String ADMIN_USER_GROUP_ID = "ADMIN"

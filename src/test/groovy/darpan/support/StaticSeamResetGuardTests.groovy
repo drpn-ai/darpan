@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * every `static void resetForTests()` in main). That only works if every class holding such state declares one.
  * This guard fails when a class in src/main/groovy declares
  *   - a `static` field that is not `final` (seam, hook, clock, counter, lazy cache), or
- *   - a `static final` field that is a mutable shared container: type Atomic*, Concurrent*, a Cache/Queue/Deque,
+ *   - a `static final` field that is a mutable shared container: type Atomic*, Concurrent*, ThreadLocal, a Cache/Queue/Deque,
  *     a name SHARED, or an initializer that builds one (`new ...`, an empty `[:]`/`[]` literal, boundedXxx(...))
  * and has no `static void resetForTests()`. Constants (literal lists/maps/sets, loggers, patterns, mappers) pass.
  * Text scan, no Moqui: runs in the unit pool.
@@ -31,35 +31,14 @@ class StaticSeamResetGuardTests {
             "TenantConfigPendingSupport.MARK_LOCKS": "registry of lock objects per key; holds no test-observable state",
             "OutboundHttpClient.sharedByConnectTimeout": "pool of stateless HttpClients keyed by connect timeout; no test-observable state",
             "ScriptSupervisor.threadCount": "monotonic counter used only to name worker threads",
-            "AgentQueryLane.IN_FLIGHT": "TODO DAR-OPS-026: reset owed",
-            "AgentQueryLane.total": "TODO DAR-OPS-026: reset owed",
-            "AgentQuerySupport.timeoutMillis": "TODO DAR-OPS-026: reset owed",
-            "AgentQuerySupport.WORKER_SEQ": "TODO DAR-OPS-026: reset owed",
-            "AuditChangePlanner.backtest": "TODO DAR-OPS-026: reset owed",
-            "AuditDigestSupport.sendEmail": "TODO DAR-OPS-026: reset owed",
-            "AuditRunUpdateSupport.sendEmail": "TODO DAR-OPS-026: reset owed",
-            "AuditRunUpdateSupport.dispatch": "TODO DAR-OPS-026: reset owed",
-            "BrainEngine.CACHE": "TODO DAR-OPS-026: reset owed",
-            "EmailCopy.seedDefaultsCache": "TODO DAR-OPS-026: reset owed",
-            "EmailCopy.seedSubjectsCache": "TODO DAR-OPS-026: reset owed",
-            "AuthFacadeSupport.passwordHashCostMillis": "TODO DAR-OPS-026: reset owed",
-            "AuthFacadeSupport.passwordHashCostMeasured": "TODO DAR-OPS-026: reset owed",
-            "PasskeySupport.decoyKeyCache": "TODO DAR-OPS-026: reset owed",
-            "RunConclusionStep.lastCaptureMillis": "TODO DAR-OPS-026: reset owed",
-            "KnowledgeSupport.product": "TODO DAR-OPS-026: reset owed",
-            "KnowledgeSupport.GENERATIONS": "TODO DAR-OPS-026: reset owed",
-            "RunConclusionSupport.maxBrainFindings": "TODO DAR-OPS-026: reset owed",
-            "RunNotificationVoice.linePicker": "TODO DAR-OPS-026: reset owed",
-            "RunNotificationVoice.CYCLES": "TODO DAR-OPS-026: reset owed",
-            "RunNotificationVoice.LAST_DEALT": "TODO DAR-OPS-026: reset owed",
     ]
 
     private static final Pattern FIELD = Pattern.compile(
             '^\\s+((?:(?:private|public|protected|final|volatile|transient)\\s+|@\\w+(?:\\([^)]*\\))?\\s+)*)static\\s+' +
             '((?:(?:private|public|protected|final|volatile|transient)\\s+)*)' +
             '(?:([\\w.]+(?:<.*>)?(?:\\[\\])*)\\s+)?(\\w+)\\s*(?:=\\s*(.*))?$')
-    private static final Pattern RESET = Pattern.compile('static\\s+void\\s+resetForTests\\s*\\(\\s*\\)')
-    private static final Pattern MUTABLE_TYPE = Pattern.compile('(^|[.])(Atomic\\w+|Concurrent\\w+|\\w*Cache|\\w*Queue|\\w*Deque)(<|$)')
+    private static final Pattern RESET = Pattern.compile('static\\s+(?:synchronized\\s+)?void\\s+resetForTests\\s*\\(\\s*\\)')
+    private static final Pattern MUTABLE_TYPE = Pattern.compile('(^|[.])(Atomic\\w+|Concurrent\\w+|ThreadLocal|InheritableThreadLocal|\\w*Cache|\\w*Queue|\\w*Deque)(<|$)')
     private static final Pattern MUTABLE_INIT = Pattern.compile('^(new\\s+(?:java\\.util\\.(?:concurrent\\.)?)?\\w*(?:Map|List|Set|Queue|Deque|Cache|Atomic\\w*|Counter|Stack|Vector|Array|Collection)\\b|\\[:?\\]\\s*(as\\b.*)?$|bounded\\w+\\(|Collections\\.synchronized|\\w+\\.SHARED\\b)')
 
     @Test
@@ -107,6 +86,7 @@ class Sample {
     static final AtomicInteger counter = new AtomicInteger()
     private static final Map<String, String> CYCLES = new ConcurrentHashMap<String, String>()
     static final Map<String, Object> BAG = [:]
+    private static final ThreadLocal<Map> CURRENT = new ThreadLocal<Map>()
     static Foo SHARED = new Foo()
     static final Foo ALIAS = Foo.SHARED
     static String describe(def x) { return null }
@@ -116,7 +96,7 @@ class Sample {
     }
 }
 '''
-        assertEquals(['hook', 'timeoutMillis', 'counter', 'CYCLES', 'BAG', 'SHARED', 'ALIAS'], scan(sample).collect { it.name })
+        assertEquals(['hook', 'timeoutMillis', 'counter', 'CYCLES', 'BAG', 'CURRENT', 'SHARED', 'ALIAS'], scan(sample).collect { it.name })
     }
 
     /** Mutable static fields of one source text: [name, kind, line]. */

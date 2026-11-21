@@ -11,6 +11,9 @@ class AgentCallMarker {
 
     static final String REFUSAL = "AGENT_CANNOT_APPROVE: only a person can apply, reject or revert a change."
 
+    /** Test-harness reset: drops the calling thread's mark. Never called from src/main. */
+    static void resetForTests() { DEPTH.remove() }
+
     /** True while the current thread is inside {@link #run}. */
     static boolean inAgentLoop() {
         return DEPTH.get() > 0

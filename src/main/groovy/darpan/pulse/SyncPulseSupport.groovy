@@ -638,6 +638,32 @@ class SyncPulseSupport {
         }
     }
 
+    /** "<upstream system> -> <target system> orders" for chat and the facades; "Source -> Target orders" when unresolved. Never throws. */
+    static String pairLabel(def ec, Map pair) {
+        try {
+            return pairNames(ec, pair).get("label") as String
+        } catch (Throwable t) {
+            logger.warn("Sync pulse pair label fell back: {}", t.message ?: t.toString())
+            clearErrors(ec)
+            return "Source ${ARROW} Target orders".toString()
+        }
+    }
+
+    /** [waitingCount, pastAllowanceCount]: the latest OK sample's waiting count (0 if none) and the pair's open orders. */
+    static Map pairCounts(def ec, String tenantId, String syncPairId) {
+        String tenant = normalize(tenantId)
+        String pairId = normalize(syncPairId)
+        if (!tenant || !pairId) return [waitingCount: 0, pastAllowanceCount: 0]
+        def sample = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPulseSample", WHY)
+                .condition("syncPairId", pairId).condition("companyUserGroupId", tenant).condition("statusEnumId", OK)
+                .orderBy("-sampleStamp").limit(1).useCache(false).list()?.find()
+        Integer waiting = sample?.get("waitingCount") as Integer
+        long open = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPulseOrder", WHY)
+                .condition("syncPairId", pairId).condition("companyUserGroupId", tenant).condition("closedStamp", null)
+                .useCache(false).count()
+        return [waitingCount: waiting ?: 0, pastAllowanceCount: (int) open]
+    }
+
     /** [upstream, target, label]: the system names of the pair's check, "<upstream> -> <target> orders". */
     private static Map pairNames(def ec, Map pair) {
         String tenantId = normalize(pair.get("companyUserGroupId"))

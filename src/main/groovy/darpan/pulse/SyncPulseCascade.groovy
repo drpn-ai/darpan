@@ -17,13 +17,19 @@ class SyncPulseCascade {
         if (!tenant || !automation) return 0
         List<String> pairIds = rows(ec, "darpan.pulse.SyncPair", tenant).condition("automationId", automation).list()
                 .collect { it.get("syncPairId") as String }
-        pairIds.each { String pairId ->
-            ["darpan.pulse.PeakPeriodSync", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder"].each { String child ->
-                rows(ec, child, tenant).condition("syncPairId", pairId).deleteAll()
-            }
-            rows(ec, "darpan.pulse.SyncPair", tenant).condition("syncPairId", pairId).deleteAll()
-        }
+        pairIds.each { String pairId -> deletePair(ec, tenant, pairId) }
         return pairIds.size()
+    }
+
+    /** Deletes one sync pair of the tenant with its peak overrides, samples and orders. Returns 1 when the pair existed, else 0. */
+    static int deletePair(def ec, String tenantId, String syncPairId) {
+        String tenant = normalize(tenantId)
+        String pairId = normalize(syncPairId)
+        if (!tenant || !pairId) return 0
+        ["darpan.pulse.PeakPeriodSync", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder"].each { String child ->
+            rows(ec, child, tenant).condition("syncPairId", pairId).deleteAll()
+        }
+        return (int) rows(ec, "darpan.pulse.SyncPair", tenant).condition("syncPairId", pairId).deleteAll()
     }
 
     private static def rows(def ec, String entityName, String tenantId) {

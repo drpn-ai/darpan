@@ -305,7 +305,9 @@
 
             THE PREDICATE BELONGS TO THE EXTRACTOR, not to this service. "Which orders never shipped" is
             one query against one system; there is no second side to diff and nothing here filters. That
-            is the whole point of the mode — see RuleSetCompareScope.scopeMode.
+            is the whole point of the mode — see RuleSetCompareScope.scopeMode. The side's Keep (keepBySide,
+            DAR-BE-318) is not that predicate: it sets aside what the scope's source filters reject, at ingest,
+            exactly as the read used to drop them.
 
             No rules run. A richer form (rules evaluated against a single dataset) is expressible in this
             same shape and is deliberately not built yet.</description>
@@ -328,6 +330,9 @@
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
+            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b, Task 16b). The side's Keep (KeepPlanSupport.sideKeep),
+                keyed FILE_1, as reconcile#RuleSetCompareScope takes it: see prepare#RuleSetCompareScope. Spark sets aside at ingest, so the
+                findings are the kept records only.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -345,6 +350,10 @@
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
             <parameter name="persistedSources" type="List"/>
+            <parameter name="setAsideBySide" type="Map"><description>DAR-BE-318. Set only when the side kept in Spark: file1 to the Set of its
+                set-aside records' compare ids, as reconcile#RuleSetCompareScope returns it.</description></parameter>
+            <parameter name="keepSummaryBySide" type="Map"><description>DAR-BE-318. Set only when the side kept in Spark: file1 to the Keep
+                summary written beside its extract (KeepArtifacts .keep.json), with keptCount and setAsideCount.</description></parameter>
         </out-parameters>
         <actions>
             <set field="ruleSetIdInput" from="ruleSetId"/>
@@ -363,7 +372,7 @@
                     file1FileTypeEnumId:file1FileTypeEnumId, file1SchemaFileName:file1SchemaFileName,
                     file1Label:file1LabelInput, hasHeader:hasHeader,
                     file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation,
-                    sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    keepBySide:keepBySide, sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="prepared"/>
 
             <if condition="!ec.message.hasError() &amp;&amp; prepared">
@@ -396,6 +405,8 @@
                 <set field="validationErrors" from="prepared.validationErrors ?: []"/>
                 <set field="processingWarnings" from="prepared.processingWarnings ?: []"/>
                 <set field="persistedSources" from="(prepared.persistedSources ?: []) + [diffDfValue].findAll { it != null }"/>
+                <set field="setAsideBySide" from="prepared.setAsideBySide"/>
+                <set field="keepSummaryBySide" from="prepared.keepSummaryBySide"/>
             </if>
         </actions>
     </service>

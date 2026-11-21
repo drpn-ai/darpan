@@ -3270,8 +3270,8 @@ class AutomationExecutionSupportTests {
 
     @Test
     void aCallerWhoseCompareTakesNoKeepKeepsTheFiltersAtTheRead() {
-        // An evaluate run (its compare takes no keepBySide) and the sync pulse (it reads the records itself) do not say
-        // keepInSpark: a Spark side's read is sent its rows and filters, exactly as before Keep moved into Spark.
+        // A caller that does not say keepInSpark (its compare takes no keepBySide): a Spark side's read is sent its rows and
+        // filters, exactly as before Keep moved into Spark. Every run loop says it, an evaluate run's included (Task 16b).
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
         addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")

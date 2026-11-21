@@ -568,9 +568,9 @@ class AutomationExecutionSupport {
             // (sm-darpan 2026-08-22: a KG Canada run reconciled 98 Dolce Vita orders).
             Map<String, Object> windowParams = new LinkedHashMap<String, Object>(executionParams)
             windowParams.automationExecutionId = automationExecutionId
-            // DAR-BE-318 (plan 3b-2b, Task 14): the compare takes each side's Keep (keepBySide), so a Spark side's reads leave
-            // Keep to it; an evaluate run's compare does not, and its side keeps filtering at the read.
-            windowParams.put(KEEP_IN_SPARK, !evaluateMode)
+            // DAR-BE-318 (plan 3b-2b, Tasks 14 and 16b): the compare takes each side's Keep (keepBySide), and so does an evaluate
+            // run's, so a Spark side's reads leave Keep to it.
+            windowParams.put(KEEP_IN_SPARK, true)
 
             // Audit 2026-06-11 #16: hold the Spark Datasets persisted by reconcile#RuleSetCompareScope
             // so the finally below unpersists them on every exit path of this automation execution.
@@ -2558,9 +2558,9 @@ class AutomationExecutionSupport {
 
     /**
      * DAR-BE-318 (plan 3b-2b, Task 14). The dispatch parameter by which a caller says its compare takes keepBySide, so a
-     * Spark side's read may leave Keep to Spark. The run loop sets it from its mode (not on an evaluate run, whose compare takes
-     * no keepBySide), and the sync pulse sets it the same way, then runs the side's Keep over its own extract; any other caller
-     * keeps every side's filters at the read.
+     * Spark side's read may leave Keep to Spark. The run loop sets it on every run, an evaluate run's included (Task 16b: both
+     * compares take keepBySide); the sync pulse sets it as SyncPulseReader decides, then runs the side's Keep over its own
+     * extract; any other caller keeps every side's filters at the read.
      */
     static final String KEEP_IN_SPARK = "keepInSpark"
 
@@ -2995,6 +2995,10 @@ class AutomationExecutionSupport {
                 sparkAppName        : normalize(params.sparkAppName) ?: "AutomationRuleSetEvaluateScope",
                 file1KeysOutLocation: window?.auditFile1KeysOut,
         ].findAll { it.value != null } as Map<String, Object>
+        // DAR-BE-318 (Task 16b): the side's Keep when it runs in Spark, as callRuleSetCompareScope sends it; sent only then, so an
+        // evaluate run with no Spark Keep is called exactly as before.
+        Map sideKeep1 = sideKeepOfResult(ec, automation, file1Source, file1Result, params)
+        if (KeepStepSupport.applies(sideKeep1)) serviceParams.keepBySide = [(FILE_SIDE_1): sideKeep1]
 
         return dispatchInternalService(ec,
                 "reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope", serviceParams)

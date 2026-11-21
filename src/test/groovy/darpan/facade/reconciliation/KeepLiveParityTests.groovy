@@ -47,6 +47,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * <li>an upload: no Keep at all.</li>
  * </ul>
  * The extractors still make their own drops (a record marked _builtInDrop), which Tasks 17–23 move into Spark later.
+ *
+ * Task 16b: an evaluate run (a single-sided EVALUATE scope, KL_RS_EVAL*) keeps in Spark wherever a compare run would, so the
+ * same records are kept and found as by its filtering read.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class KeepLiveParityTests {
@@ -115,6 +118,14 @@ class KeepLiveParityTests {
                 recordRootExpression="orders" primaryIdExpression="orderId" companyUserGroupId="${A}"/>
             ${filter("KL_RS_NEST", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST")}
             ${filter("KL_RS_NEST", "FILE_2", 1, "channel", "EXCLUDE_IN", "TEST")}
+            ${savedRun("KL_RS_EVAL", ["FILE_1": api("KL_SPARK", "kl-1")], "EVALUATE")}
+            ${savedRun("KL_RS_EVAL_REAL", ["FILE_1": api("KL_FILTERING", "kl-1")], "EVALUATE")}
+            ${filter("KL_RS_EVAL", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST,B2B")}
+            ${filter("KL_RS_EVAL", "FILE_1", 2, "orderName", "INCLUDE_PREFIX", "#SYN")}
+            ${filter("KL_RS_EVAL", "FILE_1", 3, "total", "EXCLUDE_IN", "24.00")}
+            ${filter("KL_RS_EVAL_REAL", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST,B2B")}
+            ${filter("KL_RS_EVAL_REAL", "FILE_1", 2, "orderName", "INCLUDE_PREFIX", "#SYN")}
+            ${filter("KL_RS_EVAL_REAL", "FILE_1", 3, "total", "EXCLUDE_IN", "24.00")}
             ${savedRun("KL_RS_NONE", ["FILE_1": api("KL_SPARK", "kl-none-1"), "FILE_2": api("KL_QUIET", "kl-none-2")])}
             ${filter("KL_RS_NONE", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST")}
             ${filter("KL_RS_NONE", "FILE_2", 1, "status", "INCLUDE_IN", "PAID")}
@@ -325,25 +336,86 @@ class KeepLiveParityTests {
     /** Ruling 3b2b-4: the fields Keep reads join the side's keepFields and readFields; keepRuleFields only where it is declared. */
     @Test
     void keepFieldsAndReadFieldsCarryTheKeepFields() {
-        Map selecting = sentBy("KL_RS_DEF", "FILE_2", "KL_SELECT", true)
+        Map selecting = sentBy("KL_RS_DEF", "FILE_2", "KL_SELECT")
         assertNull(selecting.sourceFilters)
         assertTrue((selecting.keepFields as List).containsAll(["orderId", "channel"]), "${selecting.keepFields}")
         assertEquals(["channel"], selecting.readFields)
         assertFalse(selecting.containsKey(KeepPlanSupport.KEEP_FIELDS_PARAMETER), "an extract that does not declare keepRuleFields is not sent it")
 
-        Map spark = sentBy("KL_RS", "FILE_1", "KL_SPARK", true)
+        Map spark = sentBy("KL_RS", "FILE_1", "KL_SPARK")
         assertEquals(["channel", "orderName", "total"] as Set, spark.keepRuleFields as Set)
         assertFalse(spark.containsKey("readFields"), "an extract that does not declare readFields is not sent it")
         assertFalse(spark.containsKey("keepFields"))
     }
 
-    /** An evaluate run's compare takes no Keep, so its read keeps today's filters and Spark runs nothing for it. */
+    /**
+     * Task 16b (and Task 13 review M3, pinned through the real run): an evaluate run's Spark side is sent no filters, Spark Keep
+     * runs at its ingest, and it finds exactly what its filtering read found. It keeps the same records, sets aside the same
+     * ones and writes the same summary as a compare run with Spark Keep over the same records.
+     */
     @Test
-    void aRunWhoseCompareTakesNoKeepFiltersAtTheRead() {
-        Map evaluate = sentBy("KL_RS", "FILE_1", "KL_SPARK", false)
-        assertEquals(["channel", "orderName", "total"], (evaluate.sourceFilters as List<Map>)*.fieldExpression)
-        assertFalse(evaluate.containsKey(KeepPlanSupport.KEEP_FIELDS_PARAMETER))
-        assertEquals(KeepPlanSupport.READ, evaluate.plan.placement)
+    void anEvaluateRunKeepsInSparkAndFindsWhatItsFilteredReadFound() {
+        Map run = runSaved("KL_RS_EVAL")
+        Map sent = call("kl-1")
+        assertNull(sent.sourceFilters, "the evaluate run's Spark side is sent no filters")
+        assertEquals(["channel", "orderName", "total"] as Set, sent.keepRuleFields as Set)
+        File after = extractOf(sent)
+        assertEquals(10, json(after).records.size(), "the read kept every record but the extractor's own drop")
+        Map keep = KeepArtifacts.readSummary(after)
+        assertNotNull(keep, "Spark Keep ran at the evaluate run's ingest")
+
+        // before: the read sent today's filters, evaluated with no Keep
+        Map src = source("KL_RS_EVAL", "FILE_1")
+        File before = beforeRead("kl-1", "KL_SPARK", src, "eval-" + after.name)
+        List<String> keptBefore = json(before).records*.orderId
+        assertEquals(["O1", "O6", "O10", "O12"], keptBefore, "the fixture is not hollow: each rule drops something")
+        assertEquals(keptBefore.size() as long, keep.keptCount as long)
+        assertEquals(json(before).metadata.filters.configuredExclusions, keep.configuredExclusions)
+        Map labels = RunConclusionStep.documentLabels(runDiffFile(run))
+        File evaluatedBefore = evaluateAndWrite("KL_RS_EVAL", before, labels, "eval-before")
+        List findings = json(runDiffFile(run)).differences
+        assertEquals(JsonOutput.toJson(json(evaluatedBefore).differences), JsonOutput.toJson(findings))
+        assertEquals(keptBefore as Set, findings*.id as Set, "every kept record is a finding, and only those")
+        assertEquals(keptBefore.size() as long, run.differenceCount as long)
+        assertEquals(sideEntries(sideFile(before)) as Set, sideEntries(sideFile(after)) as Set, "the same side file")
+
+        // a compare run with Spark Keep over the same records (KL_RS holds the same FILE_1 filters) keeps and sets aside the same
+        File reconciled = new File(after.parentFile, "eval-reconciled-" + after.name)
+        reconciled.bytes = after.bytes
+        File other = beforeRead("kl-2", "KL_QUIET", source("KL_RS", "FILE_2"), "eval-reconciled-file2.json")
+        Map compared = compareAndWrite("KL_RS", reconciled, other,
+                [FILE_1: RunExtractSupport.sideKeep(ec, source("KL_RS", "FILE_1"), "FILE_1", connectorOf("KL_SPARK"))], labels, "eval-reconciled")
+        Map reconciledKeep = KeepArtifacts.readSummary(reconciled)
+        // the copy is the extract alone: the extractor's own side file (its built-in drop, extractorSideFile) is not beside it
+        Closure keepOnly = { Map summary -> summary.findAll { !(it.key in ["sourceFileName", "extractorSideFile"]) } }
+        assertEquals(keepOnly(keep), keepOnly(reconciledKeep))
+        assertEquals(KeepArtifacts.rowsFile(reconciled).text, KeepArtifacts.rowsFile(after).text, "the same records set aside")
+        assertEquals(keptIds(reconciled), keptIds(after))
+        assertEquals(keptBefore, keptIds(after))
+        assertEquals(["O2", "O3", "O4", "O5", "O8", "O9"] as Set, (compared.setAsideBySide as Map).file1)
+    }
+
+    /**
+     * Task 16b, Ruling 3b2b-23: an evaluate run on a side whose extract still takes the filter parameter is today's run: the read
+     * is sent the filters and drops what they reject, no .keep.json is written, and it finds what it found before.
+     */
+    @Test
+    void anEvaluateRunWhoseExtractStillTakesFiltersKeepsTodaysRead() {
+        Map run = runSaved("KL_RS_EVAL_REAL")
+        Map sent = call("kl-1")
+        Map src = source("KL_RS_EVAL_REAL", "FILE_1")
+        assertEquals(ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, src), sent.sourceFilters,
+                "the read gets today's filters, operator and values included")
+        assertNull(sent.keepRuleFields)
+        File after = extractOf(sent)
+        assertEquals(["O1", "O6", "O10", "O12"], json(after).records*.orderId, "the read dropped what the filters reject")
+        assertFalse(KeepArtifacts.keepFile(after).exists(), "no Spark Keep artifact beside it")
+
+        File before = beforeRead("kl-1", "KL_FILTERING", src, "eval-real-" + after.name)
+        assertEquals(json(before).records, json(after).records)
+        File evaluatedBefore = evaluateAndWrite("KL_RS_EVAL_REAL", before, RunConclusionStep.documentLabels(runDiffFile(run)), "eval-real-before")
+        assertEquals(JsonOutput.toJson(json(evaluatedBefore).differences), JsonOutput.toJson(json(runDiffFile(run)).differences))
+        assertEquals(4L, run.differenceCount as long)
     }
 
     /**
@@ -353,7 +425,7 @@ class KeepLiveParityTests {
     @Test
     void aSideNotKeyedOnTopLevelRecordsKeepsItsFiltersAtTheRead() {
         ["FILE_1", "FILE_2"].each { String side ->
-            Map sent = sentBy("KL_RS_NEST", side, "KL_SPARK", true)
+            Map sent = sentBy("KL_RS_NEST", side, "KL_SPARK")
             assertEquals(["channel"], (sent.sourceFilters as List<Map>)*.fieldExpression, side)
             assertEquals(KeepPlanSupport.READ, sent.plan.placement, side)
             assertFalse(sent.containsKey(KeepPlanSupport.KEEP_FIELDS_PARAMETER), side)
@@ -467,13 +539,13 @@ class KeepLiveParityTests {
     }
 
     /** One API side through RunExtractSupport.extractApiSource with a stub caller: what the read would be sent. */
-    private Map sentBy(String scopeRs, String fileSide, String systemEnumId, boolean keepInSpark) {
+    private Map sentBy(String scopeRs, String fileSide, String systemEnumId) {
         Map sent = null
         Map source = source(scopeRs, fileSide)
         String location = DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec), "keep-live/sent")
         Map artifact = [location: location, runToken: "sent"]
         // the plan as run#SavedRunDiff builds it for the side, and hands the read and the compare
-        Map plan = RunExtractSupport.sideKeep(ec, source, fileSide, RunExtractSupport.resolveExtractConnector(ec, source), keepInSpark)
+        Map plan = RunExtractSupport.sideKeep(ec, source, fileSide, RunExtractSupport.resolveExtractConnector(ec, source))
         RunExtractSupport.extractApiSource(ec, source, fileSide, fileSide, artifact,
                 [windowStartDate: START, windowEndDate: END, timeZone: "UTC"], null, { String name, Map params ->
             sent = new LinkedHashMap(params)
@@ -515,6 +587,31 @@ class KeepLiveParityTests {
         } finally {
             ReconciliationServices.unpersistDatasets((List) (out?.persistedSources ?: []))
         }
+    }
+
+    /** evaluate#RuleSetCompareScope over file with no Keep, its findings written as the run writes them: the diff file. */
+    private File evaluateAndWrite(String ruleSetId, File file, Map labels, String tag) {
+        ec.message.clearAll()
+        Map out = ec.service.sync().name("reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope").parameters([
+                ruleSetId: ruleSetId, compareScopeId: ruleSetId, file1Location: file.absolutePath, file1Name: file.name,
+                file1Label: labels.file1Label, sparkAppName: "KeepLiveParityTests"]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        try {
+            File dir = new File(dataManagerRoot, "keep-live/out-${tag}")
+            dir.deleteDir()
+            Map written = ReconciliationServices.writeDiffDatasetOutput(ec, (Dataset) out.diffDf, dir.absolutePath, "diff.json", "diff.json",
+                    [timestamp: "fixed", ruleSetId: out.ruleSetId, compareScopeId: out.compareScopeId, file1Label: labels.file1Label],
+                    [totalDifferences: out.differenceCount], (List) out.validationErrors, (List) out.processingWarnings)
+            return new File(written.diffLocation as String)
+        } finally {
+            ReconciliationServices.unpersistDatasets((List) (out?.persistedSources ?: []))
+        }
+    }
+
+    private static List<String> keptIds(File extract) {
+        List<String> out = []
+        KeepArtifacts.forEachKeptRecord(extract) { Map record -> out << (record.orderId as String) }
+        return out
     }
 
     /** [key, conclusion] per finding, from each side's presence: the conclude pass's own evidence (KeepArtifacts, side files). */
@@ -582,9 +679,10 @@ class KeepLiveParityTests {
         return """systemEnumId="${systemEnumId}" sourceTypeEnumId="AUT_SRC_API" sourceConfigId="${configId}" sourceConfigType="KL_TYPE" fileTypeEnumId="DftJson\""""
     }
 
-    private static String savedRun(String id, Map<String, String> sides) {
+    private static String savedRun(String id, Map<String, String> sides, String scopeMode = null) {
         return """<darpan.rule.RuleSet ruleSetId="${id}" ruleSetName="${id}" companyUserGroupId="${A}"/>
-            <darpan.rule.RuleSetCompareScope compareScopeId="${id}" ruleSetId="${id}" objectType="ORDER" companyUserGroupId="${A}" description="${id}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="${id}" ruleSetId="${id}" objectType="ORDER" companyUserGroupId="${A}" description="${id}"
+                ${scopeMode ? "scopeMode=\"${scopeMode}\"" : ""}/>
             """ + sides.collect { String side, String attrs ->
             """<darpan.rule.RuleSetCompareSource compareScopeId="${id}" fileSide="${side}" ${attrs}
                 recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${A}"/>"""

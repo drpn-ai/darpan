@@ -62,7 +62,11 @@ class KeptCopySparkReadProbe {
 
     @AfterAll
     void cleanup() {
+        File root = null
+        try { root = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveDataManagerLocation(ec), false) } catch (Throwable ignored) { }
         try { spark?.stop() } finally { ReconciliationSmokeTestSupport.cleanupMoqui(ec) }
+        // the probe's ~240 MB of copies and slices: only a folder this probe owns is ever removed
+        if (root != null && root.path.contains("test-data-manager") && root.name == "kept-copy-spark-read-probe") root.deleteDir()
     }
 
     /** Serializable: Spark ships it to tasks, so it holds only the window's millis. */
@@ -139,7 +143,8 @@ class KeptCopySparkReadProbe {
     private static Map measured(Closure<Map> route) {
         System.gc()
         def memory = ManagementFactory.memoryMXBean
-        long[] peak = [memory.heapMemoryUsage.used] as long[]
+        long baseline = memory.heapMemoryUsage.used
+        long[] peak = [baseline] as long[]
         boolean[] running = [true] as boolean[]
         Thread sampler = new Thread({
             while (running[0]) {
@@ -152,11 +157,13 @@ class KeptCopySparkReadProbe {
         sampler.start()
         long t0 = System.nanoTime()
         Map result
-        try { result = route.call() } finally { running[0] = false; sampler.join() }
-        long wallMs = (System.nanoTime() - t0).intdiv(1_000_000L)
+        long t1
+        try { result = route.call() } finally { t1 = System.nanoTime(); running[0] = false; sampler.join() }
+        long wallMs = (t1 - t0).intdiv(1_000_000L)
         long used = memory.heapMemoryUsage.used
         if (used > peak[0]) peak[0] = used
-        return result + [wallMs: wallMs, peakHeapMb: peak[0].intdiv(1024 * 1024)]
+        return result + [wallMs: wallMs, peakHeapMb: peak[0].intdiv(1024 * 1024), baselineMb: baseline.intdiv(1024 * 1024),
+                          peakOverBaselineMb: (peak[0] - baseline).intdiv(1024 * 1024)]
     }
 
     @Test
@@ -172,17 +179,29 @@ class KeptCopySparkReadProbe {
         File gz = new File(new File(big, KeptCopyStore.manifest(big).version as String), KeptCopyStore.RECORDS_FILE)
         CompressionCodec codec = new CompressionCodecFactory(new Configuration()).getCodec(new Path(gz.absolutePath))
 
-        Map slice = measured { sliceRoute(big, from, to, "big") }
-        Map direct = measured { directRoute(big, from, to) }
-        assertEquals(slice.count, direct.count, "both routes count the same records")
-        assertTrue((slice.count as long) > 0)
-
-        double saved = 100.0d * (1 - (direct.wallMs as double) / (slice.wallMs as double))
-        String line = ("records=${RECORDS} window=${WINDOW_DAYS}d counted=${slice.count} gzBytes=${gz.length()} " +
-                "gzipCodec=${codec?.class?.name ?: 'NOT LOADED'} " +
-                "slice[wallMs=${slice.wallMs} peakHeapMb=${slice.peakHeapMb} partitions=${slice.partitions}] " +
-                "direct[wallMs=${direct.wallMs} peakHeapMb=${direct.peakHeapMb} partitions=${direct.partitions}] " +
-                "directSavesWallPct=${String.format('%.1f', saved)} " +
+        // alternate the order so neither route always inherits the other's warm caches: slice-direct, direct-slice, slice-direct
+        List<Map> slices = [], directs = []
+        [["slice", "direct"], ["direct", "slice"], ["slice", "direct"]].eachWithIndex { List<String> order, int r ->
+            order.each { String route ->
+                if (route == "slice") slices << measured { sliceRoute(big, from, to, "big${r}") }
+                else directs << measured { directRoute(big, from, to) }
+            }
+        }
+        (slices + directs).each { assertEquals(slices[0].count, it.count, "every run counts the same records") }
+        assertTrue((slices[0].count as long) > 0)
+        Closure median = { List<Map> runs, String key -> (runs*.get(key) as List<Long>).sort()[1] }
+        Closure runsText = { List<Map> runs ->
+            runs.collect { "${it.wallMs}ms/+${it.peakOverBaselineMb}MB(base ${it.baselineMb})" }.join(" ")
+        }
+        long sliceMs = median(slices, "wallMs"), directMs = median(directs, "wallMs")
+        long slicePeak = median(slices, "peakOverBaselineMb"), directPeak = median(directs, "peakOverBaselineMb")
+        double saved = 100.0d * (1 - (directMs as double) / (sliceMs as double))
+        String line = ("records=${RECORDS} window=${WINDOW_DAYS}d counted=${slices[0].count} gzBytes=${gz.length()} " +
+                "gzipCodec=${codec?.class?.name ?: 'NOT LOADED'} runs=3 medians " +
+                "slice[wallMs=${sliceMs} peakOverBaselineMb=${slicePeak} partitions=${slices[0].partitions}] " +
+                "direct[wallMs=${directMs} peakOverBaselineMb=${directPeak} partitions=${directs[0].partitions}] " +
+                "directSavesWallPct=${String.format('%.1f', saved)} heapIsIndicativeOnly " +
+                "sliceRuns[${runsText(slices)}] directRuns[${runsText(directs)}] " +
                 "cores=${Runtime.runtime.availableProcessors()} maxHeapMb=${Runtime.runtime.maxMemory().intdiv(1024 * 1024)}").toString()
         File out = new File("build/kept-copy-spark-read.txt")
         out.parentFile.mkdirs()

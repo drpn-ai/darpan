@@ -378,7 +378,7 @@ tasks.register('mysqlTest', Test) {
 // stale pattern from passing green).
 tasks.register('perfTest', Test) {
     group = 'verification'
-    description = 'Run the opt-in @Tag("perf") throughput probes (JudgeThroughputProbe). Never run by test or CI.'
+    description = 'Run the opt-in @Tag("perf") throughput probes (JudgeThroughputProbe, KeptCopySparkReadProbe). Never run by test or CI.'
     useJUnitPlatform { includeTags 'perf' }
     include '**/JudgeThroughputProbe.class'
     include '**/KeptCopySparkReadProbe.class'

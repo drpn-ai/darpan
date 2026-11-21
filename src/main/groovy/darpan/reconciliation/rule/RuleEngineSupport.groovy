@@ -119,6 +119,11 @@ class RuleEngineSupport {
 
     static final ConcurrentMap<String, Map<String, Object>> RULESET_CACHE = boundedRuleSetCache(DEFAULT_RULESET_CACHE_MAX)
 
+    /** DAR-OPS-026: empties the ruleset cache (disposing cached containers); idempotent, never throws. */
+    static void resetForTests() {
+        try { RULESET_CACHE.clear() } catch (Throwable t) { logger.warn("resetForTests: ruleset cache clear failed: {}", t.message) }
+    }
+
     private static boolean rawDrlAllowed() {
         return "true".equalsIgnoreCase(System.getProperty(ALLOW_RAW_DRL_PROP, "false"))
     }

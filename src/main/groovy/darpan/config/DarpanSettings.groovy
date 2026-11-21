@@ -417,5 +417,9 @@ class DarpanSettings {
         loaderSource = null
         warned.clear()
         reloading.set(false)
+        expireCount.set(0)
     }
+
+    /** DAR-OPS-026: the one name the shared-Moqui sweep looks for; same reset as resetForTest. Idempotent. */
+    static void resetForTests() { resetForTest() }
 }

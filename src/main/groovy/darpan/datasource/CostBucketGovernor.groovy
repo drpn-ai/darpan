@@ -26,6 +26,9 @@ class CostBucketGovernor {
 
     static void resetShared() { SHARED.clear() }
 
+    /** DAR-OPS-026: the one name the shared-Moqui sweep looks for. */
+    static void resetForTests() { resetShared() }
+
     private final Semaphore inFlight
     private final Closure<Long> clock
     private double available = 0d

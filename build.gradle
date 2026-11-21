@@ -381,8 +381,10 @@ tasks.register('perfTest', Test) {
     description = 'Run the opt-in @Tag("perf") throughput probes (JudgeThroughputProbe). Never run by test or CI.'
     useJUnitPlatform { includeTags 'perf' }
     include '**/JudgeThroughputProbe.class'
+    include '**/KeptCopySparkReadProbe.class'
     filter {
         includeTestsMatching '*JudgeThroughputProbe'
+        includeTestsMatching '*KeptCopySparkReadProbe'
         failOnNoMatchingTests = true
     }
     maxParallelForks = 1

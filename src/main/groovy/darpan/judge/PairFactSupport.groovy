@@ -1,5 +1,7 @@
 package darpan.judge
 
+import groovy.transform.CompileStatic
+
 /**
  * DAR-BE-318 plan 2, Task 6 (D7). One fact per compare id. A pair row is [compareId, file1: Map or null, file2: Map or null]
  * (null = the side holds no record; the shape AskSupport.fetchAsks takes). The fact carries each side's presence, each
@@ -69,31 +71,44 @@ class PairFactSupport {
      * pairRow: [compareId, file1, file2]. sideState: [factTypeId, file1: [prefix, setAside: Set, keyNames: Map key->field name], file2: [...]]
      * (keyNames come from generate#PairFactType). A side key with no name is refused: the caller generates from every key first.
      * Returns [factTypeId, recordId: compareId, fact: [...]], the shape moqui-rules evaluate takes as a fact.
+     * Statically compiled with plain loops: it runs once per pair over every field, and dynamic dispatch on values of
+     * several classes relinks its call sites value after value.
      */
+    @CompileStatic
     static Map<String, Object> buildFact(Map pairRow, Map sideState, Map params, Map askFields) {
-        String compareId = pairRow.compareId as String
+        String compareId = pairRow.get("compareId") as String
         Map<String, Object> fact = new LinkedHashMap<>()
         fact.put("compareId", compareId)
-        ["file1", "file2"].each { String side ->
+        for (String side in SIDES) {
             Map record = pairRow.get(side) as Map
             Map state = (sideState.get(side) ?: [:]) as Map
-            String prefix = (state.prefix ?: side) as String
-            Collection<String> setAside = (state.setAside ?: []) as Collection<String>
+            String prefix = (state.get("prefix") ?: side) as String
+            // a cast, not `as`: `as Collection` tries Collection's constructors first and throws twice per side per pair
+            Collection<String> setAside = (Collection<String>) (state.get("setAside") ?: [])
             String presence = record != null ? KEPT : (setAside.contains(compareId) ? SET_ASIDE : ABSENT)
             fact.put(prefix + "_presence", presence)
             if (record != null) {
-                Map<String, String> names = (state.keyNames ?: [:]) as Map<String, String>
-                record.each { Object key, Object value ->
-                    String name = names.get(key as String)
-                    if (name == null) throw new IllegalStateException("key ${key} of ${side} has no field name in the pair fact type".toString())
-                    fact.put(name, value)
+                Map<String, String> names = (state.get("keyNames") ?: [:]) as Map<String, String>
+                for (Object e in record.entrySet()) {
+                    Map.Entry entry = (Map.Entry) e
+                    String name = names.get(entry.key as String)
+                    if (name == null) throw new IllegalStateException("key ${entry.key} of ${side} has no field name in the pair fact type".toString())
+                    fact.put(name, entry.value)
                 }
             }
         }
-        (params ?: [:]).each { Object name, Object value -> fact.put("param_" + name, value) }
-        (askFields ?: [:]).each { Object name, Object value -> fact.put(name as String, value) }
-        return [factTypeId: sideState.factTypeId, recordId: compareId, fact: fact] as Map<String, Object>
+        for (Object e in (params ?: [:]).entrySet()) {
+            Map.Entry entry = (Map.Entry) e
+            fact.put("param_" + entry.key, entry.value)
+        }
+        for (Object e in (askFields ?: [:]).entrySet()) {
+            Map.Entry entry = (Map.Entry) e
+            fact.put(entry.key as String, entry.value)
+        }
+        return [factTypeId: sideState.get("factTypeId"), recordId: compareId, fact: fact] as Map<String, Object>
     }
+
+    private static final List<String> SIDES = Collections.unmodifiableList(["file1", "file2"])
 
     /**
      * Pairs in batches of size. A compare id seen twice in the whole judging is refused when the second is read, never merged

@@ -53,12 +53,20 @@ Details, including the required production environment variables (`Moqui_DB_*`,
 
 All commands are run from `darpan-backend/`.
 
+**Which kind of test to write (DAR-OPS-026).** Prefer a unit test through seams: it needs no Moqui and runs in the
+`unitTest` pool in milliseconds. Boot Moqui only to test entity, service or XML wiring. A new Moqui-booting class
+starts `@SharedMoqui` (it then shares one Moqui per JVM; the harness resets the database to an empty schema, clears
+caches and calls every `resetForTests()` between classes) unless it swaps a process-global seam or sets a `System`
+property it does not restore in `@AfterAll`, asserts an elapsed-time bound, or is `@Tag("mysql")`. A new mutable
+static in `src/main` needs a `static void resetForTests()`; `StaticSeamResetGuardTests` fails without one.
+
 | Command | Runs | Use it for |
 | --- | --- | --- |
 | `runtime/component/darpan/scripts/focused-test.sh [base-ref]` | only what your diff can break | the normal inner loop |
 | `./gradlew :runtime:component:darpan:unitTest` | the classes that never boot Moqui | quick signal mid-edit |
-| `./gradlew :runtime:component:darpan:smokeTest` | the classes that boot Moqui | when you touch services, entities or seed data |
-| `./gradlew :runtime:component:darpan:testAll` | the full suite, as the two pools above | before pushing |
+| `./gradlew :runtime:component:darpan:smokeTest` | the classes that boot Moqui, one JVM each | when you touch services, entities or seed data |
+| `./gradlew :runtime:component:darpan:smokeSharedTest` | the `@SharedMoqui` classes, several per JVM on one Moqui | same as smokeTest, much cheaper per class |
+| `./gradlew :runtime:component:darpan:testAll` | the full suite, as the three pools above | before pushing |
 | `./gradlew :runtime:component:darpan:test` | the full suite, one JVM per class | what CI runs; the fallback if you suspect the split |
 | `./gradlew :runtime:component:darpan:mysqlTest` | the `@Tag("mysql")` classes | InnoDB locking behaviour H2 cannot reproduce |
 

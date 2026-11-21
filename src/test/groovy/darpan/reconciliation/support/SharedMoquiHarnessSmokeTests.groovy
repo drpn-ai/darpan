@@ -9,17 +9,23 @@ import org.junit.jupiter.api.TestInstance
 import org.moqui.Moqui
 import org.moqui.context.ExecutionContext
 
+import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicInteger
+
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertSame
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-OPS-026: proves the shared harness. This class and SharedMoquiHarnessSecondSmokeTests do the same thing in
  * either order: at class start check the state is clean, then dirty it (a DB row, a cached entity row, a sequence, a
- * static seam, a DarpanSettings row) and leave it dirty. Whichever class runs second in the JVM therefore fails unless
- * the harness reset the DB, the entity caches, the sequence bank and the statics between them — on the same ECF.
+ * static seam, a DarpanSettings row, an async task still sleeping before its own write) and leave it dirty. Whichever
+ * class runs second in the JVM therefore fails unless the harness waited for that task, then reset the DB, the entity
+ * caches, the sequence bank and the statics between them — on the same ECF. The second class takes its lifecycle
+ * methods from an unmarked base class, as TwoFactorTestSupport's subclasses do.
  */
 @SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -29,6 +35,9 @@ class SharedMoquiHarnessSmokeTests {
     static final String PROBE_ENUM_ID = 'DAR_OPS_026_PROBE'
     /** System.identityHashCode of the ECF each class ran on, in run order. */
     static final List<Integer> ecfSeen = Collections.synchronizedList([])
+    /** Async writes dirty() started, and those that landed (in the class's own DB, before the next class's reset). */
+    static final AtomicInteger asyncStarted = new AtomicInteger()
+    static final AtomicInteger asyncWritten = new AtomicInteger()
 
     private ExecutionContext ec
 
@@ -60,6 +69,21 @@ class SharedMoquiHarnessSmokeTests {
         assertTrue(names.every { !it.startsWith('org.moqui.') && !it.contains('Tests') }, "unexpected reset targets: ${names}")
     }
 
+    @Test
+    void quietWaitFailsNamingThePreviousClassWhileWorkIsStillRunning() {
+        Future sleeper = ec.runAsync { Thread.sleep(1500) }
+        try {
+            IllegalStateException e = assertThrows(IllegalStateException) {
+                ReconciliationSmokeTestSupport.awaitSharedQuiet('PreviousProbeClass', 200)
+            }
+            assertTrue(e.message.contains('PreviousProbeClass') && e.message.contains('workerPool'), e.message)
+        } finally {
+            sleeper.get()
+        }
+        // Quiet again once the work is done (dirty()'s own sleeper may still be finishing).
+        ReconciliationSmokeTestSupport.awaitSharedQuiet('PreviousProbeClass', 10_000)
+    }
+
     static void assertCleanStart(ExecutionContext ec, String who) {
         // Same ECF as any class that ran before in this JVM, on this JVM's shared token.
         int ecf = System.identityHashCode(Moqui.getExecutionContextFactory())
@@ -72,6 +96,8 @@ class SharedMoquiHarnessSmokeTests {
         assertEquals("test-${ReconciliationSmokeTestSupport.sharedToken()}".toString(), System.getProperty('bitronix.tm.serverId'))
         System.out.println("SharedMoquiHarness: ${who} is class ${ecfSeen.size()} on ECF ${ecf}")
 
+        // The previous class's async write landed before the reset (the reset waited for it), so it is gone with the DB.
+        assertEquals(asyncStarted.get(), asyncWritten.get(), "${who}: the reset did not wait for the previous class's async work")
         // A working ec: authz off (dirty() then runs a service and entity writes on it).
         assertTrue(ec.artifactExecution.authzDisabled)
         // Empty tables: the previous class's rows are gone.
@@ -104,5 +130,17 @@ class SharedMoquiHarnessSmokeTests {
                 .setAll([settingKey: SETTING_KEY, settingValue: (defaultValue + 1) as String]).create()
         DarpanSettings.expire()
         assertEquals(defaultValue + 1, DarpanSettings.intValue(SETTING_KEY))
+
+        // Background work that outlives the class: sleeps, then writes a row. Its probe type exists only in this
+        // class's DB, so the write succeeds only if it runs before the next class's reset drops it.
+        asyncStarted.incrementAndGet()
+        ec.runAsync {
+            Thread.sleep(2000)
+            ExecutionContext threadEc = Moqui.getExecutionContext()
+            threadEc.artifactExecution.disableAuthz()
+            threadEc.entity.makeValue('moqui.basic.Enumeration')
+                    .setAll([enumId: 'DAR_OPS_026_ASYNC', enumTypeId: PROBE_ENUM_TYPE, description: 'async probe']).create()
+            asyncWritten.incrementAndGet()
+        }
     }
 }

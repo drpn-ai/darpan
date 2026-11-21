@@ -5,6 +5,8 @@ import org.moqui.Moqui
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 import org.moqui.impl.context.ExecutionContextFactoryImpl
+import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.RunAdmission
 
 import java.sql.Timestamp
 import java.sql.Connection
@@ -13,6 +15,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.Comparator
+import java.util.concurrent.ThreadPoolExecutor
 
 class ReconciliationSmokeTestSupport {
     private static final String TEST_COMPANY_USER_ID = "TEST_CUSTOMER_USER"
@@ -37,13 +40,20 @@ class ReconciliationSmokeTestSupport {
     private static Map<String, Boolean> sharedTablesExist
     private static int sharedClassCount
     private static boolean sharedShutdownHookAdded
+    /** @SharedMoqui classes now running (innermost first; @Nested classes stack), set by SharedMoquiExtension. */
+    private static final Deque<Class<?>> sharedClassStack = new ArrayDeque<>()
+    /** The class whose ec is sharedClassEc; named when its background work outlives it. */
+    private static String sharedClassEcOwner
+    /** How long a class's reset waits for the previous class's background work before failing. */
+    static final long SHARED_QUIET_TIMEOUT_MILLIS = 30_000L
 
     /**
      * Boots Moqui for one smoke class. An unmarked class gets a fresh ECF on its own DB token (one JVM each).
      * A class annotated @SharedMoqui shares one ECF per JVM (initSharedMoqui).
      */
     static ExecutionContext initMoqui(Path backendRoot, String testDbName) {
-        if (calledFromSharedMoquiClass()) return initSharedMoqui(backendRoot, testDbName)
+        if (sharedClassActive()) return initSharedMoqui(backendRoot, testDbName)
+        tearDownSharedMoqui("unmarked class booting its own ECF on ${testDbName}")
         return bootMoqui(backendRoot, testDbName)
     }
 
@@ -97,12 +107,15 @@ class ReconciliationSmokeTestSupport {
         )
         ec.artifactExecution.setAnonymousAuthorizedAll()
         ec.message.clearErrors()
-        ec.resource.properties["darpan.data.manager.location"] = "runtime://tmp/test-data-manager/${safeTestToken}"
         return ec
     }
 
+    /**
+     * Ends one smoke class. Shared mode is keyed on identity (the ec is the shared class ec) or on a @SharedMoqui
+     * class still running, never on the caller, so an inherited @AfterAll cannot tear down the shared ECF.
+     */
     static void cleanupMoqui(ExecutionContext ec) {
-        if (calledFromSharedMoquiClass()) {
+        if (isSharedCleanup(ec)) {
             cleanupSharedMoqui(ec)
             return
         }
@@ -122,6 +135,52 @@ class ReconciliationSmokeTestSupport {
     /** The current shared ECF, or null when none is up. */
     static ExecutionContextFactoryImpl sharedEcf() { synchronized (SHARED_LOCK) { return liveSharedEcf() } }
 
+    /** SharedMoquiExtension.beforeAll: a @SharedMoqui class starts (before its @BeforeAll methods). */
+    static void enterSharedClass(Class<?> testClass) {
+        synchronized (SHARED_LOCK) { sharedClassStack.push(testClass) }
+    }
+
+    /**
+     * SharedMoquiExtension.afterAll: a @SharedMoqui class ended (after its @AfterAll methods). When the outermost
+     * class ends, an ec it never cleaned up is destroyed here; the ECF stays up.
+     */
+    static void exitSharedClass(Class<?> testClass) {
+        synchronized (SHARED_LOCK) {
+            sharedClassStack.removeFirstOccurrence(testClass)
+            if (sharedClassStack.isEmpty() && sharedClassEc != null) {
+                sharedClassEc.destroy()
+                sharedClassEc = null
+                System.clearProperty("darpan.data.manager.location")
+            }
+        }
+    }
+
+    private static boolean sharedClassActive() { synchronized (SHARED_LOCK) { return !sharedClassStack.isEmpty() } }
+
+    private static boolean isSharedCleanup(ExecutionContext ec) {
+        synchronized (SHARED_LOCK) {
+            return (ec != null && ec.is(sharedClassEc)) || !sharedClassStack.isEmpty()
+        }
+    }
+
+    /**
+     * An unmarked class always gets a fresh ECF, as before shared mode. If a shared ECF is still up in this JVM (an IDE
+     * run mixing marked and unmarked classes), it is torn down deliberately and logged rather than left for the
+     * unmarked boot to destroy behind the harness's back; the next marked class boots a new one.
+     */
+    private static void tearDownSharedMoqui(String reason) {
+        synchronized (SHARED_LOCK) {
+            if (liveSharedEcf() == null) return
+            System.err.println("Shared Moqui: tearing down the shared ECF (${sharedClassCount} class(es) on it, last " +
+                    "${sharedClassEcOwner}): ${reason}")
+            if (sharedClassEc != null) sharedClassEc.destroy()
+            sharedClassEc = null
+            Moqui.destroyActiveExecutionContextFactory()
+            sharedEcf = null
+            deleteSharedFiles()
+        }
+    }
+
     /**
      * DAR-OPS-026 shared mode. The first marked class in a JVM boots the ECF exactly as an unmarked class does, on
      * token shared-<pid>, and snapshots the empty schema. Every later class: destroy the previous class's ec, drop
@@ -134,7 +193,7 @@ class ReconciliationSmokeTestSupport {
             String safeTestToken = testDbName.replaceAll(/[^A-Za-z0-9_-]/, "_")
             ExecutionContext ec
             if (liveSharedEcf() != null) {
-                ec = resetSharedMoqui()
+                ec = resetSharedMoqui(sharedClassEcOwner)
                 sharedClassCount++
             } else {
                 String token = sharedToken()
@@ -155,20 +214,20 @@ class ReconciliationSmokeTestSupport {
                 addSharedShutdownHook()
             }
             sharedClassEc = ec
+            sharedClassEcOwner = sharedClassStack.peekFirst()?.name
             System.setProperty("darpan.rules.allowRawDrl", "true")
-            String dataManagerLocation = "runtime://tmp/test-data-manager/${safeTestToken}".toString()
-            // System property only: `ec.resource.properties[...] = ` (as in bootMoqui) resolves to Groovy's getProperties()
-            // copy and stores nothing; DataManagerSupport falls back to this System property.
-            System.setProperty("darpan.data.manager.location", dataManagerLocation)
+            System.setProperty("darpan.data.manager.location", "runtime://tmp/test-data-manager/${safeTestToken}".toString())
             StaticResets.resetAll()
             return ec
         }
     }
 
-    private static ExecutionContext resetSharedMoqui() {
+    private static ExecutionContext resetSharedMoqui(String previousClass) {
         if (sharedClassEc != null) sharedClassEc.destroy()
         sharedClassEc = null
         sharedEcf.destroyActiveExecutionContext()
+        // The previous class's async work must not write into this class's fresh DB or hold locks the DROP waits on.
+        awaitSharedQuiet(previousClass, SHARED_QUIET_TIMEOUT_MILLIS)
 
         withSharedConnection { Connection c ->
             c.createStatement().withCloseable {
@@ -215,6 +274,48 @@ class ReconciliationSmokeTestSupport {
         }
     }
 
+    /**
+     * Waits until the shared ECF's worker pools are idle (no active thread, empty queue), its scheduled executor runs
+     * nothing, and run admission has nothing running or queued; past timeoutMillis it fails naming previousClass,
+     * whose work is still going. The scheduled executor's queue always holds Moqui's periodic tasks, so only its
+     * active count is checked.
+     */
+    static void awaitSharedQuiet(String previousClass, long timeoutMillis) {
+        long deadline = System.currentTimeMillis() + timeoutMillis
+        String busy
+        while ((busy = sharedBusy()) != null) {
+            if (System.currentTimeMillis() >= deadline) {
+                throw new IllegalStateException("Shared Moqui: ${previousClass ?: 'the previous class'} left background " +
+                        "work running ${timeoutMillis} ms after it ended (${busy}). It would write into the next class's " +
+                        "fresh database: make it wait for its async work in @AfterAll, or leave it unmarked.")
+            }
+            Thread.sleep(50)
+        }
+    }
+
+    private static String sharedBusy() {
+        ExecutionContextFactoryImpl ecfi = liveSharedEcf()
+        if (ecfi == null) return null
+        List<String> busy = []
+        Map<String, ThreadPoolExecutor> pools = [workerPool: ecfi.workerPool, jobWorkerPool: ecfi.serviceFacade.jobWorkerPool]
+        pools.each { String name, ThreadPoolExecutor pool ->
+            if (pool != null && (pool.activeCount > 0 || !pool.queue.isEmpty())) {
+                busy << "${name}: ${pool.activeCount} active, ${pool.queue.size()} queued".toString()
+            }
+        }
+        if (ecfi.scheduledExecutor != null && ecfi.scheduledExecutor.activeCount > 0) {
+            busy << "scheduledExecutor: ${ecfi.scheduledExecutor.activeCount} active".toString()
+        }
+        for (RunAdmission admission : [AutomationExecutionSupport.getRunAdmission(), RunAdmission.SHARED].unique { System.identityHashCode(it) }) {
+            if (admission == null) continue
+            Map<String, Object> state = admission.snapshot()
+            if (((state.running ?: 0) as int) > 0 || ((state.queued ?: 0) as int) > 0) {
+                busy << "run admission: ${state.running} running, ${state.queued} queued".toString()
+            }
+        }
+        return busy ? busy.join("; ") : null
+    }
+
     private static ExecutionContextFactoryImpl liveSharedEcf() {
         if (sharedEcf == null || sharedEcf.isDestroyed() || !sharedEcf.is(Moqui.getExecutionContextFactory())) return null
         return sharedEcf
@@ -233,16 +334,20 @@ class ReconciliationSmokeTestSupport {
                 } catch (Throwable t) {
                     System.err.println("Shared Moqui shutdown: ECF destroy failed: ${t}")
                 }
-                try {
-                    if (sharedDbBasePath != null) resetDatabaseFiles(sharedDbBasePath)
-                    if (sharedTxLogPath != null && Files.exists(sharedTxLogPath)) {
-                        Files.walk(sharedTxLogPath).sorted(Comparator.reverseOrder()).forEach { Path p -> Files.deleteIfExists(p) }
-                    }
-                } catch (Throwable ignored) {
-                    // best effort: the next boot on a token clears its own files anyway
-                }
+                deleteSharedFiles()
             }
         } as Runnable, "shared-moqui-shutdown"))
+    }
+
+    private static void deleteSharedFiles() {
+        try {
+            if (sharedDbBasePath != null) resetDatabaseFiles(sharedDbBasePath)
+            if (sharedTxLogPath != null && Files.exists(sharedTxLogPath)) {
+                Files.walk(sharedTxLogPath).sorted(Comparator.reverseOrder()).forEach { Path p -> Files.deleteIfExists(p) }
+            }
+        } catch (Throwable ignored) {
+            // best effort: the next boot on a token clears its own files anyway
+        }
     }
 
     /** A plain JDBC session on the shared H2 file DB (same URL and credentials as Moqui's transactional datasource). */
@@ -261,32 +366,6 @@ class ReconciliationSmokeTestSupport {
     }
 
     private static String sqlPath(Path path) { return path.toAbsolutePath().toString().replace("'", "''") }
-
-    /**
-     * True when a class on the call stack is annotated @SharedMoqui (or is nested in, or a closure of, one that is):
-     * the test class calling initMoqui/cleanupMoqui directly or through a helper.
-     */
-    private static boolean calledFromSharedMoquiClass() {
-        return StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).walk { stream ->
-            stream.map { StackWalker.StackFrame f -> f.declaringClass }
-                    .filter { Class<?> c -> c != ReconciliationSmokeTestSupport && !isRuntimeFrame(c.name) }
-                    .anyMatch { Class<?> c -> isSharedMoquiClass(c) }
-        }
-    }
-
-    private static boolean isRuntimeFrame(String className) {
-        return className.startsWith("java.") || className.startsWith("jdk.") || className.startsWith("sun.") ||
-                className.startsWith("groovy.") || className.startsWith("org.codehaus.groovy.") ||
-                className.startsWith("org.apache.groovy.") || className.startsWith("org.junit.") ||
-                className.startsWith("org.gradle.") || className.startsWith("worker.org.gradle.")
-    }
-
-    private static boolean isSharedMoquiClass(Class<?> type) {
-        for (Class<?> c = type; c != null; c = c.enclosingClass) {
-            if (c.isAnnotationPresent(SharedMoqui)) return true
-        }
-        return false
-    }
 
     static void loadSeedData(ExecutionContext ec, String... locations) {
         boolean alreadyDisabled = ec.artifactExecution.disableAuthz()

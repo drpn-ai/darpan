@@ -76,20 +76,37 @@ class StaticResets {
                 }
             }
         }
-        List<Method> found = []
+        List<Class<?>> types = []
         for (String name : candidates.sort()) {
             Class<?> type = Class.forName(name, false, loader)
             // Only classes that really come from this component's main output; a same-named class elsewhere is skipped.
-            if (type.protectionDomain?.codeSource?.location != location) continue
-            Method m
-            try {
-                m = type.getDeclaredMethod('resetForTests')
-            } catch (NoSuchMethodException ignored) {
-                continue // the name appears only as a call (e.g. a delegating caller), not a declaration
+            if (type.protectionDomain?.codeSource?.location == location) types << type
+        }
+        return resetMethodsOf(types)
+    }
+
+    /**
+     * The callable resetForTests() of each class. A class that only calls resetForTests (a delegating caller, a closure)
+     * declares none and is skipped; one that declares it in a shape the sweep cannot call fails.
+     */
+    static List<Method> resetMethodsOf(List<Class<?>> types) {
+        List<Method> found = []
+        List<String> misdeclared = []
+        for (Class<?> type : types) {
+            for (Method m : type.declaredMethods.findAll { Method dm -> dm.name == 'resetForTests' && !dm.synthetic }) {
+                if (Modifier.isStatic(m.modifiers) && m.returnType == void.class && m.parameterCount == 0) {
+                    m.accessible = true
+                    found << m
+                } else {
+                    misdeclared << m.toGenericString()
+                }
             }
-            if (!Modifier.isStatic(m.modifiers) || m.returnType != void.class) continue
-            m.accessible = true
-            found << m
+        }
+        // A resetForTests the sweep cannot call (instance, non-void, with parameters) would leave that class's state
+        // unreset without anyone noticing, so it fails here instead of being skipped.
+        if (misdeclared) {
+            throw new AssertionError("StaticResets: resetForTests must be declared `static void resetForTests()`; found:\n  " +
+                    misdeclared.join("\n  "))
         }
         return found
     }

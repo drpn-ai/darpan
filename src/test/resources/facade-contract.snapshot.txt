@@ -4384,6 +4384,7 @@ SERVICE get SyncPair
     pastOrders.otherSystemId : String
     pastOrders.recordKey : String
     pastOrders.reportedInRunId : String
+    pastOrders.reportedInSavedRunId : String
     pastOrders.sourceCreatedStamp : String
     pastOrders.waitingMinutes : String
     samplesToday : List

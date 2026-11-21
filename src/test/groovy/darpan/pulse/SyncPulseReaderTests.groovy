@@ -82,11 +82,14 @@ class SyncPulseReaderTests {
         assertEquals(["#GOR1"] as Set, found.present)
         assertEquals(1, found.warnings.size(), "one warning for every invalid key")
         assertTrue((found.warnings[0] as String).startsWith("3 key(s) not asked for"), found.warnings[0] as String)
+        assertEquals(["bad key", "x'); DROP", tooLong] as Set, found.unasked,
+                "a skipped key comes back as unasked, never as absent")
 
         List<List<String>> none = []
         Map nothing = SyncPulseReader.presentByBatches(["bad key"], "k") { List<String> batch -> none << batch; null }
         assertEquals([], none, "no valid key, no read")
         assertEquals([] as Set, nothing.present)
+        assertEquals(["bad key"] as Set, nothing.unasked)
     }
 
     @Test
@@ -121,6 +124,10 @@ class SyncPulseReaderTests {
         assertEquals(Instant.parse("2026-11-21T10:15:00Z"), SyncPulseReader.createdAt("2026-11-21T10:15:00Z"))
         assertEquals(Instant.ofEpochMilli(1763720100000L), SyncPulseReader.createdAt("1763720100000"))
         assertEquals(Instant.ofEpochMilli(1763720100000L), SyncPulseReader.createdAt(1763720100000L))
+        assertEquals(Instant.ofEpochMilli(1763720100000L), SyncPulseReader.createdAt(BigInteger.valueOf(1763720100000L)))
+        assertEquals(null, SyncPulseReader.createdAt("1763720100"), "a 10-digit string is no epoch-ms date (it would read as 1970)")
+        assertEquals(null, SyncPulseReader.createdAt(1763720100), "a small Integer is no date")
+        assertEquals(null, SyncPulseReader.createdAt(1.5d), "a decimal is no date")
         assertEquals(null, SyncPulseReader.createdAt("2026-11-21 10:15"))
         assertEquals(null, SyncPulseReader.createdAt(null))
     }

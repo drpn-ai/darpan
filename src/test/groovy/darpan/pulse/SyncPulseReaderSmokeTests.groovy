@@ -165,6 +165,51 @@ class SyncPulseReaderSmokeTests {
         assertEquals([["#GOR2", "#GOR3"]], calls.collect { it.params.lookupKeys })
         assertEquals(["#GOR2"] as Set, out.present)
         assertTrue((out.warnings[0] as String).startsWith("1 key(s) not asked for"), out.warnings.toString())
+        assertEquals(["x'); DROP"] as Set, out.unasked, "the skipped key comes back as unasked, so it is never read as absent")
+
+        SyncPulseReader.setLiveExtractor({ String service, Map params -> throw new RuntimeException("NetSuite timed out") })
+        Map failed = SyncPulseReader.presentInTarget(ec, pair, automation, ["x'); DROP", "#GOR2"])
+        assertEquals(false, failed.ok)
+        assertEquals(["x'); DROP"] as Set, failed.unasked, "a failed read still says which keys it never asked")
+    }
+
+    /**
+     * A pulse runs on a bare thread (RunAdmission): no user and no anonymous login, and an authenticate="true" extract
+     * refuses that. The reader logs itself in anonymously for its reads and out again after.
+     */
+    @Test
+    void readsFromAThreadWithNoUser() {
+        List<Map> seen = Collections.synchronizedList([])
+        Closure inner = stub()
+        SyncPulseReader.setLiveExtractor({ String service, Map params ->
+            def threadEc = ec.factory.getExecutionContext()
+            seen << [anonymous: threadEc.user.loggedInAnonymous, username: threadEc.user.username]
+            inner.call(service, params)
+        })
+        Map out = null, after = null
+        Throwable failure = null
+        Thread t = new Thread({ ->
+            def threadEc = ec.factory.getExecutionContext()
+            try {
+                assertNull(threadEc.user.username)
+                assertFalse(threadEc.user.loggedInAnonymous as boolean)
+                out = SyncPulseReader.readUpstream(threadEc, pair, automation, FROM, THRU)
+                after = [anonymous: threadEc.user.loggedInAnonymous, username: threadEc.user.username]
+            } catch (Throwable e) {
+                failure = e
+            } finally {
+                threadEc.destroy()
+            }
+        } as Runnable, "pulse-no-user")
+        t.start()
+        t.join(60000)
+
+        assertNull(failure, failure?.toString())
+        assertEquals(true, out?.ok, out?.toString())
+        assertEquals(2, (out.records as List).size())
+        assertEquals([[anonymous: true, username: null]], seen, "the extract ran with the reader's anonymous login")
+        assertEquals([anonymous: false, username: null], after, "and the reader logged out again")
+        assertNoPulseFiles()
     }
 
     @Test

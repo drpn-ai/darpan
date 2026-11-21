@@ -8,6 +8,7 @@ import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
 import darpan.reconciliation.conclusion.JsonRecordStream
+import org.moqui.context.ArtifactExecutionInfo
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -32,6 +33,10 @@ import static darpan.common.ValueSupport.readField
  * sync-pulse/&lt;tenant&gt;/&lt;syncPairId&gt;/&lt;stamp&gt; under the data manager, removed before it answers. NetSuite reads take
  * their turn in NetSuiteReadGate inside the NetSuite extract itself; HotWax reads keep their peak share there too. A
  * reader only reads: what is waiting or late is the pulse engine's question (SyncPulseSupport).</p>
+ *
+ * <p>A pulse runs on a bare thread (RunAdmission), with no user, and every extract is authenticate="true". With no user
+ * the reader logs itself in anonymously and runs as an anonymous-all service does (an artifact authorized for all, the
+ * way execute#Automation's scheduled reads run), then logs out again. A caller with a user reads as that user.</p>
  */
 class SyncPulseReader {
     private static final Logger logger = LoggerFactory.getLogger(SyncPulseReader)
@@ -74,19 +79,22 @@ class SyncPulseReader {
 
     /**
      * Which of keys the pair's target side holds, read by key AuditRecheckSupport.MAX_KEYS at a time. A key NetSuite would
-     * refuse is skipped with one warning, never sent.
+     * refuse (KEY_PATTERN) is skipped with one warning, never sent, and comes back in unasked: it is neither present nor
+     * absent, so the pulse engine must not count it as waiting or past its allowance. unasked is answered on a failed
+     * read too.
      *
-     * @return [ok, present: Set of keys the target holds, errors, warnings]
+     * @return [ok, present: Set of keys the target holds, unasked: Set of keys never asked, errors, warnings]
      */
     static Map presentInTarget(def ec, Map pair, Map automation, Collection<String> keys) {
-        if (!keys) return [ok: true, present: [] as Set<String>, errors: [], warnings: []]
-        return run(ec, pair, automation, "target", [present: [] as Set<String>]) { Map sides, String location ->
+        Set<String> unasked = (validKeys(keys).invalid as Set<String>)
+        if (!keys) return [ok: true, present: [] as Set<String>, unasked: unasked, errors: [], warnings: []]
+        return run(ec, pair, automation, "target", [present: [] as Set<String>, unasked: unasked]) { Map sides, String location ->
             Timestamp now = (ec.user?.nowTimestamp as Timestamp) ?: new Timestamp(System.currentTimeMillis())
             Map window = [childWindowStartDate: Timestamp.from(now.toInstant().minus(TARGET_WINDOW)), childWindowEndDate: now]
             Map found = presentByBatches(keys, sides.targetKey as String) { List<String> batch ->
                 extract(ec, automation, sides.target, window, location, batch)
             }
-            return [ok: true, present: found.present, errors: [], warnings: found.warnings]
+            return [ok: true, present: found.present, unasked: found.unasked, errors: [], warnings: found.warnings]
         }
     }
 
@@ -114,11 +122,16 @@ class SyncPulseReader {
         return [records: records, warnings: warnings]
     }
 
-    /** An orderDate as an instant: ISO-8601 text, or epoch milliseconds (a number or digits); else null. */
+    /**
+     * An orderDate as an instant, as KeptCopyStore.parseInstant reads a record's date: epoch milliseconds as a Long or
+     * BigInteger (JSON reads every epoch-ms date after January 1970 as one) or as text of 13+ digits, else ISO-8601 text.
+     * Any other number (a small Integer, a decimal) or a shorter digit string is no date: null.
+     */
     static Instant createdAt(Object value) {
-        if (value instanceof Number) return Instant.ofEpochMilli(((Number) value).longValue())
+        if (value instanceof Long || value instanceof BigInteger) return KeptCopyStore.parseInstant(value)
+        if (value instanceof Number) return null
         String s = normalize(value)
-        if (s ==~ /\d{10,}/) return Instant.ofEpochMilli(Long.parseLong(s))
+        if (s ==~ /\d+/) return s.length() >= 13 ? Instant.ofEpochMilli(Long.parseLong(s)) : null
         return KeptCopyStore.parseInstant(s)
     }
 
@@ -137,7 +150,8 @@ class SyncPulseReader {
 
     /**
      * Asks readBatch(batch) -> File (the target's records for those keys, or null for none) AuditRecheckSupport.MAX_KEYS
-     * valid keys at a time; a key is present when a record's keyField holds it. Invalid keys are never sent.
+     * valid keys at a time; a key is present when a record's keyField holds it. Invalid keys are never sent: they come back
+     * as unasked.
      */
     static Map presentByBatches(Collection keys, String keyField, Closure<File> readBatch) {
         Map checked = validKeys(keys)
@@ -163,7 +177,7 @@ class SyncPulseReader {
                 file.delete()
             }
         }
-        return [present: present, warnings: warnings]
+        return [present: present, unasked: (checked.invalid as Set<String>), warnings: warnings]
     }
 
     /**
@@ -185,10 +199,39 @@ class SyncPulseReader {
     // --------------------------------------------------------------------------------------------------- ec parts
 
     /**
+     * signedIn(...) with a login: on a thread with no user (a pulse on RunAdmission's pool), an anonymous login and an
+     * artifact authorized for all, as an anonymous-all service runs, both undone after. Never throws.
+     */
+    private static Map run(def ec, Map pair, Map automation, String what, Map empty, Closure<Map> work) {
+        boolean anonymous = false
+        ArtifactExecutionInfo aei = null
+        try {
+            anonymous = ec.user.loginAnonymousIfNoUser()
+            if (anonymous) {
+                aei = ec.artifactExecution.push("darpan.pulse.SyncPulseReader", ArtifactExecutionInfo.AT_OTHER,
+                        ArtifactExecutionInfo.AUTHZA_ALL, false)
+                ec.artifactExecution.setAnonymousAuthorizedAll()
+            }
+            return signedIn(ec, pair, automation, what, empty, work)
+        } catch (Throwable t) {
+            logger.warn("Sync pulse ${what} read could not sign in: ${t.message}")
+            return new LinkedHashMap(empty) + [ok: false, errors: ["The ${what} read failed: ${normalize(t.message) ?: t.class.simpleName}".toString()],
+                                               warnings: []]
+        } finally {
+            try {
+                if (aei != null) ec.artifactExecution.pop(aei)
+                if (anonymous) ec.user.logoutAnonymousOnly()
+            } catch (Throwable t) {
+                logger.warn("Sync pulse ${what} read could not sign out: ${t.message}")
+            }
+        }
+    }
+
+    /**
      * Resolves the pair's sides and keys and its folder, then runs work(sides, location) as the check's tenant, guarded.
      * Errors work leaves on the message facade fail the read and are cleared, so the caller's next service call runs.
      */
-    private static Map run(def ec, Map pair, Map automation, String what, Map empty, Closure<Map> work) {
+    private static Map signedIn(def ec, Map pair, Map automation, String what, Map empty, Closure<Map> work) {
         int errorsBefore = messageErrors(ec).size()
         String location = null
         File folder = null

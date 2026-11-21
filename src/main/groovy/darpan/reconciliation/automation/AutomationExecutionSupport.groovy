@@ -2332,7 +2332,7 @@ class AutomationExecutionSupport {
                 "installed on this deployment.")
     }
 
-    protected static Map<String, Object> callConfiguredSourceExtractor(def ec, def automation, def source,
+    static Map<String, Object> callConfiguredSourceExtractor(def ec, def automation, def source,
             Map<String, Object> window, Map<String, Object> params) {
         Map<String, Object> metadata = resolveSourceExtractorMetadata(ec, source,
                 params?.sourceExtractorConfigDefaults instanceof Map ? (Map<String, Object>) params.sourceExtractorConfigDefaults : [:])
@@ -2550,7 +2550,7 @@ class AutomationExecutionSupport {
         return serviceParams
     }
 
-    protected static Map<String, Object> resolveSourceExtractorConfigDefaults(def ec, def automation, Collection sources) {
+    static Map<String, Object> resolveSourceExtractorConfigDefaults(def ec, def automation, Collection sources) {
         String companyUserGroupId = normalize(readField(automation, "companyUserGroupId"))
         if (!companyUserGroupId) return [:]
 
@@ -2952,7 +2952,7 @@ class AutomationExecutionSupport {
         return source
     }
 
-    protected static Map<String, Object> normalizeSourceResult(Object rawResult, def source) {
+    static Map<String, Object> normalizeSourceResult(Object rawResult, def source) {
         Map<String, Object> result = rawResult instanceof Map ? new LinkedHashMap<String, Object>((Map) rawResult) : [:]
         result.dataAvailable = result.containsKey("dataAvailable") ?
                 toBoolean(result.dataAvailable) :

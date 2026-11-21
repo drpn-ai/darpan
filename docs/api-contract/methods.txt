@@ -187,10 +187,12 @@ facade.NetSuiteQueryFacadeServices.run#NsSuiteQlAgentQuery
 facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery
 facade.PeakPeriodFacadeServices.delete#PeakPeriod
 facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime
+facade.PeakPeriodFacadeServices.delete#PeakPeriodSync
 facade.PeakPeriodFacadeServices.get#PeakPeriod
 facade.PeakPeriodFacadeServices.list#PeakPeriods
 facade.PeakPeriodFacadeServices.save#PeakPeriod
 facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime
+facade.PeakPeriodFacadeServices.save#PeakPeriodSync
 facade.ReconciliationFacadeServices.archive#Automation
 facade.ReconciliationFacadeServices.archive#SavedRun
 facade.ReconciliationFacadeServices.cancel#ReconciliationRun
@@ -293,6 +295,11 @@ facade.SlackFacadeServices.list#SlackChannels
 facade.SlackFacadeServices.save#SlackBotToken
 facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints
 facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess
+facade.SyncPulseFacadeServices.delete#SyncPair
+facade.SyncPulseFacadeServices.get#RunPulseFlags
+facade.SyncPulseFacadeServices.get#SyncPair
+facade.SyncPulseFacadeServices.list#SyncPairs
+facade.SyncPulseFacadeServices.save#SyncPair
 facade.TenantConfigFacadeServices.get#TenantConfigVersion
 facade.TenantConfigFacadeServices.get#TenantConfigVersions
 facade.TenantConfigFacadeServices.preview#TenantConfigRestore

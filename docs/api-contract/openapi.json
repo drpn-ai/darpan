@@ -591,6 +591,9 @@
                                         "$ref": "#/components/schemas/DeletePeakPeriodRunTimeRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeletePeakPeriodSyncRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetPeakPeriodRequest"
                                     },
                                     {
@@ -601,6 +604,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SavePeakPeriodRunTimeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SavePeakPeriodSyncRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/ArchiveAutomationRequest"
@@ -909,6 +915,21 @@
                                         "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeleteSyncPairRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetRunPulseFlagsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetSyncPairRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListSyncPairsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveSyncPairRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetTenantConfigVersionRequest"
                                     },
                                     {
@@ -1140,10 +1161,12 @@
                                         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
                                         "facade.PeakPeriodFacadeServices.delete#PeakPeriod": "#/components/schemas/DeletePeakPeriodRequest",
                                         "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime": "#/components/schemas/DeletePeakPeriodRunTimeRequest",
+                                        "facade.PeakPeriodFacadeServices.delete#PeakPeriodSync": "#/components/schemas/DeletePeakPeriodSyncRequest",
                                         "facade.PeakPeriodFacadeServices.get#PeakPeriod": "#/components/schemas/GetPeakPeriodRequest",
                                         "facade.PeakPeriodFacadeServices.list#PeakPeriods": "#/components/schemas/ListPeakPeriodsRequest",
                                         "facade.PeakPeriodFacadeServices.save#PeakPeriod": "#/components/schemas/SavePeakPeriodRequest",
                                         "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime": "#/components/schemas/SavePeakPeriodRunTimeRequest",
+                                        "facade.PeakPeriodFacadeServices.save#PeakPeriodSync": "#/components/schemas/SavePeakPeriodSyncRequest",
                                         "facade.ReconciliationFacadeServices.archive#Automation": "#/components/schemas/ArchiveAutomationRequest",
                                         "facade.ReconciliationFacadeServices.archive#SavedRun": "#/components/schemas/ArchiveSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "#/components/schemas/CancelReconciliationRunRequest",
@@ -1246,6 +1269,11 @@
                                         "facade.SlackFacadeServices.save#SlackBotToken": "#/components/schemas/SaveSlackBotTokenRequest",
                                         "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "#/components/schemas/ListSourceConfigEndpointsRequest",
                                         "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "#/components/schemas/StoreSourceConfigEndpointAccessRequest",
+                                        "facade.SyncPulseFacadeServices.delete#SyncPair": "#/components/schemas/DeleteSyncPairRequest",
+                                        "facade.SyncPulseFacadeServices.get#RunPulseFlags": "#/components/schemas/GetRunPulseFlagsRequest",
+                                        "facade.SyncPulseFacadeServices.get#SyncPair": "#/components/schemas/GetSyncPairRequest",
+                                        "facade.SyncPulseFacadeServices.list#SyncPairs": "#/components/schemas/ListSyncPairsRequest",
+                                        "facade.SyncPulseFacadeServices.save#SyncPair": "#/components/schemas/SaveSyncPairRequest",
                                         "facade.TenantConfigFacadeServices.get#TenantConfigVersion": "#/components/schemas/GetTenantConfigVersionRequest",
                                         "facade.TenantConfigFacadeServices.get#TenantConfigVersions": "#/components/schemas/GetTenantConfigVersionsRequest",
                                         "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "#/components/schemas/PreviewTenantConfigRestoreRequest",
@@ -1843,6 +1871,9 @@
                                             "$ref": "#/components/schemas/DeletePeakPeriodRunTimeResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/DeletePeakPeriodSyncResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetPeakPeriodResponse"
                                         },
                                         {
@@ -1853,6 +1884,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SavePeakPeriodRunTimeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SavePeakPeriodSyncResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ArchiveAutomationResponse"
@@ -2159,6 +2193,21 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeleteSyncPairResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetRunPulseFlagsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetSyncPairResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListSyncPairsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveSyncPairResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetTenantConfigVersionResponse"
@@ -7606,7 +7655,7 @@
                     },
                     "periodDays": {
                         "type": "object",
-                        "description": "Optional preview of the instance periods in days (or forever) by table key\n                (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the stored ones."
+                        "description": "Optional preview of the instance periods in days (or forever) by table key\n                (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG, SYNC_PULSE_SAMPLE), used instead of the stored ones."
                     },
                     "tenantPeriodDays": {
                         "type": "object",
@@ -7798,7 +7847,7 @@
                 "required": [
                     "periods"
                 ],
-                "description": "Sets, for the instance or for one tenant, how long each table keeps its rows. periods maps a table key\n            (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG) to a whole number of days from 1 to 3650, to forever, or (a\n            tenant only) to inherit (drop the tenant's own period and follow the instance's). A tenant's own period, including forever,\n            wins over the instance period for that tenant's rows only. Refused as a whole, with the reason and nothing saved: an\n            unknown table, a value that is not one of those, inherit at instance level, an unknown tenant, forever at instance level\n            while a JVM property pins the period. A table whose period does not change is skipped. While the retention job is running\n            (not paused), a change that keeps rows for less time (a shorter period, or forever to days) needs previewedRows, the total\n            dryRun#Retention showed for the same change: the preview is run again and the change is refused when today's count is more\n            than 100 rows or 5% above it. Lengthening, and any change while the job is paused, needs no preview. Instance periods go\n            through the settings store (one AdminAuditLog row per table, `key: old -> new (note)`); a tenant's go to its own\n            TenantRetentionPeriod rows (one AdminAuditLog row for the call: `TABLE: before -> after`)."
+                "description": "Sets, for the instance or for one tenant, how long each table keeps its rows. periods maps a table key\n            (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG, SYNC_PULSE_SAMPLE) to a whole number of days from 1 to 3650, to forever, or (a\n            tenant only) to inherit (drop the tenant's own period and follow the instance's). A tenant's own period, including forever,\n            wins over the instance period for that tenant's rows only. Refused as a whole, with the reason and nothing saved: an\n            unknown table, a value that is not one of those, inherit at instance level, an unknown tenant, forever at instance level\n            while a JVM property pins the period, forever at instance level for a table whose period has a default\n            (SYNC_PULSE_SAMPLE: removing the setting brings back its 30 days; a tenant's own period may still be forever). A table whose period does not change is skipped. While the retention job is running\n            (not paused), a change that keeps rows for less time (a shorter period, or forever to days) needs previewedRows, the total\n            dryRun#Retention showed for the same change: the preview is run again and the change is refused when today's count is more\n            than 100 rows or 5% above it. Lengthening, and any change while the job is paused, needs no preview. Instance periods go\n            through the settings store (one AdminAuditLog row per table, `key: old -> new (note)`); a tenant's go to its own\n            TenantRetentionPeriod rows (one AdminAuditLog row for the call: `TABLE: before -> after`)."
             },
             "UpdateRetentionPeriodsResult": {
                 "type": "object",
@@ -23432,7 +23481,7 @@
                 "required": [
                     "peakPeriodId"
                 ],
-                "description": "Delete a peak period and its run times."
+                "description": "Delete a peak period, its run times and its sync overrides."
             },
             "DeletePeakPeriodResult": {
                 "type": "object",
@@ -23606,6 +23655,102 @@
                     "result"
                 ]
             },
+            "DeletePeakPeriodSyncParams": {
+                "type": "object",
+                "properties": {
+                    "peakPeriodId": {
+                        "type": "string"
+                    },
+                    "syncPairId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "peakPeriodId",
+                    "syncPairId"
+                ],
+                "description": "Remove one sync pair's override for a peak period; a missing override is fine."
+            },
+            "DeletePeakPeriodSyncResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DeletePeakPeriodSyncRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.delete#PeakPeriodSync",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.delete#PeakPeriodSync",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.delete#PeakPeriodSync"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeletePeakPeriodSyncParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeletePeakPeriodSyncResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.delete#PeakPeriodSync. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeletePeakPeriodSyncResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetPeakPeriodParams": {
                 "type": "object",
                 "properties": {
@@ -23616,7 +23761,7 @@
                 "required": [
                     "peakPeriodId"
                 ],
-                "description": "One peak period with its run-time moves, the runs its peak hours hold, and the runs a move can name."
+                "description": "One peak period with its run-time moves, the runs its peak hours or a sync lag allowance hold, and the runs a move can name."
             },
             "GetPeakPeriodResult": {
                 "type": "object",
@@ -23750,6 +23895,32 @@
                                 },
                                 "label": {
                                     "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "syncRows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "syncPairId": {
+                                    "type": "string"
+                                },
+                                "label": {
+                                    "type": "string"
+                                },
+                                "normalAllowanceMinutes": {
+                                    "type": "integer"
+                                },
+                                "periodAllowanceMinutes": {
+                                    "type": "integer"
+                                },
+                                "normalPulseMinutes": {
+                                    "type": "integer"
+                                },
+                                "periodPulseMinutes": {
+                                    "type": "integer"
                                 }
                             }
                         }
@@ -24151,6 +24322,108 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SavePeakPeriodRunTimeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SavePeakPeriodSyncParams": {
+                "type": "object",
+                "properties": {
+                    "peakPeriodId": {
+                        "type": "string"
+                    },
+                    "syncPairId": {
+                        "type": "string"
+                    },
+                    "allowanceMinutes": {
+                        "type": "integer"
+                    },
+                    "pulseEveryMinutes": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "peakPeriodId",
+                    "syncPairId"
+                ],
+                "description": "Replace one sync pair's override for a peak period. Allowance (15 minutes to 48 hours) and pulse (0, 60, 120, 180, 240 or 360 minutes; 0 is off for the period) are each null for normal; an omitted value clears that field."
+            },
+            "SavePeakPeriodSyncResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "SavePeakPeriodSyncRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.PeakPeriodFacadeServices.save#PeakPeriodSync",
+                "x-darpan-method": "facade.PeakPeriodFacadeServices.save#PeakPeriodSync",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.PeakPeriodFacadeServices.save#PeakPeriodSync"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SavePeakPeriodSyncParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SavePeakPeriodSyncResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.PeakPeriodFacadeServices.save#PeakPeriodSync. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SavePeakPeriodSyncResult"
                     }
                 },
                 "required": [
@@ -38751,6 +39024,670 @@
                     "result"
                 ]
             },
+            "DeleteSyncPairParams": {
+                "type": "object",
+                "properties": {
+                    "syncPairId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "syncPairId"
+                ],
+                "description": "Delete a sync pair with its peak-period overrides, samples and tracked orders."
+            },
+            "DeleteSyncPairResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DeleteSyncPairRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SyncPulseFacadeServices.delete#SyncPair",
+                "x-darpan-method": "facade.SyncPulseFacadeServices.delete#SyncPair",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SyncPulseFacadeServices.delete#SyncPair"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteSyncPairParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteSyncPairResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SyncPulseFacadeServices.delete#SyncPair. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteSyncPairResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetRunPulseFlagsParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationRunResultId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationRunResultId"
+                ],
+                "description": "The records of one daily-check run that the sync pulse had already flagged past allowance before the run started and that were still open then: recordKey to the ISO time the pulse first flagged it. syncPairId is the run's sync pair; null with no flags when the run's check has no pair."
+            },
+            "GetRunPulseFlagsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "syncPairId": {
+                        "type": "string"
+                    },
+                    "flags": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetRunPulseFlagsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SyncPulseFacadeServices.get#RunPulseFlags",
+                "x-darpan-method": "facade.SyncPulseFacadeServices.get#RunPulseFlags",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SyncPulseFacadeServices.get#RunPulseFlags"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetRunPulseFlagsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetRunPulseFlagsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SyncPulseFacadeServices.get#RunPulseFlags. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetRunPulseFlagsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetSyncPairParams": {
+                "type": "object",
+                "properties": {
+                    "syncPairId": {
+                        "type": "string"
+                    }
+                },
+                "description": "One sync pair of the active tenant: its effective allowance and cadence today (and the pair's own values), today's samples and the open past-allowance orders, oldest first. Always returns the daily checks and chat spaces the pair form picks from; with no syncPairId that is all it returns."
+            },
+            "GetSyncPairResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "syncPair": {
+                        "type": "object",
+                        "properties": {
+                            "syncPairId": {
+                                "type": "string"
+                            },
+                            "label": {
+                                "type": "string"
+                            },
+                            "automationId": {
+                                "type": "string"
+                            },
+                            "automationName": {
+                                "type": "string"
+                            },
+                            "upstreamSide": {
+                                "type": "string"
+                            },
+                            "allowanceMinutes": {
+                                "type": "string"
+                            },
+                            "pulseEveryMinutes": {
+                                "type": "string"
+                            },
+                            "normalAllowanceMinutes": {
+                                "type": "string"
+                            },
+                            "normalPulseEveryMinutes": {
+                                "type": "string"
+                            },
+                            "periodName": {
+                                "type": "string"
+                            },
+                            "chatSpaceId": {
+                                "type": "string"
+                            },
+                            "hourlySummary": {
+                                "type": "string"
+                            },
+                            "isActive": {
+                                "type": "string"
+                            },
+                            "lastPulseStamp": {
+                                "type": "string"
+                            },
+                            "lastPulseStatusEnumId": {
+                                "type": "string"
+                            },
+                            "waitingCount": {
+                                "type": "string"
+                            },
+                            "pastAllowanceCount": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "samplesToday": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sampleStamp": {
+                                    "type": "string"
+                                },
+                                "waitingCount": {
+                                    "type": "string"
+                                },
+                                "oldestWaitingMinutes": {
+                                    "type": "string"
+                                },
+                                "pastAllowanceCount": {
+                                    "type": "string"
+                                },
+                                "statusEnumId": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "pastOrders": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "recordKey": {
+                                    "type": "string"
+                                },
+                                "orderName": {
+                                    "type": "string"
+                                },
+                                "otherSystemId": {
+                                    "type": "string"
+                                },
+                                "sourceCreatedStamp": {
+                                    "type": "string"
+                                },
+                                "waitingMinutes": {
+                                    "type": "string"
+                                },
+                                "reportedInRunId": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "automations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "automationId": {
+                                    "type": "string"
+                                },
+                                "label": {
+                                    "type": "string"
+                                },
+                                "upstreamOptions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "upstreamSide": {
+                                                "type": "string"
+                                            },
+                                            "label": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "chatSpaces": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "chatSpaceId": {
+                                    "type": "string"
+                                },
+                                "label": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetSyncPairRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SyncPulseFacadeServices.get#SyncPair",
+                "x-darpan-method": "facade.SyncPulseFacadeServices.get#SyncPair",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SyncPulseFacadeServices.get#SyncPair"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetSyncPairParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetSyncPairResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SyncPulseFacadeServices.get#SyncPair. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetSyncPairResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListSyncPairsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "List the active tenant's sync pairs with the waiting and past-allowance counts from the latest sample and the open orders."
+            },
+            "ListSyncPairsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "syncPairs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "syncPairId": {
+                                    "type": "string"
+                                },
+                                "label": {
+                                    "type": "string"
+                                },
+                                "automationId": {
+                                    "type": "string"
+                                },
+                                "automationName": {
+                                    "type": "string"
+                                },
+                                "allowanceMinutes": {
+                                    "type": "string"
+                                },
+                                "pulseEveryMinutes": {
+                                    "type": "string"
+                                },
+                                "isActive": {
+                                    "type": "string"
+                                },
+                                "lastPulseStamp": {
+                                    "type": "string"
+                                },
+                                "waitingCount": {
+                                    "type": "string"
+                                },
+                                "pastAllowanceCount": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "ListSyncPairsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SyncPulseFacadeServices.list#SyncPairs",
+                "x-darpan-method": "facade.SyncPulseFacadeServices.list#SyncPairs",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SyncPulseFacadeServices.list#SyncPairs"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListSyncPairsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListSyncPairsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SyncPulseFacadeServices.list#SyncPairs. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListSyncPairsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveSyncPairParams": {
+                "type": "object",
+                "properties": {
+                    "syncPairId": {
+                        "type": "string"
+                    },
+                    "automationId": {
+                        "type": "string"
+                    },
+                    "upstreamSide": {
+                        "type": "string"
+                    },
+                    "allowanceMinutes": {
+                        "type": "integer"
+                    },
+                    "pulseEveryMinutes": {
+                        "type": "integer"
+                    },
+                    "chatSpaceId": {
+                        "type": "string"
+                    },
+                    "hourlySummary": {
+                        "type": "boolean"
+                    },
+                    "isActive": {
+                        "type": "boolean"
+                    }
+                },
+                "description": "Create or update one sync pair of the active tenant. A blank pulseEveryMinutes is pulse off and a blank chatSpaceId is no chat space (both stored null, never the old value); isActive and hourlySummary keep the stored value when omitted. One pair per automation; a pulse needs HotWax orders upstream."
+            },
+            "SaveSyncPairResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "syncPairId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SaveSyncPairRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SyncPulseFacadeServices.save#SyncPair",
+                "x-darpan-method": "facade.SyncPulseFacadeServices.save#SyncPair",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SyncPulseFacadeServices.save#SyncPair"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveSyncPairParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveSyncPairResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SyncPulseFacadeServices.save#SyncPair. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveSyncPairResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetTenantConfigVersionParams": {
                 "type": "object",
                 "properties": {
@@ -40221,10 +41158,12 @@
         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
         "facade.PeakPeriodFacadeServices.delete#PeakPeriod": "DeletePeakPeriod",
         "facade.PeakPeriodFacadeServices.delete#PeakPeriodRunTime": "DeletePeakPeriodRunTime",
+        "facade.PeakPeriodFacadeServices.delete#PeakPeriodSync": "DeletePeakPeriodSync",
         "facade.PeakPeriodFacadeServices.get#PeakPeriod": "GetPeakPeriod",
         "facade.PeakPeriodFacadeServices.list#PeakPeriods": "ListPeakPeriods",
         "facade.PeakPeriodFacadeServices.save#PeakPeriod": "SavePeakPeriod",
         "facade.PeakPeriodFacadeServices.save#PeakPeriodRunTime": "SavePeakPeriodRunTime",
+        "facade.PeakPeriodFacadeServices.save#PeakPeriodSync": "SavePeakPeriodSync",
         "facade.ReconciliationFacadeServices.archive#Automation": "ArchiveAutomation",
         "facade.ReconciliationFacadeServices.archive#SavedRun": "ArchiveSavedRun",
         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "CancelReconciliationRun",
@@ -40327,6 +41266,11 @@
         "facade.SlackFacadeServices.save#SlackBotToken": "SaveSlackBotToken",
         "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "ListSourceConfigEndpoints",
         "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "StoreSourceConfigEndpointAccess",
+        "facade.SyncPulseFacadeServices.delete#SyncPair": "DeleteSyncPair",
+        "facade.SyncPulseFacadeServices.get#RunPulseFlags": "GetRunPulseFlags",
+        "facade.SyncPulseFacadeServices.get#SyncPair": "GetSyncPair",
+        "facade.SyncPulseFacadeServices.list#SyncPairs": "ListSyncPairs",
+        "facade.SyncPulseFacadeServices.save#SyncPair": "SaveSyncPair",
         "facade.TenantConfigFacadeServices.get#TenantConfigVersion": "GetTenantConfigVersion",
         "facade.TenantConfigFacadeServices.get#TenantConfigVersions": "GetTenantConfigVersions",
         "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "PreviewTenantConfigRestore",

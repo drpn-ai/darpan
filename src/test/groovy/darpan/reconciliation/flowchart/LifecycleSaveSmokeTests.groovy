@@ -13,8 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /** DAR-UI-050. save#Lifecycle turns dropdown choices into the start, the stage checks and the named question tree. */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class LifecycleSaveSmokeTests {
 

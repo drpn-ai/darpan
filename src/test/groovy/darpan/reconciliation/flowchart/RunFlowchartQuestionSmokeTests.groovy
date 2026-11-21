@@ -15,8 +15,10 @@ import java.nio.file.Path
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /** DAR-UI-048. One question through the real pipeline with a parent's keys, from the internal entry point. */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RunFlowchartQuestionSmokeTests {
 

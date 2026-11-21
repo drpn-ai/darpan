@@ -13,11 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * DAR-UI-050. A lifecycle's rules leave records out: "leave out sales orders where HC Sales Channel is Shopify
  * Draft Order". A rule is a filter on the start's records, so a left-out record is in no place at all.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class LifecycleRuleSmokeTests {
 

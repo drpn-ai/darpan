@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * Terminal automation failures must reach the tenant's chat space.
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *
  * <p>A failure that is going to be retried is NOT terminal and must stay quiet.</p>
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AutomationFailureNotificationTests {
 

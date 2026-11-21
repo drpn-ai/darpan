@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * THE EXPANDABILITY CONTRACT. A future endpoint must need only data: one Enumeration row, one
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * production-code change to pass, the contract has been broken and the fix belongs in the code
  * under test, not here.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class EndpointExpandabilityTests {
     private ExecutionContext ec

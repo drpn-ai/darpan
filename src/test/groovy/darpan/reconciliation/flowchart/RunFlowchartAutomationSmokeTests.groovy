@@ -15,8 +15,10 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import darpan.reconciliation.support.SharedMoqui
 
 /** DAR-UI-048. An automation whose saved-run type is "reconciliation" runs the flowchart walker. */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RunFlowchartAutomationSmokeTests {
 

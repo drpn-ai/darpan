@@ -14,8 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /** DAR-UI-048 plan 3. A run's past executions, and the NetSuite checks a tenant already has turned into runs. */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RunFlowchartImportSmokeTests {
 

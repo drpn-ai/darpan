@@ -15,11 +15,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * Auto-resolution must consider a config eligible per ENDPOINT. A tenant with one config that has
  * returns disabled must not have it silently auto-selected for a returns automation.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AutomationEndpointGateTests {
     private ExecutionContext ec

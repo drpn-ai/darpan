@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * Slack-support upgrade migration:
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertNull
  * an already-migrated space, must not overwrite a Slack space's provider, and must be safe to run
  * twice.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ChatSpaceWebhookMigrationSmokeTests {
     private static final String TENANT_ID = "TEN_MIG"

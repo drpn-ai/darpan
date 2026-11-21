@@ -16,11 +16,13 @@ import java.nio.file.Path
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * DAR-UI-064 — a run's conclusion tree through the facade, in the ACTIVE tenant (KREWE): saved as a tree, read back in
  * order; a refused tree writes nothing; another tenant's run is not found.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation)
 class RunConclusionAuthoringSmokeTests {

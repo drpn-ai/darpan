@@ -15,12 +15,14 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * The enablement predicate. The load-bearing rule is ABSENT MEANS ENABLED: a connector row shipped
  * in a later release must be usable with no per-tenant backfill, so a missing access row can never
  * read as disabled.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SourceEndpointAccessSupportTests {
     private ExecutionContext ec

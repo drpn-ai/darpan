@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * Phase 1 (DAR-293) acceptance for the SourceSystemConnector registry: the data-driven resolver must
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * Assertions compare against the LIVE constants (not re-typed literals) so the seed rows are proven
  * byte-identical to the source of truth and will fail if either drifts.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SourceSystemConnectorSupportSmokeTests {
     private static final String OMS_GQL_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"

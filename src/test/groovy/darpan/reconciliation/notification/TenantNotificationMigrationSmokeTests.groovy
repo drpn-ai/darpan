@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * v1.2.0 upgrade migration: reconciliation.ReconciliationNotificationServices.migrate#TenantNotificationSettings
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNull
  * 'Default space' and links that tenant's un-linked automations to it. Internal-only
  * (authenticate="false", not allow-remote) — invoked once during the v1.2.0 upgrade, never from the SPA.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TenantNotificationMigrationSmokeTests {
     private static final String TEN_A = "TEN_A"

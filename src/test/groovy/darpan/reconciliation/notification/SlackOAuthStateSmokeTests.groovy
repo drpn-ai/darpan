@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
+import darpan.reconciliation.support.SharedMoqui
 
 /**
  * The Slack OAuth callback is a PUBLIC endpoint — Slack redirects the installing admin's browser to
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *  - tenant-bound, so an attacker cannot attach their workspace to someone else's tenant
  *  - short-lived, so a leaked state is worthless by the time it is found
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SlackOAuthStateSmokeTests {
     private static final String TEN_A = "TEN_SLK_A"

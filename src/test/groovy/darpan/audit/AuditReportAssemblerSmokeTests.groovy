@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * the scenario's health.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditReportAssemblerSmokeTests {
 
     private static final String LEDGER = "audit.AuditLedgerServices"

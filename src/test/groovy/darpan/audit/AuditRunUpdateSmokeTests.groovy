@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.peak.PeakWindow
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * digest sends to a chat space and two addresses.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditRunUpdateSmokeTests {
 
     private static final String LEDGER = "audit.AuditLedgerServices"

@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * a missing description is a gap in the published docs: this test fails the build on one.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class GraphQlSchemaDescriptionTests {
 
     private ExecutionContext ec

@@ -1,5 +1,6 @@
 package darpan.agent
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.*
  * catalog, one-record inspection and knowledge search. Tenants and rows are synthetic; another tenant's rows never show.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AgentReadFacadeSmokeTests {
 
     private static final String FACADE = "facade.AgentReadFacadeServices"

@@ -1,5 +1,6 @@
 package darpan.agent.pipeline
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*
  * Tenants and rows are synthetic.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditSetupLeverSmokeTests {
 
     private static final String FACADE = "facade.AgentChangeFacadeServices"

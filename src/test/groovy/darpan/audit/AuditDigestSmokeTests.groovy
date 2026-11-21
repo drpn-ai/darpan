@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * 2026-10-22 the check did not run. KREWE has a chat space of its own. Each test sets up the digests it needs.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditDigestSmokeTests {
 
     private static final String LEDGER = "audit.AuditLedgerServices"

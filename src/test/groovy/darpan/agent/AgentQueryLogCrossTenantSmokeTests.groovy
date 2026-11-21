@@ -1,5 +1,6 @@
 package darpan.agent
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-CLI-003 Task 4: the query log is tenant-owned and only a tenant admin lists it. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AgentQueryLogCrossTenantSmokeTests {
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String TENANT_A = "KREWE"

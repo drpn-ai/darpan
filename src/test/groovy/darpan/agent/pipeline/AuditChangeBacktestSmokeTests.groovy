@@ -1,5 +1,6 @@
 package darpan.agent.pipeline
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*
  * document, or the findings ledger itself. Nothing is read live and nothing is written. Tenants and rows are synthetic.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditChangeBacktestSmokeTests {
 
     private static final String MINE = "KREWE"

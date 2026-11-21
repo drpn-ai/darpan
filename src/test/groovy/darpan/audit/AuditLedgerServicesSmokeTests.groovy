@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * entities. Each test uses its own record keys, so the class-wide database never couples two tests.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditLedgerServicesSmokeTests {
 
     private static final String SVC = "audit.AuditLedgerServices"

@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * minted for the active tenant, even when the caller also administers another, and another tenant's key reads as missing.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class GqlApiKeyManagementTests {
 
     private static final String AUTH = "gql.GqlAuthServices"

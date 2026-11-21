@@ -1,5 +1,6 @@
 package darpan.agent
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.admin.AdminAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*
  * tenant's own editor or viewer is refused by the admin fence and again by each service. Synthetic tenants and users.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AgentAccessAdminSmokeTests {
     private static final String SVC = "admin.AgentAccessAdminServices"
     private static final List<String> SERVICES = ["list#AgentAccessGrants", "create#AgentAccessGrant", "update#AgentAccessGrant",

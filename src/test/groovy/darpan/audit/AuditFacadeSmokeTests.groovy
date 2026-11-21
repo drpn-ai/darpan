@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -21,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * JSON unchanged (the same document GraphQL and the CLI read). Another tenant's audit or finding reads as not found.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditFacadeSmokeTests {
 
     private static final String FACADE = "facade.AuditFacadeServices"

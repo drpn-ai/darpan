@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * tenant's rows are its own. Dry run first, then the run, then a second run that changes nothing.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class StatementLinkExpectedMigrationSmokeTests {
 
     private static final String T = "TSLE"

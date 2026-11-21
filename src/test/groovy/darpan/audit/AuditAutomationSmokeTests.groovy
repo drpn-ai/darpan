@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.AfterAll
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * The check tests R4 (rows missing in NetSuite) and R8 (rows missing in the OMS); a row whose cause is expected breaks neither.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class AuditAutomationSmokeTests {
 
     private static final String TENANT = "TAUTO"

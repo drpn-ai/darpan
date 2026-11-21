@@ -1,5 +1,6 @@
 package darpan.agent
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.admin.AdminAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*
  * list across tenants and move one through RECEIVED, ACCEPTED, DECLINED, SHIPPED inside the admin fence. Synthetic data.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class BrainChangeTicketSmokeTests {
 
     private static final String FACADE = "facade.AgentChangeFacadeServices"

@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.ExtractReplaySupport
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation)
+@SharedMoqui
 class AuditSettingsSmokeTests {
 
     private static final String FACADE = "facade.AuditFacadeServices"

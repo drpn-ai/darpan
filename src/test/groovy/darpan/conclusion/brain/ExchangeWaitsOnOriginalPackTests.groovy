@@ -105,14 +105,17 @@ class ExchangeWaitsOnOriginalPackTests {
 
     @Test
     void controlsDoNotWaitOnTheirOriginal() {
-        // The original is billed (M1224113's SO4581003): not this cause.
-        assertEquals([], codes(fire("orderLine", [r1("M1224113", "EXC-#GOR194804616-1")],
+        // The original is billed (M1224113's SO4581003): not this cause. With its return credited in NetSuite, nothing
+        // holds the exchange: HotWax never sent it (DAR-BE-192, 2026-11-21).
+        assertEquals(["EXC_NOT_SENT"], codes(fire("orderLine", [r1("M1224113", "EXC-#GOR194804616-1")],
                 chain("M1224113", "M270003", "M1000003", [M1000003: so("SO4581003", "Billed")]))))
-        // NetSuite has no sales order for the original: not in the unfulfilled list, so not this cause.
-        assertEquals([], codes(fire("orderLine", [r1("M1224113", "EXC-#GOR194804616-1")],
+        // NetSuite has no sales order for the original: not in the unfulfilled list, so not this cause (on gorjana
+        // 2026-11-21, 4 synced exchanges had an original with no NetSuite id, so it does not hold one back either).
+        assertEquals(["EXC_NOT_SENT"], codes(fire("orderLine", [r1("M1224113", "EXC-#GOR194804616-1")],
                 chain("M1224113", "M270003", "M1000003", [M1000003: null]))))
-        // Not answered yet: nothing is concluded from a question not asked.
-        assertEquals([], codes(fire("orderLine", [r1("M1223508", "EXC-#GOR197410604-1")], chain("M1223508", "M270001", "M1191688", null))))
+        // Not answered yet: nothing is concluded about the original from a question not asked.
+        assertFalse(codes(fire("orderLine", [r1("M1223508", "EXC-#GOR197410604-1")], chain("M1223508", "M270001", "M1191688", null)))
+                .contains("ORIG_OPEN"))
         // The exchange's return named no order: nothing to ask.
         Map orphan = [replacementReturn: [M1223508: ret("M270001", null)]]
         assertEquals([], ((List<Ask>) fire("orderLine", [r1("M1223508", "EXC-#GOR197410604-1")], orphan).asks)

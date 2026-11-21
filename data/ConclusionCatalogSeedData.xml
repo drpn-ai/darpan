@@ -31,6 +31,12 @@
             enumCode="LOST_NO_MEMO" description="Lost-warranty claim, no credit memo"/>
     <moqui.basic.Enumeration enumId="REPL_UNPAID" enumTypeId="DarpanConclusion"
             enumCode="REPL_UNPAID" description="Replacement not paid for"/>
+    <!-- DAR-BE-192 (2026-11-21): an exchange whose return is credited in NetSuite, never sent by HotWax. -->
+    <moqui.basic.Enumeration enumId="EXC_NOT_SENT" enumTypeId="DarpanConclusion"
+            enumCode="EXC_NOT_SENT" description="Exchange not sent, return credited"/>
+    <!-- DAR-BE-192 (2026-11-21): an order NetSuite lacks, younger than the in-flight grace (brain param inFlightHours). -->
+    <moqui.basic.Enumeration enumId="NS_IN_FLIGHT" enumTypeId="DarpanConclusion"
+            enumCode="NS_IN_FLIGHT" description="On its way to NetSuite"/>
     <!-- DAR-BE-204: why a Shopify order is not in NetSuite, concluded through its HotWax order (Dolls Kill). -->
     <moqui.basic.Enumeration enumId="PAY_EXPIRED" enumTypeId="DarpanConclusion"
             enumCode="PAY_EXPIRED" description="Payment failed, never paid"/>

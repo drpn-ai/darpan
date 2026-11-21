@@ -23,4 +23,6 @@ class Order {
      *  null after the answer means NetSuite has no sales order for it. */
     String netsuiteTranId
     String netsuiteStatus
+    /** DAR-BE-192 (2026-11-21): hours from the order's date to when the run read it; null when either is unknown. */
+    BigDecimal ageHours
 }

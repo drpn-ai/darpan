@@ -45,9 +45,10 @@ class BrainFactAdapter {
         if (fileSide != "FILE_1") return []
         switch (conclusionBrain?.toString()?.trim()) {
             // omsOrderName: the name the order-items read (OMS_ORDER_ITEMS_GQL, gorjana R1) gives the order.
-            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName", "omsOrderName"]
+            // omsOrderDate / orderDate (DAR-BE-192, 2026-11-21): how old the order was when read, for the in-flight grace.
+            case "ORDER_LINE": return ["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName", "omsOrderName", "omsOrderDate"]
             // DAR-BE-192: an R7 order, its name (a replacement's EXC- / WTY-) and its HotWax status.
-            case "ORDER": return ["orderId", "orderName", "grandTotal", "statusId"]
+            case "ORDER": return ["orderId", "orderName", "grandTotal", "statusId", "orderDate"]
             case "RETURN": return ["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"]
             // DAR-BE-204: a Shopify order (the Shopify orders read keeps its amounts as {shopMoney: {amount}}).
             case "SHOPIFY_ORDER": return ["id", "name", "displayFinancialStatus", "sourceName", "totalPriceSet",
@@ -61,7 +62,8 @@ class BrainFactAdapter {
      * order and product, so a second finding reuses them. productAnswers: productNetsuiteId answers by product id.
      */
     static List<Object> facts(String kind, Map finding, Map<String, Map> answersByOrderId, Map<String, ?> world = null,
-                              Map<String, Map> productAnswers = null, Map<String, Map<String, Map>> moreAnswers = null) {
+                              Map<String, Map> productAnswers = null, Map<String, Map<String, Map>> moreAnswers = null,
+                              Long readAtMillis = null) {
         Map sides = (Map) (finding?.sides ?: [:])
         Map record = (Map) (((Map) (sides.FILE_1 ?: [:])).record ?: [:])
         List<Object> facts = []
@@ -88,6 +90,7 @@ class BrainFactAdapter {
         if (kind == Finding.ORDER_LINE) {
             f.order = orderFor(normalize(record.omsOrderId), record.orderGrandTotal, null,
                     normalize(record.orderName) ?: normalize(record.omsOrderName))
+            setAge(f.order, record.omsOrderDate, readAtMillis)
             f.netsuiteHasOrderLine = ((Map) (sides.FILE_2 ?: [:])).firstFieldPresence != "ABSENT"
             String productId = normalize(record.productId)
             if (f.order != null && productId) {
@@ -110,6 +113,7 @@ class BrainFactAdapter {
         } else if (kind == Finding.ORDER) {
             // DAR-BE-192: an R7 order: HotWax approved it and NetSuite has no sales order for it (MISSING_FROM_FILE_2).
             f.order = orderFor(normalize(record.orderId), record.grandTotal, null, normalize(record.orderName), normalize(record.statusId))
+            setAge(f.order, record.orderDate, readAtMillis)
         } else if (kind == Finding.SHOPIFY_ORDER) {
             // DAR-BE-204: a Shopify order NetSuite has no sales order for. Its HotWax order (and that order's payments) comes
             // from the omsOrderByShopifyId answer; until then the finding has only its Shopify side.
@@ -267,5 +271,24 @@ class BrainFactAdapter {
         if (value == null) return null
         if (value instanceof BigDecimal) return (BigDecimal) value
         try { return new BigDecimal(value.toString().trim()) } catch (NumberFormatException ignored) { return null }
+    }
+
+    /** DAR-BE-192 (2026-11-21): the order's age at the read, once (a second finding about the order keeps the first). */
+    private static void setAge(Order order, Object orderDate, Long readAtMillis) {
+        if (order == null || order.ageHours != null || readAtMillis == null) return
+        Long at = epochMillis(orderDate)
+        if (at == null) return
+        order.ageHours = new BigDecimal(readAtMillis - at).divide(new BigDecimal(3_600_000L), 2, java.math.RoundingMode.HALF_UP)
+    }
+
+    /** Epoch millis from a number, a string of digits (R1's omsOrderDate) or an ISO instant / offset date-time; null otherwise. */
+    static Long epochMillis(Object value) {
+        if (value == null) return null
+        if (value instanceof Number) return ((Number) value).longValue()
+        String s = value.toString().trim()
+        if (!s) return null
+        if (s ==~ /\d{10,}/) return Long.parseLong(s)
+        try { return java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli() } catch (Exception ignored) { }
+        try { return java.time.Instant.parse(s).toEpochMilli() } catch (Exception ignored) { return null }
     }
 }

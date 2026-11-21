@@ -94,6 +94,14 @@ declare ExchangeWaitsOnOriginal
     original : Order
 end
 
+// DAR-BE-192 (Aditi 2026-11-21, R1 "Not in NetSuite" on 115 orders): the exchange's return is complete in NetSuite, RMA and
+// credit memo both, and the exchange is still not there. Nothing on the return side holds it; HotWax never sent it.
+declare ExchangeReturnCreditedInNetsuite
+    @label("Its return is in NetSuite with an RMA and a credit memo") @value("{ret.returnId}: {ret.rmaTranId}, {ret.memoTranId}")
+    order : Order @key
+    ret : ReplacementReturn
+end
+
 declare PaymentsNotTheTotal
     @label("Its payments do not settle its total") @value("{settled} of {order.total}")
     order : Order @key
@@ -148,6 +156,14 @@ declare ApprovedAndPaid
     settled : BigDecimal
 end
 
+// DAR-BE-192 (Aditi 2026-11-21: "should we add a grace to exchange sync?"): HotWax sends most orders within 2 h and sweeps the
+// rest in a daily catch-up (~10:45 UTC, after gorjana's 09:30 UTC read): synced exchanges p50 1.8 h, p90 13.8 h, max 17.6 h.
+declare OrderInFlightToNetsuite
+    @label("Younger than the in-flight grace when read") @value("{order.ageHours} h old, grace {hours} h")
+    order : Order @key
+    hours : BigDecimal
+end
+
 // ---- each fact read once
 
 rule "R1 sees the order not in NetSuite: no sales order line"
@@ -174,6 +190,17 @@ when
     Finding( kind == "order", bucket == "MISSING_FROM_FILE_2", $o : order, order != null )
 then
     insertLogical( new OrderNotInNetsuite( $o ) );
+end
+
+// The age is the order's date (R1 omsOrderDate, R7 orderDate) to the read; an order with no age is never in flight.
+rule "An order NetSuite lacks is younger than the in-flight grace"
+    @reads("OrderNotInNetsuite, Order") @produces("OrderInFlightToNetsuite")
+when
+    GraphParam( name == "inFlightHours", $h : number, number != null )
+    OrderNotInNetsuite( $o : order )
+    Order( this == $o, ageHours != null, ageHours < $h )
+then
+    insertLogical( new OrderInFlightToNetsuite( $o, $h ) );
 end
 
 // DAR-BE-204: NetSuite has no sales order by the Shopify order's name; HotWax answered with its order.
@@ -247,7 +274,7 @@ end
 // DAR-BE-192: a replacement's name says it is one (EXC- an exchange, WTY- a warranty replacement); its return is found from it.
 rule "Ask for the return a replacement was made for, when the replacement never reached NetSuite"
     @reads("OrderNotInNetsuite, Order, Answered") @asks("replacementReturn")
-    @mayEnable("RET_OPEN,RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO,ORIG_OPEN")
+    @mayEnable("RET_OPEN,RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO,ORIG_OPEN,EXC_NOT_SENT")
 when
     GraphParam( name == "replacementPrefixes", $rp : prefixRegex )
     OrderNotInNetsuite( $o : order )
@@ -259,7 +286,7 @@ end
 
 rule "Ask NetSuite for the RMA of a replacement's completed return"
     @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @asks("returnRma")
-    @mayEnable("RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA")
+    @mayEnable("RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,EXC_NOT_SENT")
 when
     OrderNotInNetsuite( $o : order )
     $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED" )
@@ -270,7 +297,7 @@ end
 
 rule "Ask NetSuite for the credit memo of a replacement's completed return"
     @reads("OrderNotInNetsuite, ReplacementReturn, Answered") @asks("returnMemo")
-    @mayEnable("RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO")
+    @mayEnable("RMA_CLOSED,RMA_NO_MEMO,RET_NO_RMA,LOST_NO_MEMO,EXC_NOT_SENT")
 when
     OrderNotInNetsuite( $o : order )
     $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED" )
@@ -378,6 +405,22 @@ when
     Answered( question == "returnMemo", subject == $r )
 then
     insertLogical( new ReturnNotInNetsuite( $o, $r ) );
+end
+
+// gorjana 2026-11-21: 112 store exchanges (EXC-) completed in HotWax, none in NetSuite, every return's RMA and credit memo
+// in NetSuite (memo Open, nothing to apply it to; 375 synced exchanges' memos are Fully Applied). Only an exchange: no
+// warranty replacement was probed in this shape.
+rule "An exchange's completed return has its RMA and credit memo in NetSuite"
+    @reads("OrderNotInNetsuite, Order, ReplacementReturn, Answered") @produces("ExchangeReturnCreditedInNetsuite")
+when
+    GraphParam( name == "exchangePrefixes", $ep : prefixRegex )
+    OrderNotInNetsuite( $o : order )
+    Order( this == $o, name != null, name matches $ep )
+    $r : ReplacementReturn( replacement == $o, statusId == "RETURN_COMPLETED", rmaTranId != null, memoTranId != null )
+    Answered( question == "returnRma", subject == $r )
+    Answered( question == "returnMemo", subject == $r )
+then
+    insertLogical( new ExchangeReturnCreditedInNetsuite( $o, $r ) );
 end
 
 rule "A replacement's lost-warranty claim has no credit memo"
@@ -530,6 +573,17 @@ then
 end
 
 // ---- DAR-BE-204 causes (ranks unique in the pack)
+
+// Above every other order cause: inside the grace nothing is wrong yet, and no question is worth asking. Past it, the order
+// comes back with its real cause.
+rule "Order cause · on its way to NetSuite"
+    @reads("OrderNotInNetsuite, OrderInFlightToNetsuite") @concludes("NS_IN_FLIGHT") @rank(99)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $f : OrderInFlightToNetsuite( order == $o )
+then
+    insertLogical( Cause.expected( $o, "NS_IN_FLIGHT", 99, $n, $f ) );
+end
 
 rule "Order cause · payment failed, never paid"
     @reads("OrderNotInNetsuite, PaymentNeverMade") @concludes("PAY_EXPIRED") @rank(95)
@@ -694,6 +748,16 @@ when
     $p : PaymentsNotTheTotal( order == $o )
 then
     insertLogical( Cause.fix( $o, "REPL_UNPAID", 51, $n, $p ) );
+end
+
+// Below every reason that holds an exchange back (51-59): with its return credited in NetSuite, HotWax should have sent it.
+rule "Order cause · an exchange HotWax never sent, its return credited in NetSuite"
+    @reads("OrderNotInNetsuite, ExchangeReturnCreditedInNetsuite") @concludes("EXC_NOT_SENT") @rank(50)
+when
+    $n : OrderNotInNetsuite( $o : order )
+    $c : ExchangeReturnCreditedInNetsuite( order == $o )
+then
+    insertLogical( Cause.fix( $o, "EXC_NOT_SENT", 50, $n, $c ) );
 end
 
 // ---- one rule picks every subject's best cause

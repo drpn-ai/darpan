@@ -77,7 +77,9 @@ class BrainEngine {
             moneyTolerance        : new BigDecimal("0.01"),
             currencyShortfallShare: new BigDecimal("0.02"),
             replacementPrefixes   : "EXC|WTY",
-            exchangePrefixes      : "EXC"] as Map<String, Object>)
+            exchangePrefixes      : "EXC",
+            // DAR-BE-192 (gorjana 2026-11-21): an order NetSuite lacks that is younger than this, at the read, is in flight.
+            inFlightHours         : new BigDecimal("24")] as Map<String, Object>)
 
     /** The defaults with a per-call override laid over them, as one GraphParam per name. An unknown name is refused. */
     static List<GraphParam> params(Map<String, Object> overrides) {

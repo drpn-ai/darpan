@@ -71,7 +71,24 @@ class RunConclusionStepTests {
         Map labels = RunConclusionStep.documentLabels(f)
         assertEquals("HotWax", labels.file1Label)
         assertNull(labels.file2Label)
+        assertNull(labels.readAtMillis, "no timestamp: no read time, so no order is in flight")
         f.delete()
+    }
+
+    /** DAR-BE-192: the read time an order's age is measured to. A replay is as old as the run it replays. */
+    @Test
+    void theReadTimeIsTheDocumentsOwnOrTheReplayedRunsTime() {
+        File f = File.createTempFile("doc", ".json")
+        f.text = '{\n"metadata":{"file1Label":"HotWax","timestamp":"2026-11-21T09:33:18.120Z"},\n"summary":{},\n"differences":[]\n}'
+        assertEquals(1795253598120L, RunConclusionStep.documentLabels(f).readAtMillis)
+        f.delete()
+        // gorjana's 2026-11-21 morning run folder: the replay's own timestamp (now) is not the read time.
+        assertEquals(1795253426833L, RunConclusionStep.readAtOf([timestamp: "2026-11-22T05:00:00Z",
+                replayOfRunFolder: "datamanager/reconciliation-runs/101823/20261121-093026833"]))
+        assertEquals(1795253426762L, RunConclusionStep.readAtOf([replayOfRunFolder: "reconciliation-runs/101823/20261121-093026762-FILE_2/"]))
+        assertNull(RunConclusionStep.readAtOf([replayOfRunFolder: "reconciliation-runs/101823/latest", timestamp: "2026-11-22T05:00:00Z"]),
+                "a replay whose run time cannot be read gets none, never the replay's own")
+        assertNull(RunConclusionStep.readAtOf([:]))
     }
 
     // Final review I1: the side's key is rebuilt the way RuleSetCompareScopeAdapter built it, or the

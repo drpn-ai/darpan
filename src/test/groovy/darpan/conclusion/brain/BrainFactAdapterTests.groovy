@@ -111,13 +111,26 @@ class BrainFactAdapterTests {
         assertNull(of(BrainFactAdapter.facts("orderLine", r1("M1", null), [:]), Order)[0].total)
     }
 
+    /** DAR-BE-192: an order's date arrives as epoch millis (a number, or R1's string of digits) or an ISO date-time. */
+    @Test
+    void anOrdersDateReadsInEveryShapeTheReadsGiveIt() {
+        assertEquals(1795194434000L, BrainFactAdapter.epochMillis("1795194434000"))
+        assertEquals(1795248764000L, BrainFactAdapter.epochMillis(1795248764000L))
+        assertEquals(1795194434000L, BrainFactAdapter.epochMillis("2026-11-20T17:07:14Z"))
+        assertEquals(1795194434000L, BrainFactAdapter.epochMillis("2026-11-20T09:07:14-08:00"))
+        assertNull(BrainFactAdapter.epochMillis("20 Nov"))
+        assertNull(BrainFactAdapter.epochMillis(""))
+        assertNull(BrainFactAdapter.epochMillis(null))
+    }
+
     /** Final review I2: the extract keeps what the adapter reads, or an R2 return's order id is projected away and nothing is asked. */
     @Test
     void theRecordFieldsTheBrainReadsAreNamedPerKindAndSide() {
         assertEquals(["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"], BrainFactAdapter.recordFieldsFor("RETURN", "FILE_1"))
         // DAR-BE-186: an R1 line keeps its product and SKU, for the productNetsuiteId question.
-        assertEquals(["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName", "omsOrderName"], BrainFactAdapter.recordFieldsFor("ORDER_LINE", "FILE_1"))
-        assertEquals(["orderId", "orderName", "grandTotal", "statusId"], BrainFactAdapter.recordFieldsFor("ORDER", "FILE_1"))
+        // DAR-BE-192: and its order's date, for the in-flight grace (R1 omsOrderDate, R7 orderDate).
+        assertEquals(["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName", "omsOrderName", "omsOrderDate"], BrainFactAdapter.recordFieldsFor("ORDER_LINE", "FILE_1"))
+        assertEquals(["orderId", "orderName", "grandTotal", "statusId", "orderDate"], BrainFactAdapter.recordFieldsFor("ORDER", "FILE_1"))
         assertEquals([], BrainFactAdapter.recordFieldsFor("RETURN", "FILE_2"))
         assertEquals([], BrainFactAdapter.recordFieldsFor(null, "FILE_1"))
     }

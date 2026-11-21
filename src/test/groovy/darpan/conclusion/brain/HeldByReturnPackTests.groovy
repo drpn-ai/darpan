@@ -130,14 +130,43 @@ class HeldByReturnPackTests {
                 ((List<Conclusion>) fired.conclusions)[0].cause.because.find { it.getClass().simpleName == "PaymentsNotTheTotal" }))
     }
 
+    /**
+     * gorjana 2026-11-21 (Aditi: R1 "Not in NetSuite" on 115 orders): EXC-#GOR195929958-1 (M1289823) completed at store 157
+     * on 2026-11-20, never in NetSuite; its return M284109 has RMA385821 and credit memo CM7691176 there, the memo Open. 112
+     * of the 115 are this shape; 375 exchanges that synced the same days have their memo Fully Applied.
+     */
+    @Test
+    void anExchangeWhoseReturnIsCreditedInNetsuiteWasNeverSent() {
+        Map paid = [M1289823: [paymentPreferences: [[paymentMethodTypeId: "EXCHANGE_CREDIT", statusId: "PAYMENT_SETTLED", maxAmount: 272.85],
+                                                    [paymentMethodTypeId: "EXCHANGE_PAYMENT", statusId: "PAYMENT_SETTLED", maxAmount: 2.55]],
+                               paymentPreferenceSlotsFull: false]]
+        Map answers = more([M1289823: ret("M284109", "RETURN_COMPLETED", "AFTSHP_SCE_WTY")],
+                [M284109: [tranId: "RMA385821", status: "Return Authorization : Pending Receipt"]],
+                [M284109: [tranId: "CM7691176", amount: 272.85]])
+        Map line = fire("orderLine", [r1("M1289823", "EXC-#GOR195929958-1", 275.4)], paid, answers)
+        assertEquals(["EXC_NOT_SENT"], codes(line), "R1's line takes its order's cause")
+        Cause c = ((List<Conclusion>) line.conclusions)[0].cause
+        assertEquals(50, c.rank)
+        assertFalse(c.expected)
+        assertEquals("M284109: RMA385821, CM7691176", BrainConclude.fill("{ret.returnId}: {ret.rmaTranId}, {ret.memoTranId}",
+                c.because.find { it.getClass().simpleName == "ExchangeReturnCreditedInNetsuite" }))
+        assertEquals(["EXC_NOT_SENT"], codes(fire("order", [r7("M1289823", "EXC-#GOR195929958-1", 275.4)], paid, answers)), "R7 reaches it too")
+        // Every reason that holds an exchange outranks it: its payments short of the total (51) is named instead.
+        assertEquals(["REPL_UNPAID"], codes(fire("order", [r7("M1289823", "EXC-#GOR195929958-1", 275.4)], [M1289823: credit(100)], answers)))
+        // Not concluded before NetSuite has answered for the memo.
+        assertEquals([], codes(fire("order", [r7("M1289823", "EXC-#GOR195929958-1", 275.4)], paid,
+                more([M1289823: ret("M284109", "RETURN_COMPLETED")], [M284109: [tranId: "RMA385821", status: "Pending Receipt"]]))))
+    }
+
     @Test
     void controlsDoNotConclude() {
         // An orderless return cannot be found from its replacement (EXC-#GOR196200155-1): nothing; its payments settle it.
         assertEquals([], codes(fire("order", [r7("M1088720", "EXC-#GOR196200155-1", 70.77)], [M1088720: credit(70.77)], more([M1088720: null]))))
-        // A complete chain (RMA and memo, paid in full) holds nothing.
-        assertEquals([], codes(fire("order", [r7("M1097719", "EXC-#GOR196245476-1", 85.1)], [M1097719: credit(85.1)],
-                more([M1097719: ret("M249948", "RETURN_COMPLETED")], [M249948: [tranId: "RMA370800", status: "Pending Receipt"]],
-                        [M249948: [tranId: "CM7676067", amount: 85.1]]))))
+        // A warranty replacement's complete chain (RMA and memo, paid in full) holds nothing: only exchanges were probed
+        // in the not-sent shape (anExchangeWhoseReturnIsCreditedInNetsuiteWasNeverSent).
+        assertEquals([], codes(fire("order", [r7("M1167220", "WTY-#GOR196553714-1", 275)], [M1167220: credit(275)],
+                more([M1167220: ret("M244082", "RETURN_COMPLETED", "AFTSHP_OL_WTY")], [M244082: [tranId: "RMA338431", status: "Pending Receipt"]],
+                        [M244082: [tranId: "CM7676067", amount: 275]]))))
         // An R7 order HotWax has moved on from (completed) is R1's, not R7's.
         assertEquals([], codes(fire("order", [r7("M1201553", "EXC-#GOR197307497-1", 297, "ORDER_COMPLETED")], [M1201553: credit(297)],
                 more([M1201553: ret("M258769", "RETURN_REQUESTED")]))))

@@ -57,8 +57,8 @@ class GraphParamPackTests {
     @Test
     void theDefaultsAreTodaysValues() {
         assertEquals([moneyTolerance: new BigDecimal("0.01"), currencyShortfallShare: new BigDecimal("0.02"),
-                      replacementPrefixes: "EXC|WTY", exchangePrefixes: "EXC"], BrainEngine.PARAM_DEFAULTS)
-        assertEquals(4, BrainEngine.params([:]).size())
+                      replacementPrefixes: "EXC|WTY", exchangePrefixes: "EXC", inFlightHours: new BigDecimal("24")], BrainEngine.PARAM_DEFAULTS)
+        assertEquals(5, BrainEngine.params([:]).size())
     }
 
     @Test

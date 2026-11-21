@@ -73,7 +73,7 @@ class RunConclusionStep {
             }
             String kind = brainKind(scope?.conclusionBrain)
             // Ruling P2-27: with its own fetcher (a replay) the brain neither reads nor writes the answers live runs share.
-            Map brain = kind ? [kind: kind, tenantId: tenantId, shareAnswers: sharesBrainAnswers(args),
+            Map brain = kind ? [kind: kind, tenantId: tenantId, shareAnswers: sharesBrainAnswers(args), readAtMillis: documentLabels.readAtMillis,
                     labelFor: { String code -> labels.get(code) ?: normalize(FacadeSupport.findEnum(ec, code)?.description) ?: code },
                     // Answers the shared store serves are never fetched, so they are kept here (live passes only; a replay shares nothing).
                     captureServed: lookupsDir == null ? null : { String question, Map<String, Map> served ->
@@ -375,11 +375,32 @@ class RunConclusionStep {
         }
     }
 
+    /**
+     * DAR-BE-192 (2026-11-21): when a run's records were read, for an order's age (the brain's in-flight grace). A replay's
+     * document names the captured run it replays (replayOfRunFolder, its last segment yyyyMMdd-HHmmssSSS as the run wrote it,
+     * UTC on the servers), so its orders are as old as they were then; any other document's own timestamp is its compare time,
+     * minutes after the read. Null when neither parses: then no order is in flight.
+     */
+    static Long readAtOf(Map metadata) {
+        String replayOf = normalize(metadata?.replayOfRunFolder)
+        if (replayOf) {
+            java.util.regex.Matcher m = (replayOf =~ /(\d{8}-\d{9})(?:-[A-Za-z0-9_]+)?\/*$/)
+            if (!m.find()) return null
+            try {
+                return java.time.LocalDateTime.parse(m.group(1), java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmssSSS"))
+                        .toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
+            } catch (Exception ignored) {
+                return null
+            }
+        }
+        return darpan.conclusion.brain.BrainFactAdapter.epochMillis(normalize(metadata?.timestamp))
+    }
+
     /** The side labels as the result document itself records them — what the rows' presentIn/missingIn use. */
     static Map documentLabels(File diffFile) {
         JsonSlurper slurper = new JsonSlurper()
         String metadataPrefix = "\"metadata\":"
-        Map labels = [file1Label: null, file2Label: null]
+        Map labels = [file1Label: null, file2Label: null, readAtMillis: null]
         diffFile.withReader("UTF-8") { Reader reader ->
             BufferedReader lines = new BufferedReader(reader)
             String line
@@ -389,6 +410,7 @@ class RunConclusionStep {
                     if (metadata instanceof Map) {
                         labels.file1Label = normalize(((Map) metadata).file1Label)
                         labels.file2Label = normalize(((Map) metadata).file2Label)
+                        labels.readAtMillis = readAtOf((Map) metadata)
                     }
                     break
                 }

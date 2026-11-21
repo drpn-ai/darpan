@@ -31,10 +31,12 @@ class BrainConclude {
      * args: kind, tenantId, findings ([key, bucket, sides] each), fetchQuestion(question, ids) -> id -> record, labelFor(code);
      * catalog (BrainQuestionCatalog entries, default all of them); shareAnswers (default true): false neither reads nor writes
      * BrainAnswerStore, the answers every check in this JVM shares (DAR-BE-318, ruling P2-27: a replay, whose answers come only
-     * from its captured lookups and must never reach a live run's, nor take one of theirs).
+     * from its captured lookups and must never reach a live run's, nor take one of theirs). readAtMillis (DAR-BE-192): when the
+     * records were read, so an order's age is the age it had then (a replay passes its captured run's time); none, no ages.
      */
     static Map run(Map args) {
         String kind = (String) args.kind
+        Long readAtMillis = args.readAtMillis == null ? null : (args.readAtMillis as Long)
         boolean shareAnswers = args.shareAnswers != false
         String tenantId = (String) args.tenantId
         Closure fetchQuestion = (Closure) args.fetchQuestion
@@ -57,7 +59,7 @@ class BrainConclude {
         Closure<Void> tally = { String q, String what, int n -> if (n && ledger.containsKey(q)) ledger.get(q).put(what, ledger.get(q).get(what) + n) }
         List<String> warnings = []
 
-        List<Map> round = batches.collect { fire(engine, kind, it, answers) }
+        List<Map> round = batches.collect { fire(engine, kind, it, answers, readAtMillis) }
         int asked = 0, reused = 0, dropped = 0
         Map<String, Integer> ranks = BrainQuestions.mayEnableRanks(engine)
         // A question that failed for a subject is not asked again in a later round of the same pass.
@@ -121,7 +123,7 @@ class BrainConclude {
             }
             if (!gained) break
             round = batches.withIndex().collect { List<Map> batch, int i ->
-                touches(kind, batch, answers, catalog) ? fire(engine, kind, batch, answers) : round[i]
+                touches(kind, batch, answers, catalog) ? fire(engine, kind, batch, answers, readAtMillis) : round[i]
             }
         }
         Map<String, Map> byKey = [:]
@@ -162,11 +164,12 @@ class BrainConclude {
         return out
     }
 
-    private static Map fire(BrainEngine engine, String kind, List<Map> batch, Map<String, Map<String, Map>> answers) {
+    private static Map fire(BrainEngine engine, String kind, List<Map> batch, Map<String, Map<String, Map>> answers,
+                            Long readAtMillis) {
         Map<String, Object> world = [:]
         return engine.fire(batch.collectMany {
             BrainFactAdapter.facts(kind, it, answers.get(BrainFactAdapter.ORDER_PAYMENTS), world,
-                    answers.get(BrainFactAdapter.PRODUCT_NETSUITE_ID), answers)
+                    answers.get(BrainFactAdapter.PRODUCT_NETSUITE_ID), answers, readAtMillis)
         } as List<Object>)
     }
 

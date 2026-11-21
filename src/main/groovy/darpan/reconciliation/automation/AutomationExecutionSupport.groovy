@@ -2511,7 +2511,10 @@ class AutomationExecutionSupport {
         Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connectorForService, serviceParams, [
                 tenantId   : serviceParams.companyUserGroupId, windowStart: serviceParams.windowStartDate,
                 windowEnd  : serviceParams.windowEndDate, stateMode: isStateWindowMode(automation) && connectorForService?.supportsStateExtract,
-                outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId]))
+                outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId,
+                // DAR-BE-318 (plan 3b-2b): an effective-SPARK side's plan, so the slice leaves Keep to Spark and a projecting
+                // source keeps the fields Spark's Keep reads (KeptCopySupport.callProjection); any other side slices as today.
+                sideKeep   : KeepPlanSupport.SPARK == sideKeep.placement ? sideKeep : null]))
         if (served.served) {
             return KeptCopySupport.extractResult(served) + [readWindowFrom: serviceParams.windowStartDate,
                                                             readWindowThru: serviceParams.windowEndDate]

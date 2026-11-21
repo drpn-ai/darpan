@@ -53,6 +53,7 @@ class AutomationKeepParityTests {
     private static final String LEDGER_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#LedgerRecords"
     private static final String SPARK_COPY_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkCopyRecords"
     private static final String READ_COPY_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#ReadCopyRecords"
+    private static final String SPARK_PROJ_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkProjRecords"
     private static final Timestamp FIRE = Timestamp.valueOf("2026-11-21 06:00:00")
     /** The kept copies are read at this clock: their readThru covers the previous-day window FIRE resolves. */
     private static final Instant COPY_READ_AT = Instant.parse("2026-11-22T00:00:00Z")
@@ -96,6 +97,7 @@ class AutomationKeepParityTests {
         seed()
         keptDataset("ACME_COPY_SPARK")
         keptDataset("ACME_COPY_READ")
+        keptDataset("ACME_COPY_PROJ")
     }
 
     @AfterAll
@@ -223,6 +225,29 @@ class AutomationKeepParityTests {
         assertEquals(JsonOutput.toJson(spark.document.differences), JsonOutput.toJson(gated.document.differences))
     }
 
+    @Test
+    void aServedSparkSideOfAProjectingSourceKeepsTheKeepFieldsInItsSlice() {
+        // The automation hands its Keep plan to the slice (run.sideKeep): a projecting source's slice keeps only the fields
+        // the side asks for (id, createdAt), so without the plan it would drop status, region and total, and Spark's Keep
+        // would set every record aside for want of region (the window closes NO_DATA). With it, the projection keeps them
+        // and Keep judges them.
+        darpan.dataset.MadeUpKeptRecords.CALLS.clear()
+        List<Map> calls = []
+        Map served = run("KAP_COPY_PROJ", calls)
+        assertFalse(calls.any { it.service == SPARK_PROJ_EXTRACT }, "a served side never calls its live extract")
+        assertEquals(true, json(served.extract).metadata?.servedFromCopy, "side 1 was served from the kept copy")
+        Map projected = darpan.dataset.MadeUpKeptRecords.CALLS.find { it.recordsFile }
+        assertNotNull(projected, "the slice went through the projecting source's service")
+        assertEquals(["id", "createdAt", "status", "region", "total"], projected.side.keepFields)
+        assertEquals(["status", "region", "total"], projected.side.filterFields)
+        assertEquals(COPY_ORDERS.size(), records(served.extract).size(), "the slice is unfiltered")
+        assertTrue(records(served.extract).every { Map r -> r.keySet().containsAll(["id", "createdAt", "status"]) })
+        assertEquals(["K1", "K7", "K8"], kept(served.extract)*.id)
+        assertEquals(["K2", "K3", "K4", "K5", "K6"], ((List<Map>) sideFile(served.extract).records)*.id)
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, served.execution.statusEnumId)
+        assertEquals(3, served.execution.file1RecordCount)
+    }
+
     // ---------------------------------------------------------------------------------------------------------- the run
 
     /** The automation run once, scheduled; its execution row, its side-1 extract and its result document. */
@@ -304,7 +329,8 @@ class AutomationKeepParityTests {
          KAP_COPY_SPARK: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
          KAP_COPY_SPARK_LIVE: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
          KAP_COPY_SPARK_TWIN: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
-         KAP_COPY_READ: ["ACME_COPY_READ", READ_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]]].each { String id, List side1 ->
+         KAP_COPY_READ: ["ACME_COPY_READ", READ_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
+         KAP_COPY_PROJ: ["ACME_COPY_PROJ", SPARK_PROJ_EXTRACT, false, [projConfigId: COPY_CONFIG, keepFields: ["id", "createdAt"]]]].each { String id, List side1 ->
             automations << """
             <darpan.reconciliation.ReconciliationAutomation automationId="${id}" automationName="${id}" companyUserGroupId="${TENANT}"
                 inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_RS" savedRunType="ruleset"
@@ -342,6 +368,11 @@ class AutomationKeepParityTests {
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="ACME_COPY_TYPE"
                 configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
                 excludedRecordsSidecar="Y" enabled="Y"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_COPY_PROJ" extractServiceName="${SPARK_PROJ_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="ACME_COPY_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="Y" keepFieldsParameterName="keepFields"
+                keepFieldsBase="id,createdAt" filterParameterName="sourceFilters" excludedRecordsSidecar="Y"
+                servingProjectionServiceName="test.KeptCopyTestServices.project#MadeUpKeptRecords" enabled="Y"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LEDGER" extractServiceName="${LEDGER_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" enabled="Y"/>
             <darpan.rule.RuleSet ruleSetId="KAP_RS" ruleSetName="ACME orders vs ledger" companyUserGroupId="${TENANT}"/>

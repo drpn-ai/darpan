@@ -69,6 +69,23 @@
         <out-parameters><parameter name="fileLocation"/></out-parameters>
         <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
     </service>
+    <!-- SparkProjRecords: a projecting source's extract (its connector names test.KeptCopyTestServices.project#MadeUpKeptRecords),
+         which keeps only the fields it is asked for (keepFields) and takes no sourceFilters. -->
+    <service verb="extract" noun="SparkProjRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="keepFields" type="List"/>
+            <parameter name="keepRuleFields" type="List"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
     <service verb="extract" noun="LedgerRecords" allow-remote="false">
         <in-parameters>
             <parameter name="windowStart"/>

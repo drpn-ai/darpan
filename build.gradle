@@ -113,6 +113,11 @@ dependencies {
     implementation 'org.drools:drools-mvel:10.2.0'
     implementation 'org.drools:drools-xml-support:10.2.0'
     implementation 'org.kie:kie-api:10.2.0'
+    // DAR-BE-318 (Ruling 3b2b-13): Keep in Spark runs moqui-rules' own value checks (ValueChecks.likeMatches and
+    // normalizedText) inside its UDFs, so a Keep line means exactly what the rule engine means. compileOnly: the
+    // component is installed beside darpan and its jar is on the Moqui classpath at run time; tests need it too.
+    compileOnly project(':runtime:component:moqui-rules')
+    testImplementation project(':runtime:component:moqui-rules')
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'

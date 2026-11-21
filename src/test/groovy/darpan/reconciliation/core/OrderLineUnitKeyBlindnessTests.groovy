@@ -1,6 +1,5 @@
 package darpan.reconciliation.core
 
-import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.RowFactory
@@ -9,12 +8,9 @@ import org.apache.spark.sql.types.DataTypes
 import org.apache.spark.sql.types.StructType
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
-
-import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 
@@ -34,13 +30,22 @@ class OrderLineUnitKeyBlindnessTests {
     /** ASCII Unit Separator, the shipped composite-key delimiter. Never hardcode a visible one. */
     private static final String SEP = ReconciliationServices.COMPOSITE_KEY_DELIMITER
 
+    /** reconcileIdDataFrames reads only ec.contextStack (the inputs) and ec.message on its error path: a stub carries both. */
+    private Map<String, Object> contextStack = [:]
     private ExecutionContext ec
+
+    private ExecutionContext stubEc() {
+        Map<String, Object> stack = contextStack
+        ExecutionContext stub = ([:] as ExecutionContext)
+        // contextStack is an ExecutionContextImpl getter, not on the interface: per-instance metaClass supplies it.
+        stub.metaClass.getContextStack = { -> stack }
+        return stub
+    }
     private SparkSession spark
 
     @BeforeAll
     void setup() {
-        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
-        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "order-line-unit-key")
+        ec = stubEc()
         // One session for the whole class: per-test create/stop races the next test's getOrCreate
         // against the previous stop and intermittently hands out a dead session.
         spark = SparkSession.builder().appName("OrderLineUnitKeyBlindnessTests").master("local[1]")
@@ -50,12 +55,6 @@ class OrderLineUnitKeyBlindnessTests {
     @AfterAll
     void cleanup() {
         if (spark != null) spark.stop()
-        ReconciliationSmokeTestSupport.cleanupMoqui(ec)
-    }
-
-    @BeforeEach
-    void clearErrors() {
-        ec.message.clearErrors()
     }
 
     private Dataset<Row> frameOf(List<String> compareIds) {
@@ -66,10 +65,11 @@ class OrderLineUnitKeyBlindnessTests {
 
     /**
      * Drives the real public entry point rather than a test-only shim: reconcileIdDataFrames reads
-     * its inputs from ec.contextStack, which is the same object ec.context returns.
+     * its inputs from ec.contextStack (a plain map here, no Moqui).
      */
     private Map<String, Object> reconcile(Dataset<Row> df1, Dataset<Row> df2) {
-        ec.context.putAll([df1: df1, df2: df2, idColumnName: "compare_id",
+        contextStack.clear()
+        contextStack.putAll([df1: df1, df2: df2, idColumnName: "compare_id",
                            df1Label: "Shopify", df2Label: "OMS"])
         return ReconciliationServices.reconcileIdDataFrames(ec)
     }

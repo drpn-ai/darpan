@@ -40,14 +40,22 @@ class AuditRunUpdateSupport {
     static final String EMAIL_TEMPLATE = "DARPAN_AUDIT_RUN"
 
     /** Every run-update email goes through here, so tests record sends instead of making them. */
-    static Closure sendEmail = { def ec, String toAddresses, Map bodyParameters, List<Map> attachments ->
+    private static final Closure DEFAULT_SEND_EMAIL = { def ec, String toAddresses, Map bodyParameters, List<Map> attachments ->
         AutomationExecutionSupport.dispatchInternalService(ec, "org.moqui.impl.EmailServices.send#EmailTemplate",
                 [emailTemplateId: EMAIL_TEMPLATE, toAddresses: toAddresses, bodyParameters: bodyParameters, attachments: attachments])
     }
+    static Closure sendEmail = DEFAULT_SEND_EMAIL
 
     /** How a finished execution hands the update to the background; tests call it in line. */
-    static Closure dispatch = { def ec, Map params ->
+    private static final Closure DEFAULT_DISPATCH = { def ec, Map params ->
         ec.service.async().name(SERVICE).parameters(params).call()
+    }
+    static Closure dispatch = DEFAULT_DISPATCH
+
+    /** Test-only: restores both seams to their production values. Idempotent; never called from src/main. */
+    static void resetForTests() {
+        sendEmail = DEFAULT_SEND_EMAIL
+        dispatch = DEFAULT_DISPATCH
     }
 
     /**

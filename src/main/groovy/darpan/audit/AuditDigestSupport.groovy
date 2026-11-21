@@ -39,10 +39,14 @@ class AuditDigestSupport {
     private static final java.util.regex.Pattern EMAIL = ~/[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+/
 
     /** Every digest email goes through here, so tests record sends instead of making them (as PasswordResetSupport). */
-    static Closure sendEmail = { def ec, String toAddresses, Map bodyParameters ->
+    private static final Closure DEFAULT_SEND_EMAIL = { def ec, String toAddresses, Map bodyParameters ->
         AutomationExecutionSupport.dispatchInternalService(ec, "org.moqui.impl.EmailServices.send#EmailTemplate",
                 [emailTemplateId: EMAIL_TEMPLATE, toAddresses: toAddresses, bodyParameters: bodyParameters])
     }
+    static Closure sendEmail = DEFAULT_SEND_EMAIL
+
+    /** Test-only: restores the seam to its production value. Idempotent; never called from src/main. */
+    static void resetForTests() { sendEmail = DEFAULT_SEND_EMAIL }
 
     /**
      * The digest text. weekAgo is the report of seven mornings before, for a weekly summary; null for a daily one.

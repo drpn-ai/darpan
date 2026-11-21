@@ -27,6 +27,9 @@ class BrainEngine {
     static final String RESOURCE_DIR = "darpan/conclusion/brain/"
     private static final Map<String, BrainEngine> CACHE = new ConcurrentHashMap<>()
 
+    /** Test-only: drops every compiled engine so the next forPacks compiles afresh. Idempotent; never called from src/main. */
+    static void resetForTests() { CACHE.clear() }
+
     final List<String> packs
     private final KieContainer container
 

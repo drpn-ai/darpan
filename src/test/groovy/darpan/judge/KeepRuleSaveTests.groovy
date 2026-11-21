@@ -54,11 +54,13 @@ class KeepRuleSaveTests {
                 permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM_DATE])
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])
 
+        insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanSystemSource", description: "Darpan system source"])
+        ["ACME", "BRAVO"].each { insert("moqui.basic.Enumeration", [enumId: it, enumTypeId: "DarpanSystemSource", description: "Made-up system " + it]) }
         actAs(A)
-        checkA = seedCheck(A, "keep-save")
-        checkB = seedCheck(B, "keep-save-b")
+        checkA = seedCheck(A, "keep-save", "ACME", "BRAVO")
+        checkB = seedCheck(B, "keep-save-b", "ACME", "BRAVO")
         // A's pair fact type: file1 holds orderId and amount, file2 tranId, and one ask field.
-        Map generated = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", [checkId: checkA,
+        Map generated = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", [checkId: checkA, file1SystemEnumId: "ACME", file2SystemEnumId: "BRAVO",
                 sampleKeys: [file1: ["orderId", "amount"], file2: ["tranId"], asks: ["ask_orders_status"]]]))
         factTypeId = generated.factTypeId
     }
@@ -77,7 +79,7 @@ class KeepRuleSaveTests {
     void anExistsLineOnAKeepDecisionIsRefusedAndNothingIsSaved() {
         String decision = decision(checkA, "CDS_KEEP_FILE_1", factTypeId)
         Map result = storeRule(decision, "has a list", 10, [[conditionSeqId: "01", conditionTypeId: "RCT_EXISTS", factTypeId: factTypeId,
-                fieldName: "file1_orderId"]])
+                fieldName: "acme_orderId"]])
         assertRefused(result, "Keep line 01: an exists line reads a list, and Keep sets aside whole records only")
         assertEquals([], rows("rules.RuleSetRule", [ruleSetId: decision]), "nothing saved")
     }
@@ -89,8 +91,8 @@ class KeepRuleSaveTests {
                 [conditionSeqId: "01", conditionTypeId: "RCT_PIECE", factTypeId: factTypeId, compareValue: "SOME_PIECE"],
                 [conditionSeqId: "02", conditionTypeId: "RCT_COMPARE", factTypeId: factTypeId, fieldName: "ask_orders_status",
                  operatorEnumId: "ENTCO_EQUALS", compareValue: "OPEN"],
-                [conditionSeqId: "03", conditionTypeId: "RCT_COMPARE_FIELD", factTypeId: factTypeId, fieldName: "file1_orderId",
-                 operatorEnumId: "ENTCO_EQUALS", compareFieldName: "file1_amount"]])
+                [conditionSeqId: "03", conditionTypeId: "RCT_COMPARE_FIELD", factTypeId: factTypeId, fieldName: "acme_orderId",
+                 operatorEnumId: "ENTCO_EQUALS", compareFieldName: "acme_amount"]])
         assertRefused(result, "Keep line 01: a piece cannot be used in Keep; write its lines out")
         assertRefused(result, "Keep line 02: ask_orders_status comes from an ask, which runs after Keep")
         assertRefused(result, "Keep line 03: Keep compares one field with fixed values, not with another field")
@@ -98,29 +100,45 @@ class KeepRuleSaveTests {
     }
 
     @Test
+    void aValidLineSavesOnASystemPrefixedPairType() {
+        String decision = decision(checkA, "CDS_KEEP_FILE_1", factTypeId)
+        assertEquals([], storeRule(decision, "acme field", 10, [compare("01", "acme_orderId", "ENTCO_EQUALS", "X")]).errors)
+        assertEquals(1, rows("rules.RuleSetRule", [ruleSetId: decision]).size())
+    }
+
+    @Test
+    void aCheckWithNoSavedRunIsRefusedNotGuessed() {
+        String bare = seedCheck(A, "keep-no-run", null, null)
+        String decision = decision(bare, "CDS_KEEP_FILE_1", factTypeId)
+        Map result = storeRule(decision, "no run", 10, [compare("01", "acme_orderId", "ENTCO_EQUALS", "X")])
+        assertRefused(result, "Keep cannot check these lines: the check has no saved run with two systems, so its file 1 field names are unknown")
+        assertEquals([], rows("rules.RuleSetRule", [ruleSetId: decision]))
+    }
+
+    @Test
     void aFieldOfTheOtherSideIsRefusedOnTheSideItsStageNames() {
         String decision = decision(checkA, "CDS_KEEP_FILE_2", factTypeId)
-        Map result = storeRule(decision, "other side", 10, [compare("01", "file1_orderId", "ENTCO_EQUALS", "X")])
-        assertRefused(result, "Keep line 01: file1_orderId is not a file2 record field")
+        Map result = storeRule(decision, "other side", 10, [compare("01", "acme_orderId", "ENTCO_EQUALS", "X")])
+        assertRefused(result, "Keep line 01: acme_orderId is not a bravo record field")
         assertEquals([], rows("rules.RuleSetRule", [ruleSetId: decision]))
         // The same line on file 2's own field saves.
-        assertEquals([], storeRule(decision, "own side", 10, [compare("01", "file2_tranId", "ENTCO_EQUALS", "X")]).errors)
+        assertEquals([], storeRule(decision, "own side", 10, [compare("01", "bravo_tranId", "ENTCO_EQUALS", "X")]).errors)
         assertEquals(1, rows("rules.RuleSetRule", [ruleSetId: decision]).size())
     }
 
     @Test
     void aFieldThatIsNotInTheSidesPairFactTypeIsRefusedAtSave() {
-        // A made-up fact type ACME_PAIR names file1_ghost; the decision may read it, but the check's pair fact type does not hold it.
+        // A made-up fact type ACME_PAIR names acme_ghost; the decision may read it, but the check's pair fact type does not hold it.
         String acme = ok(underFacadeGrant("create#rules.FactType", [description: "ACME_PAIR"])).factTypeId
-        ["compareId", "file1_presence", "file2_presence", "claim", "file1_ghost", "file1_orderId"].each { String name ->
+        ["compareId", "acme_presence", "bravo_presence", "claim", "acme_ghost", "acme_orderId"].each { String name ->
             ok(underFacadeGrant("create#rules.FactField", [factTypeId: acme, fieldName: name, valueTypeEnumId: "FVT_TEXT"]))
         }
         String decision = decision(checkA, "CDS_KEEP_FILE_1", acme)
-        Map result = storeRule(decision, "ghost", 10, [compare("01", "file1_ghost", "ENTCO_EQUALS", "X")], acme)
-        assertRefused(result, "Keep line 01: file1_ghost is not a field of this check's pair fact type, so Keep cannot read it from a file 1 record")
+        Map result = storeRule(decision, "ghost", 10, [compare("01", "acme_ghost", "ENTCO_EQUALS", "X")], acme)
+        assertRefused(result, "Keep line 01: acme_ghost is not a field of this check's pair fact type, so Keep cannot read it from a file 1 record")
         assertEquals([], rows("rules.RuleSetRule", [ruleSetId: decision]), "nothing saved")
         // A field the pair fact type holds saves.
-        assertEquals([], storeRule(decision, "known", 20, [compare("01", "file1_orderId", "ENTCO_EQUALS", "X")], acme).errors)
+        assertEquals([], storeRule(decision, "known", 20, [compare("01", "acme_orderId", "ENTCO_EQUALS", "X")], acme).errors)
     }
 
     @Test
@@ -129,8 +147,8 @@ class KeepRuleSaveTests {
         Map result = storeRule(decision, "same lines", 10, [
                 [conditionSeqId: "01", conditionTypeId: "RCT_COMPARE", factTypeId: factTypeId, fieldName: "ask_orders_status",
                  operatorEnumId: "ENTCO_EQUALS", compareValue: "OPEN"],
-                [conditionSeqId: "02", conditionTypeId: "RCT_COMPARE_FIELD", factTypeId: factTypeId, fieldName: "file1_orderId",
-                 operatorEnumId: "ENTCO_EQUALS", compareFieldName: "file1_amount"]])
+                [conditionSeqId: "02", conditionTypeId: "RCT_COMPARE_FIELD", factTypeId: factTypeId, fieldName: "acme_orderId",
+                 operatorEnumId: "ENTCO_EQUALS", compareFieldName: "acme_amount"]])
         assertEquals([], result.errors)
         assertEquals(1, rows("rules.RuleSetRule", [ruleSetId: decision]).size())
     }
@@ -165,9 +183,24 @@ class KeepRuleSaveTests {
         return [conditionSeqId: seq, conditionTypeId: "RCT_COMPARE", fieldName: field, operatorEnumId: op, compareValue: value]
     }
 
-    private String seedCheck(String tenant, String code) {
+    /** A check whose saved run reads system1 on file 1 and system2 on file 2 (null system1: no saved run). */
+    private String seedCheck(String tenant, String code, String system1, String system2) {
         String checkId = ec.entity.sequencedIdPrimary("darpan.audit.AuditCheck", null, null)
-        insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: tenant, checkCode: code, label: "check ${code}".toString()])
+        String savedRunId = system1 ? "KRS_RUN_" + code : null
+        if (savedRunId) {
+            insert("darpan.rule.RuleSet", [ruleSetId: savedRunId, ruleSetName: "Keep save run " + code, version: "1.0",
+                    companyUserGroupId: tenant, createdByUserId: EDITOR_ID])
+        }
+        insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: tenant, checkCode: code, label: "check ${code}".toString(),
+                savedRunId: savedRunId])
+        if (system1) {
+            insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "KRS_SCOPE_" + code, ruleSetId: savedRunId, companyUserGroupId: tenant,
+                    scopeMode: "COMPARE"])
+            insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "KRS_SCOPE_" + code, fileSide: "FILE_1", systemEnumId: system1,
+                    companyUserGroupId: tenant])
+            insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "KRS_SCOPE_" + code, fileSide: "FILE_2", systemEnumId: system2,
+                    companyUserGroupId: tenant])
+        }
         insert("darpan.judge.CheckAsk", [checkId: checkId, askName: "orders", companyUserGroupId: tenant, subjectSide: "FILE_1",
                 idField: "orderId", systemEnumId: "OMS", sourceConfigId: "CFG", keyField: "id", many: "N", keepRecordFields: "status"])
         return checkId

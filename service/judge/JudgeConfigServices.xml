@@ -176,7 +176,29 @@
                     <econdition field-name="checkId" from="keepDecision.checkId"/>
                     <econdition field-name="companyUserGroupId" from="tenantId"/>
                 </entity-find>
-                <set field="pairFactTypeId" from="keepCheckList ? keepCheckList[0].pairFactTypeId : null"/>
+                <set field="keepCheck" from="keepCheckList ? keepCheckList[0] : null"/>
+                <!-- The side prefixes the check's pair fact type was generated with: its saved run's two systems, as
+                     generate#PairFactType and the replay read them. Nothing found is a refusal, never a guessed prefix. -->
+                <set field="systemBySide" from="[:]"/>
+                <if condition="keepCheck?.savedRunId">
+                    <entity-find entity-name="darpan.rule.RuleSetCompareScope" list="keepScopeList">
+                        <econdition field-name="ruleSetId" from="keepCheck.savedRunId"/>
+                        <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    </entity-find>
+                    <if condition="keepScopeList.size() == 1">
+                        <entity-find entity-name="darpan.rule.RuleSetCompareSource" list="keepSourceList">
+                            <econdition field-name="compareScopeId" from="keepScopeList[0].compareScopeId"/>
+                            <econdition field-name="companyUserGroupId" from="tenantId"/>
+                        </entity-find>
+                        <set field="systemBySide" from="keepSourceList.collectEntries { [(it.fileSide): it.systemEnumId] }"/>
+                    </if>
+                </if>
+                <if condition="!systemBySide.containsKey('FILE_1') || !systemBySide.containsKey('FILE_2')">
+                    <message error="true">Keep cannot check these lines: the check has no saved run with two systems, so its ${sideWord} field names are unknown</message>
+                    <continue/>
+                </if>
+                <set field="sidePrefix" from="darpan.judge.PairFactSupport.sidePrefixes(systemBySide.FILE_1, systemBySide.FILE_2)[keepDecision.stageEnumId == 'CDS_KEEP_FILE_1' ? 0 : 1]"/>
+                <set field="pairFactTypeId" from="keepCheck.pairFactTypeId"/>
                 <set field="factFieldList" from="[]"/>
                 <if condition="pairFactTypeId">
                     <entity-find entity-name="rules.FactField" list="factFieldList">
@@ -185,11 +207,8 @@
                     </entity-find>
                 </if>
                 <script><![CDATA[
-                    // The side's prefix is the one its presence field was named with (generate#PairFactType); file1/file2 when none.
                     Map fieldKinds = [:]
                     factFieldList.each { fieldKinds.put(it.fieldName, it.valueTypeEnumId) }
-                    def presence = factFieldList.find { it.fieldName.endsWith('_presence') && it.description?.endsWith('on ' + sideWord) }
-                    String sidePrefix = presence ? presence.fieldName.substring(0, presence.fieldName.length() - '_presence'.length()) : sideWord.replace(' ', '')
                     List keepRefusals = []
                     try {
                         keepRefusals.addAll(darpan.reconciliation.source.KeepLineTranslator.refusals(conditions as List<Map>, sidePrefix, fieldKinds))

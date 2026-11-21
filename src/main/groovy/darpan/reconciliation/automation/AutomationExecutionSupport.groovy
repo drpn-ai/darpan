@@ -2511,10 +2511,10 @@ class AutomationExecutionSupport {
         Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connectorForService, serviceParams, [
                 tenantId   : serviceParams.companyUserGroupId, windowStart: serviceParams.windowStartDate,
                 windowEnd  : serviceParams.windowEndDate, stateMode: isStateWindowMode(automation) && connectorForService?.supportsStateExtract,
-                outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId, sideKeep: sideKeep]))
+                outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId]))
         if (served.served) {
             return KeptCopySupport.extractResult(served) + [readWindowFrom: serviceParams.windowStartDate,
-                                                            readWindowThru: serviceParams.windowEndDate, (SIDE_KEEP): sideKeep]
+                                                            readWindowThru: serviceParams.windowEndDate]
         }
         logger.info("${serviceParams.fileSide} reads live, not from a kept copy: ${served.reason}")
 
@@ -2590,11 +2590,8 @@ class AutomationExecutionSupport {
      * <li>READ (a data-defined endpoint, Ruling 3b2b-16): the read gets the rows and filters, as today.</li>
      * <li>SPARK: the read gets no rows; Spark runs the connector's built-ins and the rows at the compare's ingest.</li>
      * </ul>
-     * Until a connector stops filtering (plan 3b-2b Tasks 17-23, which drop the filter parameter from its extract service),
-     * its extract still filters: a SPARK side whose extract service still declares the connector's filter parameter keeps
-     * its Keep at the read, exactly as today, and Spark runs nothing over it. Running both would set aside nothing more but
-     * would replace the extract's exclusion counts with the Keep summary's zeros, which conclusions read as authoritative.
-     * keepInSpark false (a caller whose compare takes no keepBySide, KEEP_IN_SPARK) keeps a SPARK side at the read too.
+     * A SPARK side keeps today's read (KeepPlanSupport.todaysRead) until its extract stops filtering (KeepPlanSupport.sparkKeepsSide,
+     * Ruling 3b2b-23), and whenever the caller's compare takes no keepBySide (keepInSpark false, KEEP_IN_SPARK).
      */
     static Map sideKeepOf(def ec, def automation, def source, Map connector, String serviceName, Map extractOptions,
                           boolean keepInSpark) {
@@ -2603,9 +2600,8 @@ class AutomationExecutionSupport {
         List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
                 normalize(readField(source, "fileSide")), normalize(readField(automation, "companyUserGroupId")))
         if (placement == KeepPlanSupport.SPARK &&
-                (!keepInSpark || declaresParameter(ec, serviceName, normalize(connector.get("filterParameterName"))))) {
-            return [placement: KeepPlanSupport.READ, readFilters: rows, rules: [], writeSidecar: false,
-                    fields   : new LinkedHashSet<String>(rows.collect { it.fieldExpression as String })]
+                (!keepInSpark || !KeepPlanSupport.sparkKeepsSide(connector, serviceName ? ec.service.getServiceDefinition(serviceName) : null))) {
+            return KeepPlanSupport.todaysRead(rows)
         }
         return KeepPlanSupport.sideKeepFromFilterRows(ec, rows, connector, extractOptions)
     }

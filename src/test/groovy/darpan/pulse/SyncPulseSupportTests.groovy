@@ -75,10 +75,11 @@ class SyncPulseSupportTests {
     }
 
     @Test
-    void windowIsAllowancePlusTwoCadences() {
+    void windowIsAllowancePlusTwoCadencesSlackAndATick() {
         Map w = SyncPulseSupport.pulseWindow(NOW, 60, 120)
-        assertEquals(NOW.minus(Duration.ofMinutes(60 + 240)), w.from)
+        assertEquals(NOW.minus(Duration.ofMinutes(60 + 240 + 2 + 5)), w.from)
         assertEquals(NOW, w.thru)
+        assertEquals(NOW.minus(Duration.ofMinutes(60)), SyncPulseSupport.pulseWindow(NOW, 60, null).from, "no cadence, no margin")
     }
 
     @Test

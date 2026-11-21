@@ -56,6 +56,8 @@ class SyncPulseSupport {
     static final String LABEL_PREFIX = "pulse "
     /** The job ticks every 5 minutes with some jitter: a pulse is due this much early rather than a whole tick late. */
     static final Duration DUE_SLACK = Duration.ofMinutes(2)
+    /** One tick of the job. */
+    static final Duration TICK = Duration.ofMinutes(5)
 
     private static final String SCAN_WHY = "system-cron cross-tenant sweep of sync pairs; no active tenant in scheduler context"
     private static final String WHY = "sync pulse reads one pair's rows (no active tenant): explicit companyUserGroupId condition applied"
@@ -118,9 +120,15 @@ class SyncPulseSupport {
         return !now.isBefore(lastAt.plus(Duration.ofMinutes(effectiveCadence)).minus(DUE_SLACK))
     }
 
-    /** The read window of one pulse: (now − allowance − 2 × cadence, now]. A null cadence adds no margin. */
+    /**
+     * The read window of one pulse: (now − allowance − margin, now]. The margin is the longest gap between two pulses after
+     * a skip, 2 × cadence + DUE_SLACK + one tick, so an order passing the allowance in that gap is still read. A null
+     * cadence adds no margin.
+     */
     static Map pulseWindow(Instant now, int allowanceMinutes, Integer cadenceMinutes) {
-        long back = Math.max(0, allowanceMinutes) + 2L * Math.max(0, cadenceMinutes ?: 0)
+        long cadence = Math.max(0, cadenceMinutes ?: 0)
+        long margin = cadence > 0 ? 2L * cadence + DUE_SLACK.toMinutes() + TICK.toMinutes() : 0L
+        long back = Math.max(0, allowanceMinutes) + margin
         return [from: now.minus(Duration.ofMinutes(back)), thru: now]
     }
 
@@ -280,6 +288,7 @@ class SyncPulseSupport {
             Map day = tenantDay(ec, tenantId, now)
             Map effective = effectiveValues(pair, day.windows as List<PeakWindow>, periodRows(ec, pair), day.date as LocalDate)
             allowance = effective.allowanceMinutes as Integer
+            claimPulse(ec, pair, now)
             open = openOrders(ec, pair)
             Map window = pulseWindow(now, allowance, effective.pulseEveryMinutes as Integer)
 
@@ -491,6 +500,21 @@ class SyncPulseSupport {
         return new LinkedHashMap(row.getMap())
     }
 
+    /**
+     * Claims the pulse: stamps lastPulseStamp in its OWN transaction before any read, so a sample write that fails later
+     * cannot roll the stamp back and leave the pair due on every tick.
+     */
+    private static void claimPulse(def ec, Map pair, Instant now) {
+        ec.transaction.runRequireNew(30, "Sync pulse ${pair.syncPairId} could not claim its pulse".toString()) {
+            def row = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", WHY)
+                    .condition("syncPairId", normalize(pair.syncPairId)).condition("companyUserGroupId", normalize(pair.companyUserGroupId))
+                    .useCache(false).list().find()
+            if (row == null) return
+            row.setAll([lastPulseStamp: Timestamp.from(now)])
+            row.update()
+        }
+    }
+
     private static void stampPair(def ec, Map pair, Instant now, String status) {
         def row = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", WHY)
                 .condition("syncPairId", normalize(pair.syncPairId)).condition("companyUserGroupId", normalize(pair.companyUserGroupId))
@@ -572,14 +596,14 @@ class SyncPulseSupport {
         int past = (result.get("pastCount") ?: 0) as int
         Map oldest = result.get("oldest") as Map
         Integer waiting = result.get("waitingCount") as Integer
-        if (past > prior) {
+        if (prior == 0 && past > 0) {
             return [kind: "past", text: pastText(label, allowance, past, oldest, waiting), lastPostedPastCount: past]
         }
         if (past == 0 && prior > 0) {
             return [kind: "clear", text: clearText(label, allowance, oldest, waiting, ((result.get("closed") ?: []) as List).size()),
                     lastPostedPastCount: 0]
         }
-        // fewer past than last said, still some: nothing to announce, but the count moves so a new one posts again
+        // a count that changed but stays above zero announces nothing (the hourly summary carries it); the stored count follows
         Integer stored = past != prior ? (Integer) past : priorPosted
         if (hourlySummary && topOfHour) {
             return [kind: "summary", text: summaryText(label, waiting, oldest, past), lastPostedPastCount: stored]

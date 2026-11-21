@@ -273,7 +273,24 @@ class SyncPulseEngineSmokeTests {
         assertTrue(stamp >= before - 1000 && stamp <= System.currentTimeMillis() + 1000,
                 "sampled when it started (${s.sampleStamp}), not at the scan's ${T0}")
         Instant started = (s.sampleStamp as Timestamp).toInstant()
-        assertEquals(started.minus(Duration.ofMinutes(60 + 120)), upstreamCalls.last().from, "its window ends when it starts")
+        assertEquals(started.minus(Duration.ofMinutes(60 + 127)), upstreamCalls.last().from, "its window ends when it starts")
+    }
+
+    /** A sample write that throws (no SPS_* enums, FK SPSAMPLE_STATUS) leaves the claim stamped: no re-read every tick. */
+    @Test
+    void aSampleWriteThatThrowsStillClaimsThePulse() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        ec.entity.find("moqui.basic.Enumeration").condition("enumId", "in", ["SPS_OK", "SPS_FAILED", "SPS_SKIPPED"])
+                .disableAuthz().deleteAll()
+        try {
+            SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+            assertEquals([], samples(), "the sample write failed")
+            assertEquals(Timestamp.from(T0), pairMap(SP).lastPulseStamp, "the claim survived the rollback")
+            assertEquals(false, SyncPulseSupport.isDue(pairMap(SP), 60, T0.plus(Duration.ofMinutes(5))), "not due on the next tick")
+            assertEquals(1, upstreamCalls.size())
+        } finally {
+            ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SyncPulseSeedData.xml")
+        }
     }
 
     @Test
@@ -295,7 +312,7 @@ class SyncPulseEngineSmokeTests {
         AutomationExecutionSupport.setRunAdmission(admission(false))
         Instant third = T0.plus(Duration.ofMinutes(120))
         assertEquals([], runJob(third).errors)
-        assertEquals(third.minus(Duration.ofMinutes(60 + 120)), upstreamCalls.last().from, "allowance + 2 x cadence back")
+        assertEquals(third.minus(Duration.ofMinutes(60 + 127)), upstreamCalls.last().from, "allowance + 2 x cadence back")
         assertEquals(1, openOrders().size(), "the order the skipped pulse never saw is past its allowance")
         assertEquals("#LATE", openOrders()[0].recordKey)
         assertEquals(1, latestSample().pastAllowanceCount as Integer)
@@ -354,7 +371,7 @@ class SyncPulseEngineSmokeTests {
         assertEquals([], runJob(T0).errors)
         assertEquals(1, samples().size(), "the period's hourly cadence makes it due")
         assertEquals(30, samples()[0].allowanceMinutes as Integer, "and its allowance is the period's")
-        assertEquals(T0.minus(Duration.ofMinutes(30 + 120)), upstreamCalls.last().from)
+        assertEquals(T0.minus(Duration.ofMinutes(30 + 127)), upstreamCalls.last().from)
     }
 
     // ------------------------------------------------------------------------------------------------ helpers

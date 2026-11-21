@@ -131,8 +131,8 @@ class SyncPulseChatTests {
 
         upstream["#A2"] = T0.minus(Duration.ofMinutes(150))
         pulse(T0.plus(Duration.ofMinutes(15)))
-        assertEquals(2, posts.size(), "a new one past is a change")
-        assertTrue((posts[1].text as String).startsWith("${LABEL}: 2 past the 1h allowance."), posts[1].text as String)
+        assertEquals(1, posts.size(), "a rise while some are already past posts nothing")
+        assertEquals(2, pairMap(SP).lastPostedPastCount as Integer, "the count follows")
     }
 
     @Test

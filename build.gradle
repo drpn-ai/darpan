@@ -174,6 +174,13 @@ ext.darpanTestForks = ((project.findProperty('testForks')
 // ExecutionContextFactory is a smoke test and needs its own JVM; everything else is a plain
 // unit test that needs no isolation at all and is paying for a JVM it never uses.
 //
+// DAR-OPS-026 adds a third pool, `shared`: the smoke classes whose source contains `@SharedMoqui`.
+// Those classes opt in to JVM reuse (smokeSharedTest, forkEvery = 0): the shared harness resets the
+// database and the process-global statics (ECF, Bitronix, Spark) between classes, so they no longer
+// need a JVM each. Only marked classes join; an unmarked smoke class keeps its own JVM in smokeTest.
+// `smoke` still lists EVERY Moqui-booting class (shared included), so unitTest, sharding and
+// select_tests.py see the same set as before; `shared` is a subset of it.
+//
 // The split is DERIVED from source rather than hand-listed, because a hand-listed pool is how
 // a test silently stops running (see mysqlTest below for what maintaining one by hand costs).
 // scripts/select_tests.py keys off this same marker set — keep them in step.
@@ -182,18 +189,24 @@ ext.darpanTestForks = ((project.findProperty('testForks')
 ext.darpanTestPools = { ->
     List<String> moquiBootMarkers = ['initMoqui(', 'Moqui.dynamicInit', 'ExecutionContextFactoryImpl']
     File testSrc = file('src/test/groovy')
-    List<String> smoke = [], unit = []
+    List<String> smoke = [], unit = [], shared = []
     testSrc.eachFileRecurse { File f ->
         if (!(f.name.endsWith('Test.groovy') || f.name.endsWith('Tests.groovy'))) return
         String classPattern = testSrc.toPath().relativize(f.toPath()).toString()
                 .replaceFirst(/\.groovy$/, '.class')
-        (moquiBootMarkers.any { f.text.contains(it) } ? smoke : unit) << classPattern
+        String text = f.text
+        if (moquiBootMarkers.any { text.contains(it) }) {
+            smoke << classPattern
+            if (text.contains('@SharedMoqui')) shared << classPattern
+        } else {
+            unit << classPattern
+        }
     }
     if (smoke.isEmpty()) {
         throw new GradleException("No test class matched ${moquiBootMarkers} — the marker set has " +
                 "gone stale, and unitTest would silently run Moqui-booting classes in a shared JVM.")
     }
-    return [smoke: smoke.sort(), unit: unit.sort()]
+    return [smoke: smoke.sort(), unit: unit.sort(), shared: shared.sort()]
 }()
 
 test {
@@ -299,6 +312,7 @@ tasks.register('smokeTest', Test) {
 
     useJUnitPlatform { excludeTags 'mysql', 'perf' }
     include pools.smoke
+    exclude pools.shared     // @SharedMoqui classes run in smokeSharedTest
     filter { failOnNoMatchingTests = true }
 
     forkEvery = 1
@@ -308,7 +322,35 @@ tasks.register('smokeTest', Test) {
     jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
 
     doFirst {
-        logger.lifecycle("smokeTest pool: ${pools.smoke.size()} Moqui-booting classes, " +
+        logger.lifecycle("smokeTest pool: ${pools.smoke.size() - pools.shared.size()} Moqui-booting classes " +
+                "(one JVM each; ${pools.shared.size()} @SharedMoqui classes live in smokeSharedTest), " +
+                "${maxParallelForks} JVM(s) at a time.")
+    }
+}
+
+// DAR-OPS-026: smoke classes marked @SharedMoqui, several per JVM. forkEvery = 0 reuses a worker, so
+// the classes in it run one after another in the same process; the shared harness resets the DB and
+// statics between them.
+tasks.register('smokeSharedTest', Test) {
+    group = 'verification'
+    description = 'Run the @SharedMoqui darpan smoke classes, several per JVM (harness resets state between classes).'
+    def pools = darpanTestPools
+
+    useJUnitPlatform { excludeTags 'mysql', 'perf' }
+    include pools.shared
+    // An empty include would select every class; keep the task a no-op instead when nothing is marked yet.
+    onlyIf { !pools.shared.isEmpty() }
+    filter { failOnNoMatchingTests = true }
+
+    forkEvery = 0
+    maxParallelForks = darpanTestForks
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
+
+    doFirst {
+        logger.lifecycle("smokeSharedTest pool: ${pools.shared.size()} @SharedMoqui classes " +
+                "(${pools.unit.size()} unit, ${pools.smoke.size() - pools.shared.size()} one-JVM smoke), " +
                 "${maxParallelForks} JVM(s) at a time.")
     }
 }
@@ -321,8 +363,8 @@ tasks.register('smokeTest', Test) {
 // or CI invocation changes meaning, and nothing silently stops running.
 tasks.register('testAll') {
     group = 'verification'
-    description = 'Run the full darpan suite as unitTest + smokeTest (faster than `test`, same coverage).'
-    dependsOn 'unitTest', 'smokeTest'
+    description = 'Run the full darpan suite as unitTest + smokeTest + smokeSharedTest (faster than `test`, same coverage).'
+    dependsOn 'unitTest', 'smokeTest', 'smokeSharedTest'
 }
 
 // Tests read side 2 after side 1: their harness contexts cannot make a worker context (AutomationExecutionSupport).

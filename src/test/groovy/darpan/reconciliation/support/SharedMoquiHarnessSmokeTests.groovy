@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * caches, the sequence bank and the statics between them — on the same ECF. The second class takes its lifecycle
  * methods from an unmarked base class, as TwoFactorTestSupport's subclasses do.
  */
-@SharedMoqui
+@SharedMoqui(quietAtEnd = false)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SharedMoquiHarnessSmokeTests {
     static final String SETTING_KEY = 'darpan.reconciliation.automation.maxConcurrentExecutions'
@@ -35,6 +35,7 @@ class SharedMoquiHarnessSmokeTests {
     static final String PROBE_ENUM_ID = 'DAR_OPS_026_PROBE'
     /** System.identityHashCode of the ECF each class ran on, in run order. */
     static final List<Integer> ecfSeen = Collections.synchronizedList([])
+    static int lastClassCount = 0
     /** Async writes dirty() started, and those that landed (in the class's own DB, before the next class's reset). */
     static final AtomicInteger asyncStarted = new AtomicInteger()
     static final AtomicInteger asyncWritten = new AtomicInteger()
@@ -92,7 +93,12 @@ class SharedMoquiHarnessSmokeTests {
             ecfSeen << ecf
         }
         assertSame(Moqui.getExecutionContextFactory(), ReconciliationSmokeTestSupport.sharedEcf())
-        assertEquals(ecfSeen.size(), ReconciliationSmokeTestSupport.sharedClassCount())
+        // Other @SharedMoqui classes may run between the two harness classes in this JVM, so the count only has to grow.
+        int classCount = ReconciliationSmokeTestSupport.sharedClassCount()
+        synchronized (ecfSeen) {
+            if (ecfSeen.size() > 1) assertTrue(classCount > lastClassCount, "${who}: class count ${classCount} did not grow past ${lastClassCount}")
+            lastClassCount = classCount
+        }
         assertEquals("test-${ReconciliationSmokeTestSupport.sharedToken()}".toString(), System.getProperty('bitronix.tm.serverId'))
         System.out.println("SharedMoquiHarness: ${who} is class ${ecfSeen.size()} on ECF ${ecf}")
 

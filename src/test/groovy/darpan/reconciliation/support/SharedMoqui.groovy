@@ -23,4 +23,9 @@ import java.lang.annotation.Target
 @Target(ElementType.TYPE)
 @ExtendWith(SharedMoquiExtension)
 @interface SharedMoqui {
+    /**
+     * When true (default) the class fails itself if background work is still running when it ends. Only the harness's
+     * own probe classes set false: they leave async work on purpose to prove the next class's reset waits for it.
+     */
+    boolean quietAtEnd() default true
 }

@@ -145,6 +145,20 @@ class ReconciliationSmokeTestSupport {
      * class ends, an ec it never cleaned up is destroyed here; the ECF stays up.
      */
     static void exitSharedClass(Class<?> testClass) {
+        // The class's own async work must be done when it ends: fail it here, by name, not the next class.
+        SharedMoqui marker = testClass.getAnnotation(SharedMoqui)
+        if (marker == null || marker.quietAtEnd()) {
+            try {
+                awaitSharedQuiet(testClass.name, SHARED_QUIET_TIMEOUT_MILLIS, true)
+            } finally {
+                exitSharedClassState(testClass)
+            }
+            return
+        }
+        exitSharedClassState(testClass)
+    }
+
+    private static void exitSharedClassState(Class<?> testClass) {
         synchronized (SHARED_LOCK) {
             sharedClassStack.removeFirstOccurrence(testClass)
             if (sharedClassStack.isEmpty() && sharedClassEc != null) {
@@ -278,19 +292,70 @@ class ReconciliationSmokeTestSupport {
      * Waits until the shared ECF's worker pools are idle (no active thread, empty queue), its scheduled executor runs
      * nothing, and run admission has nothing running or queued; past timeoutMillis it fails naming previousClass,
      * whose work is still going. The scheduled executor's queue always holds Moqui's periodic tasks, so only its
-     * active count is checked.
+     * active threads are checked, and not those running a Moqui framework periodic task (the ElasticSearch log
+     * flusher blocks in an HTTP bulk call for long stretches).
      */
     static void awaitSharedQuiet(String previousClass, long timeoutMillis) {
+        awaitSharedQuiet(previousClass, timeoutMillis, false)
+    }
+
+    /** atClassEnd: the wait runs when previousClass itself ends, so the message blames it directly. */
+    static void awaitSharedQuiet(String previousClass, long timeoutMillis, boolean atClassEnd) {
         long deadline = System.currentTimeMillis() + timeoutMillis
         String busy
         while ((busy = sharedBusy()) != null) {
             if (System.currentTimeMillis() >= deadline) {
                 throw new IllegalStateException("Shared Moqui: ${previousClass ?: 'the previous class'} left background " +
                         "work running ${timeoutMillis} ms after it ended (${busy}). It would write into the next class's " +
-                        "fresh database: make it wait for its async work in @AfterAll, or leave it unmarked.")
+                        "fresh database: make it wait for its async work in @AfterAll, or leave it unmarked." +
+                        "\nActive pool threads:\n${activePoolThreads()}")
             }
             Thread.sleep(50)
         }
+    }
+
+    /** Moqui's own periodic tasks on the scheduled executor: they never touch a test class's data, so they do not count as leaked work. */
+    private static final List<String> FRAMEWORK_PERIODIC_FRAMES = [
+            'org.moqui.impl.util.ElasticSearchLogger', 'org.moqui.impl.webapp.ElasticRequestLogFilter',
+            'org.moqui.impl.service.ScheduledJobRunner', 'org.moqui.impl.service.ServiceFacadeImpl$ScheduledJobRunner',
+            'org.moqui.jcache.MCache'].asImmutable()
+
+    private static boolean isIdlePoolThread(StackTraceElement[] frames) {
+        return frames.length > 0 && frames[0].methodName == 'park' && frames.any { it.methodName == 'getTask' || it.methodName == 'take' }
+    }
+
+    private static boolean isFrameworkPeriodic(StackTraceElement[] frames) {
+        return frames.any { StackTraceElement f -> FRAMEWORK_PERIODIC_FRAMES.any { String p -> f.className.startsWith(p) } }
+    }
+
+    /** Live Moqui pool threads (workers, jobs, scheduled) that are running something, with their frames. */
+    private static Map<Thread, StackTraceElement[]> activePoolThreadMap() {
+        Map<Thread, StackTraceElement[]> result = new LinkedHashMap<>()
+        Thread.getAllStackTraces().each { Thread t, StackTraceElement[] frames ->
+            if (!(t.name.startsWith('MoquiWorker-') || t.name.startsWith('MoquiJob-') || t.name.startsWith('MoquiScheduled-'))) return
+            if (isIdlePoolThread(frames)) return
+            result.put(t, frames)
+        }
+        return result
+    }
+
+    /** Scheduled-executor threads running something other than a Moqui framework periodic task. */
+    private static int busyScheduledThreadCount() {
+        return activePoolThreadMap().findAll { Thread t, StackTraceElement[] frames ->
+            t.name.startsWith('MoquiScheduled-') && !isFrameworkPeriodic(frames)
+        }.size()
+    }
+
+    /** Name and top 8 frames of each active Moqui pool thread, marking framework periodic tasks (not counted as leaked). */
+    private static String activePoolThreads() {
+        StringBuilder sb = new StringBuilder()
+        activePoolThreadMap().each { Thread t, StackTraceElement[] frames ->
+            sb.append("  ").append(t.name).append(" [").append(t.state).append("]")
+            if (isFrameworkPeriodic(frames)) sb.append(" (Moqui periodic task, not counted)")
+            sb.append("\n")
+            frames.take(8).each { sb.append("      at ").append(it).append("\n") }
+        }
+        return sb.length() == 0 ? "  (none active)" : sb.toString()
     }
 
     private static String sharedBusy() {
@@ -303,9 +368,8 @@ class ReconciliationSmokeTestSupport {
                 busy << "${name}: ${pool.activeCount} active, ${pool.queue.size()} queued".toString()
             }
         }
-        if (ecfi.scheduledExecutor != null && ecfi.scheduledExecutor.activeCount > 0) {
-            busy << "scheduledExecutor: ${ecfi.scheduledExecutor.activeCount} active".toString()
-        }
+        int scheduledBusy = ecfi.scheduledExecutor != null ? busyScheduledThreadCount() : 0
+        if (scheduledBusy > 0) busy << "scheduledExecutor: ${scheduledBusy} active".toString()
         for (RunAdmission admission : [AutomationExecutionSupport.getRunAdmission(), RunAdmission.SHARED].unique { System.identityHashCode(it) }) {
             if (admission == null) continue
             Map<String, Object> state = admission.snapshot()

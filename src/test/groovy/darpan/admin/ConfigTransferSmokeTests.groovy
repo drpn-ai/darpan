@@ -6,6 +6,7 @@ import darpan.admin.transfer.SecretHandoff
 import darpan.audit.AuditSettingsSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.*
  * XFER_OTHER has its own audit and Shopify auth and must never leak; XFER_DST is the empty import target, wiped
  * before every test.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ConfigTransferSmokeTests {
     private ExecutionContext ec

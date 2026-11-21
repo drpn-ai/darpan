@@ -2,6 +2,7 @@ package darpan.content
 
 import darpan.admin.AuditLogTestSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*
  * answers only edited SEED rows and ADMIN rows (to a user with no active tenant too), and the DB-backed rules refuse
  * shadowing and unknown routes, conditions and anchors.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AppContentServicesSmokeTests {
     private ExecutionContext ec

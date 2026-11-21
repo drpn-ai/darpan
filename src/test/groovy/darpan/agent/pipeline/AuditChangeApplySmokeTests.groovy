@@ -4,6 +4,7 @@ import darpan.agent.AgentCallMarker
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*
  * it, only while the plan still matches the config (planHash), and with a config version kept before and after. Plan
  * checks the change with the real save validators and rolls it back. Tenants and rows are synthetic.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AuditChangeApplySmokeTests {
 

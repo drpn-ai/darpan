@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull
  * Its @BeforeAll/@AfterAll come from an unmarked base class: shared mode must hold anyway (the harness reads the
  * running class from JUnit, and keys cleanup on the ec, not on the caller).
  */
-@SharedMoqui
+@SharedMoqui(quietAtEnd = false)
 class SharedMoquiHarnessSecondSmokeTests extends SharedMoquiHarnessInheritedLifecycle {
     @Test
     void dirtiesEveryKindOfStateTheNextClassMustNotSee() {

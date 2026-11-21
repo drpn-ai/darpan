@@ -1349,8 +1349,10 @@
                 one, exactly as a blank filterParameterName means no exclusion rules.</description>
         </field>
         <field name="filterParameterName" type="text-medium">
-            <description>Service parameter this connector's extractor accepts for record-exclusion rules.
-                Absent means the connector does not support exclusion filters and never receives them.</description>
+            <description>DAR-BE-318 (ruling 3b2b-9). Set means this endpoint takes Keep: a side's source filters and the
+                built-ins in keepLinesJson. Where they run is KeepPlanSupport.placement: in Spark after the read, or, for a
+                data-defined endpoint (dataSourceDefinitionId set), at the read, sent as this extract-service parameter. Absent
+                means the endpoint takes no Keep and never receives filters (file uploads, databases).</description>
         </field>
         <field name="lookupServiceName" type="text-medium">
             <description>Optional point-lookup service (lookup#* shape only, enforced by the lookup fence)
@@ -1440,6 +1442,13 @@
             <description>DAR-BE-318 (ruling P3b1-9). A project#* service in the system's own component that implements
                 dataset.DatasetServices.project#KeptRecords: it says whether a kept copy can stand in for a side's live read
                 and trims the side's records as the extract would. Blank: a side that sends keep fields or readFields reads live.</description>
+        </field>
+        <field name="keepLinesJson" type="text-long">
+            <description>DAR-BE-318 (ruling 3b2b-12). This endpoint's built-in Keep lines, as data set by the system's own
+                component, never in core: [{sequenceNum, label, appliesUnless: {extract option: value}, kinds: {field: FVT_*},
+                lines: [RuleSetCondition maps on plain record fields]}]. Compiled by KeepLineTranslator.declared and run in
+                Spark before the tenant's source filters; an entry is skipped when the side sets one of its appliesUnless
+                options to that value. They never appear among a side's configured exclusions. Blank: none.</description>
         </field>
         <field name="datasetReadParametersJson" type="text-medium">
             <description>DAR-BE-318. Extract parameters every dataset read of this endpoint sends, as a JSON object (a run never

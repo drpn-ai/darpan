@@ -8,6 +8,7 @@ import darpan.peak.PeakPeriodSupport
 import darpan.peak.PeakWindow
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
+import darpan.reconciliation.notification.TenantNotificationSupport
 import org.moqui.context.ArtifactExecutionInfo
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -17,6 +18,8 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 import static darpan.common.ValueSupport.normalize
@@ -174,6 +177,12 @@ class SyncPulseSupport {
                     clearErrors(ec)
                 }
             }
+            try {
+                postPeriodBoundaries(ec, pairs.collect { new LinkedHashMap(it.getMap()) }, now, tenantDays)
+            } catch (Throwable t) {
+                logger.warn("Sync pulse period posts failed: {}", t.message ?: t.toString())
+                clearErrors(ec)
+            }
         } catch (Throwable t) {
             logger.error("Sync pulse scan failed: {}", t.message ?: t.toString())
             clearErrors(ec)
@@ -252,6 +261,12 @@ class SyncPulseSupport {
      *         oldest: [orderName, ageMinutes] or null, pastCount, priorPastCount, skipped]
      */
     static Map runPulse(def ec, Map pair, Instant now) {
+        Map out = pulse(ec, pair, now)
+        postAfterPulse(ec, pair, now, out)
+        return out
+    }
+
+    private static Map pulse(def ec, Map pair, Instant now) {
         String tenantId = normalize(pair?.get("companyUserGroupId"))
         String syncPairId = normalize(pair?.get("syncPairId"))
         Map empty = [status: null, sample: null, newlyPast: [], closed: [], waitingCount: null, oldest: null, pastCount: null,
@@ -307,8 +322,10 @@ class SyncPulseSupport {
                 sample = writeSample(ec, pair, now, [statusEnumId: SKIPPED, allowanceMinutes: allowance, pastAllowanceCount: openCount, message: message])
                 stampPair(ec, pair, now, SKIPPED)
             }
-            return [status: SKIPPED, sample: sample, newlyPast: [], closed: [], waitingCount: null, oldest: null,
-                    pastCount: openCount, priorPastCount: openCount, skipped: false]
+            Map out = [status: SKIPPED, sample: sample, newlyPast: [], closed: [], waitingCount: null, oldest: null,
+                       pastCount: openCount, priorPastCount: openCount, skipped: false]
+            postAfterPulse(ec, pair, now, out)
+            return out
         } catch (Throwable t) {
             logger.warn("Sync pulse {} could not record a skipped sample: {}", pair?.syncPairId, t.message ?: t.toString())
             clearErrors(ec)
@@ -481,6 +498,253 @@ class SyncPulseSupport {
         if (row == null) return
         row.setAll([lastPulseStamp: Timestamp.from(now), lastPulseStatusEnumId: status])
         row.update()
+    }
+
+    // ------------------------------------------------------------------------------------------- chat posts
+
+    private static final String ARROW = "→"
+    private static final String DOT = " · "
+    private static final String DASH = "–"
+    private static final DateTimeFormatter MONTH_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
+
+    /** "6h" for whole hours, else "90m". */
+    static String allowanceWords(Integer minutes) {
+        int m = Math.max(0, minutes ?: 0)
+        return (m >= 60 && m % 60 == 0) ? "${m.intdiv(60)}h".toString() : "${m}m".toString()
+    }
+
+    /** "6h 40m", "6h", "40m". */
+    static String ageWords(Number minutes) {
+        long m = Math.max(0L, minutes?.longValue() ?: 0L)
+        long h = m.intdiv(60L)
+        long r = m % 60L
+        if (h == 0L) return "${r}m".toString()
+        return (r == 0L ? "${h}h" : "${h}h ${r}m").toString()
+    }
+
+    private static String cadenceWords(Integer minutes) {
+        if (minutes == null) return null
+        if (minutes <= 0) return "pulse off"
+        if (minutes == 60) return "pulse every hour"
+        if (minutes % 60 == 0) return "pulse every ${minutes.intdiv(60)} hours".toString()
+        return "pulse every ${minutes} min".toString()
+    }
+
+    private static String oldestWords(Map oldest) {
+        return oldest != null ? ageWords(oldest.get("ageMinutes") as Number) : "none"
+    }
+
+    /** The past message: two lines. */
+    static String pastText(String label, Integer allowance, int pastCount, Map oldest, Integer waiting) {
+        return "${label}: ${pastCount} past the ${allowanceWords(allowance)} allowance.\n".toString() +
+                "Oldest ${oldest?.get('orderName') ?: 'unknown'}, ${oldestWords(oldest)}${DOT}${waiting ?: 0} waiting".toString()
+    }
+
+    static String clearText(String label, Integer allowance, Map oldest, Integer waiting, int closedCount) {
+        return "${label}: caught up. Nothing past the ${allowanceWords(allowance)} allowance.\n".toString() +
+                "${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${closedCount} findings closed".toString()
+    }
+
+    static String summaryText(String label, Integer waiting, Map oldest, int pastCount) {
+        return "${label}: ${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${pastCount} past allowance".toString()
+    }
+
+    static String failureText(String label) { return "${label}: the sync pulse could not read for 2 pulses.".toString() }
+
+    /**
+     * The post a finished pulse earns, or null. result is runPulse's map; priorPosted the pair's lastPostedPastCount (null =
+     * never posted); recent the pair's newest sample statuses, newest first (the pulse's own sample first).
+     *
+     * @return [kind: past|clear|summary|failure|none, text, lastPostedPastCount (to store; unchanged when kind has none)]
+     */
+    static Map decidePost(String label, Map result, Integer priorPosted, List<String> recent, boolean hourlySummary,
+                          boolean topOfHour) {
+        String status = result?.get("status")
+        int prior = priorPosted ?: 0
+        Integer allowance = (result?.get("sample") as Map)?.get("allowanceMinutes") as Integer
+        if (status == FAILED || status == SKIPPED) {
+            List<String> r = recent ?: []
+            boolean twoInARow = r.size() >= 2 && r[0] != OK && r[1] != OK && (r.size() == 2 || r[2] == OK)
+            return twoInARow ? [kind: "failure", text: failureText(label), lastPostedPastCount: priorPosted]
+                    : [kind: "none", text: null, lastPostedPastCount: priorPosted]
+        }
+        if (status != OK) return [kind: "none", text: null, lastPostedPastCount: priorPosted]
+        int past = (result.get("pastCount") ?: 0) as int
+        Map oldest = result.get("oldest") as Map
+        Integer waiting = result.get("waitingCount") as Integer
+        if (past > prior) {
+            return [kind: "past", text: pastText(label, allowance, past, oldest, waiting), lastPostedPastCount: past]
+        }
+        if (past == 0 && prior > 0) {
+            return [kind: "clear", text: clearText(label, allowance, oldest, waiting, ((result.get("closed") ?: []) as List).size()),
+                    lastPostedPastCount: 0]
+        }
+        // fewer past than last said, still some: nothing to announce, but the count moves so a new one posts again
+        Integer stored = past != prior ? (Integer) past : priorPosted
+        if (hourlySummary && topOfHour) {
+            return [kind: "summary", text: summaryText(label, waiting, oldest, past), lastPostedPastCount: stored]
+        }
+        return [kind: "none", text: null, lastPostedPastCount: stored]
+    }
+
+    /**
+     * Posts what a finished pulse earned to the pair's chat space: a past/clear change, a summary at the first pulse of a
+     * tenant-local hour, or the failure notice. Nothing without a chatSpaceId; a failed post is logged and never fails the pulse.
+     */
+    private static void postAfterPulse(def ec, Map pair, Instant now, Map result) {
+        try {
+            if (result == null || result.get("skipped") == true || result.get("sample") == null) return
+            String tenantId = normalize(pair?.get("companyUserGroupId"))
+            def row = tenantFind(ec, "darpan.pulse.SyncPair", [syncPairId: normalize(pair?.get("syncPairId"))], tenantId)
+            String chatSpaceId = normalize(row?.get("chatSpaceId"))
+            if (!tenantId || !chatSpaceId) return
+            List<Map> samples = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPulseSample", WHY)
+                    .condition("syncPairId", normalize(pair.syncPairId)).condition("companyUserGroupId", tenantId)
+                    .orderBy("-sampleStamp").limit(3).useCache(false).list() ?: []).collect { it.getMap() as Map }
+            ZoneId zone = TenantAccessSupport.tenantTimeZoneFor(ec, tenantId)
+            boolean topOfHour = true
+            if (samples.size() >= 2) {
+                Instant prev = (samples[1].get("sampleStamp") as Timestamp).toInstant()
+                topOfHour = !prev.atZone(zone).truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+                        .equals(now.atZone(zone).truncatedTo(java.time.temporal.ChronoUnit.HOURS))
+            }
+            Map names = pairNames(ec, pair)
+            Map decision = decidePost(names.label as String, result, row.get("lastPostedPastCount") as Integer,
+                    samples.collect { normalize(it.get("statusEnumId")) }, normalize(row.get("hourlySummary")) == "Y", topOfHour)
+            boolean posted = decision.text == null || postChat(ec, tenantId, chatSpaceId, decision.text as String)
+            Integer wanted = decision.lastPostedPastCount as Integer
+            if (posted && wanted != (row.get("lastPostedPastCount") as Integer)) {
+                ec.transaction.runUseOrBegin(30, "Sync pulse ${pair.syncPairId} could not store its posted count".toString()) {
+                    row.set("lastPostedPastCount", wanted)
+                    row.update()
+                }
+            }
+        } catch (Throwable t) {
+            logger.warn("Sync pulse {} chat post skipped: {}", pair?.syncPairId, t.message ?: t.toString())
+            clearErrors(ec)
+        }
+    }
+
+    /** One post; false when it could not be delivered. Never throws. */
+    private static boolean postChat(def ec, String tenantId, String chatSpaceId, String text) {
+        if (!tenantId || !chatSpaceId || !text) return false
+        try {
+            Map result = TenantNotificationSupport.postToChatSpace(ec, tenantId, chatSpaceId, [text: text])
+            return result != null && result.get("ok") != false
+        } catch (Throwable t) {
+            logger.warn("Sync pulse chat post to space {} failed: {}", chatSpaceId, t.message ?: t.toString())
+            clearErrors(ec)
+            return false
+        }
+    }
+
+    /** [upstream, target, label]: the system names of the pair's check, "<upstream> -> <target> orders". */
+    private static Map pairNames(def ec, Map pair) {
+        String tenantId = normalize(pair.get("companyUserGroupId"))
+        String upstreamSide = normalize(pair.get("upstreamSide"))
+        List sources = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.reconciliation.ReconciliationAutomationSource", WHY)
+                .condition("automationId", normalize(pair.get("automationId"))).condition("companyUserGroupId", tenantId)
+                .useCache(false).list() ?: []
+        String up = systemName(ec, sources.find { normalize(it.get("fileSide")) == upstreamSide }?.get("systemEnumId")) ?: "Source"
+        String target = systemName(ec, sources.find { normalize(it.get("fileSide")) != upstreamSide }?.get("systemEnumId")) ?: "Target"
+        return [upstream: up, target: target, label: "${up} ${ARROW} ${target} orders".toString()]
+    }
+
+    private static String systemName(def ec, Object enumId) {
+        return TenantNotificationSupport.resolveSystemSourceName(ec, enumId) ?: normalize(enumId)
+    }
+
+    private static def tenantFind(def ec, String entity, Map keys, String tenantId) {
+        def find = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, entity, WHY)
+        keys.each { String k, Object v -> find.condition(k, v) }
+        // list(), not one(): one() drops the tenant condition beside a full PK.
+        return find.condition("companyUserGroupId", tenantId).useCache(false).list().find()
+    }
+
+    /** "NetSuite sync allowance 6h . pulse every hour . heavy runs wait 08:00-23:00"; empty when the period overrides nothing. */
+    static String overridesLine(Map period, List<Map> syncRows, Map<String, Map> namesByPair) {
+        List<String> parts = []
+        List<Map> withAllowance = (syncRows ?: []).findAll { it.get("allowanceMinutes") != null }
+        Set<Integer> allowances = withAllowance.collect { it.get("allowanceMinutes") as Integer } as LinkedHashSet
+        if (allowances.size() == 1) {
+            String target = namesByPair?.get(withAllowance[0].get("syncPairId"))?.get("target") ?: "Sync"
+            parts << "${target} sync allowance ${allowanceWords(allowances.first())}".toString()
+        } else if (allowances.size() > 1) {
+            withAllowance.each { Map r ->
+                String label = namesByPair?.get(r.get("syncPairId"))?.get("label") ?: r.get("syncPairId")
+                parts << "${label} allowance ${allowanceWords(r.get('allowanceMinutes') as Integer)}".toString()
+            }
+        }
+        Set<Integer> cadences = (syncRows ?: []).findAll { it.get("pulseEveryMinutes") != null }
+                .collect { it.get("pulseEveryMinutes") as Integer } as LinkedHashSet
+        cadences.each { Integer c -> parts << cadenceWords(c) }
+        String from = normalize(period.get("peakHoursStart")), thru = normalize(period.get("peakHoursEnd"))
+        if (from && thru) parts << "heavy runs wait ${from}${DASH}${thru}".toString()
+        return parts.join(DOT)
+    }
+
+    /**
+     * Once per period per boundary: "<name> started. Until <MMM d>:" + its overrides, and "<name> ended. Normal settings are
+     * back.", to every distinct chat space of the tenant's active pairs. The period's startPostedStamp / endPostedStamp say it
+     * was done; a tenant with no chat space posts and stamps nothing (a space added later still gets the start). An end is only
+     * posted for a start that was.
+     */
+    private static void postPeriodBoundaries(def ec, List<Map> pairs, Instant now, Map<String, Map> tenantDays) {
+        pairs.groupBy { normalize(it.get("companyUserGroupId")) }.each { String tenantId, List<Map> tenantPairs ->
+            if (!tenantId) return
+            try {
+                List<String> spaces = tenantPairs.collect { normalize(it.get("chatSpaceId")) }.findAll { it }.unique()
+                if (!spaces) return
+                Map day = tenantDays.computeIfAbsent(tenantId) { String t -> tenantDay(ec, t, now) }
+                LocalDate today = day.date as LocalDate
+                List periods = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.peak.PeakPeriod", WHY)
+                        .condition("companyUserGroupId", tenantId).useCache(false).list() ?: []
+                periods.findAll { normalize(it.get("isActive")) != "N" }.each { period ->
+                    LocalDate from = dateOf(period.get("fromDate")), thru = dateOf(period.get("thruDate"))
+                    if (from == null || thru == null) return
+                    boolean started = period.get("startPostedStamp") != null
+                    boolean ended = period.get("endPostedStamp") != null
+                    String text = null
+                    String stampField = null
+                    if (!started && !ended && !today.isBefore(from) && !today.isAfter(thru)) {
+                        text = startText(ec, tenantId, tenantPairs, period.getMap() as Map, thru)
+                        stampField = "startPostedStamp"
+                    } else if (started && !ended && today.isAfter(thru)) {
+                        text = "${normalize(period.get('periodName'))} ended. Normal settings are back.".toString()
+                        stampField = "endPostedStamp"
+                    }
+                    if (text == null) return
+                    spaces.each { String space -> postChat(ec, tenantId, space, text) }
+                    ec.transaction.runUseOrBegin(30, "Sync pulse could not stamp the ${stampField} of a peak period".toString()) {
+                        period.set(stampField, Timestamp.from(now))
+                        period.update()
+                    }
+                }
+            } catch (Throwable t) {
+                logger.warn("Sync pulse period posts for tenant {} skipped: {}", tenantId, t.message ?: t.toString())
+                clearErrors(ec)
+            }
+        }
+    }
+
+    private static String startText(def ec, String tenantId, List<Map> tenantPairs, Map period, LocalDate thru) {
+        String periodId = normalize(period.get("peakPeriodId"))
+        Map<String, Map> names = [:]
+        tenantPairs.each { Map p -> names[normalize(p.get("syncPairId"))] = pairNames(ec, p) }
+        List<Map> rows = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.PeakPeriodSync", WHY)
+                .condition("peakPeriodId", periodId).condition("companyUserGroupId", tenantId).useCache(false).list() ?: [])
+                .collect { it.getMap() as Map }.findAll { names.containsKey(normalize(it.get("syncPairId"))) }
+                .sort { normalize(it.get("syncPairId")) }
+        String head = "${normalize(period.get('periodName'))} started. Until ${MONTH_DAY.format(thru)}:".toString()
+        String line = overridesLine(period, rows, names)
+        return line ? head + "\n" + line : head
+    }
+
+    private static LocalDate dateOf(Object value) {
+        if (value == null) return null
+        if (value instanceof java.sql.Date) return ((java.sql.Date) value).toLocalDate()
+        if (value instanceof java.util.Date) return new java.sql.Date(((java.util.Date) value).time).toLocalDate()
+        return LocalDate.parse(value.toString().take(10))
     }
 
     // ------------------------------------------------------------------------------------------- small parts

@@ -45,7 +45,8 @@ class DatasetRefreshTests {
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
     private static final String SERVICES = "dataset.DatasetServices"
-    private static final String SHOPIFY_EXTRACT = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
+    private static final String ISO_EXTRACT = "reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRecords"
+    private static final String ROUNDED_EXTRACT = "reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRoundedRecords"
     private static final long DAY = 86_400_000L
     private static final long HOUR = 3_600_000L
     /**
@@ -74,11 +75,11 @@ class DatasetRefreshTests {
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])
         insert(TenantAccessSupport.TENANT_SETTING_ENTITY_NAME, [companyUserGroupId: A, timeZone: A_ZONE])
         insert(TenantAccessSupport.TENANT_SETTING_ENTITY_NAME, [companyUserGroupId: B, timeZone: B_ZONE])
-        // The Shopify connector row as the shipped seed has it: the read goes through the registry, as the live paths do.
+        // A made-up connector row: the read goes through the registry, as the live paths do.
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-            <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY" extractServiceName="${SHOPIFY_EXTRACT}"
-                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_AUTH"
-                configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig"
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" extractServiceName="${ISO_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_ISO_TYPE"
+                configParameterName="projConfigId"
                 preserveWindowInstants="Y" enabled="Y"/>
         </entity-facade-xml>""").dummyFks(true).load()
     }
@@ -105,8 +106,8 @@ class DatasetRefreshTests {
 
         assertEquals(1, calls.size())
         Map p = calls[0].params
-        assertEquals(SHOPIFY_EXTRACT, calls[0].service)
-        assertEquals("conn-first", p.shopifyAuthConfigId)
+        assertEquals(ISO_EXTRACT, calls[0].service)
+        assertEquals("conn-first", p.projConfigId)
         assertEquals("createdAt", p.windowFieldName)
         assertEquals(A, p.companyUserGroupId)
         assertFalse(p.containsKey("sourceFilters"), "a dataset read takes no filters")
@@ -272,14 +273,14 @@ class DatasetRefreshTests {
 
     @Test
     void aRollingDatasetNeedsNoStampField() {
-        Map res = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-roll-nostamp", options: [:],
+        Map res = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-roll-nostamp", options: [:],
                 idField: "id", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"])
         assertEquals([], res.errors)
         def row = find("darpan.dataset.Dataset", [datasetId: res.out.datasetId])
         assertEquals("createdAt", row.stampField)
         assertEquals([], refresh(res.out.datasetId as String, stub([], [order(1, 5, 5)])).errors)
         // a changed-since dataset still requires one
-        Map bad = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-cs-nostamp", options: [:],
+        Map bad = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-cs-nostamp", options: [:],
                 idField: "id", windowField: "createdAt"])
         assertFalse(bad.errors.isEmpty())
     }
@@ -321,7 +322,7 @@ class DatasetRefreshTests {
         def before = find("darpan.dataset.Dataset", [datasetId: id])
         assertNotNull(before.lastFullReadAt)
         // a re-store that names neither the rule nor the stamp field
-        Map again = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-roll-restore", options: [:],
+        Map again = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-roll-restore", options: [:],
                 idField: "id", windowField: "createdAt", marginDays: 3])
         assertEquals([], again.errors)
         assertEquals(id, again.out.datasetId)
@@ -333,7 +334,7 @@ class DatasetRefreshTests {
         assertEquals(before.lastFullReadAt, row.lastFullReadAt, "nothing that matters changed")
         // and a changed-since dataset re-stored without a rule or stamp keeps both
         String cs = dataset("cs-restore")
-        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-cs-restore", options: [:],
+        assertEquals([], call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-cs-restore", options: [:],
                 idField: "id", windowField: "createdAt"]).errors)
         def csRow = find("darpan.dataset.Dataset", [datasetId: cs])
         assertEquals("DRR_CHANGED_SINCE", csRow.readRuleEnumId)
@@ -345,16 +346,16 @@ class DatasetRefreshTests {
         String id = dataset("to-rolling")
         assertEquals(62, find("darpan.dataset.Dataset", [datasetId: id]).horizonDays as int)
         assertEquals([], refresh(id, stub([], [order(1, 5, 5)])).errors)
-        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-to-rolling", options: [:],
+        assertEquals([], call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-to-rolling", options: [:],
                 idField: "id", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"]).errors)
         def row = find("darpan.dataset.Dataset", [datasetId: id])
         assertEquals("DRR_ROLLING", row.readRuleEnumId)
         assertEquals(60, row.horizonDays as int)
         assertNull(row.lastFullReadAt, "a rule change forces a full read")
         // an explicit horizon wins, and an omitted one on a later update is kept
-        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-to-rolling", options: [:],
+        assertEquals([], call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-to-rolling", options: [:],
                 idField: "id", windowField: "createdAt", horizonDays: 45]).errors)
-        assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-to-rolling", options: [:],
+        assertEquals([], call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-to-rolling", options: [:],
                 idField: "id", windowField: "createdAt"]).errors)
         assertEquals(45, find("darpan.dataset.Dataset", [datasetId: id]).horizonDays as int)
     }
@@ -363,7 +364,7 @@ class DatasetRefreshTests {
     void theIdFieldIsStoredTrimmedAndNeverEmpty() {
         String id = dataset("id-trim", [idField: " orderId , orderItemSeqId ,"])
         assertEquals("orderId,orderItemSeqId", find("darpan.dataset.Dataset", [datasetId: id]).idField)
-        Map empty = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-id-empty", options: [:],
+        Map empty = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-id-empty", options: [:],
                 idField: " , ", stampField: "updatedAt", windowField: "createdAt"])
         assertFalse(empty.errors.isEmpty())
         // "id," is the single field id: records key by it, not by a missing _copyId
@@ -512,15 +513,15 @@ class DatasetRefreshTests {
         Timestamp start = new Timestamp(System.currentTimeMillis() - 4 * DAY)
         Closure<Map> sliceFor = { String token ->
             Timestamp end = find("darpan.dataset.Dataset", [datasetId: id]).readThru as Timestamp
-            KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
-                    [shopifyAuthConfigId: "conn-id-change", outputLocation: sliceLocation(token), fileName: "slice.json"],
+            KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "KC_ISO"),
+                    [projConfigId: "conn-id-change", outputLocation: sliceLocation(token), fileName: "slice.json"],
                     [tenantId: A, windowStart: start, windowEnd: end]))
         }
         Map control = sliceFor("id-0")
         assertTrue(control.served as boolean, control.reason as String)
         assertEquals(["1", "2"], json(control.extractFile as File).records*.id.sort())
 
-        Map changed = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-id-change", options: [:],
+        Map changed = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-id-change", options: [:],
                 idField: "legacyResourceId", stampField: "updatedAt", windowField: "createdAt"])
         assertEquals([], changed.errors)
         assertEquals(id, changed.out.datasetId)
@@ -553,10 +554,10 @@ class DatasetRefreshTests {
         String id = dataset("skew")
         assertEquals([], refresh(id, stub([], [order(1, 5, 5)])).errors)
         String versionBefore = KeptCopyStore.manifest(dir(id)).version
-        def connector = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "SHOPIFY").disableAuthz().one()
-        // the line-units extract service declares no windowFieldName
-        String lineUnits = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderLineUnits"
-        assertNotNull(ec.service.getServiceDefinition(lineUnits), "test precondition: shopify-darpan is installed")
+        def connector = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "KC_ISO").disableAuthz().one()
+        // the rounded-records extract service declares no windowFieldName
+        String lineUnits = ROUNDED_EXTRACT
+        assertNotNull(ec.service.getServiceDefinition(lineUnits), "test precondition: the made-up extract service is on the test classpath")
         assertFalse("windowFieldName" in ec.service.getServiceDefinition(lineUnits).getInParameterNames())
         connector.set("extractServiceName", lineUnits)
         connector.update()
@@ -574,15 +575,15 @@ class DatasetRefreshTests {
             assertTrue(read.errorText.contains("takes no windowFieldName"), read.errorText)
             assertEquals(versionBefore, KeptCopyStore.manifest(dir(id)).version, "the copy is untouched")
 
-            Map store = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-skew", options: [:],
+            Map store = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-skew", options: [:],
                     idField: "id", stampField: "updatedAt", windowField: "createdAt"])
             assertTrue(store.errors.any { it.contains("cannot be kept") && it.contains("takes no windowFieldName") }, store.errors.toString())
             // pausing it still works
-            assertEquals([], call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-skew", options: [:],
+            assertEquals([], call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-skew", options: [:],
                     idField: "id", stampField: "updatedAt", windowField: "createdAt", statusId: "DST_PAUSED"]).errors)
             assertEquals("DST_PAUSED", find("darpan.dataset.Dataset", [datasetId: id]).statusId)
         } finally {
-            connector.set("extractServiceName", SHOPIFY_EXTRACT)
+            connector.set("extractServiceName", ISO_EXTRACT)
             connector.update()
         }
     }
@@ -640,12 +641,12 @@ class DatasetRefreshTests {
         Set<String> foldersBefore = versionFolders(d)
 
         // 1. the extractor throws
-        Map thrown = refresh(id, { String svc, Map p -> throw new IllegalStateException("Shopify said no") } as Closure)
-        assertTrue(thrown.errors.any { it.contains("Shopify said no") }, thrown.errors.toString())
+        Map thrown = refresh(id, { String svc, Map p -> throw new IllegalStateException("Source said no") } as Closure)
+        assertTrue(thrown.errors.any { it.contains("Source said no") }, thrown.errors.toString())
         assertUntouched(id, manifestBefore, recordsBefore, rowBefore, foldersBefore)
         def failed = find("darpan.dataset.DatasetRead", [datasetId: id, readSeqId: "000002"])
         assertEquals("DRS_FAILED", failed.statusId)
-        assertTrue(failed.errorText.contains("Shopify said no"), failed.errorText)
+        assertTrue(failed.errorText.contains("Source said no"), failed.errorText)
 
         // 2. the file breaks off mid-record, so the full read fails while it writes the new version
         Closure truncated = { String svc, Map p ->
@@ -912,7 +913,7 @@ class DatasetRefreshTests {
         return (d.listFiles()?.findAll { it.isDirectory() && it.name.startsWith("v") }*.name ?: []) as Set<String>
     }
 
-    /** A Shopify-shaped order created createdDaysAgo and updated updatedDaysAgo. */
+    /** A made-up order created createdDaysAgo and updated updatedDaysAgo. */
     private static Map order(int n, int createdDaysAgo, int updatedDaysAgo, String name = null) {
         Instant now = RECORD_NOW
         return [id: "${n}".toString(), name: name ?: "#${n}".toString(),
@@ -932,7 +933,7 @@ class DatasetRefreshTests {
     }
 
     private String rolling(String conn, Map extra = [:]) {
-        Map res = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-${conn}".toString(), options: [:],
+        Map res = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-${conn}".toString(), options: [:],
                 idField: "id", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"] + extra)
         assertEquals([], res.errors)
         return res.out.datasetId
@@ -947,7 +948,7 @@ class DatasetRefreshTests {
     }
 
     private String dataset(String conn, Map extra = [:]) {
-        Map res = call("store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-${conn}".toString(), options: [:],
+        Map res = call("store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-${conn}".toString(), options: [:],
                 idField: "id", stampField: "updatedAt", windowField: "createdAt"] + extra)
         assertEquals([], res.errors)
         return res.out.datasetId

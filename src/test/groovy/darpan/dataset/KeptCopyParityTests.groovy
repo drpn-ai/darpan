@@ -34,10 +34,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 /**
  * DAR-BE-318 plan 3a, Task 8. Parity: a run served from the kept copy is the run read live.
  *
- * The fixture (src/test/resources/dataset/shopify-orders) is 30 synthetic Shopify orders shaped like a bulk extract, around
+ * The fixture (src/test/resources/dataset/made-up-orders) is 30 synthetic orders shaped like a bulk extract, around
  * the window [2026-11-10T08:00Z, 2026-11-11T08:00Z): one order exactly at the start (in), one exactly at the end (out), two
  * of a store a source filter excludes, and two updated long after they were created. orders.json is what the stub extractor
- * reads for the refresh AND for the live read, so the copy and the live read hold the same records. oms-orders.json is the
+ * reads for the refresh AND for the live read, so the copy and the live read hold the same records. ledger-orders.json is the
  * other side of the compare: it lacks the start order and holds the end order, a test-store order and a stranger.
  *
  * How parity is compared: the diff document (writeDiffDatasetOutput over the compare's diff frame, fixed metadata), the
@@ -55,7 +55,7 @@ class KeptCopyParityTests {
     private static final String EDITOR_USERNAME = "test.customer"
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
-    private static final String SHOPIFY_EXTRACT = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
+    private static final String ISO_EXTRACT = "reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRecords"
     private static final Timestamp START = Timestamp.from(Instant.parse("2026-11-10T08:00:00Z"))
     private static final Timestamp END = Timestamp.from(Instant.parse("2026-11-11T08:00:00Z"))
     private static final Instant COPY_READ_AT = Instant.parse("2026-11-20T00:00:00Z")
@@ -79,7 +79,7 @@ class KeptCopyParityTests {
         ["datasets", DataManagerSupport.RECONCILIATION_RUNS_PATH, "kcp-out", "kcp-fixtures", "judge-replays"].each { new File(dataManagerRoot, it).deleteDir() }
         fixtures = new File(dataManagerRoot, "kcp-fixtures")
         fixtures.mkdirs()
-        Files.copy(fixtureFile("oms-orders.json").toPath(), new File(fixtures, "oms-orders.json").toPath())
+        Files.copy(fixtureFile("ledger-orders.json").toPath(), new File(fixtures, "ledger-orders.json").toPath())
 
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.loadSeedData(ec, "classpath://data/EntityTypeData.xml",
@@ -88,8 +88,13 @@ class KeptCopyParityTests {
                 "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
                 "component://darpan/data/ConclusionCatalogSeedData.xml", "component://darpan/data/DatasetSeedData.xml")
         ec.entity.makeDataLoader().location("component://darpan/data/SourceSystemConnectorSeedData.xml").dummyFks(true).load()
-        // the system's own declarations on its rows (ruling P3b1-9): side files
-        ec.entity.makeDataLoader().location("component://shopify-darpan/data/ShopifyConnectorSeedData.xml").dummyFks(true).load()
+        // a made-up system's declarations on its row (ruling P3b1-9): side files
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" extractServiceName="${ISO_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_ISO_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="Y" enabled="Y"/>
+        </entity-facade-xml>""").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])
         seedSavedRun()
@@ -161,9 +166,9 @@ class KeptCopyParityTests {
         // the diff is the real thing, not two empty documents
         Map<String, String> typeById = ((List<Map>) json(new File(dataManagerRoot, "kcp-out/served/diff.json")).differences)
                 .collectEntries { [(it.primaryId as String): it.diffType as String] }
-        assertEquals("MISSING_IN_FILE_2", typeById[START_ORDER], "the start order is in the window and the OMS lacks it")
-        assertEquals("MISSING_IN_FILE_1", typeById[END_ORDER], "the OMS holds the end order, which the window leaves out")
-        assertEquals("MISSING_IN_FILE_1", typeById[TEST_STORE_ORDERS[0]], "the OMS holds a test-store order the filter drops")
+        assertEquals("MISSING_IN_FILE_2", typeById[START_ORDER], "the start order is in the window and the ledger lacks it")
+        assertEquals("MISSING_IN_FILE_1", typeById[END_ORDER], "the ledger holds the end order, which the window leaves out")
+        assertEquals("MISSING_IN_FILE_1", typeById[TEST_STORE_ORDERS[0]], "the ledger holds a test-store order the filter drops")
         assertEquals("MISSING_IN_FILE_1", typeById["5009999"])
         assertTrue(typeById.values().count { it == "MISSING_IN_FILE_2" } >= 2, typeById.toString())
     }
@@ -171,7 +176,7 @@ class KeptCopyParityTests {
     /** A composite-id rolling dataset serves the same records, byte for byte, as a live read (no _copyId leaks). */
     @Test
     void aServedCompositeRollingRunMatchesALiveRun() {
-        Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: "conn-composite",
+        Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: "conn-composite",
                 options: [:], idField: "id,legacyResourceId", windowField: "createdAt", readRuleEnumId: "DRR_ROLLING"])
         assertEquals([], stored.errors)
         String id = stored.out.datasetId
@@ -186,14 +191,14 @@ class KeptCopyParityTests {
         assertEquals([], served.errors)
         assertEquals(0, servedCalls.size(), "the served run never calls the live extractor")
         Map dsRow = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().useCache(false).one().getMap()
-        underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: "DST_PAUSED", systemEnumId: "SHOPIFY",
+        underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: "DST_PAUSED", systemEnumId: "KC_ISO",
                 sourceConfigId: "conn-composite", options: [:], idField: "id,legacyResourceId", windowField: "createdAt"])
         List<Map> liveCalls = []
         Map live
         try {
             live = interactive("conn-composite", liveCalls, "composite")
         } finally {
-            underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: "DST_ACTIVE", systemEnumId: "SHOPIFY",
+            underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: "DST_ACTIVE", systemEnumId: "KC_ISO",
                     sourceConfigId: "conn-composite", options: [:], idField: "id,legacyResourceId", windowField: "createdAt"])
         }
         assertEquals(1, liveCalls.size())
@@ -254,9 +259,9 @@ class KeptCopyParityTests {
     void aServedRunReplaysThroughThePlan2Judge() {
         String id = keptDataset("conn-judge")
         String runsLocation = DataManagerSupport.resolveReconciliationRunsLocation(ec)
-        File omsFixture = new File(fixtures, "oms-orders.json")
+        File ledgerFixture = new File(fixtures, "ledger-orders.json")
 
-        // KCP_EXEC_S: side 1 served from the copy (the scheduled dispatcher), side 2 the OMS file
+        // KCP_EXEC_S: side 1 served from the copy (the scheduled dispatcher), side 2 the ledger file
         Map served = automationSlice("conn-judge", DataManagerSupport.childLocation(runsLocation, "KCP_EXEC_S/${STAMP}".toString()))
         File servedExtract = locationFile(served.fileLocation as String)
         assertEquals(true, json(servedExtract).metadata.servedFromCopy)
@@ -298,7 +303,7 @@ class KeptCopyParityTests {
         assertTrue(judgedServed.size() >= 2, "the judge found something, or this proves nothing: ${judgedServed}")
         assertTrue(judgedServed*.recordKey.contains(START_ORDER), judgedServed*.recordKey.toString())
         assertEquals(["S1"], judgedServed*.statementCode.unique())
-        assertEquals(["NO_OMS_ORDER"], judgedServed*.claimOutcomeId.unique())
+        assertEquals(["NO_LEDGER_ORDER"], judgedServed*.claimOutcomeId.unique())
         assertEquals(JsonOutput.toJson(onLive.out.judgedFindings), JsonOutput.toJson(judgedServed))
         assertEquals(onLive.out.judgedPairCounts, onServed.out.judgedPairCounts)
         assertTrue((onServed.out.judgedPairCounts.matched as int) > 0 && (onServed.out.judgedPairCounts.missing as int) > 0, "${onServed.out.judgedPairCounts}")
@@ -355,7 +360,7 @@ class KeptCopyParityTests {
     /** One interactive FILE_1 side through RunExtractSupport.extractApiSource; the live extractor is the stub below. */
     private Map interactive(String conn, List<Map> calls, String token) {
         String runToken = "p${++seq}"
-        Map source = [systemEnumId: "SHOPIFY", sourceConfigType: "SHOPIFY_AUTH", sourceConfigId: conn, fileSide: "FILE_1",
+        Map source = [systemEnumId: "KC_ISO", sourceConfigType: "KC_ISO_TYPE", sourceConfigId: conn, fileSide: "FILE_1",
                       compareScopeId: "KCP_SCOPE"]
         // the same artifact file name for every run, in a folder of its own
         Map artifact = [location: DataManagerSupport.resolveReconciliationRunLocation(ec, "kcp-${token}-${runToken}", STAMP), runToken: "parity"]
@@ -370,9 +375,9 @@ class KeptCopyParityTests {
     /** The scheduled dispatcher, as a job runs it, with the run's side landing in outputLocation. */
     private Map automationSlice(String conn, String outputLocation, List<Map> liveCalls = null) {
         Map automation = [automationId: "KCP_AUTO", companyUserGroupId: A, relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
-        Map source = [automationId: "KCP_AUTO", fileSide: "FILE_1", systemEnumId: "SHOPIFY", companyUserGroupId: A,
+        Map source = [automationId: "KCP_AUTO", fileSide: "FILE_1", systemEnumId: "KC_ISO", companyUserGroupId: A,
                       sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
-                      safeMetadataJson: JsonOutput.toJson([extractServiceName: SHOPIFY_EXTRACT, parameters: [shopifyAuthConfigId: conn]])]
+                      safeMetadataJson: JsonOutput.toJson([extractServiceName: ISO_EXTRACT, parameters: [projConfigId: conn]])]
         ec.user.logoutUser()
         ec.user.loginAnonymousIfNoUser()
         try {
@@ -390,19 +395,19 @@ class KeptCopyParityTests {
 
     private Map direct(String conn, String token) {
         return KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(
-                darpan.reconciliation.automation.SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
-                [shopifyAuthConfigId: conn, outputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, "kcp-${token}", STAMP),
+                darpan.reconciliation.automation.SourceSystemConnectorSupport.resolve(ec, "KC_ISO"),
+                [projConfigId: conn, outputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, "kcp-${token}", STAMP),
                  fileName: "slice.json"], [tenantId: A, windowStart: START, windowEnd: END]))
     }
 
-    /** What a live Shopify read answers for the window: the fixture's orders in [start, end), the side's filters applied. */
+    /** What a live read answers for the window: the fixture's orders in [start, end), the side's filters applied. */
     private Closure liveExtractor(List<Map> calls) {
         return { String service, Map params ->
             calls << [service: service, params: new LinkedHashMap(params)]
             // the interactive path sends ISO instants, the scheduled one raw Timestamps
             Closure<Instant> instantOf = { Object v -> v instanceof Timestamp ? ((Timestamp) v).toInstant() : Instant.parse(v as String) }
             Instant from = instantOf(params.windowStart), to = instantOf(params.windowEnd)
-            String fileName = (params.fileName ?: "shopify-${from.toEpochMilli()}-${to.toEpochMilli()}.json") as String
+            String fileName = (params.fileName ?: "kc_iso-${from.toEpochMilli()}-${to.toEpochMilli()}.json") as String
             String field = (params.windowFieldName ?: "createdAt") as String
             List<Map> inWindow = fixtureRecords().findAll { Map r ->
                 Instant at = Instant.parse(r[field] as String)
@@ -432,9 +437,9 @@ class KeptCopyParityTests {
         }
     }
 
-    /** The ACTIVE dataset for SHOPIFY + conn, its copy read in full from the fixture at the day the fixture ends. */
+    /** The ACTIVE dataset for KC_ISO + conn, its copy read in full from the fixture at the day the fixture ends. */
     private String keptDataset(String conn) {
-        Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: conn,
+        Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: conn,
                 options: [:], idField: "id", stampField: "updatedAt", windowField: "createdAt"])
         assertEquals([], stored.errors)
         String id = stored.out.datasetId
@@ -464,21 +469,21 @@ class KeptCopyParityTests {
 
     private void setStatus(String id, String statusId) {
         assertEquals([], underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: id, statusId: statusId,
-                systemEnumId: "SHOPIFY", sourceConfigId: datasetIds.find { it.value == id }.key, options: [:], idField: "id",
+                systemEnumId: "KC_ISO", sourceConfigId: datasetIds.find { it.value == id }.key, options: [:], idField: "id",
                 stampField: "updatedAt", windowField: "createdAt"]).errors)
     }
 
     // ------------------------------------------------------------------------------------------------------- the compare
 
     /**
-     * reconcile#RuleSetCompareScope over the run's FILE_1 and the OMS file, then the diff document written as the live writer
+     * reconcile#RuleSetCompareScope over the run's FILE_1 and the ledger file, then the diff document written as the live writer
      * writes it, and the compare's own outputs as sorted JSON. Returns the bytes of both, and leaves them in kcp-out/<tag>.
      */
     private Map compareAndWrite(Map run, String tag) {
         Map called = underFacadeGrant("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
                 ruleSetId: "KCP_RS", compareScopeId: "KCP_SCOPE", file1Location: run.result.fileLocation,
-                file2Location: new File(fixtures, "oms-orders.json").absolutePath, file1Name: run.result.fileName,
-                file2Name: "oms-orders.json", sparkAppName: "KeptCopyParityTests"])
+                file2Location: new File(fixtures, "ledger-orders.json").absolutePath, file1Name: run.result.fileName,
+                file2Name: "ledger-orders.json", sparkAppName: "KeptCopyParityTests"])
         assertEquals([], called.errors, tag)
         Map out = called.out
         try {
@@ -510,7 +515,7 @@ class KeptCopyParityTests {
     private void placeSide2(String executionId) {
         File dir = new File(dataManagerRoot, "${DataManagerSupport.RECONCILIATION_RUNS_PATH}/${executionId}/${STAMP}-FILE_2")
         dir.mkdirs()
-        Files.copy(new File(fixtures, "oms-orders.json").toPath(), new File(dir, "oms-orders.json").toPath())
+        Files.copy(new File(fixtures, "ledger-orders.json").toPath(), new File(dir, "ledger-orders.json").toPath())
     }
 
     private Map replay(String executionId) {
@@ -523,34 +528,34 @@ class KeptCopyParityTests {
 
     private String checkId
 
-    /** One saved run (Shopify orders against the OMS file, a store filter on side 1), its automation and its audit check. */
+    /** One saved run (made-up orders against the ledger file, a store filter on side 1), its automation and its audit check. */
     private void seedSavedRun() {
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-            <darpan.rule.RuleSet ruleSetId="KCP_RS" ruleSetName="Shopify orders vs OMS" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSet ruleSetId="KCP_RS" ruleSetName="Orders vs ledger" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="KCP_SCOPE" ruleSetId="KCP_RS" objectType="ORDER" companyUserGroupId="${A}"
-                description="Shopify orders against OMS orders"/>
-            <darpan.rule.RuleSetCompareSource compareScopeId="KCP_SCOPE" fileSide="FILE_1" systemEnumId="SHOPIFY" fileTypeEnumId="DftJson"
+                description="Orders against ledger orders"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KCP_SCOPE" fileSide="FILE_1" systemEnumId="KC_ISO" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="legacyResourceId" companyUserGroupId="${A}"/>
-            <darpan.rule.RuleSetCompareSource compareScopeId="KCP_SCOPE" fileSide="FILE_2" systemEnumId="NETSUITE" fileTypeEnumId="DftJson"
+            <darpan.rule.RuleSetCompareSource compareScopeId="KCP_SCOPE" fileSide="FILE_2" systemEnumId="MU_LEDGER" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="externalOrderId" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KCP_SCOPE" fileSide="FILE_1" sequenceNum="1"
-                fieldExpression="\$.records[*].shopifyStore" operator="EXCLUDE_IN" filterValues="syn-test" companyUserGroupId="${A}"/>
+                fieldExpression="\$.records[*].madeUpStore" operator="EXCLUDE_IN" filterValues="syn-test" companyUserGroupId="${A}"/>
             <darpan.reconciliation.ReconciliationAutomation automationId="KCP_AUTO" automationName="Parity orders" companyUserGroupId="${A}"
                 inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KCP_RS"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="KCP_AUTO" fileSide="FILE_1" companyUserGroupId="${A}"
-                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="SHOPIFY"/>
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="KC_ISO"/>
             <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KCP_AUTO" fileSide="FILE_1" sequenceNum="1"
-                fieldExpression="\$.records[*].shopifyStore" operator="EXCLUDE_IN" filterValues="syn-test" companyUserGroupId="${A}"/>
+                fieldExpression="\$.records[*].madeUpStore" operator="EXCLUDE_IN" filterValues="syn-test" companyUserGroupId="${A}"/>
             <darpan.reconciliation.ReconciliationAutomationExecution automationExecutionId="KCP_EXEC_S" automationId="KCP_AUTO"
                 companyUserGroupId="${A}" statusEnumId="AUT_STAT_SUCCESS"/>
             <darpan.reconciliation.ReconciliationAutomationExecution automationExecutionId="KCP_EXEC_L" automationId="KCP_AUTO"
                 companyUserGroupId="${A}" statusEnumId="AUT_STAT_SUCCESS"/>
             <darpan.audit.Audit auditId="KCP_AUDIT" companyUserGroupId="${A}" auditCode="kcp" auditName="Parity" periodEnumId="AUDP_MONTH"/>
             <darpan.audit.AuditStatement statementId="KCP_S1" companyUserGroupId="${A}" auditId="KCP_AUDIT" statementCode="S1"
-                categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_FIRM" statementText="Every Shopify order is in the OMS" sequenceNum="1"/>
+                categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_FIRM" statementText="Every order is in the ledger" sequenceNum="1"/>
         </entity-facade-xml>""").dummyFks(true).load()
         checkId = ec.entity.sequencedIdPrimary("darpan.audit.AuditCheck", null, null)
-        insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: A, checkCode: "kcp-orders", label: "Orders vs OMS",
+        insert("darpan.audit.AuditCheck", [checkId: checkId, companyUserGroupId: A, checkCode: "kcp-orders", label: "Orders vs ledger",
                 savedRunId: "KCP_RS", automationId: "KCP_AUTO", file1RecordType: "order", file2RecordType: "order"])
         insert("darpan.audit.AuditStatementCheck", [checkId: checkId, statementId: "KCP_S1", companyUserGroupId: A, sequenceNum: 1,
                 diffTypes: "MISSING_IN_FILE_2"])
@@ -558,27 +563,27 @@ class KeptCopyParityTests {
     }
 
     /**
-     * The judge's config for the check, as JudgeReplayTests seeds it: a Must hold decision (NO_OMS_ORDER: the OMS holds no record)
+     * The judge's config for the check, as JudgeReplayTests seeds it: a Must hold decision (NO_LEDGER_ORDER: the ledger holds no record)
      * that statement S1 promises, and an Explains decision (a partly refunded order is EXPECTED, the rest UNEXPLAINED).
      */
     private void seedDecisions() {
         actAs(EDITOR_USERNAME, A)
         Map generated = ok(underFacadeGrant("judge.PairFactServices.generate#PairFactType", [checkId: checkId,
-                file1SystemEnumId: "SHOPIFY", file2SystemEnumId: "NETSUITE",
+                file1SystemEnumId: "KC_ISO", file2SystemEnumId: "MU_LEDGER",
                 sampleKeys: [file1: ["legacyResourceId", "displayFinancialStatus"], file2: ["externalOrderId", "total"]]]))
         factTypeId = generated.factTypeId
-        String mustHold = createDecision("N", ["NO_OMS_ORDER"])
-        storeRule(mustHold, "no OMS order", 10, [line("01", "netsuite_presence", "ENTCO_NOT_EQUALS", "KEPT")], "NO_OMS_ORDER")
-        meaning(mustHold, "NO_OMS_ORDER", "JOK_FINDING", "The OMS holds no order")
+        String mustHold = createDecision("N", ["NO_LEDGER_ORDER"])
+        storeRule(mustHold, "no ledger order", 10, [line("01", "mu_presence", "ENTCO_NOT_EQUALS", "KEPT")], "NO_LEDGER_ORDER")
+        meaning(mustHold, "NO_LEDGER_ORDER", "JOK_FINDING", "The ledger holds no order")
         String explains = createDecision("Y", ["PARTLY_REFUNDED", "UNEXPLAINED"])
-        storeRule(explains, "partly refunded", 10, [line("01", "claim", "ENTCO_EQUALS", "NO_OMS_ORDER"),
-                line("02", "shopify_displayFinancialStatus", "ENTCO_EQUALS", "PARTIALLY_REFUNDED")], "PARTLY_REFUNDED")
-        meaning(explains, "PARTLY_REFUNDED", "JOK_EXPECTED", "Partly refunded, not in the OMS")
+        storeRule(explains, "partly refunded", 10, [line("01", "claim", "ENTCO_EQUALS", "NO_LEDGER_ORDER"),
+                line("02", "kc_displayFinancialStatus", "ENTCO_EQUALS", "PARTIALLY_REFUNDED")], "PARTLY_REFUNDED")
+        meaning(explains, "PARTLY_REFUNDED", "JOK_EXPECTED", "Partly refunded, not in the ledger")
         meaning(explains, "UNEXPLAINED", "JOK_FINDING", "Unexplained")
         insert("darpan.judge.CheckDecision", [checkId: checkId, stageEnumId: "CDS_MUST_HOLD", companyUserGroupId: A, ruleSetId: mustHold])
         insert("darpan.judge.CheckDecision", [checkId: checkId, stageEnumId: "CDS_EXPLAINS", companyUserGroupId: A, ruleSetId: explains])
         def statement = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "KCP_S1").disableAuthz().useCache(false).one()
-        statement.setAll([claimRuleSetId: mustHold, claimOutcomeId: "NO_OMS_ORDER"])
+        statement.setAll([claimRuleSetId: mustHold, claimOutcomeId: "NO_LEDGER_ORDER"])
         statement.update()
     }
 
@@ -612,7 +617,7 @@ class KeptCopyParityTests {
 
     private File fixtureFile(String name) {
         return ReconciliationSmokeTestSupport.resolveBackendRoot()
-                .resolve("runtime/component/darpan/src/test/resources/dataset/shopify-orders/${name}").toFile()
+                .resolve("runtime/component/darpan/src/test/resources/dataset/made-up-orders/${name}").toFile()
     }
 
     private List<Map> fixtureRecords() {
@@ -620,8 +625,8 @@ class KeptCopyParityTests {
     }
 
     private static Map order(String legacyId, String createdAt, String updatedAt) {
-        return [id: "gid://shopify/Order/${legacyId}".toString(), legacyResourceId: legacyId, name: "#SYN${legacyId}".toString(),
-                createdAt: createdAt, updatedAt: updatedAt, shopifyStore: "syn-main", currencyCode: "USD"]
+        return [id: "gid://madeup/Order/${legacyId}".toString(), legacyResourceId: legacyId, name: "#SYN${legacyId}".toString(),
+                createdAt: createdAt, updatedAt: updatedAt, madeUpStore: "syn-main", currencyCode: "USD"]
     }
 
     private File locationFile(String location) {

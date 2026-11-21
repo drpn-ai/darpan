@@ -725,6 +725,42 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertFalse(ec.message.hasError())
     }
 
+    /**
+     * DAR-BE-318 (plan 3b-2b, Task 10; review item M6). Keep at ingest under a booted Moqui: the LIKE and normalizeText checks run
+     * as Spark UDFs that call moqui-rules' ValueChecks, through ReconciliationServices.ingestFile with the real ExecutionContext.
+     * Made-up system (ACME), decision-shaped rules on fact text.
+     */
+    @Test
+    void keepAtIngestRunsItsValueCheckUdfsUnderMoqui() {
+        File folder = java.nio.file.Files.createTempDirectory("keep-ingest-smoke").toFile()
+        File extract = new File(folder, "acme-orders.json")
+        extract.setText(groovy.json.JsonOutput.toJson([metadata: [system: "ACME"], records: [
+                [id: "1", note: "a gift card", city: "x"],
+                [id: "2", note: "plain", city: "  portland "],
+                [id: "3", note: "plain", city: "Austin"]]]), "UTF-8")
+        List<Map> rules = [
+                [id: "B:LIKE", sequenceNum: 1, label: "Gift notes", source: "DECISION", tests: [[reason: "OUT_LIKE",
+                        test: [kind: "compare", field: "note", text: "FACT", op: "LIKE", values: ["%gift%"], valueKind: "TEXT", fold: "LIKE_UPPER"]]]],
+                [id: "B:NORM", sequenceNum: 2, label: "Portland", source: "DECISION", tests: [[reason: "OUT_NORM",
+                        test: [kind: "compare", field: "city", text: "FACT", op: "IN", values: ["Portland"], valueKind: "TEXT", fold: "NORMALIZE"]]]]]
+        Map sideKeep = [placement: darpan.reconciliation.source.KeepPlanSupport.SPARK, readFilters: [], rules: rules, writeSidecar: false,
+                        fields: ["note", "city"] as Set]
+        org.apache.spark.sql.SparkSession spark = org.apache.spark.sql.SparkSession.builder().appName("RuleSetCompareScopeServiceSmokeTests-Keep")
+                .master("local[1]").config("spark.ui.enabled", "false").getOrCreate()
+        try {
+            Map out = ReconciliationServices.ingestFile(ec, spark, extract.absolutePath, "JSON", [[idExpr: '$.records[*].id', idNormalizer: null]],
+                    true, "File 1 (ACME)", [], null, sideKeep)
+
+            assertEquals(["3"], collectCompareIds((Dataset) out.idDf))
+            assertEquals(["1", "2"], collectCompareIds((Dataset) out.asideIdDf))
+            assertEquals(["0\tB:LIKE", "1\tB:NORM"], darpan.reconciliation.source.KeepArtifacts.rowsFile(extract).readLines("UTF-8"))
+            assertEquals(2, darpan.reconciliation.source.KeepArtifacts.readSummary(extract).setAsideCount)
+            ((List<Dataset>) out.persisted).each { it.unpersist() }
+        } finally {
+            folder.deleteDir()
+        }
+    }
+
     private static List<String> collectCompareIds(Dataset dataset) {
         return dataset.collectAsList()
                 .collect { row -> row.getAs("compare_id")?.toString() }

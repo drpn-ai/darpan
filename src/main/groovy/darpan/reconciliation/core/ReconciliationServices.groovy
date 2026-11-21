@@ -2,9 +2,11 @@ package darpan.reconciliation.core
 
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.source.KeepStepSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.PackageScope
+import org.apache.spark.sql.Column
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
@@ -356,13 +358,25 @@ class ReconciliationServices {
 
     // --- Private Helpers ---
 
-    static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, Object idSpecOrList, boolean hasHeader, String label, List validationErrors, String schemaFile) {
+    /**
+     * One side's id and data frames. With a sideKeep whose plan places Keep in Spark (DAR-BE-318, KeepStepSupport.applies),
+     * the records are split into kept and set aside first and the set-aside artifact is written beside the extract: the id and
+     * data frames hold kept records only, asideIdDf the set-aside records' compare ids, keepSummary the summary written and
+     * persisted the frames the caller unpersists. Without one (or with any other placement) this is the ingest as it was, and
+     * only idDf and dataDf come back.
+     */
+    static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, Object idSpecOrList, boolean hasHeader, String label, List validationErrors, String schemaFile, Map sideKeep = null) {
         String path = resolvePath(ec, loc)
         List<Map> idSpecs = normalizeIdSpecs(idSpecOrList)
         Dataset df = null
         Dataset idDf = null
         Dataset dataDf = null
         validateStagedPayloadShape(path, type, label)
+        boolean keep = KeepStepSupport.applies(sideKeep)
+        if (keep && type != "JSON") throw new IllegalArgumentException("${label}: Keep runs on a JSON extract's records; this side is ${type}.")
+        Dataset asideIdDf = null
+        Map keepSummary = null
+        List<Dataset> persisted = []
 
         if (type == "JSON") {
             // Validate if needed
@@ -385,28 +399,56 @@ class ReconciliationServices {
             List<String> fieldExpressions = idSpecs.collect { (String) it.idExpr }
             StructType readSchema = (schemaFile && SparkReadSchemaSupport.savedReadSchemaEnabled()) ?
                     SparkReadSchemaSupport.buildReadSchema(ec, schemaFile) : null
+            // DAR-BE-318: under Keep each record also carries its Keep field text and its row (KeepStepSupport.injections).
+            List<Map> injections = keep ? KeepStepSupport.injections((List<Map>) sideKeep.rules) : null
+            File extract = keep ? new File(path) : null
             // DAR-BE-166: keys under one top-level array (every extract: {metadata, records:[...]}) are read from its
             // records, one per line, in partitions. multiLine makes each FILE one row, so a month's extract was parsed
             // whole in one task and ran a 2 GB JVM out of heap at the compare.
-            File recordLines = JsonRecordLines.forRecordArray(ec, path, pathInfos)
+            File recordLines = JsonRecordLines.forRecordArray(ec, path, pathInfos, injections)
+            if (keep && recordLines == null) {
+                // Keep numbers the records of the records array; with none, the side kept and set aside nothing.
+                if (!extract.isFile() || KeepStepSupport.holdsRecords(extract)) {
+                    throw new IllegalArgumentException("${label}: Keep runs on the extract's records array, and this side's key paths do not read it.")
+                }
+                keepSummary = KeepStepSupport.applyToNoRecords(sideKeep, extract)
+                asideIdDf = spark.createDataFrame(new ArrayList<Row>(), EMPTY_COMPARE_ID_SCHEMA)
+            }
             List<Map> readPathInfos = recordLines != null ? JsonRecordLines.recordRootPathInfos(pathInfos) : pathInfos
             Closure<Dataset> readJson = { StructType schema ->
                 def reader = spark.read()
                 if (recordLines == null) reader = reader.option("multiLine", "true")
-                StructType effective = recordLines != null ? JsonRecordLines.recordSchema(schema, pathInfos) : schema
+                StructType effective = recordLines != null ? JsonRecordLines.recordSchema(schema, pathInfos, injections) : schema
                 if (effective != null) reader = reader.schema(effective)
                 return reader.json(recordLines?.absolutePath ?: path)
             }
+            Closure buildFrames = { Dataset read ->
+                df = read
+                if (keep && recordLines != null) {
+                    Map applied = KeepStepSupport.apply(read, sideKeep, extract)
+                    persisted.addAll((List<Dataset>) applied.persisted)
+                    keepSummary = (Map) applied.summary
+                    df = (Dataset) applied.kept
+                    asideIdDf = CompareDatasetSupport.buildJsonIdDf(withWholeKeys((Dataset) applied.aside, readPathInfos, idNormalizers),
+                            readPathInfos, label, idNormalizers, fieldExpressions)
+                }
+                idDf = CompareDatasetSupport.buildJsonIdDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
+                dataDf = CompareDatasetSupport.buildJsonDataDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
+            }
             try {
-                df = readJson(readSchema)
-                idDf = CompareDatasetSupport.buildJsonIdDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
-                dataDf = CompareDatasetSupport.buildJsonDataDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
-            } catch (Exception readFailure) {
-                if (readSchema == null) throw readFailure
-                logger.warn("Saved read schema for '${label}' did not cover the data (${readFailure.message}); re-reading with inference.")
-                df = readJson(null)
-                idDf = CompareDatasetSupport.buildJsonIdDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
-                dataDf = CompareDatasetSupport.buildJsonDataDf(df, readPathInfos, label, idNormalizers, fieldExpressions)
+                try {
+                    buildFrames(readJson(readSchema))
+                } catch (Exception readFailure) {
+                    if (readSchema == null) throw readFailure
+                    logger.warn("Saved read schema for '${label}' did not cover the data (${readFailure.message}); re-reading with inference.")
+                    persisted.each { Dataset frame -> frame.unpersist() }
+                    persisted.clear()
+                    buildFrames(readJson(null))
+                }
+            } catch (Throwable failure) {
+                // The caller never sees a failed ingest's persisted frames, so they are released here (none without Keep).
+                persisted.each { Dataset frame -> frame.unpersist() }
+                throw failure
             }
         } else {
              // CSV
@@ -414,7 +456,22 @@ class ReconciliationServices {
              idDf = CompareDatasetSupport.buildCsvIdDf(df, idSpecs, label, hasHeader)
              dataDf = CompareDatasetSupport.buildCsvDataDf(df, idSpecs, label, hasHeader)
         }
-        return [idDf: idDf, dataDf: dataDf]
+        if (!keep) return [idDf: idDf, dataDf: dataDf]
+        return [idDf: idDf, dataDf: dataDf, asideIdDf: asideIdDf, keepSummary: keepSummary, persisted: persisted]
+    }
+
+    /**
+     * DAR-BE-318. Set-aside records whose every key field has a value. A set-aside record never reached the compare before Keep
+     * moved into Spark, so one with a blank key field is not a compare id and must not fail the composite-key check.
+     */
+    private static Dataset withWholeKeys(Dataset aside, List<Map> recordPathInfos, List<String> idNormalizers) {
+        Column whole = lit(true)
+        [recordPathInfos, idNormalizers].transpose().each { List pair ->
+            String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(((Map) pair[0]).path as String))
+            Column key = CompareDatasetSupport.applyIdNormalizer(col(safePath), (String) pair[1])
+            whole = whole.and(key.isNotNull()).and(length(trim(key)).gt(0))
+        }
+        return aside.filter(whole)
     }
 
     // Task 3 (composite compare keys): the RuleSet compare-scope pipeline always resolves an ordered

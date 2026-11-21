@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-328 plan 3: sync pairs and the sync pulse. Every row carries companyUserGroupId (filter
+         DARPAN_ACTIVE_COMPANY_SCOPE, group DARPAN_APP). -->
+
+    <entity entity-name="SyncPair" package="darpan.pulse" use="configuration">
+        <description>A watched sync: one automation whose upstream side should reach the other system within an allowance.</description>
+        <field name="syncPairId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="automationId" type="id" not-null="true"/>
+        <field name="upstreamSide" type="text-short" not-null="true">
+            <description>FILE_1 or FILE_2: the side the records start on.</description>
+        </field>
+        <field name="allowanceMinutes" type="number-integer" not-null="true">
+            <description>Minutes a record may wait before it counts as past allowance.</description>
+        </field>
+        <field name="pulseEveryMinutes" type="number-integer">
+            <description>Minutes between samples; null means no pulse.</description>
+        </field>
+        <field name="pulseWindowField" type="text-short" default="'CREATED'"/>
+        <field name="chatSpaceId" type="id"/>
+        <field name="hourlySummary" type="text-indicator" default="'N'"/>
+        <field name="isActive" type="text-indicator" default="'Y'"/>
+        <field name="lastPulseStamp" type="date-time"/>
+        <field name="lastPulseStatusEnumId" type="id"/>
+        <field name="lastPostedPastCount" type="number-integer"/>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="SYNCPAIR_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.reconciliation.ReconciliationAutomation" fk-name="SYNCPAIR_AUTOMATION">
+            <key-map field-name="automationId"/>
+        </relationship>
+        <index name="SYNCPAIR_AUTOMATION"><index-field name="automationId"/></index>
+    </entity>
+
+    <entity entity-name="PeakPeriodSync" package="darpan.pulse" use="configuration">
+        <description>A peak period's override of a sync pair's allowance and pulse cadence. A null value means normal.</description>
+        <field name="peakPeriodId" type="id" is-pk="true"/>
+        <field name="syncPairId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="allowanceMinutes" type="number-integer"/>
+        <field name="pulseEveryMinutes" type="number-integer"/>
+        <relationship type="one" related="darpan.peak.PeakPeriod" fk-name="PEAKSYNC_PERIOD">
+            <key-map field-name="peakPeriodId"/>
+        </relationship>
+        <relationship type="one" related="darpan.pulse.SyncPair" fk-name="PEAKSYNC_PAIR">
+            <key-map field-name="syncPairId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="PEAKSYNC_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="SyncPulseSample" package="darpan.pulse" use="transactional">
+        <description>One pulse sample of a sync pair: how many records waited and how many were past the allowance.</description>
+        <field name="sampleId" type="id" is-pk="true"/>
+        <field name="syncPairId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="sampleStamp" type="date-time" not-null="true"/>
+        <field name="waitingCount" type="number-integer"/>
+        <field name="oldestWaitingMinutes" type="number-integer"/>
+        <field name="pastAllowanceCount" type="number-integer"/>
+        <field name="allowanceMinutes" type="number-integer">
+            <description>The allowance in force when sampled (peak override applied).</description>
+        </field>
+        <field name="statusEnumId" type="id">
+            <description>SPS_OK, SPS_FAILED or SPS_SKIPPED (enum type SyncPulseSampleStatus).</description>
+        </field>
+        <field name="message" type="text-medium"/>
+        <relationship type="one" related="darpan.pulse.SyncPair" fk-name="SPSAMPLE_PAIR">
+            <key-map field-name="syncPairId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="SPSAMPLE_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="SPSAMPLE_STATUS">
+            <key-map field-name="statusEnumId"/>
+        </relationship>
+        <index name="SPSAMPLE_PAIR_STAMP"><index-field name="syncPairId"/><index-field name="sampleStamp"/></index>
+    </entity>
+
+    <entity entity-name="SyncPulseOrder" package="darpan.pulse" use="transactional">
+        <description>A record a sync pair has seen waiting past its allowance, tracked until it closes.</description>
+        <field name="pulseOrderId" type="id" is-pk="true"/>
+        <field name="syncPairId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="recordKey" type="text-medium" not-null="true"/>
+        <field name="orderName" type="text-medium"/>
+        <field name="otherSystemId" type="text-medium"/>
+        <field name="sourceCreatedStamp" type="date-time"/>
+        <field name="firstPastStamp" type="date-time"/>
+        <field name="lastCheckedStamp" type="date-time"/>
+        <field name="closedStamp" type="date-time"/>
+        <relationship type="one" related="darpan.pulse.SyncPair" fk-name="SPORDER_PAIR">
+            <key-map field-name="syncPairId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="SPORDER_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="SPORDER_PAIR_KEY"><index-field name="syncPairId"/><index-field name="recordKey"/></index>
+    </entity>
+</entities>

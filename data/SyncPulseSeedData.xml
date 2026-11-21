@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-328 plan 3: the outcome of one sync pulse sample. -->
+<entity-facade-xml type="darpan-seed">
+    <moqui.basic.EnumerationType enumTypeId="SyncPulseSampleStatus" description="Sync pulse sample status"/>
+    <moqui.basic.Enumeration enumId="SPS_OK" enumTypeId="SyncPulseSampleStatus" enumCode="ok"
+            description="Sampled" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SPS_FAILED" enumTypeId="SyncPulseSampleStatus" enumCode="failed"
+            description="Sample failed" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="SPS_SKIPPED" enumTypeId="SyncPulseSampleStatus" enumCode="skipped"
+            description="Sample skipped" sequenceNum="3"/>
+</entity-facade-xml>

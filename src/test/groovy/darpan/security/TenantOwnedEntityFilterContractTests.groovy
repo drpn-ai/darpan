@@ -132,6 +132,11 @@ class TenantOwnedEntityFilterContractTests {
             // DAR-BE-328 plan 1: peak periods and their run times
             "DARPAN_SCOPE_PEAK_PERIOD": "darpan.peak.PeakPeriod",
             "DARPAN_SCOPE_PEAK_PERIOD_RUN_TIME": "darpan.peak.PeakPeriodRunTime",
+            // DAR-BE-328 plan 3: sync pairs and the sync pulse
+            "DARPAN_SCOPE_SYNC_PAIR": "darpan.pulse.SyncPair",
+            "DARPAN_SCOPE_PEAK_PERIOD_SYNC": "darpan.pulse.PeakPeriodSync",
+            "DARPAN_SCOPE_SYNC_PULSE_SAMPLE": "darpan.pulse.SyncPulseSample",
+            "DARPAN_SCOPE_SYNC_PULSE_ORDER": "darpan.pulse.SyncPulseOrder",
     ].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */

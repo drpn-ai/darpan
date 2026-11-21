@@ -25,6 +25,12 @@
             <description>Y runs NetSuite reads one at a time in the period. Takes effect in plan 2 (DAR-BE-328).</description>
         </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
+        <field name="startPostedStamp" type="date-time">
+            <description>When the period-start chat post went out (DAR-BE-328 plan 3); null until then.</description>
+        </field>
+        <field name="endPostedStamp" type="date-time">
+            <description>When the period-end chat post went out (DAR-BE-328 plan 3); null until then.</description>
+        </field>
         <field name="createdByUserId" type="id"/>
         <field name="lastUpdatedDate" type="date-time"/>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="PEAKPER_COMPANY_GRP">

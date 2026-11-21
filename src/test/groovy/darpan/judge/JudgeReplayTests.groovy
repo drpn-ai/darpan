@@ -785,7 +785,7 @@ class JudgeReplayTests {
     private <T> T withConnectors(Map<String, String> sideFileBySystem, String extractServiceName = KEPT_IN_SPARK, Closure<T> body) {
         sideFileBySystem.each { String system, String sideFile ->
             insert(SourceSystemConnectorSupport.ENTITY_NAME, [systemEnumId: system, filterParameterName: "sourceFilters",
-                    excludedRecordsSidecar: sideFile, extractServiceName: extractServiceName, enabled: "Y"])
+                    excludedRecordsSidecar: sideFile, extractServiceName: extractServiceName, enabled: "Y", keepLinesJson: "[]"])
         }
         try {
             return body.call()

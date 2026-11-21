@@ -3434,6 +3434,7 @@ class AutomationExecutionSupportTests {
                 filterParameterName   : "sourceFilters",
                 excludedRecordsSidecar: "Y",
                 enabled               : "Y",
+                keepLinesJson         : "[]",
         ] + connectorExtras)
         // each side's key, read off a top-level record: the gate (KeepPlanSupport.keyedOnRecords) lets such a side keep in Spark
         ["FILE_1", "FILE_2"].each { String side ->

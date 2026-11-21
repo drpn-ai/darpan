@@ -31,18 +31,37 @@ class KeepArtifactsTests {
     }
 
     @Test
-    void theSummaryRoundTripsAndConfiguredExclusionsReadsIt() {
+    void theSummaryRoundTrips() {
         File file = extract([[n: 0]])
         assertNull(KeepArtifacts.readSummary(file))
-        assertNull(KeepArtifacts.configuredExclusions(file))
 
         KeepArtifacts.writeSummary(file, summary())
 
         assertEquals("acme-orders.keep.json", KeepArtifacts.keepFile(file).name)
         assertEquals(summary(), KeepArtifacts.readSummary(file))
-        assertEquals(summary().configuredExclusions, KeepArtifacts.configuredExclusions(file))
         KeepArtifacts.writeSummary(file, summary() + [configuredExclusions: []])
-        assertEquals([], KeepArtifacts.configuredExclusions(file))
+        assertEquals([], KeepArtifacts.readSummary(file).configuredExclusions)
+    }
+
+    /**
+     * Final review m3: only a Spark Keep writes a summary, so one beside the extract means its read did not filter it, whatever
+     * the read's signals (configuredExclusions, missing flags) say.
+     */
+    @Test
+    void aKeepSummaryBesideTheExtractMeansItWasNotFilteredAtTheRead() {
+        File ruled = new File(dir, "ruled-before.json")
+        ruled.text = JsonOutput.toJson([records: [[id: "K1"]], metadata: [filters: [configuredExclusions: [[sequenceNum: 1,
+                fieldExpression: "status", operator: "EXCLUDE_IN", values: ["VOID"], excludedCount: 0, fieldAbsentCount: 0]]]]])
+        File unflagged = extract([[id: "K1"]], "unflagged.json")
+        assertTrue(KeepArtifacts.filteredAtRead(ruled), "test precondition")
+        assertTrue(KeepArtifacts.filteredAtRead(unflagged, ["isTest"]), "test precondition")
+
+        KeepArtifacts.writeSummary(ruled, summary())
+        KeepArtifacts.writeSummary(unflagged, summary())
+
+        assertFalse(KeepArtifacts.filteredAtRead(ruled))
+        assertFalse(KeepArtifacts.filteredAtRead(unflagged, ["isTest"]))
+        assertTrue(KeepArtifacts.filteredAtRead(new File(dir, "gone.json")), "a missing extract still answers true")
     }
 
     @Test

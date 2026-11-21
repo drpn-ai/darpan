@@ -722,11 +722,13 @@ class KeepLiveParityTests {
         return out
     }
 
+    /** A connector row; one with no built-ins carries an explicit "[]" (Ruling 3b2b-29: a missing value fails a Spark-kept side). */
     private static String connector(String id, String service, String sidecar, String extra = "") {
+        String keepLines = extra.contains("keepLinesJson") ? "" : "keepLinesJson=\"[]\""
         return """<darpan.reconciliation.SourceSystemConnector systemEnumId="${id}" extractServiceName="${service}"
                 expectedSourceConfigType="KL_TYPE" configParameterName="projConfigId" dateFromParameterName="windowStart"
                 dateToParameterName="windowEnd" preserveWindowInstants="Y" filterParameterName="sourceFilters"
-                excludedRecordsSidecar="${sidecar}" enabled="Y" ${extra}/>
+                excludedRecordsSidecar="${sidecar}" enabled="Y" ${keepLines} ${extra}/>
             <moqui.basic.Enumeration enumId="${id}" enumTypeId="DarpanSystemSource" description="${id} (made up)"/>"""
     }
 

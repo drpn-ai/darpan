@@ -60,7 +60,7 @@ class KeepPlanSupportTests {
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME" extractServiceName="reconciliation.AcmeExtractionServices.extract#Records"
                 filterParameterName="excludeFilters" excludedRecordsSidecar="Y" keepLinesJson="${keepLinesAttr}"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_QUIET" extractServiceName="reconciliation.AcmeExtractionServices.extract#Quiet"
-                filterParameterName="excludeFilters" excludedRecordsSidecar="N"/>
+                filterParameterName="excludeFilters" excludedRecordsSidecar="N" keepLinesJson="[]"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_DEFINED" extractServiceName="datasource.DataSourceServices.extract#DataDefinedSource"
                 filterParameterName="excludeFilters" excludedRecordsSidecar="Y" dataSourceDefinitionId="ACME_DEF" keepLinesJson="${keepLinesAttr}"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_UPLOAD" extractServiceName="reconciliation.AcmeExtractionServices.extract#Upload"
@@ -72,7 +72,15 @@ class KeepPlanSupportTests {
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_BUILT_IN" extractServiceName="${NO_LONGER_FILTERS}"
                 filterParameterName="sourceFilters" excludedRecordsSidecar="Y" keepLinesJson='[{"sequenceNum":1,"label":"Unkeyed lines","kinds":{"lineKind":"FVT_TEXT"},"lines":[{"conditionSeqId":"01","sequenceNum":1,"conditionTypeId":"RCT_COMPARE","fieldName":"lineKind","operatorEnumId":"ENTCO_EQUALS","compareValue":"UNKEYED"}]}]'/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_PLAIN" extractServiceName="${NO_LONGER_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="N" keepLinesJson="[]"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_UNLOADED" extractServiceName="${NO_LONGER_FILTERS}"
                 filterParameterName="sourceFilters" excludedRecordsSidecar="N"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_BLANK" extractServiceName="${NO_LONGER_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="N" keepLinesJson="  "/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_FILTERING_UNLOADED" extractServiceName="${STILL_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="N"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_ABSENCE" extractServiceName="${NO_LONGER_FILTERS}"
+                filterParameterName="sourceFilters" excludedRecordsSidecar="N" keepLinesJson='[{"sequenceNum":1,"label":"Not keyed lines","kinds":{"lineKind":"FVT_TEXT"},"lines":[{"conditionSeqId":"01","sequenceNum":1,"conditionTypeId":"RCT_COMPARE","fieldName":"lineKind","operatorEnumId":"ENTCO_NOT_EQUALS","compareValue":"KEYED"}]}]'/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LIVE_FILTERING" extractServiceName="${STILL_FILTERS}"
                 filterParameterName="sourceFilters" excludedRecordsSidecar="Y" keepLinesJson="${keepLinesAttr}"/>
             ${scope('KP_SCOPE_A', A)}
@@ -110,6 +118,75 @@ class KeepPlanSupportTests {
         assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, new File(builtInOnly.parentFile, "gone.json"), rows, builtIn, [:]))
     }
 
+    /**
+     * Final review triage 6 (16e M4): a built-in line that could hold on a missing field (here NE) sets aside records that carry no
+     * flag, so a file with no flagged record says nothing about its read; only configuredExclusions tell.
+     */
+    @Test
+    void aLineThatHoldsOnAMissingFieldTakesOnlyTheConfiguredExclusionsSignal() {
+        File noFlag = landed("absence-no-flag", [records: [[orderId: "O1"], [orderId: "O2"]], metadata: [filters: [builtInDropCount: 1]]])
+        File ruled = landed("absence-ruled", [records: [[orderId: "O1"]], metadata: [filters: [configuredExclusions: [[sequenceNum: 1,
+                fieldExpression: "other", operator: "EXCLUDE_IN", values: ["X"], excludedCount: 0, fieldAbsentCount: 0]]]]])
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, noFlag, [], connector("ACME_LIVE_ABSENCE"), [:]),
+                "an NE line: a file with no lineKind is not read as filtered")
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, ruled, [], connector("ACME_LIVE_ABSENCE"), [:]), "configuredExclusions still tell")
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, noFlag, [], connector("ACME_LIVE_BUILT_IN"), [:]), "control: an EQ line's flag tells")
+    }
+
+    /**
+     * Final review m3: a Keep summary beside a landed file means Spark Keep ran over it, so its read did not filter it, whatever
+     * the read's signals say. Otherwise a retry would skip Keep and leave the earlier attempt's summary and rows to be read.
+     */
+    @Test
+    void aKeepSummaryBesideALandedFileMeansItWasNotFilteredAtTheRead() {
+        File ruled = landed("kept-before", [records: [[orderId: "O1"]], metadata: [filters: [configuredExclusions: [[sequenceNum: 1,
+                fieldExpression: "other", operator: "EXCLUDE_IN", values: ["X"], excludedCount: 0, fieldAbsentCount: 0]]]]])
+        List<Map<String, Object>> rows = KeepPlanSupport.tenantRuleRows(ec, "KP_SCOPE_A", "FILE_2", A)
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, ruled, rows, connector("ACME_LIVE"), [:]), "test precondition")
+        KeepArtifacts.writeSummary(ruled, [rules: [], configuredExclusions: [], keptCount: 1, setAsideCount: 0])
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, ruled, rows, connector("ACME_LIVE"), [:]))
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, ruled, [], connector("ACME_LIVE_BUILT_IN"), [:]))
+        assertEquals("SPARK", KeepPlanSupport.effectiveSideKeep(ec, rows, connector("ACME_LIVE"), [:],
+                ec.service.getServiceDefinition(NO_LONGER_FILTERS), "records", ['$.records[*].orderId'], true, ruled).placement,
+                "the retried side keeps in Spark again")
+    }
+
+    /**
+     * Ruling 3b2b-29 (final review I2): a side Spark keeps fails when its connector has no Keep lines loaded (null or blank), as
+     * after a skipped upgrade-data load; an explicit "[]" or a real line passes, and a side still filtering at the read is
+     * unaffected.
+     */
+    @Test
+    void aSideSparkKeepsFailsWhenItsConnectorsKeepLinesAreNotLoaded() {
+        Object noLongerFilters = ec.service.getServiceDefinition(NO_LONGER_FILTERS)
+        Object stillFilters = ec.service.getServiceDefinition(STILL_FILTERS)
+        List<Map<String, Object>> rows = KeepPlanSupport.tenantRuleRows(ec, "KP_SCOPE_A", "FILE_2", A)
+        Closure<Map> effective = { List<Map<String, Object>> sideRows, String system, Object definition ->
+            KeepPlanSupport.effectiveSideKeep(ec, sideRows, connector(system), [:], definition, "records", ['$.records[*].orderId'], true,
+                    null, "FILE_2")
+        }
+        assertNull(ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "ACME_LIVE_UNLOADED").one().keepLinesJson,
+                "test precondition: no value loaded")
+
+        IllegalArgumentException unloaded = assertThrows(IllegalArgumentException) { effective([], "ACME_LIVE_UNLOADED", noLongerFilters) }
+        assertEquals("File 2 (ACME_LIVE_UNLOADED) cannot be filtered: the ACME_LIVE_UNLOADED connector's Keep lines (keepLinesJson) " +
+                "are not loaded. Load the upgrade data, then run again.", unloaded.message)
+        assertThrows(IllegalArgumentException) { effective(rows, "ACME_LIVE_UNLOADED", noLongerFilters) }
+        assertThrows(IllegalArgumentException) { effective([], "ACME_LIVE_BLANK", noLongerFilters) }
+        File ruled = landed("unloaded-ruled", [records: [[orderId: "O1"]], metadata: [filters: [configuredExclusions: [[sequenceNum: 1,
+                fieldExpression: "other", operator: "EXCLUDE_IN", values: ["X"], excludedCount: 0, fieldAbsentCount: 0]]]]])
+        assertThrows(IllegalArgumentException) {
+            KeepPlanSupport.effectiveSideKeep(ec, rows, connector("ACME_LIVE_UNLOADED"), [:], noLongerFilters, "records", ["orderId"], true, ruled)
+        }
+
+        Map plain = effective([], "ACME_LIVE_PLAIN", noLongerFilters)
+        assertEquals("SPARK", plain.placement, "an explicit [] is a loaded value")
+        assertEquals([], plain.rules)
+        assertEquals(["BUILT_IN:1"], effective([], "ACME_LIVE_BUILT_IN", noLongerFilters).rules*.id, "a real line passes")
+        assertEquals(KeepPlanSupport.todaysRead(rows), effective(rows, "ACME_FILTERING_UNLOADED", stillFilters),
+                "a side still filtering at the read is unaffected")
+    }
+
     /** A landed extract written to a scratch folder. */
     private static File landed(String name, Map document) {
         File dir = java.nio.file.Files.createTempDirectory("keep-plan-landed").toFile()
@@ -118,6 +195,20 @@ class KeepPlanSupportTests {
         file.setText(JsonOutput.toJson(document), "UTF-8")
         file.deleteOnExit()
         return file
+    }
+
+    /**
+     * A side placed through the one gate (effectiveSideKeep), as a run whose compare takes Keep, whose extract no longer declares
+     * the filter parameter and whose records are top-level.
+     */
+    private Map placed(List<Map<String, Object>> rows, String system, Map extractOptions = [:]) {
+        return KeepPlanSupport.effectiveSideKeep(ec, rows, connector(system), extractOptions, [inParameterNameList: ["keepRuleFields"]],
+                "records", ['$.records[*].orderId'], true)
+    }
+
+    /** placed with the compare scope's rows for one named tenant. */
+    private Map placedFor(String compareScopeId, String fileSide, String tenant, String system, Map extractOptions = [:]) {
+        return placed(KeepPlanSupport.tenantRuleRows(ec, compareScopeId, fileSide, tenant), system, extractOptions)
     }
 
     private Map connector(String systemEnumId) {
@@ -135,11 +226,11 @@ class KeepPlanSupportTests {
         assertEquals("SPARK", KeepPlanSupport.placement(connector("ACME")))
         assertEquals("READ", KeepPlanSupport.placement(connector("ACME_DEFINED")))
 
-        Map none = KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME_UPLOAD"), [:])
+        Map none = placedFor("KP_SCOPE_A", "FILE_1", A, "ACME_UPLOAD")
         assertEquals([placement: "NONE", readFilters: [], rules: [], writeSidecar: false, fields: [] as Set], none,
                 "an upload gets no filters and no Keep, its declared lines included")
 
-        Map read = KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME_DEFINED"), [:])
+        Map read = placedFor("KP_SCOPE_A", "FILE_1", A, "ACME_DEFINED")
         assertEquals("READ", read.placement)
         assertEquals([], read.rules, "a data-defined side keeps filtering at read (Ruling 3b2b-16): no Spark rules, no built-ins")
         assertEquals([[1, "orderType", "EXCLUDE_IN", "TRANSFER"], [2, "channel", "INCLUDE_IN", "WEB,POS"]],
@@ -148,7 +239,7 @@ class KeepPlanSupportTests {
         assertEquals(["orderType", "channel"] as Set, read.fields)
         assertFalse(read.writeSidecar, "the read writes its own side file; Spark writes none")
 
-        Map spark = KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_2", A, connector("ACME"), [:])
+        Map spark = placedFor("KP_SCOPE_A", "FILE_2", A, "ACME")
         assertEquals("SPARK", spark.placement)
         assertEquals([], spark.readFilters, "a Spark side's read gets no filters")
         assertEquals(["BUILT_IN:1", "BUILT_IN:2", "A:1"], spark.rules*.id)
@@ -233,7 +324,7 @@ class KeepPlanSupportTests {
                 "so Keep cannot run in Spark.", nestedKey.message)
         // a side whose ONLY Keep rule is a declared built-in drop (keepLinesJson, no tenant filter) fails exactly the same:
         // without the check it would silently stop applying the drop its extractor no longer makes
-        assertEquals(["BUILT_IN:1"], KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector("ACME_LIVE_BUILT_IN"), [:]).rules*.id,
+        assertEquals(["BUILT_IN:1"], placed([], "ACME_LIVE_BUILT_IN").rules*.id,
                 "test precondition: the side's one Keep rule is its connector's declared built-in")
         IllegalArgumentException builtInOnly = assertThrows(IllegalArgumentException) { effective([], "ACME_LIVE_BUILT_IN", noLongerFilters, null, nested, true) }
         assertEquals("File 2 (ACME_LIVE_BUILT_IN) cannot be filtered: its source no longer filters at read and its records are not top-level, " +
@@ -241,6 +332,16 @@ class KeepPlanSupportTests {
         assertThrows(IllegalArgumentException) { effective(null, "ACME_LIVE_BUILT_IN", noLongerFilters, "records", ["orderId"], false) }
         assertThrows(IllegalArgumentException) { effective([], "ACME_LIVE", noLongerFilters, "orders", ["orderId"], true) }
         assertThrows(IllegalArgumentException) { effective(rows, "ACME_LIVE_PLAIN", noLongerFilters, null, nested, true) }
+
+        // a side with no key: its own reason, and what to do
+        IllegalArgumentException keyless = assertThrows(IllegalArgumentException) { effective(rows, "ACME_LIVE", noLongerFilters, "records", [], true) }
+        assertEquals("File 2 (ACME_LIVE) cannot be filtered: its source no longer filters at read and it has no key, so Keep cannot " +
+                "run in Spark. Give the side a key field in its compare scope.", keyless.message)
+        IllegalArgumentException blankKeys = assertThrows(IllegalArgumentException) {
+            effective([], "ACME_LIVE_BUILT_IN", noLongerFilters, null, [null, " "], true)
+        }
+        assertEquals(keyless.message.replace("ACME_LIVE", "ACME_LIVE_BUILT_IN"), blankKeys.message, "blank key fields are no key")
+        assertEquals(KeepPlanSupport.todaysRead([]), effective([], "ACME_LIVE_PLAIN", noLongerFilters, "records", [], true), "no rules: nothing to filter")
 
         // keepInSpark false with rules
         IllegalArgumentException noKeep = assertThrows(IllegalArgumentException) { effective(rows, "ACME_LIVE", noLongerFilters, "records", ["orderId"], false) }
@@ -296,7 +397,7 @@ class KeepPlanSupportTests {
                 "the owner reads its row (control)")
         assertEquals([], KeepPlanSupport.tenantRuleRows(ec, "KP_SCOPE_A", "FILE_1", B))
 
-        Map plan = KeepPlanSupport.sideKeep(ec, "KP_SCOPE_B", "FILE_1", A, connector("ACME_QUIET"), [:])
+        Map plan = placedFor("KP_SCOPE_B", "FILE_1", A, "ACME_QUIET")
         assertEquals([], plan.rules)
         assertEquals([] as Set, plan.fields)
     }
@@ -305,14 +406,14 @@ class KeepPlanSupportTests {
     void aBlankTenantIsRefused() {
         [null, "", "  "].each { String tenant ->
             assertThrows(IllegalArgumentException) { KeepPlanSupport.tenantRuleRows(ec, "KP_SCOPE_A", "FILE_1", tenant) }
-            assertThrows(IllegalArgumentException) { KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", tenant, connector("ACME"), [:]) }
-            assertThrows(IllegalArgumentException) { KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", tenant, connector("ACME_UPLOAD"), [:]) }
+            assertThrows(IllegalArgumentException) { placedFor("KP_SCOPE_A", "FILE_1", tenant, "ACME") }
+            assertThrows(IllegalArgumentException) { placedFor("KP_SCOPE_A", "FILE_1", tenant, "ACME_UPLOAD") }
         }
     }
 
     @Test
     void builtInsComeBeforeTheTenantsRules() {
-        Map plan = KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME"), [:])
+        Map plan = placedFor("KP_SCOPE_A", "FILE_1", A, "ACME")
         assertEquals(["BUILT_IN:1", "BUILT_IN:2", "A:1", "A:2"], plan.rules*.id)
         assertEquals(["BUILT_IN", "BUILT_IN", "TENANT", "TENANT"], plan.rules*.source)
         assertEquals(["Cancelled records", "Draft records", "orderType", "channel"], plan.rules*.label,
@@ -325,33 +426,33 @@ class KeepPlanSupportTests {
         assertEquals([kind: "compare", field: "channel", text: "GROOVY", op: "NOT_IN", values: ["WEB", "POS"], valueKind: "TEXT", fold: "A_UPPER"],
                 include.tests[1].test)
 
-        Map skipped = KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME"), [onlyCancelled: true])
+        Map skipped = placedFor("KP_SCOPE_A", "FILE_1", A, "ACME", [onlyCancelled: true])
         assertEquals(["BUILT_IN:2", "A:1", "A:2"], skipped.rules*.id, "an entry is skipped when the side sets its appliesUnless option")
 
         // Ruling 3b2b-15: the automation path brings its own filter rows (loadAutomationSourceFilters' getter shape)
         List<Map<String, Object>> automationRows = [[sequenceNum: 1, fieldExpression: "kind", operator: "INCLUDE_PREFIX", filterValues: "EXC-"]]
-        Map automation = KeepPlanSupport.sideKeepFromFilterRows(ec, automationRows, connector("ACME"), [:])
+        Map automation = placed(automationRows, "ACME")
         assertEquals(["BUILT_IN:1", "BUILT_IN:2", "A:1"], automation.rules*.id)
         assertEquals([kind: "not", of: [kind: "compare", field: "kind", text: "GROOVY", op: "STARTS_WITH_ANY", values: ["EXC-"],
                                         valueKind: "TEXT", fold: "A_UPPER"]], automation.rules[2].tests[1].test)
-        Map automationRead = KeepPlanSupport.sideKeepFromFilterRows(ec, automationRows, connector("ACME_DEFINED"), [:])
+        Map automationRead = placed(automationRows, "ACME_DEFINED")
         assertEquals(automationRows, automationRead.readFilters)
         assertEquals([], automationRead.rules)
     }
 
     @Test
     void writeSidecarFollowsTheConnectorRow() {
-        assertTrue(KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME"), [:]).writeSidecar as boolean)
-        assertFalse(KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME_QUIET"), [:]).writeSidecar as boolean)
-        assertFalse(KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME_DEFINED"), [:]).writeSidecar as boolean)
-        assertFalse(KeepPlanSupport.sideKeep(ec, "KP_SCOPE_A", "FILE_1", A, connector("ACME_UPLOAD"), [:]).writeSidecar as boolean)
+        assertTrue(placedFor("KP_SCOPE_A", "FILE_1", A, "ACME").writeSidecar as boolean)
+        assertFalse(placedFor("KP_SCOPE_A", "FILE_1", A, "ACME_QUIET").writeSidecar as boolean)
+        assertFalse(placedFor("KP_SCOPE_A", "FILE_1", A, "ACME_DEFINED").writeSidecar as boolean)
+        assertFalse(placedFor("KP_SCOPE_A", "FILE_1", A, "ACME_UPLOAD").writeSidecar as boolean)
     }
 
     /** Built-ins are data on a connector row (Ruling 3b2b-12): a made-up system's lines compile with no system component. */
     @Test
     void aMadeUpSystemsDeclaredKeepLinesCompile() {
         assertNull(ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "ACME_ABSENT").one())
-        Map plan = KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector("ACME"), [:])
+        Map plan = placed([], "ACME")
         assertEquals([
                 [id: "BUILT_IN:1", sequenceNum: 1, label: "Cancelled records", source: "BUILT_IN", tests: [[reason: "BUILT_IN",
                         test: [kind: "compare", field: "isCancelled", text: "FACT", op: "EQ", values: ["true"], valueKind: "BOOLEAN", fold: "NONE"]]]],
@@ -361,7 +462,7 @@ class KeepPlanSupportTests {
         assertEquals(["isCancelled", "stage"], KeepRules.injections(plan.rules)*.field)
 
         IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
-            KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector("ACME_BAD"), [:])
+            placed([], "ACME_BAD")
         }
         assertTrue(refused.message.contains("Has lines"), "a refused declared line is a data error naming the entry: ${refused.message}")
     }

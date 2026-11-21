@@ -102,7 +102,7 @@ class KeptCopyParityTests {
             <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" extractServiceName="${ISO_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_ISO_TYPE"
                 configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
-                excludedRecordsSidecar="Y" enabled="Y"/>
+                excludedRecordsSidecar="Y" enabled="Y" keepLinesJson="[]"/>
         </entity-facade-xml>""").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])

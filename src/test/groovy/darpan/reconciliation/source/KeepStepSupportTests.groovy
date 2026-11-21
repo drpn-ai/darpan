@@ -161,7 +161,6 @@ class KeepStepSupportTests {
         Map summary = KeepArtifacts.readSummary(file)
         assertTrue(summary.containsKey("configuredExclusions"))
         assertEquals([], summary.configuredExclusions)
-        assertEquals([], KeepArtifacts.configuredExclusions(file))
         assertEquals(1, summary.setAsideCount)
     }
 

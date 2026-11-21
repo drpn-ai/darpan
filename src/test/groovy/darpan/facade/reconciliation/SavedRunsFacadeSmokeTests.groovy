@@ -3057,7 +3057,7 @@ end'''
             <darpan.reconciliation.SourceSystemConnector systemEnumId="KL_SMOKE" extractServiceName="${service}"
                 expectedSourceConfigType="KL_SMOKE_TYPE" configParameterName="projConfigId" dateFromParameterName="windowStart"
                 dateToParameterName="windowEnd" preserveWindowInstants="Y" filterParameterName="sourceFilters"
-                excludedRecordsSidecar="Y" enabled="Y"/>
+                excludedRecordsSidecar="Y" enabled="Y" keepLinesJson="[]"/>
             <moqui.basic.Enumeration enumId="KL_SMOKE" enumTypeId="DarpanSystemSource" description="Keep smoke (made up)"/>
             <darpan.rule.RuleSet ruleSetId="KL_SMOKE_RS" ruleSetName="Keep smoke" companyUserGroupId="${KREWE}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="KL_SMOKE_RS" ruleSetId="KL_SMOKE_RS" objectType="ORDER"

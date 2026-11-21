@@ -44,7 +44,6 @@ class KeepArtifacts {
         }
     }
 
-    /** The summary, or null when there is none (a side that had no Spark Keep). */
     private static final ObjectMapper FILTERED_MAPPER = new ObjectMapper()
 
     /**
@@ -65,12 +64,18 @@ class KeepArtifacts {
      * Records are streamed token by token; the metadata object's own keys are not records. A missing or unreadable extract also
      * answers true, so the side keeps today's read and the compare reports the problem.
      *
+     * A Keep summary beside the extract ({@code .keep.json}, final review m3) answers false before either signal: only a Spark
+     * Keep writes one (a side with Spark rules), so Spark Keep ran over this file and its read did not filter it. Without this,
+     * a retried file whose flags happen to be absent would read as filtered, skip Keep, and leave the earlier attempt's summary
+     * and set-aside rows for the conclude pass to read against a compare that took every record.
+     *
      * Package scope: every path asks KeepPlanSupport.landedFilteredAtRead (through effectiveSideKeep), which derives
      * keepLineFields itself, so no caller can ask the narrower question by forgetting them.
      */
     @PackageScope
     static boolean filteredAtRead(File extract, Collection<String> keepLineFields = null) {
         if (extract == null || !extract.isFile()) return true
+        if (keepFile(extract).isFile()) return false
         Set<String> flags = keepLineFields ? new HashSet<String>(keepLineFields) : Collections.<String>emptySet()
         try {
             JsonParser parser = FILTERED_MAPPER.getFactory().createParser(extract)
@@ -124,17 +129,11 @@ class KeepArtifacts {
         return found
     }
 
+    /** The summary, or null when there is none (a side that had no Spark Keep). */
     static Map readSummary(File extract) {
         File file = keepFile(extract)
         if (!file.isFile()) return null
         return (Map) new JsonSlurper().parse(file, "UTF-8")
-    }
-
-    /** The tenant rules' counts, [] when the side had none, null when there is no summary (read as "not applied"). */
-    static List configuredExclusions(File extract) {
-        Map summary = readSummary(extract)
-        if (summary == null) return null
-        return (summary.get("configuredExclusions") as List) ?: []
     }
 
     /**

@@ -92,7 +92,7 @@ class SyncPulseReaderSmokeTests {
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" enabled="Y"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="${ACME}" extractServiceName="${ACME_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
-                excludedRecordsSidecar="Y" enabled="Y"/>
+                excludedRecordsSidecar="Y" enabled="Y" keepLinesJson="[]"/>
             <darpan.rule.RuleSet ruleSetId="PULSE_KEEP_RS" ruleSetName="Pulse keep" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="PULSE_KEEP_SCOPE" ruleSetId="PULSE_KEEP_RS" objectType="ORDER" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_1" systemEnumId="${ACME}" fileTypeEnumId="DftJson"

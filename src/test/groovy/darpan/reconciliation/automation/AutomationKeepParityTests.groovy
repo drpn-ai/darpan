@@ -659,14 +659,14 @@ class AutomationKeepParityTests {
                 groupTypeEnumId="${TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID}"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_SPARK" extractServiceName="${SPARK_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
-                excludedRecordsSidecar="Y" enabled="Y"/>
+                excludedRecordsSidecar="Y" enabled="Y" keepLinesJson="[]"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_READ" extractServiceName="${READ_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
                 excludedRecordsSidecar="Y" enabled="Y"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_COPY_SPARK" extractServiceName="${SPARK_COPY_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="ACME_COPY_TYPE"
                 configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
-                excludedRecordsSidecar="Y" enabled="Y"/>
+                excludedRecordsSidecar="Y" enabled="Y" keepLinesJson="[]"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_COPY_READ" extractServiceName="${READ_COPY_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="ACME_COPY_TYPE"
                 configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
@@ -675,7 +675,7 @@ class AutomationKeepParityTests {
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="ACME_COPY_TYPE"
                 configParameterName="projConfigId" preserveWindowInstants="Y" keepFieldsParameterName="keepFields"
                 keepFieldsBase="id,createdAt" filterParameterName="sourceFilters" excludedRecordsSidecar="Y"
-                servingProjectionServiceName="test.KeptCopyTestServices.project#MadeUpKeptRecords" enabled="Y"/>
+                servingProjectionServiceName="test.KeptCopyTestServices.project#MadeUpKeptRecords" enabled="Y" keepLinesJson="[]"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_SPARK_FLAGGED" extractServiceName="${FLAGGED_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
                 excludedRecordsSidecar="Y" enabled="Y"

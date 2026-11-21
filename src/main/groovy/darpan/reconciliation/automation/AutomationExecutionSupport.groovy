@@ -3146,11 +3146,12 @@ class AutomationExecutionSupport {
      * {@code executeAutomationForTenant} — the three points where a real, potentially slow I/O call
      * (a Shopify/OMS extract, or the Spark reconcile) has just finished.</p>
      *
-     * <p><b>Residual limitation, stated plainly:</b> this is a BOUNDARY heartbeat, not a progress
-     * heartbeat. It resets the clock only between phases, so a run is still falsely reaped if a SINGLE
-     * phase — one very large Shopify/OMS extract, or one very large reconcile — exceeds the threshold
-     * on its own. That is exactly the guarantee the interactive path's beginStep/endStep heartbeats
-     * give today; this task extends the same guarantee to automations, it does not improve on it.</p>
+     * <p>This is a BOUNDARY heartbeat, not a progress heartbeat: it resets the clock only between phases.
+     * Inside an extract phase, the extract's own page heartbeats (RunObservability.heartbeatStageProgress)
+     * keep the run-result row fresh and, since DAR-BE-328, touch this execution row too (at most once a
+     * minute, RunObservability.touchAutomationExecution), so an extract slowed on purpose by a peak period
+     * is not reaped while its pages still move. A single phase with no page heartbeat of its own (one very
+     * large reconcile) is still falsely reaped if it alone exceeds the threshold.</p>
      *
      * <p>Never touches {@code statusEnumId} or {@code notifiedDate}, and never fails the run: the
      * run-result write and the execution write are independently caught and logged at warn, exactly

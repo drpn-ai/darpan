@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory
 
 import darpan.facade.common.DarpanMdcSupport
 import java.sql.Timestamp
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Single instrumentation seam for reconciliation run observability. Foundation increment:
@@ -17,6 +18,13 @@ class RunObservability {
 
     static final String RUN_RESULT_ENTITY = "darpan.reconciliation.ReconciliationRunResult"
     static final String RUN_STEP_ENTITY   = "darpan.reconciliation.ReconciliationRunStep"
+    static final String AUTOMATION_EXECUTION_ENTITY = "darpan.reconciliation.ReconciliationAutomationExecution"
+
+    /** DAR-BE-328: an extract's page heartbeats touch the run's automation execution at most this often. */
+    static final long EXECUTION_TOUCH_EVERY_MS = 60_000L
+    /** Seam for tests. */
+    static Closure<Long> executionTouchClock = { -> System.currentTimeMillis() }
+    private static final ConcurrentHashMap<String, Long> EXECUTION_TOUCHED_AT = new ConcurrentHashMap<String, Long>()
 
     static final String STATUS_PENDING  = "AUT_STAT_PENDING"
     static final String STATUS_RUNNING  = "AUT_STAT_RUNNING"
@@ -279,8 +287,50 @@ class RunObservability {
                 progress.put("progressPercent", Math.min(99, (int) Math.floor(processed * 100.0d / expected)))
             }
             heartbeat(ec, step, progress)
+            touchAutomationExecution(ec, runIdValue, step.get("companyUserGroupId"))
         } catch (Exception ignored) {
         }
+    }
+
+    /**
+     * DAR-BE-328. An automation's execution row is otherwise written only at phase boundaries, and StuckRunReaper fails it
+     * once its lastUpdatedStamp is older than reaperStaleMinutes. A phase slowed on purpose (a peak period's HotWax share,
+     * NetSuite one at a time) can outlast that while its pages still move, so each page heartbeat also touches the RUNNING
+     * execution that owns the run (ReconciliationAutomationExecution.reconciliationRunResultId), at most once a minute per
+     * run. A run with no execution (an interactive run) finds none. Never throws.
+     */
+    static void touchAutomationExecution(def ec, String runId, Object tenantId) {
+        String tenant = norm(tenantId)
+        if (!runId || !tenant) return
+        try {
+            long nowMs = executionTouchClock.call()
+            Long last = EXECUTION_TOUCHED_AT.get(runId)
+            if (last != null && nowMs >= last && nowMs - last < EXECUTION_TOUCH_EVERY_MS) return
+            EXECUTION_TOUCHED_AT.put(runId, nowMs)
+            if (EXECUTION_TOUCHED_AT.size() > 1000) {
+                EXECUTION_TOUCHED_AT.entrySet().removeIf { Map.Entry<String, Long> e -> nowMs - e.value > 10L * EXECUTION_TOUCH_EVERY_MS }
+            }
+            Timestamp now = nowSafe(ec)
+            ec.transaction.runUseOrBegin(30, "Error touching reconciliation automation execution", {
+                List executions = ec.entity.find(AUTOMATION_EXECUTION_ENTITY)
+                        .condition("reconciliationRunResultId", runId)
+                        .condition("companyUserGroupId", tenant)
+                        .condition("statusEnumId", STATUS_RUNNING)
+                        .useCache(false).list()
+                for (def execution : executions) {
+                    // update() bumps lastUpdatedStamp, which is what the reaper reads.
+                    execution.set("lastUpdatedDate", now)
+                    execution.update()
+                }
+            })
+        } catch (Throwable t) {
+            logger.warn("RunObservability.touchAutomationExecution best-effort failure (runId=${runId}): ${t.message}")
+        }
+    }
+
+    static void resetExecutionTouchesForTests() {
+        EXECUTION_TOUCHED_AT.clear()
+        executionTouchClock = { -> System.currentTimeMillis() }
     }
 
     static void heartbeat(def ec, Object step, Map<String, Object> progress) {

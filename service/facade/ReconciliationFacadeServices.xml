@@ -3160,6 +3160,8 @@
                 <set field="deletedExecutionCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <!-- DAR-BE-328: a peak period's run times that name it (FK PEAKRT_AUTOMATION) go with it. -->
                 <set field="ignorePeakRunTimeDelete" from="darpan.peak.PeakPeriodFacadeSupport.deleteRunTimesForAutomation(ec, automationRecord.companyUserGroupId as String, automationIdValue)"/>
+                <!-- DAR-BE-328: a sync pair (FK SYNCPAIR_AUTOMATION) and its samples, orders and peak overrides go with it. -->
+                <set field="ignoreSyncPairDelete" from="darpan.pulse.SyncPulseCascade.deleteForAutomation(ec, automationRecord.companyUserGroupId as String, automationIdValue)"/>
                 <!-- DAR-BE-107/108: the streak and its badges belong to the automation. A side quest it found stays the tenant's. -->
                 <set field="ignoreStreakDelete" from="darpan.reconciliation.streak.AutomationStreakSupport.deleteFor(ec, automationIdValue)"/>
                 <set field="ignoreAutomationDelete" from="automationRecord.delete()"/>

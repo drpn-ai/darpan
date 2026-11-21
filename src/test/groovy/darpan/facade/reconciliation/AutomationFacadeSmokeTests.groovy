@@ -260,6 +260,26 @@ class AutomationFacadeSmokeTests {
         String runTimeId = runTimeSave.runTimeId as String
         assertNotNull(findOne("darpan.peak.PeakPeriodRunTime", [runTimeId: runTimeId]))
 
+        // DAR-BE-328: sync pairs (FK SYNCPAIR_AUTOMATION) and their children go too; another tenant's pair stays.
+        String otherTenant = "SYNC_CASCADE_OTHER"
+        seedTenant(otherTenant, "Sync cascade other")
+        String otherAutomationId = "SYNC_CASCADE_AUT"
+        Map<String, Object> otherAutomation = new LinkedHashMap<String, Object>(
+                findOne("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId]).getMap())
+        otherAutomation.putAll([automationId: otherAutomationId, companyUserGroupId: otherTenant, automationName: "Cascade other"])
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationAutomation", otherAutomation)
+        String ownTenant = findOne("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId]).companyUserGroupId
+        def pairFields = { String id, String tenant, String aut -> [syncPairId: id, companyUserGroupId: tenant, automationId: aut,
+                upstreamSide: "FILE_1", allowanceMinutes: 30] }
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.pulse.SyncPair", pairFields("CASC_PAIR_OWN", ownTenant, automationId))
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.pulse.SyncPair", pairFields("CASC_PAIR_OTHER", otherTenant, otherAutomationId))
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.pulse.PeakPeriodSync", [peakPeriodId: peakPeriodId,
+                syncPairId: "CASC_PAIR_OWN", companyUserGroupId: ownTenant, allowanceMinutes: 10])
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.pulse.SyncPulseSample", [sampleId: "CASC_SAMPLE",
+                syncPairId: "CASC_PAIR_OWN", companyUserGroupId: ownTenant, sampleStamp: new java.sql.Timestamp(System.currentTimeMillis())])
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.pulse.SyncPulseOrder", [pulseOrderId: "CASC_ORDER",
+                syncPairId: "CASC_PAIR_OWN", companyUserGroupId: ownTenant, recordKey: "K1"])
+
         ec.message.clearErrors()
         Map<String, Object> deleteResult = callFacade("facade.ReconciliationFacadeServices.delete#Automation", [
                 automationId: automationId,
@@ -271,6 +291,13 @@ class AutomationFacadeSmokeTests {
         assertNull(findOne("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId]))
         assertNull(findOne("darpan.peak.PeakPeriodRunTime", [runTimeId: runTimeId]), "the run time went with its automation")
         assertNotNull(findOne("darpan.peak.PeakPeriod", [peakPeriodId: peakPeriodId]), "the period itself stays")
+        assertNull(findOne("darpan.pulse.SyncPair", [syncPairId: "CASC_PAIR_OWN"]), "the sync pair went with its automation")
+        assertNull(findOne("darpan.pulse.PeakPeriodSync", [peakPeriodId: peakPeriodId, syncPairId: "CASC_PAIR_OWN"]))
+        assertNull(findOne("darpan.pulse.SyncPulseSample", [sampleId: "CASC_SAMPLE"]))
+        assertNull(findOne("darpan.pulse.SyncPulseOrder", [pulseOrderId: "CASC_ORDER"]))
+        assertNotNull(findOne("darpan.pulse.SyncPair", [syncPairId: "CASC_PAIR_OTHER"]), "another tenant's pair stays")
+        ec.entity.find("darpan.pulse.SyncPair").condition("syncPairId", "CASC_PAIR_OTHER").disableAuthz().deleteAll()
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", otherAutomationId).disableAuthz().deleteAll()
 
         ec.message.clearErrors()
         assertTrue((Boolean) callFacade("facade.PeakPeriodFacadeServices.delete#PeakPeriod", [peakPeriodId: peakPeriodId]).ok)

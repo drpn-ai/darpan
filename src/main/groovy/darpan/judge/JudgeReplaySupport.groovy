@@ -11,7 +11,6 @@ import darpan.reconciliation.core.ReconciliationServices
 import darpan.audit.AuditAutomationSupport
 import darpan.common.FactText
 import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
 
 import java.nio.charset.StandardCharsets
@@ -242,7 +241,6 @@ class JudgeReplaySupport {
         private final Map<String, Integer> skipped
         private final Map<String, Integer> dropped
         private final Map<String, Integer> counts
-        private final JsonSlurper slurper = new JsonSlurper()
         private Iterator<String> leftover
         private Map pending
 
@@ -270,17 +268,17 @@ class JudgeReplaySupport {
 
         private Map advance() {
             while (matched.hasNext()) {
-                Map row = (Map) slurper.parseText(matched.next())
+                Map row = (Map) JsonRecordStream.parseText(matched.next())
                 String id = row.primaryId as String
                 SIDES.each { drop(it, id) }
                 count("matched")
                 return [compareId: id, file1: FactText.flat((Map) row.file1), file2: FactText.flat((Map) row.file2)]
             }
             while (missing.hasNext()) {
-                Map row = (Map) slurper.parseText(missing.next())
+                Map row = (Map) JsonRecordStream.parseText(missing.next())
                 String type = row.diffType as String
                 String id = row.primaryId as String
-                Map data = row.data ? FactText.flat((Map) slurper.parseText(row.data as String)) : [:]
+                Map data = row.data ? FactText.flat((Map) JsonRecordStream.parseText(row.data as String)) : [:]
                 if (type == "MISSING_IN_FILE_2") {
                     drop("file1", id)
                     return count("missing") + [compareId: id, file1: data, file2: readBack.file2?.remove(id)]

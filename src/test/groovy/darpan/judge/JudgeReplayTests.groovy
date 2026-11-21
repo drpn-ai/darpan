@@ -430,6 +430,27 @@ class JudgeReplayTests {
         }
     }
 
+    @Test
+    void pairRowsReadAnIntegerBeyondTheLongRangeExactly() {
+        org.apache.spark.sql.SparkSession spark = org.apache.spark.sql.SparkSession.builder().appName("JudgeReplayTests-BigInt")
+                .master("local[1]").config("spark.ui.enabled", "false").getOrCreate()
+        try {
+            String data = '{"ref":12345678901234567890123,"lines":[{"serial":-99999999999999999999999999}],"price":12.50,"small":7}'
+            String line = groovy.json.JsonOutput.toJson([diffType: "MISSING_IN_FILE_2", primaryId: "k1", data: data])
+            org.apache.spark.sql.Dataset df = spark.read().json(spark.createDataset([line], org.apache.spark.sql.Encoders.STRING()))
+            List<Map> pairs = new JudgeReplaySupport.PairRows(null, df, [file1: [:], file2: [:]], [:], [:], [:]).toList()
+            assertEquals(1, pairs.size())
+            Map file1 = (Map) pairs[0].file1
+            assertEquals("12345678901234567890123", file1.ref)
+            assertEquals('[{"serial":-99999999999999999999999999}]', file1.lines)
+            assertEquals("12.5", file1.price)
+            assertEquals("7", file1.small)
+            assertEquals(["ref", "lines", "price", "small"], file1.keySet() as List)
+        } finally {
+            spark.stop()
+        }
+    }
+
     // --------------------------------------------------------------------------------------- tenant safety (P2-9)
 
     @Test

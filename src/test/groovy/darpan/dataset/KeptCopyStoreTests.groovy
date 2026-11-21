@@ -386,6 +386,22 @@ class KeptCopyStoreTests {
         assertEquals("2026-10-03T14:22:01Z", byId()["1"].stamp)
     }
 
+    /** groovy-json corrupts an integer beyond the Long range (a wrong negative Long, or null); a kept record must read back exact. */
+    @Test void anIntegerBeyondTheLongRangeSurvivesWriteThenReadBack() {
+        BigInteger top = new BigInteger("12345678901234567890123")
+        BigInteger deep = new BigInteger("-99999999999999999999999999")
+        Map big = rec("1", "2026-10-03T14:22:01Z", [ref: top, lines: [[qty: 1, serial: deep]], nested: [inner: [id: top + 1]], price: 12.50G, small: 7])
+        merge(dir, [big])
+        Map back = byId()["1"].record
+        assertEquals(top, back.ref)
+        assertEquals(deep, back.lines[0].serial)
+        assertEquals(top + 1, back.nested.inner.id)
+        assertEquals(12.50G, back.price)
+        assertEquals(7, back.small)
+        assertEquals(big.keySet() as List, back.keySet() as List, "key order kept")
+        assertEquals("2026-10-03T14:22:01Z", byId()["1"].stamp)
+    }
+
     @Test void replaceWithoutMissCountingStillCountsChangedAddedRemoved() {
         replace(dir, [rec("1", "2026-10-03T14:22:01Z"), rec("2", "2026-10-03T14:22:01Z"), rec("3", "2026-10-03T14:22:01Z")])
         // 1 silently changed (a miss when counted), 2 absent (removed), 3 newer stamp (changed), 4 new from before the old readThru

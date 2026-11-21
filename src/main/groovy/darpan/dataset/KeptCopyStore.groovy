@@ -1,5 +1,6 @@
 package darpan.dataset
 
+import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
@@ -386,7 +387,6 @@ class KeptCopyStore {
     /** One version's records, a line at a time; closes itself at the end, and on close(). */
     private static class RecordReader implements Iterator<Map>, Closeable {
         private final BufferedReader reader
-        private final JsonSlurper slurper = new JsonSlurper()
         private String next
         private boolean closed
 
@@ -415,7 +415,12 @@ class KeptCopyStore {
 
         Map next() {
             if (next == null) throw new NoSuchElementException()
-            Map m = (Map) slurper.parseText(next)
+            Map m
+            try {
+                m = (Map) JsonRecordStream.parseText(next)
+            } catch (IOException e) {
+                throw new IllegalStateException("A kept record line is not valid JSON: " + e.getMessage(), e)   // unchecked, as the slurper threw
+            }
             next = reader.readLine()
             if (next == null) close()
             return m

@@ -93,16 +93,18 @@
                  would: the run path's connector (RunExtractSupport.resolveExtractConnector) and its gate (RunExtractSupport.sideKeep:
                  placement, Ruling 3b2b-23's sparkKeepsSide, the keyed-on-records guard), with the scope's own filter rows read for
                  the replaying tenant. That is the compare scope's filters, not the automation's own store (Ruling 3b2b-15), so an
-                 automation whose filters drifted replays under its run's. A capture its read already filtered (its metadata
-                 reports read-time configuredExclusions) never keeps in Spark: Spark would find nothing left and write zero
-                 counts the conclude pass reads as authoritative. A side left out keeps reading its side file exactly as before.
+                 automation whose filters drifted replays under its run's. A capture its read already filtered never keeps in
+                 Spark (KeepPlanSupport.landedFilteredAtRead, asked by the gate for the captured file: read-time
+                 configuredExclusions, or, with no tenant rows, no record carrying a built-in Keep line's flag): Spark would find
+                 nothing left and write zero counts the conclude pass reads as authoritative. A capture that cannot be resolved
+                 is left out. A side left out keeps reading its side file exactly as before.
                  Reading the connector registry row calls no system. -->
             <set field="keepBySide" from="[:]"/>
             <iterate list="sourceList" entry="source">
                 <set field="capturedExtract" from="darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, picked.files[source.fileSide]?.fileLocation)"/>
-                <if condition="!darpan.reconciliation.source.KeepArtifacts.filteredAtRead(capturedExtract)">
+                <if condition="capturedExtract != null">
                     <set field="sideKeep" from="darpan.facade.reconciliation.RunExtractSupport.sideKeep(ec, source, source.fileSide,
-                            darpan.facade.reconciliation.RunExtractSupport.resolveExtractConnector(ec, source))"/>
+                            darpan.facade.reconciliation.RunExtractSupport.resolveExtractConnector(ec, source), true, capturedExtract)"/>
                     <if condition="darpan.reconciliation.source.KeepStepSupport.applies(sideKeep)">
                         <script>keepBySide.put(source.fileSide, sideKeep)</script></if>
                 </if>

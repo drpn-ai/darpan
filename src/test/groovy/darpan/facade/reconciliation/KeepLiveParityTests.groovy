@@ -60,6 +60,9 @@ class KeepLiveParityTests {
     private static final String SELECTING = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveSelectingRecords"
     private static final String FILTERING = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveFilteringRecords"
     private static final String CONTRACT = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveContractRecords"
+    /** Task 16e: KL_FLAGGED's built-in Keep line, on the isTest flag a Spark-era extract writes on what it flags. */
+    private static final String FLAG_LINES = '[{"sequenceNum":0,"label":"isTest","kinds":{"isTest":"FVT_TEXT"},"lines":[{"conditionSeqId":"01",' +
+            '"sequenceNum":1,"conditionTypeId":"RCT_COMPARE","fieldName":"isTest","operatorEnumId":"ENTCO_EQUALS","compareValue":"Y"}]}]'
     private static final Timestamp START = Timestamp.from(Instant.parse("2026-11-10T00:00:00Z"))
     private static final Timestamp END = Timestamp.from(Instant.parse("2026-11-11T00:00:00Z"))
 
@@ -127,6 +130,15 @@ class KeepLiveParityTests {
             ${filter("KL_RS_EVAL_REAL", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST,B2B")}
             ${filter("KL_RS_EVAL_REAL", "FILE_1", 2, "orderName", "INCLUDE_PREFIX", "#SYN")}
             ${filter("KL_RS_EVAL_REAL", "FILE_1", 3, "total", "EXCLUDE_IN", "24.00")}
+            ${connector("KL_FLAGGED", SERVICE, "Y", 'keepLinesJson="' + FLAG_LINES.replace('"', '&quot;') + '"')}
+            <darpan.rule.RuleSet ruleSetId="KL_RS_NEST_UP" ruleSetName="KL_RS_NEST_UP" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="KL_RS_NEST_UP" ruleSetId="KL_RS_NEST_UP" objectType="ORDER" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KL_RS_NEST_UP" fileSide="FILE_1" ${api("KL_FLAGGED", "kl-nest-up")}
+                recordRootExpression="orders" primaryIdExpression="orderId" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KL_RS_NEST_UP" fileSide="FILE_2" systemEnumId="KL_SPARK" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${A}"/>
+            ${savedRun("KL_RS_EVAL_NONE", ["FILE_1": api("KL_SPARK", "kl-eval-none")], "EVALUATE")}
+            ${filter("KL_RS_EVAL_NONE", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST")}
             ${savedRun("KL_RS_NONE", ["FILE_1": api("KL_SPARK", "kl-none-1"), "FILE_2": api("KL_QUIET", "kl-none-2")])}
             ${filter("KL_RS_NONE", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST")}
             ${filter("KL_RS_NONE", "FILE_2", 1, "status", "INCLUDE_IN", "PAID")}
@@ -150,6 +162,7 @@ class KeepLiveParityTests {
                 "kl-def"   : [order("D1", "WEB", "#SYN1", 1), order("D2", "TEST", "#SYN2", 2)],
                 "kl-select": [order("D1", "WEB", "#SYN1", 1), order("D2", "TEST", "#SYN2", 2)],
                 "kl-none-1": [order("N1", "TEST", "#SYN1", 1)],
+                "kl-eval-none": [order("E1", "TEST", "#SYN1", 1), order("E2", " test", "#SYN2", 2)],
                 "kl-con-1" : [order("C1", "WEB", "#SYN1", 1), order("C2", "TEST", "#SYN2", 2)],
                 "kl-con-2" : [[orderId: "C1"], [orderId: "C2"]],
                 "kl-none-2": [[orderId: "N1", status: "VOIDED"]],
@@ -461,6 +474,21 @@ class KeepLiveParityTests {
         assertEquals(0L, run.differenceCount as long)
     }
 
+    /**
+     * Review 16b-M1: an interactive evaluate run whose Spark Keep keeps nothing has no data, as its filtering read (which wrote
+     * no record) had, although its extract holds every record.
+     */
+    @Test
+    void anEvaluateRunWhoseSparkKeepKeepsNothingHasNoData() {
+        Map run = runSaved("KL_RS_EVAL_NONE")
+        File extract = extractOf(call("kl-eval-none"))
+        assertEquals(2, json(extract).records.size(), "the read kept every record; Spark sets them aside")
+        assertEquals(0, KeepArtifacts.readSummary(extract).keptCount as int)
+        def row = ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("reconciliationRunResultId", run.reconciliationRunResultId).useCache(false).one()
+        assertEquals(RunObservability.STATUS_NO_DATA, row.statusEnumId)
+    }
+
     /** DAR-BE-163: a retry hands back the side the failed run already read, and that side still gets its Keep. */
     @Test
     void aRetriedRunKeepsTheSideItHandsBack() {
@@ -500,7 +528,7 @@ class KeepLiveParityTests {
         landed.setText(JsonOutput.toJson([metadata: [filters: [configuredExclusions: [[sequenceNum: 1, fieldExpression: "channel",
                 operator: "EXCLUDE_IN", values: ["TEST"], excludedCount: 1, fieldAbsentCount: 0]]]],
                 records: [[orderId: "U1", channel: "WEB"]]]), "UTF-8")
-        assertTrue(KeepArtifacts.filteredAtRead(landed))
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, landed, [], connectorOf("KL_SPARK"), [:]))
         failedRun("KL_FAILED_FILTERED", path, landed.name)
 
         Map run = runSaved("KL_RS_UP", [retryFromRunResultId: "KL_FAILED_FILTERED", file2Name: "upload.json",
@@ -511,12 +539,34 @@ class KeepLiveParityTests {
         assertEquals(0L, run.differenceCount as long)
     }
 
-    /** A failed run of KL_RS_UP whose side 1 landed at path and whose side 2 failed, as the runner leaves one. */
-    private void failedRun(String id, String path, String fileName) {
+    /**
+     * Task 16e round 2 (review 16d-M6): a capture whose read applied only its built-in drops (the side has no tenant rule)
+     * reports no configuredExclusions, and no record carries isTest, the flag KL_FLAGGED's built-in line reads. Its side sits
+     * under orders, which Spark cannot keep, and its extract no longer filters: retried, it keeps today's read, not the error.
+     */
+    @Test
+    void aRetriedNestedSideOverABuiltInOnlyCaptureDoesNotFail() {
+        String path = "${DataManagerSupport.RECONCILIATION_RUNS_PATH}/KL_RS_NEST_UP/20261121-000000003/kl-nest-up-landed.json".toString()
+        File landed = DataManagerSupport.resolveDataManagerFile(ec, path, true)
+        landed.setText(JsonOutput.toJson([metadata: [filters: [builtInDropCount: 1]], orders: [[orderId: "N1", channel: "WEB"]]]), "UTF-8")
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, landed, [], connectorOf("KL_SPARK"), [:]), "test precondition: no configuredExclusions")
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, landed, [], connectorOf("KL_FLAGGED"), [:]))
+        failedRun("KL_FAILED_NEST", path, landed.name, "KL_RS_NEST_UP")
+
+        Map run = runSaved("KL_RS_NEST_UP", [retryFromRunResultId: "KL_FAILED_NEST", file2Name: "upload.json",
+                                             file2Text: JsonOutput.toJson([records: [[orderId: "N1"]]])])
+        assertEquals([], KeepLiveTestExtracts.CALLS, "the landed side is not read again")
+        assertEquals(path, run.file1DataManagerPath)
+        assertNull(KeepArtifacts.readSummary(landed), "no Spark Keep over a file its read filtered")
+        assertEquals(0L, run.differenceCount as long)
+    }
+
+    /** A failed run of savedRunId whose side 1 landed at path and whose side 2 failed, as the runner leaves one. */
+    private void failedRun(String id, String path, String fileName, String savedRunId = "KL_RS_UP") {
         Timestamp started = new Timestamp(System.currentTimeMillis() + 1000L)
         ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationRunResult", [
-                reconciliationRunResultId: id, savedRunId: "KL_RS_UP", savedRunType: "ruleset", ruleSetId: "KL_RS_UP",
-                compareScopeId: "KL_RS_UP", companyUserGroupId: A, statusEnumId: RunObservability.STATUS_FAILED, startedDate: started,
+                reconciliationRunResultId: id, savedRunId: savedRunId, savedRunType: "ruleset", ruleSetId: savedRunId,
+                compareScopeId: savedRunId, companyUserGroupId: A, statusEnumId: RunObservability.STATUS_FAILED, startedDate: started,
                 createdDate: started, windowStartDate: START, windowEndDate: END, windowTimeZone: "UTC", file1Name: fileName,
                 file1DataManagerPath: path])
         ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationRunStep", [

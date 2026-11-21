@@ -346,8 +346,10 @@ class JudgeReplayTests {
             Map captured = replay(checkA, RUN_FOLDER_A, true)
             assertEquals([], captured.errors)
             assertEquals(0, connectorCalls, "captured: no extract or lookup connector was resolved")
-            assertEquals(["SHOPIFY", "configType:null"], keepPlanReads.sort(),
-                    "only the Keep plan read the registry, by the run path's resolution; NetSuite's capture was filtered at read, so not even that")
+            // Task 16e round 2: every side's Keep decision asks KeepPlanSupport.landedFilteredAtRead, which needs the side's connector
+            // for its built-in Keep lines, so a capture filtered at read is resolved too (the registry only, no system)
+            assertEquals(["NETSUITE", "SHOPIFY", "configType:null", "configType:null"], keepPlanReads.sort(),
+                    "only the Keep plan read the registry, once per side, by the run path's resolution")
             assertEquals([], captured.out.replayWarnings)
             assertFalse(captured.out.judgeWarnings.any { it.contains("not captured") }, "${captured.out.judgeWarnings}")
             assertEquals("REFUNDED_IN_SHOPIFY", captured.out.judgedFindings.find { it.recordKey == "SR-1007" }.causeOutcomeId,

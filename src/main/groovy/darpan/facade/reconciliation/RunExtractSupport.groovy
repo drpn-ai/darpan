@@ -301,8 +301,8 @@ class RunExtractSupport {
      * <ul>
      * <li>its extract service still declares the connector's filter parameter (Ruling 3b2b-23, KeepPlanSupport.sparkKeepsSide):
      *     the read still filters until its system's task (17–23) drops the parameter;</li>
-     * <li>filteredAtRead: the side is a retried run's landed file its read already filtered (KeepArtifacts.filteredAtRead),
-     *     handed back without a new read.</li>
+     * <li>landed: the side is a landed file handed back without a new read (a retried run's, a judge replay's) that its read
+     *     already filtered (KeepPlanSupport.landedFilteredAtRead, asked by effectiveSideKeep).</li>
      * </ul>
      * Every run's compare takes keepBySide, an evaluate run's included (Task 16b), so keepInSpark is true for every run path.
      * A side whose extract no longer declares the parameter but that Spark cannot keep (keepInSpark false, or not keyed on
@@ -310,7 +310,7 @@ class RunExtractSupport {
      * rules (Ruling 3b2b-25): neither its read nor Spark could filter it.
      */
     static Map sideKeep(def ec, Object source, String fileSide, Map<String, Object> connector, boolean keepInSpark = true,
-                        boolean filteredAtRead = false) {
+                        File landed = null) {
         String compareScopeId = normalize(source?.compareScopeId)
         String side = normalize(fileSide) ?: normalize(source?.fileSide)
         // the compare scope's rows, read for the active tenant; an upload or database side (NONE) takes none
@@ -321,7 +321,7 @@ class RunExtractSupport {
                 SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)),
                 extractServiceName ? ec.service.getServiceDefinition(extractServiceName) : null,
                 normalize(source?.recordRootExpression), (List<String>) RunConclusionStep.keySpecFor(ec, compareScopeId, side).keyFields,
-                keepInSpark, filteredAtRead, side)
+                keepInSpark, landed, side)
     }
 
     /**

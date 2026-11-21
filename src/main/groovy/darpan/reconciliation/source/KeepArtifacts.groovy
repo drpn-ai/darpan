@@ -64,7 +64,11 @@ class KeepArtifacts {
      * </ul>
      * Records are streamed token by token; the metadata object's own keys are not records. A missing or unreadable extract also
      * answers true, so the side keeps today's read and the compare reports the problem.
+     *
+     * Package scope: every path asks KeepPlanSupport.landedFilteredAtRead (through effectiveSideKeep), which derives
+     * keepLineFields itself, so no caller can ask the narrower question by forgetting them.
      */
+    @PackageScope
     static boolean filteredAtRead(File extract, Collection<String> keepLineFields = null) {
         if (extract == null || !extract.isFile()) return true
         Set<String> flags = keepLineFields ? new HashSet<String>(keepLineFields) : Collections.<String>emptySet()

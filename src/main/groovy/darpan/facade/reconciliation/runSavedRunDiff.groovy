@@ -343,12 +343,12 @@ def resolveTenantApiWindow = {
 Map<String, Map> keepPlanBySide = [:]
 def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null, Map byKeys = null ->
     // DAR-BE-163: a side the failed run already read comes back as it landed, with no call to the source system. It gets the
-    // side's Keep at the compare, unless that read already filtered it (KeepArtifacts.filteredAtRead): then it keeps today's read.
+    // side's Keep at the compare, unless that read already filtered it (KeepPlanSupport.landedFilteredAtRead, asked by the
+    // side's Keep decision for the landed file): then it keeps today's read.
     Map<String, Object> replayed = retryPlan ? RunRetrySupport.replayedSide(ec, retryPlan, source, fileSide) : null
-    boolean landedFiltered = replayed != null &&
-            darpan.reconciliation.source.KeepArtifacts.filteredAtRead(RunVerificationSupport.resolveLocationFile(ec, replayed.fileLocation as String))
+    File landed = replayed == null ? null : RunVerificationSupport.resolveLocationFile(ec, replayed.fileLocation as String)
     Map sideKeep = RunExtractSupport.sideKeep(ec, source, fileSide, RunExtractSupport.resolveExtractConnector(ec, source),
-            true, landedFiltered)
+            true, landed)
     keepPlanBySide.put(fileSide, sideKeep)
     if (replayed != null) return replayed
     RunExtractSupport.extractApiSource(ec, source, fileSide, sourceLabel(source, fileSide), artifactContext,

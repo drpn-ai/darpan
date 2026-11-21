@@ -89,6 +89,37 @@ class KeepPlanSupportTests {
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
+    /**
+     * Task 16e round 2: landedFilteredAtRead is the one answer every path gets. It derives the side's built-in Keep-line fields
+     * itself; a side with tenant rows takes only the read's configuredExclusions (a Spark-era file with no flagged record must
+     * not skip the tenant's rules); no landed file is never filtered; a missing one is.
+     */
+    @Test
+    void landedFilteredAtReadDerivesTheBuiltInFieldsItself() {
+        File builtInOnly = landed("helper-built-in-only", [records: [[orderId: "O1"]], metadata: [filters: [builtInDropCount: 2]]])
+        File sparkEra = landed("helper-spark-era", [records: [[orderId: "O1"], [orderId: "O2", lineKind: "UNKEYED"]]])
+        Map builtIn = connector("ACME_LIVE_BUILT_IN")
+        List<Map<String, Object>> rows = KeepPlanSupport.tenantRuleRows(ec, "KP_SCOPE_A", "FILE_2", A)
+
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, builtInOnly, [], builtIn, [:]))
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, builtInOnly, null, builtIn, [:]))
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, sparkEra, [], builtIn, [:]))
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, builtInOnly, rows, builtIn, [:]), "with tenant rows only configuredExclusions tell")
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, builtInOnly, [], connector("ACME_LIVE_PLAIN"), [:]), "no built-in line: no flag to miss")
+        assertFalse(KeepPlanSupport.landedFilteredAtRead(ec, null, [], builtIn, [:]), "no landed file: the side is read now")
+        assertTrue(KeepPlanSupport.landedFilteredAtRead(ec, new File(builtInOnly.parentFile, "gone.json"), rows, builtIn, [:]))
+    }
+
+    /** A landed extract written to a scratch folder. */
+    private static File landed(String name, Map document) {
+        File dir = java.nio.file.Files.createTempDirectory("keep-plan-landed").toFile()
+        dir.deleteOnExit()
+        File file = new File(dir, name + ".json")
+        file.setText(JsonOutput.toJson(document), "UTF-8")
+        file.deleteOnExit()
+        return file
+    }
+
     private Map connector(String systemEnumId) {
         Map resolved = SourceSystemConnectorSupport.resolveBySystemEnumId(ec, systemEnumId)
         assertEquals(systemEnumId, resolved?.systemEnumId, "test precondition: ${systemEnumId} resolves")
@@ -189,9 +220,11 @@ class KeepPlanSupportTests {
         assertTrue(KeepPlanSupport.sparkKeepsSide(connector("ACME_LIVE"), noLongerFilters), "test precondition: its read cannot filter")
         assertFalse(KeepPlanSupport.sparkKeepsSide(connector("ACME_LIVE_FILTERING"), stillFilters), "test precondition: its read filters")
         List<String> nested = ['$.records[*].lines[*].lineId']
+        File builtInCapture = landed("built-in-only", [records: [[orderId: "O1"], [orderId: "O2"]], metadata: [filters: [builtInDropCount: 1]]])
+        File sparkEra = landed("spark-era", [records: [[orderId: "O1", lineKind: "KEYED"], [orderId: "O2", lineKind: "UNKEYED"]], metadata: [:]])
         Closure<Map> effective = { List<Map<String, Object>> sideRows, String system, Object definition, String root, List<String> keys,
                                    boolean keepInSpark ->
-            KeepPlanSupport.effectiveSideKeep(ec, sideRows, connector(system), [:], definition, root, keys, keepInSpark, false, "FILE_2")
+            KeepPlanSupport.effectiveSideKeep(ec, sideRows, connector(system), [:], definition, root, keys, keepInSpark, null, "FILE_2")
         }
 
         // a nested key with rules: the tenant's, or only the connector's built-ins
@@ -232,10 +265,22 @@ class KeepPlanSupportTests {
         assertEquals(today, effective(rows, "ACME_LIVE", null, null, nested, false), "an extract that is not installed")
 
         // data its read already filtered (a retried run's landed file, not read again): today's read, never the error
+        File ruled = landed("ruled", [metadata: [filters: [configuredExclusions: [[sequenceNum: 1, fieldExpression: "other",
+                operator: "EXCLUDE_IN", values: ["X"], excludedCount: 1, fieldAbsentCount: 0]]]], records: [[orderId: "O1"]]])
         assertEquals(today, KeepPlanSupport.effectiveSideKeep(ec, rows, connector("ACME_LIVE"), [:], noLongerFilters, null, nested, false,
-                true, "FILE_2"))
+                ruled, "FILE_2"))
+        // Task 16e round 2 (review 16d-M6): a capture whose read applied only its built-in drops reports no configuredExclusions;
+        // its records carry no lineKind (the flag the built-in line reads, which a Spark-era extractor writes), so it was filtered
         assertEquals(KeepPlanSupport.todaysRead([]), KeepPlanSupport.effectiveSideKeep(ec, [], connector("ACME_LIVE_BUILT_IN"), [:],
-                noLongerFilters, "records", ["orderId"], true, true))
+                noLongerFilters, "records", ["orderId"], true, builtInCapture))
+        assertEquals(KeepPlanSupport.todaysRead([]), KeepPlanSupport.effectiveSideKeep(ec, [], connector("ACME_LIVE_BUILT_IN"), [:],
+                noLongerFilters, null, nested, true, builtInCapture, "FILE_2"), "a nested side over it does not fail")
+        // a Spark-era landed file flags a record: not filtered, so the gate is weighed as for a live read
+        assertThrows(IllegalArgumentException) {
+            KeepPlanSupport.effectiveSideKeep(ec, [], connector("ACME_LIVE_BUILT_IN"), [:], noLongerFilters, null, nested, true, sparkEra, "FILE_2")
+        }
+        assertEquals("SPARK", KeepPlanSupport.effectiveSideKeep(ec, [], connector("ACME_LIVE_BUILT_IN"), [:], noLongerFilters, "records",
+                ['$.records[*].orderId'], true, sparkEra).placement)
 
         // control: Spark can keep it, so it keeps in Spark
         Map spark = effective(rows, "ACME_LIVE", noLongerFilters, "records", ['$.records[*].orderId'], true)

@@ -51,7 +51,7 @@ class KeepPlanSupport {
      *     (Spark Keep numbers and reads that array, review M5/M6).</li>
      * </ul>
      * A side whose extract still declares the filter parameter (or is not installed) keeps today's read (todaysRead), and so does
-     * a side whose data its read already filtered (filteredAtRead: a retried run's landed file, KeepArtifacts.filteredAtRead):
+     * a side whose data is a landed file its read already filtered (landed: a retried run's or a replay's, landedFilteredAtRead):
      * it is not read again, and Spark Keep over it would find nothing left and write zero counts.
      *
      * Ruling 3b2b-25: a side whose extract no longer declares the parameter cannot filter at the read: Moqui drops an undeclared
@@ -69,7 +69,8 @@ class KeepPlanSupport {
      * @param extractServiceDefinition the side's extract service definition (ec.service.getServiceDefinition), or null
      * @param recordRootExpression the side's RuleSetCompareSource.recordRootExpression
      * @param keyExpressions the side's key field expressions (composite key fields, else its primaryIdExpression)
-     * @param filteredAtRead true when the side's data is a file its read already filtered and that is not read again
+     * @param landed the side's landed file when its data is one that is not read again (a retried run's, a replay's), else null:
+     *        whether its read filtered it is landedFilteredAtRead's answer, asked here so that no path can ask it differently
      * @param fileSide the side (FILE_1 or FILE_2) the failure message names; optional
      * @throws IllegalArgumentException when neither the read nor Spark can filter a side that has Keep rules (Ruling 3b2b-25).
      *         A configuration error, not a passing fault: the scheduled path fails it at once (isPermanentFailure) rather than
@@ -77,9 +78,10 @@ class KeepPlanSupport {
      */
     static Map effectiveSideKeep(def ec, List<Map<String, Object>> recordFieldRows, Map connector, Map extractOptions,
                                  Object extractServiceDefinition, String recordRootExpression, List<String> keyExpressions,
-                                 boolean keepInSpark, boolean filteredAtRead = false, String fileSide = null) {
+                                 boolean keepInSpark, File landed = null, String fileSide = null) {
         if (placement(connector) == SPARK) {
-            if (filteredAtRead || !sparkKeepsSide(connector, extractServiceDefinition)) return todaysRead(recordFieldRows)
+            if (!sparkKeepsSide(connector, extractServiceDefinition) ||
+                    landedFilteredAtRead(ec, landed, recordFieldRows, connector, extractOptions)) return todaysRead(recordFieldRows)
             List<String> sparkCannot = []
             if (!keepInSpark) sparkCannot.add("this run does not run Keep")
             if (!keyedOnRecords(recordRootExpression, keyExpressions)) sparkCannot.add("its records are not top-level")
@@ -92,6 +94,23 @@ class KeepPlanSupport {
             }
         }
         return plan(ec, recordFieldRows ?: [], connector, extractOptions)
+    }
+
+    /**
+     * Task 16e (reviews 16b-I1, 16d-M6): the one answer to "was this landed file filtered at the read?", which effectiveSideKeep
+     * asks for every path that hands a side back without reading it (the interactive retry, the automation's retry from its last
+     * extract, the judge replay). True when its read reported configuredExclusions, or, for a side with no tenant rows, when no
+     * record carries a field the side's built-in Keep lines read (KeepLineTranslator.declared for these extract options): a
+     * capture whose read applied only its built-in drops reports no configuredExclusions, and every built-in flag a Spark-era
+     * extractor writes came in with Tasks 17-20 (KeepArtifacts.filteredAtRead says why the tenant-rows case takes only the first
+     * signal). False when there is no landed file; a landed file that is missing or unreadable answers true.
+     */
+    static boolean landedFilteredAtRead(def ec, File landed, List<Map<String, Object>> recordFieldRows, Map connector,
+                                        Map extractOptions) {
+        if (landed == null) return false
+        Collection<String> builtInFields = recordFieldRows ? null :
+                KeepRules.fields(KeepLineTranslator.declared(keepLines(ec, connector), extractOptions ?: [:]))
+        return KeepArtifacts.filteredAtRead(landed, builtInFields)
     }
 
     /** "File 2 (ACME)" for FILE_2 on connector ACME; "The ACME side" when the side is not given. */

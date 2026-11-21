@@ -7,6 +7,7 @@ import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.source.KeepArtifacts
+import darpan.reconciliation.source.KeepPlanSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -302,7 +303,7 @@ class AutomationKeepParityTests {
     @Test
     void aCompareRetriedOverAFileItsReadFilteredKeepsTodaysRead() {
         Map first = run("KAP_RETRY_COMPARE", [])
-        assertTrue(KeepArtifacts.filteredAtRead(first.extract), "the landed file was filtered at the read")
+        assertTrue(filteredAtRead(first.extract, "ACME_SPARK"), "the landed file was filtered at the read")
         switchSide1("KAP_RETRY_COMPARE")
 
         List<Map> calls = []
@@ -320,7 +321,7 @@ class AutomationKeepParityTests {
     @Test
     void anEvaluateRetriedOverAFileItsReadFilteredKeepsTodaysRead() {
         Map first = run("KAP_RETRY_EVAL", [])
-        assertTrue(KeepArtifacts.filteredAtRead(first.extract))
+        assertTrue(filteredAtRead(first.extract, "ACME_SPARK"))
         switchSide1("KAP_RETRY_EVAL")
 
         List<Map> calls = []
@@ -340,7 +341,7 @@ class AutomationKeepParityTests {
     @Test
     void aNestedSideRetriedOverAFileItsReadFilteredDoesNotFail() {
         Map first = run("KAP_RETRY_NEST", [], [:], "orders")
-        assertTrue(KeepArtifacts.filteredAtRead(first.extract))
+        assertTrue(filteredAtRead(first.extract, "ACME_SPARK"))
         switchSide1("KAP_RETRY_NEST")
 
         Map retried = run("KAP_RETRY_NEST", [], retryOf(first), "orders")
@@ -358,8 +359,8 @@ class AutomationKeepParityTests {
     @Test
     void aNestedSideRetriedOverABuiltInOnlyCaptureDoesNotFail() {
         Map first = run("KAP_RETRY_BUILT_IN", [], [:], "orders")
-        assertFalse(KeepArtifacts.filteredAtRead(first.extract), "no tenant rule: the read reported no configuredExclusions")
-        assertTrue(KeepArtifacts.filteredAtRead(first.extract, ["isTest"]), "no record carries the built-in line's flag")
+        assertFalse(filteredAtRead(first.extract, "ACME_SPARK"), "no tenant rule: the read reported no configuredExclusions")
+        assertTrue(filteredAtRead(first.extract, "ACME_SPARK_FLAGGED"), "no record carries the built-in line's flag")
         switchSide1("KAP_RETRY_BUILT_IN", "ACME_SPARK_FLAGGED", FLAGGED_EXTRACT)
 
         Map retried = run("KAP_RETRY_BUILT_IN", [], retryOf(first), "orders")
@@ -430,6 +431,11 @@ class AutomationKeepParityTests {
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${automationId}" fileSide="FILE_1" companyUserGroupId="${TENANT}"
                 systemEnumId="${system}" safeMetadataJson="${metadata}"/>
         </entity-facade-xml>""").dummyFks(true).load()
+    }
+
+    /** The one answer the retry gets (KeepPlanSupport.landedFilteredAtRead) for a side with no tenant rows on system. */
+    private boolean filteredAtRead(File landed, String system) {
+        return KeepPlanSupport.landedFilteredAtRead(ec, landed, [], [systemEnumId: system], [:])
     }
 
     private static void assertSameRun(Map first, Map retried, List<String> fields) {

@@ -18,10 +18,11 @@ class ScriptLoadGate {
     static final int LIVE_HEAP_PERCENT = 85
 
     /** {runsRunning, runsQueued, runsCap, heapPercent, liveHeapPercent, cpuPercent}, null when unknown; replaced in tests */
-    static Closure<Map<String, Object>> probe = { -> readLoad() }
+    static final Closure<Map<String, Object>> DEFAULT_PROBE = { -> readLoad() }
+    static Closure<Map<String, Object>> probe = DEFAULT_PROBE
 
     /** Restores the process-global seams to their defaults (DAR-OPS-026 shared-Moqui harness). */
-    static void resetForTests() { probe = { -> readLoad() } }
+    static void resetForTests() { probe = DEFAULT_PROBE }
 
     static int holdAtHeapPercent() { Integer.getInteger('darpan.scripts.holdAtHeapPercent', 70) }
     static int holdAtCpuPercent() { Integer.getInteger('darpan.scripts.holdAtCpuPercent', 75) }

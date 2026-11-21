@@ -17,12 +17,13 @@ class AskSupport {
     static Closure fetcher = RunConclusionStep.&fetchLookup
 
     /** The CheckAsk read, injectable for pure tests: (ec, checkId, tenantId) -> List of row maps. */
-    static Closure reader = { Object ec, String checkId, String tenantId -> readRows(ec, checkId, tenantId) }
+    static final Closure DEFAULT_READER = { Object ec, String checkId, String tenantId -> readRows(ec, checkId, tenantId) }
+    static Closure reader = DEFAULT_READER
 
     /** Restores the process-global seams to their defaults (DAR-OPS-026 shared-Moqui harness). */
     static void resetForTests() {
         fetcher = RunConclusionStep.&fetchLookup
-        reader = { Object ec, String checkId, String tenantId -> readRows(ec, checkId, tenantId) }
+        reader = DEFAULT_READER
     }
 
     /**

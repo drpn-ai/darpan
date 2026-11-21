@@ -21,7 +21,8 @@ class BrainAnswerStore {
                                                  (BrainQuestionCatalog.FRESH_STABLE): STABLE_TTL_MILLIS].asImmutable()
     static final int MAX_ENTRIES = 100_000
     /** Test seams. */
-    static Closure<Long> clock = { System.currentTimeMillis() }
+    static final Closure<Long> DEFAULT_CLOCK = { System.currentTimeMillis() }
+    static Closure<Long> clock = DEFAULT_CLOCK
     static int maxEntries = MAX_ENTRIES
 
     private static final Map<String, Map> ANSWERS = new ConcurrentHashMap<>()
@@ -67,7 +68,7 @@ class BrainAnswerStore {
 
     /** Restores the process-global seams to their defaults (DAR-OPS-026 shared-Moqui harness). */
     static void resetForTests() {
-        clock = { System.currentTimeMillis() }
+        clock = DEFAULT_CLOCK
         maxEntries = MAX_ENTRIES
         clear()
     }

@@ -58,7 +58,10 @@ All commands are run from `darpan-backend/`.
 to sharing with `@SharedMoqui` (several classes then share one Moqui per JVM; between classes the harness waits for
 background work, resets the database to an empty schema, clears caches and calls every `resetForTests()`) only if it
 (a) boots through `ReconciliationSmokeTestSupport`, (b) restores in `@AfterAll` any seam it swaps, (c) sets no
-`System` property of its own, (d) asserts no elapsed-time bound, and (e) is not `@Tag("mysql")`. New classes should
+`System` property of its own, (d) asserts no elapsed-time bound, (e) is not `@Tag("mysql")`, (f) starts no Spark session, and (g) leaves no
+background work running past the class (the harness's quiet gate fails the class). The build treats a class as
+Moqui-booting when its source, an extended base class, or a test helper it uses contains a boot marker
+(`initMoqui(`, `Moqui.dynamicInit`, `ExecutionContextFactoryImpl`). New classes should
 meet these and opt in. A new mutable static in `src/main` needs a `static void resetForTests()` that resets it;
 `StaticSeamResetGuardTests` fails otherwise.
 

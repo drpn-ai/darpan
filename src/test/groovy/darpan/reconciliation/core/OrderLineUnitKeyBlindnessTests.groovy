@@ -30,7 +30,7 @@ class OrderLineUnitKeyBlindnessTests {
     /** ASCII Unit Separator, the shipped composite-key delimiter. Never hardcode a visible one. */
     private static final String SEP = ReconciliationServices.COMPOSITE_KEY_DELIMITER
 
-    /** reconcileIdDataFrames reads only ec.contextStack (the inputs) and ec.message on its error path: a stub carries both. */
+    /** reconcileIdDataFrames reads only ec.contextStack (the inputs); the map-coerced stub carries just that (no getMessage, so an error path would fail on the stub). */
     private Map<String, Object> contextStack = [:]
     private ExecutionContext ec
 

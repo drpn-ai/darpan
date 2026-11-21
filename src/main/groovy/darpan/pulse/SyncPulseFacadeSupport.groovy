@@ -38,8 +38,7 @@ class SyncPulseFacadeSupport {
         String type = normalize(automation?.get("relativeWindowTypeEnumId"))
         if (type == AutomationExecutionSupport.WINDOW_PREVIOUS_DAY) return true
         if (type != null && type != AutomationExecutionSupport.WINDOW_LAST_DAYS) return false
-        Object count = automation?.get("relativeWindowCount")
-        return count == null || count.toString().trim().isEmpty() || (count as Integer) == 1
+        return (darpan.common.ValueSupport.normalizeInt(automation?.get("relativeWindowCount")) ?: 1) == 1
     }
 
     /**
@@ -131,12 +130,6 @@ class SyncPulseFacadeSupport {
         }
     }
 
-    private static String pairLabel(def ec, String tenantId, Map pair, Map automation) {
-        String name = normalize(automation?.get("automationName")) ?: normalize(pair.get("automationId"))
-        String system = systemOf(ec, tenantId, normalize(pair.get("automationId")), normalize(pair.get("upstreamSide")))
-        return system ? "${name} · ${ReconciliationServices.resolveEnumLabel(ec, system, system)}".toString() : name
-    }
-
     private static String iso(Object stamp) {
         if (stamp == null) return null
         return stamp instanceof Timestamp ? ((Timestamp) stamp).toInstant().toString() : stamp.toString()
@@ -152,14 +145,12 @@ class SyncPulseFacadeSupport {
             Map pair = row.getMap()
             String id = normalize(pair.get("syncPairId"))
             Map automation = automations[normalize(pair.get("automationId"))]
-            def latestOk = rows(ec, "darpan.pulse.SyncPulseSample", tenantId).condition("syncPairId", id)
-                    .condition("statusEnumId", SyncPulseSupport.OK).orderBy("-sampleStamp").limit(1).list()?.find()
-            long past = rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", id).condition("closedStamp", null).count()
-            [syncPairId: id, label: pairLabel(ec, tenantId, pair, automation), automationId: normalize(pair.get("automationId")),
+            Map counts = SyncPulseSupport.pairCounts(ec, tenantId, id)
+            [syncPairId: id, label: SyncPulseSupport.pairLabel(ec, pair), automationId: normalize(pair.get("automationId")),
              automationName: normalize(automation?.get("automationName")), allowanceMinutes: pair.get("allowanceMinutes"),
              pulseEveryMinutes: pair.get("pulseEveryMinutes"), isActive: normalize(pair.get("isActive")) ?: "Y",
-             lastPulseStamp: iso(pair.get("lastPulseStamp")), waitingCount: (latestOk?.get("waitingCount") ?: 0) as int,
-             pastAllowanceCount: past as int] as Map
+             lastPulseStamp: iso(pair.get("lastPulseStamp")), waitingCount: counts.waitingCount,
+             pastAllowanceCount: counts.pastAllowanceCount] as Map
         }
         return out.sort { Map r -> r.label as String }
     }
@@ -178,7 +169,8 @@ class SyncPulseFacadeSupport {
         String periodName = overrides ? windows.find { it.peakPeriodId == eff.peakPeriodId }?.periodName : null
         Map automation = automationOf(ec, tenantId, normalize(pair.get("automationId")))
 
-        Map syncPair = [syncPairId: id, label: pairLabel(ec, tenantId, pair, automation), automationId: normalize(pair.get("automationId")),
+        Map counts = SyncPulseSupport.pairCounts(ec, tenantId, id)
+        Map syncPair = [syncPairId: id, waitingCount: counts.waitingCount, pastAllowanceCount: counts.pastAllowanceCount, label: SyncPulseSupport.pairLabel(ec, pair), automationId: normalize(pair.get("automationId")),
                         automationName: normalize(automation?.get("automationName")), upstreamSide: normalize(pair.get("upstreamSide")),
                         allowanceMinutes: eff.allowanceMinutes, pulseEveryMinutes: eff.pulseEveryMinutes,
                         normalAllowanceMinutes: pair.get("allowanceMinutes"), normalPulseEveryMinutes: pair.get("pulseEveryMinutes"),
@@ -196,19 +188,11 @@ class SyncPulseFacadeSupport {
         }
         List<Map> past = (rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", id).condition("closedStamp", null)
                 .orderBy("sourceCreatedStamp").list() ?: []).collect { o ->
-            Object created = o.get("sourceCreatedStamp")
-            Long minutes = created instanceof Timestamp ? Duration.between(((Timestamp) created).toInstant(), now).toMinutes() : null
+            Object created = o.get("sourceCreatedStamp") ?: o.get("firstPastStamp")
+            long minutes = created instanceof Timestamp ? Math.max(0L, Duration.between(((Timestamp) created).toInstant(), now).toMinutes()) : 0L
             [recordKey: o.get("recordKey"), orderName: o.get("orderName"), otherSystemId: o.get("otherSystemId"),
-             sourceCreatedStamp: iso(created), waitingMinutes: minutes, reportedInRunId: null] as Map
+             sourceCreatedStamp: iso(o.get("sourceCreatedStamp")), waitingMinutes: minutes, reportedInRunId: null] as Map
         }
         return [syncPair: syncPair, samplesToday: samples, pastOrders: past]
-    }
-
-    /** Deletes a pair with its peak-period rows, samples and open/closed orders (the tenant's rows only). */
-    static void deletePairCascade(def ec, String tenantId, String syncPairId) {
-        ["darpan.pulse.PeakPeriodSync", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder"].each { String entity ->
-            rows(ec, entity, tenantId).condition("syncPairId", syncPairId).deleteAll()
-        }
-        rows(ec, "darpan.pulse.SyncPair", tenantId).condition("syncPairId", syncPairId).deleteAll()
     }
 }

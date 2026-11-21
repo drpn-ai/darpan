@@ -36,6 +36,7 @@ class SyncPulseFacadeCrossTenantSmokeTests {
     @BeforeAll
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "sync-pulse-facade-cross-tenant-smoke")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SyncPulseSeedData.xml", "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         seedTenant(A, "Krewe")
         seedTenant(B, "Gorjana")
@@ -43,7 +44,7 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         String week = AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK
         String api = AutomationExecutionSupport.AUTOMATION_SOURCE_API
         StringBuilder xml = new StringBuilder('<entity-facade-xml type="test">')
-        [["SPF_A_DAILY", A, prev, "OMS_GQL", "SHOPIFY", "Y", "N"], ["SPF_A_WEEKLY", A, week, "OMS_GQL", "SHOPIFY", "Y", "N"],
+        [["SPF_A_DAILY", A, prev, "OMS_GQL", "NETSUITE_SUITEQL", "Y", "N"], ["SPF_A_WEEKLY", A, week, "OMS_GQL", "SHOPIFY", "Y", "N"],
          ["SPF_A_SHOP", A, prev, "SHOPIFY", "OMS_GQL", "Y", "N"], ["SPF_A_ARCH", A, prev, "OMS_GQL", "SHOPIFY", "Y", "Y"],
          ["SPF_A_OFF", A, prev, "OMS_GQL", "SHOPIFY", "N", "N"], ["SPF_B_DAILY", B, prev, "OMS_GQL", "SHOPIFY", "Y", "N"]].each { a ->
             xml << """<darpan.reconciliation.ReconciliationAutomation automationId="${a[0]}" automationName="${a[0]}" companyUserGroupId="${a[1]}"
@@ -90,9 +91,13 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         assertEquals(4, row.waitingCount)
         assertEquals(2, row.pastAllowanceCount)
         assertEquals("Y", row.isActive)
+        assertEquals("HotWax \u2192 NetSuite orders", row.label)
 
         Map got = call("get#SyncPair", [syncPairId: pairA])
         assertTrue(got.ok as boolean, "${got.errors}")
+        assertEquals("HotWax \u2192 NetSuite orders", got.syncPair.label)
+        assertEquals(4, got.syncPair.waitingCount)
+        assertEquals(2, got.syncPair.pastAllowanceCount)
         assertEquals(120, got.syncPair.allowanceMinutes)
         assertEquals(120, got.syncPair.normalAllowanceMinutes)
         assertEquals(60, got.syncPair.normalPulseEveryMinutes)
@@ -134,16 +139,44 @@ class SyncPulseFacadeCrossTenantSmokeTests {
     @Test
     void savingWithoutCadenceOrChatSpaceStoresNullNotTheOldValue() {
         actAs(A)
-        // an archived check is not a valid pair target
-        assertEquals(["Choose a daily check."], call("save#SyncPair", [automationId: "SPF_A_ARCH", upstreamSide: "FILE_1", allowanceMinutes: 60]).errors)
-        Map r = call("save#SyncPair", [syncPairId: pairA, automationId: "SPF_A_DAILY", upstreamSide: "FILE_1", allowanceMinutes: 90])
-        assertTrue(r.ok as boolean, "${r.errors}")
-        def row = readPair(pairA)
-        assertNull(row.pulseEveryMinutes)
-        assertNull(row.chatSpaceId)
-        assertEquals(90, row.allowanceMinutes as int)
-        assertEquals("Y", row.isActive)
-        call("save#SyncPair", [syncPairId: pairA, automationId: "SPF_A_DAILY", upstreamSide: "FILE_1", allowanceMinutes: 120, pulseEveryMinutes: 60, chatSpaceId: "SPF_CHAT_A"])
+        String id = (String) call("save#SyncPair", [automationId: "SPF_A_SHOP", upstreamSide: "FILE_2", allowanceMinutes: 60,
+                pulseEveryMinutes: 120, chatSpaceId: "SPF_CHAT_A"]).syncPairId
+        try {
+            assertEquals(120, readPair(id).pulseEveryMinutes as int)
+            assertEquals("SPF_CHAT_A", readPair(id).chatSpaceId as String)
+            // an archived check is not a valid pair target
+            assertEquals(["Choose a daily check."], call("save#SyncPair", [automationId: "SPF_A_ARCH", upstreamSide: "FILE_1", allowanceMinutes: 60]).errors)
+            Map r = call("save#SyncPair", [syncPairId: id, automationId: "SPF_A_SHOP", upstreamSide: "FILE_2", allowanceMinutes: 90])
+            assertTrue(r.ok as boolean, "${r.errors}")
+            def row = readPair(id)
+            assertNull(row.pulseEveryMinutes)
+            assertNull(row.chatSpaceId)
+            assertEquals(90, row.allowanceMinutes as int)
+            assertEquals("Y", row.isActive)
+        } finally {
+            call("delete#SyncPair", [syncPairId: id])
+        }
+    }
+
+    @Test
+    void detailUnderAnActivePeriodShowsTheEffectiveValues() {
+        actAs(A)
+        String today = java.time.LocalDate.now(TenantAccessSupport.tenantTimeZoneFor(ec, A)).toString()
+        String period = (String) call("save#PeakPeriod", [periodName: "Sale", fromDate: today, thruDate: today], "facade.PeakPeriodFacadeServices").peakPeriodId
+        assertNotNull(period)
+        ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: period, syncPairId: pairA, companyUserGroupId: A,
+                allowanceMinutes: 30, pulseEveryMinutes: 0]).createOrUpdate()
+        try {
+            Map sp = call("get#SyncPair", [syncPairId: pairA]).syncPair
+            assertEquals("Sale", sp.periodName)
+            assertEquals(30, sp.allowanceMinutes)
+            assertEquals(0, sp.pulseEveryMinutes, "a period cadence of 0 is pulse off")
+            assertEquals(120, sp.normalAllowanceMinutes)
+            assertEquals(60, sp.normalPulseEveryMinutes)
+        } finally {
+            ec.entity.find("darpan.pulse.PeakPeriodSync").condition("peakPeriodId", period).disableAuthz().deleteAll()
+            call("delete#PeakPeriod", [peakPeriodId: period], "facade.PeakPeriodFacadeServices")
+        }
     }
 
     @Test
@@ -188,9 +221,9 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         assertNull(ec.entity.find("darpan.pulse.SyncPulseOrder").condition("pulseOrderId", "SPF_DEL_O").disableAuthz().useCache(false).one())
     }
 
-    private Map call(String name, Map params) {
+    private Map call(String name, Map params, String service = "facade.SyncPulseFacadeServices") {
         ec.message.clearErrors()
-        return (Map) ec.service.sync().name("facade.SyncPulseFacadeServices.${name}".toString()).parameters(params).disableAuthz().call()
+        return (Map) ec.service.sync().name("${service}.${name}".toString()).parameters(params).disableAuthz().call()
     }
 
     private void actAs(String tenant) { ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenant) }

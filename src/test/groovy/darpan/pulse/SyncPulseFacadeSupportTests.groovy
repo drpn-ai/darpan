@@ -25,6 +25,8 @@ class SyncPulseFacadeSupportTests {
         assertTrue(SyncPulseFacadeSupport.isDailyWindow([:]), "a blank window is the last 1 day")
         assertTrue(SyncPulseFacadeSupport.isDailyWindow([relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_DAYS, relativeWindowCount: 1]))
         assertFalse(SyncPulseFacadeSupport.isDailyWindow([relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_DAYS, relativeWindowCount: 7]))
+        assertTrue(SyncPulseFacadeSupport.isDailyWindow([relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_DAYS, relativeWindowCount: 0]), "0 reads one day, as the executor does")
+        assertTrue(SyncPulseFacadeSupport.isDailyWindow([relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_DAYS, relativeWindowCount: "x"]), "non-numeric does not throw")
         assertFalse(SyncPulseFacadeSupport.isDailyWindow([relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK]))
         assertFalse(SyncPulseFacadeSupport.isDailyWindow([relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_STATE]))
     }

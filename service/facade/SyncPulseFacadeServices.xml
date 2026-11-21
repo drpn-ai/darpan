@@ -32,11 +32,27 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="syncPair" type="Map"/>
-            <parameter name="samplesToday" type="List"/>
-            <parameter name="pastOrders" type="List"/>
-            <parameter name="automations" type="List"/>
-            <parameter name="chatSpaces" type="List"/>
+            <parameter name="syncPair" type="Map">
+                <parameter name="syncPairId"/><parameter name="label"/><parameter name="automationId"/><parameter name="automationName"/>
+                <parameter name="upstreamSide"/><parameter name="allowanceMinutes"/><parameter name="pulseEveryMinutes"/>
+                <parameter name="normalAllowanceMinutes"/><parameter name="normalPulseEveryMinutes"/><parameter name="periodName"/>
+                <parameter name="chatSpaceId"/><parameter name="hourlySummary"/><parameter name="isActive"/>
+                <parameter name="lastPulseStamp"/><parameter name="lastPulseStatusEnumId"/>
+                <parameter name="waitingCount"/><parameter name="pastAllowanceCount"/>
+            </parameter>
+            <parameter name="samplesToday" type="List">
+                <parameter name="sampleStamp"/><parameter name="waitingCount"/><parameter name="oldestWaitingMinutes"/>
+                <parameter name="pastAllowanceCount"/><parameter name="statusEnumId"/>
+            </parameter>
+            <parameter name="pastOrders" type="List">
+                <parameter name="recordKey"/><parameter name="orderName"/><parameter name="otherSystemId"/>
+                <parameter name="sourceCreatedStamp"/><parameter name="waitingMinutes"/><parameter name="reportedInRunId"/>
+            </parameter>
+            <parameter name="automations" type="List">
+                <parameter name="automationId"/><parameter name="label"/>
+                <parameter name="upstreamOptions" type="List"><parameter name="upstreamSide"/><parameter name="label"/></parameter>
+            </parameter>
+            <parameter name="chatSpaces" type="List"><parameter name="chatSpaceId"/><parameter name="label"/></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
@@ -132,7 +148,7 @@
                 <message error="true">Sync pair '${syncPairIdValue}' was not found.</message>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreCascade" from="darpan.pulse.SyncPulseFacadeSupport.deletePairCascade(ec, tenantId, syncPairIdValue)"/>
+                <set field="ignoreCascade" from="darpan.pulse.SyncPulseCascade.deletePair(ec, tenantId, syncPairIdValue)"/>
                 <message>Deleted sync pair.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>

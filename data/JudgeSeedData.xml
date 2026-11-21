@@ -11,4 +11,6 @@
     <moqui.basic.EnumerationType enumTypeId="CheckDecisionStage" description="Check decision stage"/>
     <moqui.basic.Enumeration enumId="CDS_MUST_HOLD" enumTypeId="CheckDecisionStage" enumCode="mustHold" description="Must hold" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="CDS_EXPLAINS" enumTypeId="CheckDecisionStage" enumCode="explains" description="Explains" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CDS_KEEP_FILE_1" enumTypeId="CheckDecisionStage" enumCode="keepFile1" description="Keep, file 1" sequenceNum="0"/>
+    <moqui.basic.Enumeration enumId="CDS_KEEP_FILE_2" enumTypeId="CheckDecisionStage" enumCode="keepFile2" description="Keep, file 2" sequenceNum="0"/>
 </entity-facade-xml>

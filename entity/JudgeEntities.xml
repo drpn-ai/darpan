@@ -32,10 +32,10 @@
     </entity>
 
     <entity entity-name="CheckDecision" package="darpan.judge" use="configuration">
-        <description>Which moqui-rules decision a check uses at each stage. Keep stages arrive in plan 3.</description>
+        <description>Which moqui-rules decision a check uses at each stage: Must hold, Explains, and one Keep decision per side (CDS_KEEP_FILE_1, CDS_KEEP_FILE_2) that sets whole records aside before the compare.</description>
         <field name="checkId" type="id" is-pk="true"/>
         <field name="stageEnumId" type="id" is-pk="true">
-            <description>Enumeration of type CheckDecisionStage: CDS_MUST_HOLD or CDS_EXPLAINS.</description>
+            <description>Enumeration of type CheckDecisionStage: CDS_MUST_HOLD, CDS_EXPLAINS, CDS_KEEP_FILE_1 or CDS_KEEP_FILE_2.</description>
         </field>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="ruleSetId" type="id" not-null="true"/>

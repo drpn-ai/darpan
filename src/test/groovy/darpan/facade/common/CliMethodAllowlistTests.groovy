@@ -66,6 +66,10 @@ class CliMethodAllowlistTests {
     /** DAR-CLI-004: the audit page's Re-check starts a one-record run of a check, like retry#AuditCheck; named here so
      *  the verify verb stays off the list (verify#OwnPassword and verify#PasswordResetCode must never pass). */
     private static final String AUDIT_RECHECK = "facade.AuditFacadeServices.verify#AuditFinding"
+    /** DAR-CLI-007 (Aditi 2026-11-21): the only config edits a CLI session may make, named so no other save slips in. */
+    private static final Set<String> CONFIG_EDITS = ["facade.RunConclusionFacadeServices.save#RunConclusions",
+                                                     "facade.RunConclusionFacadeServices.create#RunConclusionCode",
+                                                     "facade.ReconciliationFacadeServices.sync#Automation"] as Set
 
     private static List<String> contractMethods() {
         Path methodsFile = ReconciliationSmokeTestSupport.resolveBackendRoot()
@@ -111,10 +115,10 @@ class CliMethodAllowlistTests {
     @Test
     void noSaveDeleteCreateOrUpdateOutsideTenantScriptsAndCliLogoutIsAllowed() {
         List<String> writers = CliMethodAllowlist.ALLOWED.findAll { String method ->
-            if (method == CLI_LOGOUT || method == AUDIT_RECHECK || method.startsWith(TENANT_SCRIPT_SERVICES)) return false
+            if (method == CLI_LOGOUT || method == AUDIT_RECHECK || CONFIG_EDITS.contains(method) || method.startsWith(TENANT_SCRIPT_SERVICES)) return false
             return !READ_OR_RUN_VERBS.contains(verbOf(method))
         }.sort()
-        assertTrue(writers.isEmpty(), "a CLI session may only read, start runs and use tenant scripts: ${writers}")
+        assertTrue(writers.isEmpty(), "a CLI session may only read, start runs, use tenant scripts and make the CONFIG_EDITS: ${writers}")
     }
 
     @Test

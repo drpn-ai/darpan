@@ -2,8 +2,9 @@ package darpan.facade.common
 
 /**
  * DAR-CLI-003 — what a CLI session may call. A CLI session is a request signed in with a login key issued through
- * the CLI sign-in (CliAuthSupport.isCliSession). Aditi's scope: run execution and data getters, plus tenant scripts;
- * nothing that saves, changes or deletes anything else. RpcMethodFence.enforce holds a CLI session to this list on
+ * the CLI sign-in (CliAuthSupport.isCliSession). Aditi's scope: run execution and data getters, plus tenant scripts,
+ * and (DAR-CLI-007) a run's conclusion tree and syncing an automation with its run; nothing that saves, changes or
+ * deletes anything else. RpcMethodFence.enforce holds a CLI session to this list on
  * the server, so the key used directly (curl) gets no more than the CLI does.
  *
  * <p>ALLOWED: every facade get#/list#/search# that writes nothing and returns no credential, the run starters,
@@ -96,8 +97,14 @@ class CliMethodAllowlist {
             "facade.ReconciliationFacadeServices.run#GenericDiff",
             "facade.ReconciliationFacadeServices.run#Reconciliation",
             "facade.ReconciliationFacadeServices.run#SavedRunDiff",
+            // DAR-CLI-007 (Aditi 2026-11-21): re-derive an automation's sources and filters from its run; the service
+            // requires tenant write access. `darpan automation sync` previews both sides' filters first (DAR-BE-152).
+            "facade.ReconciliationFacadeServices.sync#Automation",
 
+            // DAR-CLI-007: a run's conclusion tree and its tenant codes; both require tenant write access on the server.
+            "facade.RunConclusionFacadeServices.create#RunConclusionCode",
             "facade.RunConclusionFacadeServices.get#RunConclusions",
+            "facade.RunConclusionFacadeServices.save#RunConclusions",
 
             "facade.SearchFacadeServices.search#NavigationTargets",
 
@@ -385,11 +392,7 @@ class CliMethodAllowlist {
             "facade.ReconciliationFacadeServices.save#RuleSetRun",
             "facade.ReconciliationFacadeServices.save#SavedRunName",
             "facade.ReconciliationFacadeServices.subscribe#RunNotification",
-            "facade.ReconciliationFacadeServices.sync#Automation",
             "facade.ReconciliationFacadeServices.unsubscribe#RunNotification",
-
-            "facade.RunConclusionFacadeServices.create#RunConclusionCode",
-            "facade.RunConclusionFacadeServices.save#RunConclusions",
 
             "facade.SettingsFacadeServices.delete#NsAuthConfig",
             "facade.SettingsFacadeServices.delete#TenantChatSpace",

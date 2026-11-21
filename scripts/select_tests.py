@@ -181,7 +181,9 @@ class Index:
             for cls, sup in EXTENDS.findall(raw):
                 if cls == stem:
                     super_of[stem] = sup
-        helpers = {s for s in raws if not s.endswith(("Test", "Tests"))}
+        # ReconciliationSmokeTestSupport is not a booting helper: static ratchets call only resolveBackendRoot();
+        # a class that boots through it contains initMoqui( itself.
+        helpers = {s for s in raws if not s.endswith(("Test", "Tests")) and s != "ReconciliationSmokeTestSupport"}
         boot_cache: dict[str, bool] = {}
 
         def boots(name: str, seen: frozenset = frozenset()) -> bool:

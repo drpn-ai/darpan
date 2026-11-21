@@ -210,7 +210,8 @@ ext.darpanTestPools = { ->
         if (m.find()) superOf[simple] = m.group(1)
         if (f.name.endsWith('Test.groovy') || f.name.endsWith('Tests.groovy')) candidates << f
     }
-    Set<String> helperNames = sources.keySet().findAll { !it.endsWith('Test') && !it.endsWith('Tests') } as Set<String>
+    Set<String> helperNames = sources.keySet().findAll { !it.endsWith('Test') && !it.endsWith('Tests') && it != 'ReconciliationSmokeTestSupport' } as Set<String>
+    // ReconciliationSmokeTestSupport is not a booting helper: static ratchets call only resolveBackendRoot(); a class that boots through it contains initMoqui( itself.
     Map<String, Set<String>> identsOf = [:]   // simple name -> helper names its source mentions (lazy)
     Closure<Boolean> boots
     boots = { String name, Set<String> seen ->

@@ -214,7 +214,12 @@ class ReconciliationSmokeTestSupport {
                 String token = sharedToken()
                 // No scheduled job runner: it would fire seeded jobs mid-class and write rows the quiet gate ignores.
                 System.setProperty("scheduled_job_check_time", "0")
-                ec = bootMoqui(backendRoot, token)
+                try {
+                    ec = bootMoqui(backendRoot, token)
+                } catch (Throwable t) {
+                    System.clearProperty("scheduled_job_check_time")
+                    throw t
+                }
                 sharedEcf = (ExecutionContextFactoryImpl) Moqui.getExecutionContextFactory()
                 sharedDbBasePath = backendRoot.resolve("runtime/tmp/test-h2/${token}")
                 sharedTxLogPath = backendRoot.resolve("runtime/tmp/test-txlog/${token}")
@@ -292,13 +297,6 @@ class ReconciliationSmokeTestSupport {
     }
 
     /**
-     * Waits until the shared ECF's worker pools are idle (no active thread, empty queue), its scheduled executor runs
-     * nothing, and run admission has nothing running or queued; past timeoutMillis it fails naming previousClass,
-     * whose work is still going. The scheduled executor's queue always holds Moqui's periodic tasks, so only its
-     * active threads are checked, and not those running a Moqui framework periodic task (the ElasticSearch log
-     * flusher blocks in an HTTP bulk call for long stretches).
-     */
-    /**
      * The quiet gate at a class boundary. After a timeout the shared ECF is unusable (work still running on it), so it
      * is torn down here and the next class boots fresh instead of every later class in the JVM failing.
      */
@@ -311,6 +309,13 @@ class ReconciliationSmokeTestSupport {
         }
     }
 
+    /**
+     * Waits until the shared ECF's worker pools are idle (no active thread, empty queue), its scheduled executor runs
+     * nothing, and run admission has nothing running or queued; past timeoutMillis it fails naming previousClass,
+     * whose work is still going. The scheduled executor's queue always holds Moqui's periodic tasks, so only its
+     * active threads are checked, and not those running a Moqui framework periodic task (the ElasticSearch log
+     * flusher blocks in an HTTP bulk call for long stretches).
+     */
     static void awaitSharedQuiet(String previousClass, long timeoutMillis) {
         awaitSharedQuiet(previousClass, timeoutMillis, false)
     }

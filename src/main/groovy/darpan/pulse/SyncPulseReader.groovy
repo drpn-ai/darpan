@@ -34,7 +34,7 @@ import static darpan.common.ValueSupport.readField
  * (AuditRecheckSupport.firstKeyField) holds the value the target side's first compare key field is read by.</p>
  *
  * <p>DAR-BE-318 (plan 3b-2b, Ruling 3b2b-11): a side keeps what the check's run keeps. The dispatch decides through the
- * shared gate (AutomationExecutionSupport.sideKeepOf, KeepPlanSupport.sparkKeepsSide) whether the side filters at the read,
+ * shared gate (AutomationExecutionSupport.sideKeepOf, which asks KeepPlanSupport.effectiveSideKeep) whether the side filters at the read,
  * as every side does until its extract stops taking the filter parameter, or keeps in Spark; there the pulse runs the same
  * Keep over its own extract (KeepStepSupport.keptValues, which writes the set-aside artifact beside it) and reads only the
  * kept records. A record Keep set aside is neither an upstream record nor present in the target, as when the read dropped it.</p>
@@ -84,7 +84,7 @@ class SyncPulseReader {
             if (from == null || thru == null || !from.isBefore(thru)) throw new IllegalArgumentException("A pulse reads a window that ends after it starts.")
             if (AutomationExecutionSupport.isStateWindowMode(automation)) throw new IllegalStateException("A pulse reads a window; this check reads by status.")
             Map window = [childWindowStartDate: Timestamp.from(from), childWindowEndDate: Timestamp.from(thru)]
-            File file = extract(ec, automation, sides.upstream, window, location, null, sides.upstreamKey as String)
+            File file = extract(ec, automation, sides.upstream, window, location, null, sides.upstreamKey as String, false).file
             Map read = upstreamRecords(file, sides.upstreamKey as String)
             return [ok: true, records: read.records, errors: [], warnings: read.warnings]
         }
@@ -105,7 +105,7 @@ class SyncPulseReader {
             Timestamp now = (ec.user?.nowTimestamp as Timestamp) ?: new Timestamp(System.currentTimeMillis())
             Map window = [childWindowStartDate: Timestamp.from(now.toInstant().minus(TARGET_WINDOW)), childWindowEndDate: now]
             Map found = presentByBatches(keys, sides.targetKey as String) { List<String> batch ->
-                extract(ec, automation, sides.target, window, location, batch, sides.targetKey as String)
+                extract(ec, automation, sides.target, window, location, batch, sides.targetKey as String, true)
             }
             return [ok: true, present: found.present, unasked: found.unasked, errors: [], warnings: found.warnings]
         }
@@ -162,11 +162,11 @@ class SyncPulseReader {
     }
 
     /**
-     * Asks readBatch(batch) -> File (the target's records for those keys, or null for none) AuditRecheckSupport.MAX_KEYS
-     * valid keys at a time; a key is present when a record's keyField holds it. Invalid keys are never sent: they come back
+     * Asks readBatch(batch) -> File (the target's records for those keys, or null for none), or [file, kept] with the kept keys
+     * already read off it, AuditRecheckSupport.MAX_KEYS valid keys at a time; a key is present when a record's keyField holds it. Invalid keys are never sent: they come back
      * as unasked.
      */
-    static Map presentByBatches(Collection keys, String keyField, Closure<File> readBatch) {
+    static Map presentByBatches(Collection keys, String keyField, Closure readBatch) {
         Map checked = validKeys(keys)
         List<String> valid = (List<String>) checked.valid
         List<String> warnings = []
@@ -178,12 +178,19 @@ class SyncPulseReader {
         Set<String> asked = valid as Set<String>
         Set<String> present = new LinkedHashSet<String>()
         valid.collate(AuditRecheckSupport.MAX_KEYS).each { List<String> batch ->
-            File file = readBatch.call(batch)
+            // a File, or [file, kept] where the read already holds the kept keys (KeepStepSupport.keptValues), not read again
+            def read = readBatch.call(batch)
+            File file = (read instanceof Map ? ((Map) read).get("file") : read) as File
+            Set<String> kept = read instanceof Map ? (Set<String>) ((Map) read).get("kept") : null
             if (file == null || !file.exists()) return
             try {
-                forEachPresentRecord(file) { Map r ->
-                    String v = normalize(r.get(keyField))
-                    if (v && asked.contains(v)) present.add(v)
+                if (kept != null) {
+                    kept.each { String v -> if (asked.contains(v)) present.add(v) }
+                } else {
+                    forEachPresentRecord(file) { Map r ->
+                        String v = normalize(r.get(keyField))
+                        if (v && asked.contains(v)) present.add(v)
+                    }
                 }
             } finally {
                 // one batch's file at a time: a read by key may name every batch's file alike, so what a Keep wrote beside
@@ -311,15 +318,19 @@ class SyncPulseReader {
      * One read of source through the check's own dispatch, into location; lookupKeys reads by key. Answers the file it
      * wrote, or null when it found nothing and wrote none.
      *
-     * <p>DAR-BE-318: the dispatch is told this caller keeps in Spark itself (KEEP_IN_SPARK), so a side the shared gate puts in
-     * Spark is read as the check's run reads it (no filters, the Keep fields kept); the side's Keep then runs over the file
-     * here and leaves its set-aside artifact beside it, read by forEachPresentRecord. Any other side filters at the read as
-     * before and gets no artifact.</p>
+     * <p>DAR-BE-318: the dispatch is told this caller's compare takes Keep as the run's does (KEEP_IN_SPARK, !evaluateMode), so a
+     * side the shared gate puts in Spark is read as the check's run reads it (no filters, the Keep fields kept); the side's Keep
+     * then runs over the file here and leaves its set-aside artifact beside it, read by forEachPresentRecord. Any other side
+     * filters at the read as before and gets no artifact.</p>
+     *
+     * @return [file: the file it wrote or null, kept: the keyField values of the records Keep kept (every record's without a
+     *         Keep run), or null when no Keep ran or the key is not asked for]
      */
-    private static File extract(def ec, Map automation, def source, Map window, String location, List<String> lookupKeys,
-                                String keyField) {
+    private static Map extract(def ec, Map automation, def source, Map window, String location, List<String> lookupKeys,
+                               String keyField, boolean wantKept) {
+        boolean keepInSpark = !AutomationExecutionSupport.isEvaluateScope(ec, automation)
         Map<String, Object> params = [automationExecutionId: null, sideOutputLocation: location,
-                                      (AutomationExecutionSupport.KEEP_IN_SPARK): true] as Map<String, Object>
+                                      (AutomationExecutionSupport.KEEP_IN_SPARK): keepInSpark] as Map<String, Object>
         Map<String, Object> defaults = AutomationExecutionSupport.resolveSourceExtractorConfigDefaults(ec, automation, [source])
         if (defaults) params.sourceExtractorConfigDefaults = defaults
         if (lookupKeys != null) params.lookupKeys = lookupKeys
@@ -330,12 +341,12 @@ class SyncPulseReader {
         File file = RunVerificationSupport.resolveLocationFile(ec, normalize(result.fileLocation))
         if (file == null || !file.exists()) {
             if (((result.recordCount ?: 0) as int) > 0) throw new IllegalStateException("${readField(source, 'fileSide')}'s read wrote no file.")
-            return null
+            return [file: null, kept: null]
         }
         // The plan the read was sent; a read served from a kept copy carries none, so it is worked out again, as the run does.
-        Map sideKeep = AutomationExecutionSupport.sideKeepOfResult(ec, automation, source, read, params, true)
-        if (KeepStepSupport.applies(sideKeep)) KeepStepSupport.keptValues(ec, file, sideKeep, keyField)
-        return file
+        Map sideKeep = AutomationExecutionSupport.sideKeepOfResult(ec, automation, source, read, params, keepInSpark)
+        Set<String> kept = KeepStepSupport.applies(sideKeep) ? KeepStepSupport.keptValues(ec, file, sideKeep, keyField) : null
+        return [file: file, kept: wantKept ? kept : null]
     }
 
     private static String folderLocation(def ec, Map pair, String what) {

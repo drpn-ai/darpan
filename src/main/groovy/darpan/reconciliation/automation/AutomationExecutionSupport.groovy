@@ -2558,8 +2558,9 @@ class AutomationExecutionSupport {
 
     /**
      * DAR-BE-318 (plan 3b-2b, Task 14). The dispatch parameter by which a caller says its compare takes keepBySide, so a
-     * Spark side's read may leave Keep to Spark. Only the run loop sets it (not on an evaluate run, whose compare takes no
-     * keepBySide); any other caller (the sync pulse reads records directly) keeps every side's filters at the read.
+     * Spark side's read may leave Keep to Spark. The run loop sets it from its mode (not on an evaluate run, whose compare takes
+     * no keepBySide), and the sync pulse sets it the same way, then runs the side's Keep over its own extract; any other caller
+     * keeps every side's filters at the read.
      */
     static final String KEEP_IN_SPARK = "keepInSpark"
 
@@ -2593,8 +2594,9 @@ class AutomationExecutionSupport {
      * <li>READ (a data-defined endpoint, Ruling 3b2b-16): the read gets the rows and filters, as today.</li>
      * <li>SPARK: the read gets no rows; Spark runs the connector's built-ins and the rows at the compare's ingest.</li>
      * </ul>
-     * A SPARK side keeps today's read (KeepPlanSupport.todaysRead) until its extract stops filtering (KeepPlanSupport.sparkKeepsSide,
-     * Ruling 3b2b-23), and whenever the caller's compare takes no keepBySide (keepInSpark false, KEEP_IN_SPARK).
+     * Where a SPARK side's Keep runs is KeepPlanSupport.effectiveSideKeep's one decision, the same as the interactive run's: it
+     * keeps today's read (KeepPlanSupport.todaysRead) until its extract stops filtering (Ruling 3b2b-23), when the caller's compare
+     * takes no keepBySide (keepInSpark false, KEEP_IN_SPARK), and when it is not keyed on top-level records.
      */
     static Map sideKeepOf(def ec, def automation, def source, Map connector, String serviceName, Map extractOptions,
                           boolean keepInSpark) {
@@ -2602,11 +2604,33 @@ class AutomationExecutionSupport {
         if (placement == KeepPlanSupport.NONE) return KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector, extractOptions)
         List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
                 normalize(readField(source, "fileSide")), normalize(readField(automation, "companyUserGroupId")))
-        if (placement == KeepPlanSupport.SPARK &&
-                (!keepInSpark || !KeepPlanSupport.sparkKeepsSide(connector, serviceName ? ec.service.getServiceDefinition(serviceName) : null))) {
-            return KeepPlanSupport.todaysRead(rows)
-        }
-        return KeepPlanSupport.sideKeepFromFilterRows(ec, rows, connector, extractOptions)
+        // the side's keys and record root, as RunExtractSupport.sideKeep takes them: the compare scope's key spec, the source's root
+        List<String> keyExpressions = placement == KeepPlanSupport.SPARK ?
+                sideKeyExpressions(ec, automation, normalize(readField(source, "fileSide"))) : []
+        return KeepPlanSupport.effectiveSideKeep(ec, rows, connector, extractOptions,
+                serviceName ? ec.service.getServiceDefinition(serviceName) : null,
+                normalize(readField(source, "recordRootExpression")), keyExpressions, keepInSpark)
+    }
+
+    /**
+     * A side's key field expressions: the compare scope's key spec (RunConclusionStep.keySpec, as RunConclusionStep.keySpecFor
+     * reads it), with its rows read for the AUTOMATION's tenant by an explicit condition, since a scheduled run has no signed-in
+     * user to pin the tenant.
+     */
+    private static List<String> sideKeyExpressions(def ec, def automation, String fileSide) {
+        String compareScopeId = normalize(readField(automation, "compareScopeId"))
+        String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        if (!compareScopeId || !tenantId || !fileSide) return []
+        String why = "automation path reads its compare scope's key spec; explicit companyUserGroupId condition applied"
+        List keyRows = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSourceKeyField", why)
+                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
+                .condition("companyUserGroupId", tenantId).orderBy("sequenceNum").useCache(false).list() ?: []
+        // list(), not one(): one() on the full PK would drop the tenant pin.
+        def sourceRow = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSource", why)
+                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
+                .condition("companyUserGroupId", tenantId).useCache(false).list()?.find()
+        return (List<String>) RunConclusionStep.keySpec(keyRows.collect { normalize(readField(it, "fieldExpression")) },
+                normalize(readField(sourceRow, "primaryIdExpression")), null, null).keyFields
     }
 
     /**

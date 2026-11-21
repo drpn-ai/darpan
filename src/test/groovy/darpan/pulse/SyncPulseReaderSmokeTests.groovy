@@ -341,6 +341,35 @@ class SyncPulseReaderSmokeTests {
         assertEquals(["#GOR1", "#GOR2"], out.records*.key, "every dated record the read wrote is read")
     }
 
+    /**
+     * The shared gate's records guard (review M5/M6) reaches the pulse: ACME's extract no longer filters, but a side whose
+     * record root is another array is not Spark-kept, so it is read as today: filtered at the read, no Keep field, no Keep run.
+     * (A nested key never reaches the read: a pulse refuses it, SyncPulseFacadeSupport.pulseBlockFor.)
+     */
+    @Test
+    void aSideWithAnotherRecordRootKeepsTodaysReadInThePulse() {
+        def source = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", KEEP_AUTO)
+                .condition("fileSide", "FILE_1").forUpdate(true).one()
+        source.set("recordRootExpression", "\$.orders[*]")
+        source.update()
+        try {
+            Map keepPair = [syncPairId: "SP3", companyUserGroupId: A, automationId: KEEP_AUTO, upstreamSide: "FILE_1"]
+            Map keepAutomation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", KEEP_AUTO).one().getMap()
+            SyncPulseReader.setLiveExtractor(acmeStub())
+
+            Map up = SyncPulseReader.readUpstream(ec, keepPair, keepAutomation, FROM, THRU)
+
+            assertEquals(true, up.ok, up.toString())
+            Map sent = calls[0].params as Map
+            assertEquals(1, (sent.sourceFilters as List).size(), "the side is sent its filters, as the check's run sends them")
+            assertNull(sent.keepRuleFields, "no Keep field is asked for")
+            assertEquals(["#P1", "#P2", "#P3", "#P4"], up.records*.key, "no Keep ran: every dated record the read wrote is read")
+        } finally {
+            source.set("recordRootExpression", null)
+            source.update()
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ the stub
 
     /**
@@ -369,8 +398,8 @@ class SyncPulseReaderSmokeTests {
     }
 
     /**
-     * The live extracts: the upstream read writes three HotWax orders (one with no orderDate) into its outputLocation, with
-     * an excluded-records side file; a read by key writes the NetSuite orders for the even keys asked.
+     * The live extracts: the upstream read writes three orders (one with no orderDate) into its outputLocation, with
+     * an excluded-records side file; a read by key writes the orders for the even keys asked.
      */
     private Closure stub() {
         return { String service, Map params ->

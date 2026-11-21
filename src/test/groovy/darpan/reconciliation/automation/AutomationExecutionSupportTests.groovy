@@ -3285,6 +3285,25 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void aSideNotKeyedOnTopLevelRecordsKeepsTodaysReadEvenWhereItsExtractNoLongerFilters() {
+        // KeepPlanSupport.effectiveSideKeep's records guard (review M5/M6), on the automation path too: Spark Keep numbers and
+        // reads the top-level records array, so a side keyed through a nested array keeps its filters at the read.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+        ec.service.declaredInParameters = ["keepRuleFields"]
+        ec.entity.rows["darpan.rule.RuleSetCompareSourceKeyField"].find { it.fileSide == "FILE_1" }.put("fieldExpression", '$.records[*].lines[*].sku')
+
+        Map extracted = acmeExtract(ec, "FILE_1")
+
+        assertEquals(["status"], ((List<Map>) extracted.params.sourceFilters)*.fieldExpression, "the read still filters")
+        assertEquals("READ", extracted.result.sideKeep.placement)
+        assertFalse(extracted.params.containsKey("keepRuleFields"))
+        Map run = runAcmeAutomation(ec, [:])
+        assertFalse(run.reconcile.params.containsKey("keepBySide"), "and Spark runs no Keep for it")
+    }
+
+    @Test
     void aDataDefinedSideGetsItsFiltersAtRead() {
         // Ruling 3b2b-16: a data-defined endpoint's filter is a positioned step of its pipeline, so it keeps filtering at
         // the read, whatever its extract declares.
@@ -3387,6 +3406,11 @@ class AutomationExecutionSupportTests {
                 excludedRecordsSidecar: "Y",
                 enabled               : "Y",
         ] + connectorExtras)
+        // each side's key, read off a top-level record: the gate (KeepPlanSupport.keyedOnRecords) lets such a side keep in Spark
+        ["FILE_1", "FILE_2"].each { String side ->
+            ec.entity.add("darpan.rule.RuleSetCompareSourceKeyField", [compareScopeId: "SCOPE_ORDER", fileSide: side, sequenceNum: 1,
+                    fieldExpression: "orderId", companyUserGroupId: "TENANT_A"])
+        }
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].findAll { it.automationId == "AUTO_API" }.each { FakeValue source ->
             source.put("systemEnumId", "ACME")
             source.put("safeMetadataJson", '{"extractServiceName":"' + ACME_EXTRACT + '"}')

@@ -47,8 +47,9 @@ class KeptCopySupportTests {
     private static final String EDITOR_USERNAME = "test.customer"
     private static final Timestamp FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
     private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
-    private static final String SHOPIFY_EXTRACT = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
-    private static final String RETURNS_EXTRACT = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+    private static final String ISO_EXTRACT = "reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRecords"
+    private static final String EPOCH_EXTRACT = "reconciliation.KeptCopyTestExtractionServices.extract#MadeUpEpochRecords"
+    private static final String ROUNDED_EXTRACT = "reconciliation.KeptCopyTestExtractionServices.extract#MadeUpRoundedRecords"
     private static final String DATA_DEFINED_EXTRACT = "reconciliation.DataDefinedExtractionServices.extract#DataDefinedSource"
     /** A tenant east of UTC, so a day read in UTC is not the tenant's day. */
     private static final String TENANT_ZONE = "Asia/Kolkata"
@@ -77,13 +78,7 @@ class KeptCopySupportTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "classpath://data/EntityTypeData.xml", "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/DatasetSeedData.xml")
         ec.entity.makeDataLoader().location("component://darpan/data/SourceSystemConnectorSeedData.xml").dummyFks(true).load()
-        // Shopify's own side-file declarations on its rows (ruling P3b1-9). The OMS returns row is used here as a windowed
-        // source with no projection: its side-file N is set below, and its projection service (darpan-hotwax's classes, not
-        // on this classpath) is exercised by darpan-hotwax's HotWaxRollingCopyParityTests.
-        ec.entity.makeDataLoader().location("component://shopify-darpan/data/ShopifyConnectorSeedData.xml").dummyFks(true).load()
-        def omsReturns = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "OMS_RETURNS_GQL").disableAuthz().one()
-        omsReturns.set("excludedRecordsSidecar", "N")
-        omsReturns.update()
+        loadMadeUpConnectors()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert("moqui.security.UserGroup", [userGroupId: B, description: "Gorjana",
                                             groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])
@@ -91,10 +86,6 @@ class KeptCopySupportTests {
         insert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: B, userId: EDITOR_ID,
                 permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID, fromDate: FROM_DATE])
         insert("moqui.security.UserGroupMember", [userGroupId: "DARPAN_USER", userId: EDITOR_ID, fromDate: FROM_DATE])
-        // one declared extract option, so the options key is exercised on both paths
-        def shopify = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", "SHOPIFY").disableAuthz().one()
-        shopify.set("extractOptionsJson", '[{"name":"includeTest","label":"Include test orders","type":"boolean"}]')
-        shopify.update()
     }
 
     @AfterAll
@@ -118,12 +109,12 @@ class KeptCopySupportTests {
         assertEquals([], run.errors)
         assertEquals(1, calls.size(), "the live extractor is called once")
 
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_ISO")
         String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("File 1-orders-api.json", "file1-api.json")
         Map expected = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-none", run.artifact as Map, START, END,
                 fileNameValue, null, null, null, "UTC")
         assertEquals(expected, calls[0].params, "the live call's parameters are today's, exactly")
-        assertEquals(SHOPIFY_EXTRACT, calls[0].service)
+        assertEquals(ISO_EXTRACT, calls[0].service)
 
         File live = locationFile(calls[0].location as String)
         assertEquals(RunExtractSupport.sourceResultForLocation(ec, run.source, "FILE_1", calls[0].params.fileName as String,
@@ -158,7 +149,7 @@ class KeptCopySupportTests {
         assertEquals(READ_AT.toInstant().toString(), doc.metadata.copyReadAt)
 
         // the same file the live extract would have written for this side
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_ISO")
         Map live = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-window", run.artifact as Map, START, END,
                 ReconciliationOutputSupport.sanitizeUploadFileName("File 1-orders-api.json", "file1-api.json"), null, null, null, "UTC")
         assertEquals(locationFile(DataManagerSupport.childLocation(live.outputLocation as String, live.fileName as String)).canonicalPath,
@@ -183,8 +174,8 @@ class KeptCopySupportTests {
                 [sequenceNum: 2, fieldExpression: "displayFinancialStatus", operator: "INCLUDE_IN", filterValues: "PAID,PARTIALLY_REFUNDED"],
         ]
         String location = runLocation("filters")
-        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
-                [shopifyAuthConfigId: "conn-filters", sourceFilters: rules, outputLocation: location, fileName: "filters.json"],
+        Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "KC_ISO"),
+                [projConfigId: "conn-filters", sourceFilters: rules, outputLocation: location, fileName: "filters.json"],
                 [tenantId: A, windowStart: START, windowEnd: END]))
         assertTrue(served.served as boolean, served.reason as String)
 
@@ -271,7 +262,7 @@ class KeptCopySupportTests {
         before.update()
 
         // the operator raises the horizon to 30 days
-        assertEquals([], underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "SHOPIFY",
+        assertEquals([], underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "KC_ISO",
                 sourceConfigId: "conn-raise", options: [:], idField: "id", stampField: "updatedAt", windowField: "createdAt",
                 horizonDays: 30]).errors)
         def row = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().useCache(false).one()
@@ -328,11 +319,11 @@ class KeptCopySupportTests {
     void aByKeysSideReadsLive() {
         String id = dataset("conn-keys")
         copy(A, id, [order("k1", "2026-11-10T12:00:00Z")])
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_ISO")
         // as the interactive path sends a read by the other side's keys, and as an audit re-check sends one
         [[lookupKeys: ["k1"], lookupKeyField: "id"], [lookupKeys: ["k1"], lookupKeyField: "id", lookupWithinWindow: true]].eachWithIndex { Map keys, int i ->
             String location = runLocation("keys-${i}")
-            Map side = KeptCopySupport.side(connector, [shopifyAuthConfigId: "conn-keys", outputLocation: location, fileName: "keys.json"] + keys,
+            Map side = KeptCopySupport.side(connector, [projConfigId: "conn-keys", outputLocation: location, fileName: "keys.json"] + keys,
                     [tenantId: A, windowStart: START, windowEnd: END])
             assertEquals(true, side.byKeys)
             Map served = KeptCopySupport.sliceIfServed(ec, side)
@@ -340,7 +331,7 @@ class KeptCopySupportTests {
             assertEquals(KeptCopySupport.BY_KEYS, served.reason)
             assertFalse(new File(locationFile(location), "keys.json").exists())
         }
-        if (ec.service.getServiceDefinition(SHOPIFY_EXTRACT)?.inParameterNameList?.contains("lookupKeys")) {
+        if (ec.service.getServiceDefinition(ISO_EXTRACT)?.inParameterNameList?.contains("lookupKeys")) {
             List<Map> calls = []
             Map run = interactive("conn-keys", START, END, calls, [:], [lookupKeys: ["k1"], lookupKeyField: "id"])
             assertEquals([], run.errors)
@@ -354,9 +345,9 @@ class KeptCopySupportTests {
     void tenantBIsNeverServedTenantAsCopy() {
         String idA = dataset("conn-shared")
         copy(A, idA, [order("a-order", "2026-11-10T12:00:00Z")])
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_ISO")
         Closure<Map> sideFor = { String tenant, String token ->
-            KeptCopySupport.side(connector, [shopifyAuthConfigId: "conn-shared", outputLocation: runLocation(token), fileName: "shared.json"],
+            KeptCopySupport.side(connector, [projConfigId: "conn-shared", outputLocation: runLocation(token), fileName: "shared.json"],
                     [tenantId: tenant, windowStart: START, windowEnd: END])
         }
         // control: A is served A's copy
@@ -409,13 +400,13 @@ class KeptCopySupportTests {
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
             <darpan.rule.RuleSet ruleSetId="KC_RS" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="KC_SCOPE" ruleSetId="KC_RS" companyUserGroupId="${A}"/>
-            <darpan.rule.RuleSetCompareSource compareScopeId="KC_SCOPE" fileSide="FILE_1" systemEnumId="SHOPIFY" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KC_SCOPE" fileSide="FILE_1" systemEnumId="KC_ISO" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KC_SCOPE" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].sourceName" operator="EXCLUDE_IN" filterValues="POS" companyUserGroupId="${A}"/>
             <darpan.reconciliation.ReconciliationAutomation automationId="KC_AUTO" automationName="kept copy" companyUserGroupId="${A}"
                 inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KC_RS"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="KC_AUTO" fileSide="FILE_1" companyUserGroupId="${A}"
-                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="SHOPIFY"/>
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="KC_ISO"/>
             <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KC_AUTO" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].sourceName" operator="EXCLUDE_IN" filterValues="POS" companyUserGroupId="${A}"/>
         </entity-facade-xml>""").dummyFks(true).load()
@@ -426,10 +417,10 @@ class KeptCopySupportTests {
         assertEquals(0, calls.size(), "the interactive side is served")
 
         Map automation = [automationId: "KC_AUTO", companyUserGroupId: A, relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
-        Map source = [automationId: "KC_AUTO", fileSide: "FILE_1", systemEnumId: "SHOPIFY", companyUserGroupId: A,
+        Map source = [automationId: "KC_AUTO", fileSide: "FILE_1", systemEnumId: "KC_ISO", companyUserGroupId: A,
                       sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
-                      safeMetadataJson: JsonOutput.toJson([extractServiceName: SHOPIFY_EXTRACT,
-                                                           parameters: [shopifyAuthConfigId: "conn-both", includeTest: true]])]
+                      safeMetadataJson: JsonOutput.toJson([extractServiceName: ISO_EXTRACT,
+                                                           parameters: [projConfigId: "conn-both", includeTest: true]])]
         String location = runLocation("both-auto")
         Map scheduled = scheduledAs(A) {
             AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, source,
@@ -471,8 +462,8 @@ class KeptCopySupportTests {
             String location = runLocation("abort")
             File runFolder = locationFile(location).parentFile
             assertFalse(runFolder.exists(), "test precondition: the slice makes its own folders")
-            Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
-                    [shopifyAuthConfigId: "conn-abort", outputLocation: location, fileName: "abort.json"],
+            Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "KC_ISO"),
+                    [projConfigId: "conn-abort", outputLocation: location, fileName: "abort.json"],
                     [tenantId: A, windowStart: START, windowEnd: END]))
             assertFalse(served.served as boolean)
             assertTrue((served.reason as String).contains("filter failed mid-stream"), served.reason as String)
@@ -522,9 +513,9 @@ class KeptCopySupportTests {
     /**
      * Ruling 3b1-9. A run of one day, Nov 10 in the tenant's zone, is served exactly the days its live read would fetch, on
      * both paths and with the seeded connector rows:
-     * - OMS returns (no preserveWindowInstants, no windowFieldName) are sent the instants the live window code anchored at
+     * - an epoch-millis source (no preserveWindowInstants, no windowFieldName) are sent the instants the live window code anchored at
      *   the tenant's midnights, and read them half-open: 23:59 on Nov 10 is in, 00:00 on Nov 11 is out;
-     * - a whole-days source (windowDateOnly, as NetSuite) is sent the calendar days the live code read in the tenant's zone,
+     * - a whole-days source (windowDateOnly) is sent the calendar days the live code read in the tenant's zone,
      *   and reads them half-open on whole days: Nov 10 is in, Nov 11 is out. A record it dates by instant is not placed on
      *   a day here (the source compares days in its own zone), so that copy is not served.
      */
@@ -539,37 +530,37 @@ class KeptCopySupportTests {
         assertEquals(ts("2026-11-10T18:30:00Z"), window.windowEndDate)
         assertEquals([window.windowStartDate, window.windowEndDate], [autoWindow.childWindowStartDate, autoWindow.childWindowEndDate])
 
-        // --- OMS returns: the seeded row, sent instants, no window field
-        Map returnsConnector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
-        assertFalse(returnsConnector.preserveWindowInstants as boolean, "the seeded row, unchanged")
-        assertFalse(returnsConnector.windowDateOnly as boolean)
-        assertNull(returnsConnector.windowFieldName)
-        String returnsId = datasetOf("OMS_RETURNS_GQL", "conn-days-returns", "returnId", "entryDate")
-        copyOf(A, returnsId, [
-                omsReturn("first-minute", "2026-11-10T00:00:00+05:30"),
-                omsReturn("day-before", "2026-11-09T23:59:59+05:30"),
-                omsReturn("last-minute", "2026-11-10T23:59:00+05:30"),
-                omsReturn("next-midnight", "2026-11-11T00:00:00+05:30"),
-                omsReturn("utc-day-before", "2026-11-09T20:00:00Z"),
-        ], "returnId", "entryDate")
+        // --- an epoch-millis source: its row, sent instants, no window field
+        Map epochConnector = SourceSystemConnectorSupport.resolve(ec, "KC_EPOCH")
+        assertFalse(epochConnector.preserveWindowInstants as boolean, "the seeded row, unchanged")
+        assertFalse(epochConnector.windowDateOnly as boolean)
+        assertNull(epochConnector.windowFieldName)
+        String epochId = datasetOf("KC_EPOCH", "conn-days-epoch", "id", "stamp")
+        copyOf(A, epochId, [
+                epochRecord("first-minute", "2026-11-10T00:00:00+05:30"),
+                epochRecord("day-before", "2026-11-09T23:59:59+05:30"),
+                epochRecord("last-minute", "2026-11-10T23:59:00+05:30"),
+                epochRecord("next-midnight", "2026-11-11T00:00:00+05:30"),
+                epochRecord("utc-day-before", "2026-11-09T20:00:00Z"),
+        ], "id", "stamp")
         List<Map> calls = []
-        Map run = interactiveSide([systemEnumId: "OMS_RETURNS_GQL", sourceConfigType: "HOTWAX_OMS_GQL_RETURNS",
-                                   sourceConfigId: "conn-days-returns", fileSide: "FILE_1"], window, calls)
+        Map run = interactiveSide([systemEnumId: "KC_EPOCH", sourceConfigType: "KC_EPOCH_TYPE",
+                                   sourceConfigId: "conn-days-epoch", fileSide: "FILE_1"], window, calls)
         assertEquals([], run.errors)
         assertEquals(0, calls.size(), "served: the live extractor is never called")
         File interactiveFile = locationFile(run.result.fileLocation as String)
-        assertEquals(["first-minute", "last-minute", "utc-day-before"] as Set, json(interactiveFile).records*.returnId as Set)
-        // what the live call would have sent: the same instants, and no window field (its extractor windows on entryDate)
-        Map sent = RunExtractSupport.buildExtractParams(returnsConnector, "FILE_1", "conn-days-returns", run.artifact as Map,
+        assertEquals(["first-minute", "last-minute", "utc-day-before"] as Set, json(interactiveFile).records*.id as Set)
+        // what the live call would have sent: the same instants, and no window field (its extractor windows on stamp)
+        Map sent = RunExtractSupport.buildExtractParams(epochConnector, "FILE_1", "conn-days-epoch", run.artifact as Map,
                 (Timestamp) window.windowStartDate, (Timestamp) window.windowEndDate, "f.json", null, null, null, window.timeZone)
         assertEquals("2026-11-09T18:30:00Z", sent.windowStart)
         assertEquals("2026-11-10T18:30:00Z", sent.windowEnd)
         assertFalse(sent.containsKey("windowFieldName"))
 
         Map scheduled = scheduledAs(A) {
-            AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, automationSource("OMS_RETURNS_GQL", RETURNS_EXTRACT,
-                    [omsRestSourceConfigId: "conn-days-returns"]), autoWindow,
-                    [automationExecutionId: "KC_DAYS_EXEC", sideOutputLocation: runLocation("days-returns-auto")])
+            AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, automationSource("KC_EPOCH", EPOCH_EXTRACT,
+                    [projConfigId: "conn-days-epoch"]), autoWindow,
+                    [automationExecutionId: "KC_DAYS_EXEC", sideOutputLocation: runLocation("days-epoch-auto")])
         }
         assertEquals(true, scheduled.requestMetadata?.servedFromCopy, scheduled.toString())
         assertArrayEquals(interactiveFile.bytes, locationFile(scheduled.fileLocation as String).bytes, "the same slice on both paths")
@@ -591,8 +582,8 @@ class KeptCopySupportTests {
                 window.timeZone)
         assertEquals(["2026-11-10", "2026-11-11"], [daySent.windowStart, daySent.windowEnd])
         Map dayScheduled = scheduledAs(A) {
-            AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, automationSource("KC_DAYS", RETURNS_EXTRACT,
-                    [omsRestSourceConfigId: "conn-days"]), autoWindow,
+            AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, automationSource("KC_DAYS", ISO_EXTRACT,
+                    [projConfigId: "conn-days"]), autoWindow,
                     [automationExecutionId: "KC_DAYS_EXEC2", sideOutputLocation: runLocation("days-auto")])
         }
         assertEquals(true, dayScheduled.requestMetadata?.servedFromCopy, dayScheduled.toString())
@@ -623,34 +614,34 @@ class KeptCopySupportTests {
     }
 
     /**
-     * Ruling 3b1-4 / 3b1-9. The seeded OMS returns row names no windowFieldName, so the dispatchers send none and its
-     * extractor windows on its own declared field, entryDate: that is the side's field. A dataset kept on another field is
+     * Ruling 3b1-4 / 3b1-9. The made-up epoch-millis row names no windowFieldName, so the dispatchers send none and its
+     * extractor windows on its own declared field, stamp: that is the side's field. A dataset kept on another field is
      * not served; an extractor that declares no field of its own is never served without the connector naming one.
      */
     @Test
     void aSourceWithNoWindowFieldNameUsesItsExtractorsField() {
-        assertEquals("entryDate", ec.service.getServiceDefinition(RETURNS_EXTRACT).getInParameter("windowFieldName")?.attribute("default-value"),
+        assertEquals("stamp", ec.service.getServiceDefinition(EPOCH_EXTRACT).getInParameter("windowFieldName")?.attribute("default-value"),
                 "the extractor declares its own window field")
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
-        String id = datasetOf("OMS_RETURNS_GQL", "conn-own-field", "returnId", "entryDate")
-        copyOf(A, id, [omsReturn("r1", "2026-11-10T12:00:00Z"), omsReturn("r2", "2026-11-12T12:00:00Z")], "returnId", "entryDate")
-        Map side = returnsSide(connector, "conn-own-field", "own-field")
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_EPOCH")
+        String id = datasetOf("KC_EPOCH", "conn-own-field", "id", "stamp")
+        copyOf(A, id, [epochRecord("r1", "2026-11-10T12:00:00Z"), epochRecord("r2", "2026-11-12T12:00:00Z")], "id", "stamp")
+        Map side = epochSide(connector, "conn-own-field", "own-field")
         assertNull(side.windowFieldName, "nothing is sent")
         Map served = KeptCopySupport.sliceIfServed(ec, side)
         assertTrue(served.served as boolean, served.reason as String)
-        assertEquals("entryDate", served.metadata.windowFieldName)
-        assertEquals(["r1"], json(served.extractFile as File).records*.returnId)
+        assertEquals("stamp", served.metadata.windowFieldName)
+        assertEquals(["r1"], json(served.extractFile as File).records*.id)
         // with no projection service on its row, the same side asking its source to keep only some fields reads live
         Map keeping = RunExtractSupport.buildExtractParams(connector, "FILE_1", "conn-own-field", [location: runLocation("own-keep"), runToken: "k"],
-                START, END, "slice.json", ["returnId", "entryDate"], null, null, "UTC")
+                START, END, "slice.json", ["id", "stamp"], null, null, "UTC")
         assertNull(connector.servingProjectionServiceName)
         assertEquals(KeptCopySupport.KEEPS_FIELDS, KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connector, keeping,
                 [tenantId: A, windowStart: START, windowEnd: END])).reason)
 
         // the same source kept on another field than its extractor windows on
-        String other = datasetOf("OMS_RETURNS_GQL", "conn-other-field", "returnId", "returnDate")
-        copyOf(A, other, [omsReturn("r1", "2026-11-10T12:00:00Z") + [returnDate: ts("2026-11-10T12:00:00Z").time]], "returnId", "returnDate")
-        assertEquals(KeptCopySupport.OTHER_WINDOW_FIELD, KeptCopySupport.sliceIfServed(ec, returnsSide(connector, "conn-other-field", "other-field")).reason)
+        String other = datasetOf("KC_EPOCH", "conn-other-field", "id", "otherStamp")
+        copyOf(A, other, [epochRecord("r1", "2026-11-10T12:00:00Z") + [otherStamp: ts("2026-11-10T12:00:00Z").time]], "id", "otherStamp")
+        assertEquals(KeptCopySupport.OTHER_WINDOW_FIELD, KeptCopySupport.sliceIfServed(ec, epochSide(connector, "conn-other-field", "other-field")).reason)
 
         // an extractor with no field of its own (a data-defined read windows on its definition's), and no connector field
         assertNull(ec.service.getServiceDefinition(DATA_DEFINED_EXTRACT).getInParameter("windowFieldName")?.attribute("default-value"))
@@ -663,17 +654,17 @@ class KeptCopySupportTests {
     }
 
     /**
-     * Plan 3a stays as it was: a Shopify orders side defaults its field to createdAt, its slice reads live when a record's
+     * Plan 3a stays as it was: an ISO-instant side defaults its field to createdAt, its slice reads live when a record's
      * createdAt is neither an ISO instant nor epoch milliseconds (never an abort), and a source whose extractor rounds its window to whole days
-     * unless told to keep instants (Shopify return refs, preserveWindowInstants N) reads live.
+     * unless told to keep instants (a rounding source, preserveWindowInstants N) reads live.
      */
     @Test
-    void shopifyOrdersServingIsUnchanged() {
+    void anIsoInstantSourceServingIsUnchanged() {
         String id = dataset("conn-unchanged")
         copy(A, id, [order("iso", "2026-11-10T09:00:00Z"), [id: "millis", createdAt: ts("2026-11-10T10:00:00Z").time, updatedAt: "2026-11-10T10:00:00Z"],
                      [id: "other-format", createdAt: "11/10/2026 11:00", updatedAt: "2026-11-10T11:00:00Z"]])
-        Map side = KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
-                [shopifyAuthConfigId: "conn-unchanged", outputLocation: runLocation("unchanged"), fileName: "slice.json"],
+        Map side = KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "KC_ISO"),
+                [projConfigId: "conn-unchanged", outputLocation: runLocation("unchanged"), fileName: "slice.json"],
                 [tenantId: A, windowStart: START, windowEnd: END])
         assertEquals("createdAt", side.windowFieldName)
         assertNull(side.liveOnly)
@@ -682,45 +673,45 @@ class KeptCopySupportTests {
         assertFalse(served.served as boolean)
         assertTrue((served.reason as String).contains("neither an ISO instant nor epoch milliseconds"), served.reason as String)
 
-        Map refs = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS"),
-                [shopifyAuthConfigId: "conn-refs", windowStart: START.toInstant().toString(), windowEnd: END.toInstant().toString(),
+        Map refs = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "KC_ROUNDED"),
+                [projConfigId: "conn-refs", windowStart: START.toInstant().toString(), windowEnd: END.toInstant().toString(),
                  outputLocation: runLocation("refs"), fileName: "slice.json"], [tenantId: A, windowStart: START, windowEnd: END]))
         assertFalse(refs.served as boolean)
         assertEquals(KeptCopySupport.ROUNDS_TO_DAYS, refs.reason)
     }
 
     /**
-     * Ruling P3b1-6: a slice drops a record only when it places it outside the window. An OMS order-item unit carries
-     * omsOrderDate, never the orderDate its connector windows on (the server filters on the order's date), so a unit copy
+     * Ruling P3b1-6: a slice drops a record only when it places it outside the window. A unit record carries
+     * placedOn, never the placedAt its connector windows on (the server filters on the order's date), so a unit copy
      * cannot be placed and the side reads live; it is never served an empty slice. A whole-days record with no date reads
      * live the same way.
      */
     @Test
     void aRecordTheSliceCannotPlaceMakesTheSideReadLive() {
-        Map units = SourceSystemConnectorSupport.resolve(ec, "OMS_ORDER_ITEMS_GQL")
-        assertEquals("orderDate", units.windowFieldName, "the seeded row")
-        String id = datasetOf("OMS_ORDER_ITEMS_GQL", "conn-units", "unitId", "orderDate")
-        copyOf(A, id, [[unitId: "u1", orderId: "o1", omsOrderDate: "2026-11-10T09:00:00Z"],
-                       [unitId: "u2", orderId: "o1", omsOrderDate: "2026-11-10T09:00:00Z"]], "unitId", "orderDate")
+        Map units = SourceSystemConnectorSupport.resolve(ec, "KC_NAMED")
+        assertEquals("placedAt", units.windowFieldName, "the seeded row")
+        String id = datasetOf("KC_NAMED", "conn-units", "unitId", "placedAt")
+        copyOf(A, id, [[unitId: "u1", orderId: "o1", placedOn: "2026-11-10T09:00:00Z"],
+                       [unitId: "u2", orderId: "o1", placedOn: "2026-11-10T09:00:00Z"]], "unitId", "placedAt")
         List<Map> calls = []
-        Map run = interactiveSide([systemEnumId: "OMS_ORDER_ITEMS_GQL", sourceConfigType: "HOTWAX_OMS_GQL_ORDER_ITEMS",
+        Map run = interactiveSide([systemEnumId: "KC_NAMED", sourceConfigType: "KC_NAMED_TYPE",
                                    sourceConfigId: "conn-units", fileSide: "FILE_1"], [windowStartDate: START, windowEndDate: END, timeZone: "UTC"], calls)
         assertEquals([], run.errors)
         assertEquals(1, calls.size(), "read live, never served an empty slice")
-        assertEquals("orderDate", calls[0].params.windowFieldName)
+        assertEquals("placedAt", calls[0].params.windowFieldName)
         Map params = RunExtractSupport.buildExtractParams(units, "FILE_1", "conn-units", [location: runLocation("units"), runToken: "units"],
                 START, END, "slice.json", null, null, null, "UTC")
         params.outputLocation = runLocation("units")
         params.fileName = "slice.json"
         Map direct = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(units, params, [tenantId: A, windowStart: START, windowEnd: END]))
         assertFalse(direct.served as boolean)
-        assertTrue((direct.reason as String).contains("has no orderDate"), direct.reason as String)
+        assertTrue((direct.reason as String).contains("has no placedAt"), direct.reason as String)
         assertFalse(new File(locationFile(runLocation("units")), "slice.json").exists(), "nothing is left behind")
 
         // a small integer is no epoch-millis date: unplaceable, never a 1970 instant
-        String smallId = datasetOf("OMS_RETURNS_GQL", "conn-small-int", "returnId", "entryDate")
-        copyOf(A, smallId, [[returnId: "s1", entryDate: 5]], "returnId", "entryDate")
-        Map small = KeptCopySupport.sliceIfServed(ec, returnsSide(SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL"),
+        String smallId = datasetOf("KC_EPOCH", "conn-small-int", "id", "stamp")
+        copyOf(A, smallId, [[id: "s1", stamp: 5]], "id", "stamp")
+        Map small = KeptCopySupport.sliceIfServed(ec, epochSide(SourceSystemConnectorSupport.resolve(ec, "KC_EPOCH"),
                 "conn-small-int", "small-int"))
         assertFalse(small.served as boolean)
         assertTrue((small.reason as String).contains("neither an ISO instant nor epoch milliseconds"), small.reason as String)
@@ -741,13 +732,13 @@ class KeptCopySupportTests {
     @Test
     void anExactInstantSideReadsLiveWhenARecordCannotBePlaced() {
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_EXACT" extractServiceName="${RETURNS_EXTRACT}"
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_EXACT" extractServiceName="${ISO_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_EXACT_TYPE"
-                configParameterName="omsRestSourceConfigId" preserveWindowInstants="Y" windowFieldName="stamp" enabled="Y"/>
+                configParameterName="projConfigId" preserveWindowInstants="Y" windowFieldName="stamp" enabled="Y"/>
         </entity-facade-xml>""").dummyFks(true).load()
         Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_EXACT")
         Closure side = { String conn, String token ->
-            KeptCopySupport.side(connector, [omsRestSourceConfigId: conn, windowFieldName: "stamp", outputLocation: runLocation(token), fileName: "slice.json",
+            KeptCopySupport.side(connector, [projConfigId: conn, windowFieldName: "stamp", outputLocation: runLocation(token), fileName: "slice.json",
                     windowStart: START.toInstant().toString(), windowEnd: END.toInstant().toString()],
                     [tenantId: A, windowStart: START, windowEnd: END])
         }
@@ -775,7 +766,7 @@ class KeptCopySupportTests {
      * Ruling P3b1-9: a served slice writes the excluded-records side file exactly when its connector row says the live
      * extract does (excludedRecordsSidecar, declared by the system's own component), on a made-up system: Y writes it, N
      * applies the filters and writes none (the conclude pass then reads the side UNKNOWN, as on a live run), undeclared reads
-     * live. Shopify's real declaration (Y) behaves the same.
+     * live.
      */
     @Test
     void aServedSliceWritesASideFileOnlyWhenItsConnectorSaysItsExtractDoes() {
@@ -805,18 +796,6 @@ class KeptCopySupportTests {
         assertTrue(RunConclusionSupport.indexSide([extractFile: nExtract, keyFields: ["id"]], ["x"] as Set<String>,
                 [] as Set<String>).unknownWhenAbsent as boolean, "the filtered side reads UNKNOWN, as on a live run")
         assertEquals(KeptCopySupport.SIDE_FILE_UNDECLARED, serve(null, "undeclared").reason)
-
-        // a real declaration, from Shopify's own data
-        String shopify = dataset("conn-sidefile-shopify")
-        copy(A, shopify, [order("web", "2026-11-10T09:00:00Z", [sourceName: "web"]), order("pos", "2026-11-10T10:00:00Z", [sourceName: "pos"])])
-        Map shopifyConnector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
-        assertEquals("Y", shopifyConnector.excludedRecordsSidecar)
-        Map shopifyServed = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(shopifyConnector,
-                [shopifyAuthConfigId: "conn-sidefile-shopify", sourceFilters: [[sequenceNum: 1, fieldExpression: "sourceName", operator: "EXCLUDE_IN", filterValues: "POS"]],
-                 outputLocation: runLocation("sidefile-shopify"), fileName: "slice.json"], [tenantId: A, windowStart: START, windowEnd: END]))
-        assertTrue(shopifyServed.served as boolean, shopifyServed.reason as String)
-        File shopifySide = new File((shopifyServed.extractFile as File).parentFile, ExcludedRecordsSidecar.fileNameFor("slice.json"))
-        assertEquals(["pos"], json(shopifySide).records*.id)
     }
 
     /**
@@ -979,19 +958,42 @@ class KeptCopySupportTests {
 
     private static final String LIVE_TEXT = '{"metadata":{"live":true},"records":[{"id":"live-1"}]}'
 
-    /** A test-only connector row shaped as NETSUITE_SUITEQL (whole days, a DATE field), on an extractor that keeps copies. */
+    /** The made-up connectors every test here serves through: no system component is loaded or needed. */
+    private void loadMadeUpConnectors() {
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ISO" extractServiceName="${ISO_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_ISO_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="Y" enabled="Y"
+                extractOptionsJson='[{"name":"includeTest","label":"Include test records","type":"boolean"}]'/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_EPOCH" extractServiceName="${EPOCH_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_EPOCH_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="N" keepFieldsParameterName="keepFields"
+                keepFieldsBase="id,stamp" filterParameterName="sourceFilters" excludedRecordsSidecar="N" enabled="Y"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_NAMED" extractServiceName="${EPOCH_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_NAMED_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="N" windowFieldName="placedAt" enabled="Y"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_ROUNDED" extractServiceName="${ROUNDED_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_ROUNDED_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="N" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="N" enabled="Y"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        loadDaysConnector()
+    }
+
+    /** A test-only connector row of a whole-days source (a DATE field), on an extractor that keeps copies. */
     private void loadDaysConnector() {
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
-            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_DAYS" extractServiceName="${RETURNS_EXTRACT}"
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_DAYS" extractServiceName="${ISO_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_DAYS_TYPE"
-                configParameterName="omsRestSourceConfigId" preserveWindowInstants="N" windowDateOnly="Y" windowFieldName="trandate"
+                configParameterName="projConfigId" preserveWindowInstants="N" windowDateOnly="Y" windowFieldName="trandate"
                 enabled="Y"/>
         </entity-facade-xml>""").dummyFks(true).load()
     }
 
-    /** An OMS return as the GraphQL extract writes it: entryDate in epoch milliseconds (OmsGqlReturnAssembler). */
-    private static Map omsReturn(String id, String entryDate) {
-        return [returnId: id, statusId: "RETURN_REQUESTED", entryDate: OffsetDateTime.parse(entryDate).toInstant().toEpochMilli()]
+    /** A made-up record whose stamp is in epoch milliseconds. */
+    private static Map epochRecord(String id, String stamp) {
+        return [id: id, stamp: OffsetDateTime.parse(stamp).toInstant().toEpochMilli()]
     }
 
     /** A rolling dataset of the active tenant (stampField = windowField). */
@@ -1009,8 +1011,8 @@ class KeptCopySupportTests {
                 coveredFrom, READ_THRU, READ_AT, 2, null, false, copyInfo)
     }
 
-    /** The interactive dispatcher's own parameters for an OMS returns side over START..END, as the side is built from them. */
-    private Map returnsSide(Map connector, String conn, String token) {
+    /** The interactive dispatcher's own parameters for an epoch-millis side over START..END, as the side is built from them. */
+    private Map epochSide(Map connector, String conn, String token) {
         Map params = RunExtractSupport.buildExtractParams(connector, "FILE_1", conn, [location: runLocation(token), runToken: token],
                 START, END, "slice.json", null, null, null, "UTC")
         return KeptCopySupport.side(connector, params, [tenantId: A, windowStart: START, windowEnd: END])
@@ -1058,9 +1060,9 @@ class KeptCopySupportTests {
         return [id: id, createdAt: createdAt, updatedAt: createdAt] + extra
     }
 
-    /** The active tenant's dataset for SHOPIFY + conn; its row then claims a readThru and version the copy does not have. */
+    /** The active tenant's dataset for KC_ISO + conn; its row then claims a readThru and version the copy does not have. */
     private String dataset(String conn, Map extra = [:]) {
-        Map res = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "SHOPIFY", sourceConfigId: conn,
+        Map res = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: "KC_ISO", sourceConfigId: conn,
                 options: [:], idField: "id", stampField: "updatedAt", windowField: "createdAt"] + extra)
         assertEquals([], res.errors)
         String id = res.out.datasetId
@@ -1083,15 +1085,15 @@ class KeptCopySupportTests {
     }
 
     private Map direct(String conn, Timestamp start, Timestamp end, String token) {
-        return KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY"),
-                [shopifyAuthConfigId: conn, outputLocation: runLocation(token), fileName: "slice.json"],
+        return KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "KC_ISO"),
+                [projConfigId: conn, outputLocation: runLocation(token), fileName: "slice.json"],
                 [tenantId: A, windowStart: start, windowEnd: end]))
     }
 
     /** One interactive side through RunExtractSupport.extractApiSource, the live extractor a stub that writes LIVE_TEXT. */
     private Map interactive(String conn, Timestamp start, Timestamp end, List<Map> calls, Map extra = [:], Map byKeys = null) {
         String token = "i${++seq}"
-        Map source = [systemEnumId: "SHOPIFY", sourceConfigType: "SHOPIFY_AUTH", sourceConfigId: conn, fileSide: "FILE_1"] + extra
+        Map source = [systemEnumId: "KC_ISO", sourceConfigType: "KC_ISO_TYPE", sourceConfigId: conn, fileSide: "FILE_1"] + extra
         Map artifact = [location: runLocation(token), runToken: token]
         Closure stub = { String service, Map params ->
             String location = DataManagerSupport.childLocation(params.outputLocation as String, params.fileName as String)

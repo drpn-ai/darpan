@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
-    <!-- Test only (on the test classpath, never shipped): a made-up system's extract, so core's kept-copy code is tested with
-         no system component installed. Its parameters are what a dataset read and a run side send it; tests pass their own
-         extractor closure, so its body never reads anything. -->
+    <!-- Test only (on the test classpath, never shipped): made-up systems' extracts, so core's kept-copy code is tested with
+         no system component installed. Their parameters are what a dataset read and a run side send; tests pass their own
+         extractor closure, so no body ever reads anything.
+         - MadeUpRecords: an ISO-instant source whose window field defaults to createdAt, and which can be asked for records by key.
+         - MadeUpEpochRecords: an epoch-millis source with its own window field (stamp) and no rounding mode.
+         - MadeUpRoundedRecords: a source with a rounding mode (preserveWindowInstants), so a connector that does not keep
+           the instants has its window rounded to whole days. -->
     <service verb="extract" noun="MadeUpRecords" allow-remote="false">
         <in-parameters>
             <parameter name="projConfigId"/>
@@ -14,6 +18,45 @@
             <parameter name="readFields" type="List"/>
             <parameter name="sourceFilters" type="List"/>
             <parameter name="madeUpCap" type="Integer"/>
+            <parameter name="includeTest" type="Boolean"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="lookupWithinWindow" type="Boolean"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileLocation"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
+    <service verb="extract" noun="MadeUpEpochRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="stamp"/>
+            <parameter name="keepFields" type="List"/>
+            <parameter name="sourceFilters" type="List"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileLocation"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
+    <service verb="extract" noun="MadeUpRoundedRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="preserveWindowInstants" type="Boolean"/>
+            <parameter name="sourceFilters" type="List"/>
             <parameter name="outputLocation"/>
             <parameter name="fileName"/>
             <parameter name="companyUserGroupId"/>

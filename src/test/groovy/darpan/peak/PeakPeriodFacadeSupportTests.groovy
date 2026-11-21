@@ -182,6 +182,19 @@ class PeakPeriodFacadeSupportTests {
     }
 
     @Test
+    void heldRunsPicksTheAllowanceByTheDayTheRunReads() {
+        PeakWindow noHours = new PeakWindow('P1', 'x', LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), null, null, [])
+        List<Map> rows = PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 15 2 * * ?')], noHours, LA,
+                [A1: new AllowanceSpec(360, [P1: 60])])
+        assertEquals([[targetLabel: 'Run A1', normalTime: '02:15', startsAt: '06:00', reason: '02:15 waits for the sync lag allowance']], rows,
+                'only the first day (reads Nov 23, normal six hours) is held; the sale days and the day after read period days of one hour')
+
+        List<Map> after = PeakPeriodFacadeSupport.heldRuns([automation('A1', '0 15 2 * * ?')], noHours, LA,
+                [A1: new AllowanceSpec(0, [P1: 360])])
+        assertEquals('06:00', after[0].startsAt, 'the Dec 2 run (day after) reads Dec 1 and waits like the sale days')
+    }
+
+    @Test
     void windowOfCarriesMovesAndExpandsAuditsToTheirChecks() {
         Map periodRow = [peakPeriodId: 'P1', periodName: 'Black Friday sale', fromDate: '2026-11-24', thruDate: '2026-12-01',
                          peakHoursStart: '08:00', peakHoursEnd: '23:00']

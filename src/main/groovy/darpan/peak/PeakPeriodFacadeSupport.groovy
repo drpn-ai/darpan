@@ -121,6 +121,8 @@ class PeakPeriodFacadeSupport {
         List<PeakWindow> movesOnly = [new PeakWindow(w.peakPeriodId, w.periodName, w.fromDate, w.thruDate, null, null, w.moves ?: [])]
         SortedSet<LocalDate> days = new TreeSet<LocalDate>()
         for (int d = 0; d < HELD_RUN_SCAN_DAYS && !w.fromDate.plusDays(d).isAfter(w.thruDate); d++) days << w.fromDate.plusDays(d)
+        // The day after the period still reads the period's last day, so its allowance applies to that fire too.
+        if (allowances != null && !allowances.isEmpty()) days << w.thruDate.plusDays(1)
         (w.moves ?: []).each { RunTimeMove m ->
             if (m.onDate != null && !m.onDate.isBefore(w.fromDate) && !m.onDate.isAfter(w.thruDate)) days << m.onDate
         }
@@ -148,7 +150,9 @@ class PeakPeriodFacadeSupport {
                     Instant allowed = moved
                     if (allowance != null) {
                         Instant bound = AutomationExecutionSupport.readWindowEnd(automation, fire)
-                                .plus(Duration.ofMinutes(PeakPeriodSupport.effectiveAllowance(allowance, withHours, day)))
+                                .plus(Duration.ofMinutes(PeakPeriodSupport.effectiveAllowance(allowance, withHours,
+                                        AutomationExecutionSupport.lastReadDay(
+                                                AutomationExecutionSupport.readWindowEnd(automation, fire), tenantZone))))
                         if (allowed.isBefore(bound)) allowed = bound
                     }
                     Instant start = PeakPeriodSupport.effectiveStart(allowed, automationId, withHours, tenantZone, false)

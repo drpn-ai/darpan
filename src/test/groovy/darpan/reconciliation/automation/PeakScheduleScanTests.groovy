@@ -132,6 +132,40 @@ class PeakScheduleScanTests {
     }
 
     @Test
+    void theDayAfterThePeriodStillWaitsForThePeriodAllowance() {
+        FakeEc ec = ec([new PeakWindow("P1", "Black Friday", LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), null, null, [])])
+        allowances = ["100518": new AllowanceSpec(120, [P1: 360])]
+        FakeRow dayAfter = addAutomation(ec, "100518", "0 15 2 * * ?", la(12, 2, 2, 15), la(12, 1, 2, 15))
+
+        assertEquals(la(12, 2, 6, 0).toInstant(), startOf(ec, dayAfter, la(12, 2, 0, 0)),
+                "the Dec 2 run reads Dec 1, a sale day: the period's six hours, not the normal two")
+    }
+
+    @Test
+    void thePeriodsFirstDayDoesNotWaitWhenItReadsTheDayBefore() {
+        FakeEc ec = ec([new PeakWindow("P1", "Black Friday", LocalDate.of(2026, 11, 24), LocalDate.of(2026, 12, 1), null, null, [])])
+        allowances = ["100518": new AllowanceSpec(120, [P1: 360])]
+        FakeRow first = addAutomation(ec, "100518", "0 15 2 * * ?", la(11, 24, 2, 15), la(11, 23, 2, 15))
+
+        assertEquals(la(11, 24, 2, 15).toInstant(), startOf(ec, first, la(11, 24, 0, 0)),
+                "the Nov 24 run reads Nov 23, a normal day: two hours end at 02:00, before the fire")
+    }
+
+    @Test
+    void aLongOutageStepsOnlyThroughTheFiresWithinTheAllowanceAndADay() {
+        FakeEc ec = ec([])
+        allowances = ["100518": new AllowanceSpec(360, [:])]
+        FakeRow automation = addAutomation(ec, "100518", "0 15 2 * * ?", la(11, 20, 2, 15), la(11, 19, 2, 15))
+
+        scan(ec, la(11, 28, 6, 1))
+
+        assertEquals(1, executed(ec).size())
+        assertEquals(la(11, 20, 2, 15), executed(ec)[0].scheduledFireTime)
+        assertEquals(la(11, 27, 2, 15), automation.nextScheduledFireTime,
+                "now minus (six hours + one day) is Nov 27 00:01: the fires of Nov 21-26 are skipped, not run one per tick")
+    }
+
+    @Test
     void noPairNoChange() {
         FakeEc ec = ec([])
         allowances = ["OTHER": new AllowanceSpec(360, [:])]

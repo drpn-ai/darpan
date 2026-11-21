@@ -1122,8 +1122,16 @@ class AutomationExecutionSupport {
             // past: an allowance longer than a day starts this fire after the next one, and skipping past now would
             // never read that next fire's window. Each fire still waits for its own bound (window end + allowance) in
             // peakStart, so a catch-up is one run per window, never a burst.
-            Timestamp nextFireTime = peakAllowanceOf(ec, peakTick, tenantId, automationId) != null ?
-                    resolveNextScheduledFireTime(automation, scheduledFireTime, scheduledFireTime) :
+            // After a long outage the stepping is bounded: fires older than now minus (the longest allowance + one day)
+            // are skipped, as the no-pair path skips every fire already past.
+            AllowanceSpec pairAllowance = peakAllowanceOf(ec, peakTick, tenantId, automationId)
+            Timestamp steppingFloor = scheduledFireTime
+            if (pairAllowance != null) {
+                Timestamp cutoff = new Timestamp(now.time - (longestAllowanceMinutes(pairAllowance) + 24L * 60L) * 60_000L)
+                if (cutoff.after(steppingFloor)) steppingFloor = cutoff
+            }
+            Timestamp nextFireTime = pairAllowance != null ?
+                    resolveNextScheduledFireTime(automation, scheduledFireTime, steppingFloor) :
                     resolveNextScheduledFireTime(automation, scheduledFireTime, now)
             updateAutomation(ec, automation, [
                     lastScheduledFireTime: scheduledFireTime,
@@ -1224,8 +1232,10 @@ class AutomationExecutionSupport {
                 if (start.isBefore(windowEnd)) start = PeakPeriodSupport.effectiveStart(windowEnd, automationId, windows, zone, false)
             }
             if (allowance != null) {
-                int minutes = PeakPeriodSupport.effectiveAllowance(allowance, windows, fire.atZone(zone).toLocalDate())
-                Instant allowed = readWindowEnd(automation, fire).plus(Duration.ofMinutes(minutes))
+                // The allowance of the day the check reads (not the fire's day): the last day of its window, tenant zone.
+                Instant windowEnd = readWindowEnd(automation, fire)
+                int minutes = PeakPeriodSupport.effectiveAllowance(allowance, windows, lastReadDay(windowEnd, zone))
+                Instant allowed = windowEnd.plus(Duration.ofMinutes(minutes))
                 if (start.isBefore(allowed)) start = PeakPeriodSupport.effectiveStart(allowed, automationId, windows, zone, false)
             }
             if (start.isAfter(now)) return start
@@ -1245,6 +1255,18 @@ class AutomationExecutionSupport {
      * automation per tick), which runs to the end of the report day, so it would forbid every earlier move of an audit.
      * Plan 3: also where a sync pair's allowance counts from (PeakPeriodFacadeSupport.heldRuns uses it too).
      */
+    /** DAR-BE-328 plan 3: the last day a read window ending at windowEnd reads, in the tenant's zone. */
+    static LocalDate lastReadDay(Instant windowEnd, ZoneId tenantZone) {
+        return windowEnd.minusMillis(1).atZone(tenantZone).toLocalDate()
+    }
+
+    /** DAR-BE-328 plan 3: the longest allowance a pair can have, normal or any period's, in minutes. */
+    static int longestAllowanceMinutes(AllowanceSpec spec) {
+        int longest = spec.normalMinutes
+        (spec.periodMinutes ?: [:]).values().each { Integer m -> if (m != null && m > longest) longest = m }
+        return longest
+    }
+
     static Instant readWindowEnd(def automation, Instant fire) {
         ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
         Instant dayStart = fire.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()

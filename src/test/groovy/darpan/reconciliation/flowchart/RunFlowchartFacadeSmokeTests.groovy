@@ -13,10 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
-import darpan.reconciliation.support.SharedMoqui
 
 /** DAR-UI-048. Save a chart through the facade, refuse a bad one, run it end to end, read the execution. */
-@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RunFlowchartFacadeSmokeTests {
 

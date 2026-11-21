@@ -6,7 +6,6 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.moqui.Moqui
 import org.moqui.context.ExecutionContext
 import org.moqui.entity.EntityValue
 
@@ -45,7 +44,7 @@ class ScheduleJobDefaultsSmokeTests {
     }
 
     @AfterAll
-    void tearDown() { if (ec != null) Moqui.destroyActiveExecutionContextFactory() }
+    void tearDown() { ReconciliationSmokeTestSupport.cleanupMoqui(ec) }
 
     private List<EntityValue> darpanJobs() {
         asSystem { ec.entity.find("moqui.service.job.ServiceJob").condition("defaultCronExpression", org.moqui.entity.EntityCondition.NOT_EQUAL, null).list() }

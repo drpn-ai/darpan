@@ -57,7 +57,13 @@ class TwoFactorSupport {
     private static final SecureRandom random = new SecureRandom()
 
     /** The clock the code check reads; tests move it to reach the next 30-second step. Nothing else reads it. */
-    static Closure<Long> codeClock = { System.currentTimeMillis() }
+    private static final Closure<Long> DEFAULT_CODE_CLOCK = { System.currentTimeMillis() }
+    static Closure<Long> codeClock = DEFAULT_CODE_CLOCK
+
+    /** Test-only: puts the code clock back to the real one. Idempotent. */
+    static void resetForTests() {
+        codeClock = DEFAULT_CODE_CLOCK
+    }
 
     private static def find(def ec, String entityName, String reason) {
         return TwoFactorRecords.find(ec, entityName, reason)

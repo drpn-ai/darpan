@@ -38,7 +38,7 @@ class PasswordResetSupport {
 
     /** The notices (password changed, recovery email set) go through here, so tests can record sends instead of
      *  making them. Async: a notice that fails must not hold up or fail the change it reports. */
-    static Closure sendEmail = { def ec, String emailTemplateId, String toAddress, Map bodyParameters ->
+    private static final Closure DEFAULT_SEND_EMAIL = { def ec, String emailTemplateId, String toAddress, Map bodyParameters ->
         ec.service.async().name("org.moqui.impl.EmailServices.send#EmailTemplate")
                 .parameters([emailTemplateId: emailTemplateId, toAddresses: toAddress, bodyParameters: bodyParameters])
                 .call()
@@ -47,11 +47,20 @@ class PasswordResetSupport {
     /** The reset code alone is sent while the request waits (DAR-UI-084), so the page can say whether it went
      *  out. True once the mail server accepted it: send#EmailTemplate only returns a messageId on success, and
      *  logs any failure. Its own transaction, so SMTP time never sits inside the request's. */
-    static Closure<Boolean> sendResetCode = { def ec, String toAddress, Map bodyParameters ->
+    private static final Closure<Boolean> DEFAULT_SEND_RESET_CODE = { def ec, String toAddress, Map bodyParameters ->
         Map result = ec.service.sync().name("org.moqui.impl.EmailServices.send#EmailTemplate").requireNewTransaction(true)
                 .parameters([emailTemplateId: TEMPLATE_RESET_CODE, toAddresses: toAddress, bodyParameters: bodyParameters])
                 .call()
         return result?.messageId as boolean
+    }
+
+    static Closure sendEmail = DEFAULT_SEND_EMAIL
+    static Closure<Boolean> sendResetCode = DEFAULT_SEND_RESET_CODE
+
+    /** Test-only: puts both send seams back to the real senders. Idempotent. */
+    static void resetForTests() {
+        sendEmail = DEFAULT_SEND_EMAIL
+        sendResetCode = DEFAULT_SEND_RESET_CODE
     }
 
     /** First letter of the local part and the whole domain: enough for a user to recognise their own

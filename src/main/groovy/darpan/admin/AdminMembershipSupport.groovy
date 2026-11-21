@@ -32,12 +32,19 @@ class AdminMembershipSupport {
     /** Sends one welcome email and says whether the mail server accepted it (send#EmailTemplate returns a messageId
      *  only then, and logs any failure). Its own transaction, so SMTP time never sits in the grant's. keepCopy false
      *  sends without the EmailMessage row, which would hold the rendered body and so the password. Tests replace it. */
-    static Closure<Boolean> sendWelcomeEmail = { def ec, String toAddress, Map bodyParameters, boolean keepCopy ->
+    private static final Closure<Boolean> DEFAULT_SEND_WELCOME_EMAIL = { def ec, String toAddress, Map bodyParameters, boolean keepCopy ->
         Map result = ec.service.sync().name("org.moqui.impl.EmailServices.send#EmailTemplate").requireNewTransaction(true)
                 .parameters([emailTemplateId: TEMPLATE_TENANT_WELCOME, toAddresses: toAddress, bodyParameters: bodyParameters,
                              createEmailMessage: keepCopy])
                 .call()
         return result?.messageId as boolean
+    }
+
+    static Closure<Boolean> sendWelcomeEmail = DEFAULT_SEND_WELCOME_EMAIL
+
+    /** Test-only: puts the welcome-email seam back to the real sender. Idempotent. */
+    static void resetForTests() {
+        sendWelcomeEmail = DEFAULT_SEND_WELCOME_EMAIL
     }
 
     /** Sends the welcome email to a member of a tenant: which tenant, their role, their username, where to sign in,

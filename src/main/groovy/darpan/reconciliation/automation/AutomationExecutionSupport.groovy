@@ -1248,13 +1248,6 @@ class AutomationExecutionSupport {
         }
     }
 
-    /**
-     * DAR-BE-328: the earliest a moved-earlier run of this fire may start: the start of the fire's own date in the
-     * automation's windowTimeZone, never after the fire. Every relative read window (last days, previous day, week or
-     * month) has closed by then. resolveWindows is not used: an audit's check reads the audit's window (a service call per
-     * automation per tick), which runs to the end of the report day, so it would forbid every earlier move of an audit.
-     * Plan 3: also where a sync pair's allowance counts from (PeakPeriodFacadeSupport.heldRuns uses it too).
-     */
     /** DAR-BE-328 plan 3: the last day a read window ending at windowEnd reads, in the tenant's zone. */
     static LocalDate lastReadDay(Instant windowEnd, ZoneId tenantZone) {
         return windowEnd.minusMillis(1).atZone(tenantZone).toLocalDate()
@@ -1267,6 +1260,13 @@ class AutomationExecutionSupport {
         return longest
     }
 
+    /**
+     * DAR-BE-328: the earliest a moved-earlier run of this fire may start: the start of the fire's own date in the
+     * automation's windowTimeZone, never after the fire. Every relative read window (last days, previous day, week or
+     * month) has closed by then. resolveWindows is not used: an audit's check reads the audit's window (a service call per
+     * automation per tick), which runs to the end of the report day, so it would forbid every earlier move of an audit.
+     * Plan 3: also where a sync pair's allowance counts from (PeakPeriodFacadeSupport.heldRuns uses it too).
+     */
     static Instant readWindowEnd(def automation, Instant fire) {
         ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
         Instant dayStart = fire.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()

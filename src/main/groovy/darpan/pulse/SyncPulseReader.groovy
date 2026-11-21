@@ -35,9 +35,9 @@ import static darpan.common.ValueSupport.readField
  * their turn in NetSuiteReadGate inside the NetSuite extract itself; HotWax reads keep their peak share there too. A
  * reader only reads: what is waiting or late is the pulse engine's question (SyncPulseSupport).</p>
  *
- * <p>A pulse runs on a bare thread (RunAdmission), with no user, and every extract is authenticate="true". With no user
- * the reader logs itself in anonymously and runs as an anonymous-all service does (an artifact authorized for all, the
- * way execute#Automation's scheduled reads run), then logs out again. A caller with a user reads as that user.</p>
+ * <p>A pulse runs on a bare thread (RunAdmission) that already holds an anonymous login with the artifact authorized, the
+ * way execute#Automation's scheduled reads run; the reader signs in and elevates nothing itself. A caller with a user reads
+ * as that user.</p>
  */
 class SyncPulseReader {
     private static final Logger logger = LoggerFactory.getLogger(SyncPulseReader)

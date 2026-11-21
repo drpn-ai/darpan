@@ -310,6 +310,20 @@ class PeakPeriodFacadeSupport {
         return normalize(source?.get("systemEnumId")) == darpan.pulse.SyncPulseSupport.HOTWAX_ORDERS
     }
 
+    /**
+     * Why this pair's check cannot be pulsed (status mode, composite key or id normalizer), as the sentence to show; null when
+     * it can. The same rule save#SyncPair and the reader use (SyncPulseFacadeSupport.pulseBlockFor): a period must not give a
+     * pulse to a pair whose normal pulse could not be set either.
+     */
+    static String pulseBlockOf(def ec, String tenantId, Map pair) {
+        Map automation = darpan.pulse.SyncPulseFacadeSupport.automationOf(ec, tenantId, normalize(pair.get("automationId")))
+        if (automation == null) return null
+        String scopeId = normalize(automation.get("compareScopeId"))
+        return darpan.pulse.SyncPulseFacadeSupport.pulseBlockFor(automation,
+                darpan.facade.reconciliation.RunConclusionStep.keySpecFor(ec, scopeId, "FILE_1"),
+                darpan.facade.reconciliation.RunConclusionStep.keySpecFor(ec, scopeId, "FILE_2"))
+    }
+
     /** Deletes every sync override of one of the tenant's periods (FK PEAKSYNC_PERIOD). */
     static void deleteSyncRowsOf(def ec, String tenantId, String peakPeriodId) {
         rows(ec, "darpan.pulse.PeakPeriodSync", tenantId).condition("peakPeriodId", peakPeriodId).deleteAll()

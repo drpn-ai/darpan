@@ -295,6 +295,10 @@
             <if condition="!ec.message.hasError() &amp;&amp; pulseEveryMinutes != null &amp;&amp; pulseEveryMinutes > 0 &amp;&amp; !darpan.peak.PeakPeriodFacadeSupport.upstreamIsHotwax(ec, tenantId, pairRow.getMap())">
                 <message error="true">A pulse needs HotWax as the upstream side.</message>
             </if>
+            <set field="pulseBlock" from="(!ec.message.hasError() &amp;&amp; pulseEveryMinutes != null &amp;&amp; pulseEveryMinutes > 0) ? darpan.peak.PeakPeriodFacadeSupport.pulseBlockOf(ec, tenantId, pairRow.getMap()) : null"/>
+            <if condition="pulseBlock">
+                <message error="true">${pulseBlock}</message>
+            </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreReplace" from="darpan.peak.PeakPeriodFacadeSupport.replaceSync(ec, tenantId, peakPeriodIdValue, syncPairIdValue, allowanceMinutes, pulseEveryMinutes)"/>
                 <message>Saved sync override.</message>

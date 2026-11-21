@@ -36,6 +36,7 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
     private static final String PAIR_A = "PAIR_A"
     private static final String PAIR_B = "PAIR_B"
     private static final String PAIR_C = "PAIR_C"
+    private static final String PAIR_D = "PAIR_D"
 
     @BeforeAll
     void setup() {
@@ -54,6 +55,19 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         pair(PAIR_A, "AUTO_A", A, "OMS_GQL", "NETSUITE")
         pair(PAIR_B, "AUTO_B", B, "OMS_GQL", "NETSUITE")
         pair(PAIR_C, "AUTO_A_SHOP", A, "SHOPIFY", "OMS_GQL")
+        // PAIR_A's check keys both sides by one plain field; PAIR_D's check has no key at all, so it cannot pulse.
+        ec.entity.makeValue("darpan.rule.RuleSet").setAll([ruleSetId: "RS_A", ruleSetName: "Check A", companyUserGroupId: A,
+                explosionPath: "records", primaryKeyPath: "orderId"]).createOrUpdate()
+        ec.entity.makeValue("darpan.rule.RuleSetCompareScope").setAll([compareScopeId: "CS_A", ruleSetId: "RS_A", scopeMode: "EVALUATE",
+                objectType: "ORDER", companyUserGroupId: A]).createOrUpdate()
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([automationId: "AUTO_A", compareScopeId: "CS_A"]).update()
+        ["FILE_1", "FILE_2"].each { String side ->
+            ec.entity.makeValue("darpan.rule.RuleSetCompareSource").setAll([compareScopeId: "CS_A", fileSide: side, systemEnumId: "OMS_GQL",
+                    recordRootExpression: "records", primaryIdExpression: "orderId", companyUserGroupId: A]).createOrUpdate()
+        }
+        automation("AUTO_A_NOKEY", A)
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([automationId: "AUTO_A_NOKEY", scheduleExpr: null]).update()
+        pair(PAIR_D, "AUTO_A_NOKEY", A, "OMS_GQL", "NETSUITE")
         actAs(A)
         periodA = (String) call("save#PeakPeriod", [periodName: "Black Friday sale", fromDate: "2026-11-24", thruDate: "2026-12-01",
                                                     peakHoursStart: "08:00", peakHoursEnd: "23:00"]).peakPeriodId
@@ -145,6 +159,22 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         Map result = call("save#PeakPeriodRunTime", [peakPeriodId: periodA, automationId: "AUTO_B", runTime: "05:00"])
         assertFalse(result.ok as boolean)
         assertEquals(["Choose a run."], result.errors)
+    }
+
+    @Test
+    void aPeriodCannotGiveAPulseToAPairWhoseCheckCannotPulse() {
+        actAs(A)
+        String period = (String) call("save#PeakPeriod", [periodName: "No-key sale", fromDate: "2027-04-01", thruDate: "2027-04-05"]).peakPeriodId
+        Map refused = call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_D, pulseEveryMinutes: 60])
+        assertFalse(refused.ok as boolean)
+        assertEquals([darpan.pulse.SyncPulseFacadeSupport.E_KEY], refused.errors)
+        assertNull(syncRow(period, PAIR_D), "a refused pulse must not store a row")
+        assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_D, allowanceMinutes: 90]).ok as boolean,
+                "an allowance-only override needs no pulse")
+        assertEquals(90, syncRow(period, PAIR_D).allowanceMinutes as int)
+        // Another tenant cannot reach A's pair at all.
+        actAs(B)
+        assertFalse(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_D, pulseEveryMinutes: 60]).ok as boolean)
     }
 
     @Test

@@ -299,6 +299,13 @@ class PeakPeriodFacadeSupport {
         return errors
     }
 
+    /** True when the pair's upstream side reads HotWax orders (OMS_GQL), the only system a pulse can sample. */
+    static boolean upstreamIsHotwax(def ec, String tenantId, Map pair) {
+        def source = rows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
+                .condition("automationId", pair.get("automationId")).condition("fileSide", pair.get("upstreamSide")).list().find()
+        return normalize(source?.get("systemEnumId")) == darpan.pulse.SyncPulseSupport.HOTWAX_ORDERS
+    }
+
     /** Deletes every sync override of one of the tenant's periods (FK PEAKSYNC_PERIOD). */
     static void deleteSyncRowsOf(def ec, String tenantId, String peakPeriodId) {
         rows(ec, "darpan.pulse.PeakPeriodSync", tenantId).condition("peakPeriodId", peakPeriodId).deleteAll()
@@ -319,26 +326,10 @@ class PeakPeriodFacadeSupport {
     static List<Map> syncRows(def ec, String tenantId, String peakPeriodId) {
         Map<String, Map> overrides = [:]
         rows(ec, "darpan.pulse.PeakPeriodSync", tenantId).condition("peakPeriodId", peakPeriodId).list().each { overrides.put(it.get("syncPairId") as String, it.getMap()) }
-        Map<String, String> systemByAutomationSide = [:]
-        rows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId).list().each {
-            systemByAutomationSide.put("${it.get('automationId')}|${it.get('fileSide')}".toString(), normalize(it.get("systemEnumId")))
-        }
-        Map<String, String> systemLabels = [:]
-        def label = { String enumId ->
-            if (!enumId) return "Unknown system"
-            if (!systemLabels.containsKey(enumId)) {
-                def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", enumId).useCache(true).disableAuthz().one()
-                systemLabels.put(enumId, normalize(e?.get("description")) ?: enumId)
-            }
-            return systemLabels.get(enumId)
-        }
         return (rows(ec, "darpan.pulse.SyncPair", tenantId).condition("isActive", "Y").orderBy("syncPairId").list() ?: []).collect { pair ->
-            String side = normalize(pair.get("upstreamSide"))
-            String other = side == "FILE_1" ? "FILE_2" : "FILE_1"
-            String automationId = normalize(pair.get("automationId"))
             Map o = overrides.get(pair.get("syncPairId") as String)
             [syncPairId: pair.get("syncPairId"),
-             label: "${label(systemByAutomationSide.get(automationId + '|' + side))} \u2192 ${label(systemByAutomationSide.get(automationId + '|' + other))} orders".toString(),
+             label: darpan.pulse.SyncPulseSupport.pairLabel(ec, pair.getMap()),
              normalAllowanceMinutes: pair.get("allowanceMinutes"), periodAllowanceMinutes: o?.get("allowanceMinutes"),
              normalPulseMinutes: pair.get("pulseEveryMinutes"), periodPulseMinutes: o?.get("pulseEveryMinutes")]
         }

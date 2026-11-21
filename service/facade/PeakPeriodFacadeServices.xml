@@ -292,6 +292,9 @@
                 <set field="validationErrors" from="darpan.peak.PeakPeriodFacadeSupport.validateSync(allowanceMinutes, pulseEveryMinutes)"/>
                 <iterate list="validationErrors" entry="validationError"><message error="true">${validationError}</message></iterate>
             </if>
+            <if condition="!ec.message.hasError() &amp;&amp; pulseEveryMinutes != null &amp;&amp; pulseEveryMinutes > 0 &amp;&amp; !darpan.peak.PeakPeriodFacadeSupport.upstreamIsHotwax(ec, tenantId, pairRow.getMap())">
+                <message error="true">A pulse needs HotWax as the upstream side.</message>
+            </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreReplace" from="darpan.peak.PeakPeriodFacadeSupport.replaceSync(ec, tenantId, peakPeriodIdValue, syncPairIdValue, allowanceMinutes, pulseEveryMinutes)"/>
                 <message>Saved sync override.</message>

@@ -35,6 +35,7 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
     private String runTimeA
     private static final String PAIR_A = "PAIR_A"
     private static final String PAIR_B = "PAIR_B"
+    private static final String PAIR_C = "PAIR_C"
 
     @BeforeAll
     void setup() {
@@ -42,12 +43,17 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         seedTenant(A, "Krewe")
         seedTenant(B, "Gorjana")
         automation("AUTO_A", A)
         automation("AUTO_B", B)
-        pair(PAIR_A, "AUTO_A", A)
-        pair(PAIR_B, "AUTO_B", B)
+        automation("AUTO_A_SHOP", A)
+        // Unscheduled, so it is not a peak target or a held run: it only carries the pair whose upstream is not HotWax.
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([automationId: "AUTO_A_SHOP", scheduleExpr: null]).update()
+        pair(PAIR_A, "AUTO_A", A, "OMS_GQL", "NETSUITE")
+        pair(PAIR_B, "AUTO_B", B, "OMS_GQL", "NETSUITE")
+        pair(PAIR_C, "AUTO_A_SHOP", A, "SHOPIFY", "OMS_GQL")
         actAs(A)
         periodA = (String) call("save#PeakPeriod", [periodName: "Black Friday sale", fromDate: "2026-11-24", thruDate: "2026-12-01",
                                                     peakHoursStart: "08:00", peakHoursEnd: "23:00"]).peakPeriodId
@@ -156,12 +162,19 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, pulseEveryMinutes: 120]).ok as boolean)
         assertNull(syncRow(period, PAIR_A).allowanceMinutes)
         assertEquals(120, syncRow(period, PAIR_A).pulseEveryMinutes as int)
+        Map nonHotwax = call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_C, pulseEveryMinutes: 60])
+        assertFalse(nonHotwax.ok as boolean)
+        assertEquals(["A pulse needs HotWax as the upstream side."], nonHotwax.errors)
+        assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_C, allowanceMinutes: 30, pulseEveryMinutes: 0]).ok as boolean,
+                "an off pulse and an allowance are fine on a non-HotWax upstream")
+        assertTrue(call("delete#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_C]).ok as boolean)
         Map bad = call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, allowanceMinutes: 5])
         assertFalse(bad.ok as boolean)
         assertEquals(["Allowance must be 15 minutes to 48 hours."], bad.errors)
         Map got = call("get#PeakPeriod", [peakPeriodId: period])
         Map row = ((List) got.syncRows).find { it.syncPairId == PAIR_A }
         assertNotNull(row)
+        assertEquals("HotWax \u2192 NetSuite orders", row.label)
         assertNull(row.periodAllowanceMinutes)
         assertEquals(120, row.periodPulseMinutes as int)
         assertEquals(60, row.normalAllowanceMinutes as int)
@@ -202,7 +215,12 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
                 .disableAuthz().useCache(false).one()
     }
 
-    private void pair(String id, String automationId, String tenant) {
+    private void pair(String id, String automationId, String tenant, String upstream, String target) {
+        String api = AutomationExecutionSupport.AUTOMATION_SOURCE_API
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource").setAll([automationId: automationId, fileSide: "FILE_1",
+                companyUserGroupId: tenant, sourceTypeEnumId: api, systemEnumId: upstream]).createOrUpdate()
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource").setAll([automationId: automationId, fileSide: "FILE_2",
+                companyUserGroupId: tenant, sourceTypeEnumId: api, systemEnumId: target]).createOrUpdate()
         ec.entity.makeValue("darpan.pulse.SyncPair").setAll([syncPairId: id, companyUserGroupId: tenant, automationId: automationId,
                 upstreamSide: "FILE_1", allowanceMinutes: 60, isActive: "Y"]).createOrUpdate()
     }

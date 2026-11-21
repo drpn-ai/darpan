@@ -52,15 +52,26 @@ class KeepArtifacts {
         return (summary.get("configuredExclusions") as List) ?: []
     }
 
-    /** Streams the rows out; no row and no file when nothing was set aside (a stale file is removed). */
+    /**
+     * Streams the rows out; no row and no file when nothing was set aside (a stale file is removed). The readers walk
+     * this file with one cursor, so rows must be strictly ascending: callers sort first (a Spark Dataset is not ordered
+     * after a shuffle). A row that is not greater than the one before it throws IllegalArgumentException naming it,
+     * and nothing is left behind.
+     */
     static void writeRows(File extract, Iterator<List> rowAndRuleId) {
         File target = rowsFile(extract)
         File work = File.createTempFile("set-aside-", ".partial", extract.getParentFile())
         boolean any = false
+        long previous = -1
         try {
             work.withWriter("UTF-8") { Writer out ->
                 while (rowAndRuleId.hasNext()) {
                     List entry = rowAndRuleId.next()
+                    long row = ((Number) entry[0]).longValue()
+                    if (any && row <= previous) {
+                        throw new IllegalArgumentException("Set-aside rows must be strictly ascending: row ${row} follows row ${previous}.")
+                    }
+                    previous = row
                     out.write("${entry[0]}\t${entry[1]}\n".toString())
                     any = true
                 }
@@ -74,32 +85,40 @@ class KeepArtifacts {
 
     /** Calls visit(record) for every record the Keep did not set aside; returns the extract's other top-level fields. */
     static Map forEachKeptRecord(File extract, Closure visit) {
-        Iterator<String> aside = rowIds(extract)
-        long nextAside = -1
-        if (aside.hasNext()) nextAside = Long.parseLong(aside.next().split("\t", 2)[0])
-        long row = 0
-        return JsonRecordStream.forEachRecord(extract, "records") { Map record ->
-            if (row == nextAside) {
-                nextAside = aside.hasNext() ? Long.parseLong(aside.next().split("\t", 2)[0]) : -1
-            } else {
-                visit.call(record)
+        RowReader aside = rowIds(extract)
+        try {
+            long nextAside = -1
+            if (aside.hasNext()) nextAside = Long.parseLong(aside.next().split("\t", 2)[0])
+            long row = 0
+            return JsonRecordStream.forEachRecord(extract, "records") { Map record ->
+                if (row == nextAside) {
+                    nextAside = aside.hasNext() ? Long.parseLong(aside.next().split("\t", 2)[0]) : -1
+                } else {
+                    visit.call(record)
+                }
+                row++
             }
-            row++
+        } finally {
+            aside.close()
         }
     }
 
     /** Calls visit(record, ruleId) for every set-aside record, in row order. */
     static void forEachSetAsideRecord(File extract, Closure visit) {
-        Iterator<String> aside = rowIds(extract)
-        if (!aside.hasNext()) return
-        String[] next = aside.next().split("\t", 2)
-        long row = 0
-        JsonRecordStream.forEachRecord(extract, "records") { Map record ->
-            if (next != null && row == Long.parseLong(next[0])) {
-                visit.call(record, next[1])
-                next = aside.hasNext() ? aside.next().split("\t", 2) : null
+        RowReader aside = rowIds(extract)
+        try {
+            if (!aside.hasNext()) return
+            String[] next = aside.next().split("\t", 2)
+            long row = 0
+            JsonRecordStream.forEachRecord(extract, "records") { Map record ->
+                if (next != null && row == Long.parseLong(next[0])) {
+                    visit.call(record, next[1])
+                    next = aside.hasNext() ? aside.next().split("\t", 2) : null
+                }
+                row++
             }
-            row++
+        } finally {
+            aside.close()
         }
     }
 
@@ -116,7 +135,8 @@ class KeepArtifacts {
         File work = File.createTempFile("excluded-", ".partial", extract.getParentFile())
         try {
             forEachSetAsideRecord(extract) { Map record, String ruleId ->
-                Map rule = byId.get(ruleId) ?: [:]
+                Map rule = byId.get(ruleId)
+                if (rule == null) throw new IllegalStateException("Set-aside row names unknown rule ${ruleId}: it is not in the summary's rules.")
                 ExcludedRecordsSidecar.collect(collector, record, [sequenceNum: rule.get("sequenceNum"), fieldExpression: rule.get("label")])
             }
             ExcludedRecordsSidecar.write(work, collector, extract.getName())
@@ -128,29 +148,37 @@ class KeepArtifacts {
         }
     }
 
-    /** The rows file's lines, lazily; empty when there is none. */
-    private static Iterator<String> rowIds(File extract) {
+    /** The rows file's lines, lazily; empty when there is none. Callers close it in a finally. */
+    private static RowReader rowIds(File extract) {
         File rows = rowsFile(extract)
-        if (!rows.isFile()) return Collections.<String> emptyList().iterator()
-        BufferedReader reader = rows.newReader("UTF-8")
-        return new Iterator<String>() {
-            String line = advance()
+        return new RowReader(rows.isFile() ? rows.newReader("UTF-8") : null)
+    }
 
-            private String advance() {
-                String next = reader.readLine()
-                while (next != null && next.isEmpty()) next = reader.readLine()
-                if (next == null) reader.close()
-                return next
-            }
+    private static class RowReader implements Closeable {
+        private final BufferedReader reader
+        private String line
 
-            boolean hasNext() { return line != null }
-
-            String next() {
-                String current = line
-                line = advance()
-                return current
-            }
+        RowReader(BufferedReader reader) {
+            this.reader = reader
+            this.line = advance()
         }
+
+        private String advance() {
+            if (reader == null) return null
+            String next = reader.readLine()
+            while (next != null && next.isEmpty()) next = reader.readLine()
+            return next
+        }
+
+        boolean hasNext() { return line != null }
+
+        String next() {
+            String current = line
+            line = advance()
+            return current
+        }
+
+        void close() { reader?.close() }
     }
 
     private static String baseName(File extract) {

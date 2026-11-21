@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-BE-318 plan 3b-2b Task 2. The set-aside artifact, on a made-up system (ACME). */
@@ -135,5 +136,39 @@ class KeepArtifactsTests {
         assertEquals(true, doc.truncated)
         assertEquals(total, doc.total)
         assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES, doc.records.size())
+    }
+
+    @Test
+    void rowsMustBeStrictlyAscendingAndNothingIsLeftBehind() {
+        File file = extract((0..4).collect { [n: it] })
+        [[[3, "A:1"], [1, "A:1"]], [[2, "A:1"], [2, "A:1"]]].each { List rows ->
+            IllegalArgumentException thrown = assertThrows(IllegalArgumentException) { KeepArtifacts.writeRows(file, rows.iterator()) }
+            assertTrue(thrown.message.contains("row ${rows[1][0]}"), thrown.message)
+            assertFalse(KeepArtifacts.rowsFile(file).exists())
+            assertEquals(["acme-orders.json"], dir.list().toList())
+        }
+    }
+
+    @Test
+    void theRowsReaderIsClosedWhenVisitThrowsAndWhenRowsRunPastTheRecords() {
+        File file = extract((0..2).collect { [n: it] })
+        KeepArtifacts.writeRows(file, [[0, "A:1"], [1, "A:1"], [9, "A:1"]].iterator())
+        assertThrows(IllegalStateException) { KeepArtifacts.forEachKeptRecord(file) { Map r -> throw new IllegalStateException("boom") } }
+        assertThrows(IllegalStateException) { KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> throw new IllegalStateException("boom") } }
+        KeepArtifacts.forEachKeptRecord(file) { Map r -> }
+        KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> }
+
+        Process lsof = ["lsof", "-p", ProcessHandle.current().pid().toString()].execute()
+        String open = lsof.text
+        assertFalse(open.contains(KeepArtifacts.rowsFile(file).name), "rows file still open")
+    }
+
+    @Test
+    void aSetAsideRuleMissingFromTheSummaryIsNamed() {
+        File file = extract([[n: 0]])
+        KeepArtifacts.writeRows(file, [[0, "A:404"]].iterator())
+        IllegalStateException thrown = assertThrows(IllegalStateException) { KeepArtifacts.writeSidecar(file, summary()) }
+        assertTrue(thrown.message.contains("unknown rule A:404"), thrown.message)
+        assertEquals(["acme-orders.json", "acme-orders.set-aside.rows"], dir.list().toList().sort())
     }
 }

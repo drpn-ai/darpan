@@ -54,11 +54,13 @@ Details, including the required production environment variables (`Moqui_DB_*`,
 All commands are run from `darpan-backend/`.
 
 **Which kind of test to write (DAR-OPS-026).** Prefer a unit test through seams: it needs no Moqui and runs in the
-`unitTest` pool in milliseconds. Boot Moqui only to test entity, service or XML wiring. A new Moqui-booting class
-starts `@SharedMoqui` (it then shares one Moqui per JVM; the harness resets the database to an empty schema, clears
-caches and calls every `resetForTests()` between classes) unless it swaps a process-global seam or sets a `System`
-property it does not restore in `@AfterAll`, asserts an elapsed-time bound, or is `@Tag("mysql")`. A new mutable
-static in `src/main` needs a `static void resetForTests()`; `StaticSeamResetGuardTests` fails without one.
+`unitTest` pool in milliseconds. Boot Moqui only to test entity, service or XML wiring. A Moqui-booting class opts in
+to sharing with `@SharedMoqui` (several classes then share one Moqui per JVM; between classes the harness waits for
+background work, resets the database to an empty schema, clears caches and calls every `resetForTests()`) only if it
+(a) boots through `ReconciliationSmokeTestSupport`, (b) restores in `@AfterAll` any seam it swaps, (c) sets no
+`System` property of its own, (d) asserts no elapsed-time bound, and (e) is not `@Tag("mysql")`. New classes should
+meet these and opt in. A new mutable static in `src/main` needs a `static void resetForTests()` that resets it;
+`StaticSeamResetGuardTests` fails otherwise.
 
 | Command | Runs | Use it for |
 | --- | --- | --- |

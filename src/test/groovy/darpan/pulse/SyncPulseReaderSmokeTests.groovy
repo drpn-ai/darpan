@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.sql.Timestamp
@@ -174,8 +175,8 @@ class SyncPulseReaderSmokeTests {
     }
 
     /**
-     * A pulse runs on a bare thread (RunAdmission): no user and no anonymous login, and an authenticate="true" extract
-     * refuses that. The reader logs itself in anonymously for its reads and out again after.
+     * A pulse runs on a bare thread (RunAdmission), which logs in anonymously and authorizes the artifact before the
+     * reader runs (as SyncPulseSupport does); the reader signs in and elevates nothing itself, so this frame is the test's.
      */
     @Test
     void readsFromAThreadWithNoUser() {
@@ -193,7 +194,11 @@ class SyncPulseReaderSmokeTests {
             try {
                 assertNull(threadEc.user.username)
                 assertFalse(threadEc.user.loggedInAnonymous as boolean)
+                assertTrue(threadEc.user.loginAnonymousIfNoUser())
+                threadEc.artifactExecution.push("test.pulse", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
+                threadEc.artifactExecution.setAnonymousAuthorizedAll()
                 out = SyncPulseReader.readUpstream(threadEc, pair, automation, FROM, THRU)
+                threadEc.user.logoutAnonymousOnly()
                 after = [anonymous: threadEc.user.loggedInAnonymous, username: threadEc.user.username]
             } catch (Throwable e) {
                 failure = e
@@ -207,8 +212,8 @@ class SyncPulseReaderSmokeTests {
         assertNull(failure, failure?.toString())
         assertEquals(true, out?.ok, out?.toString())
         assertEquals(2, (out.records as List).size())
-        assertEquals([[anonymous: true, username: null]], seen, "the extract ran with the reader's anonymous login")
-        assertEquals([anonymous: false, username: null], after, "and the reader logged out again")
+        assertEquals([[anonymous: true, username: null]], seen, "the extract ran under the caller's anonymous login")
+        assertEquals([anonymous: false, username: null], after, "and the frame logged out again")
         assertNoPulseFiles()
     }
 

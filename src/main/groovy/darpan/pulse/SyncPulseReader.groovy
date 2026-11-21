@@ -8,7 +8,6 @@ import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
 import darpan.reconciliation.conclusion.JsonRecordStream
-import org.moqui.context.ArtifactExecutionInfo
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -199,31 +198,16 @@ class SyncPulseReader {
     // --------------------------------------------------------------------------------------------------- ec parts
 
     /**
-     * signedIn(...) with a login: on a thread with no user (a pulse on RunAdmission's pool), an anonymous login and an
-     * artifact authorized for all, as an anonymous-all service runs, both undone after. Never throws.
+     * signedIn(...), never throwing. The caller (RunAdmission's pool via SyncPulseSupport) already runs as an anonymous
+     * login with the artifact authorized, so the reader signs in and elevates nothing itself.
      */
     private static Map run(def ec, Map pair, Map automation, String what, Map empty, Closure<Map> work) {
-        boolean anonymous = false
-        ArtifactExecutionInfo aei = null
         try {
-            anonymous = ec.user.loginAnonymousIfNoUser()
-            if (anonymous) {
-                aei = ec.artifactExecution.push("darpan.pulse.SyncPulseReader", ArtifactExecutionInfo.AT_OTHER,
-                        ArtifactExecutionInfo.AUTHZA_ALL, false)
-                ec.artifactExecution.setAnonymousAuthorizedAll()
-            }
             return signedIn(ec, pair, automation, what, empty, work)
         } catch (Throwable t) {
-            logger.warn("Sync pulse ${what} read could not sign in: ${t.message}")
+            logger.warn("Sync pulse ${what} read failed: ${t.message}")
             return new LinkedHashMap(empty) + [ok: false, errors: ["The ${what} read failed: ${normalize(t.message) ?: t.class.simpleName}".toString()],
                                                warnings: []]
-        } finally {
-            try {
-                if (aei != null) ec.artifactExecution.pop(aei)
-                if (anonymous) ec.user.logoutAnonymousOnly()
-            } catch (Throwable t) {
-                logger.warn("Sync pulse ${what} read could not sign out: ${t.message}")
-            }
         }
     }
 

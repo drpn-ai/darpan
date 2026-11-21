@@ -139,6 +139,34 @@ class DisableAuthzRatchetTest {
     }
 
     /**
+     * DAR-BE-328. {@code setAnonymousAuthorizedAll} lifts authorization for the anonymous user on the whole thread, so a
+     * new call in production Groovy is a bypass like a bare disableAuthz. The one site is SyncPulseSupport, the pulse's
+     * own frame on RunAdmission's pool (an anonymous login, an artifact authorized for all, both undone in finally).
+     * Same fail-mode rule: the count must equal the baseline exactly.
+     */
+    static final int ANONYMOUS_AUTHORIZED_ALL_BASELINE = 1
+
+    @Test
+    void setAnonymousAuthorizedAllCountIsWithinRatchetBaseline() {
+        Path srcRoot = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/src/main/groovy/darpan")
+        assertTrue(Files.exists(srcRoot), "Could not locate darpan src root at ${srcRoot}; check resolveBackendRoot()")
+
+        int count = 0
+        List<String> sites = []
+        Files.walk(srcRoot).filter { Path p -> p.toString().endsWith(".groovy") }.forEach { Path p ->
+            int n = p.toFile().text.count("setAnonymousAuthorizedAll(")
+            if (n > 0) {
+                count += n
+                sites << "${srcRoot.relativize(p)} (${n})".toString()
+            }
+        }
+        assertTrue(count == ANONYMOUS_AUTHORIZED_ALL_BASELINE,
+                "setAnonymousAuthorizedAll( count ${count} does not match BASELINE ${ANONYMOUS_AUTHORIZED_ALL_BASELINE}. " +
+                "If count > BASELINE: a new authorization lift was added; use the pulse frame or a scoped finder. " +
+                "If count < BASELINE: a site was removed; lower BASELINE. Sites: ${sites}")
+    }
+
+    /**
      * DAR-BE-075. The test above only ever watched darpan's Groovy, so a bypass written in service XML
      * ({@code <set from="ec.entity.find(..).disableAuthz()..">} or {@code <service-call disable-authz="true">})
      * or in any other Darpan component grew unseen — and moving Groovy into XML actions (DAR-BE-074) would

@@ -4,6 +4,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.RunConclusionStep
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.source.KeepArtifacts
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertSame
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -319,12 +321,15 @@ class JudgeReplayTests {
      * Ruling P2-24. The scope has a conclusion lookup and the check a CheckAsk, so today's fetchLookup would resolve a connector
      * and call its extract. With the lookup captured, its answers appear (the conclusion and the ask's cause); without, nothing is
      * fetched, each is named in a warning, and no field appears. The live AskSupport.fetcher is never swapped or used.
+     * DAR-BE-318 (plan 3b-2b): the only registry read is each side's Keep plan (replay#CheckJudgement reads the side's connector
+     * row by its system, once per side: resolve); no system is called.
      */
     @Test
     void aReplayCallsNoSystemWhetherItsLookupsWereCapturedOrNot() {
         int connectorCalls = 0
+        List<String> keepPlanReads = []
         Closure count = { Object[] args -> connectorCalls++; return null }
-        SourceSystemConnectorSupport.metaClass.static.resolve = { def e, String id -> count() }
+        SourceSystemConnectorSupport.metaClass.static.resolve = { def e, String id -> keepPlanReads.add(id); return null }
         SourceSystemConnectorSupport.metaClass.static.resolveBySystemEnumId = { def e, String id -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveByExtractServiceName = { def e, String name -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveByExpectedSourceConfigType = { def e, String type -> count() }
@@ -334,10 +339,12 @@ class JudgeReplayTests {
             RunConclusionStep.fetchLookup(ec, [name: "probe", systemEnumId: "NETSUITE"], ["SR-1"], A, [])
             assertEquals(1, connectorCalls, "test precondition: the counting stub intercepts connector resolution")
             connectorCalls = 0
+            keepPlanReads.clear()
 
             Map captured = replay(checkA, RUN_FOLDER_A, true)
             assertEquals([], captured.errors)
             assertEquals(0, connectorCalls, "captured: no extract or lookup connector was resolved")
+            assertEquals(["NETSUITE", "SHOPIFY"], keepPlanReads.sort(), "only each side's Keep plan read its registry row")
             assertEquals([], captured.out.replayWarnings)
             assertFalse(captured.out.judgeWarnings.any { it.contains("not captured") }, "${captured.out.judgeWarnings}")
             assertEquals("REFUNDED_IN_SHOPIFY", captured.out.judgedFindings.find { it.recordKey == "SR-1007" }.causeOutcomeId,
@@ -478,6 +485,286 @@ class JudgeReplayTests {
         org.apache.spark.sql.Dataset missing = missingRows.isEmpty() ? null :
                 spark.read().json(spark.createDataset(missingRows.collect { groovy.json.JsonOutput.toJson(it) }, org.apache.spark.sql.Encoders.STRING()))
         return new JudgeReplaySupport.PairRows(matched, missing, [file1: [:], file2: [:]], [:], [:], [:]).toList()
+    }
+
+    // --------------------------------------------------------------------------------------- Spark presence (plan 3b-2b, Task 16)
+
+    /**
+     * Discovery risk 3: HotWax order grain, HotWax returns and Shopify return refs write no side file, so the judge read every
+     * record their filters set aside as ABSENT. Now the replay keeps such a side in Spark (its connector takes Keep and writes
+     * no side file) and the compare's setAsideBySide reaches the judge: the record reads SET_ASIDE. Core has no such system,
+     * so the fixture's Shopify side stands in for them; the grain only shapes the compare id, which Spark computes (Task 11).
+     */
+    @Test
+    void aSideWithoutASideFileNowReadsSetAside() {
+        Map out = null
+        Map<String, Map> facts = withConnectors([SHOPIFY: "N"]) {
+            withFilter("FILE_1", "returnId", "EXCLUDE_IN", "SR-1001") {
+                factsJudged { out = ok(replay(checkA, RUN_FOLDER_A, true)) }
+            }
+        }
+        assertEquals([shopify: "SET_ASIDE", netsuite: "KEPT"], presence(facts["SR-1001"]),
+                "Shopify set SR-1001 aside in Spark and wrote no side file; NetSuite holds its refunded RMA")
+        assertEquals([shopify: "ABSENT", netsuite: "KEPT"], presence(facts["SR-1009"]), "SR-1009 has no return at all")
+        assertEquals([shopify: "KEPT", netsuite: "ABSENT"], presence(facts["SR-1007"]))
+        File replayFile1 = new File(replayDir(out.replayFolder as String), "extracts/FILE_1")
+        assertEquals(["shopify-returns.json", "shopify-returns.json.records.jsonl", "shopify-returns.keep.json", "shopify-returns.set-aside.rows"],
+                replayFile1.list().sort() as List, "Spark's set-aside artifact, and no side file")
+    }
+
+    /** Carry note 1: the setAsideBySide Task 11 passes is declared on judge#ComparePairs, so it reaches the judge and is read. */
+    @Test
+    void theSetAsideIdsTheCompareReportsReachTheJudge() {
+        File copy = copyExtractsFor("keep-reaches-judge")
+        Map sideKeep = darpan.reconciliation.source.KeepPlanSupport.sideKeepFromFilterRows(ec,
+                darpan.reconciliation.source.SourceFilterSupport.toRecordFieldRules([[sequenceNum: 1, fieldExpression: "returnId",
+                        operator: "EXCLUDE_IN", filterValues: "SR-1001"] as Map<String, Object>]),
+                [systemEnumId: "ACME", filterParameterName: "sourceFilters", excludedRecordsSidecar: "N"], [:])
+        Map called = null
+        Map<String, Map> facts = factsJudged {
+            called = underFacadeGrant("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope",
+                    compareParams(copy, true) + [keepBySide: [FILE_1: sideKeep]])
+        }
+        assertEquals([], called.errors)
+        try {
+            assertEquals([file1: ["SR-1001"] as Set], called.out.setAsideBySide)
+            assertEquals("SET_ASIDE", facts["SR-1001"]?.shopify_presence, "the compare's set-aside id reached the pair fact")
+        } finally {
+            darpan.reconciliation.core.ReconciliationServices.unpersistDatasets((List) (called.out?.persistedSources ?: []))
+        }
+    }
+
+    /**
+     * A capture made after the connectors stop filtering holds every RMA and no side file (the connector writes none): Spark sets
+     * the unrefunded ones aside, and on NetSuite, a promise side, the judge reads them back as kept from the Keep artifact.
+     */
+    @Test
+    void aPromiseSideReadsItsSetAsideRecordsBackAsKept() {
+        String runFolder = seedNewCapture("JRT_EXEC_KEEP_N")
+        Map out = withConnectors([NETSUITE: "N"]) { ok(replay(checkA, runFolder, true)) }
+        assertEquals(["netsuite-rmas.json", "netsuite-rmas.json.records.jsonl", "netsuite-rmas.keep.json", "netsuite-rmas.set-aside.rows"],
+                new File(replayDir(out.replayFolder as String), "extracts/FILE_2").list().sort() as List,
+                "no side file: what is read back comes from Spark's set-aside")
+        assertEquals(judgedKeys(replayed().judgedFindings), judgedKeys(out.judgedFindings),
+                "SR-1004/1005/1006 and SR-1010 are read back as kept and fail NOT_REFUNDED, as from the old side file")
+        assertEquals([matched: 2, missing: 7, readBack: 1], out.judgedPairCounts)
+        assertTrue(out.judgeWarnings.contains("2 file2 records set aside under a key the compare already holds (kept or duplicated) were not judged"),
+                "${out.judgeWarnings}")
+    }
+
+    /**
+     * The same new capture with a connector that writes the side file: Spark writes it (KeepStepSupport), today's conclude pass
+     * reads it, and every old finding and every judged finding is the old capture's. The judge reads Spark's records once.
+     */
+    @Test
+    void aReplayStillMatchesTodaysFindings() {
+        String runFolder = seedNewCapture("JRT_EXEC_KEEP_Y")
+        Map out = withConnectors([NETSUITE: "Y"]) { ok(replay(checkA, runFolder, true)) }
+        assertTrue(new File(replayDir(out.replayFolder as String), "extracts/FILE_2/netsuite-rmas.excluded.json").isFile(), "Spark wrote the side file")
+        assertEquals(oldKeys(replayed().oldFindings), oldKeys(out.oldFindings))
+        assertEquals(judgedKeys(replayed().judgedFindings), judgedKeys(out.judgedFindings))
+        assertEquals(replayed().judgedPairCounts, out.judgedPairCounts)
+        assertFalse(out.judgeWarnings.any { it.contains("already read back") }, "Spark's records are not read twice: ${out.judgeWarnings}")
+    }
+
+    /**
+     * Carry note 6: a capture from before Keep moved into Spark (filtered by its extractor, a side file, no .keep.json) still
+     * replays from its side file when its side now keeps in Spark: Spark sets nothing more aside and the side file is read whole.
+     */
+    @Test
+    void anOldCaptureStillReadsItsSideFile() {
+        Map out = withConnectors([NETSUITE: "Y"]) { ok(replay(checkA, RUN_FOLDER_A, true)) }
+        File file2 = new File(replayDir(out.replayFolder as String), "extracts/FILE_2")
+        assertTrue(new File(file2, "netsuite-rmas.keep.json").isFile(), "the side kept in Spark")
+        assertFalse(new File(file2, "netsuite-rmas.set-aside.rows").exists(), "and set nothing aside")
+        assertArrayEquals(fixture().resolve("netsuite-rmas.excluded.json").toFile().bytes, new File(file2, "netsuite-rmas.excluded.json").bytes,
+                "the extractor's side file is left as it was")
+        assertEquals(judgedKeys(replayed().judgedFindings), judgedKeys(out.judgedFindings))
+        assertEquals(oldKeys(replayed().oldFindings), oldKeys(out.oldFindings))
+        assertEquals([matched: 2, missing: 7, readBack: 1], out.judgedPairCounts, "SR-1010 is read back from the side file")
+    }
+
+    /** A side that is not a promise: Spark's ids and an old side file's ids both read SET_ASIDE; Spark's alone are not copied. */
+    @Test
+    void sparksIdsAndAnOldSideFilesIdsBothReadSetAside() {
+        File dir = scratch("presence-union")
+        File extract = new File(dir, "x.json")
+        extract.text = '{"records":[]}'
+        new File(dir, "x.excluded.json").text = '{"sourceFileName":"x.json","truncated":false,"total":1,"records":[{"id":"A","_excludedBy":"1:id"}]}'
+        Map keySpec = [keyFields: ["id"], keyReliable: true]
+        Set<String> spark = ["B"] as Set
+        assertEquals(["A", "B"] as Set, JudgeReplaySupport.sidePresence(extract, keySpec, false, "file1", spark, []).ids)
+        assertEquals(["B"] as Set, spark, "the compare's set is not changed")
+        assertEquals(["A"] as Set, JudgeReplaySupport.sidePresence(extract, keySpec, false, "file1", null, []).ids, "an old capture: its side file")
+        new File(dir, "x.excluded.json").delete()
+        assertSame(spark, JudgeReplaySupport.sidePresence(extract, keySpec, false, "file1", spark, []).ids, "no side file: Spark's set itself")
+        List<String> warnings = []
+        assertSame(spark, JudgeReplaySupport.sidePresence(extract, [keyReliable: false], false, "file1", spark, warnings).ids)
+        assertEquals(["The file1 key cannot be rebuilt from its records, so nothing its side file set aside is judged"], warnings)
+    }
+
+    /**
+     * A side file a Spark Keep merged its records into (the connector writes one, and the extractor wrote some itself) is read
+     * for its extractor's part only: Spark's records come from the rows file, once.
+     */
+    @Test
+    void aPromiseSideReadsAMergedSideFileForItsExtractorsPartOnly() {
+        File dir = scratch("presence-merged")
+        File extract = new File(dir, "x.json")
+        extract.text = '{"records":[{"id":"K1","amount":1},{"id":"S1","amount":24.00}]}'
+        KeepArtifactsWriter.rows(extract, "1\tA:1")
+        KeepArtifactsWriter.summary(extract, [extractorSideFile: [total: 1, kept: 1, truncated: false]])
+        new File(dir, "x.excluded.json").text = '{"sourceFileName":"x.json","truncated":false,"total":2,"records":[' +
+                '{"id":"X1","amount":5,"_excludedBy":"BUILT_IN:1"},{"id":"S1","amount":24.00,"_excludedBy":"1:status"}]}'
+        List<String> warnings = []
+        Map read = JudgeReplaySupport.sidePresence(extract, [keyFields: ["id"], keyReliable: true], true, "file2", null, warnings)
+        assertEquals(["S1", "X1"], read.records.keySet() as List, "Spark's set-aside record, then the extractor's")
+        assertEquals("24", read.records.S1.amount)
+        assertEquals([], warnings, "no record is read twice")
+    }
+
+    @Test
+    void aPromiseSideReadsBackAtMostMaxEntriesAndSaysSo() {
+        int cap = darpan.reconciliation.conclusion.ExcludedRecordsSidecar.MAX_ENTRIES
+        File dir = scratch("presence-cap")
+        File extract = new File(dir, "x.json")
+        extract.withWriter("UTF-8") { w ->
+            w << '{"records":['
+            (0..cap).each { int i -> w << (i ? "," : "") << '{"id":"R' << i << '"}' }
+            w << ']}'
+        }
+        KeepArtifacts.rowsFile(extract).withWriter("UTF-8") { w -> (0..cap).each { int i -> w << i << "\tA:1\n" } }
+        List<String> warnings = []
+        Map read = JudgeReplaySupport.sidePresence(extract, [keyFields: ["id"], keyReliable: true], true, "file2", null, warnings)
+        assertEquals(cap, read.records.size())
+        assertEquals(["1 file2 set-aside records past the first ${cap} were not read back: they read as absent".toString()], warnings)
+    }
+
+    /**
+     * Task 10 review M3: a capture's Keep artifacts never reach the replay, so a side the replay does not keep never reads them
+     * as its own; its side file is copied as the extractor wrote it (a Spark Keep's entries left out, numbers as written).
+     */
+    @Test
+    void aReplayCopiesNoKeepArtifactOfItsCaptureAndOnlyTheExtractorsSideFile() {
+        File captured = scratch("m3-capture")
+        File extract = new File(captured, "x.json")
+        extract.text = '{"records":[{"id":"K1"},{"id":"S1","amount":24.00}]}'
+        KeepArtifactsWriter.rows(extract, "1\tA:1")
+        KeepArtifactsWriter.summary(extract, [rules: [], configuredExclusions: [], keptCount: 1, setAsideCount: 1,
+                extractorSideFile: [total: 3, kept: 1, truncated: true]])
+        String side = '{"sourceFileName":"x.json","truncated":true,"total":4,"records":[' +
+                '{"id":"X1","amount":12345678.00,"_excludedBy":"BUILT_IN:1"},{"id":"S1","amount":24.00,"_excludedBy":"1:status"}]}'
+        new File(captured, "x.excluded.json").text = side
+        String base = DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec), "identity/m3-capture")
+        File replayFolder = scratch("m3-replay")
+
+        JudgeReplaySupport.copyExtract(ec, [fileLocation: "${base}/x.json".toString(), fileName: "x.json"], replayFolder, "identity/m3-replay", "FILE_2")
+        File copied = new File(replayFolder, "extracts/FILE_2")
+        assertEquals(["x.excluded.json", "x.json"], copied.list().sort() as List, "no .keep.json, no .set-aside.rows")
+        assertEquals('{"sourceFileName":"x.json","truncated":true,"total":3,"records":[{"id":"X1","amount":12345678.00,"_excludedBy":"BUILT_IN:1"}]}',
+                new File(copied, "x.excluded.json").text, "the extractor's part, its own total and truncation, numbers as written")
+
+        // No mark: the whole file is the extractor's, byte for byte. A mark with no extractor part: nothing to copy.
+        KeepArtifacts.keepFile(extract).delete()
+        File again = scratch("m3-replay-2")
+        JudgeReplaySupport.copyExtract(ec, [fileLocation: "${base}/x.json".toString(), fileName: "x.json"], again, "identity/m3-replay-2", "FILE_2")
+        assertEquals(side, new File(again, "extracts/FILE_2/x.excluded.json").text)
+        KeepArtifactsWriter.summary(extract, [extractorSideFile: [total: 0, kept: 0, truncated: false]])
+        File third = scratch("m3-replay-3")
+        JudgeReplaySupport.copyExtract(ec, [fileLocation: "${base}/x.json".toString(), fileName: "x.json"], third, "identity/m3-replay-3", "FILE_2")
+        assertEquals(["x.json"], new File(third, "extracts/FILE_2").list() as List, "a side file that was Spark's alone is not copied")
+    }
+
+    /** Writes Keep artifacts by name, as KeepStepSupport leaves them. */
+    private static class KeepArtifactsWriter {
+        static void rows(File extract, String text) { KeepArtifacts.rowsFile(extract).text = text + "\n" }
+        static void summary(File extract, Map summary) { KeepArtifacts.writeSummary(extract, summary) }
+    }
+
+    private File scratch(String name) {
+        File dir = new File(dataManagerRoot, "identity/${name}")
+        dir.deleteDir()
+        dir.mkdirs()
+        return dir
+    }
+
+    /** Connector rows for the fixture's systems, for one test: each takes Keep (filterParameterName set) and writes a side file or not. */
+    private <T> T withConnectors(Map<String, String> sideFileBySystem, Closure<T> body) {
+        sideFileBySystem.each { String system, String sideFile ->
+            insert(SourceSystemConnectorSupport.ENTITY_NAME, [systemEnumId: system, filterParameterName: "sourceFilters",
+                    excludedRecordsSidecar: sideFile, enabled: "Y"])
+        }
+        try {
+            return body.call()
+        } finally {
+            sideFileBySystem.keySet().each { String system ->
+                ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).condition("systemEnumId", system).disableAuthz().deleteAll()
+            }
+        }
+    }
+
+    /** One more source filter on the fixture's scope, for one test. */
+    private <T> T withFilter(String fileSide, String field, String operator, String values, Closure<T> body) {
+        Map pk = [compareScopeId: "JRT_SCOPE", fileSide: fileSide, sequenceNum: 90]
+        insert("darpan.rule.RuleSetCompareSourceFilter", pk + [fieldExpression: field, operator: operator, filterValues: values, companyUserGroupId: A])
+        try {
+            return body.call()
+        } finally {
+            ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition(pk).disableAuthz().deleteAll()
+        }
+    }
+
+    /** Every pair fact the judge was handed while body ran, by compare id; nothing is judged. */
+    private Map<String, Map> factsJudged(Closure body) {
+        Map<String, Map> facts = new TreeMap<>()
+        JudgeSupport.metaClass.static.judge = { def e, String checkId, Iterator<List<Map>> batches, Map statements, List<String> warnings ->
+            while (batches.hasNext()) batches.next().each { Map built -> facts.put(built.recordId as String, (Map) built.fact) }
+            return []
+        }
+        try {
+            body.call()
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(JudgeSupport)
+        }
+        return facts
+    }
+
+    private static Map presence(Map fact) {
+        return [shopify: fact?.shopify_presence, netsuite: fact?.netsuite_presence]
+    }
+
+    private static List<List> judgedKeys(List<Map> findings) {
+        return findings.collect { [it.statementCode, it.recordKey, it.claimOutcomeId, it.causeOutcomeId] }.sort { it.toString() }
+    }
+
+    private static List<List> oldKeys(List<Map> findings) {
+        return findings.collect { [it.statementCode, it.recordKey] }.sort { it.toString() }
+    }
+
+    /**
+     * A capture made after connectors stop filtering: an execution of check A's automation whose NetSuite extract holds every
+     * RMA (the fixture's kept ones, then the ones its side file lists, numbers as written) and no side file, with run A's lookup.
+     */
+    private String seedNewCapture(String executionId) {
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: executionId, automationId: "JRT_AUTO_A",
+                companyUserGroupId: A, statusEnumId: "AUT_STAT_SUCCESS"])
+        String folder = "reconciliation-runs/" + executionId
+        File run = new File(dataManagerRoot, folder)
+        run.deleteDir()
+        File side1 = new File(run, "20261101-060000000")
+        File side2 = new File(run, "20261101-060000000-FILE_2")
+        File lookups = new File(run, "lookups")
+        [side1, side2, lookups]*.mkdirs()
+        Files.copy(fixture().resolve("shopify-returns.json"), new File(side1, "shopify-returns.json").toPath())
+        Files.copy(fixture().resolve(CAPTURED_LOOKUP), new File(lookups, CAPTURED_LOOKUP).toPath())
+        List<String> records = ["netsuite-rmas.json", "netsuite-rmas.excluded.json"].collectMany { String name ->
+            fixture().resolve(name).toFile().readLines("UTF-8").findAll { it.startsWith('{"externalReturnId"') }
+                    .collect { it.replaceAll(/,$/, "").replace(',"_excludedBy":"1:status"', "") }
+        }
+        assertEquals(12, records.size())
+        new File(side2, "netsuite-rmas.json").setText('{"metadata":{"systemEnumId":"NETSUITE","recordType":"returnAuthorization"},\n"records":[\n' +
+                records.join(",\n") + "\n]}", "UTF-8")
+        return folder
     }
 
     // --------------------------------------------------------------------------------------- tenant safety (P2-9)

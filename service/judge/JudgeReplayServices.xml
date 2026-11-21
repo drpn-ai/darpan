@@ -89,11 +89,21 @@
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
             </entity-find>
             <set field="systemBySide" from="sourceList.collectEntries { [(it.fileSide): it.systemEnumId] }"/>
+            <!-- DAR-BE-318 (plan 3b-2b, Ruling 3b2b-3): each side keeps as the scope's run would today, from the scope's own
+                 filter rows read for the replaying tenant (KeepPlanSupport.sideKeep pins the read to it). Reading the connector
+                 registry row calls no system. -->
+            <set field="keepBySide" from="[:]"/>
+            <iterate list="sourceList" entry="source">
+                <set field="connector" from="darpan.reconciliation.automation.SourceSystemConnectorSupport.resolve(ec, source.systemEnumId)"/>
+                <script>keepBySide.put(source.fileSide, darpan.reconciliation.source.KeepPlanSupport.sideKeep(ec, scope.compareScopeId,
+                        source.fileSide, tenantId, connector,
+                        darpan.reconciliation.automation.SourceExtractOptionsSupport.runtimeOptions(connector, source.extractParametersJson)))</script>
+            </iterate>
 
             <set field="replayed" from="darpan.judge.JudgeReplaySupport.replay(ec, [tenantId: tenantId, check: check.getMap(),
                     ruleSetId: check.savedRunId, compareScopeId: scope.compareScopeId, runFolder: runPath, files: picked.files,
                     runDir: darpan.facade.common.DataManagerSupport.resolveDirectoryFile(ec, runLocation, false),
-                    file1SystemEnumId: systemBySide.FILE_1, file2SystemEnumId: systemBySide.FILE_2,
+                    file1SystemEnumId: systemBySide.FILE_1, file2SystemEnumId: systemBySide.FILE_2, keepBySide: keepBySide,
                     judgeWithDecisions: judgeWithDecisions != false])"/>
             <set field="oldFindings" from="replayed.oldFindings"/>
             <set field="judgedFindings" from="replayed.judgedFindings"/>
@@ -131,9 +141,11 @@
 
     <service verb="judge" noun="ComparePairs" transaction="ignore" allow-remote="false">
         <description>Internal. The judging behind reconcile#RuleSetCompareScope's judgeWithDecisions: the compare's matched
-            and missing frames, as pairs, through the check's decisions. A side whose source filters are promises (a conclusion
-            of the scope reads it with presence EXCLUDED, spec §8) has what they set aside read back as its own records; any
-            other side's set-aside records read SET_ASIDE. Statements come from the tenant's AuditStatement rows that promise
+            and missing frames, as pairs, through the check's decisions. What a side set aside comes from Spark's Keep in the
+            same compare (setAsideBySide and the set-aside artifact beside the extract) and from an extractor's side file (an
+            old capture's). A side whose source filters are promises (a conclusion of the scope reads it with presence
+            EXCLUDED, spec §8) has what they set aside read back as its own records; any other side's set-aside records read
+            SET_ASIDE. Statements come from the tenant's AuditStatement rows that promise
             an outcome of the check's Must hold decision.</description>
         <in-parameters>
             <parameter name="checkId" required="true"/>
@@ -142,6 +154,8 @@
             <parameter name="missingDiffDf" type="org.apache.spark.sql.Dataset"><description>RULESET_DIFF_SCHEMA rows.</description></parameter>
             <parameter name="file1Location"/>
             <parameter name="file2Location"/>
+            <parameter name="setAsideBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b). reconcile#RuleSetCompareScope's
+                setAsideBySide: per side that kept in Spark (file1/file2), the Set of compare ids its Keep set aside.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="judgedFindings" type="List"/>
@@ -204,7 +218,7 @@
 
             <set field="judged" from="darpan.judge.JudgeReplaySupport.judgeCompare(ec, [checkId: checkId, tenantId: tenantId,
                     matchedPairDf: matchedPairDf, missingDiffDf: missingDiffDf, keySpecs: keySpecs, systems: systems,
-                    promiseSides: promiseSides, statementsByClaim: statementsByClaim, params: params,
+                    promiseSides: promiseSides, statementsByClaim: statementsByClaim, params: params, setAsideBySide: setAsideBySide,
                     extractFiles: [file1: darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, file1Location),
                                    file2: darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, file2Location)]])"/>
             <set field="judgedFindings" from="judged.findings"/>

@@ -1,9 +1,6 @@
 package darpan.judge
 
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
-
-import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
@@ -209,20 +206,5 @@ class PairFactSupportTests {
         List<List<Map>> all = PairFactSupport.batches(rows.iterator(), 2).collect { it }
         assertEquals([2, 2, 1], all*.size())
         assertEquals((1..5).collect { "C${it}".toString() }, all.flatten()*.compareId)
-    }
-
-    @Test
-    void setAsideIdsStreamTheSidecarAndKeyThemByTheSidesCompareIdExpression(@TempDir Path dir) {
-        File extract = new File(dir.toFile(), "file2.json")
-        extract.text = "[]"
-        new File(dir.toFile(), "file2.excluded.json").text =
-                '{"sourceFileName":"file2.json","truncated":false,"total":2,"records":[{"tranId":"T1","_excludedBy":"1:x"},{"tranId":"T2","_excludedBy":"1:x"}]}'
-        Map out = PairFactSupport.setAsideIds(extract) { Map record -> record.tranId as String }
-        assertEquals(["T1", "T2"] as Set, out.ids)
-        assertTrue(out.present as boolean)
-        assertFalse(out.truncated as boolean)
-        Map none = PairFactSupport.setAsideIds(new File(dir.toFile(), "nothing.json")) { Map record -> "x" }
-        assertEquals([] as Set, none.ids)
-        assertFalse(none.present as boolean)
     }
 }

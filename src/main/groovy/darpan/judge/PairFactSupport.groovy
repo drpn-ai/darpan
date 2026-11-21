@@ -1,15 +1,14 @@
 package darpan.judge
 
-import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
-
 /**
  * DAR-BE-318 plan 2, Task 6 (D7). One fact per compare id. A pair row is [compareId, file1: Map or null, file2: Map or null]
  * (null = the side holds no record; the shape AskSupport.fetchAsks takes). The fact carries each side's presence, each
  * side's fields under the side's prefix, the check's parameters (param_<name>) and the asks (ask_<name>_<field>).
  *
- * Presence: KEPT when the side holds the record. SET_ASIDE when the side does not and the side's ".excluded.json" sidecar
- * names the compare id (a source filter dropped it). ABSENT otherwise, including when no sidecar can prove the drop.
- * The sidecar is read by setAsideIds, once per side, never per pair. No Moqui, no entity access here.
+ * Presence: KEPT when the side holds the record. SET_ASIDE when the side does not and its set-aside ids name the compare id
+ * (sideState.<side>.setAside: what Spark's Keep set aside, and what an extractor's side file names; JudgeReplaySupport.sidePresence
+ * reads them once per side, never per pair). ABSENT otherwise, including when nothing can prove the drop. No Moqui, no entity
+ * access here.
  */
 class PairFactSupport {
 
@@ -128,19 +127,5 @@ class PairFactSupport {
             }
             return batch
         }
-    }
-
-    /**
-     * The compare ids a side's source filters set aside: streams the extract's ".excluded.json" sidecar and keys each record
-     * by the side's compare id expression (compareIdOf). Returns [ids: Set, present, truncated]. A missing or truncated sidecar
-     * cannot prove a drop, so the caller reads those ids as ABSENT and may warn.
-     */
-    static Map setAsideIds(File extractFile, Closure<String> compareIdOf) {
-        Set<String> ids = new HashSet<>()
-        Map head = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
-            String id = compareIdOf.call(record)
-            if (id) ids.add(id)
-        }
-        return [ids: ids, present: head.present == true, truncated: head.truncated == true]
     }
 }

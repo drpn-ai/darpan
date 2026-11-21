@@ -8,8 +8,14 @@ import darpan.reconciliation.conclusion.JsonRecordStream
 import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.conclusion.RunConclusionSupport
 import darpan.reconciliation.core.ReconciliationServices
+import darpan.reconciliation.source.KeepArtifacts
+import darpan.reconciliation.source.KeepStepSupport
 import darpan.audit.AuditAutomationSupport
 import darpan.common.FactText
+import com.fasterxml.jackson.core.JsonFactory
+import com.fasterxml.jackson.core.JsonGenerator
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.core.JsonToken
 import groovy.json.JsonOutput
 import org.apache.spark.sql.Dataset
 
@@ -24,12 +30,16 @@ import java.util.regex.Pattern
  * judge.JudgeReplayServices.
  *
  * The judging reads today's matched and missing frames as pairs (ruling P2-15): a matched row is [compareId, file1, file2]; a
- * MISSING_IN_FILE_2 row is [compareId, file1: its data, file2: null] and MISSING_IN_FILE_1 the reverse. What a side's source
- * filters set aside (its ".excluded.json" sidecar) reads two ways (spec §8):
+ * MISSING_IN_FILE_2 row is [compareId, file1: its data, file2: null] and MISSING_IN_FILE_1 the reverse. What a side set aside
+ * comes from two places (DAR-BE-318 plan 3b-2b, Ruling 3b2b-3: the judge path gets Spark presence on every side): Spark's Keep
+ * in this compare (setAsideBySide, and the set-aside records KeepArtifacts names beside the extract), and the side file an
+ * extractor wrote (".excluded.json": an old capture's, or what a connector that still filters dropped). It reads two ways
+ * (spec §8):
  *  - on a side whose filters are promises (a conclusion of the scope reads that side with presence EXCLUDED), the new config
  *    has no such Keep: those records are read back as the side's own records (KEPT), and one with no pair in the frames
  *    becomes a pair of its own;
- *  - on any other side they stay kept out by Keep: the compare id reads SET_ASIDE, with no fields (ruling D8).
+ *  - on any other side they stay kept out by Keep: the compare id reads SET_ASIDE, with no fields (ruling D8). A side whose
+ *    connector writes no side file (discovery risk 3) now reads SET_ASIDE too, from Spark.
  *
  * A replay never calls a system (ruling P2-24): every lookup the conclude pass asks and every ask the judge fetches is
  * answered by capturedFetcher, from the lookups captured in the run folder (lookups/lookup-<name>-<millis>.json, the name
@@ -56,20 +66,23 @@ class JudgeReplaySupport {
      * The judging behind reconcile#RuleSetCompareScope's judgeWithDecisions (judge.JudgeReplayServices.judge#ComparePairs).
      * args: checkId, tenantId, matchedPairDf, missingDiffDf (RULESET_DIFF_SCHEMA), extractFiles [file1, file2: File],
      * keySpecs [file1, file2: RunConclusionStep.keySpec], promiseSides (Set of file1/file2), systems [file1, file2: system enum
-     * id], statementsByClaim, params. Returns [findings, warnings, pairCounts: pairs judged from the matched frame, the missing
-     * frame and the read-back records no row named]. Throws IllegalStateException, in words, when it cannot judge.
+     * id], statementsByClaim, params, setAsideBySide [file1/file2: the compare ids Spark's Keep set aside, for a side that kept
+     * in Spark]. Returns [findings, warnings, pairCounts: pairs judged from the matched frame, the missing frame and the
+     * read-back records no row named]. Throws IllegalStateException, in words, when it cannot judge.
      */
     static Map judgeCompare(def ec, Map args) {
         String checkId = args.checkId as String
         String tenantId = args.tenantId as String
         List<String> warnings = []
         Map<String, Map<String, Map>> readBack = [:]
-        Map<String, Set<String>> setAside = [:]
-        SIDES.each { String side ->
-            Map sidecar = readSidecar((File) ((Map) args.extractFiles)?.get(side), (Map) ((Map) args.keySpecs)?.get(side),
-                    ((Collection) args.promiseSides ?: []).contains(side), side, warnings)
-            readBack.put(side, (Map<String, Map>) sidecar.records)
-            setAside.put(side, (Set<String>) sidecar.ids)
+        Map<String, Collection<String>> setAside = [:]
+        // A loop, not a closure: Groovy 5.0.3 fails a static call made inside a closure when an argument is an inline-cast null
+        // ("argument type mismatch"), and a side with no Keep passes null here.
+        for (String side : SIDES) {
+            Map presence = sidePresence((File) ((Map) args.extractFiles)?.get(side), (Map) ((Map) args.keySpecs)?.get(side),
+                    ((Collection) args.promiseSides ?: []).contains(side), side, (Collection<String>) ((Map) args.setAsideBySide)?.get(side), warnings)
+            readBack.put(side, (Map<String, Map>) presence.records)
+            setAside.put(side, (Collection<String>) presence.ids)
         }
         Dataset matched = (Dataset) args.matchedPairDf
         Dataset missing = (Dataset) args.missingDiffDf
@@ -122,22 +135,49 @@ class JudgeReplaySupport {
     }
 
     /**
-     * One side's sidecar. A promise side: [records: compareId -> the record, read back as kept]. Any other side: [ids: the
-     * compare ids set aside]. No sidecar means nothing was set aside (extractors write none then). A truncated sidecar, or a
-     * side whose key cannot be rebuilt from its records, proves nothing and says so in a warning.
+     * One side's presence: [records: compareId -> a record read back as kept, ids: the compare ids that read SET_ASIDE].
+     *  - Any side but a promise: ids = sparkIds (the compare's setAsideBySide for the side: Spark's own compare ids, already held
+     *    by the compare, so nothing is copied unless a side file adds ids too) and the compare ids the extractor's side file names.
+     *    An old capture, which has no Keep, reads its side file exactly as before.
+     *  - A promise side: records = Spark's set-aside records, streamed from the extract through the rows file
+     *    (KeepArtifacts.forEachSetAsideRecord), then the extractor's side file, at most ExcludedRecordsSidecar.MAX_ENTRIES; what
+     *    passes the cap reads as absent and says so in a warning.
+     * The cost bound: a non-promise side holds no more than the compare already does (setAsideBySide, ~10-15 MB at 125k ids),
+     * plus a union only when a side file names ids as well; a promise side holds at most MAX_ENTRIES records, as the side file did.
      */
-    static Map readSidecar(File extractFile, Map keySpec, boolean promiseSide, String side, List<String> warnings) {
+    static Map sidePresence(File extractFile, Map keySpec, boolean promiseSide, String side, Collection<String> sparkIds, List<String> warnings) {
+        Map read = readSidecar(extractFile, keySpec, promiseSide, side, warnings, sparkIds != null)
+        if (promiseSide || !sparkIds) return read
+        Set<String> fromSideFile = (Set<String>) read.ids
+        if (fromSideFile.isEmpty()) return [records: read.records, ids: sparkIds]
+        fromSideFile.addAll(sparkIds)
+        return read
+    }
+
+    /**
+     * What a side set aside, read from its files. A promise side: [records: compareId -> the record, read back as kept], Spark's
+     * set-aside records first, then the side file's. Any other side: [ids: the compare ids the side file names] (Spark's ids come
+     * from the compare, sidePresence). No side file and no Keep artifact means nothing was set aside.
+     *
+     * The side file is read as the extractor wrote it: when this extract's Keep merged its own records into the file (its
+     * .keep.json carries KeepStepSupport.EXTRACTOR_SIDE_FILE), only the extractor's part, the first entries, is read, so Spark's
+     * records are never read twice. A truncated side file, or a side whose key cannot be rebuilt from its records, proves
+     * nothing and says so in a warning. sparkJudged: the side's Spark ids are judged anyway, so the warning names the side file.
+     */
+    static Map readSidecar(File extractFile, Map keySpec, boolean promiseSide, String side, List<String> warnings, boolean sparkJudged = false) {
         Map<String, Map> records = new LinkedHashMap<>()
         Set<String> ids = new HashSet<>()
         if (extractFile == null) return [records: records, ids: ids]
         if (keySpec == null || keySpec.keyReliable == false) {
-            warnings.add("The ${side} key cannot be rebuilt from its records, so nothing it set aside is judged".toString())
+            String what = sparkJudged && !promiseSide ? "nothing its side file set aside" : "nothing it set aside"
+            warnings.add("The ${side} key cannot be rebuilt from its records, so ${what} is judged".toString())
             return [records: records, ids: ids]
         }
         List<String> keyFields = (List<String>) keySpec.keyFields
         String normalizer = keySpec.idNormalizer as String
         int repeated = 0
-        Map head = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
+        int overCap = 0
+        Closure take = { Map record ->
             Map copy = new LinkedHashMap(record)
             copy.remove("_excludedBy")
             String id = ConclusionKeySupport.compareKey(copy, keyFields, normalizer)
@@ -146,17 +186,29 @@ class JudgeReplaySupport {
                 ids.add(id)
             } else if (records.containsKey(id)) {
                 repeated++
+            } else if (records.size() >= ExcludedRecordsSidecar.MAX_ENTRIES) {
+                overCap++
             } else {
                 records.put(id, FactText.flat(copy))
             }
         }
-        if (head.truncated == true) {
+        if (promiseSide) KeepArtifacts.forEachSetAsideRecord(extractFile) { Map record, String ruleId -> take(record) }
+        Map mark = (Map) KeepArtifacts.readSummary(extractFile)?.get(KeepStepSupport.EXTRACTOR_SIDE_FILE)
+        Integer extractorEntries = mark != null ? ((mark.kept ?: 0) as Integer) : null
+        int seen = 0
+        Map head = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
+            if (extractorEntries == null || seen++ < extractorEntries) take(record)
+        }
+        if (mark != null ? mark.truncated == true : head.truncated == true) {
             warnings.add("The ${side} sidecar is truncated: what it left out reads as absent".toString())
         }
         if (head.present != true && new File(extractFile.parentFile, ExcludedRecordsSidecar.fileNameFor(extractFile.name)).exists()) {
             warnings.add("The ${side} sidecar cannot be read: what it set aside reads as absent".toString())
         }
         if (repeated) warnings.add("${repeated} ${side} records set aside under a compare id already read back were not judged".toString())
+        if (overCap) {
+            warnings.add("${overCap} ${side} set-aside records past the first ${ExcludedRecordsSidecar.MAX_ENTRIES} were not read back: they read as absent".toString())
+        }
         return [records: records, ids: ids]
     }
 
@@ -332,7 +384,8 @@ class JudgeReplaySupport {
 
     /**
      * replay#CheckJudgement after its reads: copies the captured extracts (files: FILE_1/FILE_2 -> [fileLocation, fileName])
-     * into a new folder, runs the check's compare over the copies, writes diff.json (today's document, concluded as today's conclude pass does) and result.json
+     * into a new folder, runs the check's compare over the copies (with keepBySide, each side's Keep plan, so a side that keeps
+     * in Spark writes its set-aside artifact beside its copy and the judge reads Spark presence), writes diff.json (today's document, concluded as today's conclude pass does) and result.json
      * (the run's counts) into a new folder, reads today's findings from it and, with the judge on, writes judged-findings.json.
      * The verify passes are not run: they read systems live, and a replay calls no system.
      */
@@ -353,6 +406,8 @@ class JudgeReplaySupport {
                              file1Location : file1.fileLocation, file2Location: file2.fileLocation,
                              file1Name     : file1.fileName, file2Name: file2.fileName, sparkAppName: "JudgeReplay"]
         if (judging) compareParams.putAll([judgeWithDecisions: true, judgeCheckId: check.checkId])
+        // DAR-BE-318 (plan 3b-2b): each side keeps in Spark as the scope says today, read for the replaying tenant.
+        if (args.keepBySide) compareParams.keepBySide = args.keepBySide
         // Kept even when the compare fails, so its persisted frames are always released (review M4).
         Map compared = (ec.service.sync().name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
                 .parameters(compareParams).call() ?: [:]) as Map
@@ -418,8 +473,11 @@ class JudgeReplaySupport {
     }
 
     /**
-     * A side's captured extract and its ".excluded.json" sidecar, copied into <replay>/extracts/<side>/; answers the copy's
-     * [fileLocation, fileName]. The exchange manifest is not copied: neither the compare, the conclude pass nor the judge reads it.
+     * A side's captured extract and its ".excluded.json" sidecar as the extractor wrote it (copyExtractorSideFile), copied into
+     * <replay>/extracts/<side>/; answers the copy's [fileLocation, fileName]. The capture's Keep artifacts (.keep.json,
+     * .set-aside.rows) are never copied: the replay's own compare writes them for a side it keeps in Spark, so a side it does not
+     * keep never reads a capture's Keep as its own (Task 10 review M3). The exchange manifest is not copied: neither the compare,
+     * the conclude pass nor the judge reads it.
      */
     static Map copyExtract(def ec, Map picked, File folder, String folderLocation, String side) {
         String fileName = picked.fileName as String
@@ -428,11 +486,83 @@ class JudgeReplaySupport {
         File dir = new File(new File(folder, EXTRACTS_DIR), side)
         DataManagerSupport.ensureDirectory(dir, "judge replay")
         Files.copy(source.toPath(), new File(dir, fileName).toPath())
-        File sidecar = new File(source.parentFile, ExcludedRecordsSidecar.fileNameFor(fileName))
-        if (sidecar.isFile()) Files.copy(sidecar.toPath(), new File(dir, sidecar.name).toPath())
+        copyExtractorSideFile(source, dir)
         String location = DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec),
                 "${folderLocation}/${EXTRACTS_DIR}/${side}/${fileName}".toString())
         return [fileLocation: location, fileName: fileName]
+    }
+
+    private static final JsonFactory JSON = new JsonFactory()
+
+    /**
+     * The extract's side file, as its extractor wrote it, into dir. A side file a Spark Keep merged its set-aside records into
+     * says so in the extract's .keep.json (KeepStepSupport.EXTRACTOR_SIDE_FILE: the extractor's part is the first `kept` entries,
+     * with its own total and truncation): only that part is copied, token by token so numbers keep their text, and a side file
+     * that was Spark's alone is not copied. Otherwise the whole file is the extractor's and is copied byte for byte. Copying
+     * Spark's entries too would double them when the replay's own Keep merges its records in again.
+     */
+    static void copyExtractorSideFile(File extract, File dir) {
+        File side = new File(extract.parentFile, ExcludedRecordsSidecar.fileNameFor(extract.name))
+        if (!side.isFile()) return
+        File target = new File(dir, side.name)
+        Map mark = (Map) KeepArtifacts.readSummary(extract)?.get(KeepStepSupport.EXTRACTOR_SIDE_FILE)
+        if (mark == null) {
+            Files.copy(side.toPath(), target.toPath())
+            return
+        }
+        int total = (mark.total ?: 0) as int
+        if (total == 0) return
+        int kept = (mark.kept ?: 0) as int
+        JsonParser parser = JSON.createParser(side)
+        try {
+            target.withWriter("UTF-8") { Writer writer ->
+                JsonGenerator out = JSON.createGenerator(writer)
+                if (parser.nextToken() != JsonToken.START_OBJECT) throw new IllegalStateException("Side file ${side.name} is not a JSON object.")
+                out.writeStartObject()
+                while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                    String name = parser.currentName()
+                    JsonToken value = parser.nextToken()
+                    if (name == "total") {
+                        out.writeNumberField(name, total)
+                    } else if (name == "truncated") {
+                        out.writeBooleanField(name, mark.truncated == true)
+                    } else if (name == "records" && value == JsonToken.START_ARRAY) {
+                        out.writeArrayFieldStart(name)
+                        int copied = 0
+                        while (parser.nextToken() != JsonToken.END_ARRAY) {
+                            if (parser.currentToken() == JsonToken.START_OBJECT && copied < kept) {
+                                copyExact(parser, out)
+                                copied++
+                            } else {
+                                parser.skipChildren()
+                            }
+                        }
+                        out.writeEndArray()
+                    } else {
+                        out.writeFieldName(name)
+                        copyExact(parser, out)
+                    }
+                }
+                out.writeEndObject()
+                out.close()
+            }
+        } finally {
+            parser.close()
+        }
+    }
+
+    /** The value at the parser's current token, copied whole; a number keeps the text it was written with. */
+    private static void copyExact(JsonParser parser, JsonGenerator out) {
+        int depth = 0
+        while (true) {
+            JsonToken token = parser.currentToken()
+            if (token == JsonToken.VALUE_NUMBER_INT || token == JsonToken.VALUE_NUMBER_FLOAT) out.writeNumber(parser.getText())
+            else out.copyCurrentEvent(parser)
+            if (token == JsonToken.START_OBJECT || token == JsonToken.START_ARRAY) depth++
+            else if (token == JsonToken.END_OBJECT || token == JsonToken.END_ARRAY) depth--
+            if (depth == 0) return
+            parser.nextToken()
+        }
     }
 
     /**

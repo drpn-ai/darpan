@@ -21,6 +21,8 @@ import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.core.RuleSetCompareScopeAdapter
 import darpan.reconciliation.notification.TenantNotificationSupport
+import darpan.reconciliation.source.KeepPlanSupport
+import darpan.reconciliation.source.KeepStepSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
@@ -369,7 +371,13 @@ class AutomationExecutionSupport {
         String ownKey = AuditRecheckSupport.firstKeyField(ec, scopeId, side)
         if (!otherKey || !ownKey) throw new IllegalStateException("${side} is read by ${otherSide}'s keys, and a side has no plain key field")
         File otherFile = RunVerificationSupport.resolveLocationFile(ec, normalize(otherResult?.fileLocation))
-        return readByKeysOf(otherFile, otherKey, ownKey) { List<String> batch ->
+        // DAR-BE-318 (plan 3b-2b, Task 14, Ruling 3b2b-11): only the other side's KEPT records give keys. Its extract now holds
+        // the records its Keep sets aside too (a Spark side's read is unfiltered), and those must not widen this read.
+        Map otherKeep = otherResult?.get(SIDE_KEEP) instanceof Map ? (Map) otherResult.get(SIDE_KEEP) :
+                sideKeepOfResult(ec, automation, loadAutomationSources(ec, normalize(readField(automation, "automationId")))[otherSide],
+                        otherResult, windowParams, windowParams?.get(KEEP_IN_SPARK) == true)
+        Set<String> keys = otherFile == null ? new LinkedHashSet<String>() : KeepStepSupport.keptValues(ec, otherFile, otherKeep, otherKey)
+        return readByKeys(keys, ownKey) { List<String> batch ->
             Map<String, Object> read = normalizeSourceResult(extract.call(ec, automation, source, window,
                     new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: batch] as Map<String, Object>), source)
             File f = RunVerificationSupport.resolveLocationFile(ec, normalize(read.fileLocation))
@@ -389,6 +397,11 @@ class AutomationExecutionSupport {
             String v = normalize(r.get(otherKey))
             if (v) keys.add(v)
         }
+        return readByKeys(keys, ownKey, readBatch)
+    }
+
+    /** readByKeysOf over keys already collected (each once, in record order). */
+    static Map<String, Object> readByKeys(Collection<String> keys, String ownKey, Closure readBatch) {
         Map<String, Object> first = null
         File target = null
         (keys as List<String>).collate(AuditRecheckSupport.MAX_KEYS).each { List<String> batch ->
@@ -555,6 +568,9 @@ class AutomationExecutionSupport {
             // (sm-darpan 2026-08-22: a KG Canada run reconciled 98 Dolce Vita orders).
             Map<String, Object> windowParams = new LinkedHashMap<String, Object>(executionParams)
             windowParams.automationExecutionId = automationExecutionId
+            // DAR-BE-318 (plan 3b-2b, Task 14): the compare takes each side's Keep (keepBySide), so a Spark side's reads leave
+            // Keep to it; an evaluate run's compare does not, and its side keeps filtering at the read.
+            windowParams.put(KEEP_IN_SPARK, !evaluateMode)
 
             // Audit 2026-06-11 #16: hold the Spark Datasets persisted by reconcile#RuleSetCompareScope
             // so the finally below unpersists them on every exit path of this automation execution.
@@ -706,8 +722,9 @@ class AutomationExecutionSupport {
 
                 // DAR-BE-123: a verify's empty side is its answer (the record is still missing), not "no data".
                 boolean verifying = window?.auditVerifyKeys
-                if (verifying ? (!normalize(file1Result?.fileLocation) || (!evaluateMode && !normalize(file2Result?.fileLocation))) :
-                        (!hasData(file1Result) || (!evaluateMode && !hasData(file2Result)))) {
+                // DAR-BE-318 (plan 3b-2b, Task 14): also how a window closes when a side's Keep, run in Spark at the compare,
+                // kept nothing: today that side's read filtered every record away and reported no data.
+                Closure closeAsNoData = { ->
                     Timestamp completedTimestamp = nowTimestamp(ec)
                     Map<String, Object> noDataFields = executionUpdateFields(file1Result, file2Result, [:]) + [
                             statusEnumId    : STATUS_NO_DATA,
@@ -740,6 +757,10 @@ class AutomationExecutionSupport {
                             childWindowStartDate : window.childWindowStartDate,
                             childWindowEndDate   : window.childWindowEndDate,
                     ]
+                }
+                if (verifying ? (!normalize(file1Result?.fileLocation) || (!evaluateMode && !normalize(file2Result?.fileLocation))) :
+                        (!hasData(file1Result) || (!evaluateMode && !hasData(file2Result)))) {
+                    closeAsNoData.call()
                     return
                 }
 
@@ -761,6 +782,18 @@ class AutomationExecutionSupport {
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
                 autoPersistedSources = (reconcileResult.persistedSources ?: []) as List
                 requireReconcileOutput(ec, reconcileResult)
+                // DAR-BE-318 (plan 3b-2b, Task 14, Ruling 3b2b-11): a side whose Keep ran in Spark read every record, so its
+                // recorded count is what Keep kept (what its filtering read used to count), and a side that kept nothing
+                // closes the window as no data, as its filtering read did. A verify's empty side stays its answer.
+                Map<String, Integer> keptBySide = keptCountsBySide(reconcileResult)
+                if (keptBySide.containsKey(FILE_SIDE_1)) file1Result.recordCount = keptBySide.get(FILE_SIDE_1)
+                if (keptBySide.containsKey(FILE_SIDE_2) && file2Result != null) file2Result.recordCount = keptBySide.get(FILE_SIDE_2)
+                if (!verifying && keptBySide.values().contains(0)) {
+                    if (keptBySide.get(FILE_SIDE_1) == 0) file1Result.dataAvailable = false
+                    if (keptBySide.get(FILE_SIDE_2) == 0 && file2Result != null) file2Result.dataAvailable = false
+                    closeAsNoData.call()
+                    return
+                }
                 // The diff document has to EXIST before verification, because every pass reads it off
                 // disk and rewrites it in place. This call is what sets reconcileResult.diffLocation:
                 // reconcile#RuleSetCompareScope declares no diffLocation/diffFileName out-parameter and
@@ -2368,17 +2401,9 @@ class AutomationExecutionSupport {
 
     static Map<String, Object> callConfiguredSourceExtractor(def ec, def automation, def source,
             Map<String, Object> window, Map<String, Object> params) {
-        Map<String, Object> metadata = resolveSourceExtractorMetadata(ec, source,
-                params?.sourceExtractorConfigDefaults instanceof Map ? (Map<String, Object>) params.sourceExtractorConfigDefaults : [:])
-        String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
-        // DAR-BE-176: a data-defined endpoint's connector names the extract to run, whatever an older snapshot says, so
-        // cutting an endpoint over to its data definition (and back) is the connector row alone: no stored automation is
-        // rewritten, so no migration.
-        String endpoint = normalize(readField(source, "systemEnumId"))
-        Map<String, Object> currentConnector = endpoint ? SourceSystemConnectorSupport.resolve(ec, endpoint) : null
-        if (normalize(currentConnector?.dataSourceDefinitionId) && normalize(currentConnector?.extractServiceName)) {
-            serviceName = normalize(currentConnector.extractServiceName)
-        }
+        Map<String, Object> target = extractTarget(ec, source, params)
+        Map<String, Object> metadata = (Map<String, Object>) target.metadata
+        String serviceName = (String) target.serviceName
         if (!serviceName) {
             String systemEnumId = normalize(readField(source, "systemEnumId")) ?: "unknown system"
             String fileSide = normalize(readField(source, "fileSide")) ?: "source"
@@ -2438,23 +2463,31 @@ class AutomationExecutionSupport {
         // up by the service being invoked (what the pre-registry switch keyed on). A source-level override
         // still wins; fall back to fromDate/toDate when no connector matches.
         // DAR-BE-176: data-defined endpoints share one extract service, so the source's own endpoint decides first.
-        String sourceSystem = normalize(readField(source, "systemEnumId"))
-        Map<String, Object> bySystem = sourceSystem ? SourceSystemConnectorSupport.resolve(ec, sourceSystem) : null
-        Map<String, Object> connectorForService = bySystem?.extractServiceName == serviceName ? bySystem :
-                SourceSystemConnectorSupport.resolveByExtractServiceName(ec, serviceName)
+        Map<String, Object> connectorForService = (Map<String, Object>) target.connector
         applyWindowParameters(serviceParams, automation, source, connectorForService, window)
         if (connectorForService?.preserveWindowInstants) serviceParams.preserveWindowInstants = true
 
-        applyExcludeFilterParameter(serviceParams, connectorForService,
-                loadAutomationSourceFilters(ec,
-                        normalize(readField(automation, "automationId")),
-                        normalize(readField(source, "fileSide"))))
+        // DAR-BE-318 (plan 3b-2b, Task 14): the side's Keep plan, from the automation's own filter rows (Ruling 3b2b-15).
+        // The read gets the rows only when Keep runs there (sideKeepOf); a Spark side's Keep runs at the compare's ingest.
+        Map sideKeep = sideKeepOf(ec, automation, source, connectorForService, serviceName, new LinkedHashMap<String, Object>(serviceParams),
+                params?.get(KEEP_IN_SPARK) == true)
+        applyExcludeFilterParameter(serviceParams, connectorForService, (List<Map<String, Object>>) sideKeep.readFilters)
         applyStatusParameter(serviceParams, connectorForService, source)
         applyWindowFieldParameter(serviceParams, connectorForService)
         // DAR-BE-239: the fields this side's rules read. Before, a scheduled run sent none, its HotWax read never asked
         // for paymentRefNums, and the transaction rule passed every order.
         List<String> readFields = ReconciliationSavedRunSupport.extractReadFields(ec, serviceName,
                 readField(automation, "compareScopeId"), serviceParams.fileSide)
+        // DAR-BE-318 (Ruling 3b2b-4): a Spark side's read keeps the fields its Keep reads, which the read no longer filters on.
+        if (KeepStepSupport.applies(sideKeep)) {
+            List<String> keepFields = ((Collection<String>) sideKeep.fields ?: []) as List<String>
+            if (keepFields && declaresParameter(ec, serviceName, ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER)) {
+                readFields = ((readFields ?: []) + keepFields).unique()
+            }
+            if (keepFields && declaresParameter(ec, serviceName, KeepPlanSupport.KEEP_FIELDS_PARAMETER)) {
+                serviceParams.put(KeepPlanSupport.KEEP_FIELDS_PARAMETER, new ArrayList<String>(keepFields))
+            }
+        }
         if (readFields) serviceParams.put(ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER, readFields)
         // DAR-BE-119: a read by key (an audit re-checking its older open findings), sent only to an extractor that
         // declares it: any other would ignore the keys and read the whole window.
@@ -2478,10 +2511,10 @@ class AutomationExecutionSupport {
         Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connectorForService, serviceParams, [
                 tenantId   : serviceParams.companyUserGroupId, windowStart: serviceParams.windowStartDate,
                 windowEnd  : serviceParams.windowEndDate, stateMode: isStateWindowMode(automation) && connectorForService?.supportsStateExtract,
-                outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId]))
+                outputRunId: serviceParams.automationExecutionId ?: serviceParams.automationId, sideKeep: sideKeep]))
         if (served.served) {
             return KeptCopySupport.extractResult(served) + [readWindowFrom: serviceParams.windowStartDate,
-                                                            readWindowThru: serviceParams.windowEndDate]
+                                                            readWindowThru: serviceParams.windowEndDate, (SIDE_KEEP): sideKeep]
         }
         logger.info("${serviceParams.fileSide} reads live, not from a kept copy: ${served.reason}")
 
@@ -2509,7 +2542,91 @@ class AutomationExecutionSupport {
         result = new LinkedHashMap<String, Object>(result)
         if (!result.containsKey("readWindowFrom")) result.readWindowFrom = serviceParams.windowStartDate
         if (!result.containsKey("readWindowThru")) result.readWindowThru = serviceParams.windowEndDate
+        result.put(SIDE_KEEP, sideKeep)
         return result
+    }
+
+    /**
+     * DAR-BE-318 (plan 3b-2b, Task 14). The key a side's extract result carries its Keep plan under, so the compare
+     * (keepBySide), the read by the other side's keys (keptValues) and the side's recorded count take the same plan the
+     * read was sent.
+     */
+    static final String SIDE_KEEP = "sideKeep"
+
+    /**
+     * DAR-BE-318 (plan 3b-2b, Task 14). The dispatch parameter by which a caller says its compare takes keepBySide, so a
+     * Spark side's read may leave Keep to Spark. Only the run loop sets it (not on an evaluate run, whose compare takes no
+     * keepBySide); any other caller (the sync pulse reads records directly) keeps every side's filters at the read.
+     */
+    static final String KEEP_IN_SPARK = "keepInSpark"
+
+    /**
+     * The extract a source dispatches to, resolved as callConfiguredSourceExtractor dispatches it (without its checks):
+     * [metadata, serviceName, connector]. DAR-BE-176: a data-defined endpoint's connector names the extract to run, whatever
+     * an older snapshot says, so cutting an endpoint over to its data definition (and back) is the connector row alone: no
+     * stored automation is rewritten, so no migration. The connector is the source endpoint's own row when it names that
+     * extract, else the row registered for the extract.
+     */
+    protected static Map<String, Object> extractTarget(def ec, def source, Map params) {
+        Map<String, Object> metadata = resolveSourceExtractorMetadata(ec, source,
+                params?.sourceExtractorConfigDefaults instanceof Map ? (Map<String, Object>) params.sourceExtractorConfigDefaults : [:])
+        String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
+        String endpoint = normalize(readField(source, "systemEnumId"))
+        Map<String, Object> bySystem = endpoint ? SourceSystemConnectorSupport.resolve(ec, endpoint) : null
+        if (normalize(bySystem?.dataSourceDefinitionId) && normalize(bySystem?.extractServiceName)) {
+            serviceName = normalize(bySystem.extractServiceName)
+        }
+        Map<String, Object> connector = !serviceName ? null : bySystem?.extractServiceName == serviceName ? bySystem :
+                SourceSystemConnectorSupport.resolveByExtractServiceName(ec, serviceName)
+        return [metadata: metadata, serviceName: serviceName, connector: connector]
+    }
+
+    /**
+     * DAR-BE-318 (plan 3b-2b, Task 14). One automation side's Keep plan (KeepPlanSupport's shape), from the automation's
+     * OWN filter rows (ReconciliationAutomationSourceFilter, Ruling 3b2b-15: the store switch to the compare scope is plan
+     * 3b-2c), read for the automation's tenant only.
+     * <ul>
+     * <li>NONE (no filter parameter: uploads, databases): no rows are read, nothing is filtered, as today.</li>
+     * <li>READ (a data-defined endpoint, Ruling 3b2b-16): the read gets the rows and filters, as today.</li>
+     * <li>SPARK: the read gets no rows; Spark runs the connector's built-ins and the rows at the compare's ingest.</li>
+     * </ul>
+     * Until a connector stops filtering (plan 3b-2b Tasks 17-23, which drop the filter parameter from its extract service),
+     * its extract still filters: a SPARK side whose extract service still declares the connector's filter parameter keeps
+     * its Keep at the read, exactly as today, and Spark runs nothing over it. Running both would set aside nothing more but
+     * would replace the extract's exclusion counts with the Keep summary's zeros, which conclusions read as authoritative.
+     * keepInSpark false (a caller whose compare takes no keepBySide, KEEP_IN_SPARK) keeps a SPARK side at the read too.
+     */
+    static Map sideKeepOf(def ec, def automation, def source, Map connector, String serviceName, Map extractOptions,
+                          boolean keepInSpark) {
+        String placement = KeepPlanSupport.placement(connector)
+        if (placement == KeepPlanSupport.NONE) return KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector, extractOptions)
+        List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
+                normalize(readField(source, "fileSide")), normalize(readField(automation, "companyUserGroupId")))
+        if (placement == KeepPlanSupport.SPARK &&
+                (!keepInSpark || declaresParameter(ec, serviceName, normalize(connector.get("filterParameterName"))))) {
+            return [placement: KeepPlanSupport.READ, readFilters: rows, rules: [], writeSidecar: false,
+                    fields   : new LinkedHashSet<String>(rows.collect { it.fieldExpression as String })]
+        }
+        return KeepPlanSupport.sideKeepFromFilterRows(ec, rows, connector, extractOptions)
+    }
+
+    /**
+     * The Keep plan a side's extract result carries (SIDE_KEEP), or, for a result that carries none (a retry replaying an
+     * earlier attempt's file), the plan the side's extract would be sent now.
+     */
+    static Map sideKeepOfResult(def ec, def automation, def source, Map result, Map params, boolean keepInSpark = true) {
+        if (result?.get(SIDE_KEEP) instanceof Map) return (Map) result.get(SIDE_KEEP)
+        if (source == null) return null
+        Map<String, Object> target = extractTarget(ec, source, params)
+        Map<String, Object> options = ((Map) target.metadata)?.parameters instanceof Map ?
+                new LinkedHashMap<String, Object>((Map) ((Map) target.metadata).parameters) : [:]
+        return sideKeepOf(ec, automation, source, (Map) target.connector, (String) target.serviceName, options, keepInSpark)
+    }
+
+    /** Whether serviceName's definition declares the in-parameter (ServiceDefinition.inParameterNameList). */
+    protected static boolean declaresParameter(def ec, String serviceName, String parameterName) {
+        if (!serviceName || !parameterName) return false
+        return ec.service.getServiceDefinition(serviceName)?.inParameterNameList?.contains(parameterName) ? true : false
     }
 
     /**
@@ -2807,9 +2924,31 @@ class AutomationExecutionSupport {
                 file1KeysOutLocation: window?.auditFile1KeysOut,
                 file2KeysOutLocation: window?.auditFile2KeysOut,
         ].findAll { it.value != null } as Map<String, Object>
+        // DAR-BE-318 (plan 3b-2b, Task 14): each side whose Keep runs in Spark, keyed FILE_1/FILE_2; sent only when one does,
+        // so a compare with no Spark Keep is called exactly as before.
+        Map<String, Map> keepBySide = [:]
+        Map sideKeep1 = sideKeepOfResult(ec, automation, file1Source, file1Result, params)
+        Map sideKeep2 = sideKeepOfResult(ec, automation, file2Source, file2Result, params)
+        if (KeepStepSupport.applies(sideKeep1)) keepBySide.put(FILE_SIDE_1, sideKeep1)
+        if (KeepStepSupport.applies(sideKeep2)) keepBySide.put(FILE_SIDE_2, sideKeep2)
+        if (keepBySide) serviceParams.keepBySide = keepBySide
 
         return dispatchInternalService(ec,
                 "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", serviceParams)
+    }
+
+    /**
+     * DAR-BE-318 (plan 3b-2b, Task 14): the kept count of each side whose Keep ran in Spark at the compare
+     * (keepSummaryBySide), keyed FILE_1/FILE_2. Empty when no side kept in Spark.
+     */
+    static Map<String, Integer> keptCountsBySide(Map<String, Object> reconcileResult) {
+        Map summaries = reconcileResult?.keepSummaryBySide instanceof Map ? (Map) reconcileResult.keepSummaryBySide : [:]
+        Map<String, Integer> counts = [:]
+        [(FILE_SIDE_1): "file1", (FILE_SIDE_2): "file2"].each { String side, String prefix ->
+            Object kept = summaries.get(prefix) instanceof Map ? ((Map) summaries.get(prefix)).get("keptCount") : null
+            if (kept instanceof Number) counts.put(side, ((Number) kept).intValue())
+        }
+        return counts
     }
 
     /**

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Test only (on the test classpath, never shipped): made-up systems' extracts for AutomationKeepParityTests (DAR-BE-318
+         plan 3b-2b, Task 14), so the automation path's Keep is tested with no system component installed. Tests pass their own
+         extractor closure, so no body ever reads anything; what matters is what each declares.
+         - SparkKeptRecords: an extract that has stopped filtering (no sourceFilters), so its side's Keep runs in Spark. It
+           takes the Keep fields (keepRuleFields) and readFields.
+         - ReadFilteredRecords: an extract that still filters (it declares sourceFilters), as every real one does until plan
+           3b-2b Tasks 17-23: today's behaviour, the "before" of the parity.
+         - LedgerRecords: the other side, which takes no Keep and can be read by key. -->
+    <service verb="extract" noun="SparkKeptRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="readFields" type="List"/>
+            <parameter name="keepRuleFields" type="List"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="outputLocation"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
+    <service verb="extract" noun="ReadFilteredRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="readFields" type="List"/>
+            <parameter name="sourceFilters" type="List"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="outputLocation"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
+    <service verb="extract" noun="LedgerRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="outputLocation"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
+</services>

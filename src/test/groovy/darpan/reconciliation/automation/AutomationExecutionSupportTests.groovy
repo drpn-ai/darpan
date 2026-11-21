@@ -3117,6 +3117,7 @@ class AutomationExecutionSupportTests {
         FakeEc ec = fakeEc()
         ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
                 automationId   : "AUTO_API",
+                companyUserGroupId: "TENANT_A",
                 fileSide       : "FILE_1",
                 sequenceNum    : 2,
                 fieldExpression: "returnWorkflowStatus",
@@ -3125,6 +3126,7 @@ class AutomationExecutionSupportTests {
         ])
         ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
                 automationId   : "AUTO_API",
+                companyUserGroupId: "TENANT_A",
                 fileSide       : "FILE_1",
                 sequenceNum    : 1,
                 fieldExpression: "salesChannelEnumId",
@@ -3132,7 +3134,7 @@ class AutomationExecutionSupportTests {
                 filterValues   : "POS_SALES_CHANNEL",
         ])
 
-        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1")
+        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", "TENANT_A")
 
         assertEquals([1, 2], filters*.sequenceNum)
         assertEquals("salesChannelEnumId", filters[0].fieldExpression)
@@ -3149,6 +3151,7 @@ class AutomationExecutionSupportTests {
         FakeEc ec = fakeEc()
         ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
                 automationId   : "AUTO_API",
+                companyUserGroupId: "TENANT_A",
                 fileSide       : "FILE_1",
                 sequenceNum    : 1,
                 fieldExpression: '$.records[*].salesChannelEnumId',
@@ -3156,7 +3159,7 @@ class AutomationExecutionSupportTests {
                 filterValues   : "POS_SALES_CHANNEL",
         ])
 
-        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1")
+        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", "TENANT_A")
 
         assertEquals("salesChannelEnumId", filters[0].fieldExpression)
         List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(filters)
@@ -3164,6 +3167,268 @@ class AutomationExecutionSupportTests {
                 [orderId: "O-1", salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
         assertNull(SourceFilterSupport.evaluate(
                 [orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
+    }
+
+    // ==================================================================================================
+    // DAR-BE-318 plan 3b-2b, Task 14: the automation path keeps in Spark, from the automation's OWN filter rows
+    // (Ruling 3b2b-15), read for the automation's tenant only. ACME is a made-up system: core runs with no system
+    // repo loaded. The compare is the fake's; the Spark side of it is AutomationKeepParityTests.
+    // ==================================================================================================
+
+    private static final String ACME_EXTRACT = "reconciliation.AcmeKeepExtractionServices.extract#AcmeRecords"
+
+    @Test
+    void anotherTenantsFilterRowsAreNeverRead() {
+        // Review Focus 4. The scheduler has no active tenant, so nothing but the explicit condition keeps tenant B's
+        // rows out: a row stamped for B under A's automation id (a copied or mis-stamped row) is never read.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+        addAutomationFilter(ec, "TENANT_B", "FILE_1", 2, "status", "EXCLUDE_IN", "OPEN")
+        addAutomationFilter(ec, "TENANT_B", "FILE_1", 3, "region", "INCLUDE_IN", "NORTH")
+
+        List<Map<String, Object>> rows = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", "TENANT_A")
+        assertEquals([1], rows*.sequenceNum)
+
+        // ...and the run's Spark Keep for that side holds A's rule alone.
+        Map extracted = acmeExtract(ec, "FILE_1")
+        assertEquals(["A:1"], ((List<Map>) extracted.result.sideKeep.rules)*.id)
+        assertEquals([["VOID"]], ((List<Map>) extracted.result.sideKeep.rules)*.values)
+        // ...as does a side whose extract still filters: it is sent A's row only.
+        ec.service.declaredInParameters = ["sourceFilters"]
+        Map atRead = acmeExtract(ec, "FILE_1")
+        assertEquals([1], ((List<Map>) atRead.params.sourceFilters)*.sequenceNum)
+    }
+
+    @Test
+    void anAutomationWithNoTenantHasItsFilterRowsRefused() {
+        FakeEc ec = fakeEc()
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
+            AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", " ")
+        }
+        assertTrue(refused.message.contains("its own tenant"), refused.message)
+    }
+
+    @Test
+    void aScheduledRunKeepsInSparkFromItsOwnFilters() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, '$.records[*].status', "EXCLUDE_IN", "VOID,CANCELLED")
+
+        Map extracted = acmeExtract(ec, "FILE_1")
+
+        // The read gets no filters: its records are all read, and Spark keeps at the compare's ingest.
+        assertFalse(extracted.params.containsKey("sourceFilters"))
+        Map sideKeep = (Map) extracted.result.sideKeep
+        assertEquals("SPARK", sideKeep.placement)
+        assertEquals([], sideKeep.readFilters)
+        assertEquals(true, sideKeep.writeSidecar, "the connector row says Y")
+        assertEquals(["status"] as Set, sideKeep.fields)
+        Map rule = ((List<Map>) sideKeep.rules)[0]
+        assertEquals(["TENANT", "EXCLUDE_IN", ["VOID", "CANCELLED"]], [rule.source, rule.operator, rule.values])
+        // An extract that declares no Keep fields parameter and no readFields is sent neither.
+        assertFalse(extracted.params.containsKey("keepRuleFields"))
+        assertFalse(extracted.params.containsKey("readFields"))
+    }
+
+    @Test
+    void aSparkSidesReadCarriesItsKeepFieldsWhereTheExtractTakesThem() {
+        // Ruling 3b2b-4: the read no longer filters, so it must keep the fields Spark's Keep reads.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 2, "region", "INCLUDE_PREFIX", "NO")
+        ec.service.declaredInParameters = ["keepRuleFields", "readFields"]
+
+        Map extracted = acmeExtract(ec, "FILE_1")
+
+        assertEquals(["status", "region"], extracted.params.keepRuleFields)
+        assertEquals(["status", "region"], extracted.params.readFields)
+        assertFalse(extracted.params.containsKey("sourceFilters"))
+    }
+
+    @Test
+    void aSideWhoseExtractStillTakesItsFiltersFiltersAtTheRead() {
+        // Until a connector stops filtering (Tasks 17-23 drop the filter parameter from its extract service), its read
+        // filters exactly as today and Spark runs nothing over it: no rules, no keepBySide, nothing changes.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, '$.records[*].status', "EXCLUDE_IN", "VOID")
+        ec.service.declaredInParameters = ["sourceFilters", "keepRuleFields"]
+
+        Map extracted = acmeExtract(ec, "FILE_1")
+
+        assertEquals([[sequenceNum: 1, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "VOID"]],
+                ((List<Map>) extracted.params.sourceFilters).collect { new LinkedHashMap(it).subMap(["sequenceNum", "fieldExpression", "operator", "filterValues"]) })
+        assertEquals("READ", extracted.result.sideKeep.placement)
+        assertEquals([], extracted.result.sideKeep.rules)
+        assertFalse(extracted.params.containsKey("keepRuleFields"))
+
+        Map run = runAcmeAutomation(ec, [:])
+        assertFalse(run.reconcile.params.containsKey("keepBySide"))
+    }
+
+    @Test
+    void aCallerWhoseCompareTakesNoKeepKeepsTheFiltersAtTheRead() {
+        // An evaluate run (its compare takes no keepBySide) and the sync pulse (it reads the records itself) do not say
+        // keepInSpark: a Spark side's read is sent its rows and filters, exactly as before Keep moved into Spark.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+        ec.service.declaredInParameters = ["keepRuleFields"]
+
+        Map extracted = acmeExtract(ec, "FILE_1", false)
+
+        assertEquals(["status"], ((List<Map>) extracted.params.sourceFilters)*.fieldExpression)
+        assertEquals("READ", extracted.result.sideKeep.placement)
+        assertFalse(extracted.params.containsKey("keepRuleFields"))
+    }
+
+    @Test
+    void aDataDefinedSideGetsItsFiltersAtRead() {
+        // Ruling 3b2b-16: a data-defined endpoint's filter is a positioned step of its pipeline, so it keeps filtering at
+        // the read, whatever its extract declares.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec, [dataSourceDefinitionId: "ACME_ORDERS_DEF"])
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "INCLUDE_IN", "OPEN")
+        ec.service.declaredInParameters = ["keepRuleFields", "readFields"]
+
+        Map extracted = acmeExtract(ec, "FILE_1")
+
+        assertEquals(["status"], ((List<Map>) extracted.params.sourceFilters)*.fieldExpression)
+        assertEquals("READ", extracted.result.sideKeep.placement)
+        assertFalse(extracted.params.containsKey("keepRuleFields"))
+        assertFalse(extracted.params.containsKey("readFields"), "a READ side's filter fields are its own read's business")
+        Map run = runAcmeAutomation(ec, [:])
+        assertFalse(run.reconcile.params.containsKey("keepBySide"))
+    }
+
+    @Test
+    void aDriftedAutomationStillReadsItsOwnFilters() {
+        // Ruling 3b2b-15 (overrides 3b2b-6 for automations in this plan): an automation whose rows drifted from its
+        // compare scope's keeps reading its own; switching stores is plan 3b-2c. The scope's rows are never read.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+        ec.entity.add("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", sequenceNum: 1,
+                fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "CANCELLED", companyUserGroupId: "TENANT_A"])
+
+        Map run = runAcmeAutomation(ec, [:])
+
+        Map keep1 = (Map) ((Map) run.reconcile.params.keepBySide).FILE_1
+        assertEquals([["VOID"]], ((List<Map>) keep1.rules)*.values)
+        assertEquals(0, ec.entity.listCount("darpan.rule.RuleSetCompareSourceFilter"))
+    }
+
+    @Test
+    void theCompareTakesEachSparkSidesKeepAndTheRecordedCountIsWhatItKept() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+
+        Map run = runAcmeAutomation(ec, [file1: [keptCount: 7, setAsideCount: 3]])
+
+        Map keepBySide = (Map) run.reconcile.params.keepBySide
+        // FILE_2 also keeps in Spark, but with no rule there is nothing to run: only FILE_1 is sent.
+        assertEquals(["FILE_1"], keepBySide.keySet() as List)
+        assertEquals("SPARK", keepBySide.FILE_1.placement)
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, execution.statusEnumId)
+        assertEquals(7, execution.file1RecordCount, "the extract read 10; Keep kept 7, the count a filtering read reported")
+        assertEquals(9, execution.file2RecordCount)
+    }
+
+    @Test
+    void aSideWhoseSparkKeepKeptNothingClosesTheWindowAsNoData() {
+        // A filtering read that drops every record reports no data, and the window closes NO_DATA without a finding or a
+        // message. A Spark side's read holds every record, so the compare's kept count is what says so now.
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "INCLUDE_IN", "OPEN")
+
+        Map run = runAcmeAutomation(ec, [file1: [keptCount: 0, setAsideCount: 10]])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, execution.statusEnumId)
+        assertEquals(0, execution.file1RecordCount)
+        assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, ((List<Map>) run.result.executionResults)[0].statusEnumId)
+        assertNull(execution.resultDataManagerPath)
+        assertFalse(ec.service.calls.any { it.serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload" })
+    }
+
+    @Test
+    void aSideThatTakesNoKeepReadsNoFilterRows() {
+        // NONE placement (no filter parameter on the connector: uploads, databases): nothing to filter, nothing read.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE ?
+                    [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(), recordCount: 3] :
+                    call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope" ?
+                            [diffLocation: "reconciliation-runs/AUTO_API/r.json", diffFileName: "r.json", differenceCount: 0] : [:]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(0, ec.entity.listCount("darpan.reconciliation.ReconciliationAutomationSourceFilter"))
+        FakeServiceCall reconcile = ec.service.calls.find { it.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope" }
+        assertFalse(reconcile.params.containsKey("keepBySide"))
+    }
+
+    /** AUTO_API's two sides moved onto ACME, a made-up system whose connector takes Keep (filterParameterName). */
+    private static void seedAcmeSides(FakeEc ec, Map connectorExtras = [:]) {
+        seedApiAutomation(ec)
+        ec.entity.add(SourceSystemConnectorSupport.ENTITY_NAME, [
+                systemEnumId          : "ACME",
+                extractServiceName    : ACME_EXTRACT,
+                dateFromParameterName : "windowStart",
+                dateToParameterName   : "windowEnd",
+                filterParameterName   : "sourceFilters",
+                excludedRecordsSidecar: "Y",
+                enabled               : "Y",
+        ] + connectorExtras)
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].findAll { it.automationId == "AUTO_API" }.each { FakeValue source ->
+            source.put("systemEnumId", "ACME")
+            source.put("safeMetadataJson", '{"extractServiceName":"' + ACME_EXTRACT + '"}')
+        }
+    }
+
+    private static void addAutomationFilter(FakeEc ec, String tenant, String fileSide, int sequenceNum, String field,
+                                            String operator, String values) {
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [automationId: "AUTO_API", fileSide: fileSide,
+                sequenceNum: sequenceNum, fieldExpression: field, operator: operator, filterValues: values, companyUserGroupId: tenant])
+    }
+
+    /** One side's scheduled dispatch, as the run loop makes it (keepInSpark): [result, params] (what the extract was sent). */
+    private static Map acmeExtract(FakeEc ec, String fileSide, boolean keepInSpark = true) {
+        def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+        def source = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.automationId == "AUTO_API" && it.fileSide == fileSide }
+        Map sent = null
+        Map result = AutomationExecutionSupport.callConfiguredSourceExtractor(ec, automation, source,
+                [childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")],
+                [automationExecutionId: "AUTO_EXEC_X", (AutomationExecutionSupport.KEEP_IN_SPARK): keepInSpark, liveExtractor: { String serviceName, Map params ->
+                    sent = new LinkedHashMap(params)
+                    [dataAvailable: true, fileLocation: "runtime://tmp/${fileSide}.json".toString(), recordCount: 10]
+                }])
+        return [result: result, params: sent]
+    }
+
+    /** AUTO_API run once on ACME; the compare answers keepSummaryBySide. [result, reconcile (the compare call)]. */
+    private static Map runAcmeAutomation(FakeEc ec, Map keepSummaryBySide) {
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == ACME_EXTRACT) {
+                return [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(), recordCount: call.params.fileSide == "FILE_1" ? 10 : 9]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [diffLocation    : "reconciliation-runs/AUTO_API/20260501/result.json", diffFileName: "result.json",
+                        differenceCount : 2, onlyInFile1Count: 1, onlyInFile2Count: 1, validationErrors: [], processingWarnings: []] +
+                        (keepSummaryBySide ? [keepSummaryBySide: keepSummaryBySide] : [:])
+            }
+            return [:]
+        }
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+        return [result: result, reconcile: ec.service.calls.find { it.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope" }]
     }
 
     // ==================================================================================================

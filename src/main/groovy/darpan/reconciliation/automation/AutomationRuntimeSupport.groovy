@@ -53,12 +53,18 @@ class AutomationRuntimeSupport {
      *
      * [P0#4 step 3] DUAL-CONTEXT: same as loadAutomationSources — the scheduled runner has no active
      * tenant. Trust anchor is automation.companyUserGroupId, gated at run#AutomationNow for user calls.
+     * DAR-BE-318 (plan 3b-2b, Task 14): the read is pinned to the automation's own tenant by an explicit
+     * companyUserGroupId condition, since the scheduler's context has none to filter by (Review Focus 4). A row
+     * stamped for another tenant is never read, whatever its automationId; a blank tenant throws.
      */
-    static List<Map<String, Object>> loadAutomationSourceFilters(def ec, String automationId, String fileSide) {
+    static List<Map<String, Object>> loadAutomationSourceFilters(def ec, String automationId, String fileSide, String companyUserGroupId) {
+        String tenant = normalize(companyUserGroupId)
+        if (!tenant) throw new IllegalArgumentException("Automation ${automationId}'s source filters are read for its own tenant; it names none.")
         if (!automationId || !fileSide) return []
         List rows = TenantScopedFinder.findGlobalUnscoped(
                 ec, "darpan.reconciliation.ReconciliationAutomationSourceFilter",
-                "automation runner loads by automationId; tenant gated at run#AutomationNow user entry via canAccessTenantRecord")
+                "automation runner loads by automationId; pinned to the automation's companyUserGroupId (the scheduler has no active tenant)")
+                .condition("companyUserGroupId", tenant)
                 .condition("automationId", automationId)
                 .condition("fileSide", fileSide)
                 .orderBy("sequenceNum")

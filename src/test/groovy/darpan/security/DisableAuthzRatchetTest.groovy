@@ -49,8 +49,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *       {@code TenantScopedFinder} has no create-side equivalent (it only wraps reads), so this stays
  *       a bare service call like the other writes above. The read side of the same sweep
  *       ({@code ReconciliationAutomation} list and the per-automation/fileSide existence check) both
- *       route through {@code TenantScopedFinder.findGlobalUnscoped}, matching
- *       {@code AutomationRuntimeSupport.loadAutomationSourceFilters}, and add nothing to this count.
+ *       route through {@code TenantScopedFinder.findGlobalUnscoped}, as
+ *       {@code AutomationRuntimeSupport.loadAutomationSourceFilters} does (that read is also pinned to the
+ *       automation's own companyUserGroupId since DAR-BE-318 plan 3b-2b Task 14, the run's Keep rows), and add
+ *       nothing to this count.
  *       KEPT BARE.</li>
  * </ul>
  *

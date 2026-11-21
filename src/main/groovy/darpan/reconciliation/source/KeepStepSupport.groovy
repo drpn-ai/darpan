@@ -181,11 +181,10 @@ class KeepStepSupport {
                     [id: rule.get("id"), sequenceNum: rule.get("sequenceNum"), label: rule.get("label"), source: rule.get("source")]
                 },
                 configuredExclusions: rules.findAll { it.get("source") == "TENANT" }.collect { Map rule ->
-                    Map filter = tenantFilterOf(rule)
                     [sequenceNum     : rule.get("sequenceNum"),
                      fieldExpression : rule.get("label"),
-                     operator        : filter.operator,
-                     values          : filter.values,
+                     operator        : rule.get("operator"),
+                     values          : new ArrayList((List) rule.get("values")),
                      excludedCount   : countOf("${rule.get('id')}|${SourceFilterSupport.REASON_VALUE}".toString()),
                      fieldAbsentCount: countOf("${rule.get('id')}|${SourceFilterSupport.REASON_FIELD_ABSENT}".toString())]
                 },
@@ -194,21 +193,6 @@ class KeepStepSupport {
                 },
                 keptCount           : counts.get(null) ?: 0L,
                 setAsideCount       : setAside]
-    }
-
-    /**
-     * The source filter a TENANT rule states, read back from its VALUE test in the shape SourceFilterSupport.toKeepRules writes
-     * (front-end A): IN is EXCLUDE_IN, NOT_IN is INCLUDE_IN, not STARTS_WITH_ANY is INCLUDE_PREFIX. Anything else throws, naming
-     * the rule: front-end A and this reader disagree, and a wrong configuredExclusions entry would mislead the conclude pass.
-     */
-    private static Map tenantFilterOf(Map rule) {
-        Map value = (Map) ((List) rule.get("tests")).find { ((Map) it).get("reason") == SourceFilterSupport.REASON_VALUE }?.get("test")
-        Map compare = value?.get("kind") == "not" ? (Map) value.get("of") : value
-        String op = compare?.get("kind") == "compare" ? compare.get("op") as String : null
-        String operator = value?.get("kind") == "not" ? (op == "STARTS_WITH_ANY" ? SourceFilterSupport.OPERATOR_INCLUDE_PREFIX : null)
-                : op == "IN" ? SourceFilterSupport.OPERATOR_EXCLUDE_IN : op == "NOT_IN" ? SourceFilterSupport.OPERATOR_INCLUDE_IN : null
-        if (operator == null) throw new IllegalArgumentException("Keep rule ${rule.get('id')} is a tenant rule that states no source filter.")
-        return [operator: operator, values: new ArrayList((List) compare.get("values"))]
     }
 
     private static Column quoted(String name) {

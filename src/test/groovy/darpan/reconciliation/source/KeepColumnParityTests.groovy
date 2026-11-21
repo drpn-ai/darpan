@@ -256,6 +256,8 @@ class KeepColumnParityTests {
         assertEquals([3, 4, 5], rules*.sequenceNum)
         assertEquals(["a", "b", "c"], rules*.label)
         assertEquals(["TENANT", "TENANT", "TENANT"], rules*.source)
+        assertEquals(["EXCLUDE_IN", "INCLUDE_IN", "INCLUDE_PREFIX"], rules*.operator)
+        assertEquals([["x", "y"], ["p"], ["EXC-"]], rules*.values)
         assertEquals([["VALUE"], ["FIELD_ABSENT", "VALUE"], ["FIELD_ABSENT", "VALUE"]], rules*.tests*.reason)
         assertEquals([kind: "compare", field: "a", text: "GROOVY", op: "IN", values: ["x", "y"], valueKind: "TEXT", fold: "A_UPPER"], rules[0].tests[0].test)
         assertEquals([op: "IS_NULL", values: null], [op: rules[1].tests[0].test.op, values: rules[1].tests[0].test.values])

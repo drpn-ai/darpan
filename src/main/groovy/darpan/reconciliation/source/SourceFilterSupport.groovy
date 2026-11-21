@@ -199,7 +199,8 @@ class SourceFilterSupport {
     /**
      * DAR-BE-318 (plan 3b-2b, front-end A). The parsed rules in the one Keep rule shape (KeepRules), so Spark runs what
      * {@link #evaluate} tests: id "A:<sequenceNum>", label = the field (what _excludedBy names), source TENANT, every test
-     * on the Groovy text of the value with the A_UPPER fold.
+     * on the Groovy text of the value with the A_UPPER fold. Each rule also carries the filter's operator and values as
+     * written, which the Keep summary reports in configuredExclusions (applyToRecords' shape).
      *   EXCLUDE_IN     [IN -> VALUE]
      *   INCLUDE_IN     [IS_NULL -> FIELD_ABSENT, NOT_IN -> VALUE]
      *   INCLUDE_PREFIX [IS_NULL -> FIELD_ABSENT, not STARTS_WITH_ANY -> VALUE]
@@ -226,7 +227,7 @@ class SourceFilterSupport {
                     tests = [[test: compare("IN", values), reason: REASON_VALUE]]
             }
             return [id: "A:${rule.get('sequenceNum')}".toString(), sequenceNum: (rule.get("sequenceNum") as Integer), label: field,
-                    source: "TENANT", tests: tests] as Map
+                    source: "TENANT", tests: tests, operator: rule.get("operator"), values: new ArrayList<String>(values)] as Map
         } as List<Map>
     }
 

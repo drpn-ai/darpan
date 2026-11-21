@@ -66,16 +66,16 @@ class KeepStepSupportTests {
         return [kind: "compare", field: field, text: "GROOVY", op: op, values: values, valueKind: "TEXT", fold: "A_UPPER"] + over
     }
 
-    /** Built-in first, then the tenant's rules as SourceFilterSupport's front-end A states them. */
+    /** Built-in first, then the tenant's rules as SourceFilterSupport.toKeepRules states them (operator and values carried). */
     private static List<Map> rules() {
         return [[id: "BUILT_IN:1", sequenceNum: 1, label: "Acme payment lines", source: "BUILT_IN",
                  tests: [[test: cmp("lineType", "EQ", ["X"], [text: "FACT", fold: "NONE"]), reason: "BUILT_IN"]]],
-                [id: "A:1", sequenceNum: 1, label: "status", source: "TENANT",
+                [id: "A:1", sequenceNum: 1, label: "status", source: "TENANT", operator: "EXCLUDE_IN", values: ["cancelled"],
                  tests: [[test: cmp("status", "IN", ["cancelled"]), reason: "VALUE"]]],
-                [id: "A:2", sequenceNum: 2, label: "channel", source: "TENANT",
+                [id: "A:2", sequenceNum: 2, label: "channel", source: "TENANT", operator: "INCLUDE_IN", values: ["web"],
                  tests: [[test: cmp("channel", "IS_NULL", null), reason: "FIELD_ABSENT"],
                          [test: cmp("channel", "NOT_IN", ["web"]), reason: "VALUE"]]],
-                [id: "A:3", sequenceNum: 3, label: "region", source: "TENANT",
+                [id: "A:3", sequenceNum: 3, label: "region", source: "TENANT", operator: "INCLUDE_PREFIX", values: ["zz"],
                  tests: [[test: cmp("region", "IS_NULL", null), reason: "FIELD_ABSENT"],
                          [test: [kind: "not", of: cmp("region", "STARTS_WITH_ANY", ["zz"])], reason: "VALUE"]]]]
     }
@@ -137,6 +137,20 @@ class KeepStepSupportTests {
         assertEquals(2, summary.keptCount)
         assertEquals(4, summary.setAsideCount)
         assertEquals(1, ((List) out.persisted).size())
+    }
+
+    @Test
+    void configuredExclusionsAreWhatApplyToRecordsReportsForTheSameFilters() {
+        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules([
+                [sequenceNum: 1, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "cancelled, void"],
+                [sequenceNum: 2, fieldExpression: "channel", operator: "INCLUDE_IN", filterValues: "web"],
+                [sequenceNum: 3, fieldExpression: "region", operator: "INCLUDE_PREFIX", filterValues: "zz"]])
+        File file = extract(sixRecords())
+        ingest(file, sideKeep(SourceFilterSupport.toKeepRules(parsed)))
+
+        Map today = SourceFilterSupport.applyToRecords(sixRecords(), parsed)
+        ExcludedRecordsSidecar.discard((Map) today.excludedCollector)
+        assertEquals(JsonOutput.toJson(today.configuredExclusions), JsonOutput.toJson(KeepArtifacts.readSummary(file).configuredExclusions))
     }
 
     @Test

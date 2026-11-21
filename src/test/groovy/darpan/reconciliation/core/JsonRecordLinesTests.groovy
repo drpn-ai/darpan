@@ -1,6 +1,12 @@
 package darpan.reconciliation.core
 
+import darpan.judge.JudgeReplaySupport
+import darpan.reconciliation.source.KeepRules
+import groovy.json.JsonParserType
+import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.types.DataTypes
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
 import org.junit.jupiter.api.AfterAll
@@ -142,5 +148,103 @@ class JsonRecordLinesTests {
 
     private static List<String> sorted(Dataset<String> json) {
         return json.collectAsList().sort()
+    }
+
+    // ------------------------------------------------------------------------------------ DAR-BE-318 Keep field text
+
+    private static List<Map> inj(String field, String text, int n = 0) {
+        return [[column: KeepRules.INJECTED_PREFIX + n, field: field, text: text] as Map]
+    }
+
+    private List<Map> linesOf(String name, String text, List<Map> injections) {
+        File source = extract(name, text)
+        File lines = JsonRecordLines.forRecordArray(source.absolutePath, paths('$.records[*].id'), dir.parentFile, injections)
+        return lines.readLines("UTF-8").findAll { it }.collect { (Map) new JsonSlurper().parseText(it) }
+    }
+
+    @Test
+    void noInjectionsIsByteIdentical() {
+        File source = extract("plain.json", ORDERS)
+        List<Map> infos = paths('$.records[*].orderName')
+        byte[] before = JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile).bytes
+        byte[] empty = JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile, []).bytes
+        byte[] nulls = JsonRecordLines.forRecordArray(source.absolutePath, infos, dir.parentFile, null).bytes
+        assertTrue(Arrays.equals(before, empty))
+        assertTrue(Arrays.equals(before, nulls))
+        assertTrue(!new String(before, "UTF-8").contains("_darpan"))
+    }
+
+    @Test
+    void groovyTextIsTheValuesToString() {
+        String json = '{"records":[{"id":"1","v":24.00},{"id":"2","v":1.0E7},{"id":"3","v":1.0E+7},{"id":"4","v":7},' +
+                '{"id":"5","v":true},{"id":"6","v":"x"},{"id":"7","v":[1, 2]},{"id":"8","v":{"a":1}}]}'
+        List<Map> got = linesOf("groovy.json", json, inj("v", "GROOVY"))
+        List<Object> memory = (List<Object>) ((Map) new JsonSlurper().setType(JsonParserType.CHARACTER_SOURCE).parseText(json)).get("records")
+        got.eachWithIndex { Map line, int i ->
+            Object inMemory = ((Map) memory[i]).get("v")
+            String expected = i < 3 ? ["24.00", "1.0E7", "1.0E+7"][i] : darpan.common.ValueSupport.normalize(inMemory)
+            assertEquals(expected, line.get("_darpanKeep_0"), "record ${i}")
+        }
+        assertEquals("[1, 2]", got[6].get("_darpanKeep_0"))
+        assertEquals("{a=1}", got[7].get("_darpanKeep_0"))
+        assertEquals("true", got[4].get("_darpanKeep_0"))
+    }
+
+    @Test
+    void factTextIsTheFlatText() {
+        String json = '{"records":[{"id":"1","v":24.00},{"id":"2","v":1.0E7},{"id":"3","v":"000123"},{"id":"4","v":[1,{"b":2.50}]},' +
+                '{"id":"5","v":{"a":1}},{"id":"6","v":false}]}'
+        List<Map> got = linesOf("fact.json", json, inj("v", "FACT"))
+        List<Map> memory = (List<Map>) ((Map) new JsonSlurper().parseText(json)).get("records")
+        got.eachWithIndex { Map line, int i ->
+            assertEquals(JudgeReplaySupport.flat(memory[i]).get("v"), line.get("_darpanKeep_0"), "record ${i}")
+        }
+        assertEquals("24", got[0].get("_darpanKeep_0"))
+        assertEquals("10000000", got[1].get("_darpanKeep_0"))
+        assertEquals("000123", got[2].get("_darpanKeep_0"))
+    }
+
+    @Test
+    void onlyTheTrimmedCaseSensitiveKeyMatches() {
+        String json = '{"records":[{"id":"1","Status":"A"},{"id":"2","status":"B"},{"id":"3"," status ":"C"},' +
+                '{"id":"4","Status":"first","status":"second"},{"id":"5","status":null,"Status":"x"}]}'
+        List<Map> got = linesOf("keys.json", json, inj("status", "GROOVY"))
+        assertTrue(!got[0].containsKey("_darpanKeep_0"), "Status is another key")
+        assertEquals("B", got[1].get("_darpanKeep_0"))
+        assertEquals("C", got[2].get("_darpanKeep_0"), "the key is trimmed")
+        assertEquals("second", got[3].get("_darpanKeep_0"))
+        assertTrue(!got[4].containsKey("_darpanKeep_0"), "the first match is null, so absent")
+    }
+
+    @Test
+    void anAbsentOrNullValueLeavesTheColumnOut() {
+        List<Map> got = linesOf("absent.json", '{"records":[{"id":"1"},{"id":"2","v":null},{"id":"3","v":""},{"id":"4","n":{"v":"deep"}}]}',
+                inj("v", "GROOVY"))
+        assertTrue(!got[0].containsKey("_darpanKeep_0"))
+        assertTrue(!got[1].containsKey("_darpanKeep_0"))
+        assertEquals("", got[2].get("_darpanKeep_0"))
+        assertTrue(!got[3].containsKey("_darpanKeep_0"), "only top-level keys")
+    }
+
+    @Test
+    void everyLineCarriesItsRowOrdinal() {
+        List<Map> got = linesOf("rows.json", '{"records":[{"id":"a"},"skip",{"id":"b"},7,{"id":"c","v":1}]}',
+                [[column: "_darpanKeep_0", field: "v", text: "GROOVY"] as Map, [column: "_darpanKeep_1", field: "v", text: "FACT"] as Map])
+        assertEquals([0, 1, 2], got.collect { ((Number) it.get(KeepRules.ROW_COLUMN)).intValue() })
+        assertEquals("1", got[2].get("_darpanKeep_0"))
+        assertEquals("1", got[2].get("_darpanKeep_1"))
+    }
+
+    @Test
+    void theSavedReadSchemaGainsTheInjectedColumns() {
+        StructType document = new StructType().add("records", DataTypes.createArrayType(new StructType().add("id", DataTypes.StringType)))
+        List<Map> infos = paths('$.records[*].id')
+        StructType plain = JsonRecordLines.recordSchema(document, infos, null)
+        assertEquals(["id"], plain.fieldNames() as List)
+        StructType with = JsonRecordLines.recordSchema(document, infos, inj("v", "GROOVY"))
+        assertEquals(["id", "_darpanKeep_0", "_darpanRow"], with.fieldNames() as List)
+        assertEquals(DataTypes.StringType, with.apply("_darpanKeep_0").dataType())
+        assertEquals(DataTypes.LongType, with.apply("_darpanRow").dataType())
+        assertNull(JsonRecordLines.recordSchema(null, infos, inj("v", "GROOVY")))
     }
 }

@@ -268,17 +268,17 @@ class JudgeReplaySupport {
 
         private Map advance() {
             while (matched.hasNext()) {
-                Map row = (Map) JsonRecordStream.parseText(matched.next())
+                Map row = parseRow(matched.next(), "matched pair")
                 String id = row.primaryId as String
                 SIDES.each { drop(it, id) }
                 count("matched")
                 return [compareId: id, file1: FactText.flat((Map) row.file1), file2: FactText.flat((Map) row.file2)]
             }
             while (missing.hasNext()) {
-                Map row = (Map) JsonRecordStream.parseText(missing.next())
+                Map row = parseRow(missing.next(), "missing pair")
                 String type = row.diffType as String
                 String id = row.primaryId as String
-                Map data = row.data ? FactText.flat((Map) JsonRecordStream.parseText(row.data as String)) : [:]
+                Map data = row.data ? FactText.flat(parseRow(row.data as String, "missing pair " + row.primaryId + " data")) : [:]
                 if (type == "MISSING_IN_FILE_2") {
                     drop("file1", id)
                     return count("missing") + [compareId: id, file1: data, file2: readBack.file2?.remove(id)]
@@ -311,6 +311,15 @@ class JudgeReplaySupport {
         private Map count(String kind) {
             counts.put(kind, (counts.get(kind) ?: 0) + 1)
             return [:]
+        }
+
+        /** One row's JSON; a line that is not JSON fails as an unchecked error naming the row, as the slurper did. */
+        private static Map parseRow(String json, String what) {
+            try {
+                return (Map) JsonRecordStream.parseText(json)
+            } catch (IOException e) {
+                throw new IllegalStateException("A " + what + " row is not valid JSON: " + e.getMessage(), e)
+            }
         }
 
         private static Iterator<String> rowsOf(Dataset df) {

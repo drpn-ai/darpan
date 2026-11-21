@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -432,23 +433,51 @@ class JudgeReplayTests {
 
     @Test
     void pairRowsReadAnIntegerBeyondTheLongRangeExactly() {
-        org.apache.spark.sql.SparkSession spark = org.apache.spark.sql.SparkSession.builder().appName("JudgeReplayTests-BigInt")
-                .master("local[1]").config("spark.ui.enabled", "false").getOrCreate()
+        org.apache.spark.sql.SparkSession spark = bigIntSpark()
         try {
             String data = '{"ref":12345678901234567890123,"lines":[{"serial":-99999999999999999999999999}],"price":12.50,"small":7}'
-            String line = groovy.json.JsonOutput.toJson([diffType: "MISSING_IN_FILE_2", primaryId: "k1", data: data])
-            org.apache.spark.sql.Dataset df = spark.read().json(spark.createDataset([line], org.apache.spark.sql.Encoders.STRING()))
-            List<Map> pairs = new JudgeReplaySupport.PairRows(null, df, [file1: [:], file2: [:]], [:], [:], [:]).toList()
-            assertEquals(1, pairs.size())
-            Map file1 = (Map) pairs[0].file1
-            assertEquals("12345678901234567890123", file1.ref)
-            assertEquals('[{"serial":-99999999999999999999999999}]', file1.lines)
-            assertEquals("12.5", file1.price)
-            assertEquals("7", file1.small)
-            assertEquals(["ref", "lines", "price", "small"], file1.keySet() as List)
+            for (String type : ["MISSING_IN_FILE_2", "MISSING_IN_FILE_1"]) {
+                Map pair = pairsOf(spark, null, [[diffType: type, primaryId: "k1", data: data]])[0]
+                Map side = (Map) (type == "MISSING_IN_FILE_2" ? pair.file1 : pair.file2)
+                assertEquals("12345678901234567890123", side.ref, type)
+                assertEquals('[{"serial":-99999999999999999999999999}]', side.lines, type)
+                assertEquals("12.5", side.price, type)
+                assertEquals("7", side.small, type)
+                assertEquals(["ref", "lines", "price", "small"], side.keySet() as List, type)
+            }
+            String matched = '{"primaryId":"k2","file1":{"ref":12345678901234567890123,"small":7},"file2":{"ref":-99999999999999999999999999,"small":7}}'
+            Map pair = pairsOf(spark, matched, [])[0]
+            assertEquals("12345678901234567890123", ((Map) pair.file1).ref)
+            assertEquals("-99999999999999999999999999", ((Map) pair.file2).ref)
+            assertEquals("7", ((Map) pair.file1).small)
         } finally {
             spark.stop()
         }
+    }
+
+    @Test
+    void pairRowsFailACorruptRowAsARuntimeError() {
+        org.apache.spark.sql.SparkSession spark = bigIntSpark()
+        try {
+            RuntimeException e = assertThrows(RuntimeException,
+                    { pairsOf(spark, null, [[diffType: "MISSING_IN_FILE_2", primaryId: "k9", data: "{not json"]]) })
+            assertTrue(e.message.contains("k9"), e.message)
+        } finally {
+            spark.stop()
+        }
+    }
+
+    private static org.apache.spark.sql.SparkSession bigIntSpark() {
+        return org.apache.spark.sql.SparkSession.builder().appName("JudgeReplayTests-BigInt").master("local[1]")
+                .config("spark.ui.enabled", "false").getOrCreate()
+    }
+
+    private static List<Map> pairsOf(org.apache.spark.sql.SparkSession spark, String matchedJson, List<Map> missingRows) {
+        org.apache.spark.sql.Dataset matched = matchedJson == null ? null :
+                spark.read().json(spark.createDataset([matchedJson], org.apache.spark.sql.Encoders.STRING()))
+        org.apache.spark.sql.Dataset missing = missingRows.isEmpty() ? null :
+                spark.read().json(spark.createDataset(missingRows.collect { groovy.json.JsonOutput.toJson(it) }, org.apache.spark.sql.Encoders.STRING()))
+        return new JudgeReplaySupport.PairRows(matched, missing, [file1: [:], file2: [:]], [:], [:], [:]).toList()
     }
 
     // --------------------------------------------------------------------------------------- tenant safety (P2-9)

@@ -371,16 +371,20 @@ class RunConclusionSupport {
                 add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
                 addFirstKeyRecord(byFirst, "KEPT", record, keyFields, normalizer, neededFirstFields)
             }
-            List exclusions = configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
-            // No metadata counts: the Keep summary's, when a Spark Keep ran (null = not applied, as before).
-            if (!exclusions) exclusions = KeepArtifacts.configuredExclusions(extractFile) ?: []
+            // Where a Spark Keep ran its summary decides what was set aside and extract metadata is ignored for it;
+            // with no .keep.json the metadata counts are read as before.
+            Map keep = KeepArtifacts.readSummary(extractFile)
+            List exclusions = keep != null ? ((keep.get("configuredExclusions") as List) ?: [])
+                    : configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
+            // A summary that reports set-aside records with no rows file lost its rows: unknown, never "not found".
+            boolean rowsLost = keep != null && ((keep.get("setAsideCount") ?: 0) as long) > 0 && !KeepArtifacts.rowsFile(extractFile).isFile()
             Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
                 add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
                 addFirstKeyRecord(byFirst, "EXCLUDED", record, keyFields, normalizer, neededFirstFields)
             }
             // Extractors write no sidecar when nothing was excluded, so a missing one is only unknown
             // when the side's own metadata does not prove that every rule dropped nothing.
-            boolean unknown = exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
+            boolean unknown = rowsLost || exclusions && (sidecar.present ? sidecar.truncated == true : !excludedNothing(exclusions))
             return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
                     excludedFirst: excludedFirst, unknownWhenAbsent: unknown, byFirst: byFirst]
         }

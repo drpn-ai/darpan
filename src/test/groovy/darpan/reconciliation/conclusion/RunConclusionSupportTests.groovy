@@ -423,6 +423,37 @@ class RunConclusionSupportTests {
     }
 
     @Test
+    void theKeepSummaryOutranksStaleZeroMetadata() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M6", orderLineId: "01"], [orderId: "M7", orderLineId: "01"]], [1], [KEEP_COUNTS])
+        // An extractor that no longer filters writes zero counts; the summary still says one record was set aside.
+        ns.text = JsonOutput.toJson([records: [[orderId: "M6", orderLineId: "01"], [orderId: "M7", orderLineId: "01"]],
+                                     metadata: [configuredExclusions: [[sequenceNum: 1, excludedCount: 0, fieldAbsentCount: 0]]]])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("UNEXPLAINED", onlyConclusion(doc).code)
+        assertEquals("UNKNOWN", ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }.presence)
+    }
+
+    @Test
+    void anEmptyKeepSummaryOutranksMetadataCounts() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M6", orderLineId: "01"]], [], [])
+        ns.text = JsonOutput.toJson([records: [[orderId: "M6", orderLineId: "01"]],
+                                     metadata: [configuredExclusions: [[sequenceNum: 1, excludedCount: 4, fieldAbsentCount: 0]]]])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("CONC_NEVER_REACHED_NS", onlyConclusion(doc).code)
+    }
+
+    @Test
+    void aSummaryThatLostItsRowsFileIsUnknown() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M6", orderLineId: "01"], [orderId: "M7", orderLineId: "01"]], [1], [])
+        KeepArtifacts.rowsFile(ns).delete()
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("UNEXPLAINED", onlyConclusion(doc).code)
+    }
+
+    @Test
     void anOldExtractWithMetadataCountsReadsAsBefore() {
         File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
         File ns = extract("ns.json", [[orderId: "M6", orderLineId: "01"]], [configuredExclusions: [[sequenceNum: 1, excludedCount: 0, fieldAbsentCount: 0]]])

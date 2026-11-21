@@ -213,4 +213,14 @@ class PeakPeriodFacadeSupportTests {
             assertEquals([], PeakPeriodFacadeSupport.validatePeriod(BLACK_FRIDAY + [hotwaxReadSharePct: ok], []), "share ${ok}")
         }
     }
+
+    @Test
+    void syncOverrideBoundsAndOffAreValid() {
+        assertEquals([], PeakPeriodFacadeSupport.validateSync(null, null))
+        assertEquals([], PeakPeriodFacadeSupport.validateSync(15, 0))
+        assertEquals([], PeakPeriodFacadeSupport.validateSync(2880, 360))
+        assertEquals(['Allowance must be 15 minutes to 48 hours.'], PeakPeriodFacadeSupport.validateSync(14, null))
+        assertEquals(['Allowance must be 15 minutes to 48 hours.'], PeakPeriodFacadeSupport.validateSync(2881, 60))
+        assertEquals(['Pulse must be every 1, 2, 3, 4 or 6 hours, or off.'], PeakPeriodFacadeSupport.validateSync(null, 90))
+    }
 }

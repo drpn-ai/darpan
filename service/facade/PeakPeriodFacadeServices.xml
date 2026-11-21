@@ -52,6 +52,11 @@
             <parameter name="targets" type="List">
                 <parameter name="automationId"/><parameter name="auditId"/><parameter name="label"/>
             </parameter>
+            <parameter name="syncRows" type="List">
+                <parameter name="syncPairId"/><parameter name="label"/>
+                <parameter name="normalAllowanceMinutes" type="Integer"/><parameter name="periodAllowanceMinutes" type="Integer"/>
+                <parameter name="normalPulseMinutes" type="Integer"/><parameter name="periodPulseMinutes" type="Integer"/>
+            </parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
@@ -74,6 +79,7 @@
                 <set field="peakWindow" from="darpan.peak.PeakPeriodFacadeSupport.windowOf(periodRow, runTimeRows, targetInfo.scheduled)"/>
                 <set field="heldRuns" from="darpan.peak.PeakPeriodFacadeSupport.heldRuns(targetInfo.scheduled, peakWindow, zone, darpan.peak.PeakPeriodLoader.allowances(ec, tenantId))"/>
                 <set field="targets" from="targetInfo.targets"/>
+                <set field="syncRows" from="darpan.peak.PeakPeriodFacadeSupport.syncRows(ec, tenantId, peakPeriodIdValue)"/>
                 <set field="peakPeriod" from="[peakPeriodId: periodRow.peakPeriodId, periodName: periodRow.periodName, fromDate: fromLocal.toString(), thruDate: thruLocal.toString(), peakHoursStart: periodRow.peakHoursStart, peakHoursEnd: periodRow.peakHoursEnd, hotwaxReadSharePct: periodRow.hotwaxReadSharePct, netsuiteSerial: periodRow.netsuiteSerial ?: 'N', isActive: periodRow.isActive ?: 'Y', state: darpan.peak.PeakPeriodFacadeSupport.stateOf(periodRow.getMap(), today), timeZone: zone.getId(), createdByUserId: periodRow.createdByUserId, lastUpdatedDate: periodRow.lastUpdatedDate]"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -138,7 +144,7 @@
     </service>
 
     <service verb="delete" noun="PeakPeriod" allow-remote="true" authenticate="true">
-        <description>Delete a peak period and its run times.</description>
+        <description>Delete a peak period, its run times and its sync overrides.</description>
         <in-parameters><parameter name="peakPeriodId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -158,6 +164,7 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreRunTimes" from="darpan.peak.PeakPeriodFacadeSupport.deleteRunTimesOf(ec, tenantId, peakPeriodIdValue)"/>
+                <set field="ignoreSyncRows" from="darpan.peak.PeakPeriodFacadeSupport.deleteSyncRowsOf(ec, tenantId, peakPeriodIdValue)"/>
                 <set field="ignoreDelete" from="periodRow.delete()"/>
                 <message>Deleted peak period.</message>
             </if>
@@ -245,6 +252,82 @@
             <if condition="!ec.message.hasError()">
                 <set field="ignoreDelete" from="runTimeRow.delete()"/>
                 <message>Deleted run time.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="PeakPeriodSync" allow-remote="true" authenticate="true">
+        <description>Replace one sync pair's override for a peak period. Allowance (15 minutes to 48 hours) and pulse (0, 60, 120, 180, 240 or 360 minutes; 0 is off for the period) are each null for normal; an omitted value clears that field.</description>
+        <in-parameters>
+            <parameter name="peakPeriodId" required="true"/>
+            <parameter name="syncPairId" required="true"/>
+            <parameter name="allowanceMinutes" type="Integer"/>
+            <parameter name="pulseEveryMinutes" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for peak periods.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for peak periods.')"/>
+            </if>
+            <set field="peakPeriodIdValue" from="((peakPeriodId)?.toString()?.trim())"/>
+            <set field="syncPairIdValue" from="((syncPairId)?.toString()?.trim())"/>
+            <set field="periodRow" from="(!ec.message.hasError() &amp;&amp; peakPeriodIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.peak.PeakPeriod', 'peakPeriodId', peakPeriodIdValue, tenantId, 'peak period read for a sync override verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; periodRow == null">
+                <message error="true">Peak period '${peakPeriodIdValue}' was not found.</message>
+            </if>
+            <set field="pairRow" from="(!ec.message.hasError() &amp;&amp; syncPairIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.pulse.SyncPair', 'syncPairId', syncPairIdValue, tenantId, 'sync pair read for a peak override verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; pairRow == null">
+                <message error="true">Sync pair '${syncPairIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="validationErrors" from="darpan.peak.PeakPeriodFacadeSupport.validateSync(allowanceMinutes, pulseEveryMinutes)"/>
+                <iterate list="validationErrors" entry="validationError"><message error="true">${validationError}</message></iterate>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreReplace" from="darpan.peak.PeakPeriodFacadeSupport.replaceSync(ec, tenantId, peakPeriodIdValue, syncPairIdValue, allowanceMinutes, pulseEveryMinutes)"/>
+                <message>Saved sync override.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="PeakPeriodSync" allow-remote="true" authenticate="true">
+        <description>Remove one sync pair's override for a peak period; a missing override is fine.</description>
+        <in-parameters>
+            <parameter name="peakPeriodId" required="true"/>
+            <parameter name="syncPairId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for peak periods.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for peak periods.')"/>
+            </if>
+            <set field="peakPeriodIdValue" from="((peakPeriodId)?.toString()?.trim())"/>
+            <set field="syncPairIdValue" from="((syncPairId)?.toString()?.trim())"/>
+            <set field="periodRow" from="(!ec.message.hasError() &amp;&amp; peakPeriodIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.peak.PeakPeriod', 'peakPeriodId', peakPeriodIdValue, tenantId, 'peak period read for a sync override delete verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; periodRow == null">
+                <message error="true">Peak period '${peakPeriodIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreDelete" from="darpan.peak.PeakPeriodFacadeSupport.deleteSync(ec, tenantId, peakPeriodIdValue, syncPairIdValue)"/>
+                <message>Removed sync override.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

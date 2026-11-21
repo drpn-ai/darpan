@@ -16,6 +16,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -32,6 +33,8 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
     private ExecutionContext ec
     private String periodA
     private String runTimeA
+    private static final String PAIR_A = "PAIR_A"
+    private static final String PAIR_B = "PAIR_B"
 
     @BeforeAll
     void setup() {
@@ -43,6 +46,8 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         seedTenant(B, "Gorjana")
         automation("AUTO_A", A)
         automation("AUTO_B", B)
+        pair(PAIR_A, "AUTO_A", A)
+        pair(PAIR_B, "AUTO_B", B)
         actAs(A)
         periodA = (String) call("save#PeakPeriod", [periodName: "Black Friday sale", fromDate: "2026-11-24", thruDate: "2026-12-01",
                                                     peakHoursStart: "08:00", peakHoursEnd: "23:00"]).peakPeriodId
@@ -134,6 +139,72 @@ class PeakPeriodFacadeCrossTenantSmokeTests {
         Map result = call("save#PeakPeriodRunTime", [peakPeriodId: periodA, automationId: "AUTO_B", runTime: "05:00"])
         assertFalse(result.ok as boolean)
         assertEquals(["Choose a run."], result.errors)
+    }
+
+    @Test
+    void syncOverrideReplacesClearsAndAcceptsOff() {
+        actAs(A)
+        String period = (String) call("save#PeakPeriod", [periodName: "Sync sale", fromDate: "2027-03-01", thruDate: "2027-03-05"]).peakPeriodId
+        assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, allowanceMinutes: 90, pulseEveryMinutes: 0]).ok as boolean)
+        assertEquals(90, syncRow(period, PAIR_A).allowanceMinutes as int)
+        assertNotNull(syncRow(period, PAIR_A).pulseEveryMinutes, "pulse 0 (off) must be stored as 0, not null")
+        assertEquals(0, syncRow(period, PAIR_A).pulseEveryMinutes as int)
+        // Clearing the pulse keeps the allowance; the row is replaced, not merged.
+        assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, allowanceMinutes: 90]).ok as boolean)
+        assertEquals(90, syncRow(period, PAIR_A).allowanceMinutes as int)
+        assertNull(syncRow(period, PAIR_A).pulseEveryMinutes)
+        assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, pulseEveryMinutes: 120]).ok as boolean)
+        assertNull(syncRow(period, PAIR_A).allowanceMinutes)
+        assertEquals(120, syncRow(period, PAIR_A).pulseEveryMinutes as int)
+        Map bad = call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, allowanceMinutes: 5])
+        assertFalse(bad.ok as boolean)
+        assertEquals(["Allowance must be 15 minutes to 48 hours."], bad.errors)
+        Map got = call("get#PeakPeriod", [peakPeriodId: period])
+        Map row = ((List) got.syncRows).find { it.syncPairId == PAIR_A }
+        assertNotNull(row)
+        assertNull(row.periodAllowanceMinutes)
+        assertEquals(120, row.periodPulseMinutes as int)
+        assertEquals(60, row.normalAllowanceMinutes as int)
+        assertTrue(((List) got.syncRows).every { it.syncPairId != PAIR_B }, "B's pair is not one of A's sync rows")
+        assertTrue(call("delete#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A]).ok as boolean)
+        assertNull(syncRow(period, PAIR_A))
+        assertTrue(call("delete#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A]).ok as boolean, "deleting a missing override is fine")
+        // The cascade: deleting a period removes its overrides.
+        assertTrue(call("save#PeakPeriodSync", [peakPeriodId: period, syncPairId: PAIR_A, allowanceMinutes: 30]).ok as boolean)
+        assertTrue(call("delete#PeakPeriod", [peakPeriodId: period]).ok as boolean)
+        assertNull(syncRow(period, PAIR_A), "the period's sync override survived its delete")
+    }
+
+    @Test
+    void anotherTenantsPairOrPeriodTakesNoSyncOverride() {
+        Map foreignPair = call("save#PeakPeriodSync", [peakPeriodId: periodA, syncPairId: PAIR_A, allowanceMinutes: 30])
+        assertFalse(foreignPair.ok as boolean)
+        assertNull(syncRow(periodA, PAIR_A))
+        actAs(A)
+        Map foreignPairOfB = call("save#PeakPeriodSync", [peakPeriodId: periodA, syncPairId: PAIR_B, allowanceMinutes: 30])
+        assertFalse(foreignPairOfB.ok as boolean)
+        assertEquals(["Sync pair '${PAIR_B}' was not found.".toString()], foreignPairOfB.errors)
+        assertNull(syncRow(periodA, PAIR_B))
+        // B cannot delete an override of A's period.
+        actAs(A)
+        assertTrue(call("save#PeakPeriodSync", [peakPeriodId: periodA, syncPairId: PAIR_A, allowanceMinutes: 45]).ok as boolean)
+        actAs(B)
+        assertFalse(call("delete#PeakPeriodSync", [peakPeriodId: periodA, syncPairId: PAIR_A]).ok as boolean)
+        assertNotNull(syncRow(periodA, PAIR_A), "another tenant's sync override was deleted")
+        assertFalse(call("get#PeakPeriod", [peakPeriodId: periodA]).ok as boolean)
+        // Deleting A's period as B leaves its overrides.
+        assertFalse(call("delete#PeakPeriod", [peakPeriodId: periodA]).ok as boolean)
+        assertNotNull(syncRow(periodA, PAIR_A))
+    }
+
+    private def syncRow(String period, String pair) {
+        return ec.entity.find("darpan.pulse.PeakPeriodSync").condition("peakPeriodId", period).condition("syncPairId", pair)
+                .disableAuthz().useCache(false).one()
+    }
+
+    private void pair(String id, String automationId, String tenant) {
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll([syncPairId: id, companyUserGroupId: tenant, automationId: automationId,
+                upstreamSide: "FILE_1", allowanceMinutes: 60, isActive: "Y"]).createOrUpdate()
     }
 
     private Map call(String name, Map params) {

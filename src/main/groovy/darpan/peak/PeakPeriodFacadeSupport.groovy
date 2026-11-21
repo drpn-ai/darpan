@@ -289,6 +289,61 @@ class PeakPeriodFacadeSupport {
         rows(ec, "darpan.peak.PeakPeriodRunTime", tenantId).condition("peakPeriodId", peakPeriodId).deleteAll()
     }
 
+    static final List<Integer> PULSE_CHOICES = [0, 60, 120, 180, 240, 360]
+
+    /** Validation of one pair's period override: allowance 15 minutes to 48 hours or null; pulse 0/1/2/3/4/6 hours or null. */
+    static List<String> validateSync(Integer allowanceMinutes, Integer pulseEveryMinutes) {
+        List<String> errors = []
+        if (allowanceMinutes != null && (allowanceMinutes < 15 || allowanceMinutes > 2880)) errors << "Allowance must be 15 minutes to 48 hours."
+        if (pulseEveryMinutes != null && !PULSE_CHOICES.contains(pulseEveryMinutes)) errors << "Pulse must be every 1, 2, 3, 4 or 6 hours, or off."
+        return errors
+    }
+
+    /** Deletes every sync override of one of the tenant's periods (FK PEAKSYNC_PERIOD). */
+    static void deleteSyncRowsOf(def ec, String tenantId, String peakPeriodId) {
+        rows(ec, "darpan.pulse.PeakPeriodSync", tenantId).condition("peakPeriodId", peakPeriodId).deleteAll()
+    }
+
+    /** Removes one pair's override of the period; a missing row is fine. */
+    static int deleteSync(def ec, String tenantId, String peakPeriodId, String syncPairId) {
+        return rows(ec, "darpan.pulse.PeakPeriodSync", tenantId).condition("peakPeriodId", peakPeriodId).condition("syncPairId", syncPairId).deleteAll()
+    }
+
+    /** Replaces the pair's override row of the period: null means normal, 0 pulse means off for the period. */
+    static void replaceSync(def ec, String tenantId, String peakPeriodId, String syncPairId, Integer allowanceMinutes, Integer pulseEveryMinutes) {
+        ec.entity.makeValue("darpan.pulse.PeakPeriodSync").setAll([peakPeriodId: peakPeriodId, syncPairId: syncPairId,
+                companyUserGroupId: tenantId, allowanceMinutes: allowanceMinutes, pulseEveryMinutes: pulseEveryMinutes]).createOrUpdate()
+    }
+
+    /** Every active sync pair of the tenant with this period's override values (null when none). */
+    static List<Map> syncRows(def ec, String tenantId, String peakPeriodId) {
+        Map<String, Map> overrides = [:]
+        rows(ec, "darpan.pulse.PeakPeriodSync", tenantId).condition("peakPeriodId", peakPeriodId).list().each { overrides.put(it.get("syncPairId") as String, it.getMap()) }
+        Map<String, String> systemByAutomationSide = [:]
+        rows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId).list().each {
+            systemByAutomationSide.put("${it.get('automationId')}|${it.get('fileSide')}".toString(), normalize(it.get("systemEnumId")))
+        }
+        Map<String, String> systemLabels = [:]
+        def label = { String enumId ->
+            if (!enumId) return "Unknown system"
+            if (!systemLabels.containsKey(enumId)) {
+                def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", enumId).useCache(true).disableAuthz().one()
+                systemLabels.put(enumId, normalize(e?.get("description")) ?: enumId)
+            }
+            return systemLabels.get(enumId)
+        }
+        return (rows(ec, "darpan.pulse.SyncPair", tenantId).condition("isActive", "Y").orderBy("syncPairId").list() ?: []).collect { pair ->
+            String side = normalize(pair.get("upstreamSide"))
+            String other = side == "FILE_1" ? "FILE_2" : "FILE_1"
+            String automationId = normalize(pair.get("automationId"))
+            Map o = overrides.get(pair.get("syncPairId") as String)
+            [syncPairId: pair.get("syncPairId"),
+             label: "${label(systemByAutomationSide.get(automationId + '|' + side))} \u2192 ${label(systemByAutomationSide.get(automationId + '|' + other))} orders".toString(),
+             normalAllowanceMinutes: pair.get("allowanceMinutes"), periodAllowanceMinutes: o?.get("allowanceMinutes"),
+             normalPulseMinutes: pair.get("pulseEveryMinutes"), periodPulseMinutes: o?.get("pulseEveryMinutes")]
+        }
+    }
+
     /**
      * Deletes every run time of the tenant that names this automation, so deleting the automation does not fail on the
      * PEAKRT_AUTOMATION foreign key. Returns how many were deleted.

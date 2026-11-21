@@ -523,10 +523,15 @@ class JudgeReplayTests {
     @Test
     void theSetAsideIdsTheCompareReportsReachTheJudge() {
         File copy = copyExtractsFor("keep-reaches-judge")
-        Map sideKeep = darpan.reconciliation.source.KeepPlanSupport.sideKeepFromFilterRows(ec,
-                darpan.reconciliation.source.SourceFilterSupport.toRecordFieldRules([[sequenceNum: 1, fieldExpression: "returnId",
-                        operator: "EXCLUDE_IN", filterValues: "SR-1001"] as Map<String, Object>]),
-                [systemEnumId: "ACME", filterParameterName: "sourceFilters", excludedRecordsSidecar: "N"], [:])
+        // the side's plan through the one gate, as a run places it: its extract keeps in Spark and its connector loads "[]"
+        Map sideKeep = withConnectors([SHOPIFY: "N"]) {
+            darpan.reconciliation.source.KeepPlanSupport.effectiveSideKeep(ec,
+                    darpan.reconciliation.source.SourceFilterSupport.toRecordFieldRules([[sequenceNum: 1, fieldExpression: "returnId",
+                            operator: "EXCLUDE_IN", filterValues: "SR-1001"] as Map<String, Object>]),
+                    [systemEnumId: "SHOPIFY", filterParameterName: "sourceFilters", excludedRecordsSidecar: "N"], [:],
+                    ec.service.getServiceDefinition(KEPT_IN_SPARK), "records", ["returnId"], true)
+        }
+        assertEquals(["A:1"], ((List<Map>) sideKeep.rules)*.id, "test precondition: the side keeps the tenant rule in Spark")
         Map called = null
         Map<String, Map> facts = factsJudged {
             called = underFacadeGrant("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope",

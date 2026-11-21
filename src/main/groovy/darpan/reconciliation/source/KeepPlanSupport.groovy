@@ -227,15 +227,6 @@ class KeepPlanSupport {
         } as List<Map<String, Object>>)
     }
 
-    /**
-     * The plan for rows in getter shape, built WITHOUT effectiveSideKeep's gate: [placement, readFilters, rules, writeSidecar,
-     * fields]. Production calls it only for a NONE side (AutomationExecutionSupport.sideKeepOf's shortcut), where it is the empty
-     * plan; every path that places a SPARK or READ side goes through effectiveSideKeep.
-     */
-    static Map sideKeepFromFilterRows(def ec, List<Map<String, Object>> recordFieldRows, Map connector, Map extractOptions) {
-        return plan(ec, recordFieldRows ?: [], connector, extractOptions)
-    }
-
     private static Map plan(def ec, List<Map<String, Object>> rows, Map connector, Map extractOptions) {
         String where = placement(connector)
         Map out = [placement: where, readFilters: [], rules: [], writeSidecar: false, fields: new LinkedHashSet<String>()]

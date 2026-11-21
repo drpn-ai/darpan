@@ -2593,7 +2593,8 @@ class AutomationExecutionSupport {
     static Map sideKeepOf(def ec, def automation, def source, Map connector, String serviceName, Map extractOptions,
                           boolean keepInSpark, File landed = null) {
         String placement = KeepPlanSupport.placement(connector)
-        if (placement == KeepPlanSupport.NONE) return KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector, extractOptions)
+        // NONE reads no filter rows: the gate hands back its empty plan as for any NONE side
+        if (placement == KeepPlanSupport.NONE) return KeepPlanSupport.effectiveSideKeep(ec, [], connector, extractOptions, null, null, [], keepInSpark)
         List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
                 normalize(readField(source, "fileSide")), normalize(readField(automation, "companyUserGroupId")))
         // the side's keys and record root, as RunExtractSupport.sideKeep takes them: both from the compare scope, not the automation's snapshot

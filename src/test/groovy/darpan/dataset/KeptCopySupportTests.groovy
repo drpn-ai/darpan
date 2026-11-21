@@ -1136,7 +1136,8 @@ class KeptCopySupportTests {
             return [fileLocation: location, fileName: params.fileName, recordCount: 1]
         }
         ec.message.clearAll()
-        Map result = RunExtractSupport.extractApiSource(ec, source, "FILE_1", "File 1", artifact, apiWindow, null, stub)
+        Map result = RunExtractSupport.extractApiSource(ec, source, "FILE_1", "File 1", artifact, apiWindow, null, stub, null,
+                RunExtractSupport.sideKeep(ec, source, "FILE_1", RunExtractSupport.resolveExtractConnector(ec, source)))
         List<String> errors = ec.message.errors.collect { it.toString() }
         ec.message.clearAll()
         return [result: result, artifact: artifact, source: source, errors: errors]
@@ -1193,7 +1194,8 @@ class KeptCopySupportTests {
         }
         ec.message.clearAll()
         Map result = RunExtractSupport.extractApiSource(ec, source, "FILE_1", "File 1", artifact,
-                [windowStartDate: start, windowEndDate: end, timeZone: "UTC"], null, stub, byKeys)
+                [windowStartDate: start, windowEndDate: end, timeZone: "UTC"], null, stub, byKeys,
+                RunExtractSupport.sideKeep(ec, source, "FILE_1", RunExtractSupport.resolveExtractConnector(ec, source)))
         List<String> errors = ec.message.errors.collect { it.toString() }
         ec.message.clearAll()
         return [result: result, artifact: artifact, source: source, errors: errors]

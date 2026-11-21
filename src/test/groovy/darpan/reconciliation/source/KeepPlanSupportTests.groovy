@@ -128,6 +128,37 @@ class KeepPlanSupportTests {
                 KeepPlanSupport.todaysRead([[sequenceNum: 1]]), "today's read: the rows to the read, nothing to Spark, no field added")
     }
 
+    /**
+     * Task 13 review I2: effectiveSideKeep is the one decision. A Spark-placed side keeps in Spark only when its compare takes Keep,
+     * its extract stopped taking filters and it is keyed on top-level records; otherwise today's read, and its declared Keep lines
+     * are never compiled (review M2: ACME_BAD's refused line does not fail a side that reads as today).
+     */
+    @Test
+    void effectiveSideKeepIsTheOneDecisionOnWhereKeepRuns() {
+        List<Map<String, Object>> rows = KeepPlanSupport.tenantRuleRows(ec, "KP_SCOPE_A", "FILE_2", A)
+        Map stillFilters = [inParameterNameList: ["excludeFilters"]]
+        Map noLongerFilters = [inParameterNameList: ["keepRuleFields"]]
+        Closure<Map> effective = { String system, Object definition, String root, List<String> keys, boolean keepInSpark ->
+            KeepPlanSupport.effectiveSideKeep(ec, rows, connector(system), [:], definition, root, keys, keepInSpark)
+        }
+        Map spark = effective("ACME", noLongerFilters, "records", ['$.records[*].orderId'], true)
+        assertEquals("SPARK", spark.placement)
+        assertEquals(["BUILT_IN:1", "BUILT_IN:2", "A:1"], spark.rules*.id)
+        assertEquals([], spark.readFilters)
+        Map today = KeepPlanSupport.todaysRead(rows)
+        assertEquals(today, effective("ACME", stillFilters, "records", ["orderId"], true), "the extract still filters")
+        assertEquals(today, effective("ACME", noLongerFilters, "records", ["orderId"], false), "the compare takes no Keep")
+        assertEquals(today, effective("ACME", noLongerFilters, null, ['$.records[*].lines[*].lineId'], true), "a key through a nested array")
+        assertEquals(today, effective("ACME", noLongerFilters, "orders", ["orderId"], true), "records under another array")
+        assertEquals(today, effective("ACME_BAD", stillFilters, null, ["orderId"], true), "a gated side never compiles its Keep lines")
+        assertEquals("READ", effective("ACME_DEFINED", noLongerFilters, null, ["orderId"], true).placement)
+        assertEquals(["other"] as Set, effective("ACME_DEFINED", noLongerFilters, null, ["orderId"], true).fields,
+                "a data-defined side's plan is as before")
+        assertEquals("NONE", effective("ACME_UPLOAD", noLongerFilters, null, ["orderId"], true).placement)
+        assertTrue(KeepPlanSupport.keyedOnRecords(null, ["orderId", "\$.records[*].lineId|MADE_UP_NORMALIZER"]))
+        assertFalse(KeepPlanSupport.keyedOnRecords("\$.records[*]", []), "no key at all")
+    }
+
     /** Review Focus 4: a scheduled read for tenant A never sees tenant B's filter rows, with no active tenant. */
     @Test
     void aScopeOfAnotherTenantReadsAsNoRules() {

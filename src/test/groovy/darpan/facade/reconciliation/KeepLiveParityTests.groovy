@@ -55,6 +55,7 @@ class KeepLiveParityTests {
     private static final String SERVICE = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveRecords"
     private static final String SELECTING = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveSelectingRecords"
     private static final String FILTERING = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveFilteringRecords"
+    private static final String CONTRACT = "reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveContractRecords"
     private static final Timestamp START = Timestamp.from(Instant.parse("2026-11-10T00:00:00Z"))
     private static final Timestamp END = Timestamp.from(Instant.parse("2026-11-11T00:00:00Z"))
 
@@ -81,8 +82,11 @@ class KeepLiveParityTests {
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
             ${connector("KL_SPARK", SERVICE, "Y")}
             ${connector("KL_QUIET", SERVICE, "N")}
-            ${connector("KL_DEFINED", FILTERING, "Y", 'dataSourceDefinitionId="KL_DEF"')}
+            ${connector("KL_DEFINED", FILTERING, "Y", 'dataSourceDefinitionId="KL_DEF" keepFieldsParameterName="keepFields" keepFieldsBase="orderId"')}
             ${connector("KL_FILTERING", FILTERING, "Y")}
+            ${connector("KL_CONTRACT", CONTRACT, "Y")}
+            ${savedRun("KL_RS_CON", ["FILE_1": api("KL_CONTRACT", "kl-con-1"), "FILE_2": api("KL_QUIET", "kl-con-2")])}
+            ${filter("KL_RS_CON", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST")}
             ${connector("KL_SELECT", SELECTING, "Y", 'keepFieldsParameterName="keepFields" keepFieldsBase="orderId"')}
             ${savedRun("KL_RS", ["FILE_1": api("KL_SPARK", "kl-1"), "FILE_2": api("KL_QUIET", "kl-2")])}
             ${filter("KL_RS", "FILE_1", 1, "channel", "EXCLUDE_IN", "TEST,B2B")}
@@ -134,6 +138,8 @@ class KeepLiveParityTests {
                 "kl-def"   : [order("D1", "WEB", "#SYN1", 1), order("D2", "TEST", "#SYN2", 2)],
                 "kl-select": [order("D1", "WEB", "#SYN1", 1), order("D2", "TEST", "#SYN2", 2)],
                 "kl-none-1": [order("N1", "TEST", "#SYN1", 1)],
+                "kl-con-1" : [order("C1", "WEB", "#SYN1", 1), order("C2", "TEST", "#SYN2", 2)],
+                "kl-con-2" : [[orderId: "C1"], [orderId: "C2"]],
                 "kl-none-2": [[orderId: "N1", status: "VOIDED"]],
         ])
     }
@@ -236,8 +242,8 @@ class KeepLiveParityTests {
     void aSideWhoseExtractStillTakesFiltersKeepsTodaysRead() {
         Map run = runSaved("KL_RS_REAL")
         Map sent1 = call("kl-1"), sent2 = call("kl-2")
-        assertEquals([[1, "channel"], [2, "orderName"], [3, "total"]],
-                ((List<Map>) sent1.sourceFilters).collect { [it.sequenceNum as Integer, it.fieldExpression] }, "the read gets today's filters")
+        assertEquals(ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source("KL_RS_REAL", "FILE_1")), sent1.sourceFilters,
+                "the read gets today's filters, operator and values included")
         assertNull(sent1.keepRuleFields)
         assertNull(sent1.readFields, "no Keep field joins its projection")
         File after1 = extractOf(sent1), after2 = extractOf(sent2)
@@ -260,6 +266,27 @@ class KeepLiveParityTests {
         assertTrue(conclusions(runDiffFile(run), after1, after2).contains(["O6", "UNEXPLAINED"]), "the N side stays unknown")
     }
 
+    /**
+     * Review I1: an extract that declares the filter parameter only through the interface it implements (as the HotWax OMS
+     * GraphQL extracts do) still filters at the read. The gate reads Moqui's real, merged service definition.
+     */
+    @Test
+    void anExtractTakingFiltersThroughItsContractKeepsTodaysRead() {
+        def definition = ec.service.getServiceDefinition(CONTRACT)
+        assertTrue("sourceFilters" in (definition.inParameterNameList as List), "Moqui merges the contract's parameters")
+        assertFalse(KeepPlanSupport.sparkKeepsSide(connectorOf("KL_CONTRACT"), definition))
+
+        Map run = runSaved("KL_RS_CON")
+        Map sent = call("kl-con-1")
+        assertEquals(ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source("KL_RS_CON", "FILE_1")), sent.sourceFilters)
+        assertNull(sent.keepRuleFields, "though it declares keepRuleFields, it is not a Spark side")
+        File extract = extractOf(sent)
+        assertEquals(["C1"], json(extract).records*.orderId)
+        assertFalse(KeepArtifacts.keepFile(extract).exists(), "no Spark Keep artifact")
+        assertEquals(["C2"], json(sideFile(extract)).records*.orderId, "the read's own side file")
+        assertEquals(1L, run.onlyInFile2Count as long, "C2: dropped by the read, held by side 2, as today")
+    }
+
     /** Ruling 3b2b-16: a data-defined side keeps filtering at the read, and Spark runs nothing for it. */
     @Test
     void aDataDefinedSideStillGetsItsFiltersAtRead() {
@@ -268,6 +295,13 @@ class KeepLiveParityTests {
         assertEquals([[1, "channel", "EXCLUDE_IN", "TEST"]], ((List<Map>) sent.sourceFilters).collect {
             [it.sequenceNum as Integer, it.fieldExpression, it.operator, it.filterValues] }, "the read gets today's filters")
         assertNull(sent.keepRuleFields)
+        // Ruling 3b2b-16 (review I3): its projections are exactly today's; no filter field joins keepFields or readFields
+        Map src = source("KL_RS_DEF", "FILE_1")
+        List<String> todaysKeep = RunExtractSupport.sideKeepFields(ec, src, connectorOf("KL_DEFINED"))
+        assertNotNull(todaysKeep, "the side keeps fields, so the check is not hollow")
+        assertEquals(todaysKeep, sent.keepFields)
+        assertFalse((sent.keepFields as List).contains("channel"))
+        assertNull(sent.readFields, "no rule reads a field on it, so it is sent no readFields, as today")
         File extract = extractOf(sent)
         assertEquals(["D1"], json(extract).records*.orderId, "the read dropped what they reject")
         assertNull(KeepArtifacts.readSummary(extract), "Spark Keep ran nothing for it")
@@ -378,6 +412,44 @@ class KeepLiveParityTests {
         assertEquals([1L, 1L], [KeepArtifacts.readSummary(landed)?.keptCount as Long, KeepArtifacts.readSummary(landed)?.setAsideCount as Long],
                 "Spark Keep set U2 aside on the handed-back side")
         assertEquals(0L, run.differenceCount as long, "U2 is set aside, so the upload's lack of it is no difference")
+    }
+
+    /** Review M1: a retried side whose landed file its read already filtered keeps today's read, never Spark Keep. */
+    @Test
+    void aRetriedRunOverAFilteredLandedFileKeepsTodaysRead() {
+        String path = "${DataManagerSupport.RECONCILIATION_RUNS_PATH}/KL_RS_UP/20261121-000000002/kl-up-filtered.json".toString()
+        File landed = DataManagerSupport.resolveDataManagerFile(ec, path, true)
+        // the read was sent the filter and dropped U2, as a read before this side passed the gate did
+        landed.setText(JsonOutput.toJson([metadata: [filters: [configuredExclusions: [[sequenceNum: 1, fieldExpression: "channel",
+                operator: "EXCLUDE_IN", values: ["TEST"], excludedCount: 1, fieldAbsentCount: 0]]]],
+                records: [[orderId: "U1", channel: "WEB"]]]), "UTF-8")
+        assertTrue(KeepArtifacts.filteredAtRead(landed))
+        failedRun("KL_FAILED_FILTERED", path, landed.name)
+
+        Map run = runSaved("KL_RS_UP", [retryFromRunResultId: "KL_FAILED_FILTERED", file2Name: "upload.json",
+                                        file2Text: JsonOutput.toJson([records: [[orderId: "U1", channel: "WEB"]]])])
+        assertEquals([], KeepLiveTestExtracts.CALLS, "the landed side is not read again")
+        assertEquals(path, run.file1DataManagerPath)
+        assertNull(KeepArtifacts.readSummary(landed), "no Spark Keep over a file its read filtered: no zero-count summary")
+        assertEquals(0L, run.differenceCount as long)
+    }
+
+    /** A failed run of KL_RS_UP whose side 1 landed at path and whose side 2 failed, as the runner leaves one. */
+    private void failedRun(String id, String path, String fileName) {
+        Timestamp started = new Timestamp(System.currentTimeMillis() + 1000L)
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: id, savedRunId: "KL_RS_UP", savedRunType: "ruleset", ruleSetId: "KL_RS_UP",
+                compareScopeId: "KL_RS_UP", companyUserGroupId: A, statusEnumId: RunObservability.STATUS_FAILED, startedDate: started,
+                createdDate: started, windowStartDate: START, windowEndDate: END, windowTimeZone: "UTC", file1Name: fileName,
+                file1DataManagerPath: path])
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationRunStep", [
+                reconciliationRunStepId: "${id}_E1".toString(), reconciliationRunResultId: id, companyUserGroupId: A,
+                stageCode: RunObservability.STAGE_EXTRACT_FILE1, stageSequence: 2, statusEnumId: RunObservability.STATUS_SUCCESS,
+                startedDate: started, completedDate: started, recordCount: 1])
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.ReconciliationRunStep", [
+                reconciliationRunStepId: "${id}_E2".toString(), reconciliationRunResultId: id, companyUserGroupId: A,
+                stageCode: RunObservability.STAGE_EXTRACT_FILE2, stageSequence: 3, statusEnumId: RunObservability.STATUS_FAILED,
+                startedDate: started, completedDate: started, errorMessage: "made up"])
     }
 
     // ------------------------------------------------------------------------------------------------------- the runs

@@ -9,7 +9,9 @@
            (keepRuleFields), no filters and no readFields. Its sides keep in Spark.
          - KeepLiveSelectingRecords: no longer filters either; takes keepFields and readFields, and no keepRuleFields.
          - KeepLiveFilteringRecords: shaped as every real extract is until Tasks 17-23: it still takes the filter parameter
-           (sourceFilters), so its sides keep today's read (Ruling 3b2b-23). -->
+           (sourceFilters), so its sides keep today's read (Ruling 3b2b-23).
+         - KeepLiveContractRecords: declares sourceFilters only through the interface it implements (KeepLiveFilteringContract),
+           as the HotWax OMS GraphQL extracts do through their orders contract; its sides keep today's read too. -->
     <service verb="extract" noun="KeepLiveRecords" allow-remote="false">
         <in-parameters>
             <parameter name="projConfigId"/>
@@ -88,6 +90,37 @@
             <parameter name="recordCount" type="Integer"/>
             <parameter name="errors" type="List"/>
         </out-parameters>
+        <actions><script>context.putAll(darpan.facade.reconciliation.KeepLiveTestExtracts.extract(ec, context))</script></actions>
+    </service>
+    <service verb="extract" noun="KeepLiveFilteringContract" type="interface">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="sourceFilters" type="List"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="errors" type="List"/>
+        </out-parameters>
+    </service>
+    <service verb="extract" noun="KeepLiveContractRecords" allow-remote="false">
+        <implements service="reconciliation.KeepLiveTestExtractionServices.extract#KeepLiveFilteringContract"/>
+        <in-parameters>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="keepRuleFields" type="List"/>
+            <parameter name="lookupKeys" type="List"/>
+            <parameter name="lookupKeyField"/>
+            <parameter name="systemEnumId"/>
+            <parameter name="companyUserGroupId"/>
+            <parameter name="reconciliationRunResultId"/>
+            <parameter name="progressStageCode"/>
+            <parameter name="expectedRecordCount"/>
+        </in-parameters>
         <actions><script>context.putAll(darpan.facade.reconciliation.KeepLiveTestExtracts.extract(ec, context))</script></actions>
     </service>
 </services>

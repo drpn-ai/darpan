@@ -233,7 +233,8 @@ class RunSideOptionsSmokeTests {
         Map captured = null
         RunExtractSupport.extractApiSource(ec, api, "FILE_2", "File 2", [location: "dbresource://tmp/run-side-options", runToken: "t"],
                 [windowStartDate: Timestamp.valueOf("2026-11-10 08:00:00"), windowEndDate: Timestamp.valueOf("2026-11-11 08:00:00")],
-                null, { String service, Map params -> captured = params; [:] })
+                null, { String service, Map params -> captured = params; [:] }, null,
+                RunExtractSupport.sideKeep(ec, api, "FILE_2", RunExtractSupport.resolveExtractConnector(ec, api)))
         ec.message.clearErrors()
         assertEquals(["paymentRefNums"], captured?.readFields, captured?.toString())
     }
@@ -288,7 +289,8 @@ class RunSideOptionsSmokeTests {
         Map captured = null
         RunExtractSupport.extractApiSource(ec, api, "FILE_1", "File 1", [location: "dbresource://tmp/run-side-options", runToken: "t"],
                 [windowStartDate: Timestamp.valueOf("2026-10-21 07:00:00"), windowEndDate: Timestamp.valueOf("2026-10-22 07:00:00")],
-                null, { String service, Map params -> captured = params; [:] })
+                null, { String service, Map params -> captured = params; [:] }, null,
+                RunExtractSupport.sideKeep(ec, api, "FILE_1", RunExtractSupport.resolveExtractConnector(ec, api)))
         ec.message.clearErrors()
         assertEquals(true, captured.onlyCancelledReturns)
         assertEquals("gorjana_prod", captured.omsRestSourceConfigId, "an option never displaces the config id")

@@ -1,6 +1,7 @@
 package darpan.reconciliation.source
 
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.core.CompareIdExpressionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 
 import static darpan.common.ValueSupport.normalize
@@ -39,10 +40,53 @@ class KeepPlanSupport {
     }
 
     /**
+     * The one decision on where a side's Keep runs (Ruling 3b2b-23 and the records guard; Task 13 review I2). Every path that
+     * places a side calls this: the interactive run (RunExtractSupport.sideKeep), replay, and the scheduled path. A side its
+     * connector places in Spark keeps in Spark only when all hold:
+     * <ul>
+     * <li>keepInSpark: the run's compare takes the side's Keep (an evaluate run's does not);</li>
+     * <li>sparkKeepsSide: its extract no longer declares the connector's filter parameter;</li>
+     * <li>keyedOnRecords: its records are the extract's top-level records array and every key field is read off a record there
+     *     (Spark Keep numbers and reads that array, review M5/M6).</li>
+     * </ul>
+     * Otherwise it keeps today's read (todaysRead). The gate is checked before the Spark plan is built, so a connector's declared
+     * Keep lines are compiled only for a side that runs them. READ and NONE placements get their plan as before.
+     *
+     * @param recordFieldRows the side's filter rows in getter shape, from whichever store the path reads (tenantRuleRows, or the
+     *        automation's own, Ruling 3b2b-15)
+     * @param extractServiceDefinition the side's extract service definition (ec.service.getServiceDefinition), or null
+     * @param recordRootExpression the side's RuleSetCompareSource.recordRootExpression
+     * @param keyExpressions the side's key field expressions (composite key fields, else its primaryIdExpression)
+     */
+    static Map effectiveSideKeep(def ec, List<Map<String, Object>> recordFieldRows, Map connector, Map extractOptions,
+                                 Object extractServiceDefinition, String recordRootExpression, List<String> keyExpressions,
+                                 boolean keepInSpark) {
+        if (placement(connector) == SPARK && !(keepInSpark && sparkKeepsSide(connector, extractServiceDefinition) &&
+                keyedOnRecords(recordRootExpression, keyExpressions))) {
+            return todaysRead(recordFieldRows)
+        }
+        return plan(ec, recordFieldRows ?: [], connector, extractOptions)
+    }
+
+    /**
+     * True when a side's records are the extract's top-level records array (a blank root, records, $.records or $.records[*])
+     * and no key field runs through a nested array. Any other shape is false, so the side keeps today's read.
+     */
+    static boolean keyedOnRecords(String recordRootExpression, List<String> keyExpressions) {
+        String root = normalize(recordRootExpression)
+        if (root && root.replaceFirst(/^\$\.?/, "").replaceFirst(/\[\*\]$/, "") != "records") return false
+        if (!keyExpressions) return false
+        return keyExpressions.every { String expression ->
+            String path = normalize(CompareIdExpressionSupport.splitIdExpression(expression).idExpr) ?: ""
+            return path && !path.replaceFirst(/^\$\.?/, "").replaceFirst(/^records\[\*\]\./, "").contains("[")
+        }
+    }
+
+    /**
      * Ruling 3b2b-23. Whether Spark runs the Keep of a side its connector places in Spark: only once the side's extract service
      * no longer declares the connector's filter parameter. An extract that still takes it still filters at the read until its
      * system's task (17–23) drops the parameter, and Spark Keep over that side would change live results: it cannot see fields
-     * the read overlays (HotWax unit grain filters on order fields), and where both filter it reports zero exclusions that the
+     * the read overlays (a unit grain filtering on its order's fields), and where both filter it reports zero exclusions that the
      * conclusions read as authoritative. Such a side keeps today's read (todaysRead). False for any other placement, and for an
      * extract that is not installed.
      *

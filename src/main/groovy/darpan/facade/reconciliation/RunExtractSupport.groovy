@@ -226,11 +226,12 @@ class RunExtractSupport {
         String token = sideToken(fileSide)
         String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
 
-        // DAR-BE-318 (plan 3b-2b): where this side's Keep runs (the caller's plan, which it hands the compare as keepBySide, or
-        // this side's own). SPARK sets records aside at ingest, so the read gets no filters; any other plan filters at the read.
-        // The fields Spark Keep reads join every projection.
-        if (sideKeep == null) sideKeep = RunExtractSupport.sideKeep(ec, source, fileSide, connector)
-        Collection<String> keepRuleFields = (Collection<String>) sideKeep.fields
+        // DAR-BE-318 (plan 3b-2b): where this side's Keep runs is the caller's plan (sideKeep, which it hands the compare as
+        // keepBySide), never one built here: a caller whose compare takes no Keep must not have its filters dropped. SPARK sets
+        // records aside at ingest, so the read gets no filters; any other plan filters at the read and sends exactly today's
+        // projections (Ruling 3b2b-16). Only a Spark side's Keep fields join keepFields and readFields.
+        if (sideKeep == null) throw new IllegalArgumentException("${label}: the side's Keep plan (RunExtractSupport.sideKeep) is required.")
+        Collection<String> keepRuleFields = KeepPlanSupport.SPARK == sideKeep.placement ? (Collection<String>) sideKeep.fields : []
         List<String> keepFields = sideKeepFields(ec, source, connector)
         if (keepFields != null && keepRuleFields) keepFields = (keepFields + keepRuleFields).unique()
         List<Map<String, Object>> excludeFilters = (List<Map<String, Object>>) sideKeep.readFilters ?: null
@@ -295,8 +296,8 @@ class RunExtractSupport {
      * once per API side, sends it to extractApiSource and hands it to the compare as keepBySide, so whatever the read returned
      * (live, a kept-copy slice, a retried run's landed file) gets the same Keep. An upload has no plan: it never gets filters.
      *
-     * A SPARK side's filters stay at the read, exactly as before Keep moved into Spark, and Spark runs nothing for it
-     * (KeepPlanSupport.todaysRead), when:
+     * Where the side's Keep runs is KeepPlanSupport.effectiveSideKeep's one decision. A SPARK side's filters stay at the read,
+     * exactly as before Keep moved into Spark, and Spark runs nothing for it (KeepPlanSupport.todaysRead), when:
      * <ul>
      * <li>its extract service still declares the connector's filter parameter (Ruling 3b2b-23, KeepPlanSupport.sparkKeepsSide):
      *     the read still filters until its system's task (17–23) drops the parameter;</li>
@@ -307,26 +308,17 @@ class RunExtractSupport {
      * </ul>
      */
     static Map sideKeep(def ec, Object source, String fileSide, Map<String, Object> connector, boolean keepInSpark = true) {
-        String tenant = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         String compareScopeId = normalize(source?.compareScopeId)
         String side = normalize(fileSide) ?: normalize(source?.fileSide)
-        Map plan = KeepPlanSupport.sideKeep(ec, compareScopeId, side, tenant, connector,
-                SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)))
-        if (KeepPlanSupport.SPARK != plan.placement) return plan
-        def extractDefinition = normalize(connector?.extractServiceName) ? ec.service.getServiceDefinition(normalize(connector.extractServiceName)) : null
-        if (keepInSpark && KeepPlanSupport.sparkKeepsSide(connector, extractDefinition) && keyedOnRecords(ec, source, compareScopeId, side)) return plan
-        return KeepPlanSupport.todaysRead(KeepPlanSupport.tenantRuleRows(ec, compareScopeId, side, tenant))
-    }
-
-    /** True when the side's records are the extract's top-level records array and every key field is read off a record there. */
-    private static boolean keyedOnRecords(def ec, Object source, String compareScopeId, String side) {
-        String root = normalize(source?.recordRootExpression)
-        if (root && root.replaceFirst(/^\$\.?/, "").replaceFirst(/\[\*\]$/, "") != "records") return false
-        List<String> keys = (List<String>) RunConclusionStep.keySpecFor(ec, compareScopeId, side).keyFields
-        return keys.every { String expression ->
-            String path = normalize(darpan.reconciliation.core.CompareIdExpressionSupport.splitIdExpression(expression).idExpr) ?: ""
-            return !path.replaceFirst(/^\$\.?/, "").replaceFirst(/^records\[\*\]\./, "").contains("[")
-        }
+        // the compare scope's rows, read for the active tenant; an upload or database side (NONE) takes none
+        List<Map<String, Object>> rows = KeepPlanSupport.placement(connector) == KeepPlanSupport.NONE ? [] :
+                KeepPlanSupport.tenantRuleRows(ec, compareScopeId, side, TenantAccessSupport.currentActiveTenantUserGroupId(ec))
+        String extractServiceName = normalize(connector?.extractServiceName)
+        return KeepPlanSupport.effectiveSideKeep(ec, rows, connector,
+                SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)),
+                extractServiceName ? ec.service.getServiceDefinition(extractServiceName) : null,
+                normalize(source?.recordRootExpression), (List<String>) RunConclusionStep.keySpecFor(ec, compareScopeId, side).keyFields,
+                keepInSpark)
     }
 
     /**

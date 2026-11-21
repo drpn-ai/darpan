@@ -100,7 +100,7 @@
             <set field="keepBySide" from="[:]"/>
             <iterate list="sourceList" entry="source">
                 <set field="capturedExtract" from="darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, picked.files[source.fileSide]?.fileLocation)"/>
-                <if condition="!darpan.judge.JudgeReplaySupport.filteredAtRead(capturedExtract)">
+                <if condition="!darpan.reconciliation.source.KeepArtifacts.filteredAtRead(capturedExtract)">
                     <set field="sideKeep" from="darpan.facade.reconciliation.RunExtractSupport.sideKeep(ec, source, source.fileSide,
                             darpan.facade.reconciliation.RunExtractSupport.resolveExtractConnector(ec, source))"/>
                     <if condition="darpan.reconciliation.source.KeepStepSupport.applies(sideKeep)">

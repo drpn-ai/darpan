@@ -1,5 +1,8 @@
 package darpan.reconciliation.source
 
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.core.JsonToken
+import com.fasterxml.jackson.databind.ObjectMapper
 import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -42,6 +45,40 @@ class KeepArtifacts {
     }
 
     /** The summary, or null when there is none (a side that had no Spark Keep). */
+    private static final ObjectMapper FILTERED_MAPPER = new ObjectMapper()
+
+    /**
+     * True when the extract's own read filtered it: its metadata reports read-time configuredExclusions (top level or under
+     * filters, where the conclude pass reads them). A file read that way never keeps in Spark when it is compared again (a judge
+     * replay, a retried run handing back the side it landed): its records are already gone, and a zero-count Keep summary would
+     * turn the conclude pass's "unknown" into "not found". Only the metadata is read; the records are skipped token by token. A
+     * missing or unreadable extract also answers true, so the side keeps today's read and the compare reports the problem.
+     */
+    static boolean filteredAtRead(File extract) {
+        if (extract == null || !extract.isFile()) return true
+        try {
+            JsonParser parser = FILTERED_MAPPER.getFactory().createParser(extract)
+            try {
+                if (parser.nextToken() != JsonToken.START_OBJECT) return true
+                while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                    String name = parser.currentName()
+                    parser.nextToken()
+                    if (name == "metadata" && parser.currentToken() == JsonToken.START_OBJECT) {
+                        Map metadata = FILTERED_MAPPER.readValue(parser, Map)
+                        Object nested = metadata.get("filters") instanceof Map ? ((Map) metadata.get("filters")).get("configuredExclusions") : null
+                        return [metadata.get("configuredExclusions"), nested].any { it instanceof List && !((List) it).isEmpty() }
+                    }
+                    parser.skipChildren()
+                }
+                return false
+            } finally {
+                parser.close()
+            }
+        } catch (IOException ignored) {
+            return true
+        }
+    }
+
     static Map readSummary(File extract) {
         File file = keepFile(extract)
         if (!file.isFile()) return null

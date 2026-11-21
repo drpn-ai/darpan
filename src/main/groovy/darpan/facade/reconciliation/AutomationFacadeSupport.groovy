@@ -1493,11 +1493,12 @@ class AutomationFacadeSupport {
     /**
      * The record fields a SuiteQL template adds itself, beside the operator's projection (netsuite-darpan
      * NsSuiteQlOrderSupport.TEMPLATE_RECORD_COLUMNS; darpan cannot import it, so NsSuiteQlTemplateFieldsSyncTests there
-     * keeps the two equal). SALES_LINES makes one record per item line.
+     * keeps the two equal). SALES_LINES makes one record per item line; nsUnkeyedLine ("Y" on a line with no HotWax line id,
+     * which its declared Keep line sets aside) is shown like any other field (DAR-BE-318).
      */
     static final Map<String, List<String>> SUITEQL_TEMPLATE_FIELDS = [
             SALES_LINES        : ["orderLineId", "lineId", "lineState", "lineLocation", "itemType", "quantityShipped",
-                                  "quantityBilled", "quantityBackordered", "lineClosed", "itemName", "lineAmount"],
+                                  "quantityBilled", "quantityBackordered", "lineClosed", "itemName", "lineAmount", "nsUnkeyedLine"],
             STATE_CONTRADICTION: ["contradiction", "contradictionBrief"],
     ].asImmutable()
 

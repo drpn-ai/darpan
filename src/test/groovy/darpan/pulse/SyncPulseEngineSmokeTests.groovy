@@ -92,6 +92,7 @@ class SyncPulseEngineSmokeTests {
          "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
         upstream.clear(); arrived.clear(); upstreamCalls.clear(); targetCalls.clear(); pulseThreads.clear()
         upstreamFailure = null
+        SyncPulseSupport.resetForTests()
         ec.message.clearAll()
         pair(SP, AUTO, 60, 60)
         SyncPulseSupport.setReaders({ def rec, Map p, Map automation, Instant from, Instant thru ->
@@ -112,6 +113,7 @@ class SyncPulseEngineSmokeTests {
     @AfterEach
     void resetHooks() {
         SyncPulseSupport.resetHooks()
+        SyncPulseSupport.resetForTests()
         AutomationExecutionSupport.setRunAdmission(null)
     }
 
@@ -250,6 +252,111 @@ class SyncPulseEngineSmokeTests {
         Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
         assertEquals(["#A1"], out.newlyPast*.recordKey)
         assertEquals("1 keys could not be asked", out.sample.message)
+    }
+
+    // ------------------------------------------------------------------------------------------ present keys (task 13)
+
+    @Test
+    void aSecondPulseAsksTheTargetOnlyAboutKeysItHasNotConfirmed() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(10))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(["#A1", "#A2"] as Set, targetCalls.last() as Set)
+
+        upstream["#A3"] = T0.plus(Duration.ofMinutes(20))
+        Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofHours(1)))
+
+        assertEquals(["#A2", "#A3"] as Set, targetCalls.last() as Set, "#A1 was confirmed: not asked again")
+        assertEquals(["#A1"] as Set, SyncPulseSupport.presentKeysOf(SP))
+        assertEquals(2, out.waitingCount + out.pastCount, "#A1 still counts as present, not waiting or past")
+    }
+
+    @Test
+    void aWaitingKeyThatThenArrivesIsRememberedAndNotAskedAgain() {
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(10))
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+
+        arrived << "#A2"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(60)))
+        assertEquals(["#A2"], targetCalls.last())
+        assertEquals(["#A2"] as Set, SyncPulseSupport.presentKeysOf(SP))
+
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(120)))
+        assertEquals([], targetCalls.last())
+    }
+
+    @Test
+    void keysOlderThanTheWindowArePruned() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(["#A1"] as Set, SyncPulseSupport.presentKeysOf(SP))
+
+        // a window of 60 + 2 x 60 + 2 + 5 minutes: four hours on, #A1 can no longer be asked
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofHours(4)))
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+    }
+
+    @Test
+    void aFailedPulseAddsNoKeys() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        upstreamFailure = [ok: false, records: [], errors: ["HotWax answered 503"]]
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+
+        upstreamFailure = null
+        SyncPulseSupport.setReaders(null, { def rec, Map p, Map automation, Collection keys ->
+            [ok: false, present: ["#A1"] as Set, unasked: [] as Set, errors: ["The target read failed"]]
+        })
+        Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals("SPS_FAILED", out.status)
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+    }
+
+    @Test
+    void aSettingsChangeDropsTheSet() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(["#A1"] as Set, SyncPulseSupport.presentKeysOf(SP))
+
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll(pairMap(SP) + [allowanceMinutes: 90]).update()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(30)))
+        assertEquals(["#A1"], targetCalls.last(), "asked about again after the allowance changed")
+
+        SyncPulseSupport.dropPresent(SP)
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+    }
+
+    @Test
+    void resetForTestsEmptiesTheSet() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        SyncPulseSupport.resetForTests()
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+    }
+
+    @Test
+    void countsMatchARunWithoutTheCache() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(100))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(90))
+        upstream["#A3"] = T0.minus(Duration.ofMinutes(10))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        Instant later = T0.plus(Duration.ofMinutes(60))
+        Map cached = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
+
+        SyncPulseSupport.resetForTests()
+        Map fresh = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
+
+        assertTrue(targetCalls[1].size() < targetCalls[2].size(), "the cached pulse asked about fewer keys")
+        assertEquals([fresh.status, fresh.waitingCount, fresh.pastCount],
+                [cached.status, cached.waitingCount, cached.pastCount])
+        assertEquals(fresh.sample.pastAllowanceCount, cached.sample.pastAllowanceCount)
     }
 
     // ------------------------------------------------------------------------------------------------ the job

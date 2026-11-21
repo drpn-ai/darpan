@@ -20,6 +20,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 import static darpan.common.ValueSupport.normalize
@@ -79,6 +80,56 @@ class SyncPulseSupport {
     static Closure getUpstreamReader() { return upstreamRead }
 
     static void resetHooks() { upstreamRead = null; targetRead = null }
+
+    // ------------------------------------------------------------------------------------------- present keys
+
+    /** Most keys remembered per pair; beyond it nothing more is added and those keys are simply asked about again. */
+    static final int PRESENT_CAP = 200000
+
+    /**
+     * Per pair, the keys the target has already confirmed present, each with its source created time (DAR-BE-328 task 13:
+     * a pulse asks the target only about keys not in here). In memory only: empty after a restart, so the first pulse asks
+     * about everything and correctness never depends on it. signature is the pair's pulse settings; a change drops the set.
+     */
+    private static class PresentSet {
+        final String signature
+        final Map<String, Instant> keys = new ConcurrentHashMap<String, Instant>()
+        PresentSet(String signature) { this.signature = signature }
+    }
+
+    private static final ConcurrentHashMap<String, PresentSet> PRESENT_BY_PAIR = new ConcurrentHashMap<String, PresentSet>()
+
+    static void resetForTests() { PRESENT_BY_PAIR.clear() }
+
+    /** The pair's remembered keys (a copy); empty when none. For tests and the engine. */
+    static Set<String> presentKeysOf(String syncPairId) { return new LinkedHashSet<String>(PRESENT_BY_PAIR.get(syncPairId)?.keys?.keySet() ?: []) }
+
+    /** Forgets a pair's present keys (settings changed, pair inactive or deleted). */
+    static void dropPresent(String syncPairId) { if (syncPairId) PRESENT_BY_PAIR.remove(syncPairId) }
+
+    /** The pair's set for these settings: a set made under other settings is dropped and a fresh one started. */
+    private static PresentSet presentSetFor(String syncPairId, String signature) {
+        PresentSet set = PRESENT_BY_PAIR.get(syncPairId)
+        if (set != null && set.signature == signature) return set
+        PresentSet fresh = new PresentSet(signature)
+        PRESENT_BY_PAIR.put(syncPairId, fresh)
+        return fresh
+    }
+
+    private static String presentSignature(Map pair, Integer allowance, Integer cadence) {
+        return [normalize(pair.automationId), normalize(pair.upstreamSide), normalize(pair.isActive) ?: "Y", allowance, cadence].join("|")
+    }
+
+    /** Adds the keys the target returned, with their created times, up to PRESENT_CAP; drops keys older than windowFrom. */
+    private static void rememberPresent(PresentSet set, Collection<String> returned, Map<String, Instant> createdByKey, Instant windowFrom) {
+        returned.each { String k ->
+            Instant at = createdByKey.get(k)
+            if (at == null || at.isBefore(windowFrom)) return
+            if (set.keys.size() >= PRESENT_CAP && !set.keys.containsKey(k)) return
+            set.keys.put(k, at)
+        }
+        set.keys.entrySet().removeIf { Map.Entry<String, Instant> e -> e.value.isBefore(windowFrom) }
+    }
 
     // ------------------------------------------------------------------------------------------- pure parts
 
@@ -168,6 +219,8 @@ class SyncPulseSupport {
             List pairs = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", SCAN_WHY)
                     .useCache(false).list() ?: []).findAll { (normalize(it.get("isActive")) ?: "Y") == "Y" }
             out.pairCount = pairs.size()
+            Set<String> activeIds = pairs.collect { normalize(it.get("syncPairId")) } as Set<String>
+            PRESENT_BY_PAIR.keySet().retainAll(activeIds)   // an inactive or deleted pair drops its set
             if (!pairs) return out
             admission.drain()
             Map<String, Map> tenantDays = [:]
@@ -284,7 +337,7 @@ class SyncPulseSupport {
         List<Map> open = null
         try {
             Map automation = pulseableAutomation(ec, pair)
-            if (automation == null) return empty
+            if (automation == null) { dropPresent(syncPairId); return empty }
             Map day = tenantDay(ec, tenantId, now)
             Map effective = effectiveValues(pair, day.windows as List<PeakWindow>, periodRows(ec, pair), day.date as LocalDate)
             allowance = effective.allowanceMinutes as Integer
@@ -297,17 +350,31 @@ class SyncPulseSupport {
             List<Map> records = (up.records ?: []) as List<Map>
 
             Set<String> keys = new LinkedHashSet<String>()
-            records.each { Map r -> String k = normalize(r.key); if (k) keys << k }
-            open.each { Map o -> keys << (o.recordKey as String) }
-            Map target = presentInTarget(ec, pair, automation, keys)
+            Map<String, Instant> createdByKey = [:]
+            records.each { Map r -> String k = normalize(r.key); if (k) { keys << k; createdByKey.put(k, r.createdAt as Instant) } }
+            open.each { Map o ->
+                String k = o.recordKey as String
+                keys << k
+                if (!createdByKey.containsKey(k) && o.sourceCreatedStamp != null) createdByKey.put(k, (o.sourceCreatedStamp as Timestamp).toInstant())
+            }
+            // the target is asked only about keys it has not already confirmed; a confirmed key still counts as present
+            PresentSet known = presentSetFor(syncPairId, presentSignature(pair, allowance, effective.pulseEveryMinutes as Integer))
+            known.keys.entrySet().removeIf { Map.Entry<String, Instant> e -> e.value.isBefore(window.from as Instant) }
+            Set<String> confirmed = keys.findAll { known.keys.containsKey(it) } as Set<String>
+            Set<String> toAsk = keys.findAll { !confirmed.contains(it) } as Set<String>
+            Map target = presentInTarget(ec, pair, automation, toAsk)
             if (target?.ok != true) return failed(ec, pair, now, allowance, open, target?.errors)
 
-            Set<String> present = keySet(target.present as Collection)
+            Set<String> returned = keySet(target.present as Collection)
+            Set<String> present = new LinkedHashSet<String>(returned)
+            present.addAll(confirmed)
             Set<String> unasked = keySet(target.unasked as Collection)
             Map sorted = classify(records, present, now, allowance, unasked)
             Set<String> upstreamKeys = new LinkedHashSet<String>()
             records.each { Map r -> String k = normalize(r.key); if (k) upstreamKeys << k }
-            return settle(ec, pair, now, allowance, open, sorted, present, unasked, window.from as Instant, upstreamKeys)
+            Map settled = settle(ec, pair, now, allowance, open, sorted, present, unasked, window.from as Instant, upstreamKeys)
+            if (settled.status == OK) rememberPresent(known, returned.findAll { toAsk.contains(it) }, createdByKey, window.from as Instant)
+            return settled
         } catch (Throwable t) {
             String reason = normalize(t.message) ?: t.class.simpleName
             logger.warn("Sync pulse {} (tenant {}) failed: {}", syncPairId, tenantId, reason)

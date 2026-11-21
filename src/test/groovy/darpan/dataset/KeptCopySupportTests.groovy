@@ -879,6 +879,61 @@ class KeptCopySupportTests {
     }
 
     /**
+     * 3b-1 carry M2, on a made-up system: the rebuild is queued only when the projection service says the copy lacks fields
+     * and the dataset's next read can keep every one of them. A lack the system's read can never keep (the made-up read
+     * cannot select unread*) queues nothing, or every run would queue a rebuild that cannot fix it.
+     */
+    @Test
+    void aRebuildIsQueuedOnlyWhenTheSystemSaysFieldsAreMissingAndItsReadCanKeepThem() {
+        loadProjectionConnector()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_PROJ")
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.rule.RuleSet ruleSetId="KCQ_RS" ruleSetName="KCQ_RS" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="KCQ_S" ruleSetId="KCQ_RS" objectType="ORDER" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KCQ_S" fileSide="FILE_1" systemEnumId="KC_PROJ" fileTypeEnumId="DftJson"
+                sourceConfigId="conn-proj-q" sourceConfigType="KC_PROJ_TYPE" recordRootExpression="records" primaryIdExpression="id"
+                companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="KCQ_S" fileSide="FILE_1" sequenceNum="1" fieldExpression="a"
+                companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="KCQ_S" fileSide="FILE_1" sequenceNum="2" fieldExpression="b"
+                companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="KCQ_S" fileSide="FILE_1" sequenceNum="3" fieldExpression="unreadX"
+                companyUserGroupId="${A}"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        String id = datasetOf("KC_PROJ", "conn-proj-q", "id", "createdAt")
+        assertEquals(["id", "createdAt", "a", "b"], DatasetSupport.keptFields(ec, ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().one().getMap() as Map) as List, "test precondition: unreadX is trimmed")
+        copyOf(A, id, [[id: "p1", createdAt: "2026-11-10T09:00:00Z", a: 1]], "id", "createdAt", new Timestamp(READ_THRU.time - 60 * DAY),
+                [keptFields: ["id", "createdAt", "a"]])
+        Timestamp later = ts("2026-12-25T00:00:00Z")
+        Closure dueAt = {
+            def row = ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().one()
+            return { Timestamp t -> row.nextReadDate = t; row.update() }
+        }
+        Closure<Timestamp> nextRead = { ec.entity.find("darpan.dataset.Dataset").condition("datasetId", id).disableAuthz().one().nextReadDate as Timestamp }
+        dueAt()(later)
+
+        // the copy lacks unreadX, which the dataset's read cannot keep: read live, no rebuild queued
+        MadeUpKeptRecords.CALLS.clear()
+        Map cannot = KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id", "unreadX"], "proj-q"))
+        assertFalse(cannot.served as boolean)
+        assertEquals("the made-up copy lacks unreadX", cannot.reason)
+        assertEquals(later, nextRead(), "a field the read can never keep queues nothing")
+        assertEquals(1, MadeUpKeptRecords.CALLS.count { it.unionFields == null }, "the serving check is asked once")
+        // one keepable and one not: a rebuild cannot fix the second, so it queues nothing either
+        assertFalse(KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id", "b", "unreadX"], "proj-q")).served as boolean)
+        assertEquals(later, nextRead())
+
+        // a refusal that names no missing field (the side wants whole records, the copy keeps some): nothing to rebuild for
+        Map whole = KeptCopySupport.sliceIfServed(ec, projSide(connector, null, "proj-q"))
+        assertEquals("the made-up copy keeps some fields, the side wants all", whole.reason)
+        assertEquals(later, nextRead(), "no missing fields named, no rebuild queued")
+
+        // the copy lacks b, which the dataset's next read keeps: queued
+        assertEquals("the made-up copy lacks b", KeptCopySupport.sliceIfServed(ec, projSide(connector, ["id", "b"], "proj-q")).reason)
+        assertTrue(nextRead().time <= System.currentTimeMillis(), "queued for the read that keeps b")
+    }
+
+    /**
      * M1/M2: a projection service never replaces what the slice answers itself, and an abandoned slice removes only files in
      * its own folder, whatever the service lists.
      */

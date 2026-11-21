@@ -268,7 +268,7 @@ class KeptCopySupport {
             if (side.projectionServiceName) {
                 Map checked = callProjection(ec, side, dir, manifest, windowField, [:])
                 if (checked.servingProblem) {
-                    queueRebuildIfFieldsChanged(ec, dataset, manifest, checked.servingProblem as String)
+                    queueRebuildIfFieldsChanged(ec, dataset, checked.servingProblem as String, checked.missingFields)
                     return notServed(checked.servingProblem as String)
                 }
             }
@@ -296,19 +296,23 @@ class KeptCopySupport {
     }
 
     /**
-     * A side the copy could not serve: when the dataset's next read would keep other fields than the copy holds (a check
-     * now reads a field the copy lacks), the dataset is queued for that read now. Logged either way; never throws, and
-     * leaves the message facade as it found it.
+     * A side the copy could not serve: when the system's projection service said why (the copy lacks fields) and the dataset's
+     * next read would keep every one of them, the dataset is queued for that read now. A lack the system's read can never
+     * keep (a field outside the dataset's kept-fields union) queues nothing, or every run would queue a rebuild that cannot
+     * fix it: it is logged at warn. Never throws, and leaves the message facade as it found it.
      */
-    private static void queueRebuildIfFieldsChanged(def ec, Map dataset, Map manifest, String reason) {
+    private static void queueRebuildIfFieldsChanged(def ec, Map dataset, String reason, Object missingFields) {
         try {
-            Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, dataset.systemEnumId as String)
-            Map<String, List<String>> nextRead = DatasetRefreshSupport.fieldsForRead(ec, dataset, connector)
-            List<String> next = nextRead?.keep
-            List<String> held = manifest?.keptFields as List<String>
-            // the same keep and read lists: a rebuild would read the copy the same way again
-            if (next == held && (next == null || (nextRead.read ?: []) == ((manifest?.readFields ?: []) as List))) {
-                logger.info("Dataset ${dataset.datasetId} not served: ${reason}; its next read keeps the same fields")
+            List<String> missing = missingFields instanceof Collection ? (missingFields as Collection).collect { String.valueOf(it) } : []
+            if (!missing) {
+                logger.info("Dataset ${dataset.datasetId} not served: ${reason}")
+                return
+            }
+            // null: the next read keeps whole records, so it keeps every field
+            Set<String> next = DatasetSupport.keptFields(ec, dataset)
+            List<String> unkeepable = next == null ? [] : missing.findAll { !(it in next) }
+            if (unkeepable) {
+                logger.warn("Dataset ${dataset.datasetId} not served: ${reason}; its read cannot keep ${unkeepable}, so no rebuild is queued")
                 return
             }
             logger.info("Dataset ${dataset.datasetId} not served: ${reason}; queued for a read that keeps ${next == null ? 'whole records' : next}")

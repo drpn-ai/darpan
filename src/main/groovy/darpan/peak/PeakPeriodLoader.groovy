@@ -131,6 +131,9 @@ class PeakPeriodLoader {
 
     private static final Set<String> WARNED_DUPLICATE_PAIRS = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+    /** DAR-OPS-026: forgets which duplicate sync pairs were already warned about. Test-only. */
+    static void resetForTests() { WARNED_DUPLICATE_PAIRS.clear() }
+
     /** The larger of two allowances on every date: a period one pair overrides is compared with the other's normal value. */
     private static AllowanceSpec larger(AllowanceSpec a, AllowanceSpec b) {
         Map<String, Integer> periods = [:]

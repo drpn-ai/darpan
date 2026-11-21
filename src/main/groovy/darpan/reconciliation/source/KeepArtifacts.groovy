@@ -135,6 +135,9 @@ class KeepArtifacts {
     @PackageScope
     static final AtomicInteger OPEN_ROW_READERS = new AtomicInteger()
 
+    /** DAR-OPS-026: zeroes the open row-reader count. Test-only. */
+    static void resetForTests() { OPEN_ROW_READERS.set(0) }
+
     @PackageScope
     static class RowReader implements Closeable {
         private final BufferedReader reader

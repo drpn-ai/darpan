@@ -236,6 +236,7 @@ class AutomationExecutionSupport {
             resetExecutionHooks()
             peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
             tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
+            peakAllowancesLoader = DEFAULT_PEAK_ALLOWANCES_LOADER
             RunAdmission.resetForTests()
             runAdmission = RunAdmission.SHARED
         } catch (Throwable ignored) { }

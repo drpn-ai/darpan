@@ -61,6 +61,9 @@ class SyncPulseReader {
 
     static void resetHooks() { liveExtractor = null }
 
+    /** DAR-OPS-026: clears the live-extractor seam. Test-only. */
+    static void resetForTests() { resetHooks() }
+
     /**
      * The upstream side of the pair's check for [from, thru) on its window field, with the side's filters.
      *

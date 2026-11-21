@@ -412,7 +412,7 @@ class SyncPulseEngineSmokeTests {
         Instant later = T0.plus(Duration.ofMinutes(60))
         Map cached = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
 
-        SyncPulseSupport.resetForTests()
+        SyncPulseSupport.dropPresent(SP)   // forget the cache only; resetForTests() also clears the readers (DAR-OPS-026)
         Map fresh = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
 
         assertTrue(targetCalls[1].size() < targetCalls[2].size(), "the cached pulse asked about fewer keys")

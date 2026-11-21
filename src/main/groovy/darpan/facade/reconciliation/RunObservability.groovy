@@ -23,8 +23,15 @@ class RunObservability {
     /** DAR-BE-328: an extract's page heartbeats touch the run's automation execution at most this often. */
     static final long EXECUTION_TOUCH_EVERY_MS = 60_000L
     /** Seam for tests. */
-    static Closure<Long> executionTouchClock = { -> System.currentTimeMillis() }
+    static final Closure<Long> DEFAULT_EXECUTION_TOUCH_CLOCK = { -> System.currentTimeMillis() }
+    static Closure<Long> executionTouchClock = DEFAULT_EXECUTION_TOUCH_CLOCK
     private static final ConcurrentHashMap<String, Long> EXECUTION_TOUCHED_AT = new ConcurrentHashMap<String, Long>()
+
+    /** DAR-OPS-026: restores the touch clock and forgets when each execution was last touched. Test-only. */
+    static void resetForTests() {
+        executionTouchClock = DEFAULT_EXECUTION_TOUCH_CLOCK
+        EXECUTION_TOUCHED_AT.clear()
+    }
 
     static final String STATUS_PENDING  = "AUT_STAT_PENDING"
     static final String STATUS_RUNNING  = "AUT_STAT_RUNNING"

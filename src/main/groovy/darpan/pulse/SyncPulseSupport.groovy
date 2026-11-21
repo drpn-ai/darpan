@@ -106,7 +106,7 @@ class SyncPulseSupport {
 
     private static final ConcurrentHashMap<String, PresentSet> PRESENT_BY_PAIR = new ConcurrentHashMap<String, PresentSet>()
 
-    static void resetForTests() { PRESENT_BY_PAIR.clear(); presentCap = DEFAULT_PRESENT_CAP }
+    static void resetForTests() { PRESENT_BY_PAIR.clear(); presentCap = DEFAULT_PRESENT_CAP; resetHooks() }
 
     /** The pair's remembered keys (a copy); empty when none. For tests and the engine. */
     static Set<String> presentKeysOf(String syncPairId) { return new LinkedHashSet<String>(PRESENT_BY_PAIR.get(syncPairId)?.keys?.keySet() ?: []) }

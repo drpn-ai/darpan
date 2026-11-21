@@ -37,6 +37,38 @@
         <out-parameters><parameter name="fileLocation"/></out-parameters>
         <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
     </service>
+    <!-- Kept-copy sides (fix round 1): a dataset keyed by projConfigId serves them. Neither declares readFields, which would
+         make a non-projecting side live-only.
+         - SparkCopyRecords: no sourceFilters, so the slice is unfiltered and the compare keeps in Spark.
+         - ReadCopyRecords: declares sourceFilters, so the side stays gated and the slice filters as it always has. -->
+    <service verb="extract" noun="SparkCopyRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="keepRuleFields" type="List"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
+    <service verb="extract" noun="ReadCopyRecords" allow-remote="false">
+        <in-parameters>
+            <parameter name="projConfigId"/>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="windowFieldName" default-value="createdAt"/>
+            <parameter name="sourceFilters" type="List"/>
+            <parameter name="outputLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="companyUserGroupId"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: tests pass their own extractor"/></actions>
+    </service>
     <service verb="extract" noun="LedgerRecords" allow-remote="false">
         <in-parameters>
             <parameter name="windowStart"/>

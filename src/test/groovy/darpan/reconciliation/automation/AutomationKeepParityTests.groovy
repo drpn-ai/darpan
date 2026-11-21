@@ -1,5 +1,7 @@
 package darpan.reconciliation.automation
 
+import darpan.dataset.DatasetRefreshSupport
+import darpan.dataset.KeptCopyStore
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.RunVerificationSupport
@@ -14,13 +16,16 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.sql.Timestamp
+import java.time.Instant
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -46,7 +51,14 @@ class AutomationKeepParityTests {
     private static final String SPARK_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkKeptRecords"
     private static final String READ_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#ReadFilteredRecords"
     private static final String LEDGER_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#LedgerRecords"
+    private static final String SPARK_COPY_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkCopyRecords"
+    private static final String READ_COPY_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#ReadCopyRecords"
     private static final Timestamp FIRE = Timestamp.valueOf("2026-11-21 06:00:00")
+    /** The kept copies are read at this clock: their readThru covers the previous-day window FIRE resolves. */
+    private static final Instant COPY_READ_AT = Instant.parse("2026-11-22T00:00:00Z")
+    private static final String COPY_CONFIG = "copy-1"
+    private static final String EDITOR_USERNAME = "test.customer"
+    private static final String FACADE_GRANT = "facade.ReconciliationFacadeServices.list#Reconciliations"
 
     private static final List<Map> ORDERS = [
             [id: "K1", status: "OPEN", region: "NORTH", total: 10.5],
@@ -59,6 +71,11 @@ class AutomationKeepParityTests {
             [id: "K8", status: "OPEN", region: "North", total: 9],
     ]
     private static final List<Map> LEDGER = [[id: "K1"], [id: "K2"], [id: "K3"], [id: "K7"], [id: "K9"]]
+    /** The same orders as a kept copy holds them: windowed on createdAt, stamped on updatedAt, inside the run's window. */
+    private static final List<Map> COPY_ORDERS = ORDERS.collect { Map r ->
+        new LinkedHashMap(r) + [createdAt: "2026-11-20T10:00:00Z", updatedAt: "2026-11-20T10:00:00Z"]
+    }
+    private final Map<String, String> datasetIds = [:]
 
     private ExecutionContext ec
     private int readSeq = 0
@@ -70,8 +87,15 @@ class AutomationKeepParityTests {
         assertTrue(dataManager.path.contains("test-data-manager"), "tests never write the dev datamanager: ${dataManager}")
         new File(dataManager, DataManagerSupport.RECONCILIATION_RUNS_PATH).deleteDir()
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
+        ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DatasetSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
+        ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: "DARPAN_USER", userId: "TEST_CUSTOMER_USER",
+                fromDate: Timestamp.valueOf("2026-04-21 00:00:00")]).createOrUpdate()
+        TenantAccessSupport.syncUserContext(ec)
         seed()
+        keptDataset("ACME_COPY_SPARK")
+        keptDataset("ACME_COPY_READ")
     }
 
     @AfterAll
@@ -105,6 +129,7 @@ class AutomationKeepParityTests {
         assertEquals(["K1", "K7", "K8"], records(before.extract)*.id)
         assertEquals(JsonOutput.toJson(records(before.extract)), JsonOutput.toJson(kept(after.extract)))
         assertNotNull(KeepArtifacts.readSummary(after.extract))
+        assertNull(KeepArtifacts.readSummary(before.extract), "Spark runs nothing over a gated side")
 
         // counts and status
         ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount", "file2RecordCount"].each { String f ->
@@ -139,6 +164,65 @@ class AutomationKeepParityTests {
         assertEquals(readKeys, sparkKeys)
     }
 
+    @Test
+    void aSparkSideServedFromAKeptCopyMatchesItsLiveRead() {
+        // Fix round 1 (review I1). The copy is sliced unfiltered (sideKeep reaches KeptCopySupport.side() as SPARK), the
+        // compare keeps in Spark over the slice, and the run equals the same side read live with Spark Keep.
+        List<Map> servedCalls = []
+        Map served = run("KAP_COPY_SPARK", servedCalls)
+        assertFalse(servedCalls.any { it.service == SPARK_COPY_EXTRACT }, "a served side never calls its live extract")
+        assertEquals(true, json(served.extract).metadata?.servedFromCopy, "side 1 was served from the kept copy")
+        assertEquals(COPY_ORDERS.size(), records(served.extract).size(), "the slice is unfiltered: Keep is Spark's")
+        assertEquals(["K1", "K7", "K8"], kept(served.extract)*.id)
+        assertEquals(["K2", "K3", "K4", "K5", "K6"], ((List<Map>) sideFile(served.extract).records)*.id)
+
+        List<Map> liveCalls = []
+        setStatus("ACME_COPY_SPARK", "DST_PAUSED")
+        Map live
+        try {
+            live = run("KAP_COPY_SPARK_LIVE", liveCalls)
+        } finally {
+            setStatus("ACME_COPY_SPARK", "DST_ACTIVE")
+        }
+        Map liveSent = liveCalls.find { it.service == SPARK_COPY_EXTRACT }?.params
+        assertNotNull(liveSent, "a paused copy reads live")
+        assertFalse(liveSent.containsKey("sourceFilters"))
+        assertEquals(null, json(live.extract).metadata?.servedFromCopy)
+        assertEquals(COPY_ORDERS.size(), records(live.extract).size())
+
+        assertEquals(JsonOutput.toJson(kept(live.extract)), JsonOutput.toJson(kept(served.extract)))
+        ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount", "file2RecordCount"].each { String f ->
+            assertEquals(live.execution[f], served.execution[f], f)
+        }
+        assertEquals(3, served.execution.file1RecordCount)
+        assertEquals(JsonOutput.toJson(live.document.summary), JsonOutput.toJson(served.document.summary))
+        assertEquals(JsonOutput.toJson(live.document.differences), JsonOutput.toJson(served.document.differences))
+        // the side file, apart from its sourceFileName (a slice names its file after the system and window, the stub does not)
+        assertEquals(JsonOutput.toJson(sideFile(live.extract).findAll { it.key != "sourceFileName" }),
+                JsonOutput.toJson(sideFile(served.extract).findAll { it.key != "sourceFileName" }))
+    }
+
+    @Test
+    void aGatedSideServedFromAKeptCopyIsStillFilteredAtTheSlice() {
+        // A served side whose extract still takes its filters keeps today's behaviour: the slice filters, Spark runs nothing
+        // (no Keep summary), and the run's results are the Spark-kept run's.
+        List<Map> gatedCalls = []
+        Map gated = run("KAP_COPY_READ", gatedCalls)
+        assertFalse(gatedCalls.any { it.service == READ_COPY_EXTRACT }, "a served side never calls its live extract")
+        assertEquals(true, json(gated.extract).metadata?.servedFromCopy)
+        assertEquals(["K1", "K7", "K8"], records(gated.extract)*.id, "the slice filters as it always has")
+        assertNull(KeepArtifacts.readSummary(gated.extract), "no .keep.json on a gated side")
+        assertEquals(["K2", "K3", "K4", "K5", "K6"], ((List<Map>) sideFile(gated.extract).records)*.id)
+
+        List<Map> sparkCalls = []
+        Map spark = run("KAP_COPY_SPARK_TWIN", sparkCalls)
+        assertEquals(JsonOutput.toJson(kept(spark.extract)), JsonOutput.toJson(records(gated.extract)))
+        ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount", "file2RecordCount"].each { String f ->
+            assertEquals(spark.execution[f], gated.execution[f], f)
+        }
+        assertEquals(JsonOutput.toJson(spark.document.differences), JsonOutput.toJson(gated.document.differences))
+    }
+
     // ---------------------------------------------------------------------------------------------------------- the run
 
     /** The automation run once, scheduled; its execution row, its side-1 extract and its result document. */
@@ -151,6 +235,7 @@ class AutomationKeepParityTests {
             assertEquals(1, result.executedCount, result.toString())
         } finally {
             ReconciliationSmokeTestSupport.seedCompanyScope(ec)
+            TenantAccessSupport.syncUserContext(ec)
         }
         def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution").condition("automationId", automationId)
                 .disableAuthz().useCache(false).one()
@@ -167,7 +252,7 @@ class AutomationKeepParityTests {
         return { String service, Map params ->
             calls << [service: service, params: new LinkedHashMap(params)]
             boolean ledger = service == LEDGER_EXTRACT
-            List<Map> rows = ledger ? LEDGER : ORDERS
+            List<Map> rows = ledger ? LEDGER : service in [SPARK_COPY_EXTRACT, READ_COPY_EXTRACT] ? COPY_ORDERS : ORDERS
             if (params.lookupKeys) rows = rows.findAll { ((List) params.lookupKeys).contains(it.get(params.lookupKeyField)) }
             Map applied = SourceFilterSupport.applyToRecords(rows, SourceFilterSupport.parseRules((params.sourceFilters ?: []) as List))
             String location = DataManagerSupport.resolveReconciliationRunLocation(ec, params.automationExecutionId as String,
@@ -208,13 +293,18 @@ class AutomationKeepParityTests {
     // ------------------------------------------------------------------------------------------------------------ setup
 
     private void seed() {
-        Closure<String> metadata = { String service, boolean byKeys ->
-            JsonOutput.toJson([extractServiceName: service] + (byKeys ? [parameters: [readByOtherSideKeys: true]] : [:]))
-                    .replace('"', "&quot;")
+        Closure<String> metadata = { String service, Object byKeysOrParameters ->
+            Map parameters = byKeysOrParameters instanceof Map ? (Map) byKeysOrParameters :
+                    byKeysOrParameters == true ? [readByOtherSideKeys: true] : [:]
+            JsonOutput.toJson([extractServiceName: service] + (parameters ? [parameters: parameters] : [:])).replace('"', "&quot;")
         }
         StringBuilder automations = new StringBuilder()
         [KAP_READ: ["ACME_READ", READ_EXTRACT, false], KAP_SPARK: ["ACME_SPARK", SPARK_EXTRACT, false],
-         KAP_KEYS_READ: ["ACME_READ", READ_EXTRACT, true], KAP_KEYS_SPARK: ["ACME_SPARK", SPARK_EXTRACT, true]].each { String id, List side1 ->
+         KAP_KEYS_READ: ["ACME_READ", READ_EXTRACT, true], KAP_KEYS_SPARK: ["ACME_SPARK", SPARK_EXTRACT, true],
+         KAP_COPY_SPARK: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
+         KAP_COPY_SPARK_LIVE: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
+         KAP_COPY_SPARK_TWIN: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
+         KAP_COPY_READ: ["ACME_COPY_READ", READ_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]]].each { String id, List side1 ->
             automations << """
             <darpan.reconciliation.ReconciliationAutomation automationId="${id}" automationName="${id}" companyUserGroupId="${TENANT}"
                 inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_RS" savedRunType="ruleset"
@@ -222,7 +312,7 @@ class AutomationKeepParityTests {
                 relativeWindowCount="1" windowTimeZone="UTC" isActive="N"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${id}" fileSide="FILE_1" companyUserGroupId="${TENANT}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${side1[0]}" fileTypeEnumId="DftJson"
-                safeMetadataJson="${metadata(side1[1] as String, false)}"/>
+                safeMetadataJson="${metadata(side1[1] as String, side1.size() > 3 ? side1[3] : false)}"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${id}" fileSide="FILE_2" companyUserGroupId="${TENANT}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
                 safeMetadataJson="${metadata(LEDGER_EXTRACT, side1[2] as boolean)}"/>
@@ -244,6 +334,14 @@ class AutomationKeepParityTests {
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_READ" extractServiceName="${READ_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
                 excludedRecordsSidecar="Y" enabled="Y"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_COPY_SPARK" extractServiceName="${SPARK_COPY_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="ACME_COPY_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="Y" enabled="Y"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_COPY_READ" extractServiceName="${READ_COPY_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="ACME_COPY_TYPE"
+                configParameterName="projConfigId" preserveWindowInstants="Y" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="Y" enabled="Y"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LEDGER" extractServiceName="${LEDGER_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" enabled="Y"/>
             <darpan.rule.RuleSet ruleSetId="KAP_RS" ruleSetName="ACME orders vs ledger" companyUserGroupId="${TENANT}"/>
@@ -254,5 +352,67 @@ class AutomationKeepParityTests {
                 recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
             ${automations}
         </entity-facade-xml>""").dummyFks(true).load()
+    }
+
+    // ------------------------------------------------------------------------------------------------- the kept copies
+
+    /** The ACTIVE dataset for system + COPY_CONFIG, its copy read in full (COPY_ORDERS) at COPY_READ_AT. */
+    private void keptDataset(String system) {
+        Map stored = underFacadeGrant("dataset.DatasetServices.store#Dataset", [systemEnumId: system, sourceConfigId: COPY_CONFIG,
+                options: [:], idField: "id", stampField: "updatedAt", windowField: "createdAt"])
+        assertEquals([], stored.errors, "store#Dataset for ${system}")
+        String id = stored.out.datasetId
+        datasetIds[system] = id
+        ec.user.setEffectiveTime(Timestamp.from(COPY_READ_AT))
+        Map refreshed
+        try {
+            refreshed = underFacadeGrant("dataset.DatasetServices.refresh#Dataset", [datasetId: id, forceFull: false, extractor: { String svc, Map p ->
+                File out = new File(DataManagerSupport.resolveDirectoryFile(ec, p.outputLocation as String, true), p.fileName as String)
+                out.setText(JsonOutput.toJson([metadata: [windowStart: p.windowStart, windowEnd: p.windowEnd], records: COPY_ORDERS]), "UTF-8")
+                return [fileLocation: out.absolutePath, recordCount: COPY_ORDERS.size(), dataAvailable: true]
+            }])
+        } finally {
+            ec.user.setEffectiveTime(null)
+        }
+        assertEquals([], refreshed.errors, "refresh#Dataset for ${system}")
+        Map manifest = KeptCopyStore.manifest(DatasetRefreshSupport.datasetDir(ec, TENANT, id))
+        assertEquals(COPY_ORDERS.size(), manifest.recordCount)
+        assertEquals(COPY_READ_AT, (manifest.readThru as Timestamp).toInstant())
+    }
+
+    private void setStatus(String system, String statusId) {
+        assertEquals([], underFacadeGrant("dataset.DatasetServices.store#Dataset", [datasetId: datasetIds[system], statusId: statusId,
+                systemEnumId: system, sourceConfigId: COPY_CONFIG, options: [:], idField: "id", stampField: "updatedAt",
+                windowField: "createdAt"]).errors)
+    }
+
+    /** A facade service as the editor, with authz on (as KeptCopyParityTests calls the dataset services). */
+    private Map underFacadeGrant(String serviceName, Map params) {
+        def harnessFrame = ec.artifactExecution.peek()
+        assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
+        ec.artifactExecution.pop(harnessFrame)
+        ec.artifactExecution.enableAuthz()
+        try {
+            def aei = ec.artifactExecution.push(FACADE_GRANT, ArtifactExecutionInfo.AT_SERVICE, ArtifactExecutionInfo.AUTHZA_ALL, true)
+            try {
+                ec.message.clearAll()
+                Map out = null
+                try {
+                    out = ec.service.sync().name(serviceName).parameters(new HashMap(params)).call()
+                } catch (Exception e) {
+                    ec.message.addError(e.toString())
+                }
+                List<String> errors = ec.message.errors.collect { it.toString() } +
+                        ec.message.validationErrors.collect { it.message?.toString() }
+                ec.message.clearAll()
+                return [out: errors ? null : out, errors: errors]
+            } finally {
+                ec.artifactExecution.pop(aei)
+            }
+        } finally {
+            ec.artifactExecution.disableAuthz()
+            ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
+            ec.artifactExecution.setAnonymousAuthorizedAll()
+        }
     }
 }

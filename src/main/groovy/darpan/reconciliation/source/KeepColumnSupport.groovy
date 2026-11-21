@@ -61,13 +61,13 @@ class KeepColumnSupport {
 
     /**
      * The set-aside reason. columnFor maps "<field>|<text>" (each (field, text) a compare names) to the column holding
-     * that Keep text. Throws IllegalArgumentException for an invalid rule list, or a compare with no column.
+     * that Keep text. Throws IllegalArgumentException, naming the rule, for an invalid rule list, a compare with no column,
+     * or a listed value that does not fit the field's kind.
      */
     static Column setAsideReason(List<Map> rules, Map<String, String> columnFor) {
         return reason(rules) { String key ->
             String name = columnFor?.get(key)
-            if (!name) throw new IllegalArgumentException("Keep names ${key} but no column holds it.".toString())
-            return functions.col("`" + name.replace("`", "``") + "`")
+            return name ? functions.col("`" + name.replace("`", "``") + "`") : null
         }
     }
 
@@ -76,6 +76,7 @@ class KeepColumnSupport {
      * column the schema lacks reads as null and is not added.
      */
     static Dataset annotate(Dataset df, List<Map> rules) {
+        KeepRules.validate(rules)
         Set<String> present = (df.columns() as List<String>) as Set<String>
         Map<String, Column> byKey = [:]
         for (Map injection : KeepRules.injections(rules)) {
@@ -106,7 +107,10 @@ class KeepColumnSupport {
         switch (predicate.get("kind") as String) {
             case "compare":
                 Column raw = columnOf.call("${predicate.get('field')}|${predicate.get('text')}".toString())
-                if (raw == null) throw new IllegalArgumentException("Keep rule ${ruleId}: no column for ${predicate.get('field')}.".toString())
+                if (raw == null) {
+                    throw new IllegalArgumentException(("Keep rule ${ruleId}: no column holds field ${predicate.get('field')} " +
+                            "(${predicate.get('text')} text).").toString())
+                }
                 Column value = valueOf(predicate, raw)
                 String op = predicate.get("op") as String
                 return [leaf(predicate, value, op, ruleId), leaf(predicate, value, OPPOSITE.get(op), ruleId)]

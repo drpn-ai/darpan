@@ -16,6 +16,7 @@ import org.moqui.rules.ValueChecks
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -148,8 +149,7 @@ class KeepColumnSupportTests {
             for (String op : kinds.keySet()) {
                 List<String> got = reasonsOf([rule("B:1", [[cmp("code", op, ["X"], [fold: fold]), "HIT"]])], codes.collect { [code: it] })
                 codes.eachWithIndex { String code, int i ->
-                    boolean expected = ValueChecks.fixedValue(kinds[op], code, ["X"], fold == "NORMALIZE")
-                    assertEquals(expected, got[i] != null, "${op} ${fold} on ${code?.inspect()}")
+                    assertEquals(moquiHolds(op, fold, code, ["X"]), got[i] != null, "${op} ${fold} on ${code?.inspect()}")
                 }
                 if (op in ["NE", "NOT_IN"]) assertEquals("B:1|HIT", got[0], "${op} ${fold} holds for no value")
                 else assertNull(got[0], "${op} ${fold} does not hold for no value")
@@ -221,7 +221,125 @@ class KeepColumnSupportTests {
         assertEquals((df.columns() as List) + [KeepRules.REASON_COLUMN], columns)
     }
 
+    @Test
+    void anyHoldsWhenOneChoiceHoldsAndTurnsAroundAsEveryChoiceTurnedAround() {
+        Map either = [kind: "any", of: [cmp("a", "EQ", ["X"]), cmp("b", "EQ", ["Y"])]]
+        List<Map> records = [[a: "X", b: "Y"], [a: "X", b: "Z"], [a: "W", b: "Y"], [a: "W", b: "Z"], [:]]
+        // moqui-rules: an any line holds when one line under it holds; each line is a Moqui condition
+        List<Boolean> moqui = records.collect { Map r ->
+            EntityConditionFactoryImpl.compareByOperator(r.a, EntityCondition.ComparisonOperator.EQUALS, "X") ||
+                    EntityConditionFactoryImpl.compareByOperator(r.b, EntityCondition.ComparisonOperator.EQUALS, "Y") }
+        assertEquals([true, true, true, false, false], moqui)
+
+        Closure<List<Boolean>> holds = { Map predicate ->
+            reasonsOf([rule("B:1", [[predicate, "HIT"]])], records).collect { it != null } }
+        assertEquals(moqui, holds(either), "any")
+        assertEquals(moqui.collect { !it }, holds([kind: "not", of: either]), "not over any: every line turned around")
+        assertEquals(moqui, holds([kind: "not", of: [kind: "not", of: either]]), "not over not over any")
+        // any under all, and all under any
+        assertEquals([true, true, false, false, false],
+                holds([kind: "all", of: [cmp("a", "EQ", ["X"]), either]]), "all over any")
+        assertEquals([true, false, true, true, true],
+                holds([kind: "any", of: [[kind: "not", of: either], cmp("b", "EQ", ["Y"])]]), "any over not over any")
+    }
+
+    @Test
+    void textOrderIsJavaUtf16OrderAsGroovyCompares() {
+        // U+FF61 sorts after the emoji's first UTF-16 unit (U+D83D) but before its code point (U+1F600): Groovy, and so
+        // moqui-rules, says "｡" > "😀"; Spark's own string order would say the opposite
+        Map<String, EntityCondition.ComparisonOperator> moqui = [LT: EntityCondition.ComparisonOperator.LESS_THAN,
+                LE: EntityCondition.ComparisonOperator.LESS_THAN_EQUAL_TO, GT: EntityCondition.ComparisonOperator.GREATER_THAN,
+                GE: EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO]
+        List<List<String>> pairs = [["｡", "😀"], ["😀", "｡"], ["10", "9"], ["9", "10"], ["b", "b"]]
+        for (String op : moqui.keySet()) {
+            for (List<String> pair : pairs) {
+                List<String> got = reasonsOf([rule("B:1", [[cmp("v", op, [pair[1]]), "HIT"]])], [[v: pair[0]]])
+                boolean expected = EntityConditionFactoryImpl.compareByOperator(pair[0], moqui[op], pair[1])
+                assertEquals(expected, got[0] != null, "${pair[0].inspect()} ${op} ${pair[1].inspect()} as text")
+            }
+        }
+        assertTrue(EntityConditionFactoryImpl.compareByOperator("｡", EntityCondition.ComparisonOperator.GREATER_THAN, "😀"))
+        // "10" < "9" as text, not as a number
+        assertEquals([null], reasonsOf([rule("B:1", [[cmp("v", "LT", ["9"], [valueKind: "NUMBER"]), "HIT"]])], [[v: "10"]]))
+    }
+
+    @Test
+    void aDecimalHoldsThirtyEightDigitsEighteenAfterThePoint() {
+        List<Map> rules = [rule("B:1", [[cmp("v", "IS_NULL", null, [valueKind: "NUMBER"]), "NO_VALUE"]]),
+                           rule("B:2", [[cmp("v", "EQ", ["0.1234567890123456785"], [valueKind: "NUMBER"]), "ROUNDED"]]),
+                           rule("B:3", [[cmp("v", "GT", ["1"], [valueKind: "NUMBER"]), "OVER_ONE"]])]
+        // 21 integer digits do not fit: no value. 20 do. 19 places round half up to 18, on the record and the listed value.
+        assertEquals(["B:1|NO_VALUE", "B:3|OVER_ONE", "B:2|ROUNDED", "B:2|ROUNDED", null],
+                reasonsOf(rules, [[v: "123456789012345678901"], [v: "12345678901234567890"], [v: "0.1234567890123456789"],
+                                  [v: "0.123456789012345679"], [v: "0.123456789012345678"]]))
+        // no value is < everything, so a too-wide value is set aside by a less-than line
+        assertEquals(["B:4|SMALL"], reasonsOf([rule("B:4", [[cmp("v", "LT", ["1"], [valueKind: "NUMBER"]), "SMALL"]])],
+                [[v: "123456789012345678901"]]))
+
+        IllegalArgumentException wide = assertThrows(IllegalArgumentException) {
+            reasonsOf([rule("B:5", [[cmp("v", "EQ", ["123456789012345678901"], [valueKind: "NUMBER"]), "WIDE"]])], [[v: "1"]])
+        }
+        assertEquals("Keep rule B:5: 123456789012345678901 does not fit DECIMAL(38,18).", wide.message)
+    }
+
+    @Test
+    void aRuleKeepCannotBuildIsRefusedNamingIt() {
+        Map<String, String> expected = [
+                "Keep rule B:1: abc is not a number."  : cmp("v", "IN", ["1", "abc"], [valueKind: "NUMBER"]),
+                "Keep rule B:1: maybe is not yes or no.": cmp("v", "EQ", ["maybe"], [valueKind: "BOOLEAN"]),
+                "Keep rule B:1: LT needs a value."      : cmp("v", "LT", [], [valueKind: "NUMBER"]),
+        ].collectEntries { String message, Map predicate ->
+            IllegalArgumentException e = assertThrows(IllegalArgumentException) {
+                KeepColumnSupport.annotate(frame([KeepRules.INJECTED_PREFIX + "0"], [["1"]]), [rule("B:1", [[predicate, "HIT"]])])
+            }
+            return [(message): e.message]
+        }
+        expected.each { String want, String got -> assertEquals(want, got) }
+
+        IllegalArgumentException noColumn = assertThrows(IllegalArgumentException) {
+            KeepColumnSupport.setAsideReason([rule("A:7", [[cmp("status", "IN", ["x"], [text: "GROOVY", fold: "A_UPPER"]), "VALUE"]])],
+                    ["other|GROOVY": "c"])
+        }
+        assertEquals("Keep rule A:7: no column holds field status (GROOVY text).", noColumn.message)
+
+        // annotate checks the rule list before reading it (KeepRules.injections would fail on this one with a cast error)
+        IllegalArgumentException invalid = assertThrows(IllegalArgumentException) {
+            KeepColumnSupport.annotate(frame(["a"], [["1"]]), [[id: "B:9", source: "DECISION", tests: "not a list of tests"]])
+        }
+        assertTrue(invalid.message.startsWith("Keep rule B:9 "), invalid.message)
+    }
+
+    @Test
+    void textInAndNotInWithSeveralValues() {
+        List<String> listed = ["a,b", "c", "  d"]
+        List<String> values = ["a,b", "a", "b", "c", "  d", "d", "D", "A,B", "e", "", null]
+        for (String fold : ["NONE", "NORMALIZE"]) {
+            for (String op : ["IN", "NOT_IN"]) {
+                List<String> got = reasonsOf([rule("B:1", [[cmp("v", op, listed, [fold: fold]), "HIT"]])], values.collect { [v: it] })
+                values.eachWithIndex { String value, int i ->
+                    assertEquals(moquiHolds(op, fold, value, listed), got[i] != null, "${op} ${fold} on ${value?.inspect()}")
+                }
+            }
+        }
+        assertEquals(["B:1|HIT", null, "B:1|HIT"], reasonsOf([rule("B:1", [[cmp("v", "IN", listed), "HIT"]])], [[v: "a,b"], [v: "a"], [v: "c"]]))
+    }
+
     // ---------------------------------------------------------------------------------------------------------- helpers
+
+    /**
+     * What moqui-rules decides for one field against listed values, through the path it actually runs: a normalized line is
+     * a value check (ValueChecks.fixedValue); a plain EQ/NE/IN/NOT_IN line is a Moqui condition judged in memory
+     * (compareByOperator through mapMatches): IN an OR of EQUALS, NOT_IN an AND of NOT_EQUAL (prepare#CompareLine).
+     */
+    private static boolean moquiHolds(String op, String fold, String value, List<String> listed) {
+        if (fold == "NORMALIZE") {
+            return ValueChecks.fixedValue([EQ: "=", NE: "!=", IN: "in", NOT_IN: "not in"][op], value, listed, true)
+        }
+        boolean positive = op in ["EQ", "IN"]
+        EntityCondition.ComparisonOperator compare = positive ? EntityCondition.ComparisonOperator.EQUALS : EntityCondition.ComparisonOperator.NOT_EQUAL
+        List<Boolean> each = listed.collect { EntityConditionFactoryImpl.compareByOperator(value, compare, it) }
+        return positive ? each.any() : each.every()
+    }
 
     private static Map cmp(String field, String op, List values, Map opts = [:]) {
         return [kind: "compare", field: field, text: opts.text ?: "FACT", op: op, values: values,

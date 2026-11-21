@@ -44,6 +44,9 @@ class RunSnapshotScope {
 
     static RunSnapshotScope current() { return CURRENT.get() }
 
+    /** Test-harness reset: drops the calling thread's scope. Never called from src/main. */
+    static void resetForTests() { CURRENT.remove() }
+
     Object get(String key) { return entries.get(key) }
 
     void put(String key, Object value, Closure onClose = null) {

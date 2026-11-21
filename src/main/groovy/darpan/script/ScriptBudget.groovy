@@ -52,6 +52,9 @@ class ScriptBudget {
 
     static void close() { CURRENT.remove() }
 
+    /** Test-harness reset: drops the calling thread's budget. Never called from src/main. */
+    static void resetForTests() { CURRENT.remove() }
+
     /** Spends work units; past the limit, or once the run is interrupted, the script stops. */
     static void charge(long cost = 1L) {
         ScriptBudget budget = CURRENT.get()

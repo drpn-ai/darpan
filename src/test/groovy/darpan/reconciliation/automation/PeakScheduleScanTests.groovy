@@ -143,6 +143,41 @@ class PeakScheduleScanTests {
     }
 
     @Test
+    void aLongAllowanceNeverSkipsADay() {
+        FakeEc ec = ec([])
+        allowances = ["100518": new AllowanceSpec(1620, [:])]
+        FakeRow automation = addAutomation(ec)
+
+        scan(ec, la(11, 29, 2, 16))
+        assertTrue(executed(ec).isEmpty(), "Nov 28's window closed at Nov 28 00:00; 27 hours run to Nov 29 03:00")
+
+        scan(ec, la(11, 29, 3, 1))
+        assertEquals(1, executed(ec).size())
+        assertEquals(la(11, 28, 2, 15), executed(ec)[0].scheduledFireTime)
+        assertEquals(la(11, 29, 2, 15), automation.nextScheduledFireTime, "the next fire is Nov 29's, already past, not Nov 30's")
+
+        scan(ec, la(11, 29, 3, 6))
+        assertEquals(1, executed(ec).size(), "Nov 29's fire waits for its own bound, Nov 30 03:00: no catch-up burst")
+
+        scan(ec, la(11, 30, 3, 1))
+        assertEquals(2, executed(ec).size())
+        assertEquals(la(11, 29, 2, 15), executed(ec)[1].scheduledFireTime, "Nov 29's window is read too")
+        assertEquals(la(11, 30, 2, 15), automation.nextScheduledFireTime)
+    }
+
+    @Test
+    void noPairStillSkipsPastNow() {
+        FakeEc ec = ec([])
+        FakeRow automation = addAutomation(ec)
+
+        scan(ec, la(11, 30, 5, 0))
+
+        assertEquals(1, executed(ec).size())
+        assertEquals(la(11, 28, 2, 15), executed(ec)[0].scheduledFireTime)
+        assertEquals(la(12, 1, 2, 15), automation.nextScheduledFireTime, "without a pair a late run still skips the fires already past")
+    }
+
+    @Test
     void aFailingAllowanceLoaderStartsRunsAtTheirNormalTime() {
         FakeEc ec = ec([])
         AutomationExecutionSupport.peakAllowancesLoader = { def e, String t -> throw new IllegalStateException("boom") }

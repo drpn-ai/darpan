@@ -1118,7 +1118,13 @@ class AutomationExecutionSupport {
             // Advance the moment the execution is enqueued, NOT when it finishes. Advancing after the
             // run would leave a long execution still "due" on the next 5-minute tick and submit it a
             // second time while the first is mid-flight.
-            Timestamp nextFireTime = resolveNextScheduledFireTime(automation, scheduledFireTime, now)
+            // DAR-BE-328 plan 3: an automation with a sync lag allowance steps to the very next fire, even one already
+            // past: an allowance longer than a day starts this fire after the next one, and skipping past now would
+            // never read that next fire's window. Each fire still waits for its own bound (window end + allowance) in
+            // peakStart, so a catch-up is one run per window, never a burst.
+            Timestamp nextFireTime = peakAllowanceOf(ec, peakTick, tenantId, automationId) != null ?
+                    resolveNextScheduledFireTime(automation, scheduledFireTime, scheduledFireTime) :
+                    resolveNextScheduledFireTime(automation, scheduledFireTime, now)
             updateAutomation(ec, automation, [
                     lastScheduledFireTime: scheduledFireTime,
                     nextScheduledFireTime: nextFireTime,

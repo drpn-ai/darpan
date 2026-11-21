@@ -152,15 +152,32 @@ class KeepArtifactsTests {
     @Test
     void theRowsReaderIsClosedWhenVisitThrowsAndWhenRowsRunPastTheRecords() {
         File file = extract((0..2).collect { [n: it] })
+        int before = KeepArtifacts.OPEN_ROW_READERS.get()
         KeepArtifacts.writeRows(file, [[0, "A:1"], [1, "A:1"], [9, "A:1"]].iterator())
         assertThrows(IllegalStateException) { KeepArtifacts.forEachKeptRecord(file) { Map r -> throw new IllegalStateException("boom") } }
         assertThrows(IllegalStateException) { KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> throw new IllegalStateException("boom") } }
         KeepArtifacts.forEachKeptRecord(file) { Map r -> }
         KeepArtifacts.forEachSetAsideRecord(file) { Map r, String id -> }
 
-        Process lsof = ["lsof", "-p", ProcessHandle.current().pid().toString()].execute()
-        String open = lsof.text
-        assertFalse(open.contains(KeepArtifacts.rowsFile(file).name), "rows file still open")
+        assertEquals(before, KeepArtifacts.OPEN_ROW_READERS.get(), "a rows reader was left open")
+    }
+
+    @Test
+    void aFailingFirstReadClosesTheReader() {
+        boolean[] closed = [false]
+        BufferedReader failing = new BufferedReader(new StringReader("")) {
+            @Override
+            String readLine() { throw new IOException("disk gone") }
+
+            @Override
+            void close() { closed[0] = true; super.close() }
+        }
+        int before = KeepArtifacts.OPEN_ROW_READERS.get()
+
+        assertThrows(IOException) { new KeepArtifacts.RowReader(failing) }
+
+        assertTrue(closed[0])
+        assertEquals(before, KeepArtifacts.OPEN_ROW_READERS.get())
     }
 
     @Test

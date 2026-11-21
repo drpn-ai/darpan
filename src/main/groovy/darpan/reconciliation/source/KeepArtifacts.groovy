@@ -5,8 +5,11 @@ import darpan.reconciliation.conclusion.JsonRecordStream
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
+import groovy.transform.PackageScope
+
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * DAR-BE-318 (plan 3b-2b). The set-aside artifact a Spark Keep writes beside an extract, read by name:
@@ -154,13 +157,26 @@ class KeepArtifacts {
         return new RowReader(rows.isFile() ? rows.newReader("UTF-8") : null)
     }
 
-    private static class RowReader implements Closeable {
+    /** Test seam: rows readers opened and not yet closed. */
+    @PackageScope
+    static final AtomicInteger OPEN_ROW_READERS = new AtomicInteger()
+
+    @PackageScope
+    static class RowReader implements Closeable {
         private final BufferedReader reader
         private String line
+        private boolean closed
 
         RowReader(BufferedReader reader) {
             this.reader = reader
-            this.line = advance()
+            if (reader == null) return
+            OPEN_ROW_READERS.incrementAndGet()
+            try {
+                this.line = advance()
+            } catch (Throwable failure) {
+                close()
+                throw failure
+            }
         }
 
         private String advance() {
@@ -178,7 +194,12 @@ class KeepArtifacts {
             return current
         }
 
-        void close() { reader?.close() }
+        void close() {
+            if (reader == null || closed) return
+            closed = true
+            OPEN_ROW_READERS.decrementAndGet()
+            reader.close()
+        }
     }
 
     private static String baseName(File extract) {

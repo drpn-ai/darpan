@@ -4,6 +4,7 @@ import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
+import darpan.reconciliation.source.KeepArtifacts
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.AfterAll
@@ -440,7 +441,73 @@ class AuditChangeBacktestSmokeTests {
         }
     }
 
+    /**
+     * DAR-BE-318 (Ruling 3b2b-11). A landed extract whose side kept in Spark holds the records its Keep set aside too; the
+     * backtest reads only the kept ones, on the side the change filters and on the other side alike. With no .keep.json the
+     * answer is today's, even beside a rows file.
+     */
+    @Test
+    void "a set-aside record in a landed extract is read as not there"() {
+        Map target = [savedRunId: runId, fileSide: "FILE_1"]
+        Closure<Map> backtest = { ->
+            AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target, AuditChangeLevers.merge("EXCLUSION_FILTER",
+                    AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target), [fieldExpression: '$.records[*].tranId', filterValues: ["CM-2"]]))
+        }
+        File memos = landed("TBT_EXEC1", "memos.json")
+        Map today = backtest()
+        assertEquals(["F-TBT2", "F-TBT3"], today.closed)
+        try {
+            KeepArtifacts.writeRows(memos, [[1L, "A:1"]].iterator())
+            assertEquals(today, backtest(), "no summary: today's read, whatever lies beside the extract")
+
+            keepSummary(memos, 1)
+            Map kept = backtest()
+            assertEquals(true, kept.supported, kept.toString())
+            assertEquals("TBT_EXEC1", kept.basisExecutionId)
+            assertEquals([], kept.closed, "CM-2 was set aside: the change drops nothing the run kept, so nothing closes")
+            assertEquals(6, kept.unchanged)
+        } finally {
+            removeKeep(memos)
+        }
+        assertEquals(today, backtest(), "the artifact gone, the answer is today's again")
+
+        // The other side: CM-1's application was set aside, so the dropped memo leaves nothing on file 2 unmatched.
+        Map target2 = [savedRunId: run2Id, fileSide: "FILE_1"]
+        Closure<Map> twoSided = { ->
+            AuditChangeBacktest.run(ec, MINE, "EXCLUSION_FILTER", target2, AuditChangeLevers.merge("EXCLUSION_FILTER",
+                    AuditChangeLevers.current(ec, "EXCLUSION_FILTER", target2), [fieldExpression: '$.records[*].tranId', filterValues: ["CM-1", "CM-4"]]))
+        }
+        File applications = landed("TBT_EXEC21", "applications.json")
+        Map today2 = twoSided()
+        assertEquals(["CM-1"], today2.opened)
+        try {
+            keepSummary(applications, 1)
+            KeepArtifacts.writeRows(applications, [[0L, "A:1"]].iterator())
+            Map kept2 = twoSided()
+            assertEquals(true, kept2.supported, kept2.toString())
+            assertEquals(["F-TBT21", "F-TBT22"], kept2.closed)
+            assertEquals([], kept2.opened, "CM-1's application was set aside: no record on file 2 is left unmatched")
+        } finally {
+            removeKeep(applications)
+        }
+        assertEquals(today2, twoSided())
+    }
+
     // ------------------------------------------------------------------ fixtures
+
+    /** The summary a Spark Keep leaves beside extract, with setAside records set aside by one tenant rule. */
+    private static void keepSummary(File extract, int setAside) {
+        KeepArtifacts.writeSummary(extract, [sourceFileName: extract.name,
+                rules: [[id: "A:1", sequenceNum: 1, label: "tranId", source: "TENANT"]],
+                configuredExclusions: [[sequenceNum: 1, fieldExpression: "tranId", operator: "EXCLUDE_IN", values: ["X"],
+                                        excludedCount: setAside, fieldAbsentCount: 0]],
+                builtIn: [], setAsideCount: setAside])
+    }
+
+    private static void removeKeep(File extract) {
+        KeepArtifacts.keepFile(extract).delete()
+        KeepArtifacts.rowsFile(extract).delete()
+    }
 
     private void execution(String id, String status, String completed, boolean withFiles) {
         String dir = "${RUNS}/${id}/20261102-060000000"

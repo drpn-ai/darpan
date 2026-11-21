@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.reconciliation.source.KeepArtifacts
 import groovy.json.JsonSlurper
 
 import java.time.Instant
@@ -607,11 +608,20 @@ class ReturnPresenceVerificationSupport {
      * NOT a JsonSlurper parse: a backfill window's extract reaches GB scale and exactly one field is
      * wanted. A null/absent/unreadable file yields an EMPTY set, which disables the suppression
      * entirely rather than suppressing on incomplete knowledge.
+     *
+     * DAR-BE-318 (Ruling 3b2b-11): where the OMS side kept in Spark (a .keep.json beside the extract) the
+     * extract also holds the returns Keep set aside, which booked nothing for the run; only the kept
+     * records (and the extract's other top-level fields, which the scan below reads too) give orders.
      */
     protected static Set<String> readOmsOrderIds(File omsExtractFile) {
         Set<String> ids = new HashSet<String>()
         if (omsExtractFile == null || !omsExtractFile.isFile()) return ids
         try {
+            if (KeepArtifacts.keepFile(omsExtractFile).isFile()) {
+                Map head = KeepArtifacts.forEachKeptRecord(omsExtractFile) { Map record -> addOrderExternalIds(record, ids) }
+                addOrderExternalIds(head, ids)
+                return ids
+            }
             omsExtractFile.withReader("UTF-8") { Reader reader ->
                 StringBuilder buffer = new StringBuilder()
                 char[] chunk = new char[8192]
@@ -631,6 +641,21 @@ class ReturnPresenceVerificationSupport {
             return new HashSet<String>()
         }
         return ids
+    }
+
+    /** Every non-empty text orderExternalId at any depth of value: what ORDER_EXTERNAL_ID finds in its JSON text. */
+    private static void addOrderExternalIds(Object value, Set<String> ids) {
+        if (value instanceof Map) {
+            ((Map) value).each { Object key, Object v ->
+                if (key == "orderExternalId" && v instanceof String) {
+                    if (!((String) v).isEmpty()) ids.add((String) v)
+                } else {
+                    addOrderExternalIds(v, ids)
+                }
+            }
+        } else if (value instanceof List) {
+            ((List) value).each { Object v -> addOrderExternalIds(v, ids) }
+        }
     }
 
     private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours,

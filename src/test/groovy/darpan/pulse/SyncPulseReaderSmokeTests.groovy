@@ -35,6 +35,10 @@ class SyncPulseReaderSmokeTests {
     private static final String AUTO = "PULSE_AUTO"
     private static final String GQL = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
     private static final String NS = "reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
+    /** DAR-BE-318: a made-up system whose extract no longer takes its filter parameter, so its sides keep in Spark. */
+    private static final String ACME = "ACME_PULSE"
+    private static final String ACME_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkKeptRecords"
+    private static final String KEEP_AUTO = "PULSE_KEEP_AUTO"
     private static final Instant FROM = Instant.parse("2026-11-21T07:00:00Z")
     private static final Instant THRU = Instant.parse("2026-11-21T10:00:00Z")
 
@@ -78,6 +82,32 @@ class SyncPulseReaderSmokeTests {
                 safeMetadataJson='{"extractServiceName":"${NS}","parameters":{"nsSuiteQlSourceQueryId":"PULSE_Q"}}'/>
             <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${AUTO}" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].productStoreId" operator="EXCLUDE_IN" filterValues="TEST_STORE" companyUserGroupId="${A}"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="${ACME}" extractServiceName="${ACME_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="Y" enabled="Y"/>
+            <darpan.rule.RuleSet ruleSetId="PULSE_KEEP_RS" ruleSetName="Pulse keep" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="PULSE_KEEP_SCOPE" ruleSetId="PULSE_KEEP_RS" objectType="ORDER" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_1" systemEnumId="${ACME}" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_2" systemEnumId="${ACME}" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="tranId" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="orderName" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_2" sequenceNum="1"
+                fieldExpression="otherRefNum" companyUserGroupId="${A}"/>
+            <darpan.reconciliation.ReconciliationAutomation automationId="${KEEP_AUTO}" automationName="Pulse keep check" companyUserGroupId="${A}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="PULSE_KEEP_RS" compareScopeId="PULSE_KEEP_SCOPE"
+                relativeWindowTypeEnumId="${AutomationExecutionSupport.WINDOW_PREVIOUS_DAY}" windowTimeZone="UTC"/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="${KEEP_AUTO}" fileSide="FILE_1" companyUserGroupId="${A}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${ACME}"
+                safeMetadataJson='{"extractServiceName":"${ACME_EXTRACT}"}'/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="${KEEP_AUTO}" fileSide="FILE_2" companyUserGroupId="${A}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${ACME}"
+                safeMetadataJson='{"extractServiceName":"${ACME_EXTRACT}"}'/>
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${KEEP_AUTO}" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].status" operator="EXCLUDE_IN" filterValues="VOID" companyUserGroupId="${A}"/>
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${KEEP_AUTO}" fileSide="FILE_2" sequenceNum="1"
+                fieldExpression="status" operator="EXCLUDE_IN" filterValues="CLOSED" companyUserGroupId="${A}"/>
         </entity-facade-xml>""").load()
         automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", AUTO).one().getMap()
     }
@@ -259,7 +289,84 @@ class SyncPulseReaderSmokeTests {
         assertNoPulseFiles()
     }
 
+    // ------------------------------------------------------------------- DAR-BE-318: a side that keeps in Spark
+
+    /**
+     * Ruling 3b2b-11 with the shared gate (Ruling 3b2b-23). ACME's extract no longer takes its filter parameter, so the
+     * check's run reads it unfiltered and keeps in Spark; the pulse reads it the same way and runs the same Keep over its own
+     * extract. A record Keep sets aside is neither an upstream record nor present in the target, as when the read dropped it.
+     */
+    @Test
+    void aSideThatKeepsInSparkSkipsWhatItsKeepSetsAside() {
+        Map keepPair = [syncPairId: "SP2", companyUserGroupId: A, automationId: KEEP_AUTO, upstreamSide: "FILE_1"]
+        Map keepAutomation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", KEEP_AUTO).one().getMap()
+        SyncPulseReader.setLiveExtractor(acmeStub())
+
+        Map up = SyncPulseReader.readUpstream(ec, keepPair, keepAutomation, FROM, THRU)
+
+        assertEquals(true, up.ok, up.toString())
+        assertEquals([
+                [key: "#P1", orderName: "#P1", createdAt: Instant.parse("2026-11-21T07:30:00Z"), otherKey: "#P1"],
+                [key: "#P3", orderName: "#P3", createdAt: Instant.parse("2026-11-21T07:50:00Z"), otherKey: "#P3"],
+        ], up.records, "VOID and ' void ' were set aside, as the check's filter drops them; 'open' was kept")
+        assertEquals([], up.warnings)
+        Map sent = calls[0].params as Map
+        assertEquals(ACME_EXTRACT, calls[0].service)
+        assertNull(sent.sourceFilters, "a side that keeps in Spark is read unfiltered, as the check's run reads it")
+        assertEquals(["status"], sent.keepRuleFields, "and keeps the field its Keep reads")
+
+        calls.clear()
+        List<String> keys = (1..1001).collect { "#K${it}".toString() }
+        Map target = SyncPulseReader.presentInTarget(ec, keepPair, keepAutomation, keys)
+
+        assertEquals(true, target.ok, target.toString())
+        assertEquals([1000, 1], calls.collect { ((List) it.params.lookupKeys).size() }, "two reads by key")
+        calls.each { Map c -> assertNull(c.params.sourceFilters) }
+        assertEquals(1001 - 143, target.present.size(), "the target holds every key; the 143 CLOSED ones were set aside")
+        assertFalse(target.present.contains("#K7"))
+        assertFalse(target.present.contains("#K1001"), "the second read's Keep set aside its own CLOSED record")
+        assertTrue(target.present.contains("#K1000"))
+        assertNoPulseFiles()
+    }
+
+    /** A side whose extract still takes its filter parameter is read as before: filtered at the read, no Keep run. */
+    @Test
+    void aSideStillFilteringAtTheReadKeepsTodaysRead() {
+        Map out = SyncPulseReader.readUpstream(ec, pair, automation, FROM, THRU)
+
+        assertEquals(true, out.ok, out.toString())
+        Map sent = calls[0].params as Map
+        assertEquals(1, (sent.sourceFilters as List).size(), "the check's filters, sent to the read")
+        assertNull(sent.keepRuleFields, "no Keep field is asked for")
+        assertEquals(["#GOR1", "#GOR2"], out.records*.key, "every dated record the read wrote is read")
+    }
+
     // ------------------------------------------------------------------------------------------------ the stub
+
+    /**
+     * ACME's unfiltered extracts: the upstream read writes four orders (two VOID, however written), a read by key one record
+     * per key asked, CLOSED for every key that is a multiple of 7. No side file: the extract drops nothing itself.
+     */
+    private Closure acmeStub() {
+        return { String service, Map params ->
+            calls << [service: service, params: new LinkedHashMap(params)]
+            List<Map> records
+            if (params.lookupKeys) {
+                records = ((List<String>) params.lookupKeys).collect { String k ->
+                    [otherRefNum: k, tranId: "T-${k}".toString(), status: (k.replaceAll(/\D/, '') as long) % 7 == 0 ? "CLOSED" : "OPEN"]
+                }
+            } else {
+                records = [[orderId: "P1", orderName: "#P1", orderDate: "2026-11-21T07:30:00Z", status: "OPEN"],
+                           [orderId: "P2", orderName: "#P2", orderDate: "2026-11-21T07:40:00Z", status: "VOID"],
+                           [orderId: "P3", orderName: "#P3", orderDate: "2026-11-21T07:50:00Z", status: "open"],
+                           [orderId: "P4", orderName: "#P4", orderDate: "2026-11-21T08:00:00Z", status: " void "]]
+            }
+            File dir = DataManagerSupport.resolveDirectoryFile(ec, params.outputLocation as String, true)
+            new File(dir, "acme.json").setText(JsonOutput.toJson([metadata: [:], records: records]), "UTF-8")
+            return [fileLocation: DataManagerSupport.childLocation(params.outputLocation as String, "acme.json"), fileName: "acme.json",
+                    recordCount : records.size()]
+        }
+    }
 
     /**
      * The live extracts: the upstream read writes three HotWax orders (one with no orderDate) into its outputLocation, with

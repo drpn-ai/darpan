@@ -1,5 +1,6 @@
 package darpan.pulse
 
+import darpan.reconciliation.source.KeepArtifacts
 import groovy.json.JsonOutput
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -119,6 +120,77 @@ class SyncPulseReaderTests {
         assertTrue(folder.parentFile.exists(), "only the pulse's own folder is removed")
     }
 
+    // ------------------------------------------------------------------- DAR-BE-318: what Keep set aside is not there
+
+    /**
+     * Ruling 3b2b-11. Under Spark Keep the extract holds every record and the set-aside artifact beside it names the rows Keep
+     * set aside; the pulse reads them as the run does: not there.
+     */
+    @Test
+    void upstreamRecordsSkipWhatKeepSetAside() {
+        File file = json("up.json", UPSTREAM)
+        Map before = SyncPulseReader.upstreamRecords(file, "orderName")
+        keep(file, [1L, 3L])
+
+        Map read = SyncPulseReader.upstreamRecords(file, "orderName")
+
+        assertEquals([
+                [key: "#GOR1", orderName: "#GOR1", createdAt: Instant.parse("2026-11-21T10:15:00Z"), otherKey: "#GOR1"],
+                [key: "#GOR3", orderName: "#GOR3", createdAt: Instant.parse("2026-11-21T10:17:00Z"), otherKey: "#GOR3"],
+        ], read.records, "#GOR2 and the undated #GOR4 were set aside: neither is an upstream record")
+        assertEquals([], read.warnings, "a set-aside record is never counted as skipped")
+        assertEquals(["#GOR1", "#GOR2", "#GOR3"], before.records*.key, "without the artifact every record was read")
+    }
+
+    /** With no .keep.json the read is today's, whatever else lies beside the file: even a rows file reads every record. */
+    @Test
+    void withNoKeepSummaryTheUpstreamReadIsTodays() {
+        File file = json("up.json", UPSTREAM)
+        Map today = SyncPulseReader.upstreamRecords(file, "orderName")
+        KeepArtifacts.writeRows(file, [[1L, "A:1"]].iterator())
+
+        assertEquals(today, SyncPulseReader.upstreamRecords(file, "orderName"), "the summary decides, not a rows file")
+        assertEquals(["1 upstream record(s) skipped: no orderDate that reads as a date and time."], today.warnings)
+    }
+
+    @Test
+    void targetPresenceSkipsWhatKeepSetAsideAndEachBatchTakesItsArtifactAlong() {
+        List<String> keys = (1..1500).collect { "K${it}".toString() }
+        int reads = 0
+        Map found = SyncPulseReader.presentByBatches(keys, "otherRefNum") { List<String> batch ->
+            reads++
+            // every batch's file has the same name, as a read by key may write it; Keep set aside the keys ending in 7
+            File f = json("target.json", batch.collect { [otherRefNum: it] })
+            keep(f, batch.withIndex().findAll { String k, int i -> k.endsWith("7") }.collect { it[1] as long })
+            assertFalse(new File(f.parentFile, "target.excluded.json").exists(), "the batch before took its side file along")
+            new File(f.parentFile, "target.excluded.json").text = "{}"
+            f
+        }
+
+        assertEquals(2, reads)
+        assertEquals(1350, found.present.size(), "the 150 keys Keep set aside are not present")
+        assertFalse(found.present.contains("K7"))
+        assertFalse(found.present.contains("K1497"), "the second batch's Keep is its own")
+        assertTrue(found.present.contains("K1500"))
+        assertEquals([], tmp.toFile().listFiles().findAll { it.name.startsWith("target") }*.name,
+                "the batch file, its summary, its rows and its side file are removed once read")
+    }
+
+    /** With no .keep.json a batch reads every record and only its file is removed, as before. */
+    @Test
+    void withNoKeepSummaryTheTargetReadIsTodays() {
+        Map found = SyncPulseReader.presentByBatches(["K1", "K2"], "k") { List<String> batch ->
+            File f = json("t.json", batch.collect { [k: it] })
+            KeepArtifacts.writeRows(f, [[0L, "A:1"]].iterator())
+            new File(tmp.toFile(), "t.excluded.json").text = "{}"
+            f
+        }
+
+        assertEquals(["K1", "K2"] as Set, found.present)
+        assertEquals(["t.excluded.json", "t.set-aside.rows"], tmp.toFile().listFiles()*.name.sort(),
+                "only the batch file goes: the folder's removal takes the rest, as before")
+    }
+
     @Test
     void createdAtReadsIsoTextAndEpochMillis() {
         assertEquals(Instant.parse("2026-11-21T10:15:00Z"), SyncPulseReader.createdAt("2026-11-21T10:15:00Z"))
@@ -130,6 +202,20 @@ class SyncPulseReaderTests {
         assertEquals(null, SyncPulseReader.createdAt(1.5d), "a decimal is no date")
         assertEquals(null, SyncPulseReader.createdAt("2026-11-21 10:15"))
         assertEquals(null, SyncPulseReader.createdAt(null))
+    }
+
+    private static final List<Map> UPSTREAM = [
+            [orderId: "O1", orderName: "#GOR1", orderDate: "2026-11-21T10:15:00Z"],
+            [orderId: "O2", orderName: "#GOR2", orderDate: "2026-11-21T10:16:00Z"],
+            [orderId: "O3", orderName: "#GOR3", orderDate: "2026-11-21T10:17:00Z"],
+            [orderId: "O4", orderName: "#GOR4"],
+    ].asImmutable()
+
+    /** The artifact a Spark Keep leaves beside file: its summary, and these rows set aside. */
+    private static void keep(File file, List<Long> rows) {
+        KeepArtifacts.writeSummary(file, [sourceFileName: file.name, rules: [[id: "A:1", sequenceNum: 1, label: "status", source: "TENANT"]],
+                                          configuredExclusions: [], builtIn: [], setAsideCount: rows.size()])
+        KeepArtifacts.writeRows(file, rows.collect { [it, "A:1"] }.iterator())
     }
 
     private File json(String name, List<Map> records) {

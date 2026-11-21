@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.reconciliation.source.KeepArtifacts
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.Test
@@ -773,6 +774,61 @@ class ReturnPresenceVerificationSupportTests {
 
         assertEquals(0, result.siblingReturnSuppressedCount)
         assertEquals(0, result.removedCount)
+    }
+
+    // --- DAR-BE-318 (Ruling 3b2b-11): an OMS return Keep set aside booked nothing -----------------
+    // Under Spark Keep the OMS extract holds the returns Keep set aside too (HotWax's cancelled and
+    // no-ref returns, once its extract stops dropping them); as when the extract dropped them, they
+    // give the sibling rule no order.
+
+    @Test
+    void anOmsReturnKeepSetAsideBooksNoOrder() {
+        File extract = writeOmsExtract(["6950050758787", "7005613588611", "6945586774147"])
+        File diff = writeDiffDocument([missingInOmsRow("27051229315", OLD, "RETURN", "7005613588611")])
+        keep(extract, [1L])
+
+        assertEquals(["6950050758787", "6945586774147"] as Set, ReturnPresenceVerificationSupport.readOmsOrderIds(extract))
+        Map result = verifyWithOmsExtract(diff, extract)
+        assertEquals(0, result.siblingReturnSuppressedCount, "the order's only OMS return was set aside: it booked nothing")
+        assertEquals(["27051229315"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    /** With no .keep.json the scan is today's, even beside a rows file. */
+    @Test
+    void withNoKeepSummaryTheOrderScanIsTodays() {
+        File extract = writeOmsExtract(["6950050758787", "7005613588611"])
+        Set<String> today = ReturnPresenceVerificationSupport.readOmsOrderIds(extract)
+        KeepArtifacts.writeRows(extract, [[1L, "A:1"]].iterator())
+
+        assertEquals(["6950050758787", "7005613588611"] as Set, today)
+        assertEquals(today, ReturnPresenceVerificationSupport.readOmsOrderIds(extract))
+    }
+
+    /** The kept-record walk finds exactly what the text scan finds, at any depth, in the records and beside them. */
+    @Test
+    void theKeptRecordReadFindsWhatTheScanFinds() {
+        File extract = new File(tempDir, "oms-shapes.json")
+        extract.setText(JsonOutput.toJson([metadata: [orderExternalId: "HEAD-1"], records: [
+                [orderExternalId: "A1"],
+                [order: [orderExternalId: "N1", items: [[orderExternalId: "N2"]]]],
+                [orderExternalId: 12345],
+                [orderExternalId: ""],
+                [orderExternalId: null],
+                [orderExternalId: [orderExternalId: "N3"]],
+                [note: "orderExternalId", orderExternalIds: "X"]]]), "UTF-8")
+        Set<String> scanned = ReturnPresenceVerificationSupport.readOmsOrderIds(extract)
+        keep(extract, [])
+
+        assertEquals(["HEAD-1", "A1", "N1", "N2", "N3"] as Set, scanned)
+        assertEquals(scanned, ReturnPresenceVerificationSupport.readOmsOrderIds(extract), "nothing set aside: the same orders")
+    }
+
+    /** The artifact a Spark Keep leaves beside file: its summary, and these rows set aside. */
+    private static void keep(File file, List<Long> rows) {
+        KeepArtifacts.writeSummary(file, [sourceFileName: file.name, rules: [[id: "BUILT_IN:1", sequenceNum: 1, label: "cancelled", source: "BUILT_IN"]],
+                                          configuredExclusions: [], builtIn: [[sequenceNum: 1, label: "cancelled", setAsideCount: rows.size()]],
+                                          setAsideCount: rows.size()])
+        KeepArtifacts.writeRows(file, rows.collect { [it, "BUILT_IN:1"] }.iterator())
     }
 
     @Test

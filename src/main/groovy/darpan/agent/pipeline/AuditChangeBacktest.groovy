@@ -15,6 +15,7 @@ import darpan.reconciliation.conclusion.JsonRecordStream
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
 import darpan.reconciliation.conclusion.ConclusionTreeSupport
 import darpan.reconciliation.conclusion.RunConclusionSupport
+import darpan.reconciliation.source.KeepArtifacts
 import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonSlurper
 import org.moqui.entity.EntityCondition
@@ -49,7 +50,9 @@ import static darpan.common.ValueSupport.normalize
  *   becomes "missing" on the dropped side (MISSING_IN_FILE_1 when FILE_1 drops it), so a link counting that diff type
  *   reports it (opened, or kept), unless the run marks a cause expected (or its brain may): the new row's cause is not
  *   computed, so it cannot be decided (OPENED_NOT_COMPUTED), and an open finding for that record is left out of closed. A rule on a
- *   data-defined field no landed record carries is refused (FIELD_NOT_IN_LANDED_RECORDS). EVALUATE runs: CLOSES_ONLY.</li>
+ *   data-defined field no landed record carries is refused (FIELD_NOT_IN_LANDED_RECORDS). EVALUATE runs: CLOSES_ONLY.
+ *   A landed extract whose side kept in Spark (DAR-BE-318, a .keep.json beside it) holds the records Keep set aside too; on
+ *   either side only its kept records are read, as the run read them (Ruling 3b2b-11).</li>
  *   <li>STATEMENT_NARROWING: a link names diff types and rules only (DAR-BE-196), and a finding records neither, so it is
  *   refused (DIFF_TYPE_NOT_ON_FINDINGS).</li>
  *   <li>EXPECTED_CAUSES: from AuditFinding rows alone (CLOSES_ONLY); every open finding of a check on the run whose cause
@@ -153,7 +156,7 @@ class AuditChangeBacktest {
         Set<String> reportedAfter = new HashSet<String>()
         bases.each { Map basis ->
             Set<String> dropped = new LinkedHashSet<String>()
-            JsonRecordStream.forEachRecord(fileOf(basis, side), "records") { Map record ->
+            forEachKeptRecord(fileOf(basis, side)) { Map record ->
                 recordsRead++
                 if (dataDefined) ruleFields.each { String f -> if (record.containsKey(f)) carried.add(f) }
                 if (SourceFilterSupport.evaluate(record, rules) == null) return
@@ -166,7 +169,7 @@ class AuditChangeBacktest {
             boolean otherKnown = otherKey.keyReliable as boolean
             Set<String> held = otherKnown ? new HashSet<String>() : dropped
             if (otherKnown) {
-                JsonRecordStream.forEachRecord(fileOf(basis, other), "records") { Map record ->
+                forEachKeptRecord(fileOf(basis, other)) { Map record ->
                     String k = ConclusionKeySupport.compareKey(record, (List<String>) otherKey.keyFields, (String) otherKey.idNormalizer)
                     if (k && dropped.contains(k)) held.add(k)
                 }
@@ -470,6 +473,15 @@ class AuditChangeBacktest {
 
     private static File fileOf(Map basis, String part) {
         return (File) ((Map) ((Map) basis.files)[part]).file
+    }
+
+    /**
+     * DAR-BE-318 (Ruling 3b2b-11): the records of a landed extract its run kept. With a .keep.json beside it (the side kept in
+     * Spark) the set-aside records are skipped (KeepArtifacts.forEachKeptRecord); with none every record, as before.
+     */
+    private static void forEachKeptRecord(File extract, Closure visit) {
+        if (KeepArtifacts.keepFile(extract).isFile()) KeepArtifacts.forEachKeptRecord(extract, visit)
+        else JsonRecordStream.forEachRecord(extract, "records", visit)
     }
 
     /** A finding's identity within one period's ledger: check, statement, record. */

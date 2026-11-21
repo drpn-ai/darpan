@@ -6,7 +6,6 @@ import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 import org.moqui.impl.context.ExecutionContextFactoryImpl
 
-import javax.naming.NameNotFoundException
 import java.sql.Timestamp
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -16,13 +15,39 @@ import java.nio.file.Paths
 import java.util.Comparator
 
 class ReconciliationSmokeTestSupport {
-    private static final String TRANSACTIONAL_DS_NAME = "transactional_DS"
     private static final String TEST_COMPANY_USER_ID = "TEST_CUSTOMER_USER"
     private static final String TEST_COMPANY_USERNAME = "test.customer"
     private static final String TEST_COMPANY_USER_GROUP_ID = "KREWE"
     private static final Timestamp TEST_FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
 
+    // DAR-OPS-026 shared mode (@SharedMoqui): one ECF per test JVM, reset between classes. See initSharedMoqui.
+    private static final Object SHARED_LOCK = new Object()
+    // Caches that hold parsed artifacts (definitions, compiled scripts and screens), not database rows; they survive the
+    // per-class reset so the shared JVM does not re-parse them. Every other cache (entity.record.*, the sequence bank,
+    // data-feed info, l10n messages, darpan.*) is cleared, since it can hold the previous class's rows.
+    private static final List<String> SHARED_KEPT_CACHE_PREFIXES = ["entity.definition", "entity.location",
+            "service.", "screen.location", "screen.url", "screen.info", "screen.template.", "screen.find.path",
+            "resource.", "widget.template.", "kie."]
+    private static ExecutionContextFactoryImpl sharedEcf
+    private static ExecutionContext sharedClassEc
+    private static Path sharedSchemaScript
+    private static Path sharedDbBasePath
+    private static Path sharedTxLogPath
+    private static Map<String, Timestamp> sharedTablesChecked
+    private static Map<String, Boolean> sharedTablesExist
+    private static int sharedClassCount
+    private static boolean sharedShutdownHookAdded
+
+    /**
+     * Boots Moqui for one smoke class. An unmarked class gets a fresh ECF on its own DB token (one JVM each).
+     * A class annotated @SharedMoqui shares one ECF per JVM (initSharedMoqui).
+     */
     static ExecutionContext initMoqui(Path backendRoot, String testDbName) {
+        if (calledFromSharedMoquiClass()) return initSharedMoqui(backendRoot, testDbName)
+        return bootMoqui(backendRoot, testDbName)
+    }
+
+    private static ExecutionContext bootMoqui(Path backendRoot, String testDbName) {
         String runtimePath = backendRoot.resolve("runtime").toString()
         Path testDbBasePath = backendRoot.resolve("runtime/tmp/test-h2/${testDbName}")
         resetDatabaseFiles(testDbBasePath)
@@ -53,7 +78,6 @@ class ReconciliationSmokeTestSupport {
         if (Moqui.getExecutionContextFactory() != null && !Moqui.getExecutionContextFactory().isDestroyed()) {
             Moqui.destroyActiveExecutionContextFactory()
         }
-        clearTransactionalDatasourceRegistration()
 
         Moqui.dynamicInit(new ExecutionContextFactoryImpl(
                 runtimePath,
@@ -78,12 +102,190 @@ class ReconciliationSmokeTestSupport {
     }
 
     static void cleanupMoqui(ExecutionContext ec) {
+        if (calledFromSharedMoquiClass()) {
+            cleanupSharedMoqui(ec)
+            return
+        }
         ec?.destroy()
         if (Moqui.getExecutionContextFactory() != null && !Moqui.getExecutionContextFactory().isDestroyed()) {
             Moqui.destroyActiveExecutionContextFactory()
         }
-        clearTransactionalDatasourceRegistration()
         System.clearProperty("darpan.data.manager.location")
+    }
+
+    /** The DB token of this JVM's shared ECF: names its H2 file, txlog directory and Bitronix serverId. */
+    static String sharedToken() { return "shared-${ProcessHandle.current().pid()}".toString() }
+
+    /** How many @SharedMoqui classes have started on the current shared ECF (1 for the class that booted it). */
+    static int sharedClassCount() { synchronized (SHARED_LOCK) { return sharedClassCount } }
+
+    /** The current shared ECF, or null when none is up. */
+    static ExecutionContextFactoryImpl sharedEcf() { synchronized (SHARED_LOCK) { return liveSharedEcf() } }
+
+    /**
+     * DAR-OPS-026 shared mode. The first marked class in a JVM boots the ECF exactly as an unmarked class does, on
+     * token shared-<pid>, and snapshots the empty schema. Every later class: destroy the previous class's ec, drop
+     * all objects and re-run the snapshot, clear Moqui's row caches (entity records, sequence bank, ...) and restore
+     * the table-check state to the post-boot one, then a fresh ec with john.doe, authz off and AUTHZA_ALL pushed.
+     * Every class (first included) gets its own data-manager location and StaticResets.resetAll().
+     */
+    private static ExecutionContext initSharedMoqui(Path backendRoot, String testDbName) {
+        synchronized (SHARED_LOCK) {
+            String safeTestToken = testDbName.replaceAll(/[^A-Za-z0-9_-]/, "_")
+            ExecutionContext ec
+            if (liveSharedEcf() != null) {
+                ec = resetSharedMoqui()
+                sharedClassCount++
+            } else {
+                String token = sharedToken()
+                ec = bootMoqui(backendRoot, token)
+                sharedEcf = (ExecutionContextFactoryImpl) Moqui.getExecutionContextFactory()
+                sharedDbBasePath = backendRoot.resolve("runtime/tmp/test-h2/${token}")
+                sharedTxLogPath = backendRoot.resolve("runtime/tmp/test-txlog/${token}")
+                // Named <token>.schema.sql so resetDatabaseFiles clears a stale one at the next boot on this token.
+                sharedSchemaScript = backendRoot.resolve("runtime/tmp/test-h2/${token}.schema.sql")
+                Files.deleteIfExists(sharedSchemaScript)
+                withSharedConnection { Connection c ->
+                    c.createStatement().withCloseable { it.execute("SCRIPT NODATA TO '${sqlPath(sharedSchemaScript)}'".toString()) }
+                }
+                def dbMeta = sharedEcf.entityFacade.getEntityDbMeta()
+                sharedTablesChecked = new HashMap<>((Map<String, Timestamp>) dbMeta.@entityTablesChecked)
+                sharedTablesExist = new HashMap<>((Map<String, Boolean>) dbMeta.@entityTablesExist)
+                sharedClassCount = 1
+                addSharedShutdownHook()
+            }
+            sharedClassEc = ec
+            System.setProperty("darpan.rules.allowRawDrl", "true")
+            String dataManagerLocation = "runtime://tmp/test-data-manager/${safeTestToken}".toString()
+            // System property only: `ec.resource.properties[...] = ` (as in bootMoqui) resolves to Groovy's getProperties()
+            // copy and stores nothing; DataManagerSupport falls back to this System property.
+            System.setProperty("darpan.data.manager.location", dataManagerLocation)
+            StaticResets.resetAll()
+            return ec
+        }
+    }
+
+    private static ExecutionContext resetSharedMoqui() {
+        if (sharedClassEc != null) sharedClassEc.destroy()
+        sharedClassEc = null
+        sharedEcf.destroyActiveExecutionContext()
+
+        withSharedConnection { Connection c ->
+            c.createStatement().withCloseable {
+                it.execute("DROP ALL OBJECTS")
+                it.execute("RUNSCRIPT FROM '${sqlPath(sharedSchemaScript)}'".toString())
+            }
+        }
+        for (String cacheName : new ArrayList<String>(sharedEcf.cacheFacade.getCacheNames())) {
+            String plainName = cacheName.contains("__") ? cacheName.substring(cacheName.indexOf("__") + 2) : cacheName
+            if (SHARED_KEPT_CACHE_PREFIXES.any { String prefix -> plainName.startsWith(prefix) }) continue
+            sharedEcf.cacheFacade.getCache(cacheName).clear()
+        }
+        def dbMeta = sharedEcf.entityFacade.getEntityDbMeta()
+        synchronized (dbMeta) {
+            Map<String, Timestamp> checked = (Map<String, Timestamp>) dbMeta.@entityTablesChecked
+            Map<String, Boolean> exist = (Map<String, Boolean>) dbMeta.@entityTablesExist
+            checked.clear(); checked.putAll(sharedTablesChecked)
+            exist.clear(); exist.putAll(sharedTablesExist)
+        }
+
+        ExecutionContext ec = Moqui.getExecutionContext()
+        if (!ec.user.internalLoginUser("john.doe")) {
+            assert ec.user.loginAnonymousIfNoUser()
+        }
+        ec.artifactExecution.disableAuthz()
+        ec.artifactExecution.push(
+                "smokeTests",
+                ArtifactExecutionInfo.AT_OTHER,
+                ArtifactExecutionInfo.AUTHZA_ALL,
+                false
+        )
+        ec.artifactExecution.setAnonymousAuthorizedAll()
+        ec.message.clearErrors()
+        return ec
+    }
+
+    /** Shared mode: the class's ec only; the ECF stays up for the next class and the shutdown hook destroys it. */
+    private static void cleanupSharedMoqui(ExecutionContext ec) {
+        synchronized (SHARED_LOCK) {
+            ec?.destroy()
+            if (sharedClassEc != null && !sharedClassEc.is(ec)) sharedClassEc.destroy()
+            sharedClassEc = null
+            System.clearProperty("darpan.data.manager.location")
+        }
+    }
+
+    private static ExecutionContextFactoryImpl liveSharedEcf() {
+        if (sharedEcf == null || sharedEcf.isDestroyed() || !sharedEcf.is(Moqui.getExecutionContextFactory())) return null
+        return sharedEcf
+    }
+
+    private static void addSharedShutdownHook() {
+        if (sharedShutdownHookAdded) return
+        sharedShutdownHookAdded = true
+        Runtime.runtime.addShutdownHook(new Thread({
+            synchronized (SHARED_LOCK) {
+                try {
+                    if (sharedEcf != null && !sharedEcf.isDestroyed()) {
+                        if (sharedEcf.is(Moqui.getExecutionContextFactory())) Moqui.destroyActiveExecutionContextFactory()
+                        else sharedEcf.destroy()
+                    }
+                } catch (Throwable t) {
+                    System.err.println("Shared Moqui shutdown: ECF destroy failed: ${t}")
+                }
+                try {
+                    if (sharedDbBasePath != null) resetDatabaseFiles(sharedDbBasePath)
+                    if (sharedTxLogPath != null && Files.exists(sharedTxLogPath)) {
+                        Files.walk(sharedTxLogPath).sorted(Comparator.reverseOrder()).forEach { Path p -> Files.deleteIfExists(p) }
+                    }
+                } catch (Throwable ignored) {
+                    // best effort: the next boot on a token clears its own files anyway
+                }
+            }
+        } as Runnable, "shared-moqui-shutdown"))
+    }
+
+    /** A plain JDBC session on the shared H2 file DB (same URL and credentials as Moqui's transactional datasource). */
+    private static void withSharedConnection(Closure body) {
+        Properties props = new Properties()
+        props.setProperty("user", System.getProperty("entity_ds_user") ?: "sa")
+        props.setProperty("password", System.getProperty("entity_ds_password") ?: "")
+        java.sql.Driver driver = (java.sql.Driver) Class.forName("org.h2.Driver", true, ReconciliationSmokeTestSupport.classLoader)
+                .getDeclaredConstructor().newInstance()
+        Connection c = driver.connect(System.getProperty("entity_ds_url"), props)
+        try {
+            body.call(c)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static String sqlPath(Path path) { return path.toAbsolutePath().toString().replace("'", "''") }
+
+    /**
+     * True when a class on the call stack is annotated @SharedMoqui (or is nested in, or a closure of, one that is):
+     * the test class calling initMoqui/cleanupMoqui directly or through a helper.
+     */
+    private static boolean calledFromSharedMoquiClass() {
+        return StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).walk { stream ->
+            stream.map { StackWalker.StackFrame f -> f.declaringClass }
+                    .filter { Class<?> c -> c != ReconciliationSmokeTestSupport && !isRuntimeFrame(c.name) }
+                    .anyMatch { Class<?> c -> isSharedMoquiClass(c) }
+        }
+    }
+
+    private static boolean isRuntimeFrame(String className) {
+        return className.startsWith("java.") || className.startsWith("jdk.") || className.startsWith("sun.") ||
+                className.startsWith("groovy.") || className.startsWith("org.codehaus.groovy.") ||
+                className.startsWith("org.apache.groovy.") || className.startsWith("org.junit.") ||
+                className.startsWith("org.gradle.") || className.startsWith("worker.org.gradle.")
+    }
+
+    private static boolean isSharedMoquiClass(Class<?> type) {
+        for (Class<?> c = type; c != null; c = c.enclosingClass) {
+            if (c.isAnnotationPresent(SharedMoqui)) return true
+        }
+        return false
     }
 
     static void loadSeedData(ExecutionContext ec, String... locations) {
@@ -592,25 +794,6 @@ class ReconciliationSmokeTestSupport {
             }.forEach { Path path ->
                 Files.deleteIfExists(path)
             }
-        }
-    }
-
-    private static void clearTransactionalDatasourceRegistration() {
-        try {
-            ClassLoader atomikosClassLoader = Thread.currentThread().contextClassLoader
-            if (atomikosClassLoader == null) return
-
-            Class<?> registryClass = atomikosClassLoader.loadClass("com.atomikos.util.IntraVmObjectRegistry")
-            registryClass.getMethod("removeResource", String).invoke(null, TRANSACTIONAL_DS_NAME)
-
-            Class<?> configurationClass = atomikosClassLoader.loadClass("com.atomikos.icatch.config.Configuration")
-            configurationClass.getMethod("removeResource", String).invoke(null, TRANSACTIONAL_DS_NAME)
-            configurationClass.getMethod("shutdown", boolean).invoke(null, false)
-        } catch (NameNotFoundException ignored) {
-        } catch (ReflectiveOperationException e) {
-            Throwable cause = e.cause ?: e
-            if (cause instanceof NameNotFoundException || cause instanceof ClassNotFoundException) return
-            throw new IllegalStateException("Unable to clear Atomikos datasource registration for ${TRANSACTIONAL_DS_NAME}", cause)
         }
     }
 

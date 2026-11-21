@@ -1443,7 +1443,7 @@
                 dataset.DatasetServices.project#KeptRecords: it says whether a kept copy can stand in for a side's live read
                 and trims the side's records as the extract would. Blank: a side that sends keep fields or readFields reads live.</description>
         </field>
-        <field name="keepLinesJson" type="text-long">
+        <field name="keepLinesJson" type="text-very-long">
             <description>DAR-BE-318 (ruling 3b2b-12). This endpoint's built-in Keep lines, as data set by the system's own
                 component, never in core: [{sequenceNum, label, appliesUnless: {extract option: value}, kinds: {field: FVT_*},
                 lines: [RuleSetCondition maps on plain record fields]}]. Compiled by KeepLineTranslator.declared and run in

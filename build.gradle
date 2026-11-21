@@ -189,15 +189,37 @@ ext.darpanTestForks = ((project.findProperty('testForks')
 ext.darpanTestPools = { ->
     List<String> moquiBootMarkers = ['initMoqui(', 'Moqui.dynamicInit', 'ExecutionContextFactoryImpl']
     File testSrc = file('src/test/groovy')
-    List<String> smoke = [], unit = [], shared = []
+    // DAR-OPS-026 O7: a class that boots Moqui through a base class's lifecycle (TwoFactorTestSupport.boot())
+    // has no marker of its own. So a class is smoke when its source has a marker OR it extends, transitively
+    // (simple-name scan of `extends X` over every test source, base classes included), a class whose source does.
+    Map<String, String> sources = [:]      // simple class name -> source text
+    Map<String, String> superOf = [:]      // simple class name -> simple superclass name
+    List<File> candidates = []
     testSrc.eachFileRecurse { File f ->
-        if (!(f.name.endsWith('Test.groovy') || f.name.endsWith('Tests.groovy'))) return
+        if (!f.name.endsWith('.groovy')) return
+        String text = f.text
+        String simple = f.name.replaceFirst(/\.groovy$/, '')
+        sources[simple] = text
+        java.util.regex.Matcher m = text =~ /(?m)^\s*(?:(?:public|abstract|final|static)\s+)*class\s+${simple}\b[^{]*?\bextends\s+([A-Za-z_][A-Za-z0-9_]*)/
+        if (m.find()) superOf[simple] = m.group(1)
+        if (f.name.endsWith('Test.groovy') || f.name.endsWith('Tests.groovy')) candidates << f
+    }
+    Closure<Boolean> boots
+    boots = { String name, Set<String> seen ->
+        String text = sources[name]
+        if (text == null || !seen.add(name)) return false
+        if (moquiBootMarkers.any { text.contains(it) }) return true
+        String sup = superOf[name]
+        return sup != null && boots(sup, seen)
+    }
+    List<String> smoke = [], unit = [], shared = []
+    candidates.each { File f ->
         String classPattern = testSrc.toPath().relativize(f.toPath()).toString()
                 .replaceFirst(/\.groovy$/, '.class')
-        String text = f.text
-        if (moquiBootMarkers.any { text.contains(it) }) {
+        String simple = f.name.replaceFirst(/\.groovy$/, '')
+        if (boots(simple, new HashSet<String>())) {
             smoke << classPattern
-            if (text.contains('@SharedMoqui')) shared << classPattern
+            if (sources[simple].contains('@SharedMoqui')) shared << classPattern
         } else {
             unit << classPattern
         }

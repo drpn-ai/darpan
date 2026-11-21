@@ -185,6 +185,31 @@ class AuditAutomationSmokeTests {
                 "DAR-BE-178: on Nov 2 a monthly audit plays from October 1")
     }
 
+    // DAR-BE-332: prod Gorjana's R9 bundle took R3's memo-amount check off its statement on purpose (2026-11-04) and left it
+    // on its automation; every run after recorded nothing and logged "tests no statement". A check off every statement is retired.
+    @Test
+    void aCheckOnNoStatementIsNotRun() {
+        Connection connection = ec.entity.getConnection(ec.entity.getEntityGroupName("darpan.audit.AuditCheck"))
+        try {
+            Statement statement = connection.createStatement()
+            statement.execute("SET REFERENTIAL_INTEGRITY FALSE")
+            try {
+                ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.audit.AuditCheck", [checkId: "TAUTO_RETIRED",
+                        companyUserGroupId: TENANT, checkCode: "retired", label: "retired", automationId: "TAUTO_AUTO"])
+            } finally {
+                statement.execute("SET REFERENTIAL_INTEGRITY TRUE")
+                statement.close()
+            }
+        } finally {
+            connection.close()
+        }
+        try {
+            assertEquals([CHECK], AuditAutomationSupport.checksFor(ec, automation)*.checkId)
+        } finally {
+            ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TAUTO_RETIRED").disableAuthz().deleteAll()
+        }
+    }
+
     @Test
     void aCheckReportingToTwoAuditsIsAConfigError() {
         // A check whose statements belong to two audits (or none) cannot pick its windows.

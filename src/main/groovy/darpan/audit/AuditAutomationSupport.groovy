@@ -50,12 +50,19 @@ class AuditAutomationSupport {
     private static final int REASON_MAX = 1000
     private static final String WHY = "audit run hook on a scheduled thread: explicit companyUserGroupId condition applied"
 
-    /** The audit checks this automation runs; empty when it feeds no audit. */
+    /**
+     * The audit checks this automation runs; empty when it feeds no audit. A check on no statement is retired (an import or
+     * restore takes a check off its statements and leaves its automation, DAR-BE-332): it reports nowhere, so it is not run.
+     */
     static List<Map> checksFor(def ec, def automation) {
         String automationId = normalize(readField(automation, "automationId"))
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
         if (!automationId || !tenantId) return []
-        return tenantRows(ec, "darpan.audit.AuditCheck", tenantId).condition("automationId", automationId).list()*.getMap()
+        List<Map> checks = tenantRows(ec, "darpan.audit.AuditCheck", tenantId).condition("automationId", automationId).list()*.getMap()
+        if (!checks) return []
+        Set<String> tested = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId)
+                .condition("checkId", EntityCondition.IN, checks*.checkId).list()*.checkId.collect { it as String } as Set<String>
+        return checks.findAll { (it.checkId as String) in tested }
     }
 
     /** The one audit these checks report to. An automation runs one audit's checks; anything else is a config error. */

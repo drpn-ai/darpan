@@ -305,7 +305,9 @@ class SyncPulseSupport {
             Set<String> present = keySet(target.present as Collection)
             Set<String> unasked = keySet(target.unasked as Collection)
             Map sorted = classify(records, present, now, allowance, unasked)
-            return settle(ec, pair, now, allowance, open, sorted, present, unasked)
+            Set<String> upstreamKeys = new LinkedHashSet<String>()
+            records.each { Map r -> String k = normalize(r.key); if (k) upstreamKeys << k }
+            return settle(ec, pair, now, allowance, open, sorted, present, unasked, window.from as Instant, upstreamKeys)
         } catch (Throwable t) {
             String reason = normalize(t.message) ?: t.class.simpleName
             logger.warn("Sync pulse {} (tenant {}) failed: {}", syncPairId, tenantId, reason)
@@ -344,12 +346,12 @@ class SyncPulseSupport {
 
     /** Opens, touches and closes the pair's orders, writes the OK sample and stamps the pair, in one transaction. */
     private static Map settle(def ec, Map pair, Instant now, int allowance, List<Map> open, Map sorted, Set<String> present,
-                              Set<String> unasked) {
+                              Set<String> unasked, Instant windowFrom, Set<String> upstreamKeys) {
         Timestamp stamp = Timestamp.from(now)
         Map<String, Map> openByKey = open.collectEntries { Map o -> [(o.recordKey as String): o] }
         List<Map> waiting = sorted.waiting as List<Map>
         List<Map> past = sorted.past as List<Map>
-        List<Map> closed = [], newlyPast = [], stillOpen = []
+        List<Map> closed = [], dropped = [], newlyPast = [], stillOpen = []
         Map sample = null, oldest = null
         ec.transaction.runUseOrBegin(120, "Sync pulse ${pair.syncPairId} could not save its sample".toString()) {
             open.each { Map o ->
@@ -358,6 +360,9 @@ class SyncPulseSupport {
                     closed << updateOrder(ec, o, [closedStamp: stamp, lastCheckedStamp: stamp])
                 } else if (unasked.contains(key)) {
                     stillOpen << o
+                } else if (leftTheCheck(o, now, allowance, windowFrom, upstreamKeys)) {
+                    // never "synced": it left the check (cancelled or filtered upstream, or the daily check owns it now)
+                    dropped << updateOrder(ec, o, [closedStamp: stamp, lastCheckedStamp: stamp])
                 } else {
                     stillOpen << updateOrder(ec, o, [lastCheckedStamp: stamp])
                 }
@@ -375,8 +380,25 @@ class SyncPulseSupport {
                     pastAllowanceCount: stillOpen.size(), message: message])
             stampPair(ec, pair, now, OK)
         }
-        return [status   : OK, sample: sample, newlyPast: newlyPast, closed: closed, waitingCount: waiting.size(), oldest: oldest,
+        return [status   : OK, sample: sample, newlyPast: newlyPast, closed: closed, dropped: dropped, waitingCount: waiting.size(), oldest: oldest,
                 pastCount: stillOpen.size(), priorPastCount: open.size(), skipped: false]
+    }
+
+    /**
+     * Whether an open order that did not arrive in the target has left the check: its source created time is inside the
+     * pulse's read window yet the upstream read did not return it, or it is older than the window and has been open longer
+     * than the allowance + 24h (the daily check owns it from there).
+     */
+    static boolean leftTheCheck(Map order, Instant now, int allowanceMinutes, Instant windowFrom, Set<String> upstreamKeys) {
+        Object created = order.get("sourceCreatedStamp")
+        if (created != null) {
+            Instant createdAt = created instanceof Instant ? (Instant) created : ((Date) created).toInstant()
+            if (!createdAt.isBefore(windowFrom)) return !upstreamKeys.contains(order.get("recordKey") as String)
+        }
+        Object first = order.get("firstPastStamp")
+        if (first == null) return false
+        Instant firstAt = first instanceof Instant ? (Instant) first : ((Date) first).toInstant()
+        return Duration.between(firstAt, now) > Duration.ofMinutes(Math.max(0, allowanceMinutes)).plus(Duration.ofHours(24))
     }
 
     /**

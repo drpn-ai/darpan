@@ -169,6 +169,45 @@ class SyncPulseEngineSmokeTests {
     }
 
     @Test
+    void anOrderCancelledUpstreamInsideTheWindowClosesWithoutCountingAsSynced() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, openOrders().size())
+
+        upstream.clear()
+        Instant later = T0.plus(Duration.ofMinutes(60))
+        Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
+
+        assertEquals([], out.closed*.recordKey, "it did not sync")
+        assertEquals(["#A1"], out.dropped*.recordKey)
+        assertEquals(0, out.pastCount)
+        assertEquals(0, openOrders().size())
+        assertEquals(Timestamp.from(later), orders("#A1")[0].closedStamp)
+        Map post = SyncPulseSupport.decidePost("L", out, 1, ["SPS_OK"], false, false)
+        assertEquals("clear", post.kind, "past reached 0: the caught-up post still fires")
+        assertTrue((post.text as String).endsWith("0 findings closed"), post.text as String)
+    }
+
+    @Test
+    void anOrderOlderThanTheWindowClosesOnlyAfterTheAllowancePlus24Hours() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        upstream.clear()
+
+        // allowance 60 min + 24 h after it was first flagged: not before
+        Instant edge = T0.plus(Duration.ofHours(25))
+        Map early = SyncPulseSupport.runPulse(ec, pairMap(SP), edge.minus(Duration.ofMinutes(1)))
+        assertEquals(1, early.pastCount, "still inside allowance + 24h")
+        assertEquals([], early.dropped*.recordKey)
+
+        Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), edge.plus(Duration.ofMinutes(1)))
+        assertEquals(["#A1"], out.dropped*.recordKey)
+        assertEquals([], out.closed*.recordKey)
+        assertEquals(0, out.pastCount)
+        assertEquals(0, openOrders().size())
+    }
+
+    @Test
     void failedReadWritesFailedSampleAndKeepsOrders() {
         upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
         SyncPulseSupport.runPulse(ec, pairMap(SP), T0)

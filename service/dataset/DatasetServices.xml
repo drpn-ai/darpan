@@ -77,6 +77,9 @@
                     <else><return error="true" message="stampField is required for a DRR_CHANGED_SINCE dataset"/></else>
                 </if>
             </if>
+            <!-- M3: a changed-since read asks the stamp which records changed; a creation date never changes, so it cannot say -->
+            <if condition="!rolling &amp;&amp; stampField == windowField">
+                <return error="true" message="stampField cannot be the windowField for a DRR_CHANGED_SINCE dataset: a creation date cannot say what changed"/></if>
             <if condition="existingList">
                 <then>
                     <set field="existing" from="existingList[0]"/>

@@ -164,6 +164,26 @@ class DatasetServicesTests {
         assertEquals("DST_PAUSED", find("darpan.dataset.Dataset", [datasetId: paused.out.datasetId]).statusId)
     }
 
+    /** M3: a changed-since dataset whose stamp is its window field could never see a change; a rolling one re-reads the window, so it may. */
+    @Test
+    void aChangedSinceDatasetCannotStampByItsWindowField() {
+        // a made-up system, paused so no connector is needed
+        Map same = [systemEnumId: "MADE_UP_SYSTEM", sourceConfigId: "conn-m3", options: [:], idField: "id", windowField: "createdAt",
+                    stampField: "createdAt", statusId: "DST_PAUSED"]
+        Map created = call("store#Dataset", same)
+        assertTrue(created.errors.any { it.contains("a creation date cannot say what changed") }, created.errors.toString())
+        assertEquals(0, ec.entity.find("darpan.dataset.Dataset").condition("sourceConfigId", "conn-m3").disableAuthz().count())
+
+        Map ok = call("store#Dataset", same + [stampField: "updatedAt"])
+        assertEquals([], ok.errors)
+        Map updated = call("store#Dataset", same)
+        assertTrue(updated.errors.any { it.contains("a creation date cannot say what changed") }, updated.errors.toString())
+        assertEquals("updatedAt", find("darpan.dataset.Dataset", [datasetId: ok.out.datasetId]).stampField)
+
+        Map rolling = call("store#Dataset", same + [sourceConfigId: "conn-m3-roll", readRuleEnumId: "DRR_ROLLING"])
+        assertEquals([], rolling.errors)
+    }
+
     @Test
     void datasetDirIsUnderTheTenant(@TempDir Path root) {
         File dir = DatasetSupport.datasetDir(root.toFile(), "KREWE", "1001")

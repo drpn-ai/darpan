@@ -44,7 +44,7 @@ class RunAdmission {
     private static final String HOLD_HEAP_KEY = "darpan.reconciliation.automation.holdAtHeapPercent"
     private static final String MAX_WAITING_KEY = "darpan.reconciliation.automation.maxWaitingPerTenant"
 
-    static final RunAdmission SHARED = new RunAdmission(
+    static RunAdmission SHARED = new RunAdmission(
             { -> DarpanSettings.intValue(CAP_KEY) }, { -> DarpanSettings.intValue(PER_TENANT_KEY) },
             { -> DarpanSettings.intValue(HOLD_HEAP_KEY) }, { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
             { -> DarpanSettings.intValue(MAX_WAITING_KEY) })
@@ -257,6 +257,30 @@ class RunAdmission {
     }
 
     private int waitingTotal() { return (int) (waiting.values().sum { it.size() } ?: 0) }
+
+    /**
+     * DAR-OPS-026: replaces SHARED with a fresh default instance, but only when nothing runs or waits (else logs and
+     * leaves it). Test-only; never throws.
+     */
+    static void resetForTests() {
+        try {
+            RunAdmission old = SHARED
+            try { old.drain() } catch (Throwable ignored) { }
+            synchronized (old) {
+                if (old.running > 0 || old.waitingTotal() > 0) {
+                    logger.warn("RunAdmission.resetForTests: runs still active or waiting, SHARED left in place")
+                    return
+                }
+            }
+            SHARED = new RunAdmission(
+                    { -> DarpanSettings.intValue(CAP_KEY) }, { -> DarpanSettings.intValue(PER_TENANT_KEY) },
+                    { -> DarpanSettings.intValue(HOLD_HEAP_KEY) }, { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
+                    { -> DarpanSettings.intValue(MAX_WAITING_KEY) })
+            if (AutomationExecutionSupport.getRunAdmission().is(old)) AutomationExecutionSupport.setRunAdmission(SHARED)
+        } catch (Throwable t) {
+            logger.warn("RunAdmission.resetForTests failed: {}", t.toString())
+        }
+    }
 
     private static String tenantKey(String tenantId) { return tenantId ?: "_none" }
 

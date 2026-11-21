@@ -230,6 +230,17 @@ class AutomationExecutionSupport {
         reconcileRunner = DEFAULT_RECONCILE_RUNNER
     }
 
+    /** DAR-OPS-026: restores every mutable seam in this class (hooks, peak loaders, admission) to its default. Test-only. */
+    static void resetForTests() {
+        try {
+            resetExecutionHooks()
+            peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
+            tenantZoneLoader = DEFAULT_TENANT_ZONE_LOADER
+            RunAdmission.resetForTests()
+            runAdmission = RunAdmission.SHARED
+        } catch (Throwable ignored) { }
+    }
+
     /**
      * Entry point for both the scheduler (via {@code execute#Automation}) and interactive
      * {@code run#AutomationNow}.

@@ -258,6 +258,9 @@ class KeptCopyStore {
     /** Test seam: called after each line is written to a new version; may throw to simulate a mid-write failure. */
     static Closure lineWrittenHook = null
 
+    /** DAR-OPS-026: clears the test hook. Test-only. */
+    static void resetForTests() { lineWrittenHook = null }
+
     // ---- internals ----
 
     /**

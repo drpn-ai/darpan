@@ -37,9 +37,17 @@ class DataDefinedExtract {
     static final long PROGRESS_MIN_INTERVAL_MS = 2000L
 
     /** How a run reaches the endpoint: the generic GraphQL transport. Replaced only by tests, to answer without a server. */
-    static Closure transportFactory = { Map definition, Map connectionRecord -> new GraphQlTransport(definition, connectionRecord) }
+    private static final Closure DEFAULT_TRANSPORT_FACTORY = { Map definition, Map connectionRecord -> new GraphQlTransport(definition, connectionRecord) }
+    private static final Closure DEFAULT_REST_TRANSPORT_FACTORY = { Map definition, Map connectionRecord -> new RestJsonTransport(definition, connectionRecord) }
+    static Closure transportFactory = DEFAULT_TRANSPORT_FACTORY
     /** DAR-BE-234: the same for a REST_JSON definition. */
-    static Closure restTransportFactory = { Map definition, Map connectionRecord -> new RestJsonTransport(definition, connectionRecord) }
+    static Closure restTransportFactory = DEFAULT_REST_TRANSPORT_FACTORY
+
+    /** DAR-OPS-026: restores both transport factories. Test-only. */
+    static void resetForTests() {
+        transportFactory = DEFAULT_TRANSPORT_FACTORY
+        restTransportFactory = DEFAULT_REST_TRANSPORT_FACTORY
+    }
 
     /** The transport for a prepared run, by its definition's protocol. */
     private static Object transportFor(Map prepared) {

@@ -385,6 +385,15 @@ class EmailCopy {
             "TenantWelcomeEmailSeedData", "AuditDigestEmailSeedData"]
     private static volatile Map<String, String> seedSubjectsCache
 
+    /** Test-only: drops the seed caches and the log-once memory so the next call re-reads. Idempotent, never throws. */
+    static void resetForTests() {
+        try {
+            seedDefaultsCache = null
+            seedSubjectsCache = null
+            LOGGED.clear()
+        } catch (Throwable ignored) { }
+    }
+
     /** emailTemplateId -> the subject its seed file ships. */
     static Map<String, String> seedSubjects(def ec) {
         Map<String, String> cached = seedSubjectsCache

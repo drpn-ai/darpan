@@ -60,6 +60,11 @@ class PasskeySupport {
     /** [factory, key]: the decoy key as read for one framework instance (tests boot several in one JVM). */
     private static volatile Map decoyKeyCache
 
+    /** Test-only: forgets the cached decoy key. Idempotent, never throws. */
+    static void resetForTests() {
+        try { decoyKeyCache = null } catch (Throwable ignored) { }
+    }
+
     static final int MAX_PASSKEYS = 10
     static final int NAME_MAX_LENGTH = 60
     static final int CEREMONY_TIMEOUT_MILLIS = 120_000

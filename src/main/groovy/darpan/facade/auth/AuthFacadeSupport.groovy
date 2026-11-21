@@ -296,6 +296,14 @@ class AuthFacadeSupport {
     /** Set by the first decoy: a hash that measures 0 ms (SHA-256) is measured, not missing. */
     private static volatile boolean passwordHashCostMeasured = false
 
+    /** Test-only: back to "hash cost not yet measured". Idempotent, never throws. */
+    static void resetForTests() {
+        try {
+            passwordHashCostMillis = 0L
+            passwordHashCostMeasured = false
+        } catch (Throwable ignored) { }
+    }
+
     private static void recordPasswordHashCost(long millis) {
         long previous = passwordHashCostMillis
         passwordHashCostMillis = previous == 0L ? millis : ((previous * 3L + millis).intdiv(4L) as long)

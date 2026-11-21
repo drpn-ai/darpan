@@ -129,4 +129,33 @@ class KeepArtifactsTests {
         assertTrue(closed[0])
         assertEquals(before, KeepArtifacts.OPEN_ROW_READERS.get())
     }
+
+    /**
+     * Task 16e (review 16d-M6): a capture whose read applied only its built-in drops (no tenant rules) reports no
+     * configuredExclusions. Its records carry none of the fields the side's built-in Keep lines read, which a Spark-era extractor
+     * writes on what it flags, so it reads as filtered when those fields are given, and as before when they are not.
+     */
+    @Test
+    void aCaptureWhoseReadAppliedOnlyItsBuiltInsReadsAsFilteredByItsMissingFlags() {
+        File builtInOnly = new File(dir, "built-in-only.json")
+        // records first, metadata last, as a streaming extractor writes them; its filter block holds built-in counts only
+        builtInOnly.text = '{"records":[{"id":"K1","lines":[{"sku":"A"}]},{"id":"K2"}],' +
+                '"metadata":{"filters":{"excludedFlaggedCount":2},"isTest":"a metadata key is not a record field"}}'
+        assertFalse(KeepArtifacts.filteredAtRead(builtInOnly), "without the fields, only configuredExclusions tells")
+        assertTrue(KeepArtifacts.filteredAtRead(builtInOnly, ["isTest"]))
+        assertFalse(KeepArtifacts.filteredAtRead(builtInOnly, []))
+
+        File sparkEra = new File(dir, "spark-era.json")
+        sparkEra.text = '{"metadata":{"filters":{}},"records":[{"id":"K1"},{"id":"K2","isTest":"Y"},{"id":"K3"}]}'
+        assertFalse(KeepArtifacts.filteredAtRead(sparkEra, ["isTest"]), "a record carries the flag: its read left the built-in to Spark")
+        File nestedFlag = new File(dir, "nested-flag.json")
+        nestedFlag.text = '{"records":[{"id":"K1","lines":[{"isTest":"N","x":{"y":[1,{"z":2}]}}],"after":{"a":1}},{"id":"K2"}],"metadata":{}}'
+        assertFalse(KeepArtifacts.filteredAtRead(nestedFlag, ["isTest"]))
+
+        File ruled = new File(dir, "ruled.json")
+        ruled.text = JsonOutput.toJson([records: [[id: "K1", isTest: "N"]], metadata: [filters: [configuredExclusions: [[sequenceNum: 1,
+                fieldExpression: "status", operator: "EXCLUDE_IN", values: ["VOID"], excludedCount: 0, fieldAbsentCount: 0]]]]])
+        assertTrue(KeepArtifacts.filteredAtRead(ruled, ["isTest"]), "read-time configuredExclusions decide, whatever the records carry")
+        assertTrue(KeepArtifacts.filteredAtRead(new File(dir, "missing.json"), ["isTest"]))
+    }
 }

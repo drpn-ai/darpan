@@ -45,6 +45,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * if it were read.
  *
  * Task 16b: a scheduled evaluate run (a single-sided EVALUATE scope, KAP_EVAL_*) keeps in Spark wherever a compare run would.
+ *
+ * Task 16e: a retry from the last extract (DAR-BE-142) over a landed file its read filtered keeps today's read after the side's
+ * extract stops filtering (KAP_RETRY_*: side 1 is first read through ACME_READ, then switched to ACME_SPARK and retried).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AutomationKeepParityTests {
@@ -56,6 +59,7 @@ class AutomationKeepParityTests {
     private static final String SPARK_COPY_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkCopyRecords"
     private static final String READ_COPY_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#ReadCopyRecords"
     private static final String SPARK_PROJ_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkProjRecords"
+    private static final String FLAGGED_EXTRACT = "reconciliation.AutomationKeepTestExtractionServices.extract#SparkFlaggedRecords"
     private static final Timestamp FIRE = Timestamp.valueOf("2026-11-21 06:00:00")
     /** The kept copies are read at this clock: their readThru covers the previous-day window FIRE resolves. */
     private static final Instant COPY_READ_AT = Instant.parse("2026-11-22T00:00:00Z")
@@ -290,32 +294,152 @@ class AutomationKeepParityTests {
         assertEquals(3, served.execution.file1RecordCount)
     }
 
+    /**
+     * Task 16e (review 16b-I1): a compare retried from its last extract after side 1's extract stopped filtering. The landed file
+     * was filtered at the read, so the retry keeps today's read: Spark runs no Keep over it, writes no zero-count .keep.json (which
+     * the conclude pass would read as "not found" in place of the read's configuredExclusions), and the run equals the first.
+     */
+    @Test
+    void aCompareRetriedOverAFileItsReadFilteredKeepsTodaysRead() {
+        Map first = run("KAP_RETRY_COMPARE", [])
+        assertTrue(KeepArtifacts.filteredAtRead(first.extract), "the landed file was filtered at the read")
+        switchSide1("KAP_RETRY_COMPARE")
+
+        List<Map> calls = []
+        Map retried = run("KAP_RETRY_COMPARE", calls, retryOf(first))
+
+        assertEquals([], calls, "a retry reads nothing")
+        assertEquals(first.extract, retried.extract, "the retry compares the landed file")
+        assertNull(KeepArtifacts.readSummary(retried.extract), "no Spark Keep over a file its read filtered")
+        assertSameRun(first, retried, ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount",
+                                       "file2RecordCount"])
+        assertEquals(JsonOutput.toJson(first.document.summary), JsonOutput.toJson(retried.document.summary))
+    }
+
+    /** Task 16e: the same for an evaluate run, which keeps in Spark since Task 16b. */
+    @Test
+    void anEvaluateRetriedOverAFileItsReadFilteredKeepsTodaysRead() {
+        Map first = run("KAP_RETRY_EVAL", [])
+        assertTrue(KeepArtifacts.filteredAtRead(first.extract))
+        switchSide1("KAP_RETRY_EVAL")
+
+        List<Map> calls = []
+        Map retried = run("KAP_RETRY_EVAL", calls, retryOf(first))
+
+        assertEquals([], calls)
+        assertEquals(first.extract, retried.extract)
+        assertNull(KeepArtifacts.readSummary(retried.extract), "no Spark Keep over a file its read filtered")
+        assertSameRun(first, retried, ["statusEnumId", "differenceCount", "file1RecordCount"])
+        assertEquals(["K1", "K7", "K8"] as Set, ((List<Map>) retried.document.differences)*.id as Set)
+    }
+
+    /**
+     * Task 16e (Ruling 3b2b-26): a side whose records are not top-level (KAP_NEST_SCOPE's side 1 sits under orders) fails once its
+     * extract stops filtering (Ruling 3b2b-25), but not when it is retried over a file its read already filtered.
+     */
+    @Test
+    void aNestedSideRetriedOverAFileItsReadFilteredDoesNotFail() {
+        Map first = run("KAP_RETRY_NEST", [], [:], "orders")
+        assertTrue(KeepArtifacts.filteredAtRead(first.extract))
+        switchSide1("KAP_RETRY_NEST")
+
+        Map retried = run("KAP_RETRY_NEST", [], retryOf(first), "orders")
+
+        assertNull(KeepArtifacts.readSummary(retried.extract))
+        assertSameRun(first, retried, ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount",
+                                       "file2RecordCount"])
+    }
+
+    /**
+     * Review 16d-M6: a capture whose read applied only its built-in drops (the side has no tenant rules) reports no
+     * configuredExclusions. Its records carry no isTest, the flag ACME_SPARK_FLAGGED's built-in Keep line reads and a Spark-era
+     * extract writes, so it was filtered at the read: retried after the extract stopped filtering, the nested side does not fail.
+     */
+    @Test
+    void aNestedSideRetriedOverABuiltInOnlyCaptureDoesNotFail() {
+        Map first = run("KAP_RETRY_BUILT_IN", [], [:], "orders")
+        assertFalse(KeepArtifacts.filteredAtRead(first.extract), "no tenant rule: the read reported no configuredExclusions")
+        assertTrue(KeepArtifacts.filteredAtRead(first.extract, ["isTest"]), "no record carries the built-in line's flag")
+        switchSide1("KAP_RETRY_BUILT_IN", "ACME_SPARK_FLAGGED", FLAGGED_EXTRACT)
+
+        Map retried = run("KAP_RETRY_BUILT_IN", [], retryOf(first), "orders")
+
+        assertNull(KeepArtifacts.readSummary(retried.extract))
+        assertSameRun(first, retried, ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount",
+                                       "file2RecordCount"])
+    }
+
+    /**
+     * Review 16b-M1: an evaluate run whose Spark Keep keeps nothing closes as no data, as its filtering read (which wrote no
+     * record) did, although its extract held records.
+     */
+    @Test
+    void anEvaluateRunWhoseSparkKeepKeepsNothingReportsNoData() {
+        Map executed = execute("KAP_EVAL_NONE", [])
+        Map execution = (Map) executed.execution
+        assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, execution.statusEnumId, executed.result.toString())
+        assertEquals([0, 1], [executed.result.executedCount, executed.result.noDataCount])
+        assertEquals(0, execution.file1RecordCount as int, "the recorded count is what Keep kept")
+        File extract = RunVerificationSupport.resolveLocationFile(ec, execution.file1DataManagerPath as String)
+        assertEquals(ORDERS.size(), records(extract).size(), "the read held every record")
+        assertEquals(0, KeepArtifacts.readSummary(extract).keptCount as int)
+    }
+
     // ---------------------------------------------------------------------------------------------------------- the run
 
     /** The automation run once, scheduled; its execution row, its side-1 extract and its result document. */
-    private Map run(String automationId, List<Map> calls) {
-        ec.user.logoutUser()
-        ec.user.loginAnonymousIfNoUser()
-        try {
-            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: automationId, scheduledFireTime: FIRE,
-                    sparkMaster: "local[1]", sparkAppName: "AutomationKeepParityTests", liveExtractor: liveExtractor(calls)])
-            assertEquals(1, result.executedCount, result.toString())
-        } finally {
-            ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-            TenantAccessSupport.syncUserContext(ec)
-        }
-        def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution").condition("automationId", automationId)
-                .disableAuthz().useCache(false).one()
-        assertNotNull(execution)
+    private Map run(String automationId, List<Map> calls, Map extra = [:], String root = "records") {
+        Map executed = execute(automationId, calls, extra, root)
+        assertEquals(1, executed.result.executedCount, executed.result.toString())
+        Map execution = (Map) executed.execution
         File extract = RunVerificationSupport.resolveLocationFile(ec, execution.file1DataManagerPath as String)
         File document = DataManagerSupport.resolveDataManagerFile(ec, execution.resultDataManagerPath as String, false)
         assertTrue(document?.isFile(), "result document of ${automationId}: ${execution.resultDataManagerPath}")
         // read now: two runs in one second share the result path, and the next run would overwrite it
-        return [execution: new LinkedHashMap(execution.getMap()), extract: extract, document: json(document)]
+        return [execution: execution, extract: extract, document: json(document)]
+    }
+
+    /** The automation run once, scheduled (extra: more input, such as a retry's): [result, execution (its row)]. */
+    private Map execute(String automationId, List<Map> calls, Map extra = [:], String root = "records") {
+        ec.user.logoutUser()
+        ec.user.loginAnonymousIfNoUser()
+        Map result
+        try {
+            result = AutomationExecutionSupport.executeAutomation(ec, [automationId: automationId, scheduledFireTime: FIRE,
+                    sparkMaster: "local[1]", sparkAppName: "AutomationKeepParityTests", liveExtractor: liveExtractor(calls, root)] + extra)
+        } finally {
+            ReconciliationSmokeTestSupport.seedCompanyScope(ec)
+            TenantAccessSupport.syncUserContext(ec)
+        }
+        String executionId = ((List<Map>) result.executionResults)?.find()?.automationExecutionId
+        def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution").condition("automationExecutionId", executionId)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(execution, result.toString())
+        return [result: result, execution: new LinkedHashMap(execution.getMap())]
+    }
+
+    /** A retry from first's extracts (DAR-BE-142, as retryFromExtracts submits it): a later fire over the same day's window. */
+    private static Map retryOf(Map first) {
+        return [scheduledFireTime: new Timestamp(FIRE.time + 3600_000L), replayFromExecutionId: ((Map) first.execution).automationExecutionId]
+    }
+
+    /** The automation's side 1 now dispatches to system, whose extract no longer takes the filters (Tasks 17-23). */
+    private void switchSide1(String automationId, String system = "ACME_SPARK", String service = SPARK_EXTRACT) {
+        String metadata = JsonOutput.toJson([extractServiceName: service]).replace('"', "&quot;")
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="${automationId}" fileSide="FILE_1" companyUserGroupId="${TENANT}"
+                systemEnumId="${system}" safeMetadataJson="${metadata}"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+    }
+
+    private static void assertSameRun(Map first, Map retried, List<String> fields) {
+        fields.each { String f -> assertEquals(((Map) first.execution)[f], ((Map) retried.execution)[f], f) }
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, ((Map) retried.execution).statusEnumId)
+        assertEquals(JsonOutput.toJson(first.document.differences), JsonOutput.toJson(retried.document.differences))
     }
 
     /** What a live read answers: the records (by key when asked), the rows it was sent applied and their side file written. */
-    private Closure liveExtractor(List<Map> calls) {
+    private Closure liveExtractor(List<Map> calls, String root = "records") {
         return { String service, Map params ->
             calls << [service: service, params: new LinkedHashMap(params)]
             boolean ledger = service == LEDGER_EXTRACT
@@ -326,8 +450,8 @@ class AutomationKeepParityTests {
                     "20261121-060000000-${params.fileSide}-${++readSeq}".toString())
             File dir = DataManagerSupport.resolveDirectoryFile(ec, location, true)
             String fileName = ledger ? "ledger.json" : "acme-orders.json"
-            new File(dir, fileName).setText(JsonOutput.toJson([metadata: [filters: [configuredExclusions: applied.configuredExclusions]],
-                                                               records : applied.records]), "UTF-8")
+            new File(dir, fileName).setText(JsonOutput.toJson([metadata         : [filters: [configuredExclusions: applied.configuredExclusions]],
+                                                               (ledger ? "records" : root): applied.records]), "UTF-8")
             if (applied.excludedCollector) ExcludedRecordsSidecar.writeBeside(ec, (Map) applied.excludedCollector, location, fileName, dir)
             List kept = (List) applied.records
             return [fileLocation : DataManagerSupport.childLocation(location, fileName), fileName: fileName, fileTypeEnumId: "DftJson",
@@ -367,7 +491,7 @@ class AutomationKeepParityTests {
         }
         StringBuilder automations = new StringBuilder()
         [KAP_READ: ["ACME_READ", READ_EXTRACT, false], KAP_SPARK: ["ACME_SPARK", SPARK_EXTRACT, false],
-         KAP_EVAL_COMPARE: ["ACME_SPARK", SPARK_EXTRACT, false],
+         KAP_EVAL_COMPARE: ["ACME_SPARK", SPARK_EXTRACT, false], KAP_RETRY_COMPARE: ["ACME_READ", READ_EXTRACT, false],
          KAP_KEYS_READ: ["ACME_READ", READ_EXTRACT, true], KAP_KEYS_SPARK: ["ACME_SPARK", SPARK_EXTRACT, true],
          KAP_COPY_SPARK: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
          KAP_COPY_SPARK_LIVE: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
@@ -395,7 +519,8 @@ class AutomationKeepParityTests {
                 fieldExpression="id" operator="EXCLUDE_IN" filterValues="K1,K7,K8" companyUserGroupId="${OTHER_TENANT}"/>"""
         }
         // Task 16b: the same side and rows on an EVALUATE scope, one source each: today's filtering read, and the Spark side
-        String evaluateAutomations = [KAP_EVAL_READ: ["ACME_READ", READ_EXTRACT], KAP_EVAL_SPARK: ["ACME_SPARK", SPARK_EXTRACT]].collect { String id, List side1 ->
+        String evaluateAutomations = [KAP_EVAL_READ: ["ACME_READ", READ_EXTRACT], KAP_EVAL_SPARK: ["ACME_SPARK", SPARK_EXTRACT],
+                                      KAP_RETRY_EVAL: ["ACME_READ", READ_EXTRACT]].collect { String id, List side1 ->
             """
             <darpan.reconciliation.ReconciliationAutomation automationId="${id}" automationName="${id}" companyUserGroupId="${TENANT}"
                 inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_EVAL_RS" savedRunType="ruleset"
@@ -411,6 +536,35 @@ class AutomationKeepParityTests {
             <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="3"
                 fieldExpression="total" operator="EXCLUDE_IN" filterValues="24.00" companyUserGroupId="${TENANT}"/>"""
         }.join("")
+        // Task 16e: side 1 under orders (not top-level records), first read through the filtering extract
+        String nestedAutomation = """
+            <darpan.reconciliation.ReconciliationAutomation automationId="KAP_RETRY_NEST" automationName="KAP_RETRY_NEST" companyUserGroupId="${TENANT}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_NEST_RS" savedRunType="ruleset"
+                ruleSetId="KAP_NEST_RS" compareScopeId="KAP_NEST_SCOPE" relativeWindowTypeEnumId="${AutomationExecutionSupport.WINDOW_PREVIOUS_DAY}"
+                relativeWindowCount="1" windowTimeZone="UTC" isActive="N"/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="KAP_RETRY_NEST" fileSide="FILE_1" companyUserGroupId="${TENANT}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="ACME_READ" fileTypeEnumId="DftJson"
+                safeMetadataJson="${metadata(READ_EXTRACT, false)}"/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="KAP_RETRY_NEST" fileSide="FILE_2" companyUserGroupId="${TENANT}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
+                safeMetadataJson="${metadata(LEDGER_EXTRACT, false)}"/>
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KAP_RETRY_NEST" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="status" operator="EXCLUDE_IN" filterValues="VOID,CANCELLED" companyUserGroupId="${TENANT}"/>
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KAP_RETRY_NEST" fileSide="FILE_1" sequenceNum="2"
+                fieldExpression="region" operator="INCLUDE_PREFIX" filterValues="NO" companyUserGroupId="${TENANT}"/>"""
+        // review 16d-M6: the same nested side with no tenant rule
+        String builtInOnly = nestedAutomation.replace("KAP_RETRY_NEST", "KAP_RETRY_BUILT_IN").replaceAll(/(?s)\s*<darpan\.reconciliation\.ReconciliationAutomationSourceFilter .*/, "")
+        // review 16b-M1: an evaluate run on the Spark side whose one rule sets every record aside
+        String keepsNothing = """
+            <darpan.reconciliation.ReconciliationAutomation automationId="KAP_EVAL_NONE" automationName="KAP_EVAL_NONE" companyUserGroupId="${TENANT}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_EVAL_RS" savedRunType="ruleset"
+                ruleSetId="KAP_EVAL_RS" compareScopeId="KAP_EVAL_SCOPE" relativeWindowTypeEnumId="${AutomationExecutionSupport.WINDOW_PREVIOUS_DAY}"
+                relativeWindowCount="1" windowTimeZone="UTC" isActive="N"/>
+            <darpan.reconciliation.ReconciliationAutomationSource automationId="KAP_EVAL_NONE" fileSide="FILE_1" companyUserGroupId="${TENANT}"
+                sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="ACME_SPARK" fileTypeEnumId="DftJson"
+                safeMetadataJson="${metadata(SPARK_EXTRACT, false)}"/>
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KAP_EVAL_NONE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="status" operator="INCLUDE_IN" filterValues="CLOSED" companyUserGroupId="${TENANT}"/>"""
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
             <moqui.security.UserGroup userGroupId="${OTHER_TENANT}" description="Bravo"
                 groupTypeEnumId="${TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID}"/>
@@ -433,6 +587,10 @@ class AutomationKeepParityTests {
                 configParameterName="projConfigId" preserveWindowInstants="Y" keepFieldsParameterName="keepFields"
                 keepFieldsBase="id,createdAt" filterParameterName="sourceFilters" excludedRecordsSidecar="Y"
                 servingProjectionServiceName="test.KeptCopyTestServices.project#MadeUpKeptRecords" enabled="Y"/>
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_SPARK_FLAGGED" extractServiceName="${FLAGGED_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters"
+                excludedRecordsSidecar="Y" enabled="Y"
+                keepLinesJson='[{"sequenceNum":0,"label":"isTest","kinds":{"isTest":"FVT_TEXT"},"lines":[{"conditionSeqId":"01","sequenceNum":1,"conditionTypeId":"RCT_COMPARE","fieldName":"isTest","operatorEnumId":"ENTCO_EQUALS","compareValue":"Y"}]}]'/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="ACME_LEDGER" extractServiceName="${LEDGER_EXTRACT}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" enabled="Y"/>
             <darpan.rule.RuleSet ruleSetId="KAP_RS" ruleSetName="ACME orders vs ledger" companyUserGroupId="${TENANT}"/>
@@ -448,6 +606,15 @@ class AutomationKeepParityTests {
             <darpan.rule.RuleSetCompareSource compareScopeId="KAP_EVAL_SCOPE" fileSide="FILE_1" systemEnumId="ACME_SPARK" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
             ${evaluateAutomations}
+            ${keepsNothing}
+            <darpan.rule.RuleSet ruleSetId="KAP_NEST_RS" ruleSetName="ACME orders under orders vs ledger" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="KAP_NEST_SCOPE" ruleSetId="KAP_NEST_RS" objectType="ORDER" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KAP_NEST_SCOPE" fileSide="FILE_1" systemEnumId="ACME_SPARK" fileTypeEnumId="DftJson"
+                recordRootExpression="orders" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KAP_NEST_SCOPE" fileSide="FILE_2" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
+            ${nestedAutomation}
+            ${builtInOnly}
         </entity-facade-xml>""").dummyFks(true).load()
     }
 

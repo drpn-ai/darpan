@@ -48,35 +48,76 @@ class KeepArtifacts {
     private static final ObjectMapper FILTERED_MAPPER = new ObjectMapper()
 
     /**
-     * True when the extract's own read filtered it: its metadata reports read-time configuredExclusions (top level or under
-     * filters, where the conclude pass reads them). A file read that way never keeps in Spark when it is compared again (a judge
+     * True when the extract's own read filtered it. A file read that way never keeps in Spark when it is compared again (a judge
      * replay, a retried run handing back the side it landed): its records are already gone, and a zero-count Keep summary would
-     * turn the conclude pass's "unknown" into "not found". Only the metadata is read; the records are skipped token by token. A
-     * missing or unreadable extract also answers true, so the side keeps today's read and the compare reports the problem.
+     * turn the conclude pass's "unknown" into "not found". Two signals, both written by the extractor at the read:
+     * <ul>
+     * <li>its metadata reports read-time configuredExclusions (top level or under filters, where the conclude pass reads them):
+     * a read that applied the tenant's rules reported every rule, even one that matched nothing;</li>
+     * <li>keepLineFields (the fields the side's built-in Keep lines read; Task 16e, review 16d-M6): no record carries any of
+     * them. An extractor that leaves its built-ins to Spark writes the flag a line reads on the records it flags (Tasks 17-20
+     * introduced every such flag), and one that dropped them at the read never wrote it. This catches a capture whose read
+     * applied only its built-in drops, which reports no configuredExclusions. Pass the fields only for a side with no tenant
+     * rules: such a side's capture that applied rules is told by the first signal, and a Spark-era file with no flagged record
+     * would otherwise read as filtered and skip the tenant's rules. Where it does read as filtered, the built-in lines (field
+     * equals a value) would have set nothing aside over it.</li>
+     * </ul>
+     * Records are streamed token by token; the metadata object's own keys are not records. A missing or unreadable extract also
+     * answers true, so the side keeps today's read and the compare reports the problem.
      */
-    static boolean filteredAtRead(File extract) {
+    static boolean filteredAtRead(File extract, Collection<String> keepLineFields = null) {
         if (extract == null || !extract.isFile()) return true
+        Set<String> flags = keepLineFields ? new HashSet<String>(keepLineFields) : Collections.<String>emptySet()
         try {
             JsonParser parser = FILTERED_MAPPER.getFactory().createParser(extract)
             try {
                 if (parser.nextToken() != JsonToken.START_OBJECT) return true
+                boolean flagged = false
                 while (parser.nextToken() == JsonToken.FIELD_NAME) {
                     String name = parser.currentName()
                     parser.nextToken()
                     if (name == "metadata" && parser.currentToken() == JsonToken.START_OBJECT) {
                         Map metadata = FILTERED_MAPPER.readValue(parser, Map)
                         Object nested = metadata.get("filters") instanceof Map ? ((Map) metadata.get("filters")).get("configuredExclusions") : null
-                        return [metadata.get("configuredExclusions"), nested].any { it instanceof List && !((List) it).isEmpty() }
+                        if ([metadata.get("configuredExclusions"), nested].any { it instanceof List && !((List) it).isEmpty() }) return true
+                        if (flags.isEmpty()) return false
+                    } else if (!flags.isEmpty() && !flagged && parser.currentToken().isStructStart()) {
+                        flagged = carriesField(parser, flags)
+                    } else {
+                        parser.skipChildren()
                     }
-                    parser.skipChildren()
                 }
-                return false
+                return !flags.isEmpty() && !flagged
             } finally {
                 parser.close()
             }
         } catch (IOException ignored) {
             return true
         }
+    }
+
+    /** Whether the structure the parser is at holds a key named in fields, at any depth; the parser ends past the structure. */
+    private static boolean carriesField(JsonParser parser, Set<String> fields) {
+        int depth = 1
+        boolean found = false
+        while (depth > 0) {
+            JsonToken token = parser.nextToken()
+            if (token == null) throw new IOException("The extract ends inside a structure.")
+            if (token.isStructStart()) depth++
+            else if (token.isStructEnd()) depth--
+            else if (token == JsonToken.FIELD_NAME && fields.contains(parser.currentName())) {
+                found = true
+                break
+            }
+        }
+        // past the rest of the structure: close every level still open
+        while (found && depth > 0) {
+            JsonToken token = parser.nextToken()
+            if (token == null) throw new IOException("The extract ends inside a structure.")
+            if (token.isStructStart()) parser.skipChildren()
+            else if (token.isStructEnd()) depth--
+        }
+        return found
     }
 
     static Map readSummary(File extract) {

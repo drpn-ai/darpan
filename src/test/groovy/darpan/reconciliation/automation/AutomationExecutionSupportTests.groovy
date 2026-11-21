@@ -3279,7 +3279,8 @@ class AutomationExecutionSupportTests {
         ec.service.declaredInParameters = ["keepRuleFields"]
 
         IllegalArgumentException refused = assertThrows(IllegalArgumentException) { acmeExtract(ec, "FILE_1", false) }
-        assertEquals("The ACME side cannot be filtered: its source no longer filters at read and this run does not run Keep, " +
+        // the scheduled message names the side as the interactive one does (Task 16e)
+        assertEquals("File 1 (ACME) cannot be filtered: its source no longer filters at read and this run does not run Keep, " +
                 "so Keep cannot run in Spark.", refused.message)
 
         // an extract that still declares the filter parameter: such a caller's read is sent its rows, as before
@@ -3308,7 +3309,7 @@ class AutomationExecutionSupportTests {
         assertFalse(ec.service.calls.any { it.serviceName == ACME_EXTRACT && it.params.fileSide == "FILE_1" }, "the side is never read")
         FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
         assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
-        assertTrue(((execution.errorMessage ?: "") as String).contains("cannot be filtered"), "error: ${execution.errorMessage}")
+        assertTrue(((execution.errorMessage ?: "") as String).contains("File 1 (ACME) cannot be filtered"), "error: ${execution.errorMessage}")
     }
 
     @Test

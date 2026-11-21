@@ -21,6 +21,7 @@ import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.core.RuleSetCompareScopeAdapter
 import darpan.reconciliation.notification.TenantNotificationSupport
+import darpan.reconciliation.source.KeepArtifacts
 import darpan.reconciliation.source.KeepPlanSupport
 import darpan.reconciliation.source.KeepStepSupport
 import groovy.json.JsonOutput
@@ -2597,9 +2598,12 @@ class AutomationExecutionSupport {
      * Where a SPARK side's Keep runs is KeepPlanSupport.effectiveSideKeep's one decision, the same as the interactive run's: it
      * keeps today's read (KeepPlanSupport.todaysRead) until its extract stops filtering (Ruling 3b2b-23), when the caller's compare
      * takes no keepBySide (keepInSpark false, KEEP_IN_SPARK), and when it is not keyed on top-level records.
+     * A side whose data is a replayed file (landed, sideKeepOfResult) its read already filtered keeps today's read
+     * (KeepArtifacts.filteredAtRead: read-time configuredExclusions, or, for a side with no tenant rules, no record carrying a
+     * field its built-in Keep lines read).
      */
     static Map sideKeepOf(def ec, def automation, def source, Map connector, String serviceName, Map extractOptions,
-                          boolean keepInSpark) {
+                          boolean keepInSpark, File landed = null) {
         String placement = KeepPlanSupport.placement(connector)
         if (placement == KeepPlanSupport.NONE) return KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector, extractOptions)
         List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
@@ -2607,9 +2611,12 @@ class AutomationExecutionSupport {
         // the side's keys and record root, as RunExtractSupport.sideKeep takes them: both from the compare scope, not the automation's snapshot
         Map shape = placement == KeepPlanSupport.SPARK ? sideKeyShape(ec, automation, normalize(readField(source, "fileSide"))) :
                 [recordRoot: null, keyFields: []]
+        boolean filteredAtRead = landed != null && KeepArtifacts.filteredAtRead(landed,
+                rows ? null : (Collection<String>) KeepPlanSupport.sideKeepFromFilterRows(ec, [], connector, extractOptions).fields)
         return KeepPlanSupport.effectiveSideKeep(ec, rows, connector, extractOptions,
                 serviceName ? ec.service.getServiceDefinition(serviceName) : null,
-                (String) shape.recordRoot, (List<String>) shape.keyFields, keepInSpark)
+                (String) shape.recordRoot, (List<String>) shape.keyFields, keepInSpark, filteredAtRead,
+                normalize(readField(source, "fileSide")))
     }
 
     /**
@@ -2637,7 +2644,10 @@ class AutomationExecutionSupport {
 
     /**
      * The Keep plan a side's extract result carries (SIDE_KEEP), or, for a result that carries none (a retry replaying an
-     * earlier attempt's file), the plan the side's extract would be sent now.
+     * earlier attempt's file), the plan the side's extract would be sent now. DAR-BE-318 (Task 16e, review 16b-I1): a replayed
+     * file its read already filtered (KeepArtifacts.filteredAtRead) keeps today's read, as the interactive retry's landed side
+     * does (runSavedRunDiff): Spark Keep over it would write a zero-count .keep.json that the conclude pass reads as "not
+     * found", and a side Spark cannot keep would fail although its data is filtered.
      */
     static Map sideKeepOfResult(def ec, def automation, def source, Map result, Map params, boolean keepInSpark = true) {
         if (result?.get(SIDE_KEEP) instanceof Map) return (Map) result.get(SIDE_KEEP)
@@ -2645,7 +2655,10 @@ class AutomationExecutionSupport {
         Map<String, Object> target = extractTarget(ec, source, params)
         Map<String, Object> options = ((Map) target.metadata)?.parameters instanceof Map ?
                 new LinkedHashMap<String, Object>((Map) ((Map) target.metadata).parameters) : [:]
-        return sideKeepOf(ec, automation, source, (Map) target.connector, (String) target.serviceName, options, keepInSpark)
+        // a replay's landed file (ExtractReplaySupport.replayResults has checked it is on disk); null for any other result
+        File landed = normalize(result?.get("replayedFromExecutionId")) == null ? null :
+                RunVerificationSupport.resolveLocationFile(ec, normalize(result.get("fileLocation") ?: result.get("dataManagerPath")))
+        return sideKeepOf(ec, automation, source, (Map) target.connector, (String) target.serviceName, options, keepInSpark, landed)
     }
 
     /** Whether serviceName's definition declares the in-parameter (ServiceDefinition.inParameterNameList). */

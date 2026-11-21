@@ -28,12 +28,13 @@
             parameterName="limit"
             defaultValue="100"/>
 
-    <!-- DAR-BE-328 plan 3: the sync pulse. Seeded running: it does nothing until a sync pair has a pulse cadence. -->
+    <!-- DAR-BE-328 plan 3: the sync pulse. Seeded running: it does nothing until a sync pair has a pulse cadence. Every 5 minutes
+         at 2:30 past, off the automation scan's second (which also takes RunAdmission slots). -->
     <moqui.service.job.ServiceJob
             jobName="run_SyncPulse"
             description="Sample every due sync pair: orders waiting on the other system and orders past their allowance."
             serviceName="pulse.SyncPulseServices.run#DuePulses"
-            defaultCronExpression="0 0/5 * * * ?"
+            defaultCronExpression="30 2/5 * * * ?"
             defaultPaused="N" minIntervalMinutes="1"/>
 
     <!-- Audit H2.5 / H3.3: stuck-RUNNING reaper. Every 10 minutes, flip stale RUNNING/PENDING

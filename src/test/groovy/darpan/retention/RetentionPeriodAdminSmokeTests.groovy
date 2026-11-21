@@ -219,6 +219,27 @@ class RetentionPeriodAdminSmokeTests {
     }
 
     @Test
+    void syncPulseSamplesCannotBeKeptForeverInstanceWideButATenantMay() {
+        String pulseKey = "darpan.retention.syncPulseSample.days"
+        String pulse = RetentionSupport.SYNC_PULSE_SAMPLE
+        Map refused = svc("update#RetentionPeriods", [periods: [(pulse): "forever"]])
+        assertEquals(["SYNC_PULSE_SAMPLE cannot be kept forever instance-wide; set a tenant's own period to forever."], refused.errors)
+        assertEquals(30, DarpanSettings.optionalIntValue(pulseKey), "still the default 30 days")
+        assertEquals(0, auditRows().size(), "nothing saved, nothing audited")
+
+        // with a row of its own, forever would delete the row and fall back to 30 days: refused the same, the row kept
+        ok(svc("update#RetentionPeriods", [periods: [(pulse): 60]]))
+        assertEquals(60, DarpanSettings.optionalIntValue(pulseKey))
+        Map again = svc("update#RetentionPeriods", [periods: [(pulse): "forever"]])
+        assertTrue(again.errors.any { it.contains("cannot be kept forever instance-wide") }, "${again.errors}")
+        assertEquals(60, DarpanSettings.optionalIntValue(pulseKey))
+
+        Map tenant = ok(svc("update#RetentionPeriods", [tenantUserGroupId: B, periods: [(pulse): "forever"]])).result
+        assertEquals([[pulse, "forever"]], tenant.changed.collect { [it.table, it.mode] }, "a tenant's own period may be forever")
+        assertNull(RetentionSupport.periods(ec, B)[pulse].periodDays)
+    }
+
+    @Test
     void aTenantPeriodIsItsOwnRowAndInheritDropsIt() {
         Map saved = ok(svc("update#RetentionPeriods", [tenantUserGroupId: A, periods: [(QUERY_LOG): 10]])).result
         assertEquals([10], saved.changed*.after)

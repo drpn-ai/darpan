@@ -140,6 +140,7 @@ class SyncPulseEngineSmokeTests {
         assertEquals(Timestamp.from(T0.plus(Duration.ofMinutes(5))), orders("#A1")[0].lastCheckedStamp)
         assertEquals(Timestamp.from(T0), orders("#A1")[0].firstPastStamp)
         assertEquals(Timestamp.from(upstream["#A1"]), orders("#A1")[0].sourceCreatedStamp)
+        assertEquals("#A1", orders("#A1")[0].otherSystemId, "the key the target is asked by")
         assertEquals(2, samples().size())
         Map p = pairMap(SP)
         assertEquals(["SPS_OK", Timestamp.from(T0.plus(Duration.ofMinutes(5)))], [p.lastPulseStatusEnumId, p.lastPulseStamp])
@@ -234,6 +235,45 @@ class SyncPulseEngineSmokeTests {
         pair(SP, AUTO, 60, 60)
         assertEquals([], runJob(T0.plus(Duration.ofHours(1))).errors)
         assertEquals(1, samples().size())
+    }
+
+    /**
+     * canStartNow said yes, but another start took the slot before the submit: RunAdmission queues the pulse. The scan writes
+     * nothing; the pulse samples when it starts, at that moment, not at the scan's now.
+     */
+    @Test
+    void aQueuedPulseSamplesWhenItStartsNotAtTheScansNow() {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1)
+        RunAdmission full = new RunAdmission(1, 1, 101, { -> 0 }, { Runnable r ->
+            Thread t = new Thread(r, "pulse-test-" + pulseThreads.size()); pulseThreads << t; t.start()
+        } as Executor, 10) {
+            @Override boolean canStartNow(String tenantId) { return true }
+        }
+        full.submit("OTHER_TENANT", "blocker", { -> release.await(60, java.util.concurrent.TimeUnit.SECONDS) } as Runnable)
+        AutomationExecutionSupport.setRunAdmission(full)
+
+        Map out = runJob(T0, false)
+        assertEquals([], out.errors)
+        assertEquals(1, out.out.queuedCount as Integer)
+        assertEquals(0, out.out.submittedCount as Integer)
+        assertEquals([], samples(), "a queued pulse writes no sample at the scan")
+        assertNull(pairMap(SP).lastPulseStamp)
+        assertTrue(full.busy("pulse " + SP), "and the next tick sees it in flight")
+
+        long before = System.currentTimeMillis()
+        release.countDown()
+        long deadline = before + 60000
+        while (samples().isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50)
+        new ArrayList<Thread>(pulseThreads).each { it.join(60000) }
+
+        assertEquals(1, samples().size())
+        Map s = latestSample()
+        assertEquals("SPS_OK", s.statusEnumId)
+        long stamp = (s.sampleStamp as Timestamp).time
+        assertTrue(stamp >= before - 1000 && stamp <= System.currentTimeMillis() + 1000,
+                "sampled when it started (${s.sampleStamp}), not at the scan's ${T0}")
+        Instant started = (s.sampleStamp as Timestamp).toInstant()
+        assertEquals(started.minus(Duration.ofMinutes(60 + 120)), upstreamCalls.last().from, "its window ends when it starts")
     }
 
     @Test
@@ -360,7 +400,7 @@ class SyncPulseEngineSmokeTests {
     }
 
     /** run#DuePulses as its ServiceJob runs it: nobody logged in, authz on; then waits for the pulses it started. */
-    private Map runJob(Instant now) {
+    private Map runJob(Instant now, boolean join = true) {
         def harnessFrame = ec.artifactExecution.peek()
         assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
         ec.artifactExecution.pop(harnessFrame)
@@ -381,7 +421,7 @@ class SyncPulseEngineSmokeTests {
             ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
             ec.artifactExecution.setAnonymousAuthorizedAll()
         }
-        new ArrayList<Thread>(pulseThreads).each { it.join(60000) }
+        if (join) new ArrayList<Thread>(pulseThreads).each { it.join(60000) }
         return [out: out, errors: errors]
     }
 }

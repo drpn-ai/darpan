@@ -89,6 +89,7 @@ class RetentionSmokeTests {
         Map pulse = table(out, RetentionSupport.SYNC_PULSE_SAMPLE)
         assertEquals([RetentionSupport.DELETED, 30, 0L], [pulse.status, pulse.periodDays, pulse.rows], "DAR-BE-328: 30 days unless set")
         assertEquals(before, snapshot(), "every row is still there")
+        assertEquals(1L, auditRowCount(), "a table always has a period now, so every real run writes its audit row")
     }
 
     @Test

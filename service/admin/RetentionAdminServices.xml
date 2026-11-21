@@ -77,7 +77,8 @@
             tenant only) to inherit (drop the tenant's own period and follow the instance's). A tenant's own period, including forever,
             wins over the instance period for that tenant's rows only. Refused as a whole, with the reason and nothing saved: an
             unknown table, a value that is not one of those, inherit at instance level, an unknown tenant, forever at instance level
-            while a JVM property pins the period. A table whose period does not change is skipped. While the retention job is running
+            while a JVM property pins the period, forever at instance level for a table whose period has a default
+            (SYNC_PULSE_SAMPLE: removing the setting brings back its 30 days; a tenant's own period may still be forever). A table whose period does not change is skipped. While the retention job is running
             (not paused), a change that keeps rows for less time (a shorter period, or forever to days) needs previewedRows, the total
             dryRun#Retention showed for the same change: the preview is run again and the change is refused when today's count is more
             than 100 rows or 5% above it. Lengthening, and any change while the job is paused, needs no preview. Instance periods go
@@ -125,6 +126,10 @@
                         <set field="pinned" from="darpan.config.DarpanSettings.describe(chg.key).propertyValue"/>
                         <if condition="pinned != null &amp;&amp; darpan.config.DarpanSettings.problem(chg.key, pinned) == null">
                             <return error="true" message="${chg.table} is pinned to ${pinned} days by the JVM property ${chg.key}; remove the property to keep it forever."/></if>
+                        <!-- DAR-BE-328: forever at instance level removes the setting, and a table whose setting has a default
+                             (SYNC_PULSE_SAMPLE, 30 days) then falls back to it: the change would save nothing, so refuse it -->
+                        <if condition="darpan.config.DarpanSettings.describe(chg.key).defaultValue != null">
+                            <return error="true" message="${chg.table} cannot be kept forever instance-wide; set a tenant's own period to forever."/></if>
                     </if>
                 </iterate>
             </if>

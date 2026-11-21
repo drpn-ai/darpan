@@ -17,6 +17,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicBoolean
 
 import static darpan.common.ValueSupport.normalize
 
@@ -146,11 +147,11 @@ class SyncPulseSupport {
      * run#DuePulses: every active pair of every tenant, its effective cadence for the tenant date, and each due pulse
      * admitted (or SKIPPED). Never throws.
      *
-     * @return [scanTimestamp, pairCount, dueCount, submittedCount, skippedCount]
+     * @return [scanTimestamp, pairCount, dueCount, submittedCount, queuedCount, skippedCount]
      */
     static Map runDuePulses(def ec, Timestamp nowTimestamp) {
         Instant now = (nowTimestamp ?: (ec.user?.nowTimestamp as Timestamp) ?: new Timestamp(System.currentTimeMillis())).toInstant()
-        Map out = [scanTimestamp: Timestamp.from(now), pairCount: 0, dueCount: 0, submittedCount: 0, skippedCount: 0]
+        Map out = [scanTimestamp: Timestamp.from(now), pairCount: 0, dueCount: 0, submittedCount: 0, queuedCount: 0, skippedCount: 0]
         try {
             RunAdmission admission = AutomationExecutionSupport.getRunAdmission()
             List pairs = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", SCAN_WHY)
@@ -165,6 +166,7 @@ class SyncPulseSupport {
                     String outcome = scanPair(ec, admission, pair, now, tenantDays)
                     if (outcome) out.dueCount = (out.dueCount as int) + 1
                     if (outcome == "submitted") out.submittedCount = (out.submittedCount as int) + 1
+                    if (outcome == "queued") out.queuedCount = (out.queuedCount as int) + 1
                     if (outcome == SKIPPED) out.skippedCount = (out.skippedCount as int) + 1
                 } catch (Throwable t) {
                     logger.warn("Sync pulse scan skipped pair {} (tenant {}): {}", pair.syncPairId, pair.companyUserGroupId,
@@ -179,7 +181,7 @@ class SyncPulseSupport {
         return out
     }
 
-    /** One pair of the scan: null when not due or skipped silently, else "submitted" or SKIPPED. */
+    /** One pair of the scan: null when not due or skipped silently, else "submitted", "queued" or SKIPPED. */
     private static String scanPair(def ec, RunAdmission admission, Map pair, Instant now, Map<String, Map> tenantDays) {
         String tenantId = normalize(pair.companyUserGroupId)
         String syncPairId = normalize(pair.syncPairId)
@@ -196,7 +198,15 @@ class SyncPulseSupport {
         }
         def factory = ec.factory
         Map pulsePair = new LinkedHashMap(pair)
-        Map admitted = admission.submit(tenantId, label, { -> runAdmitted(factory, pulsePair, now) } as Runnable)
+        // A pulse that waits for a slot (canStartNow raced another start) samples the moment it starts, never the scan's now.
+        AtomicBoolean waited = new AtomicBoolean(false)
+        Map admitted = admission.submit(tenantId, label, { -> runAdmitted(factory, pulsePair, waited.get() ? null : now) } as Runnable)
+        if (admitted.submitted == true && admitted.queued == true) {
+            waited.set(true)
+            logger.debug("Sync pulse {} waits for a slot (tenant {}, position {}); it samples when it starts", syncPairId, tenantId,
+                    admitted.position)
+            return "queued"
+        }
         if (admitted.submitted != true) {
             recordSkipped(ec, pair, now, effective.allowanceMinutes as Integer,
                     "This pulse was skipped: ${normalize(admitted.error) ?: 'no run slot was free'}".toString())
@@ -208,12 +218,14 @@ class SyncPulseSupport {
     /**
      * An admitted pulse on RunAdmission's thread: a fresh execution context made here and destroyed after, an anonymous
      * login with an artifact authorized for all (as an anonymous-all service runs; the pulse writes its rows and the reader
-     * calls authenticate="true" extracts), and the pair's tenant. Never throws.
+     * calls authenticate="true" extracts), and the pair's tenant. A null now (the pulse waited for its slot) is the moment it
+     * starts. Never throws.
      */
-    private static void runAdmitted(def factory, Map pair, Instant now) {
+    private static void runAdmitted(def factory, Map pair, Instant scanNow) {
         def pulseEc = factory.getExecutionContext()
         ArtifactExecutionInfo aei = null
         try {
+            Instant now = scanNow ?: ((pulseEc.user.nowTimestamp as Timestamp)?.toInstant() ?: Instant.now())
             pulseEc.user.loginAnonymousIfNoUser()
             aei = pulseEc.artifactExecution.push("darpan.pulse.SyncPulseSupport", ArtifactExecutionInfo.AT_OTHER,
                     ArtifactExecutionInfo.AUTHZA_ALL, false)
@@ -445,6 +457,7 @@ class SyncPulseSupport {
         def order = ec.entity.makeValue("darpan.pulse.SyncPulseOrder")
         order.setAll([syncPairId        : normalize(pair.syncPairId), companyUserGroupId: normalize(pair.companyUserGroupId),
                       recordKey         : record.key, orderName: normalize(record.orderName) ?: record.key,
+                      otherSystemId     : normalize(record.otherKey),
                       sourceCreatedStamp: Timestamp.from(record.createdAt as Instant), firstPastStamp: stamp, lastCheckedStamp: stamp])
         order.setSequencedIdPrimary()
         order.create()

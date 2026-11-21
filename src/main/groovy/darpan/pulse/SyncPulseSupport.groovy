@@ -83,13 +83,20 @@ class SyncPulseSupport {
 
     // ------------------------------------------------------------------------------------------- present keys
 
-    /** Most keys remembered per pair; beyond it nothing more is added and those keys are simply asked about again. */
-    static final int PRESENT_CAP = 200000
+    /** Most keys remembered per pair (the cap is per pair); beyond it nothing more is added and those keys are simply asked about again. */
+    static final int DEFAULT_PRESENT_CAP = 200000
+    private static volatile int presentCap = DEFAULT_PRESENT_CAP
+
+    /** Seam for tests: a smaller cap. resetForTests restores the default. */
+    static void setPresentCapForTests(int cap) { presentCap = cap }
 
     /**
      * Per pair, the keys the target has already confirmed present, each with its source created time (DAR-BE-328 task 13:
      * a pulse asks the target only about keys not in here). In memory only: empty after a restart, so the first pulse asks
-     * about everything and correctness never depends on it. signature is the pair's pulse settings; a change drops the set.
+     * about everything and correctness never depends on it. signature is what the target answers by (the check, its upstream
+     * side, its last update); a change drops the set. Allowance and cadence are not in it: presence in the target does not
+     * depend on them. A key deleted in the target after it was seen keeps counting as present until it prunes out of the
+     * window (about allowance + 2 x cadence + 7 minutes); the daily check covers deletions.
      */
     private static class PresentSet {
         final String signature
@@ -99,7 +106,7 @@ class SyncPulseSupport {
 
     private static final ConcurrentHashMap<String, PresentSet> PRESENT_BY_PAIR = new ConcurrentHashMap<String, PresentSet>()
 
-    static void resetForTests() { PRESENT_BY_PAIR.clear() }
+    static void resetForTests() { PRESENT_BY_PAIR.clear(); presentCap = DEFAULT_PRESENT_CAP }
 
     /** The pair's remembered keys (a copy); empty when none. For tests and the engine. */
     static Set<String> presentKeysOf(String syncPairId) { return new LinkedHashSet<String>(PRESENT_BY_PAIR.get(syncPairId)?.keys?.keySet() ?: []) }
@@ -116,8 +123,9 @@ class SyncPulseSupport {
         return fresh
     }
 
-    private static String presentSignature(Map pair, Integer allowance, Integer cadence) {
-        return [normalize(pair.automationId), normalize(pair.upstreamSide), normalize(pair.isActive) ?: "Y", allowance, cadence].join("|")
+    /** The check and side the target is asked through; its last update changes when its target or keys do. */
+    private static String presentSignature(Map pair, Map automation) {
+        return [normalize(pair.automationId), normalize(pair.upstreamSide), automation?.get("lastUpdatedStamp")].join("|")
     }
 
     /** Adds the keys the target returned, with their created times, up to PRESENT_CAP; drops keys older than windowFrom. */
@@ -125,10 +133,9 @@ class SyncPulseSupport {
         returned.each { String k ->
             Instant at = createdByKey.get(k)
             if (at == null || at.isBefore(windowFrom)) return
-            if (set.keys.size() >= PRESENT_CAP && !set.keys.containsKey(k)) return
+            if (set.keys.size() >= presentCap && !set.keys.containsKey(k)) return
             set.keys.put(k, at)
         }
-        set.keys.entrySet().removeIf { Map.Entry<String, Instant> e -> e.value.isBefore(windowFrom) }
     }
 
     // ------------------------------------------------------------------------------------------- pure parts
@@ -358,7 +365,7 @@ class SyncPulseSupport {
                 if (!createdByKey.containsKey(k) && o.sourceCreatedStamp != null) createdByKey.put(k, (o.sourceCreatedStamp as Timestamp).toInstant())
             }
             // the target is asked only about keys it has not already confirmed; a confirmed key still counts as present
-            PresentSet known = presentSetFor(syncPairId, presentSignature(pair, allowance, effective.pulseEveryMinutes as Integer))
+            PresentSet known = presentSetFor(syncPairId, presentSignature(pair, automation))
             known.keys.entrySet().removeIf { Map.Entry<String, Instant> e -> e.value.isBefore(window.from as Instant) }
             Set<String> confirmed = keys.findAll { known.keys.containsKey(it) } as Set<String>
             Set<String> toAsk = keys.findAll { !confirmed.contains(it) } as Set<String>

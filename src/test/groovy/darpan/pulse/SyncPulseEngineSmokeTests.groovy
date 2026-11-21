@@ -317,7 +317,7 @@ class SyncPulseEngineSmokeTests {
     }
 
     @Test
-    void aSettingsChangeDropsTheSet() {
+    void anAllowanceChangeKeepsTheSetButAChangedUpstreamSideDropsIt() {
         upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
         arrived << "#A1"
         SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
@@ -325,9 +325,46 @@ class SyncPulseEngineSmokeTests {
 
         ec.entity.makeValue("darpan.pulse.SyncPair").setAll(pairMap(SP) + [allowanceMinutes: 90]).update()
         SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(30)))
-        assertEquals(["#A1"], targetCalls.last(), "asked about again after the allowance changed")
+        assertEquals([], targetCalls.last(), "an allowance change keeps what the target confirmed")
+        assertEquals(["#A1"] as Set, SyncPulseSupport.presentKeysOf(SP))
 
-        SyncPulseSupport.dropPresent(SP)
+        // the other side as upstream is a different question: the set starts over (the pair's check may pulse or not)
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll(pairMap(SP) + [upstreamSide: "FILE_2"]).update()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(60)))
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+    }
+
+    @Test
+    void aPeakPeriodBoundaryDoesNotReAskRememberedKeys() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(50))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        // the next pulse runs with a different effective allowance and cadence (a period's)
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll(pairMap(SP) + [allowanceMinutes: 30, pulseEveryMinutes: 30]).update()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(30)))
+        assertEquals([], targetCalls.last())
+    }
+
+    @Test
+    void beyondTheCapNothingMoreIsAddedAndTheKeysAreAskedAgain() {
+        SyncPulseSupport.setPresentCapForTests(1)
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(50))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(40))
+        arrived << "#A1" << "#A2"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, SyncPulseSupport.presentKeysOf(SP).size())
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(30)))
+        assertEquals(1, targetCalls.last().size(), "the key that did not fit is asked about again")
+    }
+
+    @Test
+    void theScanDropsAnInactivePairsSet() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(50))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(["#A1"] as Set, SyncPulseSupport.presentKeysOf(SP))
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll(pairMap(SP) + [isActive: "N"]).update()
+        SyncPulseSupport.runDuePulses(ec, Timestamp.from(T0.plus(Duration.ofHours(1))))
         assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
     }
 

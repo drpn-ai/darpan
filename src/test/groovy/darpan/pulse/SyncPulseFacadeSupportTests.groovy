@@ -81,12 +81,38 @@ class SyncPulseFacadeSupportTests {
     }
 
     @Test
-    void reportedInRunIsTheNewestRunStartedAfterTheFlag() {
+    void reportedInRunIsTheRunWhoseWindowHoldsTheOrderElseTheFirstAfterTheFlag() {
         java.time.Instant a = java.time.Instant.parse("2026-11-21T06:00:00Z")
-        List<Map> runs = [[reconciliationRunResultId: "R3", start: a.plusSeconds(7200)], [reconciliationRunResultId: "R2", start: a.plusSeconds(3600)],
-                          [reconciliationRunResultId: "R0", start: a.minusSeconds(60)]]
-        assertEquals("R3", SyncPulseFacadeSupport.reportedInRun(runs, java.sql.Timestamp.from(a)))
-        assertEquals(null, SyncPulseFacadeSupport.reportedInRun(runs, java.sql.Timestamp.from(a.plusSeconds(9000))))
-        assertEquals(null, SyncPulseFacadeSupport.reportedInRun([], java.sql.Timestamp.from(a)))
+        Closure<java.sql.Timestamp> ts = { java.time.Instant i -> java.sql.Timestamp.from(i) }
+        java.time.Instant d1 = java.time.Instant.parse("2026-11-20T00:00:00Z"), d2 = java.time.Instant.parse("2026-11-21T00:00:00Z"), d3 = java.time.Instant.parse("2026-11-22T00:00:00Z")
+        List<Map> runs = [[reconciliationRunResultId: "R3", start: a.plusSeconds(86400 + 7200), windowStart: d2, windowEnd: d3],
+                          [reconciliationRunResultId: "R2", start: a.plusSeconds(3600), windowStart: d1, windowEnd: d2],
+                          [reconciliationRunResultId: "R0", start: a.minusSeconds(60), windowStart: d1, windowEnd: d2]]
+        assertEquals("R2", SyncPulseFacadeSupport.reportedInRun(runs, ts(a), ts(d1.plusSeconds(100))), "the run that read the order's day, not a later one")
+        assertEquals("R3", SyncPulseFacadeSupport.reportedInRun(runs, ts(a), ts(d2.plusSeconds(100))))
+        assertEquals("R2", SyncPulseFacadeSupport.reportedInRun(runs, ts(a), null), "no created stamp: the first run after the flag")
+        assertEquals("R2", SyncPulseFacadeSupport.reportedInRun(runs, ts(a), ts(d1.minusSeconds(100))), "no window holds it: the first run after the flag")
+        assertEquals(null, SyncPulseFacadeSupport.reportedInRun(runs, ts(a.plusSeconds(999999)), ts(d1)))
+        assertEquals(null, SyncPulseFacadeSupport.reportedInRun([], ts(a), ts(d1)))
+    }
+
+    @Test
+    void aPulseNeedsAPlainSingleKeyOnBothSidesAndADayRead() {
+        Map ok = [keyReliable: true, idNormalizer: null, keyFields: ["orderName"]]
+        assertEquals(null, SyncPulseFacadeSupport.pulseBlockFor(DAILY, ok, ok))
+        assertEquals(SyncPulseFacadeSupport.E_KEY, SyncPulseFacadeSupport.pulseBlockFor(DAILY, ok, ok + [idNormalizer: "STRIP"]))
+        assertEquals(SyncPulseFacadeSupport.E_KEY, SyncPulseFacadeSupport.pulseBlockFor(DAILY, ok + [keyFields: ["a", "b"]], ok))
+        assertEquals(SyncPulseFacadeSupport.E_KEY, SyncPulseFacadeSupport.pulseBlockFor(DAILY, ok, ok + [keyReliable: false]))
+        assertEquals(SyncPulseFacadeSupport.E_KEY, SyncPulseFacadeSupport.pulseBlockFor(DAILY, ok, [keyReliable: false, keyFields: []]))
+        assertEquals(SyncPulseFacadeSupport.E_STATUS, SyncPulseFacadeSupport.pulseBlockFor([relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_STATE], ok, ok))
+    }
+
+    @Test
+    void theKeyRefusalOnlyAppliesWhenAPulseIsOn() {
+        List<String> on = SyncPulseFacadeSupport.validate(OK_INPUT, DAILY, "OMS_GQL", false, true, SyncPulseFacadeSupport.E_KEY)
+        assertEquals([SyncPulseFacadeSupport.E_KEY], on)
+        // validate is only handed a block when a cadence is set; with a cadence of null the block is ignored too
+        assertEquals([], SyncPulseFacadeSupport.validate(OK_INPUT + [pulseEveryMinutes: null], DAILY, "OMS_GQL", false, true, SyncPulseFacadeSupport.E_KEY))
+        assertEquals([SyncPulseFacadeSupport.E_HOTWAX], SyncPulseFacadeSupport.validate(OK_INPUT, DAILY, "SHOPIFY", false, true, SyncPulseFacadeSupport.E_KEY))
     }
 }

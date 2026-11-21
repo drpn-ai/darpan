@@ -6,6 +6,7 @@ import darpan.peak.PeakPeriodLoader
 import darpan.peak.PeakWindow
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.core.ReconciliationServices
+import darpan.facade.reconciliation.RunConclusionStep
 
 import java.sql.Timestamp
 import java.time.Duration
@@ -14,6 +15,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeInt
 
 /**
  * DAR-BE-328 plan 3. What SyncPulseFacadeServices checks and shows: the error sentences the UI prints verbatim, the
@@ -31,6 +33,8 @@ class SyncPulseFacadeSupport {
     static final String E_HOTWAX = "A pulse needs HotWax as the upstream side."
     static final String E_ALLOWANCE = "Allowance must be 15 minutes to 48 hours."
     static final String E_CADENCE = "Pulse must be every 1, 2, 3, 4 or 6 hours, or off."
+    static final String E_KEY = "A pulse needs a check that pairs orders by one plain key field on both sides."
+    static final String E_STATUS = "A pulse needs a check that reads a day, not one that reads by status."
     static final String E_CHAT = "Choose a chat space of this tenant."
 
     /** A check that reads one day: previous day, or last N days with N = 1 (a blank window is last 1 day). */
@@ -48,8 +52,10 @@ class SyncPulseFacadeSupport {
      * @param upstreamSystemEnumId systemEnumId of the automation's source on the chosen side
      * @param duplicate another pair of the tenant already watches this automation
      * @param chatSpaceOk the chat space is blank or belongs to the tenant
+     * @param pulseBlock why the check cannot be pulsed (pulseBlockFor), or null; refused only when a cadence is set
      */
-    static List<String> validate(Map p, Map automation, String upstreamSystemEnumId, boolean duplicate, boolean chatSpaceOk) {
+    static List<String> validate(Map p, Map automation, String upstreamSystemEnumId, boolean duplicate, boolean chatSpaceOk,
+                                 String pulseBlock = null) {
         List<String> errors = []
         String side = normalize(p?.get("upstreamSide"))
         if (automation == null || !isDailyWindow(automation) || !(side in ["FILE_1", "FILE_2"])) {
@@ -64,9 +70,24 @@ class SyncPulseFacadeSupport {
             errors << E_CADENCE
         } else if (cadence != null && automation != null && upstreamSystemEnumId != SyncPulseSupport.HOTWAX_ORDERS) {
             errors << E_HOTWAX
+        } else if (cadence != null && automation != null && pulseBlock) {
+            errors << pulseBlock
         }
         if (!chatSpaceOk) errors << E_CHAT
         return errors
+    }
+
+    /**
+     * Why a pulse cannot read this check, as the sentence to show; null when it can. The reader pairs by the first key field of
+     * each side and throws every pulse on a check that reads by status, a key with an id normalizer, or a composite key. Same
+     * rule as SyncPulseReader.sides + AuditRecheckSupport.firstKeyField, from the sides' key specs (RunConclusionStep.keySpec).
+     */
+    static String pulseBlockFor(Map automation, Map upstreamKey, Map targetKey) {
+        if (AutomationExecutionSupport.isStateWindowMode(automation)) return E_STATUS
+        boolean plain = [upstreamKey, targetKey].every { Map k ->
+            k != null && k.keyReliable && !k.idNormalizer && ((k.keyFields ?: []) as List).size() == 1
+        }
+        return plain ? null : E_KEY
     }
 
     /** Reads for save#SyncPair, then validate(). existingPairId: the pair being edited (not its own duplicate). */
@@ -81,7 +102,12 @@ class SyncPulseFacadeSupport {
         String chatSpaceId = normalize(p.get("chatSpaceId"))
         boolean chatOk = !chatSpaceId || TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.reconciliation.TenantChatSpace",
                 "chatSpaceId", chatSpaceId, tenantId, WHY) != null
-        return validate(p, automation, system, duplicate, chatOk)
+        String block = null
+        if (automation != null && normalizeInt(p.get("pulseEveryMinutes")) != null) {
+            String scopeId = normalize(automation.get("compareScopeId"))
+            block = pulseBlockFor(automation, RunConclusionStep.keySpecFor(ec, scopeId, "FILE_1"), RunConclusionStep.keySpecFor(ec, scopeId, "FILE_2"))
+        }
+        return validate(p, automation, system, duplicate, chatOk, block)
     }
 
     // ------------------------------------------------------------------------------------------- reads
@@ -186,11 +212,13 @@ class SyncPulseFacadeSupport {
             [sampleStamp: iso(s.get("sampleStamp")), waitingCount: s.get("waitingCount"), oldestWaitingMinutes: s.get("oldestWaitingMinutes"),
              pastAllowanceCount: s.get("pastAllowanceCount"), statusEnumId: s.get("statusEnumId")] as Map
         }
-        List<Map> runs = pairRuns(ec, tenantId, normalize(pair.get("automationId")))
-        List<Map> past = (rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", id).condition("closedStamp", null)
-                .orderBy("sourceCreatedStamp").list() ?: []).collect { o ->
+        List<Map> openOrders = (rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", id).condition("closedStamp", null)
+                .orderBy("sourceCreatedStamp").list() ?: [])
+        Instant oldestFlag = openOrders.collect { instantOf(it.get("firstPastStamp")) }.findAll { it != null }.min()
+        List<Map> runs = pairRuns(ec, tenantId, normalize(pair.get("automationId")), oldestFlag)
+        List<Map> past = openOrders.collect { o ->
             Object created = o.get("sourceCreatedStamp") ?: o.get("firstPastStamp")
-            String reportedId = reportedInRun(runs, o.get("firstPastStamp"))
+            String reportedId = reportedInRun(runs, o.get("firstPastStamp"), o.get("sourceCreatedStamp"))
             long minutes = created instanceof Timestamp ? Math.max(0L, Duration.between(((Timestamp) created).toInstant(), now).toMinutes()) : 0L
             [recordKey: o.get("recordKey"), orderName: o.get("orderName"), otherSystemId: o.get("otherSystemId"),
              sourceCreatedStamp: iso(o.get("sourceCreatedStamp")), waitingMinutes: minutes,
@@ -208,24 +236,38 @@ class SyncPulseFacadeSupport {
     /** A run's start: when it began, else when it was created. */
     private static Instant runStart(Map run) { return instantOf(run?.get("startedDate")) ?: instantOf(run?.get("createdDate")) }
 
-    /** The automation's run results the tenant owns, newest start first: [reconciliationRunResultId, start (Instant)]. */
-    static List<Map> pairRuns(def ec, String tenantId, String automationId) {
+    /**
+     * The automation's run results the tenant owns, newest start first: [reconciliationRunResultId, start, windowStart, windowEnd]
+     * (Instants; the window is what the run's execution read, null when unrecorded). With after, only runs that started after it.
+     */
+    static List<Map> pairRuns(def ec, String tenantId, String automationId, Instant after = null) {
         if (!automationId) return []
-        Set<String> ids = (rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationId", automationId).list() ?: [])
-                .collect { normalize(it.get("reconciliationRunResultId")) }.findAll { it } as Set<String>
-        if (ids.isEmpty()) return []
+        Map<String, Map> windows = [:]
+        (rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationId", automationId).list() ?: []).each { e ->
+            String runId = normalize(e.get("reconciliationRunResultId"))
+            if (runId) windows[runId] = [from: instantOf(e.get("windowStartDate")), thru: instantOf(e.get("windowEndDate"))]
+        }
+        if (windows.isEmpty()) return []
         List<Map> out = (rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId)
-                .condition("reconciliationRunResultId", org.moqui.entity.EntityCondition.IN, ids as List).list() ?: []).collect { r ->
-            [reconciliationRunResultId: normalize(r.get("reconciliationRunResultId")), start: runStart(r.getMap())] as Map
-        }.findAll { it.start != null }
+                .condition("reconciliationRunResultId", org.moqui.entity.EntityCondition.IN, windows.keySet() as List).list() ?: []).collect { r ->
+            String id = normalize(r.get("reconciliationRunResultId"))
+            [reconciliationRunResultId: id, start: runStart(r.getMap()), windowStart: windows[id]?.from, windowEnd: windows[id]?.thru] as Map
+        }.findAll { it.start != null && (after == null || (it.start as Instant).isAfter(after)) }
         return out.sort { Map a, Map b -> (b.start as Instant) <=> (a.start as Instant) }
     }
 
-    /** Newest run (runs newest first) that started after the order's firstPastStamp; null when none. */
-    static String reportedInRun(List<Map> runs, Object firstPastStamp) {
+    /**
+     * The run that reported an order: the newest run (runs newest first) whose read window contains the order's
+     * sourceCreatedStamp and that started after the flag; else the first run that started after the flag. Null when none.
+     */
+    static String reportedInRun(List<Map> runs, Object firstPastStamp, Object sourceCreatedStamp = null) {
         Instant flagged = instantOf(firstPastStamp)
         if (flagged == null) return null
-        return runs?.find { (it.start as Instant).isAfter(flagged) }?.get("reconciliationRunResultId") as String
+        List<Map> after = (runs ?: []).findAll { (it.start as Instant).isAfter(flagged) }
+        Instant created = instantOf(sourceCreatedStamp)
+        Map hit = created == null ? null : after.find { Instant f = it.windowStart as Instant; Instant t = it.windowEnd as Instant
+            f != null && t != null && !created.isBefore(f) && created.isBefore(t) }
+        return ((hit ?: (after ? after.last() : null))?.get("reconciliationRunResultId")) as String
     }
 
     /** Orders the pulse had flagged before the run started and that were still open at its start: recordKey -> ISO firstPastStamp. */

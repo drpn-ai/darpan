@@ -43,12 +43,20 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         String prev = AutomationExecutionSupport.WINDOW_PREVIOUS_DAY
         String week = AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK
         String api = AutomationExecutionSupport.AUTOMATION_SOURCE_API
-        StringBuilder xml = new StringBuilder('<entity-facade-xml type="test">')
+        StringBuilder xml = new StringBuilder('<entity-facade-xml type="test">' + """<darpan.rule.RuleSet ruleSetId="SPF_PAIR_RS" ruleSetName="Pair" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="SPF_SCOPE_A" ruleSetId="SPF_PAIR_RS" objectType="ORDER" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="SPF_SCOPE_A" fileSide="FILE_1" systemEnumId="OMS_GQL" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="orderId" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="SPF_SCOPE_A" fileSide="FILE_2" systemEnumId="NETSUITE_SUITEQL" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="tranId" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="SPF_SCOPE_A" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderName" companyUserGroupId="${A}"/>
+            <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="SPF_SCOPE_A" fileSide="FILE_2" sequenceNum="1" fieldExpression="otherRefNum" companyUserGroupId="${A}"/>""")
         [["SPF_A_DAILY", A, prev, "OMS_GQL", "NETSUITE_SUITEQL", "Y", "N"], ["SPF_A_WEEKLY", A, week, "OMS_GQL", "SHOPIFY", "Y", "N"],
          ["SPF_A_SHOP", A, prev, "SHOPIFY", "OMS_GQL", "Y", "N"], ["SPF_A_ARCH", A, prev, "OMS_GQL", "SHOPIFY", "Y", "Y"],
-         ["SPF_A_OFF", A, prev, "OMS_GQL", "SHOPIFY", "N", "N"], ["SPF_B_DAILY", B, prev, "OMS_GQL", "SHOPIFY", "Y", "N"]].each { a ->
+         ["SPF_A_OFF", A, prev, "OMS_GQL", "SHOPIFY", "N", "N"], ["SPF_B_DAILY", B, prev, "OMS_GQL", "SHOPIFY", "Y", "N"],
+         ["SPF_A_NOKEY", A, prev, "OMS_GQL", "SHOPIFY", "Y", "N"]].each { a ->
             xml << """<darpan.reconciliation.ReconciliationAutomation automationId="${a[0]}" automationName="${a[0]}" companyUserGroupId="${a[1]}"
-                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="SPF_RS" isActive="${a[5]}" isArchived="${a[6]}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="SPF_RS" compareScopeId="${a[0] == 'SPF_A_NOKEY' ? '' : 'SPF_SCOPE_A'}" isActive="${a[5]}" isArchived="${a[6]}"
                 relativeWindowTypeEnumId="${a[2]}" windowTimeZone="UTC"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${a[0]}" fileSide="FILE_1" companyUserGroupId="${a[1]}"
                 sourceTypeEnumId="${api}" systemEnumId="${a[3]}"/>
@@ -114,7 +122,7 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         assertTrue(got.ok as boolean)
         assertNull(got.syncPair)
         List autos = got.automations as List
-        assertEquals(["SPF_A_DAILY", "SPF_A_SHOP"], autos.collect { it.automationId }.sort(),
+        assertEquals(["SPF_A_DAILY", "SPF_A_NOKEY", "SPF_A_SHOP"], autos.collect { it.automationId }.sort(),
                 "weekly, archived, paused and other tenants' checks are not offered")
         Map daily = autos.find { it.automationId == "SPF_A_DAILY" }
         assertEquals(["FILE_1", "FILE_2"], daily.upstreamOptions.collect { it.upstreamSide })
@@ -131,6 +139,11 @@ class SyncPulseFacadeCrossTenantSmokeTests {
                 call("save#SyncPair", [automationId: "SPF_A_SHOP", upstreamSide: "FILE_1", allowanceMinutes: 60, pulseEveryMinutes: 120]).errors)
         assertEquals(["Choose a chat space of this tenant."],
                 call("save#SyncPair", [syncPairId: pairA, automationId: "SPF_A_DAILY", upstreamSide: "FILE_1", allowanceMinutes: 60, chatSpaceId: "SPF_CHAT_B"]).errors)
+        assertEquals([darpan.pulse.SyncPulseFacadeSupport.E_KEY],
+                call("save#SyncPair", [automationId: "SPF_A_NOKEY", upstreamSide: "FILE_1", allowanceMinutes: 60, pulseEveryMinutes: 120]).errors)
+        Map nokey = call("save#SyncPair", [automationId: "SPF_A_NOKEY", upstreamSide: "FILE_1", allowanceMinutes: 60])
+        assertTrue(nokey.ok as boolean, "an allowance alone needs no key: ${nokey.errors}")
+        assertTrue(call("delete#SyncPair", [syncPairId: nokey.syncPairId]).ok as boolean)
         Map shop = call("save#SyncPair", [automationId: "SPF_A_SHOP", upstreamSide: "FILE_1", allowanceMinutes: 60])
         assertTrue(shop.ok as boolean, "an allowance alone is fine with any upstream: ${shop.errors}")
         assertTrue(call("delete#SyncPair", [syncPairId: shop.syncPairId]).ok as boolean)
@@ -221,13 +234,14 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         assertNull(ec.entity.find("darpan.pulse.SyncPulseOrder").condition("pulseOrderId", "SPF_DEL_O").disableAuthz().useCache(false).one())
     }
 
-    private String seedRun(String id, String tenant, String automationId, String start) {
+    private String seedRun(String id, String tenant, String automationId, String start, String windowFrom = null, String windowThru = null) {
+        String window = windowFrom ? " windowStartDate=\"" + Timestamp.from(Instant.parse(windowFrom)) + "\" windowEndDate=\"" + Timestamp.from(Instant.parse(windowThru)) + "\"" : ""
         ec.entity.makeDataLoader().dummyFks(true).xmlText("""<entity-facade-xml type="test">
             <moqui.basic.Enumeration enumId="AUT_STAT_SUCCESS" enumTypeId="AutomationStatus"/>
             <moqui.basic.Enumeration enumId="AUT_STAT_PENDING" enumTypeId="AutomationStatus"/>
             <darpan.reconciliation.ReconciliationRunResult reconciliationRunResultId="${id}" companyUserGroupId="${tenant}" startedDate="${Timestamp.from(Instant.parse(start))}"/>
             <darpan.reconciliation.ReconciliationAutomationExecution automationExecutionId="${id}_X" automationId="${automationId}"
-                companyUserGroupId="${tenant}" reconciliationRunResultId="${id}"/></entity-facade-xml>""").load()
+                companyUserGroupId="${tenant}" reconciliationRunResultId="${id}"${window}/></entity-facade-xml>""").load()
         return id
     }
 
@@ -285,7 +299,7 @@ class SyncPulseFacadeCrossTenantSmokeTests {
     }
 
     @Test
-    void reportedInRunIsTheNewestRunThatStartedAfterTheFlag() {
+    void reportedInRunIsTheRunThatReadTheOrdersDayElseTheFirstAfterTheFlag() {
         actAs(A)
         seedRun("SPF_RB", A, "SPF_A_DAILY", "2026-11-21T05:00:00Z")
         seedRun("SPF_RC", A, "SPF_A_DAILY", "2026-11-21T08:00:00Z")
@@ -298,11 +312,24 @@ class SyncPulseFacadeCrossTenantSmokeTests {
             Map got = call("get#SyncPair", [syncPairId: pairA])
             Map o1 = ((List) got.pastOrders).find { it.recordKey == "RO1" }
             Map o2 = ((List) got.pastOrders).find { it.recordKey == "RO2" }
-            assertEquals("SPF_RD", o1.reportedInRunId)
+            assertEquals("SPF_RC", o1.reportedInRunId, "no window recorded: the first run after the flag")
             assertEquals("SPF_RS", o1.reportedInSavedRunId)
             assertNull(o2.reportedInSavedRunId)
             assertNull(o2.reportedInRunId, "no run has started since it was flagged")
         } finally { dropRuns(["SPF_RB", "SPF_RC", "SPF_RD"], ["SPF_RO1", "SPF_RO2"]) }
+    }
+
+    @Test
+    void reportedInRunIsTheRunWhoseWindowReadTheOrdersDay() {
+        actAs(A)
+        seedRun("SPF_RW1", A, "SPF_A_DAILY", "2026-11-21T08:00:00Z", "2026-11-20T00:00:00Z", "2026-11-21T00:00:00Z")
+        seedRun("SPF_RW2", A, "SPF_A_DAILY", "2026-11-22T08:00:00Z", "2026-11-21T00:00:00Z", "2026-11-22T00:00:00Z")
+        ec.entity.makeValue("darpan.pulse.SyncPulseOrder").setAll([pulseOrderId: "SPF_RW_O", syncPairId: pairA, companyUserGroupId: A, recordKey: "RWO",
+                sourceCreatedStamp: Timestamp.from(Instant.parse("2026-11-20T10:00:00Z")), firstPastStamp: Timestamp.from(Instant.parse("2026-11-20T14:00:00Z"))]).createOrUpdate()
+        try {
+            Map o = ((List) call("get#SyncPair", [syncPairId: pairA]).pastOrders).find { it.recordKey == "RWO" }
+            assertEquals("SPF_RW1", o.reportedInRunId, "the run that read Nov 20, not the newest")
+        } finally { dropRuns(["SPF_RW1", "SPF_RW2"], ["SPF_RW_O"]) }
     }
 
     private Map call(String name, Map params, String service = "facade.SyncPulseFacadeServices") {

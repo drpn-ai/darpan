@@ -342,12 +342,12 @@ class SyncPulseReaderSmokeTests {
     }
 
     /**
-     * The shared gate's records guard (review M5/M6) reaches the pulse: ACME's extract no longer filters, but a side whose
-     * record root is another array is not Spark-kept, so it is read as today: filtered at the read, no Keep field, no Keep run.
-     * (A nested key never reaches the read: a pulse refuses it, SyncPulseFacadeSupport.pulseBlockFor.)
+     * The shared gate's records guard (review M5/M6) takes its record root from the compare scope, as the run does (I1): a
+     * pulse only runs on a scope rooted at records (SyncPulseFacadeSupport.pulseBlockFor), so a drifted automation snapshot's
+     * root never moves the side out of Spark: it is still read unfiltered and its Keep still runs.
      */
     @Test
-    void aSideWithAnotherRecordRootKeepsTodaysReadInThePulse() {
+    void aDriftedSnapshotRecordRootDoesNotMoveASideOutOfSparkInThePulse() {
         def source = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", KEEP_AUTO)
                 .condition("fileSide", "FILE_1").forUpdate(true).one()
         source.set("recordRootExpression", "\$.orders[*]")
@@ -361,9 +361,9 @@ class SyncPulseReaderSmokeTests {
 
             assertEquals(true, up.ok, up.toString())
             Map sent = calls[0].params as Map
-            assertEquals(1, (sent.sourceFilters as List).size(), "the side is sent its filters, as the check's run sends them")
-            assertNull(sent.keepRuleFields, "no Keep field is asked for")
-            assertEquals(["#P1", "#P2", "#P3", "#P4"], up.records*.key, "no Keep ran: every dated record the read wrote is read")
+            assertNull(sent.sourceFilters, "the compare scope's root is records: the side is read unfiltered")
+            assertEquals(["status"], sent.keepRuleFields)
+            assertEquals(["#P1", "#P3"], up.records*.key, "and its Keep ran")
         } finally {
             source.set("recordRootExpression", null)
             source.update()

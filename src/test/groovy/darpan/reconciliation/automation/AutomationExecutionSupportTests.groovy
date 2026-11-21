@@ -3304,6 +3304,24 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void anAutomationDecidesPlacementFromTheCompareScopesRecordRootNotItsSnapshots() {
+        // the run path and the compare adapter take the root from RuleSetCompareSource; a drifted snapshot must not move Keep
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+        ec.service.declaredInParameters = ["keepRuleFields"]
+        ec.entity.add("darpan.rule.RuleSetCompareSource", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", recordRootExpression: "records",
+                companyUserGroupId: "TENANT_A"])
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
+
+        assertEquals("SPARK", acmeExtract(ec, "FILE_1").result.sideKeep.placement, "the compare scope's root is records: Keep stays in Spark")
+
+        ec.entity.rows["darpan.rule.RuleSetCompareSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", "records")
+        assertEquals("READ", acmeExtract(ec, "FILE_1").result.sideKeep.placement, "the compare scope's root is another array: today's read")
+    }
+
+    @Test
     void aDataDefinedSideGetsItsFiltersAtRead() {
         // Ruling 3b2b-16: a data-defined endpoint's filter is a positioned step of its pipeline, so it keeps filtering at
         // the read, whatever its extract declares.

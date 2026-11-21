@@ -2651,9 +2651,11 @@ class AutomationExecutionSupport {
         Map<String, Object> target = extractTarget(ec, source, params)
         Map<String, Object> options = ((Map) target.metadata)?.parameters instanceof Map ?
                 new LinkedHashMap<String, Object>((Map) ((Map) target.metadata).parameters) : [:]
-        // a replay's landed file (ExtractReplaySupport.replayResults has checked it is on disk); null for any other result
-        File landed = normalize(result?.get("replayedFromExecutionId")) == null ? null :
-                RunVerificationSupport.resolveLocationFile(ec, normalize(result.get("fileLocation") ?: result.get("dataManagerPath")))
+        // a replay's landed file, resolved as ExtractReplaySupport.replayResults resolved it when it checked the file is on disk
+        // (review 16e M2: resolveLocationFile lacks its runtime:// fallback); null for any other result
+        String landedAt = normalize(result?.get("replayedFromExecutionId")) == null ? null :
+                normalize(result.get("fileLocation") ?: result.get("dataManagerPath"))
+        File landed = landedAt ? DataManagerSupport.resolveDirectoryFile(ec, landedAt, false) : null
         return sideKeepOf(ec, automation, source, (Map) target.connector, (String) target.serviceName, options, keepInSpark, landed)
     }
 

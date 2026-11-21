@@ -304,6 +304,8 @@ class AutomationKeepParityTests {
     void aCompareRetriedOverAFileItsReadFilteredKeepsTodaysRead() {
         Map first = run("KAP_RETRY_COMPARE", [])
         assertTrue(filteredAtRead(first.extract, "ACME_SPARK"), "the landed file was filtered at the read")
+        List exclusionsFirst = concludedExclusions(first.extract)
+        assertEquals([1, 2, 3], exclusionsFirst*.sequenceNum, "test precondition: the read reported its rules")
         switchSide1("KAP_RETRY_COMPARE")
 
         List<Map> calls = []
@@ -315,6 +317,7 @@ class AutomationKeepParityTests {
         assertSameRun(first, retried, ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount",
                                        "file2RecordCount"])
         assertEquals(JsonOutput.toJson(first.document.summary), JsonOutput.toJson(retried.document.summary))
+        assertEquals(exclusionsFirst, concludedExclusions(retried.extract), "the conclude pass reads the read's own exclusions")
     }
 
     /** Task 16e: the same for an evaluate run, which keeps in Spark since Task 16b. */
@@ -322,6 +325,7 @@ class AutomationKeepParityTests {
     void anEvaluateRetriedOverAFileItsReadFilteredKeepsTodaysRead() {
         Map first = run("KAP_RETRY_EVAL", [])
         assertTrue(filteredAtRead(first.extract, "ACME_SPARK"))
+        List exclusionsFirst = concludedExclusions(first.extract)
         switchSide1("KAP_RETRY_EVAL")
 
         List<Map> calls = []
@@ -330,6 +334,42 @@ class AutomationKeepParityTests {
         assertEquals([], calls)
         assertEquals(first.extract, retried.extract)
         assertNull(KeepArtifacts.readSummary(retried.extract), "no Spark Keep over a file its read filtered")
+        assertSameRun(first, retried, ["statusEnumId", "differenceCount", "file1RecordCount"])
+        assertEquals(["K1", "K7", "K8"] as Set, ((List<Map>) retried.document.differences)*.id as Set)
+        assertEquals(exclusionsFirst, concludedExclusions(retried.extract))
+    }
+
+    /**
+     * Fix round 1 (review 16e-I1): the other direction. A Spark-era landed file (its read filtered nothing; Spark kept it) retried
+     * from its last extract keeps in Spark again: it is not read as filtered at the read, the retry's own Spark Keep writes the
+     * set-aside artifacts afresh (the first run's are removed first, so only the retry can write them), keeps the same records,
+     * records the kept count and gives the conclude pass the same exclusions. A wiring fault that handed the replay a file that
+     * reads as filtered (a wrong or missing one) would compare all 8 records unfiltered.
+     */
+    @Test
+    void aCompareRetriedOverASparkKeptFileKeepsItInSparkAgain() {
+        Map first = run("KAP_RETRY_SPARK", [])
+        Map before = sparkKept(first)
+
+        List<Map> calls = []
+        Map retried = run("KAP_RETRY_SPARK", calls, retryOf(first))
+
+        assertKeptInSparkAgain(first, before, retried, calls)
+        assertSameRun(first, retried, ["statusEnumId", "differenceCount", "onlyInFile1Count", "onlyInFile2Count", "file1RecordCount",
+                                       "file2RecordCount"])
+        assertEquals(JsonOutput.toJson(first.document.summary), JsonOutput.toJson(retried.document.summary))
+    }
+
+    /** Fix round 1 (review 16e-I1): the same for an evaluate run. */
+    @Test
+    void anEvaluateRetriedOverASparkKeptFileKeepsItInSparkAgain() {
+        Map first = run("KAP_RETRY_EVAL_SPARK", [])
+        Map before = sparkKept(first)
+
+        List<Map> calls = []
+        Map retried = run("KAP_RETRY_EVAL_SPARK", calls, retryOf(first))
+
+        assertKeptInSparkAgain(first, before, retried, calls)
         assertSameRun(first, retried, ["statusEnumId", "differenceCount", "file1RecordCount"])
         assertEquals(["K1", "K7", "K8"] as Set, ((List<Map>) retried.document.differences)*.id as Set)
     }
@@ -438,6 +478,48 @@ class AutomationKeepParityTests {
         return KeepPlanSupport.landedFilteredAtRead(ec, landed, [], [systemEnumId: system], [:])
     }
 
+    /**
+     * What a first run's Spark Keep left beside its extract (kept ids, the conclude pass's exclusions, the side file), read before
+     * its set-aside artifacts are removed so that only a retry's own Spark Keep can write them again.
+     */
+    private Map sparkKept(Map first) {
+        File extract = (File) first.extract
+        assertFalse(filteredAtRead(extract, "ACME_SPARK"), "test precondition: the read filtered nothing")
+        assertEquals(ORDERS.size(), records(extract).size(), "test precondition: the extract holds every record")
+        Map before = [kept: kept(extract)*.id, exclusions: concludedExclusions(extract), side: sideFile(extract)]
+        assertEquals(["K1", "K7", "K8"], before.kept, "test precondition: the first run kept in Spark")
+        assertEquals([1, 2, 3], ((List<Map>) before.exclusions)*.sequenceNum)
+        [KeepArtifacts.keepFile(extract), KeepArtifacts.rowsFile(extract),
+         new File(extract.parentFile, ExcludedRecordsSidecar.fileNameFor(extract.name))].each { File f ->
+            assertTrue(f.delete(), "removed ${f.name}")
+        }
+        return before
+    }
+
+    private static void assertKeptInSparkAgain(Map first, Map before, Map retried, List<Map> calls) {
+        File extract = (File) retried.extract
+        assertEquals([], calls, "a retry reads nothing")
+        assertEquals(first.extract, extract, "the retry compares the landed file")
+        assertNotNull(KeepArtifacts.readSummary(extract), "the retry's Spark Keep wrote its summary: the side was not read as filtered")
+        assertEquals(before.kept, kept(extract)*.id)
+        assertEquals(3, ((Map) retried.execution).file1RecordCount as int, "the recorded count is what Keep kept, not all 8")
+        assertEquals(before.exclusions, concludedExclusions(extract))
+        assertEquals(JsonOutput.toJson(before.side), JsonOutput.toJson(sideFile(extract)))
+    }
+
+    /**
+     * The configuredExclusions the conclude pass reads for a side, as RunConclusionSupport.indexSide takes them: the Keep summary's
+     * where Spark kept the side, else the read's own metadata (top level, else under filters).
+     */
+    private static List concludedExclusions(File extract) {
+        Map keep = KeepArtifacts.readSummary(extract)
+        if (keep != null) return (List) (keep.configuredExclusions ?: [])
+        Map metadata = (Map) (json(extract).metadata ?: [:])
+        if (metadata.configuredExclusions instanceof List && metadata.configuredExclusions) return (List) metadata.configuredExclusions
+        Object nested = metadata.filters instanceof Map ? ((Map) metadata.filters).configuredExclusions : null
+        return nested instanceof List ? (List) nested : []
+    }
+
     private static void assertSameRun(Map first, Map retried, List<String> fields) {
         fields.each { String f -> assertEquals(((Map) first.execution)[f], ((Map) retried.execution)[f], f) }
         assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, ((Map) retried.execution).statusEnumId)
@@ -498,6 +580,7 @@ class AutomationKeepParityTests {
         StringBuilder automations = new StringBuilder()
         [KAP_READ: ["ACME_READ", READ_EXTRACT, false], KAP_SPARK: ["ACME_SPARK", SPARK_EXTRACT, false],
          KAP_EVAL_COMPARE: ["ACME_SPARK", SPARK_EXTRACT, false], KAP_RETRY_COMPARE: ["ACME_READ", READ_EXTRACT, false],
+         KAP_RETRY_SPARK: ["ACME_SPARK", SPARK_EXTRACT, false],
          KAP_KEYS_READ: ["ACME_READ", READ_EXTRACT, true], KAP_KEYS_SPARK: ["ACME_SPARK", SPARK_EXTRACT, true],
          KAP_COPY_SPARK: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
          KAP_COPY_SPARK_LIVE: ["ACME_COPY_SPARK", SPARK_COPY_EXTRACT, false, [projConfigId: COPY_CONFIG]],
@@ -526,7 +609,7 @@ class AutomationKeepParityTests {
         }
         // Task 16b: the same side and rows on an EVALUATE scope, one source each: today's filtering read, and the Spark side
         String evaluateAutomations = [KAP_EVAL_READ: ["ACME_READ", READ_EXTRACT], KAP_EVAL_SPARK: ["ACME_SPARK", SPARK_EXTRACT],
-                                      KAP_RETRY_EVAL: ["ACME_READ", READ_EXTRACT]].collect { String id, List side1 ->
+                                      KAP_RETRY_EVAL: ["ACME_READ", READ_EXTRACT], KAP_RETRY_EVAL_SPARK: ["ACME_SPARK", SPARK_EXTRACT]].collect { String id, List side1 ->
             """
             <darpan.reconciliation.ReconciliationAutomation automationId="${id}" automationName="${id}" companyUserGroupId="${TENANT}"
                 inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_EVAL_RS" savedRunType="ruleset"

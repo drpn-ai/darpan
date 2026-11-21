@@ -19,6 +19,12 @@ class AskSupport {
     /** The CheckAsk read, injectable for pure tests: (ec, checkId, tenantId) -> List of row maps. */
     static Closure reader = { Object ec, String checkId, String tenantId -> readRows(ec, checkId, tenantId) }
 
+    /** Restores the process-global seams to their defaults (DAR-OPS-026 shared-Moqui harness). */
+    static void resetForTests() {
+        fetcher = RunConclusionStep.&fetchLookup
+        reader = { Object ec, String checkId, String tenantId -> readRows(ec, checkId, tenantId) }
+    }
+
     /**
      * pairFacts: rows [compareId, file1 Map or null, file2 Map or null] (null = side absent), before the fact is built.
      * Returns compareId -> [ask_<askName>_<field>: value] for every pair whose subject side has the id field. A pair

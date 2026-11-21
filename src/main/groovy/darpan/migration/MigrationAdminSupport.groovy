@@ -39,6 +39,9 @@ class MigrationAdminSupport {
     /** Seam for the super-admin gate. Production never reassigns this. */
     static Closure<Boolean> superAdminGate = DEFAULT_GATE
 
+    /** Restores the process-global seams to their defaults (DAR-OPS-026 shared-Moqui harness). */
+    static void resetForTests() { superAdminGate = DEFAULT_GATE }
+
     /** Registry and ledger state for every registered migration, or null (with an error) if denied. */
     static List<Map<String, Object>> listStatus(def ec) {
         if (!gate(ec)) return null

@@ -64,4 +64,11 @@ class BrainAnswerStore {
     }
 
     static void clear() { ANSWERS.clear() }
+
+    /** Restores the process-global seams to their defaults (DAR-OPS-026 shared-Moqui harness). */
+    static void resetForTests() {
+        clock = { System.currentTimeMillis() }
+        maxEntries = MAX_ENTRIES
+        clear()
+    }
 }

@@ -24,6 +24,9 @@ class BrainConclude {
     /** Test seam: ids per question call when above 0; otherwise each question's catalogue batch size. */
     static int fetchBatch = 0
 
+    /** Restores the process-global seams to their defaults (DAR-OPS-026 shared-Moqui harness). */
+    static void resetForTests() { fetchBatch = 0 }
+
     /**
      * args: kind, tenantId, findings ([key, bucket, sides] each), fetchQuestion(question, ids) -> id -> record, labelFor(code);
      * catalog (BrainQuestionCatalog entries, default all of them); shareAnswers (default true): false neither reads nor writes

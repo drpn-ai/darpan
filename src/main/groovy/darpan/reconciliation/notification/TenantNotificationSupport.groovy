@@ -54,6 +54,11 @@ class TenantNotificationSupport {
         deliveryHook = null
     }
 
+    /** Restores every process-global seam to its default (DAR-OPS-026 shared-Moqui harness). */
+    static void resetForTests() {
+        resetDeliveryHook()
+    }
+
     /**
      * Normalizes a stored provider id. Null/blank is Google Chat — see PROVIDER_GOOGLE. An
      * unrecognized value is returned as-is so validation and delivery can fail closed on it rather

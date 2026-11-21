@@ -291,7 +291,7 @@ class RunExtractSupport {
     }
 
     /**
-     * DAR-BE-318 (plan 3b-2b, Task 13). One API side's Keep plan (KeepPlanSupport.sideKeep), read for the active tenant from the
+     * DAR-BE-318 (plan 3b-2b, Task 13). One API side's Keep plan (KeepPlanSupport.effectiveSideKeep), read for the active tenant from the
      * side's compare scope rows, with the side's own extract options (a built-in may apply unless one is set). The run builds it
      * once per API side, sends it to extractApiSource and hands it to the compare as keepBySide, so whatever the read returned
      * (live, a kept-copy slice, a retried run's landed file) gets the same Keep. An upload has no plan: it never gets filters.
@@ -304,13 +304,12 @@ class RunExtractSupport {
      * <li>landed: the side is a landed file handed back without a new read (a retried run's, a judge replay's) that its read
      *     already filtered (KeepPlanSupport.landedFilteredAtRead, asked by effectiveSideKeep).</li>
      * </ul>
-     * Every run's compare takes keepBySide, an evaluate run's included (Task 16b), so keepInSpark is true for every run path.
-     * A side whose extract no longer declares the parameter but that Spark cannot keep (keepInSpark false, or not keyed on
+     * Every run's compare takes keepBySide, an evaluate run's included (Task 16b).
+     * A side whose extract no longer declares the parameter but that Spark cannot keep (not keyed on
      * top-level records: Spark Keep numbers and reads the records array, review M5/M6) fails before any read when it has Keep
      * rules (Ruling 3b2b-25): neither its read nor Spark could filter it.
      */
-    static Map sideKeep(def ec, Object source, String fileSide, Map<String, Object> connector, boolean keepInSpark = true,
-                        File landed = null) {
+    static Map sideKeep(def ec, Object source, String fileSide, Map<String, Object> connector, File landed = null) {
         String compareScopeId = normalize(source?.compareScopeId)
         String side = normalize(fileSide) ?: normalize(source?.fileSide)
         // the compare scope's rows, read for the active tenant; an upload or database side (NONE) takes none
@@ -321,7 +320,7 @@ class RunExtractSupport {
                 SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)),
                 extractServiceName ? ec.service.getServiceDefinition(extractServiceName) : null,
                 normalize(source?.recordRootExpression), (List<String>) RunConclusionStep.keySpecFor(ec, compareScopeId, side).keyFields,
-                keepInSpark, landed, side)
+                true, landed, side)
     }
 
     /**

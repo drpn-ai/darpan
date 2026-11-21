@@ -347,8 +347,7 @@ def extractApiSource = { Object source, String fileSide, Map artifactContext, Ma
     // side's Keep decision for the landed file): then it keeps today's read.
     Map<String, Object> replayed = retryPlan ? RunRetrySupport.replayedSide(ec, retryPlan, source, fileSide) : null
     File landed = replayed == null ? null : RunVerificationSupport.resolveLocationFile(ec, replayed.fileLocation as String)
-    Map sideKeep = RunExtractSupport.sideKeep(ec, source, fileSide, RunExtractSupport.resolveExtractConnector(ec, source),
-            true, landed)
+    Map sideKeep = RunExtractSupport.sideKeep(ec, source, fileSide, RunExtractSupport.resolveExtractConnector(ec, source), landed)
     keepPlanBySide.put(fileSide, sideKeep)
     if (replayed != null) return replayed
     RunExtractSupport.extractApiSource(ec, source, fileSide, sourceLabel(source, fileSide), artifactContext,

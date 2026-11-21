@@ -226,7 +226,7 @@ class RuleSetCompareScopeAdapter {
         spark.conf().set("spark.sql.shuffle.partitions",
                 (System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16"))
 
-        // DAR-BE-318 (plan 3b-2b, Task 11): each side's Keep (KeepPlanSupport.sideKeep), keyed FILE_1/FILE_2. It runs at ingest,
+        // DAR-BE-318 (plan 3b-2b, Task 11): each side's Keep (KeepPlanSupport.effectiveSideKeep), keyed FILE_1/FILE_2. It runs at ingest,
         // before the id restriction, keys out and duplicate split below, so those see kept records only. A side with no entry,
         // or whose Keep is not Spark's, is ingested as before. Live runs pass none until Tasks 13 and 14.
         Map keepBySide = (Map) context.get("keepBySide")

@@ -30,11 +30,10 @@ class ReadByOtherSideKeysTests {
     }
 
     @Test
-    void eachKeyIsAskedOnceInRecordOrderAndLaterBatchesAreAppended() {
-        List<Map> memos = (1..1001).collect { [returnId: "M${it}".toString(), amount: it] } +
-                [[returnId: "M1", amount: 1], [returnId: " ", amount: 0], [returnId: null, amount: 0]]
+    void keysAreAskedInOrderAndLaterBatchesAreAppended() {
+        List<String> memoKeys = (1..1001).collect { "M${it}".toString() }
         List<List<String>> asked = []
-        Map result = AutomationExecutionSupport.readByKeysOf(extract(memos), "returnId", "returnId") { List<String> keys ->
+        Map result = AutomationExecutionSupport.readByKeys(memoKeys, "returnId") { List<String> keys ->
             asked << keys
             File f = extract(keys.collect { [returnId: it, returnCredit: 1] })
             return [result: [fileLocation: f.absolutePath, recordCount: keys.size()], file: f]
@@ -51,11 +50,9 @@ class ReadByOtherSideKeysTests {
     @Test
     void aSideOneWithNoKeysReadsNothing() {
         boolean called = false
-        Map result = AutomationExecutionSupport.readByKeysOf(extract([]), "returnId", "returnId") { List<String> keys -> called = true; [:] }
+        Map result = AutomationExecutionSupport.readByKeys([], "returnId") { List<String> keys -> called = true; [:] }
         assertFalse(called)
         assertEquals([:], result)
-        assertEquals([:], AutomationExecutionSupport.readByKeysOf(null, "returnId", "returnId") { List<String> keys -> called = true; [:] })
-        assertFalse(called)
     }
 
     @Test

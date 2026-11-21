@@ -129,7 +129,7 @@ class KeptCopySupport {
      * @param params the extractor parameters, complete, as they would be sent
      * @param run tenantId (the run's owner), windowStart and windowEnd (Timestamps: the instants the run covers),
      *        stateMode (an automation read by status with no window), outputRunId (the folder name an extractor uses
-     *        when params carry no outputLocation), sideKeep (optional: the side's Keep plan, KeepPlanSupport.sideKeep; when it
+     *        when params carry no outputLocation), sideKeep (optional: the side's Keep plan, KeepPlanSupport.effectiveSideKeep; when it
      *        places Keep in SPARK, Spark Keep runs at ingest, so the slice leaves the filters to it and keeps the Keep fields.
      *        Absent or any other placement: the slice filters as it always has. A caller passes it only where Spark Keep runs.)
      */

@@ -75,7 +75,7 @@
             label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="4"
             description="Order spine — the Shopify order id of the return's order, resolved through OMS orders. Absent on a return with no items. Not offered as the ID (DAR-BE-071): one order can carry several returns, and duplicate keys collapse."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].statusId"
-            label="Return status" fieldType="string" sequenceNum="5" description="The RETURN's status. Includes RETURN_REQUESTED; RETURN_CANCELLED is excluded by the extract."/>
+            label="Return status" fieldType="string" sequenceNum="5" description="The RETURN's status. Every status is returned; a Keep rule on it decides which returns a run keeps."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].entryDate"
             label="Created" fieldType="string" sequenceNum="6" description="Epoch milliseconds. The extract windows on it."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnTotal"
@@ -84,7 +84,7 @@
             label="Currency" fieldType="string" sequenceNum="8" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnChannelEnumId"
             label="Return channel" fieldType="string" sequenceNum="9"
-            description="Return channel. Exclusion rules on it run client-side, after the built-in exclusions."/>
+            description="Return channel. A Keep rule on it decides which returns a run keeps."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderProductStoreId"
             label="Store" fieldType="string" sequenceNum="10"
             description="DAR-BE-068: the product store of the return's ORIGIN order (Return.productStoreId is unpopulated). NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared. Absent on a return with no items, so an include rule drops those."/>

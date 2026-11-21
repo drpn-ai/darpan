@@ -90,7 +90,7 @@
             </entity-find>
             <set field="systemBySide" from="sourceList.collectEntries { [(it.fileSide): it.systemEnumId] }"/>
             <!-- DAR-BE-318 (plan 3b-2b, Ruling 3b2b-3): a side keeps in Spark in the replay only where the live interactive run
-                 would: the run path's connector (RunExtractSupport.resolveExtractConnector) and its gate (RunExtractSupport.sideKeep:
+                 would: the run path's connector (RunExtractSupport.resolveExtractConnector) and its gate (RunExtractSupport.sideKeep, which asks KeepPlanSupport.effectiveSideKeep:
                  placement, Ruling 3b2b-23's sparkKeepsSide, the keyed-on-records guard), with the scope's own filter rows read for
                  the replaying tenant. That is the compare scope's filters, not the automation's own store (Ruling 3b2b-15), so an
                  automation whose filters drifted replays under its run's. A capture its read already filtered never keeps in
@@ -104,7 +104,7 @@
                 <set field="capturedExtract" from="darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, picked.files[source.fileSide]?.fileLocation)"/>
                 <if condition="capturedExtract != null">
                     <set field="sideKeep" from="darpan.facade.reconciliation.RunExtractSupport.sideKeep(ec, source, source.fileSide,
-                            darpan.facade.reconciliation.RunExtractSupport.resolveExtractConnector(ec, source), true, capturedExtract)"/>
+                            darpan.facade.reconciliation.RunExtractSupport.resolveExtractConnector(ec, source), capturedExtract)"/>
                     <if condition="darpan.reconciliation.source.KeepStepSupport.applies(sideKeep)">
                         <script>keepBySide.put(source.fileSide, sideKeep)</script></if>
                 </if>

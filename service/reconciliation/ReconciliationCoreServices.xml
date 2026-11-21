@@ -114,7 +114,7 @@
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
             <parameter name="file2KeysOutLocation"><description>DAR-BE-091. Every distinct compare_id on FILE_2, one per line: with file1KeysOutLocation, the records an audit run examined.</description></parameter>
-            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b). Each side's Keep (KeepPlanSupport.sideKeep), keyed
+            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b). Each side's Keep (KeepPlanSupport.effectiveSideKeep), keyed
                 FILE_1/FILE_2, run at ingest before the keys out and the duplicate split. A side with none, or whose Keep is not Spark's,
                 is ingested as before.</description></parameter>
         </in-parameters>
@@ -175,7 +175,7 @@
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
             <parameter name="file2KeysOutLocation"><description>DAR-BE-091. Every distinct compare_id on FILE_2, one per line: with file1KeysOutLocation, the records an audit run examined.</description></parameter>
-            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b). Each side's Keep (KeepPlanSupport.sideKeep), keyed
+            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b). Each side's Keep (KeepPlanSupport.effectiveSideKeep), keyed
                 FILE_1/FILE_2, run at ingest before the keys out and the duplicate split. A side with none, or whose Keep is not Spark's,
                 is ingested as before.</description></parameter>
         </in-parameters>
@@ -330,7 +330,7 @@
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
-            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b, Task 16b). The side's Keep (KeepPlanSupport.sideKeep),
+            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b, Task 16b). The side's Keep (KeepPlanSupport.effectiveSideKeep),
                 keyed FILE_1, as reconcile#RuleSetCompareScope takes it: see prepare#RuleSetCompareScope. Spark sets aside at ingest, so the
                 findings are the kept records only.</description></parameter>
         </in-parameters>
@@ -439,7 +439,7 @@
                 judge.JudgeReplayServices.replay#CheckJudgement only: the matched and missing frames are also judged with
                 judgeCheckId's decisions into judgedFindings. Every other output is the same either way.</description></parameter>
             <parameter name="judgeCheckId"/>
-            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b). Each side's Keep (KeepPlanSupport.sideKeep), keyed
+            <parameter name="keepBySide" type="Map"><description>DAR-BE-318 (plan 3b-2b). Each side's Keep (KeepPlanSupport.effectiveSideKeep), keyed
                 FILE_1/FILE_2: see prepare#RuleSetCompareScope.</description></parameter>
         </in-parameters>
         <out-parameters>

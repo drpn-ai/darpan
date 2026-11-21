@@ -387,20 +387,10 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * DAR-BE-192. The keys otherFile's otherKey holds, each once in record order, read by readBatch(keys) -> [result, file]
-     * AuditRecheckSupport.MAX_KEYS at a time; every later batch's records are appended to the first batch's file (by ownKey)
-     * and counted on its result. [:] when otherFile holds no keys.
+     * DAR-BE-192. Reads the keys (each once, in record order) through readBatch(keys) -> [result, file], AuditRecheckSupport.MAX_KEYS
+     * at a time; every later batch's records are appended to the first batch's file (by ownKey) and counted on its result.
+     * [:] when there are no keys.
      */
-    static Map<String, Object> readByKeysOf(File otherFile, String otherKey, String ownKey, Closure readBatch) {
-        Set<String> keys = new LinkedHashSet<String>()
-        if (otherFile != null) darpan.reconciliation.conclusion.JsonRecordStream.forEachRecord(otherFile, "records") { Map r ->
-            String v = normalize(r.get(otherKey))
-            if (v) keys.add(v)
-        }
-        return readByKeys(keys, ownKey, readBatch)
-    }
-
-    /** readByKeysOf over keys already collected (each once, in record order). */
     static Map<String, Object> readByKeys(Collection<String> keys, String ownKey, Closure readBatch) {
         Map<String, Object> first = null
         File target = null

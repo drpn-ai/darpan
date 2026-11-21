@@ -142,7 +142,6 @@ class KeptCopySupportTests {
                 order("before-end", "2026-11-11T07:59:59.999Z"),
                 order("at-end", "2026-11-11T08:00:00Z"),
                 order("at-end-millis", "2026-11-11T08:00:00.000Z"),
-                [id: "no-created", updatedAt: "2026-11-10T10:00:00Z"],
         ])
         List<Map> calls = []
         Map run = interactive("conn-window", START, END, calls)
@@ -664,8 +663,8 @@ class KeptCopySupportTests {
     }
 
     /**
-     * Plan 3a stays as it was: a Shopify orders side defaults its field to createdAt, its slice skips a record whose
-     * createdAt is not an ISO instant (never an abort), and a source whose extractor rounds its window to whole days
+     * Plan 3a stays as it was: a Shopify orders side defaults its field to createdAt, its slice reads live when a record's
+     * createdAt is neither an ISO instant nor epoch milliseconds (never an abort), and a source whose extractor rounds its window to whole days
      * unless told to keep instants (Shopify return refs, preserveWindowInstants N) reads live.
      */
     @Test
@@ -678,9 +677,10 @@ class KeptCopySupportTests {
                 [tenantId: A, windowStart: START, windowEnd: END])
         assertEquals("createdAt", side.windowFieldName)
         assertNull(side.liveOnly)
+        // an ISO instant and epoch milliseconds both place; a createdAt in another format cannot, so the side reads live
         Map served = KeptCopySupport.sliceIfServed(ec, side)
-        assertTrue(served.served as boolean, served.reason as String)
-        assertEquals(["iso"], json(served.extractFile as File).records*.id)
+        assertFalse(served.served as boolean)
+        assertTrue((served.reason as String).contains("neither an ISO instant nor epoch milliseconds"), served.reason as String)
 
         Map refs = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS"),
                 [shopifyAuthConfigId: "conn-refs", windowStart: START.toInstant().toString(), windowEnd: END.toInstant().toString(),
@@ -732,6 +732,43 @@ class KeptCopySupportTests {
         Map undated = daySide("conn-days-undated", window, "days-undated")
         assertFalse(undated.served as boolean)
         assertTrue((undated.reason as String).contains("has no trandate"), undated.reason as String)
+    }
+
+    /**
+     * An exact-instant side places a record as the extractor reads what it is sent (an ISO instant or epoch milliseconds);
+     * a record it cannot place, or one with no value, makes the side read live. Never skipped, never an empty slice. Made-up system.
+     */
+    @Test
+    void anExactInstantSideReadsLiveWhenARecordCannotBePlaced() {
+        ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
+            <darpan.reconciliation.SourceSystemConnector systemEnumId="KC_EXACT" extractServiceName="${RETURNS_EXTRACT}"
+                dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="KC_EXACT_TYPE"
+                configParameterName="omsRestSourceConfigId" preserveWindowInstants="Y" windowFieldName="stamp" enabled="Y"/>
+        </entity-facade-xml>""").dummyFks(true).load()
+        Map connector = SourceSystemConnectorSupport.resolve(ec, "KC_EXACT")
+        Closure side = { String conn, String token ->
+            KeptCopySupport.side(connector, [omsRestSourceConfigId: conn, windowFieldName: "stamp", outputLocation: runLocation(token), fileName: "slice.json",
+                    windowStart: START.toInstant().toString(), windowEnd: END.toInstant().toString()],
+                    [tenantId: A, windowStart: START, windowEnd: END])
+        }
+        String ok = datasetOf("KC_EXACT", "conn-exact-ok", "id", "stamp")
+        copyOf(A, ok, [[id: "iso", stamp: "2026-11-10T09:00:00Z"], [id: "millis", stamp: ts("2026-11-10T10:00:00Z").time],
+                       [id: "before", stamp: "2026-01-01T00:00:00Z"]], "id", "stamp")
+        Map served = KeptCopySupport.sliceIfServed(ec, side("conn-exact-ok", "exact-ok") as Map)
+        assertTrue(served.served as boolean, served.reason as String)
+        assertEquals(["iso", "millis"], json(served.extractFile as File).records*.id)
+
+        String odd = datasetOf("KC_EXACT", "conn-exact-odd", "id", "stamp")
+        copyOf(A, odd, [[id: "iso", stamp: "2026-11-10T09:00:00Z"], [id: "odd", stamp: "11/10/2026 11:00"]], "id", "stamp")
+        Map unplaced = KeptCopySupport.sliceIfServed(ec, side("conn-exact-odd", "exact-odd") as Map)
+        assertFalse(unplaced.served as boolean)
+        assertTrue((unplaced.reason as String).contains("neither an ISO instant nor epoch milliseconds"), unplaced.reason as String)
+
+        String blank = datasetOf("KC_EXACT", "conn-exact-blank", "id", "stamp")
+        copyOf(A, blank, [[id: "iso", stamp: "2026-11-10T09:00:00Z"], [id: "none"]], "id", "stamp")
+        Map undated = KeptCopySupport.sliceIfServed(ec, side("conn-exact-blank", "exact-blank") as Map)
+        assertFalse(undated.served as boolean)
+        assertTrue((undated.reason as String).contains("has no stamp"), undated.reason as String)
     }
 
     /**

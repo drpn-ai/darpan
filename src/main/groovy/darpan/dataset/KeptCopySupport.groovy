@@ -448,11 +448,7 @@ class KeptCopySupport {
                             record.remove(KeptCopyStore.COPY_ID)
                         }
                         Object value = record?.get(windowField)
-                        if (windowMode == EXACT_INSTANTS) {
-                            Instant at = instant(value)
-                            // half-open, as instants: [windowStart, windowEnd)
-                            if (at == null || at.isBefore(from) || !at.isBefore(to)) continue
-                        } else if (blank(value)) {
+                        if (blank(value)) {
                             // ruling P3b1-6: a record is dropped only when it is placed outside the window. One with no
                             // value may be dated by a field the source filters on and the record never carries (a line
                             // record dated only by its own field, where the server filters on its order's date).
@@ -473,7 +469,7 @@ class KeptCopySupport {
                                 unplaceable = "a record's ${windowField} is neither an ISO instant nor epoch milliseconds".toString()
                                 break
                             }
-                            // half-open, as instants: [windowStart, windowEnd), as the extractor reads what it is sent
+                            // half-open, as instants: [windowStart, windowEnd); exact-instant sides place by the same rule
                             if (at.isBefore(from) || !at.isBefore(to)) continue
                         }
                         inWindow++

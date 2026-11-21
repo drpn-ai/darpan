@@ -131,8 +131,8 @@ class SyncPulseSupport {
         String scopeId = normalize(automation?.get("compareScopeId"))
         Object scopeStamp = null
         if (scopeId) {
-            scopeStamp = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", scopeId)
-                    .condition("companyUserGroupId", normalize(pair.companyUserGroupId)).disableAuthz().useCache(false).list()?.find()?.get("lastUpdatedStamp")
+            scopeStamp = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.rule.RuleSetCompareScope", WHY).condition("compareScopeId", scopeId)
+                    .condition("companyUserGroupId", normalize(pair.companyUserGroupId)).useCache(false).list()?.find()?.get("lastUpdatedStamp")
         }
         return [normalize(pair.automationId), normalize(pair.upstreamSide), scopeId, normalize(automation?.get("ruleSetId")), scopeStamp].join("|")
     }

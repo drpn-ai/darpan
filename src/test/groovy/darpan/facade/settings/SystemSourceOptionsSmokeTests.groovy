@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.*
  * DarpanSystemSource row, the retired OMS REST endpoints included. It now offers what the run pickers offer.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class SystemSourceOptionsSmokeTests {
     private ExecutionContext ec
 

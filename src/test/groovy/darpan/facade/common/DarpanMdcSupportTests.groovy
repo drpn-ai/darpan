@@ -1,5 +1,6 @@
 package darpan.facade.common
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.apache.logging.log4j.ThreadContext
 import org.junit.jupiter.api.AfterAll
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.*
  *     tenant user, and asserts MDC keys are set and then cleared.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class DarpanMdcSupportTests {
 
     // ── Smoke test state ──────────────────────────────────────────────────────

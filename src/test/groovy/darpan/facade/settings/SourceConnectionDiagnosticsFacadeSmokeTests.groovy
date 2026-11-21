@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * exercises the registry seam without depending on a connector component being installed.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class SourceConnectionDiagnosticsFacadeSmokeTests {
     private static final String SERVICE = "facade.SettingsFacadeServices.test#SourceConnection"
     private static final String CONNECTOR_ENTITY = "darpan.reconciliation.SourceSystemConnector"

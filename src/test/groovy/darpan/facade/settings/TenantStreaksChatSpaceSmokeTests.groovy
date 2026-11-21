@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * and a streaks save must not reset the timezone to the entity default.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class TenantStreaksChatSpaceSmokeTests {
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String TENANT = "KREWE"

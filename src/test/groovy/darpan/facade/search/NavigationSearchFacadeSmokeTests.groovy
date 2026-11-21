@@ -1,5 +1,6 @@
 package darpan.facade.search
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class NavigationSearchFacadeSmokeTests {
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String KREWE = "KREWE"

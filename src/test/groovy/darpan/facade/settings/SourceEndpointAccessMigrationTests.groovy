@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.reconciliation.automation.SourceEndpointAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * convention in {@code SourceEndpointAccessSupportTests.setup()}.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class SourceEndpointAccessMigrationTests {
     private ExecutionContext ec
 

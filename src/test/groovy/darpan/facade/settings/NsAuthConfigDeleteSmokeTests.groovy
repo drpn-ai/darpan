@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * stranger is refused exactly as the Shopify delete refuses them.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class NsAuthConfigDeleteSmokeTests {
     private static final String OWNER = "KREWE"
     private static final String MEMBER = "NS_DELETE_MEMBER"

@@ -1,5 +1,6 @@
 package darpan.facade.common
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-CLI-003: a request names its tenant (X-Darpan-Tenant); the saved preference never moves. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class RequestedTenantSmokeTests {
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String TENANT_A = ReconciliationSmokeTestSupport.TEST_COMPANY_USER_GROUP_ID

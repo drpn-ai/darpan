@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * be listed or moved from MINE.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class NotificationRouteServicesTests {
     private static final String MINE = "KREWE"
     private static final String OTHER = "GORJANA"

@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.AutomationFacadeSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * webhook, it re-parents another tenant's chat space into the caller's tenant.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class ChatSpaceCrossTenantSmokeTests {
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String VICTIM = "KREWE"

@@ -1,5 +1,6 @@
 package darpan.facade.peak
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * (GORJANA, the caller) must not list, read, change, delete or move into them, and cannot name A's automation in a run time.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class PeakPeriodFacadeCrossTenantSmokeTests {
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String A = "KREWE"

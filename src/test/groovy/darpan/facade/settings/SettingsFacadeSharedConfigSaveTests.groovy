@@ -1,5 +1,6 @@
 package darpan.facade.settings
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * still cannot distinguish "exists, not mine" from "does not exist" through the response text.</p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@SharedMoqui
 class SettingsFacadeSharedConfigSaveTests {
     private static final String OWNER = "KREWE"
     private static final String MEMBER = "SHARED_CFG_MEMBER"

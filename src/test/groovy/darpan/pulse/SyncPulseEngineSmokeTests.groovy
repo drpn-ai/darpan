@@ -335,6 +335,31 @@ class SyncPulseEngineSmokeTests {
     }
 
     @Test
+    void aScheduledFireKeepsTheSetButAnEditedCompareScopeDropsIt() {
+        ec.entity.makeDataLoader().dummyFks(true).xmlText('<entity-facade-xml type="seed"><darpan.rule.RuleSetCompareScope ' +
+                'compareScopeId="PULSE_E_SCOPE" ruleSetId="PULSE_E_RS" companyUserGroupId="' + A + '" objectType="Order"/></entity-facade-xml>').load()
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([automationId: AUTO, compareScopeId: "PULSE_E_SCOPE"]).update()
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(50))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(40))
+        arrived << "#A1" << "#A2"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(["#A1", "#A2"] as Set, SyncPulseSupport.presentKeysOf(SP))
+
+        // what a scheduled fire writes: the automation's own stamps move; the set stays
+        Thread.sleep(5)
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([automationId: AUTO,
+                lastScheduledFireTime: Timestamp.from(T0)]).update()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(10)))
+        assertEquals([], targetCalls.last(), "a scheduled fire does not make the pulse re-ask")
+
+        // an edit of the compare scope: the target is asked about every remembered key again
+        Thread.sleep(5)
+        ec.entity.makeValue("darpan.rule.RuleSetCompareScope").setAll([compareScopeId: "PULSE_E_SCOPE", objectType: "OrderLine"]).update()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(20)))
+        assertEquals(["#A1", "#A2"] as Set, targetCalls.last() as Set)
+    }
+
+    @Test
     void aPeakPeriodBoundaryDoesNotReAskRememberedKeys() {
         upstream["#A1"] = T0.minus(Duration.ofMinutes(50))
         arrived << "#A1"

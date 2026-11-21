@@ -94,7 +94,7 @@ class SyncPulseSupport {
      * Per pair, the keys the target has already confirmed present, each with its source created time (DAR-BE-328 task 13:
      * a pulse asks the target only about keys not in here). In memory only: empty after a restart, so the first pulse asks
      * about everything and correctness never depends on it. signature is what the target answers by (the check, its upstream
-     * side, its last update); a change drops the set. Allowance and cadence are not in it: presence in the target does not
+     * side, its compare scope and that scope's last update); a change drops the set. Allowance and cadence are not in it: presence in the target does not
      * depend on them. A key deleted in the target after it was seen keeps counting as present until it prunes out of the
      * window (about allowance + 2 x cadence + 7 minutes); the daily check covers deletions.
      */
@@ -123,9 +123,18 @@ class SyncPulseSupport {
         return fresh
     }
 
-    /** The check and side the target is asked through; its last update changes when its target or keys do. */
-    private static String presentSignature(Map pair, Map automation) {
-        return [normalize(pair.automationId), normalize(pair.upstreamSide), automation?.get("lastUpdatedStamp")].join("|")
+    /**
+     * The check, side and compare scope the target is asked through. The scope row's own last update changes when its keys
+     * or targets are edited; the automation's stamp is not used (every scheduled fire moves it).
+     */
+    private static String presentSignature(def ec, Map pair, Map automation) {
+        String scopeId = normalize(automation?.get("compareScopeId"))
+        Object scopeStamp = null
+        if (scopeId) {
+            scopeStamp = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", scopeId)
+                    .condition("companyUserGroupId", normalize(pair.companyUserGroupId)).disableAuthz().useCache(false).list()?.find()?.get("lastUpdatedStamp")
+        }
+        return [normalize(pair.automationId), normalize(pair.upstreamSide), scopeId, normalize(automation?.get("ruleSetId")), scopeStamp].join("|")
     }
 
     /** Adds the keys the target returned, with their created times, up to PRESENT_CAP; drops keys older than windowFrom. */
@@ -365,7 +374,7 @@ class SyncPulseSupport {
                 if (!createdByKey.containsKey(k) && o.sourceCreatedStamp != null) createdByKey.put(k, (o.sourceCreatedStamp as Timestamp).toInstant())
             }
             // the target is asked only about keys it has not already confirmed; a confirmed key still counts as present
-            PresentSet known = presentSetFor(syncPairId, presentSignature(pair, automation))
+            PresentSet known = presentSetFor(syncPairId, presentSignature(ec, pair, automation))
             known.keys.entrySet().removeIf { Map.Entry<String, Instant> e -> e.value.isBefore(window.from as Instant) }
             Set<String> confirmed = keys.findAll { known.keys.containsKey(it) } as Set<String>
             Set<String> toAsk = keys.findAll { !confirmed.contains(it) } as Set<String>

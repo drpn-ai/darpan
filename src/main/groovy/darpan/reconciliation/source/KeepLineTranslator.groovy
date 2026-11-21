@@ -1,6 +1,9 @@
 package darpan.reconciliation.source
 
 import groovy.json.JsonSlurper
+import org.moqui.entity.EntityCondition.ComparisonOperator
+import org.moqui.impl.entity.EntityConditionFactoryImpl
+import org.moqui.rules.ValueChecks
 
 /**
  * DAR-BE-318 (plan 3b-2b, front-end B). Turns moqui-rules "when" lines (RuleSetCondition maps, a tree by
@@ -14,7 +17,8 @@ import groovy.json.JsonSlurper
  *
  * Values. Compare values and list elements are converted to the field's kind as convert#FactValue does; the predicate
  * carries them as text (a number as its plain text with its scale, yes/no as true or false), and the Spark builder folds
- * and casts both sides. This class holds no system name and no Moqui or Spark dependency.
+ * and casts both sides. A param line is judged here by moqui-rules' ValueChecks and Moqui's in-memory condition, never a
+ * copy of them. This class holds no system name and no Spark dependency.
  */
 class KeepLineTranslator {
 
@@ -271,7 +275,7 @@ class KeepLineTranslator {
                 // a JSON number is its plain text: 1e2 is 100 on a text field and a whole number on a number field
                 Map converted = convert(kindId, element instanceof BigDecimal ? ((BigDecimal) element).toPlainString() : element)
                 if (converted.problem) throw new IllegalArgumentException("Keep line ${seq}: value ${element} in the list does not fit field ${field}".toString())
-                if (normalize && normalizedText(converted.value) == null) {
+                if (normalize && ValueChecks.normalizedText(converted.value) == null) {
                     throw new IllegalArgumentException("Keep line ${seq}: value \"${element}\" for field ${field} is no value once case and surrounding spaces are ignored".toString())
                 }
                 out.add(converted.value)
@@ -281,7 +285,7 @@ class KeepLineTranslator {
         Object single = compareValue instanceof BigDecimal ? ((BigDecimal) compareValue).toPlainString() : compareValue
         Map converted = convert(kindId, single)
         if (single == null || converted.problem) throw new IllegalArgumentException("Keep line ${seq}: value ${compareValue} does not fit field ${field}".toString())
-        if (normalize && normalizedText(converted.value) == null) {
+        if (normalize && ValueChecks.normalizedText(converted.value) == null) {
             throw new IllegalArgumentException("Keep line ${seq}: value \"${compareValue}\" for field ${field} is no value once case and surrounding spaces are ignored".toString())
         }
         out.add(converted.value)
@@ -318,71 +322,26 @@ class KeepLineTranslator {
 
     // ---------------------------------------------------------------------------------------------------------- params
 
+    /** The value check each operator is when the line normalizes or is a like (prepare#CompareLine valueCheckKinds). */
+    private static final Map<String, String> VALUE_CHECK_KINDS = [EQ: "=", NE: "!=", IN: "in", NOT_IN: "not in", LIKE: "like", NOT_LIKE: "not like"]
+    /** The Moqui condition every other line is (prepare#CompareLine, comparisonOperatorFromEnumId). */
+    private static final Map<String, ComparisonOperator> CONDITION_OPS = [EQ: ComparisonOperator.EQUALS, NE: ComparisonOperator.NOT_EQUAL,
+            LT: ComparisonOperator.LESS_THAN, LE: ComparisonOperator.LESS_THAN_EQUAL_TO, GT: ComparisonOperator.GREATER_THAN,
+            GE: ComparisonOperator.GREATER_THAN_EQUAL_TO, IS_NULL: ComparisonOperator.IS_NULL, IS_NOT_NULL: ComparisonOperator.IS_NOT_NULL]
+
     /**
      * A param line judged now: the param converted to the field's kind (a missing param is no value), then the line as
-     * moqui-rules judges it in memory. Normalized and LIKE lines follow ValueChecks.fixedValue; the rest follow Moqui's
-     * in-memory condition (EntityConditionFactoryImpl.compareByOperator): Groovy equality, so numbers compare by value,
-     * and Groovy ordering, where no value orders before every value.
+     * moqui-rules judges it, by moqui-rules' and Moqui's own code. A normalized line and every like is a value check
+     * (ValueChecks.fixedValue). Any other line is a Moqui condition judged in memory (EntityConditionFactoryImpl.compareByOperator):
+     * in is one equals per value, not in one not-equal per value, as prepare#CompareLine builds them.
      */
     private static boolean paramHolds(String seq, String field, String kindId, String op, boolean normalize, List<Object> values, Object raw) {
         Map converted = convert(kindId, raw)
         if (converted.problem) throw new IllegalArgumentException("Keep line ${seq}: parameter value ${raw} does not fit field ${field}".toString())
         Object fact = converted.value
-        if (normalize || LIKE_OPS.contains(op)) {
-            boolean like = LIKE_OPS.contains(op)
-            Object folded = foldParam(fact, normalize, like)
-            boolean found = folded != null && values.any { Object listed ->
-                Object one = foldParam(listed, normalize, like)
-                return one != null && (like ? likeMatches((String) folded, (String) one) : folded == one)
-            }
-            return op in ["EQ", "IN", "LIKE"] ? found : !found
-        }
-        switch (op) {
-            case "IS_NULL": return fact == null
-            case "IS_NOT_NULL": return fact != null
-            case "EQ": case "IN": return values.any { fact == it }
-            case "NE": case "NOT_IN": return values.every { fact != it }
-            default:
-                int order = fact == null ? -1 : ((Comparable) fact) <=> values[0]
-                switch (op) {
-                    case "LT": return order < 0
-                    case "LE": return order <= 0
-                    case "GT": return order > 0
-                    default: return order >= 0
-                }
-        }
-    }
-
-    private static Object foldParam(Object value, boolean normalize, boolean like) {
-        if (normalize) return normalizedText(value)
-        if (like) return value?.toString()?.toUpperCase(Locale.ROOT)
-        return value
-    }
-
-    /** ValueChecks.normalizedText: trimmed (String.trim) and upper-cased with Locale.ROOT; null or empty is no value. */
-    private static String normalizedText(Object value) {
-        String text = value?.toString()?.trim()
-        return text ? text.toUpperCase(Locale.ROOT) : null
-    }
-
-    /** ValueChecks.likeMatches: % any run (none included), _ one UTF-16 unit, no escape; linear, no regex. */
-    private static boolean likeMatches(String text, String pattern) {
-        int t = 0, p = 0, lastPercent = -1, textAtPercent = 0
-        while (t < text.length()) {
-            if (p < pattern.length() && pattern.charAt(p) != ('%' as char) &&
-                    (pattern.charAt(p) == ('_' as char) || pattern.charAt(p) == text.charAt(t))) {
-                t++; p++
-            } else if (p < pattern.length() && pattern.charAt(p) == ('%' as char)) {
-                lastPercent = p++
-                textAtPercent = t
-            } else if (lastPercent >= 0) {
-                p = lastPercent + 1
-                t = ++textAtPercent
-            } else {
-                return false
-            }
-        }
-        while (p < pattern.length() && pattern.charAt(p) == ('%' as char)) p++
-        return p == pattern.length()
+        if (normalize || LIKE_OPS.contains(op)) return ValueChecks.fixedValue(VALUE_CHECK_KINDS.get(op), fact, values, normalize)
+        if (op == "IN") return values.any { EntityConditionFactoryImpl.compareByOperator(fact, ComparisonOperator.EQUALS, it) }
+        if (op == "NOT_IN") return values.every { EntityConditionFactoryImpl.compareByOperator(fact, ComparisonOperator.NOT_EQUAL, it) }
+        return EntityConditionFactoryImpl.compareByOperator(fact, CONDITION_OPS.get(op), values ? values[0] : null)
     }
 }

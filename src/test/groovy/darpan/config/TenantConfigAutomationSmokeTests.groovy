@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
@@ -21,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*
  * automation's sources, filters and schedule back. Whether it is paused stays as it is: that is an operational switch,
  * as are its last and next firing, so neither makes a version.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TenantConfigAutomationSmokeTests {
 

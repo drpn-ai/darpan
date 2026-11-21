@@ -1,5 +1,6 @@
 package darpan.dataset
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * it writes a {metadata, records} file where the read asked, as a live extract does. Authz is ON with the facade grant
  * for refreshes; the scan runs as the job does, anonymous.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DatasetRefreshTests {
 

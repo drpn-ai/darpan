@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.admin.transfer.TransferSpecs
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*
  * pending, once per transaction, after the commit (a rolled-back save marks nothing). A minute job keeps a version for
  * each tenant quiet for 60 seconds, credited to whoever saved last, and writes none when nothing changed.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TenantConfigAutoVersionSmokeTests {
 

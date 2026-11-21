@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*
  * DAR-BE-304 Task 2. A DarpanSetting row changes what run admission, the retry backoff and the window ceiling do, with no
  * restart: the code reads the settings at each decision.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RunSettingsSmokeTests {
     private static final String ENTITY = "darpan.config.DarpanSetting"

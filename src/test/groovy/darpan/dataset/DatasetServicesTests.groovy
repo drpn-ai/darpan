@@ -1,5 +1,6 @@
 package darpan.dataset
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * DAR-BE-318 plan 3a, Task 3. A Dataset is one tenant's kept copy of one source read; its reads are the log. Authz is ON
  * with the facade grant, so DARPAN_ACTIVE_COMPANY_SCOPE is live; a foreign datasetId reads as "does not exist".
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DatasetServicesTests {
 

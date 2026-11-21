@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*
  * queries, conclusion codes, connections) kept as versions. A snapshot writes a version only when the config changed,
  * chains it to the one before, never carries a secret, and another tenant's version reads as not found.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TenantConfigVersionSmokeTests {
 

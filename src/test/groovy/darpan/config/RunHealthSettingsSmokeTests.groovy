@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.reconciliation.RunHealth
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.*
  * DAR-BE-304 Task 3. Run health and the stuck-run reaper read one set of thresholds from DarpanSettings: a row changes
  * both at once, and the old staleMinutes job parameter (still in prod data) no longer overrides it.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RunHealthSettingsSmokeTests {
     private static final String ENTITY = "darpan.config.DarpanSetting"

@@ -1,5 +1,6 @@
 package darpan.dataset
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * stub (interactive) or never reached (automation, served). Every Dataset row here claims a readThru far past its copy's,
  * so a serving rule that read the row instead of the manifest (ruling P3a-12) would serve windows the copy does not hold.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class KeptCopySupportTests {
 

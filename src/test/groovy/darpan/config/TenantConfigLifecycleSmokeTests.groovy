@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.*
  * and turns the old questions off, so a restore writes rows back by their own ids, into the tenant they came from: what
  * the version holds is switched on and put back, what it does not hold is switched off, nothing is deleted.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TenantConfigLifecycleSmokeTests {
 

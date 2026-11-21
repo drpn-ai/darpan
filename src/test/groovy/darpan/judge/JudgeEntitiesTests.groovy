@@ -1,5 +1,6 @@
 package darpan.judge
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * decisions and its parameter sets. Authz is ON with the facade grant (as RulesTenantScopeTests), so the
  * DARPAN_ACTIVE_COMPANY_SCOPE filter is live; a foreign checkId or decision id reads as "does not exist".
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class JudgeEntitiesTests {
 

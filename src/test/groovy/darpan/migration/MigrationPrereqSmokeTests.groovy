@@ -1,5 +1,6 @@
 package darpan.migration
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -14,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertIterableEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
 
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MigrationPrereqSmokeTests {
     private ExecutionContext ec

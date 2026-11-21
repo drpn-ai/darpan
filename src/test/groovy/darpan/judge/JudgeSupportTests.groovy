@@ -1,5 +1,6 @@
 package darpan.judge
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * (file2_status = hide, 40, HIDDEN), WAITING (claim NOT_CLOSED and file2_status = pending, 30, EXPECTED), BAD_DATA (claim
  * TOO_SMALL, 20, FINDING) and UNEXPLAINED (no rule).
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class JudgeSupportTests {
 

@@ -1,5 +1,6 @@
 package darpan.migration
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -21,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * without SSH or a Gradle task: run one migration by name, park a broken one, and read back WHY
  * something failed.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MigrationAgentSurfaceSmokeTests {
     private ExecutionContext ec

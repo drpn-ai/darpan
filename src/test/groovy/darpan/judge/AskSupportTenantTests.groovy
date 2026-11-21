@@ -1,5 +1,6 @@
 package darpan.judge
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-BE-318 plan 2, Task 5. The CheckAsk read is tenant-scoped: a foreign checkId gives no asks. Authz ON, as JudgeEntitiesTests. */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AskSupportTenantTests {
 

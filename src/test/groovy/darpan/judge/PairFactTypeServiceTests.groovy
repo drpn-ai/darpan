@@ -1,5 +1,6 @@
 package darpan.judge
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * facade grant (the harness frame removed), exactly as a production call. Two tenants: B cannot read or extend A's generated
  * fact type, and B generating for its own check makes its own.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PairFactTypeServiceTests {
 

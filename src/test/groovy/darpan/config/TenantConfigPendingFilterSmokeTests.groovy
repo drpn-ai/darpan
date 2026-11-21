@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
  * two services still work with it loaded: Moqui runs them (a scheduled job and an async mark) with authz disabled, where
  * no entity filter applies, so the job sees every tenant's row and a mark finds the row it updates.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TenantConfigPendingFilterSmokeTests {
 

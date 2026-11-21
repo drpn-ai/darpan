@@ -1,5 +1,6 @@
 package darpan.dataset
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * read fields (sent apart, as a live read sends them); refresh#Dataset sends both, the connector's dataset read parameters,
  * and records them with the files the read wrote beside its records. Another tenant's sources never count (A7).
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class KeptFieldsUnionTests {
 

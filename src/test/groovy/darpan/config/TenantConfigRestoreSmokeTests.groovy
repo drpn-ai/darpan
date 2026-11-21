@@ -1,5 +1,6 @@
 package darpan.config
 
+import darpan.reconciliation.support.SharedMoqui
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*
  * findings or runs point at is deleted. The current config is kept as a version first, so a restore can be undone.
  * A restore applies only the plan that was previewed.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TenantConfigRestoreSmokeTests {
 

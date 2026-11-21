@@ -3,6 +3,7 @@ package darpan.reconciliation.conclusion
 import darpan.facade.reconciliation.DiffDetailClassifier
 import darpan.facade.reconciliation.DiffDocumentStreamSupport
 import darpan.conclusion.brain.BrainConclude
+import darpan.reconciliation.source.KeepArtifacts
 import groovy.json.JsonSlurper
 
 /**
@@ -365,11 +366,14 @@ class RunConclusionSupport {
         Map<String, List<Map>> byFirst = keyFields.size() > 1 ? [:] : null
         boolean readable = extractFile?.exists() && spec.keyReliable != false
         if (readable) {
-            Map head = JsonRecordStream.forEachRecord(extractFile, "records") { Map record ->
+            // DAR-BE-318 (3b2b-11): under Keep the extract holds every record; set-aside ones are not kept.
+            Map head = KeepArtifacts.forEachKeptRecord(extractFile) { Map record ->
                 add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
                 addFirstKeyRecord(byFirst, "KEPT", record, keyFields, normalizer, neededFirstFields)
             }
             List exclusions = configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
+            // No metadata counts: the Keep summary's, when a Spark Keep ran (null = not applied, as before).
+            if (!exclusions) exclusions = KeepArtifacts.configuredExclusions(extractFile) ?: []
             Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
                 add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
                 addFirstKeyRecord(byFirst, "EXCLUDED", record, keyFields, normalizer, neededFirstFields)

@@ -1,5 +1,6 @@
 package darpan.reconciliation.conclusion
 
+import darpan.reconciliation.source.KeepArtifacts
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.Test
@@ -357,6 +358,81 @@ class RunConclusionSupportTests {
 
     private static Map onlyConclusion(File doc) {
         return (Map) ((Map) ((List) parse(doc).differences)[0]).conclusion
+    }
+
+    // ---- DAR-BE-318 (3b2b-11): Keep in Spark. The extract holds every record; the set-aside artifact says which were set aside.
+
+    private static final Map KEEP_COUNTS = [sequenceNum: 1, fieldExpression: "quantityShipped", excludedCount: 1, fieldAbsentCount: 0]
+
+    private File keepExtract(String name, List records, List setAsideRows, List configured) {
+        File f = extract(name, records)
+        KeepArtifacts.writeSummary(f, [rules: [[id: "A:1", sequenceNum: 1, label: "quantityShipped"]],
+                                       configuredExclusions: configured, keptCount: records.size() - setAsideRows.size(),
+                                       setAsideCount: setAsideRows.size()])
+        KeepArtifacts.writeRows(f, setAsideRows.collect { [it, "A:1"] }.iterator())
+        return f
+    }
+
+    @Test
+    void aSetAsideRecordIsNotKept() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        // Row 0 is set aside; it is the only record of order M5, so M5 must read as not found, not kept.
+        File ns = keepExtract("ns.json", [[orderId: "M5", orderLineId: "01"], [orderId: "M6", orderLineId: "01"]], [0], [KEEP_COUNTS])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        Map f2 = (Map) ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }
+        assertFalse(f2.presence == "KEPT")
+    }
+
+    @Test
+    void aSideFileSideReadsItsSetAsideRecordsAsExcluded() {
+        File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2,
+                [omsOrderId: "M1", orderItemSeqId: "01", statusId: "ITEM_COMPLETED", facilityId: "217"])])
+        File ns = keepExtract("ns.json", [[orderId: "M1", orderLineId: "01", quantityShipped: "0", quantityBackordered: "1", status: "B"]],
+                [0], [KEEP_COUNTS])
+        KeepArtifacts.writeSidecar(ns, KeepArtifacts.readSummary(ns))
+        RunConclusionSupport.concludeRun(args(doc, BACKORDER_RULES, ns))
+        Map netsuite = (Map) ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }
+        assertEquals("CONC_NS_BACKORDERED", onlyConclusion(doc).code)
+        assertEquals("EXCLUDED", netsuite.presence)
+    }
+
+    @Test
+    void aSideWithoutASideFileIsUnknownWhenSomethingWasSetAside() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M6", orderLineId: "01"], [orderId: "M7", orderLineId: "01"]], [1], [KEEP_COUNTS])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("UNEXPLAINED", onlyConclusion(doc).code)
+        assertEquals("UNKNOWN", ((List) onlyConclusion(doc).systems).find { it.side == "FILE_2" }.presence)
+    }
+
+    @Test
+    void zeroSetAsideIsKnown() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        File ns = keepExtract("ns.json", [[orderId: "M6", orderLineId: "01"]], [], [[sequenceNum: 1, excludedCount: 0, fieldAbsentCount: 0]])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("CONC_NEVER_REACHED_NS", onlyConclusion(doc).code)
+    }
+
+    @Test
+    void builtInsAloneLeaveTheSideKnown() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        // Built-ins never appear in configuredExclusions: the summary lists no tenant rule, so nothing can be unknown.
+        File ns = keepExtract("ns.json", [[orderId: "M6", orderLineId: "01"], [orderId: "M7", orderLineId: "01"]], [1], [])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("CONC_NEVER_REACHED_NS", onlyConclusion(doc).code)
+    }
+
+    @Test
+    void anOldExtractWithMetadataCountsReadsAsBefore() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        File ns = extract("ns.json", [[orderId: "M6", orderLineId: "01"]], [configuredExclusions: [[sequenceNum: 1, excludedCount: 0, fieldAbsentCount: 0]]])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertEquals("CONC_NEVER_REACHED_NS", onlyConclusion(doc).code)
+        // And with no .keep.json at all, an unfiltered extract keeps every record, exactly as today.
+        File plain = extract("plain.json", [[orderId: "M5", orderLineId: "01"]])
+        File doc2 = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
+        RunConclusionSupport.concludeRun(args(doc2, NEVER_REACHED_RULES, plain))
+        assertEquals("KEPT", ((List) onlyConclusion(doc2).systems).find { it.side == "FILE_2" }.presence)
     }
 
     // Final review I2: extractors write no sidecar when nothing was excluded, so a filtered side whose

@@ -28,6 +28,14 @@
             parameterName="limit"
             defaultValue="100"/>
 
+    <!-- DAR-BE-328 plan 3: the sync pulse. Seeded running: it does nothing until a sync pair has a pulse cadence. -->
+    <moqui.service.job.ServiceJob
+            jobName="run_SyncPulse"
+            description="Sample every due sync pair: orders waiting on the other system and orders past their allowance."
+            serviceName="pulse.SyncPulseServices.run#DuePulses"
+            defaultCronExpression="0 0/5 * * * ?"
+            defaultPaused="N" minIntervalMinutes="1"/>
+
     <!-- Audit H2.5 / H3.3: stuck-RUNNING reaper. Every 10 minutes, flip stale RUNNING/PENDING
          reconciliation rows to FAILED so the UI stops blocking re-triggers and the scanner stops
          skipping those windows. Threshold: the reaperStaleMinutes setting. -->
@@ -51,7 +59,7 @@
          default, which keeps the table forever: resuming the job deletes nothing until a period is set. -->
     <moqui.service.job.ServiceJob
             jobName="run_DataRetention_daily"
-            description="Delete audit findings, run results, AI transcripts and agent query logs older than their configured retention periods."
+            description="Delete audit findings, run results, AI transcripts, agent query logs and sync pulse samples older than their configured retention periods."
             serviceName="retention.RetentionServices.run#Retention"
             defaultCronExpression="0 30 3 * * ?"
             defaultPaused="Y" minIntervalMinutes="360" resumePreviewService="retention.RetentionServices.dryRun#Retention"/>

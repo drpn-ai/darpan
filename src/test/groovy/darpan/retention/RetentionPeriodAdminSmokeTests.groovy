@@ -250,7 +250,7 @@ class RetentionPeriodAdminSmokeTests {
         setSetting(QL_KEY, "90")
         asSystem { tenantPeriod(B, null) }
         Map got = ok(svc("get#RetentionPeriods", [:])).result.retention
-        assertEquals(4, got.instance.size())
+        assertEquals(5, got.instance.size())
         assertEquals([90, "ROW"], got.instance.find { it.table == QUERY_LOG }.with { [it.periodDays, it.source] })
         assertEquals(["DEFAULT"], got.instance.findAll { it.table != QUERY_LOG }*.source.unique())
         assertEquals([[tenantUserGroupId: B, table: QUERY_LOG, periodDays: null]], got.tenants.collect { it.subMap(["tenantUserGroupId", "table", "periodDays"]) })

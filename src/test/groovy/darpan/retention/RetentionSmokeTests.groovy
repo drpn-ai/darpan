@@ -34,7 +34,8 @@ class RetentionSmokeTests {
     private static final List<String> WIPE = ["darpan.audit.AuditFindingRecord", "darpan.audit.AuditFindingCondition",
             "darpan.audit.AuditFindingEvent", "darpan.audit.AuditFinding", "darpan.reconciliation.ReconciliationRunStep",
             "darpan.reconciliation.ReconciliationAutomationExecution", "darpan.reconciliation.ReconciliationRunResult",
-            "darpan.agent.AgentMessage", "darpan.agent.AgentTurn", "darpan.agent.AgentConversation", "darpan.agent.AgentQueryLog"]
+            "darpan.agent.AgentMessage", "darpan.agent.AgentTurn", "darpan.agent.AgentConversation", "darpan.agent.AgentQueryLog",
+            "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPair"]
 
     private ExecutionContext ec
 
@@ -80,12 +81,46 @@ class RetentionSmokeTests {
     // ------------------------------------------------------------------ tests
 
     @Test
-    void "with no period set a run deletes nothing and writes no audit row"() {
+    void "with no period set a run deletes nothing and only sync pulse samples carry a default"() {
         Map before = snapshot()
         Map out = run("run#Retention", [:])
-        assertTrue(out.tables.every { it.status == RetentionSupport.KEEP_FOREVER && it.rows == 0L }, "${out.tables}")
+        List<Map> others = (out.tables as List<Map>).findAll { it.table != RetentionSupport.SYNC_PULSE_SAMPLE }
+        assertTrue(others.every { it.status == RetentionSupport.KEEP_FOREVER && it.rows == 0L }, "${out.tables}")
+        Map pulse = table(out, RetentionSupport.SYNC_PULSE_SAMPLE)
+        assertEquals([RetentionSupport.DELETED, 30, 0L], [pulse.status, pulse.periodDays, pulse.rows], "DAR-BE-328: 30 days unless set")
         assertEquals(before, snapshot(), "every row is still there")
-        assertEquals(0L, auditRowCount())
+    }
+
+    @Test
+    void "sync pulse samples and closed pulse orders expire at 30 days and an open order stays"() {
+        asSystem {
+            [A, B].each { String t ->
+                upsert("darpan.pulse.SyncPair", [syncPairId: "${t}_SP".toString(), companyUserGroupId: t, automationId: "${t}_AUTO".toString(),
+                        upstreamSide: "FILE_1", allowanceMinutes: 60L])
+                [OLD: OLD, NEW: RECENT].each { String age, Timestamp when ->
+                    upsert("darpan.pulse.SyncPulseSample", [sampleId: "${t}_S_${age}".toString(), syncPairId: "${t}_SP".toString(),
+                            companyUserGroupId: t, sampleStamp: when])
+                    upsert("darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_${age}".toString(), syncPairId: "${t}_SP".toString(),
+                            companyUserGroupId: t, recordKey: "#${age}".toString(), firstPastStamp: OLD, closedStamp: when])
+                }
+                upsert("darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_OPEN".toString(), syncPairId: "${t}_SP".toString(),
+                        companyUserGroupId: t, recordKey: "#OPEN", firstPastStamp: OLD, closedStamp: null])
+            }
+        }
+        Map out = run("run#Retention", [tenantUserGroupId: A])
+
+        Map pulse = table(out, RetentionSupport.SYNC_PULSE_SAMPLE)
+        assertEquals([RetentionSupport.DELETED, 1L], [pulse.status, pulse.rows])
+        assertEquals(1L, pulse.dependentRows["darpan.pulse.SyncPulseOrder"])
+        assertEquals(["${A}_S_NEW".toString()], ids("darpan.pulse.SyncPulseSample", "sampleId", A))
+        assertEquals(["${A}_O_NEW".toString(), "${A}_O_OPEN".toString()], ids("darpan.pulse.SyncPulseOrder", "pulseOrderId", A),
+                "the order closed long ago went; one closed yesterday and one still open stay")
+        assertEquals(2, ids("darpan.pulse.SyncPulseSample", "sampleId", B).size(), "another tenant's samples are not touched")
+        assertEquals(3, ids("darpan.pulse.SyncPulseOrder", "pulseOrderId", B).size())
+
+        setSetting("darpan.retention.syncPulseSample.days", "500")
+        run("run#Retention", [tenantUserGroupId: B])
+        assertEquals(2, ids("darpan.pulse.SyncPulseSample", "sampleId", B).size(), "a longer period keeps them")
     }
 
     @Test

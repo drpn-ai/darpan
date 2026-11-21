@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  DAR-BE-266, DAR-BE-306. Per-table retention: audit findings, run results, AI transcripts (AgentMessage) and agent query logs.
+  DAR-BE-266, DAR-BE-306. Per-table retention: audit findings, run results, AI transcripts (AgentMessage), agent query logs and sync pulse samples (DAR-BE-328).
   Each table's instance period is the optional setting darpan.retention.<table>.days and a tenant may carry its own period
   for a table (darpan.retention.TenantRetentionPeriod, wins for that tenant only); unset and no tenant row keeps the table
   forever, so nothing is deleted until a period is set (DAR-OPS-017 decision 7). Both are edited in production with
@@ -17,7 +17,7 @@
         <in-parameters>
             <parameter name="tenantUserGroupId"><description>One tenant; blank sweeps every tenant.</description></parameter>
             <parameter name="periodDays" type="Map"><description>Optional preview of the instance periods by table key (AUDIT_FINDING,
-                RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), in days (or forever), used instead of the stored ones. A tenant's own
+                RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG, SYNC_PULSE_SAMPLE), in days (or forever), used instead of the stored ones. A tenant's own
                 period still wins for that tenant.</description></parameter>
             <parameter name="tenantPeriodDays" type="Map"><description>Optional preview of one tenant's own periods by table key,
                 in days, forever, or inherit (follow the instance period); needs tenantUserGroupId and covers that tenant only.</description></parameter>

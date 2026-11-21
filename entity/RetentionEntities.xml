@@ -12,7 +12,7 @@
             whatever the instance period is; no row means the tenant follows the instance period.</description>
         <field name="tenantUserGroupId" type="id" is-pk="true"><description>The tenant (a company UserGroup).</description></field>
         <field name="tableKey" type="id" is-pk="true">
-            <description>AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE or AGENT_QUERY_LOG.</description></field>
+            <description>AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG or SYNC_PULSE_SAMPLE.</description></field>
         <field name="periodDays" type="number-integer"><description>Days to keep; empty = keep forever.</description></field>
         <field name="lastChangedByUserId" type="id"/>
         <field name="lastChangedDate" type="date-time"/>

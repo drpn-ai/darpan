@@ -13,11 +13,12 @@ import java.sql.Date
 import java.sql.Timestamp
 
 /**
- * DAR-BE-266, DAR-BE-306. Deletes rows older than a per-table retention period, one tenant at a time, in small batches.
+ * DAR-BE-266, DAR-BE-306, DAR-BE-328. Deletes rows older than a per-table retention period, one tenant at a time, in small batches.
  *
  * <p><strong>Off until configured.</strong> Each table's instance period is an optional setting
  * ({@code darpan.retention.<table>.days}, edited in production through admin.RetentionAdminServices). Unset means keep
- * forever, so a deploy deletes nothing until a period is set (DAR-OPS-017 decision 7).</p>
+ * forever, so a deploy deletes nothing until a period is set (DAR-OPS-017 decision 7). Sync pulse samples
+ * (SYNC_PULSE_SAMPLE, DAR-BE-328) are the one exception: their setting defaults to 30 days, so they never pile up.</p>
  *
  * <p><strong>Per tenant.</strong> A tenant may carry its own period for a table (TenantRetentionPeriod): its days, or
  * "forever" (an empty periodDays), and it wins over the instance period for that tenant's rows only. No row follows the
@@ -41,6 +42,7 @@ class RetentionSupport {
     static final String RUN_RESULT = "RUN_RESULT"
     static final String AGENT_MESSAGE = "AGENT_MESSAGE"
     static final String AGENT_QUERY_LOG = "AGENT_QUERY_LOG"
+    static final String SYNC_PULSE_SAMPLE = "SYNC_PULSE_SAMPLE"
 
     /** Table key to the setting that holds its instance period in days (optional: unset = keep forever). */
     static final Map<String, String> TABLE_SETTINGS = [
@@ -48,6 +50,8 @@ class RetentionSupport {
             (RUN_RESULT)     : "darpan.retention.runResult.days",
             (AGENT_MESSAGE)  : "darpan.retention.agentMessage.days",
             (AGENT_QUERY_LOG): "darpan.retention.agentQueryLog.days",
+            // DAR-BE-328: 30 days by default (the catalog's default), so samples never pile up unbounded.
+            (SYNC_PULSE_SAMPLE): "darpan.retention.syncPulseSample.days",
     ].asImmutable()
     static final String BATCH_SIZE_SETTING = "darpan.retention.batchSize"
     static final String TENANT_PERIOD_ENTITY = "darpan.retention.TenantRetentionPeriod"
@@ -212,6 +216,14 @@ class RetentionSupport {
                         { find -> find.condition("createdDate", EntityCondition.LESS_THAN, cutoff) }, [], [])
             case AGENT_MESSAGE:
                 return sweepAgentMessages(ec, tenantId, cutoff, dryRun, batch)
+            case SYNC_PULSE_SAMPLE:
+                // Samples by their stamp; with them, pulse orders closed before the same cutoff (an open one always stays).
+                Map counts = sweepParents(ec, tenantId, dryRun, batch, "darpan.pulse.SyncPulseSample", "sampleId",
+                        { find -> find.condition("sampleStamp", EntityCondition.LESS_THAN, cutoff) }, [], [])
+                Map closedOrders = sweepParents(ec, tenantId, dryRun, batch, "darpan.pulse.SyncPulseOrder", "pulseOrderId",
+                        { find -> find.condition("closedStamp", EntityCondition.LESS_THAN, cutoff) }, [], [])
+                counts["darpan.pulse.SyncPulseOrder"] = closedOrders._rows
+                return counts
             default:
                 throw new IllegalArgumentException("Unknown retention table ${table}")
         }

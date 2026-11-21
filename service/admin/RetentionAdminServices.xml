@@ -14,7 +14,7 @@
         <in-parameters>
             <parameter name="tenantUserGroupId"><description>One tenant; blank covers every tenant.</description></parameter>
             <parameter name="periodDays" type="Map"><description>Optional preview of the instance periods in days (or forever) by table key
-                (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG), used instead of the stored ones.</description></parameter>
+                (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG, SYNC_PULSE_SAMPLE), used instead of the stored ones.</description></parameter>
             <parameter name="tenantPeriodDays" type="Map"><description>Optional preview of one tenant's own periods by table key (days,
                 forever or inherit); needs tenantUserGroupId and covers that tenant only.</description></parameter>
         </in-parameters>
@@ -73,7 +73,7 @@
 
     <service verb="update" noun="RetentionPeriods" allow-remote="true" authenticate="true">
         <description>Sets, for the instance or for one tenant, how long each table keeps its rows. periods maps a table key
-            (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG) to a whole number of days from 1 to 3650, to forever, or (a
+            (AUDIT_FINDING, RUN_RESULT, AGENT_MESSAGE, AGENT_QUERY_LOG, SYNC_PULSE_SAMPLE) to a whole number of days from 1 to 3650, to forever, or (a
             tenant only) to inherit (drop the tenant's own period and follow the instance's). A tenant's own period, including forever,
             wins over the instance period for that tenant's rows only. Refused as a whole, with the reason and nothing saved: an
             unknown table, a value that is not one of those, inherit at instance level, an unknown tenant, forever at instance level

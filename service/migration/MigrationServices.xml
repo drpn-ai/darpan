@@ -194,7 +194,10 @@
                  the caller's authz. -->
             <entity-find entity-name="darpan.migration.DarpanMigrationRun" list="ledgerRows" limit="historyLimit">
                 <econdition field-name="migrationId"/>
+                <!-- runId breaks a same-millisecond tie (two attempts recorded back to back on a warm JVM);
+                     without it the DB returns the primary-key order, i.e. oldest first. -->
                 <order-by field-name="-startedDate"/>
+                <order-by field-name="-runId"/>
             </entity-find>
             <!-- Built key by key, not getValueMapList(): the admin wrapper serialises these maps as-is,
                  so the key set and its order are part of the wire shape. -->

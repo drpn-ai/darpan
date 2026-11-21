@@ -83,7 +83,7 @@
     </service>
 
     <service verb="save" noun="PeakPeriod" allow-remote="true" authenticate="true">
-        <description>Create or update one peak period for the active tenant. Peak hours are both set or both blank; active periods may not overlap.</description>
+        <description>Create or update one peak period for the active tenant. Peak hours are both set or both blank; active periods may not overlap. An omitted hotwaxReadSharePct clears the share, as omitted peak hours clear the hours; an omitted netsuiteSerial keeps the stored value.</description>
         <in-parameters>
             <parameter name="peakPeriodId"/>
             <parameter name="periodName"/>

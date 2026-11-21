@@ -221,6 +221,87 @@ class KeepStepSupportTests {
         assertEquals(["1:status", "2:channel", "2:channel", "1:Acme payment lines"], ((List<Map>) sidecar.records)*._excludedBy)
     }
 
+    private static final String UNKEYED = "9:Unkeyed payment lines"
+
+    /** A side file as an extractor that still drops records writes it: records the extract does not hold. */
+    private static File extractorSideFile(File file, boolean truncated = false, Integer total = null) {
+        File side = sidecarOf(file)
+        side.setText('{"sourceFileName":"acme-orders.json","truncated":' + truncated + ',"total":' + (total ?: 2) + ',"records":[' +
+                '{"id":"x1","amount":24.00,"_excludedBy":"' + UNKEYED + '"},{"id":"x2","amount":1.0E+7,"_excludedBy":"' + UNKEYED + '"}]}', "UTF-8")
+        return side
+    }
+
+    @Test
+    void anExtractorSideFileKeepsItsRecordsAndGainsSparksSetAsides() {
+        File file = extract(sixRecords())
+        File side = extractorSideFile(file)
+
+        ingest(file, sideKeep(rules(), true))
+
+        Map sidecar = new groovy.json.JsonSlurper().parse(side, "UTF-8") as Map
+        assertEquals(["x1", "x2", "2", "3", "4", "5"], ((List<Map>) sidecar.records)*.id)
+        assertEquals([UNKEYED, UNKEYED, "1:status", "2:channel", "2:channel", "1:Acme payment lines"], ((List<Map>) sidecar.records)*._excludedBy)
+        assertEquals(6, sidecar.total)
+        assertEquals(false, sidecar.truncated)
+        // the extractor's records are copied as written, numbers included
+        assertTrue(side.getText("UTF-8").contains('"amount":24.00') && side.getText("UTF-8").contains('"amount":1.0E+7'), side.getText("UTF-8"))
+        assertEquals([total: 2, kept: 2, truncated: false], KeepArtifacts.readSummary(file).get(KeepStepSupport.EXTRACTOR_SIDE_FILE))
+    }
+
+    @Test
+    void reRunningKeepOverItsOwnOutputDoublesNothing() {
+        File file = extract(sixRecords())
+        File side = extractorSideFile(file)
+        ingest(file, sideKeep(rules(), true))
+        String once = side.getText("UTF-8")
+
+        // keptValues then ingest (one run), then a replay: each pass takes back only the extractor's part
+        KeepStepSupport.keptValues(ec, file, sideKeep(rules(), true), "id")
+        ingest(file, sideKeep(rules(), true))
+        assertEquals(once, side.getText("UTF-8"))
+
+        // a pass that now sets nothing aside puts the extractor's file back as it was
+        List<Map> never = [[id: "A:1", sequenceNum: 1, label: "status", source: "TENANT", operator: "EXCLUDE_IN", values: ["nope"],
+                            tests: [[test: cmp("status", "IN", ["nope"]), reason: "VALUE"]]]]
+        ingest(file, sideKeep(never, true))
+        Map sidecar = new groovy.json.JsonSlurper().parse(side, "UTF-8") as Map
+        assertEquals(["x1", "x2"], ((List<Map>) sidecar.records)*.id)
+        assertEquals(2, sidecar.total)
+        assertFalse(KeepArtifacts.readSummary(file).containsKey(KeepStepSupport.EXTRACTOR_SIDE_FILE))
+        assertTrue(side.getText("UTF-8").contains('"amount":24.00'))
+    }
+
+    @Test
+    void aSideFileOnlyKeepWroteIsRewrittenNotDoubled() {
+        File file = extract(sixRecords())
+        ingest(file, sideKeep(rules(), true))
+        String once = sidecarOf(file).getText("UTF-8")
+        ingest(file, sideKeep(rules(), true))
+
+        assertEquals(once, sidecarOf(file).getText("UTF-8"))
+        assertEquals(4, (ExcludedRecordsSidecar.read(file).records as List).size())
+        assertEquals([total: 0, kept: 0, truncated: false], KeepArtifacts.readSummary(file).get(KeepStepSupport.EXTRACTOR_SIDE_FILE))
+
+        List<Map> never = [[id: "A:1", sequenceNum: 1, label: "status", source: "TENANT", operator: "EXCLUDE_IN", values: ["nope"],
+                            tests: [[test: cmp("status", "IN", ["nope"]), reason: "VALUE"]]]]
+        ingest(file, sideKeep(never, true))
+        assertFalse(sidecarOf(file).exists(), "nothing set aside now and no extractor part: no side file")
+    }
+
+    @Test
+    void anExtractorFilesTruncationAndTotalCarryOver() {
+        File file = extract(sixRecords())
+        File side = extractorSideFile(file, true, 60000)
+
+        ingest(file, sideKeep(rules(), true))
+
+        Map sidecar = new groovy.json.JsonSlurper().parse(side, "UTF-8") as Map
+        assertEquals(60004, sidecar.total)
+        assertEquals(true, sidecar.truncated)
+        assertEquals(6, ((List) sidecar.records).size())
+        assertEquals([total: 60000, kept: 2, truncated: true], KeepArtifacts.readSummary(file).get(KeepStepSupport.EXTRACTOR_SIDE_FILE))
+    }
+
     @Test
     void setAsideRecordsCarryEveryConclusionFieldOfTheSide() {
         // Aditi: set-aside records carry the projection kept ones do (key, check fields, conclusion fields, Keep fields).

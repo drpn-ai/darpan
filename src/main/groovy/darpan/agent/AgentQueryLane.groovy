@@ -43,8 +43,5 @@ class AgentQueryLane {
     }
 
     /** Test seam: restores the lane's initial state (same as reset). Idempotent; never throws. */
-    static synchronized void resetForTests() {
-        IN_FLIGHT.clear()
-        total = 0
-    }
+    static synchronized void resetForTests() { reset() }
 }

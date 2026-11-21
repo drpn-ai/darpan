@@ -40,11 +40,12 @@ class RunConclusionSupport {
      * DAR-BE-151: findings the brain takes per run; past it the tree concludes the rest, with a warning. Each is kept slim
      * (the present record and the other side's first-field presence only), so the pass stays bounded. Tunable for tests.
      */
-    static int maxBrainFindings = 20_000
+    static final int DEFAULT_MAX_BRAIN_FINDINGS = 20_000
+    static int maxBrainFindings = DEFAULT_MAX_BRAIN_FINDINGS
 
     /** Restores the tunable cap (DAR-OPS-026 shared-Moqui harness). */
     static void resetForTests() {
-        maxBrainFindings = 20_000
+        maxBrainFindings = DEFAULT_MAX_BRAIN_FINDINGS
     }
     /** DAR-BE-118: ids per lookup call. */
     static final int LOOKUP_BATCH = 500

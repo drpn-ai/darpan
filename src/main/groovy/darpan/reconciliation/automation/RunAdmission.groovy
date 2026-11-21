@@ -265,7 +265,6 @@ class RunAdmission {
     static void resetForTests() {
         try {
             RunAdmission old = SHARED
-            try { old.drain() } catch (Throwable ignored) { }
             synchronized (old) {
                 if (old.running > 0 || old.waitingTotal() > 0) {
                     logger.warn("RunAdmission.resetForTests: runs still active or waiting, SHARED left in place")

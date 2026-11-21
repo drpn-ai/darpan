@@ -16,6 +16,7 @@ import com.fasterxml.jackson.core.JsonFactory
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.core.JsonToken
+import com.fasterxml.jackson.databind.ObjectMapper
 import groovy.json.JsonOutput
 import org.apache.spark.sql.Dataset
 
@@ -493,6 +494,39 @@ class JudgeReplaySupport {
     }
 
     private static final JsonFactory JSON = new JsonFactory()
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+
+    /**
+     * True when the captured extract's own read filtered it: its metadata reports read-time configuredExclusions (top level or
+     * under filters, where the conclude pass reads them). Such a capture never keeps in Spark in a replay (replay#CheckJudgement):
+     * its records are already gone, and a zero-count Keep summary would turn the conclude pass's "unknown" into "not found".
+     * Only the metadata is read; the records are skipped token by token. A missing or unreadable extract also answers true, so
+     * the replay keeps today's read and the compare reports the problem.
+     */
+    static boolean filteredAtRead(File extract) {
+        if (extract == null || !extract.isFile()) return true
+        try {
+            JsonParser parser = MAPPER.getFactory().createParser(extract)
+            try {
+                if (parser.nextToken() != JsonToken.START_OBJECT) return true
+                while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                    String name = parser.currentName()
+                    parser.nextToken()
+                    if (name == "metadata" && parser.currentToken() == JsonToken.START_OBJECT) {
+                        Map metadata = MAPPER.readValue(parser, Map)
+                        Object nested = metadata.get("filters") instanceof Map ? ((Map) metadata.get("filters")).get("configuredExclusions") : null
+                        return [metadata.get("configuredExclusions"), nested].any { it instanceof List && !((List) it).isEmpty() }
+                    }
+                    parser.skipChildren()
+                }
+                return false
+            } finally {
+                parser.close()
+            }
+        } catch (IOException ignored) {
+            return true
+        }
+    }
 
     /**
      * The extract's side file, as its extractor wrote it, into dir. A side file a Spark Keep merged its set-aside records into

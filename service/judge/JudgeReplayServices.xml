@@ -89,15 +89,23 @@
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
             </entity-find>
             <set field="systemBySide" from="sourceList.collectEntries { [(it.fileSide): it.systemEnumId] }"/>
-            <!-- DAR-BE-318 (plan 3b-2b, Ruling 3b2b-3): each side keeps as the scope's run would today, from the scope's own
-                 filter rows read for the replaying tenant (KeepPlanSupport.sideKeep pins the read to it). Reading the connector
-                 registry row calls no system. -->
+            <!-- DAR-BE-318 (plan 3b-2b, Ruling 3b2b-3): a side keeps in Spark in the replay only where the live interactive run
+                 would: the run path's connector (RunExtractSupport.resolveExtractConnector) and its gate (RunExtractSupport.sideKeep:
+                 placement, Ruling 3b2b-23's sparkKeepsSide, the keyed-on-records guard), with the scope's own filter rows read for
+                 the replaying tenant. That is the compare scope's filters, not the automation's own store (Ruling 3b2b-15), so an
+                 automation whose filters drifted replays under its run's. A capture its read already filtered (its metadata
+                 reports read-time configuredExclusions) never keeps in Spark: Spark would find nothing left and write zero
+                 counts the conclude pass reads as authoritative. A side left out keeps reading its side file exactly as before.
+                 Reading the connector registry row calls no system. -->
             <set field="keepBySide" from="[:]"/>
             <iterate list="sourceList" entry="source">
-                <set field="connector" from="darpan.reconciliation.automation.SourceSystemConnectorSupport.resolve(ec, source.systemEnumId)"/>
-                <script>keepBySide.put(source.fileSide, darpan.reconciliation.source.KeepPlanSupport.sideKeep(ec, scope.compareScopeId,
-                        source.fileSide, tenantId, connector,
-                        darpan.reconciliation.automation.SourceExtractOptionsSupport.runtimeOptions(connector, source.extractParametersJson)))</script>
+                <set field="capturedExtract" from="darpan.facade.reconciliation.RunVerificationSupport.resolveLocationFile(ec, picked.files[source.fileSide]?.fileLocation)"/>
+                <if condition="!darpan.judge.JudgeReplaySupport.filteredAtRead(capturedExtract)">
+                    <set field="sideKeep" from="darpan.facade.reconciliation.RunExtractSupport.sideKeep(ec, source, source.fileSide,
+                            darpan.facade.reconciliation.RunExtractSupport.resolveExtractConnector(ec, source))"/>
+                    <if condition="darpan.reconciliation.source.KeepStepSupport.applies(sideKeep)">
+                        <script>keepBySide.put(source.fileSide, sideKeep)</script></if>
+                </if>
             </iterate>
 
             <set field="replayed" from="darpan.judge.JudgeReplaySupport.replay(ec, [tenantId: tenantId, check: check.getMap(),

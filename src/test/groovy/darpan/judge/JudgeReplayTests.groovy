@@ -73,6 +73,8 @@ class JudgeReplayTests {
     private static final String EXECUTION_A2 = "JRT_EXEC_A2"
     private static final String RUN_FOLDER_A2 = "reconciliation-runs/" + EXECUTION_A2
     private static final String CAPTURED_LOOKUP = "lookup-orderInfo-1762000000000.json"
+    private static final String KEPT_IN_SPARK = "judge.JudgeReplayTestExtractionServices.extract#KeptInSpark"
+    private static final String FILTERED_AT_READ = "judge.JudgeReplayTestExtractionServices.extract#FilteredAtRead"
     private static final List<String> WATCHED = ["rules.RuleSet", "rules.RuleSetRule", "rules.RuleSetCondition", "rules.FactType",
             "rules.FactField", "darpan.judge.CheckDecision", "darpan.judge.DecisionOutcome", "darpan.audit.AuditCheck",
             "darpan.audit.AuditFinding", "darpan.audit.AuditStatement", "darpan.rule.RuleSetCompareScope"]
@@ -321,8 +323,8 @@ class JudgeReplayTests {
      * Ruling P2-24. The scope has a conclusion lookup and the check a CheckAsk, so today's fetchLookup would resolve a connector
      * and call its extract. With the lookup captured, its answers appear (the conclusion and the ask's cause); without, nothing is
      * fetched, each is named in a warning, and no field appears. The live AskSupport.fetcher is never swapped or used.
-     * DAR-BE-318 (plan 3b-2b): the only registry read is each side's Keep plan (replay#CheckJudgement reads the side's connector
-     * row by its system, once per side: resolve); no system is called.
+     * DAR-BE-318 (plan 3b-2b): the only registry reads are a side's Keep plan (replay#CheckJudgement resolves the side's connector
+     * row as the run path does, RunExtractSupport.resolveExtractConnector) for a capture its read did not filter; no system is called.
      */
     @Test
     void aReplayCallsNoSystemWhetherItsLookupsWereCapturedOrNot() {
@@ -332,7 +334,7 @@ class JudgeReplayTests {
         SourceSystemConnectorSupport.metaClass.static.resolve = { def e, String id -> keepPlanReads.add(id); return null }
         SourceSystemConnectorSupport.metaClass.static.resolveBySystemEnumId = { def e, String id -> count() }
         SourceSystemConnectorSupport.metaClass.static.resolveByExtractServiceName = { def e, String name -> count() }
-        SourceSystemConnectorSupport.metaClass.static.resolveByExpectedSourceConfigType = { def e, String type -> count() }
+        SourceSystemConnectorSupport.metaClass.static.resolveByExpectedSourceConfigType = { def e, String type -> keepPlanReads.add("configType:" + type); return null }
         Closure liveFetcher = AskSupport.fetcher
         try {
             // The stub is live: today's lookup reaches it.
@@ -344,7 +346,8 @@ class JudgeReplayTests {
             Map captured = replay(checkA, RUN_FOLDER_A, true)
             assertEquals([], captured.errors)
             assertEquals(0, connectorCalls, "captured: no extract or lookup connector was resolved")
-            assertEquals(["NETSUITE", "SHOPIFY"], keepPlanReads.sort(), "only each side's Keep plan read its registry row")
+            assertEquals(["SHOPIFY", "configType:null"], keepPlanReads.sort(),
+                    "only the Keep plan read the registry, by the run path's resolution; NetSuite's capture was filtered at read, so not even that")
             assertEquals([], captured.out.replayWarnings)
             assertFalse(captured.out.judgeWarnings.any { it.contains("not captured") }, "${captured.out.judgeWarnings}")
             assertEquals("REFUNDED_IN_SHOPIFY", captured.out.judgedFindings.find { it.recordKey == "SR-1007" }.causeOutcomeId,
@@ -491,9 +494,11 @@ class JudgeReplayTests {
 
     /**
      * Discovery risk 3: HotWax order grain, HotWax returns and Shopify return refs write no side file, so the judge read every
-     * record their filters set aside as ABSENT. Now the replay keeps such a side in Spark (its connector takes Keep and writes
-     * no side file) and the compare's setAsideBySide reaches the judge: the record reads SET_ASIDE. Core has no such system,
-     * so the fixture's Shopify side stands in for them; the grain only shapes the compare id, which Spark computes (Task 11).
+     * record their filters set aside as ABSENT. On a capture its read did not filter (taken once its extractor stops filtering),
+     * the replay keeps such a side in Spark (its connector takes Keep, writes no side file and its extract no longer declares
+     * the filter parameter) and the compare's setAsideBySide reaches the judge: the record reads SET_ASIDE. Core has no such
+     * system, so the fixture's Shopify side (no read-time exclusions) stands in for them; the grain only shapes the compare id,
+     * which Spark computes (Task 11). An old, read-filtered capture of such a side stays as it was (anOldReadFiltered...).
      */
     @Test
     void aSideWithoutASideFileNowReadsSetAside() {
@@ -568,20 +573,98 @@ class JudgeReplayTests {
     }
 
     /**
-     * Carry note 6: a capture from before Keep moved into Spark (filtered by its extractor, a side file, no .keep.json) still
-     * replays from its side file when its side now keeps in Spark: Spark sets nothing more aside and the side file is read whole.
+     * Carry note 6, fix round 1 (review I1): a capture from before Keep moved into Spark (filtered by its extractor, a side file,
+     * read-time configuredExclusions in its metadata, no .keep.json) replays from its side file as before, even where its side
+     * would keep in Spark today: the replay runs no Keep over it and writes no .keep.json.
      */
     @Test
     void anOldCaptureStillReadsItsSideFile() {
         Map out = withConnectors([NETSUITE: "Y"]) { ok(replay(checkA, RUN_FOLDER_A, true)) }
         File file2 = new File(replayDir(out.replayFolder as String), "extracts/FILE_2")
-        assertTrue(new File(file2, "netsuite-rmas.keep.json").isFile(), "the side kept in Spark")
-        assertFalse(new File(file2, "netsuite-rmas.set-aside.rows").exists(), "and set nothing aside")
+        assertFalse(new File(file2, "netsuite-rmas.keep.json").exists(), "its read filtered it: no Keep ran")
+        assertFalse(new File(file2, "netsuite-rmas.set-aside.rows").exists())
         assertArrayEquals(fixture().resolve("netsuite-rmas.excluded.json").toFile().bytes, new File(file2, "netsuite-rmas.excluded.json").bytes,
                 "the extractor's side file is left as it was")
         assertEquals(judgedKeys(replayed().judgedFindings), judgedKeys(out.judgedFindings))
         assertEquals(oldKeys(replayed().oldFindings), oldKeys(out.oldFindings))
         assertEquals([matched: 2, missing: 7, readBack: 1], out.judgedPairCounts, "SR-1010 is read back from the side file")
+    }
+
+    /**
+     * Review I1: an old capture of a side whose connector writes no side file (HotWax orders and returns, Shopify return refs) and
+     * whose read dropped records (its metadata counts them) concludes as a live run does: a missing record is unknown, never "not
+     * found". Keeping it in Spark would write a zero-count .keep.json the conclude pass reads as authoritative.
+     */
+    @Test
+    void anOldReadFilteredCaptureWithNoSideFileStaysUnknown() {
+        String runFolder = seedCapture("JRT_EXEC_OLD_N", false)
+        Map bare = ok(replay(checkA, runFolder, false))
+        Map out = withConnectors([NETSUITE: "N"]) { ok(replay(checkA, runFolder, false)) }
+        assertFalse(new File(replayDir(out.replayFolder as String), "extracts/FILE_2/netsuite-rmas.keep.json").exists(), "no Keep ran")
+        Map<String, Object> codes = missingInFile2Codes(out)
+        assertEquals(missingInFile2Codes(bare), codes, "the conclusions a replay with no Keep gives")
+        assertEquals(["SR-1004", "SR-1005", "SR-1006", "SR-1007", "SR-1008"], codes.keySet().sort() as List)
+        assertFalse(codes.values().any { it in ["DKR5T_NO_RMA", "DKR5T_REFUNDED_IN_SHOPIFY"] }, "nothing reads NetSuite as having no RMA: ${codes}")
+    }
+
+    /**
+     * Review I1: an INCLUDE rule on a field a capture lacks sets nothing aside. Shopify's extract still filters at its read
+     * (it declares sourceFilters, Ruling 3b2b-23), and NetSuite's capture was filtered at read, so neither keeps in Spark.
+     */
+    @Test
+    void anIncludeRuleOnAFieldTheCaptureLacksSetsNothingAside() {
+        Map out = withConnectors([SHOPIFY: "N"], FILTERED_AT_READ) {
+            withConnectors([NETSUITE: "Y"]) {
+                withFilter("FILE_1", "channel", "INCLUDE_IN", "web") {
+                    withFilter("FILE_2", "subsidiary", "INCLUDE_IN", "EU") { ok(replay(checkA, RUN_FOLDER_A, true)) }
+                }
+            }
+        }
+        File extracts = new File(replayDir(out.replayFolder as String), "extracts")
+        assertEquals(["shopify-returns.json", "shopify-returns.json.records.jsonl"], new File(extracts, "FILE_1").list().sort() as List)
+        assertFalse(new File(extracts, "FILE_2/netsuite-rmas.keep.json").exists())
+        assertEquals(oldKeys(replayed().oldFindings), oldKeys(out.oldFindings))
+        assertEquals(judgedKeys(replayed().judgedFindings), judgedKeys(out.judgedFindings))
+        assertEquals(replayed().judgedPairCounts, out.judgedPairCounts)
+    }
+
+    /**
+     * Review I1 (Task 10 review M5/M6): a side whose records are not the extract's top-level records array keeps today's read
+     * in the replay, as on the live path, even with a connector that keeps in Spark and a filter that would set a record aside.
+     */
+    @Test
+    void aSideNotKeyedOnTopLevelRecordsReplaysAsToday() {
+        insert("darpan.rule.RuleSet", [ruleSetId: "JRT_ROOT_RS", ruleSetName: "Orders under another root", companyUserGroupId: A])
+        insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "JRT_ROOT_SCOPE", ruleSetId: "JRT_ROOT_RS", objectType: "ORDER",
+                description: "Orders under another root", companyUserGroupId: A])
+        [["FILE_1", "ACME_LEFT", "orders"], ["FILE_2", "ACME_RIGHT", "records"]].each { List side ->
+            insert("moqui.basic.Enumeration", [enumId: side[1], enumTypeId: "DarpanSystemSource", enumCode: side[1], description: side[1]])
+            insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "JRT_ROOT_SCOPE", fileSide: side[0], systemEnumId: side[1],
+                    fileTypeEnumId: "DftJson", recordRootExpression: side[2], primaryIdExpression: "orderId", companyUserGroupId: A])
+        }
+        insert("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "JRT_ROOT_SCOPE", fileSide: "FILE_1", sequenceNum: 1,
+                fieldExpression: "status", operator: "INCLUDE_IN", filterValues: "OPEN", companyUserGroupId: A])
+        insert("darpan.reconciliation.ReconciliationAutomation", [automationId: "JRT_AUTO_ROOT", automationName: "Orders under another root",
+                companyUserGroupId: A, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "JRT_ROOT_RS"])
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "JRT_EXEC_ROOT", automationId: "JRT_AUTO_ROOT",
+                companyUserGroupId: A, statusEnumId: "AUT_STAT_SUCCESS"])
+        String checkRoot = ec.entity.sequencedIdPrimary("darpan.audit.AuditCheck", null, null)
+        insert("darpan.audit.AuditCheck", [checkId: checkRoot, companyUserGroupId: A, checkCode: "orders-root", label: "Orders under another root",
+                savedRunId: "JRT_ROOT_RS", automationId: "JRT_AUTO_ROOT"])
+        File run = new File(dataManagerRoot, "reconciliation-runs/JRT_EXEC_ROOT")
+        run.deleteDir()
+        File side1 = new File(run, "20261101-060000000")
+        File side2 = new File(run, "20261101-060000000-FILE_2")
+        [side1, side2]*.mkdirs()
+        new File(side1, "acme-orders.json").text = '{"metadata":{},"orders":[{"orderId":"O1","status":"OPEN"},{"orderId":"O2","status":"CLOSED"}]}'
+        new File(side2, "acme-ledger.json").text = '{"metadata":{},"records":[{"orderId":"O1"},{"orderId":"O2"}]}'
+
+        Map out = withConnectors([ACME_LEFT: "N"]) { ok(replay(checkRoot, "reconciliation-runs/JRT_EXEC_ROOT", false)) }
+        File dir = replayDir(out.replayFolder as String)
+        assertFalse(new File(dir, "extracts/FILE_1/acme-orders.keep.json").exists(), "no Keep ran on a side not keyed on records")
+        Map result = new JsonSlurper().parse(new File(dir, "result.json")) as Map
+        assertEquals(0, result.missingObjectDifferenceCount, "O2 was not set aside: both orders match, as today")
+        assertEquals(0, result.differenceCount)
     }
 
     /** A side that is not a promise: Spark's ids and an old side file's ids both read SET_ASIDE; Spark's alone are not copied. */
@@ -688,11 +771,14 @@ class JudgeReplayTests {
         return dir
     }
 
-    /** Connector rows for the fixture's systems, for one test: each takes Keep (filterParameterName set) and writes a side file or not. */
-    private <T> T withConnectors(Map<String, String> sideFileBySystem, Closure<T> body) {
+    /**
+     * Connector rows for one test: each takes Keep (filterParameterName set), writes a side file or not, and names an extract
+     * service; KEPT_IN_SPARK no longer declares sourceFilters, so the side keeps in Spark (Ruling 3b2b-23), FILTERED_AT_READ does.
+     */
+    private <T> T withConnectors(Map<String, String> sideFileBySystem, String extractServiceName = KEPT_IN_SPARK, Closure<T> body) {
         sideFileBySystem.each { String system, String sideFile ->
             insert(SourceSystemConnectorSupport.ENTITY_NAME, [systemEnumId: system, filterParameterName: "sourceFilters",
-                    excludedRecordsSidecar: sideFile, enabled: "Y"])
+                    excludedRecordsSidecar: sideFile, extractServiceName: extractServiceName, enabled: "Y"])
         }
         try {
             return body.call()
@@ -727,6 +813,34 @@ class JudgeReplayTests {
             GroovySystem.metaClassRegistry.removeMetaClass(JudgeSupport)
         }
         return facts
+    }
+
+    /**
+     * A copy of run A's capture as another execution of check A's automation: its extractor filtered NetSuite at read (metadata
+     * counts), with or without the side file a Y connector writes.
+     */
+    private String seedCapture(String executionId, boolean withSideFile) {
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: executionId, automationId: "JRT_AUTO_A",
+                companyUserGroupId: A, statusEnumId: "AUT_STAT_SUCCESS"])
+        String folder = "reconciliation-runs/" + executionId
+        File run = new File(dataManagerRoot, folder)
+        run.deleteDir()
+        File side1 = new File(run, "20261101-060000000")
+        File side2 = new File(run, "20261101-060000000-FILE_2")
+        File lookups = new File(run, "lookups")
+        [side1, side2, lookups]*.mkdirs()
+        Files.copy(fixture().resolve("shopify-returns.json"), new File(side1, "shopify-returns.json").toPath())
+        Files.copy(fixture().resolve("netsuite-rmas.json"), new File(side2, "netsuite-rmas.json").toPath())
+        if (withSideFile) Files.copy(fixture().resolve("netsuite-rmas.excluded.json"), new File(side2, "netsuite-rmas.excluded.json").toPath())
+        Files.copy(fixture().resolve(CAPTURED_LOOKUP), new File(lookups, CAPTURED_LOOKUP).toPath())
+        return folder
+    }
+
+    /** The conclusion code of every MISSING_IN_FILE_2 row of a replay's diff.json, by compare id (null: no conclusion). */
+    private Map<String, Object> missingInFile2Codes(Map replayOut) {
+        Map diff = new JsonSlurper().parse(new File(replayDir(replayOut.replayFolder as String), "diff.json")) as Map
+        return new TreeMap<String, Object>(((List<Map>) diff.differences).findAll { it.diffType == "MISSING_IN_FILE_2" }
+                .collectEntries { [(it.primaryId): ((Map) it.conclusion)?.code] })
     }
 
     private static Map presence(Map fact) {

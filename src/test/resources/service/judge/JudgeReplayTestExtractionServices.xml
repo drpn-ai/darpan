@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Test only (on the test classpath, never shipped): extract services JudgeReplayTests names on its connector rows (DAR-BE-318
+         plan 3b-2b, Task 16). A replay calls no extract, so no body ever runs; what matters is what each declares, because the
+         replay keeps a side in Spark only where the live path's gate would (KeepPlanSupport.sparkKeepsSide, Ruling 3b2b-23).
+         - KeptInSpark: an extract that has stopped filtering (no sourceFilters), so its side keeps in Spark.
+         - FilteredAtRead: an extract that still filters (it declares sourceFilters), as every real one does until Tasks 17-23. -->
+    <service verb="extract" noun="KeptInSpark" allow-remote="false">
+        <in-parameters>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="keepRuleFields" type="List"/>
+            <parameter name="outputLocation"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: a replay never calls it"/></actions>
+    </service>
+    <service verb="extract" noun="FilteredAtRead" allow-remote="false">
+        <in-parameters>
+            <parameter name="windowStart"/>
+            <parameter name="windowEnd"/>
+            <parameter name="sourceFilters" type="List"/>
+            <parameter name="outputLocation"/>
+        </in-parameters>
+        <out-parameters><parameter name="fileLocation"/></out-parameters>
+        <actions><return error="true" message="A test-only extract: a replay never calls it"/></actions>
+    </service>
+</services>

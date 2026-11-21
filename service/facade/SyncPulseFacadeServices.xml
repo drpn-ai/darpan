@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- DAR-BE-328 plan 3: sync pairs. Every read carries an explicit companyUserGroupId condition (SyncPulseFacadeSupport)
+         and every single-row lookup goes through TenantScopedFinder.findOneOwnedByTenant (a foreign id reads as missing). -->
+
+    <service verb="list" noun="SyncPairs" authz-action="view" allow-remote="true" authenticate="true">
+        <description>List the active tenant's sync pairs with the waiting and past-allowance counts from the latest sample and the open orders.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="syncPairs" type="List">
+                <parameter name="syncPairId"/><parameter name="label"/><parameter name="automationId"/><parameter name="automationName"/>
+                <parameter name="allowanceMinutes"/><parameter name="pulseEveryMinutes"/><parameter name="isActive"/>
+                <parameter name="lastPulseStamp"/><parameter name="waitingCount"/><parameter name="pastAllowanceCount"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="syncPairs" from="tenantId ? darpan.pulse.SyncPulseFacadeSupport.listRows(ec, tenantId) : []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="SyncPair" authz-action="view" allow-remote="true" authenticate="true">
+        <description>One sync pair of the active tenant: its effective allowance and cadence today (and the pair's own values), today's samples and the open past-allowance orders, oldest first. Always returns the daily checks and chat spaces the pair form picks from; with no syncPairId that is all it returns.</description>
+        <in-parameters><parameter name="syncPairId"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="syncPair" type="Map"/>
+            <parameter name="samplesToday" type="List"/>
+            <parameter name="pastOrders" type="List"/>
+            <parameter name="automations" type="List"/>
+            <parameter name="chatSpaces" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for sync pairs.</message></if>
+            <set field="syncPairIdValue" from="((syncPairId)?.toString()?.trim())"/>
+            <set field="pairRow" from="(!ec.message.hasError() &amp;&amp; syncPairIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.pulse.SyncPair', 'syncPairId', syncPairIdValue, tenantId, 'sync pair read verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; syncPairIdValue &amp;&amp; pairRow == null">
+                <message error="true">Sync pair '${syncPairIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; pairRow != null">
+                <set field="pairDetail" from="darpan.pulse.SyncPulseFacadeSupport.detail(ec, tenantId, pairRow.getMap())"/>
+                <set field="syncPair" from="pairDetail.syncPair"/>
+                <set field="samplesToday" from="pairDetail.samplesToday"/>
+                <set field="pastOrders" from="pairDetail.pastOrders"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automations" from="darpan.pulse.SyncPulseFacadeSupport.automationOptions(ec, tenantId)"/>
+                <set field="chatSpaces" from="darpan.pulse.SyncPulseFacadeSupport.chatSpaceOptions(ec, tenantId)"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="SyncPair" allow-remote="true" authenticate="true">
+        <description>Create or update one sync pair of the active tenant. A blank pulseEveryMinutes is pulse off and a blank chatSpaceId is no chat space (both stored null, never the old value); isActive and hourlySummary keep the stored value when omitted. One pair per automation; a pulse needs HotWax orders upstream.</description>
+        <in-parameters>
+            <parameter name="syncPairId"/>
+            <parameter name="automationId"/>
+            <parameter name="upstreamSide"/>
+            <parameter name="allowanceMinutes" type="Integer"/>
+            <parameter name="pulseEveryMinutes" type="Integer"/>
+            <parameter name="chatSpaceId"/>
+            <parameter name="hourlySummary" type="Boolean"/>
+            <parameter name="isActive" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="syncPairId"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for sync pairs.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for sync pairs.')"/>
+            </if>
+            <set field="syncPairIdValue" from="((syncPairId)?.toString()?.trim())"/>
+            <set field="existingPair" from="(!ec.message.hasError() &amp;&amp; syncPairIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.pulse.SyncPair', 'syncPairId', syncPairIdValue, tenantId, 'sync pair edit target verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; syncPairIdValue &amp;&amp; existingPair == null">
+                <message error="true">Sync pair '${syncPairIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim()) ?: null"/>
+                <set field="pairInput" from="[automationId: ((automationId)?.toString()?.trim()) ?: null, upstreamSide: ((upstreamSide)?.toString()?.trim()) ?: null, allowanceMinutes: allowanceMinutes, pulseEveryMinutes: pulseEveryMinutes, chatSpaceId: chatSpaceIdValue]"/>
+                <set field="validationErrors" from="darpan.pulse.SyncPulseFacadeSupport.validateSave(ec, tenantId, pairInput, syncPairIdValue)"/>
+                <iterate list="validationErrors" entry="validationError"><message error="true">${validationError}</message></iterate>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="storeMap" from="[syncPairId: syncPairIdValue ?: null, companyUserGroupId: tenantId, automationId: pairInput.automationId, upstreamSide: pairInput.upstreamSide, allowanceMinutes: allowanceMinutes, pulseWindowField: existingPair?.pulseWindowField ?: 'CREATED', hourlySummary: hourlySummary == null ? (existingPair?.hourlySummary ?: 'N') : (hourlySummary ? 'Y' : 'N'), isActive: isActive == null ? (existingPair?.isActive ?: 'Y') : (isActive ? 'Y' : 'N')].findAll { it.value != null }"/>
+                <!-- Set explicitly: null is the intended value for pulse off and no chat space, and findAll strips nulls. -->
+                <set field="ignoreCadence" from="storeMap.put('pulseEveryMinutes', pulseEveryMinutes)"/>
+                <set field="ignoreChat" from="storeMap.put('chatSpaceId', chatSpaceIdValue)"/>
+                <service-call name="store#darpan.pulse.SyncPair" in-map="storeMap" out-map="storeResult"/>
+                <if condition="!ec.message.hasError()"><set field="syncPairId" from="syncPairIdValue ?: ((storeResult?.syncPairId)?.toString()?.trim())"/></if>
+                <if condition="!ec.message.hasError()"><message>Saved sync pair.</message></if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="SyncPair" allow-remote="true" authenticate="true">
+        <description>Delete a sync pair with its peak-period overrides, samples and tracked orders.</description>
+        <in-parameters><parameter name="syncPairId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for sync pairs.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for sync pairs.')"/>
+            </if>
+            <set field="syncPairIdValue" from="((syncPairId)?.toString()?.trim())"/>
+            <set field="pairRow" from="(!ec.message.hasError() &amp;&amp; syncPairIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.pulse.SyncPair', 'syncPairId', syncPairIdValue, tenantId, 'sync pair delete target verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; pairRow == null">
+                <message error="true">Sync pair '${syncPairIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreCascade" from="darpan.pulse.SyncPulseFacadeSupport.deletePairCascade(ec, tenantId, syncPairIdValue)"/>
+                <message>Deleted sync pair.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

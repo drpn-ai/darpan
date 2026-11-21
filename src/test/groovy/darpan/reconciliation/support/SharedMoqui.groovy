@@ -15,9 +15,10 @@ import java.lang.annotation.Target
  * pool picks marked classes up by this annotation's name in the source.
  *
  * The annotation goes on the concrete test class (SharedMoquiExtension reads the running class from JUnit, so the
- * lifecycle methods may be inherited from an unmarked base class). Mark a class only when it boots through initMoqui
- * alone, restores in @AfterAll any process-global seam or System property it changes, asserts no elapsed-time bound
- * and is not MySQL-tagged.
+ * lifecycle methods may be inherited from an unmarked base class). Mark a class only when it: boots through the
+ * harness (initMoqui directly, an extended base, or a helper); restores in @AfterAll every seam it swaps; sets no
+ * System property of its own; asserts no elapsed-time bound; is not @Tag mysql or perf; starts NO Spark session; and
+ * leaves NO background work running past its end (the quiet gate fails the class by name).
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)

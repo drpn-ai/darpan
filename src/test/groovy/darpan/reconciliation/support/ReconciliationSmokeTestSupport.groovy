@@ -149,7 +149,7 @@ class ReconciliationSmokeTestSupport {
         SharedMoqui marker = testClass.getAnnotation(SharedMoqui)
         if (marker == null || marker.quietAtEnd()) {
             try {
-                awaitSharedQuiet(testClass.name, SHARED_QUIET_TIMEOUT_MILLIS, true)
+                awaitQuietOrTearDown(testClass.name, true)
             } finally {
                 exitSharedClassState(testClass)
             }
@@ -191,6 +191,7 @@ class ReconciliationSmokeTestSupport {
             sharedClassEc = null
             Moqui.destroyActiveExecutionContextFactory()
             sharedEcf = null
+            System.clearProperty("scheduled_job_check_time")
             deleteSharedFiles()
         }
     }
@@ -211,6 +212,8 @@ class ReconciliationSmokeTestSupport {
                 sharedClassCount++
             } else {
                 String token = sharedToken()
+                // No scheduled job runner: it would fire seeded jobs mid-class and write rows the quiet gate ignores.
+                System.setProperty("scheduled_job_check_time", "0")
                 ec = bootMoqui(backendRoot, token)
                 sharedEcf = (ExecutionContextFactoryImpl) Moqui.getExecutionContextFactory()
                 sharedDbBasePath = backendRoot.resolve("runtime/tmp/test-h2/${token}")
@@ -241,7 +244,7 @@ class ReconciliationSmokeTestSupport {
         sharedClassEc = null
         sharedEcf.destroyActiveExecutionContext()
         // The previous class's async work must not write into this class's fresh DB or hold locks the DROP waits on.
-        awaitSharedQuiet(previousClass, SHARED_QUIET_TIMEOUT_MILLIS)
+        awaitQuietOrTearDown(previousClass, false)
 
         withSharedConnection { Connection c ->
             c.createStatement().withCloseable {
@@ -295,6 +298,19 @@ class ReconciliationSmokeTestSupport {
      * active threads are checked, and not those running a Moqui framework periodic task (the ElasticSearch log
      * flusher blocks in an HTTP bulk call for long stretches).
      */
+    /**
+     * The quiet gate at a class boundary. After a timeout the shared ECF is unusable (work still running on it), so it
+     * is torn down here and the next class boots fresh instead of every later class in the JVM failing.
+     */
+    private static void awaitQuietOrTearDown(String previousClass, boolean atClassEnd) {
+        try {
+            awaitSharedQuiet(previousClass, SHARED_QUIET_TIMEOUT_MILLIS, atClassEnd)
+        } catch (IllegalStateException e) {
+            tearDownSharedMoqui("quiet gate timed out waiting for ${previousClass}")
+            throw e
+        }
+    }
+
     static void awaitSharedQuiet(String previousClass, long timeoutMillis) {
         awaitSharedQuiet(previousClass, timeoutMillis, false)
     }
@@ -317,22 +333,31 @@ class ReconciliationSmokeTestSupport {
     /** Moqui's own periodic tasks on the scheduled executor: they never touch a test class's data, so they do not count as leaked work. */
     private static final List<String> FRAMEWORK_PERIODIC_FRAMES = [
             'org.moqui.impl.util.ElasticSearchLogger', 'org.moqui.impl.webapp.ElasticRequestLogFilter',
-            'org.moqui.impl.service.ScheduledJobRunner', 'org.moqui.impl.service.ServiceFacadeImpl$ScheduledJobRunner',
             'org.moqui.jcache.MCache'].asImmutable()
+
+    /** Threads started by darpan code or the entity facade for work a class may leave behind: busy ones count as leaked work. */
+    private static final List<String> OWNED_THREAD_PREFIXES = ['darpan-script-', 'data-source-read-', 'MoquiEntityExec-',
+            'darpan-agent-query-'].asImmutable()
 
     private static boolean isIdlePoolThread(StackTraceElement[] frames) {
         return frames.length > 0 && frames[0].methodName == 'park' && frames.any { it.methodName == 'getTask' || it.methodName == 'take' }
     }
 
+    /** A task is a Moqui periodic one when its ROOT frame (bottom-most frame outside the JDK and Moqui's CustomScheduledTask wrapper) is one, so a framework frame inside darpan work cannot hide it. */
     private static boolean isFrameworkPeriodic(StackTraceElement[] frames) {
-        return frames.any { StackTraceElement f -> FRAMEWORK_PERIODIC_FRAMES.any { String p -> f.className.startsWith(p) } }
+        StackTraceElement root = frames.reverse().find { StackTraceElement f ->
+            !(f.className.startsWith('java.') || f.className.startsWith('javax.') || f.className.startsWith('jdk.') ||
+                    f.className.startsWith('sun.') || f.className.startsWith('org.moqui.impl.context.ContextJavaUtil$'))
+        }
+        return root != null && FRAMEWORK_PERIODIC_FRAMES.any { String p -> root.className.startsWith(p) }
     }
 
     /** Live Moqui pool threads (workers, jobs, scheduled) that are running something, with their frames. */
     private static Map<Thread, StackTraceElement[]> activePoolThreadMap() {
         Map<Thread, StackTraceElement[]> result = new LinkedHashMap<>()
         Thread.getAllStackTraces().each { Thread t, StackTraceElement[] frames ->
-            if (!(t.name.startsWith('MoquiWorker-') || t.name.startsWith('MoquiJob-') || t.name.startsWith('MoquiScheduled-'))) return
+            if (!(t.name.startsWith('MoquiWorker-') || t.name.startsWith('MoquiJob-') || t.name.startsWith('MoquiScheduled-') ||
+                    OWNED_THREAD_PREFIXES.any { String p -> t.name.startsWith(p) })) return
             if (isIdlePoolThread(frames)) return
             result.put(t, frames)
         }
@@ -343,6 +368,13 @@ class ReconciliationSmokeTestSupport {
     private static int busyScheduledThreadCount() {
         return activePoolThreadMap().findAll { Thread t, StackTraceElement[] frames ->
             t.name.startsWith('MoquiScheduled-') && !isFrameworkPeriodic(frames)
+        }.size()
+    }
+
+    /** Active darpan-owned (script, data-source read, entity exec, agent query) threads. */
+    private static int busyOwnedThreadCount() {
+        return activePoolThreadMap().findAll { Thread t, StackTraceElement[] frames ->
+            OWNED_THREAD_PREFIXES.any { String p -> t.name.startsWith(p) }
         }.size()
     }
 
@@ -370,6 +402,8 @@ class ReconciliationSmokeTestSupport {
         }
         int scheduledBusy = ecfi.scheduledExecutor != null ? busyScheduledThreadCount() : 0
         if (scheduledBusy > 0) busy << "scheduledExecutor: ${scheduledBusy} active".toString()
+        int ownedBusy = busyOwnedThreadCount()
+        if (ownedBusy > 0) busy << "darpan/entity threads: ${ownedBusy} active".toString()
         for (RunAdmission admission : [AutomationExecutionSupport.getRunAdmission(), RunAdmission.SHARED].unique { System.identityHashCode(it) }) {
             if (admission == null) continue
             Map<String, Object> state = admission.snapshot()

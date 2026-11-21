@@ -116,6 +116,13 @@ class AppContentRulesTests {
 
     /** One sample label per bundled regex source: the same table as darpan-ui's mascotSeed.spec.ts, run through java.util.regex here. */
     private static final Map<String, String> REGEX_SAMPLES = [
+            '^open sync pair .+$': 'open sync pair hotwax → netsuite orders',
+            '^every: .+$': 'every: 2 hours',
+            '^allowance: .+$': 'allowance: 6 hours',
+            '^run: .+$': 'run: daily order reconciliation',
+            '^upstream side: .+$': 'upstream side: hotwax',
+            '^chat space: .+$': 'chat space: none',
+            '^hourly summary: .+$': 'hourly summary: off',
             '^missing (from|in) .+$': 'missing from netsuite',
             '^request access in( .+)?$': 'request access in shopify',
             '^revoke .+$': 'revoke token abc',

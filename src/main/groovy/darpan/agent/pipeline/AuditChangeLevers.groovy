@@ -700,8 +700,7 @@ class AuditChangeLevers {
                     "agent apply: sources of an automation already read as the active tenant's").condition("automationId", automationId)
                     .orderBy("fileSide").useCache(false).list() ?: []
             Map derived = AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automation)
-            List<String> changed = (List<String>) AutomationFacadeSupport.buildAutomationSyncStatus(automation,
-                    AutomationFacadeSupport.attachCapturedFilters(ec, stored, automationId), derived).changedFields
+            List<String> changed = (List<String>) AutomationFacadeSupport.buildAutomationSyncStatus(automation, stored, derived).changedFields
             if (changed) drifted.put(automationId, changed)
         }
         return drifted

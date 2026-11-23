@@ -1320,28 +1320,80 @@ class AutomationFacadeSmokeTests {
     }
 
     @Test
-    void syncAutomationReplacesExclusionFiltersRatherThanMergingThem() {
-        Map<String, Object> automation = createSyncFixtureAutomation("Sync Filters")
+    void aSaveThatStillSendsExcludeFiltersIgnoresThem() {
+        // Review Focus 5: a client still on the old contract (an open tab) sends excludeFilters on a source. The save must not
+        // fail, and it writes nothing for them: an automation reads its run's filters (DAR-BE-318 3b-2c).
+        Map<String, Object> automation = createSyncFixtureAutomation("Old Client Filters")
         String automationId = automation.automationId as String
         try {
-            ec.service.sync().name("create#darpan.reconciliation.ReconciliationAutomationSourceFilter")
-                    .parameters([automationId      : automationId, fileSide: "FILE_1", sequenceNum: 99,
-                                 fieldExpression   : "status", operator: "EXCLUDE_IN",
-                                 filterValues      : "HAND_TUNED",
-                                 companyUserGroupId: KREWE]).disableAuthz().call()
-
-            Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.sync#Automation",
-                    [automationId: automationId])
-
-            assertTrue((Boolean) result.ok, result.errors?.toString())
-            List filters = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
-                    .condition("automationId", automationId).condition("fileSide", "FILE_1")
-                    .disableAuthz().useCache(false).list() ?: []
-            assertTrue(filters.every { it.filterValues != "HAND_TUNED" },
-                    "hand-tuned filter survived: sync merged instead of replacing")
+            List scopeFiltersBefore = scopeFilters(automation.compareScopeId as String)
+            Map<String, Object> saved = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                    automationId   : automationId,
+                    automationName : "Old Client Filters",
+                    inputModeEnumId: "AUT_IN_API_RANGE",
+                    savedRunId     : automation.savedRunId,
+                    scheduleExpr   : "PT1H",
+                    relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
+                    relativeWindowCount: 1,
+                    windowTimeZone : "UTC",
+                    sources        : [
+                            [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS_GQL", fileTypeEnumId: "DftCsv",
+                             systemMessageRemoteId: "OMS_REMOTE",
+                             excludeFilters: [[fieldExpression: "status", operator: "EXCLUDE_IN", values: ["HAND_TUNED"]]]],
+                            [fileSide: "FILE_2", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "SHOPIFY", fileTypeEnumId: "DftCsv",
+                             systemMessageRemoteId: "SHOPIFY_REMOTE"],
+                    ],
+            ])
+            assertTrue((Boolean) saved.ok, saved.errors?.toString())
+            assertEquals(scopeFiltersBefore, scopeFilters(automation.compareScopeId as String))
+            assertEquals(0, ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                    .condition("automationId", automationId).disableAuthz().useCache(false).count())
         } finally {
             deleteSyncFixtureAutomation(automationId)
         }
+    }
+
+    @Test
+    void aRunFilterChangeLeavesTheAutomationInSync() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Run Filter Edit")
+        String automationId = automation.automationId as String
+        String compareScopeId = automation.compareScopeId as String
+        try {
+            ec.service.sync().name("create#darpan.rule.RuleSetCompareSourceFilter").parameters([compareScopeId: compareScopeId,
+                    fileSide: "FILE_1", sequenceNum: 1, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "CANCELLED",
+                    companyUserGroupId: KREWE]).disableAuthz().call()
+
+            Map<String, Object> got = callFacade("facade.ReconciliationFacadeServices.get#Automation", [automationId: automationId])
+
+            assertTrue((Boolean) got.ok, got.errors?.toString())
+            // the fixture's sources already differ from its run on schema fields; a filter on the run is never drift
+            List<String> changed = (List<String>) ((Map) got.syncStatus).changedFields
+            assertFalse(changed.any { it.endsWith("excludeFilters") }, "a run filter is not drift: ${changed}")
+        } finally {
+            ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", compareScopeId).disableAuthz().deleteAll()
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
+    @Test
+    void getAutomationSourcesCarryNoFilters() {
+        Map<String, Object> automation = createSyncFixtureAutomation("No Source Filters")
+        String automationId = automation.automationId as String
+        try {
+            Map<String, Object> got = callFacade("facade.ReconciliationFacadeServices.get#Automation", [automationId: automationId])
+            assertTrue((Boolean) got.ok, got.errors?.toString())
+            List<Map> sources = (List<Map>) ((Map) got.automation).sources
+            assertEquals(["FILE_1", "FILE_2"], sources*.fileSide)
+            assertTrue(sources.every { !it.containsKey("excludeFilters") }, sources.toString())
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
+    private List<Map> scopeFilters(String compareScopeId) {
+        return (ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", compareScopeId)
+                .orderBy(["fileSide", "sequenceNum"]).disableAuthz().useCache(false).list() ?: [])
+                .collect { [it.fileSide, it.fieldExpression, it.operator, it.filterValues] as List } as List<Map>
     }
 
     @Test

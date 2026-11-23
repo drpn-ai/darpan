@@ -141,10 +141,7 @@ class AuditSettingsSmokeTests {
         Map<String, Map> params = sources(paid.automationId).collectEntries { [(it.fileSide): new groovy.json.JsonSlurper().parseText(it.safeMetadataJson as String).parameters] }
         assertEquals([FILE_1: [shopifyAuthConfigId: "cfg"], FILE_2: [omsRestSourceConfigId: "cfg"]], params)
         assertEquals([nsSuiteQlSourceQueryId: "cfg"], new groovy.json.JsonSlurper().parseText(sources(open.automationId)[0].safeMetadataJson as String).parameters)
-        List filters = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("automationId", paid.automationId)
-                .disableAuthz().useCache(false).list()
-        assertEquals([["FILE_2", "statusId", "INCLUDE_IN", "ORDER_COMPLETED"]],
-                filters.collect { [it.fileSide, it.fieldExpression, it.operator, it.filterValues] }, "the run's filter is the automation's filter")
+        // the run's filter reaches the automation through its compare scope (TSET_RS2_SCOPE, above): nothing is copied (DAR-BE-318 3b-2c)
     }
 
     @Test

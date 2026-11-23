@@ -90,7 +90,7 @@ class AutomationSyncSupportTests {
     @Test
     void mergePreservesSftpAndStateFieldsWhileOverwritingRunFields() {
         List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
-                [storedSftpSource("FILE_1")], derivedFile1())
+                [storedSftpSource("FILE_1")], derivedFile1(), [FILE_1: []])
 
         assertEquals(1, merged.size())
         Map entry = (Map) merged[0]
@@ -104,12 +104,28 @@ class AutomationSyncSupportTests {
     }
 
     @Test
-    void mergedEntriesCarryNoExcludeFilters() {
-        // DAR-BE-318 3b-2c: an automation reads its run's filters, so a sync copies sources only.
+    void mergeAlwaysSetsExcludeFiltersSoTheyAreReplacedNotKept() {
         List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
-                [storedSftpSource("FILE_1") + [excludeFilters: [[fieldExpression: "status", operator: "EXCLUDE_IN", values: ["VOID"]]]]],
-                derivedFile1())
-        assertFalse(((Map) merged[0]).containsKey("excludeFilters"))
+                [storedSftpSource("FILE_1")], derivedFile1(), [FILE_1: []])
+        // resolveSourceFilters KEEPS the automation's existing rows when the key is absent, so an
+        // omitted excludeFilters would make sync a silent no-op for filters.
+        assertTrue(((Map) merged[0]).containsKey("excludeFilters"))
+        assertEquals([], ((Map) merged[0]).excludeFilters)
+    }
+
+    @Test
+    void mergeConvertsFilterValuesToTheDeclaredValuesListParameter() {
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
+                [storedSftpSource("FILE_1")], derivedFile1(),
+                [FILE_1: [[fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "CANCELLED,VOID"]]])
+
+        Map filter = (Map) ((List) ((Map) merged[0]).excludeFilters)[0]
+        // save#Automation declares sources[].excludeFilters[].values; filterValues is undeclared and
+        // may be stripped by Moqui parameter filtering before it reaches the validator.
+        assertEquals(["CANCELLED", "VOID"], filter.get("values"))
+        assertFalse(filter.containsKey("filterValues"))
+        assertEquals("status", filter.fieldExpression)
+        assertEquals("EXCLUDE_IN", filter.operator)
     }
 
     @Test
@@ -117,14 +133,14 @@ class AutomationSyncSupportTests {
         Map<String, Map<String, Object>> derived = derivedFile1() +
                 [FILE_2: [fileSide: "FILE_2", sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API]]
         List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
-                [storedSftpSource("FILE_1")], derived)
+                [storedSftpSource("FILE_1")], derived, [:])
         assertEquals(["FILE_1", "FILE_2"], merged.collect { ((Map) it).fileSide })
     }
 
     @Test
     void mergeDropsAStoredSideTheRunNoLongerDefines() {
         List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
-                [storedSftpSource("FILE_1"), storedSftpSource("FILE_2")], derivedFile1())
+                [storedSftpSource("FILE_1"), storedSftpSource("FILE_2")], derivedFile1(), [:])
         assertEquals(["FILE_1"], merged.collect { ((Map) it).fileSide })
     }
 
@@ -201,7 +217,7 @@ class AutomationSyncSupportTests {
         assertEquals("AUT1", payload.automationId)
     }
 
-    private static Map derivedConfigFor(String schemaFileName, String inputMode) {
+    private static Map derivedConfigFor(String schemaFileName, String inputMode, List filters = []) {
         return [
                 savedRunMissing  : false,
                 error            : null,
@@ -209,12 +225,14 @@ class AutomationSyncSupportTests {
                 inputModeEnumId  : inputMode,
                 sourcesByFileSide: [FILE_1: [fileSide        : "FILE_1", schemaFileName: schemaFileName,
                                              sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API]],
+                filtersByFileSide: [FILE_1: filters],
         ]
     }
 
-    private static List storedFile1(String schemaFileName) {
+    private static List storedFile1(String schemaFileName, List excludeFilters = []) {
         return [[fileSide        : "FILE_1", schemaFileName: schemaFileName,
-                 sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API]]
+                 sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API,
+                 excludeFilters  : excludeFilters]]
     }
 
     @Test
@@ -241,6 +259,17 @@ class AutomationSyncSupportTests {
     }
 
     @Test
+    void syncStatusNoticesFilterDrift() {
+        Map automation = [inputModeEnumId: AutomationFacadeSupport.INPUT_MODE_API_RANGE,
+                          compareScopeId : "CS_ORDERS"]
+        Map status = AutomationFacadeSupport.buildAutomationSyncStatus(automation,
+                storedFile1("run-schema.json", [[fieldExpression: "status", operator: "EXCLUDE_IN",
+                                                 filterValues   : "CANCELLED"]]),
+                derivedConfigFor("run-schema.json", AutomationFacadeSupport.INPUT_MODE_API_RANGE, []))
+        assertTrue((status.changedFields as List).contains("FILE_1.excludeFilters"))
+    }
+
+    @Test
     void syncStatusFlagsAnInputModeFlip() {
         Map automation = [inputModeEnumId: AutomationFacadeSupport.INPUT_MODE_SFTP_FILES,
                           compareScopeId : "CS_ORDERS"]
@@ -254,7 +283,7 @@ class AutomationSyncSupportTests {
     @Test
     void syncStatusReportsAMissingSavedRunWithoutClaimingDrift() {
         Map status = AutomationFacadeSupport.buildAutomationSyncStatus([:], [],
-                [savedRunMissing: true, sourcesByFileSide: [:]])
+                [savedRunMissing: true, sourcesByFileSide: [:], filtersByFileSide: [:]])
         assertTrue(status.savedRunMissing as Boolean)
         // A missing run is not drift. Calling it out-of-date offers an action that cannot work.
         assertTrue(status.inSync as Boolean)
@@ -266,7 +295,7 @@ class AutomationSyncSupportTests {
         // not-null. Writing the run's null through makes validateSources reject the entire sync.
         Map<String, Map<String, Object>> derived = derivedFile1([sourceTypeEnumId: null])
         List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
-                [storedSftpSource("FILE_1")], derived)
+                [storedSftpSource("FILE_1")], derived, [FILE_1: []])
         assertEquals(AutomationFacadeSupport.SOURCE_TYPE_SFTP, ((Map) merged[0]).sourceTypeEnumId)
     }
 
@@ -274,7 +303,7 @@ class AutomationSyncSupportTests {
     void mergeStillTakesTheRunsSourceTypeWhenItHasOne() {
         Map<String, Map<String, Object>> derived = derivedFile1([sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API])
         List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
-                [storedSftpSource("FILE_1")], derived)
+                [storedSftpSource("FILE_1")], derived, [FILE_1: []])
         assertEquals(AutomationFacadeSupport.SOURCE_TYPE_API, ((Map) merged[0]).sourceTypeEnumId)
     }
 
@@ -284,7 +313,7 @@ class AutomationSyncSupportTests {
         // may hold neither, and writing that null through makes validateSources reject the sync.
         Map stored = storedSftpSource("FILE_1") + [systemMessageRemoteId: "OMS_REMOTE"]
         Map<String, Map<String, Object>> derived = derivedFile1([systemMessageRemoteId: null])
-        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries([stored], derived)
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries([stored], derived, [FILE_1: []])
         assertEquals("OMS_REMOTE", ((Map) merged[0]).systemMessageRemoteId)
     }
 
@@ -292,7 +321,7 @@ class AutomationSyncSupportTests {
     void mergeTakesTheRunsEndpointWhenItHasOne() {
         Map stored = storedSftpSource("FILE_1") + [systemMessageRemoteId: "OMS_REMOTE"]
         Map<String, Map<String, Object>> derived = derivedFile1([systemMessageRemoteId: "SHOPIFY_REMOTE"])
-        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries([stored], derived)
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries([stored], derived, [FILE_1: []])
         assertEquals("SHOPIFY_REMOTE", ((Map) merged[0]).systemMessageRemoteId)
     }
 
@@ -304,7 +333,7 @@ class AutomationSyncSupportTests {
                           compareScopeId : "CS_ORDERS"]
         List stored = [[fileSide             : "FILE_1", schemaFileName: "run-schema.json",
                         sourceTypeEnumId     : AutomationFacadeSupport.SOURCE_TYPE_API,
-                        systemMessageRemoteId: "OMS_REMOTE"]]
+                        systemMessageRemoteId: "OMS_REMOTE", excludeFilters: []]]
         Map derived = derivedConfigFor("run-schema.json", AutomationFacadeSupport.INPUT_MODE_API_RANGE)
         // The run records no endpoint at all — exactly the blank case merge preserves.
         Map status = AutomationFacadeSupport.buildAutomationSyncStatus(automation, stored, derived)
@@ -316,7 +345,7 @@ class AutomationSyncSupportTests {
         // The run recorded no source types, so the raw derive would say API_RANGE; merge restores the
         // stored SFTP type, and the persisted mode has to follow that or validateSources rejects it.
         List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
-                [storedSftpSource("FILE_1")], derivedFile1([sourceTypeEnumId: null]))
+                [storedSftpSource("FILE_1")], derivedFile1([sourceTypeEnumId: null]), [FILE_1: []])
         assertEquals(AutomationFacadeSupport.INPUT_MODE_SFTP_FILES,
                 AutomationFacadeSupport.resolveSyncedInputMode(merged))
     }

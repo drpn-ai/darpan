@@ -2759,7 +2759,8 @@
                 <!-- Snapshot drift: derived from the SAME deriveRunAuthoritativeConfig that
                      sync#Automation applies, so the edit form's out-of-date marker can never
                      disagree with what Sync would actually change. Read-only. -->
-                <set field="syncStatus" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, automationSources, darpan.facade.reconciliation.AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automationRecord))"/>
+                <set field="automationSourcesForSync" from="darpan.facade.reconciliation.AutomationFacadeSupport.attachCapturedFilters(ec, automationSources, automationIdValue)"/>
+                <set field="syncStatus" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, automationSourcesForSync, darpan.facade.reconciliation.AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automationRecord))"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -2816,6 +2817,18 @@
                 <parameter name="sourceConfigId"/>
                 <parameter name="shopifyAuthConfigId"/>
                 <parameter name="omsRestSourceConfigId"/>
+                <parameter name="excludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
+                    </parameter>
+                    <description>Record-exclusion rules for this source's fileSide, mirroring the rule
+                        set's own filters. Omitted means leave the previously-saved rows unchanged (or, on
+                        a first save, seed from the rule set); an explicit list (including an empty one)
+                        replaces them. See save#Automation's source-recreate comment for why omission
+                        cannot mean "no-op" here the way it does elsewhere.</description>
+                </parameter>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -2861,7 +2874,8 @@
                         optionKey: ((source.optionKey)?.toString()?.trim()),
                         sourceConfigId: ((source.sourceConfigId)?.toString()?.trim()),
                         shopifyAuthConfigId: ((source.shopifyAuthConfigId)?.toString()?.trim()),
-                        omsRestSourceConfigId: ((source.omsRestSourceConfigId)?.toString()?.trim())
+                        omsRestSourceConfigId: ((source.omsRestSourceConfigId)?.toString()?.trim()),
+                        excludeFilters: source.excludeFilters
                 ].findAll { it.value != null }"/>
                 <set field="ignoreSourceEntryAdd" from="sourceEntries.add(sourceEntry)"/>
             </iterate>
@@ -2977,7 +2991,17 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="sourceUpdatedDate" from="ec.user.nowTimestamp"/>
-                <!-- DAR-BE-318 3b-2c: an automation keeps no filter rows; its runs read its compare scope's. -->
+                <!-- Sources are deleted and recreated on every save, so a filter row's parent always
+                     disappears. Capture the existing rules first: a source entry that omits
+                     excludeFilters keeps what it had, matching the rule set path's presence
+                     semantics, while an explicit empty list clears them. -->
+                <!-- Resolved here, not inside the iterate: automationRecord is not set until after the
+                     loop (create path), so the compare scope is read from automationFields — already
+                     resolved above and exactly what gets persisted to automationRecord.compareScopeId
+                     either way — rather than from automationRecord itself. -->
+                <set field="automationCompareScopeId" from="automationFields.compareScopeId"/>
+                <set field="existingAutomationFilters" from="darpan.facade.reconciliation.AutomationFacadeSupport.captureSourceFiltersByFileSide(ec, savedAutomationId)"/>
+                <set field="ignoreDeleteAutomationFilters" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSourceFilter').condition('automationId', savedAutomationId).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="ignoreDeleteAutomationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).disableAuthz().useCache(false).deleteAll()"/>
                 <iterate list="sourceEntries" entry="sourceEntry">
                     <set field="sourceCreateMap" from="[
@@ -3008,6 +3032,18 @@
                     <service-call name="create#darpan.reconciliation.ReconciliationAutomationSource"
                             disable-authz="true"
                             in-map="sourceCreateMap"/>
+                    <set field="resolvedSourceFilters" from="darpan.facade.reconciliation.AutomationFacadeSupport.resolveSourceFilters(ec, automationCompareScopeId, sourceEntry, existingAutomationFilters)"/>
+                    <set field="sourceFilterSequence" from="0"/>
+                    <iterate list="resolvedSourceFilters" entry="sourceFilterRow">
+                        <set field="sourceFilterSequence" from="sourceFilterSequence + 1"/>
+                        <service-call name="create#darpan.reconciliation.ReconciliationAutomationSourceFilter" disable-authz="true"
+                                in-map="[automationId: savedAutomationId, fileSide: sourceEntry.fileSide, sequenceNum: sourceFilterSequence,
+                                         fieldExpression: sourceFilterRow.fieldExpression, operator: sourceFilterRow.operator,
+                                         filterValues: sourceFilterRow.filterValues,
+                                         companyUserGroupId: darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                                         createdByUserId: darpan.facade.common.TenantAccessSupport.currentUserId(ec),
+                                         createdDate: sourceUpdatedDate, lastUpdatedDate: sourceUpdatedDate]"/>
+                    </iterate>
                 </iterate>
                 <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', savedAutomationId).disableAuthz().useCache(false).one()"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
@@ -3023,13 +3059,13 @@
 
     <service verb="sync" noun="Automation" allow-remote="true" authenticate="true">
         <description>Re-derive an automation's snapshot from its saved run. Overwrites the compare
-            scope, input mode and both source definitions; preserves the name,
+            scope, input mode, both source definitions and the exclusion filters; preserves the name,
             schedule, window, chat space, active status, and the SFTP server, path and pattern the run
             cannot supply. Never re-points the automation at a different run.
 
             Writes nothing directly: it derives, merges the result over the stored source rows, and
-            delegates to save#Automation, which already deletes and recreates every source row on each
-            save. That inherits the whole save path (validateSources, validateApiSource,
+            delegates to save#Automation, which already deletes and recreates every source and filter
+            row on each save. That inherits the whole save path (validateSources, validateApiSource,
             applyApiSourceMetadataDefaults, tenant stamping, the response builder) rather than growing
             a second writer that would drift from it. Filters are never copied: an automation's runs
             read its run's compare scope filters.</description>
@@ -3068,8 +3104,8 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="storedSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="changedFields" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, storedSources, derivedConfig).changedFields"/>
-                <set field="mergedSources" from="darpan.facade.reconciliation.AutomationFacadeSupport.mergeSyncedSourceEntries(storedSources, derivedConfig.sourcesByFileSide)"/>
+                <set field="changedFields" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, darpan.facade.reconciliation.AutomationFacadeSupport.attachCapturedFilters(ec, storedSources, automationIdValue), derivedConfig).changedFields"/>
+                <set field="mergedSources" from="darpan.facade.reconciliation.AutomationFacadeSupport.mergeSyncedSourceEntries(storedSources, derivedConfig.sourcesByFileSide, derivedConfig.filtersByFileSide)"/>
                 <set field="syncPayload" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncPayload(automationRecord, darpan.facade.reconciliation.AutomationFacadeSupport.resolveSyncedInputMode(mergedSources), mergedSources)"/>
                 <service-call name="facade.ReconciliationFacadeServices.save#Automation"
                         in-map="syncPayload" out-map="saveResult"/>
@@ -3117,6 +3153,10 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <!-- Filter rows FK to the source row (RECAUTSF_SOURCE on automationId+fileSide), so they
+                     must be cleared before their ReconciliationAutomationSource parent or the parent
+                     delete would orphan them (or fail on the foreign key, depending on datasource). -->
+                <set field="deletedFilterCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSourceFilter').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="deletedSourceCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="deletedExecutionCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <!-- DAR-BE-328: a peak period's run times that name it (FK PEAKRT_AUTOMATION) go with it. -->

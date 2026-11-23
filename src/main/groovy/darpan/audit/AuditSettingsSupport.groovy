@@ -390,7 +390,16 @@ class AuditSettingsSupport {
                     recordRootExpression: source.recordRootExpression, primaryIdExpression: source.primaryIdExpression,
                     idValueNormalizer: source.idValueNormalizer, createdDate: now, lastUpdatedDate: now,
                     safeMetadataJson: metadata ? AutomationRuntimeSupport.safeMetadataJson(metadata) : null]).create()
-            // the run's source filters reach the automation through its compare scope (DAR-BE-318 3b-2c): nothing is copied
+            // DAR-UI-063 (found in DAR-UI-064's walk): the run's source filters too. An automation reads its OWN filter rows
+            // (loadAutomationSourceFilters), so without this copy every run that filters its source (R1 "completed units
+            // only", R15 "EXC- orders, not WH") ran unfiltered and raised findings for records it never meant to read.
+            darpan.facade.reconciliation.AutomationFacadeSupport.seedFromRuleSet(ec, scope.compareScopeId as String, source.fileSide as String)
+                    .eachWithIndex { Map filter, int i ->
+                        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSourceFilter").setAll([
+                                automationId: automationId, fileSide: source.fileSide, sequenceNum: i + 1,
+                                fieldExpression: filter.fieldExpression, operator: filter.operator, filterValues: filter.filterValues,
+                                companyUserGroupId: tenantId, createdByUserId: userId, createdDate: now, lastUpdatedDate: now]).create()
+                    }
         }
         return automationId
     }

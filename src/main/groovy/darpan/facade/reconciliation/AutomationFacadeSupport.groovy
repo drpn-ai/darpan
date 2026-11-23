@@ -12,6 +12,7 @@ import darpan.reconciliation.automation.SftpAutomationSupport
 import darpan.reconciliation.automation.SourceEndpointAccessSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.slf4j.Logger
@@ -173,7 +174,11 @@ class AutomationFacadeSupport {
                 lastUpdatedDate       : readField(automation, "lastUpdatedDate"),
         ].findAll { it.value != null } as Map<String, Object>
         if (includeSources) {
-            row.sources = sourceRows.collect { source -> buildSourceRow(ec, source) }
+            // Reused whole-automation lookup rather than one query per source: cheap for the
+            // single-record get/save/pause/resume paths this runs on (list#Automations passes
+            // includeSources=false and never reaches here).
+            Map<String, List<Map<String, Object>>> filtersByFileSide = captureSourceFiltersByFileSide(ec, automationId)
+            row.sources = sourceRows.collect { source -> buildSourceRow(ec, source, filtersByFileSide) }
             row.savedRun = savedRun
         }
         return row
@@ -249,7 +254,7 @@ class AutomationFacadeSupport {
         ]
     }
 
-    protected static Map<String, Object> buildSourceRow(def ec, def source) {
+    protected static Map<String, Object> buildSourceRow(def ec, def source, Map<String, List<Map<String, Object>>> filtersByFileSide = [:]) {
         String sourceTypeEnumId = readString(source, "sourceTypeEnumId")
         String systemEnumId = readString(source, "systemEnumId")
         String fileSide = readString(source, "fileSide")
@@ -278,9 +283,117 @@ class AutomationFacadeSupport {
                 dateFromParameterName : readString(source, "dateFromParameterName"),
                 dateToParameterName   : readString(source, "dateToParameterName"),
                 safeMetadataJson      : readString(source, "safeMetadataJson"),
+                excludeFilters        : buildSourceExcludeFilterResponse(filtersByFileSide?.get(fileSide)),
                 createdDate           : readField(source, "createdDate"),
                 lastUpdatedDate       : readField(source, "lastUpdatedDate"),
         ].findAll { it.value != null } as Map<String, Object>
+    }
+
+    /** Captured filter rows (stored shape) in wire shape: values as a List, not the stored CSV string. */
+    protected static List<Map<String, Object>> buildSourceExcludeFilterResponse(List<Map<String, Object>> capturedRows) {
+        if (!capturedRows) return []
+        return capturedRows.collect { Map<String, Object> row ->
+            [
+                    fieldExpression: row.fieldExpression,
+                    operator       : row.operator,
+                    values         : SourceFilterSupport.splitValues(row.filterValues as String),
+            ] as Map<String, Object>
+        }
+    }
+
+    /**
+     * Existing automation source-exclusion-filter rows grouped by fileSide, in stored shape
+     * (filterValues as the comma-joined string), ordered by sequenceNum.
+     *
+     * A fileSide that currently has a ReconciliationAutomationSource row is always represented as a
+     * key here — with an empty list when it has no filter rows — never simply omitted. The automation
+     * save deletes and recreates every source row on every save (see save#Automation), so a source row
+     * existing is exactly the signal that this side has been saved before. Without that empty-list
+     * entry, a side with zero filter rows (e.g. explicitly cleared on a prior save) would be
+     * indistinguishable from a side that has never been configured, and the very next omitted-key
+     * resave would silently re-seed it from the rule set (see resolveSourceFilters/seedFromRuleSet)
+     * instead of staying cleared — the scheduled automation would then quietly diverge from what the
+     * operator intentionally cleared.
+     */
+    static Map<String, List<Map<String, Object>>> captureSourceFiltersByFileSide(def ec, String automationId) {
+        Map<String, List<Map<String, Object>>> byFileSide = [:]
+        if (!automationId) return byFileSide
+        // Both entities carry their own companyUserGroupId (directly tenant-owned, not transitively via
+        // a parent), so this routes through TenantScopedFinder rather than a bare disableAuthz (P0 #4 —
+        // bare disableAuthz is CI-banned by DisableAuthzRatchetTest). Callers of this function (the
+        // save#Automation capture-before-delete step and buildAutomationRow's load path) have already
+        // established an active tenant matching the automation before reaching here.
+        List existingSources = TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.ReconciliationAutomationSource")
+                .condition("automationId", automationId)
+                .useCache(false).list() ?: []
+        existingSources.each { def existingSource ->
+            String existingFileSide = normalize(existingSource.fileSide)
+            if (existingFileSide) byFileSide.putIfAbsent(existingFileSide, [])
+        }
+        List rows = TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                .condition("automationId", automationId)
+                .orderBy("fileSide,sequenceNum")
+                .useCache(false).list() ?: []
+        rows.each { def row ->
+            String fileSide = normalize(row.fileSide)
+            byFileSide.computeIfAbsent(fileSide, { ignored -> [] }).add([
+                    fieldExpression: normalize(row.fieldExpression),
+                    operator       : normalize(row.operator),
+                    filterValues   : normalize(row.filterValues),
+            ] as Map<String, Object>)
+        }
+        return byFileSide
+    }
+
+    /**
+     * The filter rows to write for one source entry. An entry that omits excludeFilters keeps the
+     * rules captured before the source delete; an explicit list (including an empty one) replaces them.
+     *
+     * On a FIRST save there is nothing captured and the automation UI submits nothing (exclusions are
+     * only editable on the rules board, which belongs to the rule set — the automation wizard never
+     * submits them), so without the seed below an automation would run with no exclusions while its
+     * rule set has them — the scheduled job silently disagreeing with the interactive run. The seed
+     * copies the rule set's rows once, at creation; it is frozen thereafter (later rule-set edits do
+     * not reach an existing automation), which is the snapshot property the mirrored tables exist for.
+     */
+    static List<Map<String, Object>> resolveSourceFilters(def ec, String compareScopeId, Object sourceEntry,
+                                                          Map<String, List<Map<String, Object>>> capturedByFileSide) {
+        Map entry = (sourceEntry instanceof Map) ? (Map) sourceEntry : [:]
+        String fileSide = normalize(entry.get("fileSide"))
+        if (entry.containsKey("excludeFilters") && entry.get("excludeFilters") != null) {
+            return ReconciliationSavedRunSupport.validateExcludeFilterPayload(
+                    entry.get("excludeFilters"), "Automation ${fileSide ?: 'source'}".toString())
+        }
+        List<Map<String, Object>> captured = capturedByFileSide?.get(fileSide)
+        if (captured != null) return captured
+        return seedFromRuleSet(ec, compareScopeId, fileSide)
+    }
+
+    /** Rule set rows for this automation's compare scope and side; empty when it has no compareScopeId. */
+    protected static List<Map<String, Object>> seedFromRuleSet(def ec, String rawCompareScopeId, String fileSide) {
+        String compareScopeId = normalize(rawCompareScopeId)
+        if (!compareScopeId || !fileSide) return []
+        // Same entity, same directly-tenant-owned read pattern as
+        // ReconciliationSavedRunSupport.resolveExtractExcludeFilters (P0 #4 — bare disableAuthz is
+        // CI-banned by DisableAuthzRatchetTest). Session-scoped by design: this is the save#Automation
+        // path, where the caller's active tenant is exactly the tenant the compareScopeId belongs to.
+        // Do NOT reuse this for a cross-tenant sweep.
+        List rows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceFilter")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", fileSide)
+                .orderBy("sequenceNum")
+                .useCache(false).list() ?: []
+        return mapRuleSetFilterRows(rows)
+    }
+
+    private static List<Map<String, Object>> mapRuleSetFilterRows(List rows) {
+        return rows.collect { def row ->
+            [
+                    fieldExpression: normalize(row.fieldExpression),
+                    operator       : normalize(row.operator),
+                    filterValues   : normalize(row.filterValues),
+            ] as Map<String, Object>
+        }
     }
 
     static final String SOURCE_CONFIG_TYPE_DATABASE_QUERY = "DATABASE_QUERY"
@@ -328,22 +441,23 @@ class AutomationFacadeSupport {
         String savedRunId = normalize(readField(automation, "savedRunId"))
         String savedRunType = normalizeLower(readField(automation, "savedRunType")) ?: "ruleset"
         if (!savedRunId || savedRunType != "ruleset") {
-            return [savedRunMissing: true, error: null, sourcesByFileSide: [:]]
+            return [savedRunMissing: true, error: null, sourcesByFileSide: [:], filtersByFileSide: [:]]
         }
 
         Map<String, Object> resolved = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId)
         if (resolved.error) {
             return [savedRunMissing: false, error: resolved.error as String,
-                    sourcesByFileSide: [:]]
+                    sourcesByFileSide: [:], filtersByFileSide: [:]]
         }
         if (!resolved.savedRun) {
-            return [savedRunMissing: true, error: null, sourcesByFileSide: [:]]
+            return [savedRunMissing: true, error: null, sourcesByFileSide: [:], filtersByFileSide: [:]]
         }
 
         String compareScopeId = normalize(((Map) resolved.savedRun)?.get("compareScopeId"))
         Map sourceBySide = (resolved.sourceBySide instanceof Map) ? (Map) resolved.sourceBySide : [:]
 
         Map<String, Map<String, Object>> sourcesByFileSide = [:]
+        Map<String, List<Map<String, Object>>> filtersByFileSide = [:]
         FILE_SIDES.each { String fileSide ->
             def runSource = sourceBySide.get(fileSide)
             if (runSource == null) return
@@ -364,6 +478,7 @@ class AutomationFacadeSupport {
                     SourceExtractOptionsSupport.storedOn(runSource))
             if (options) derived.put("safeMetadataJson", JsonOutput.toJson([parameters: options]))
             sourcesByFileSide.put(fileSide, derived)
+            filtersByFileSide.put(fileSide, seedFromRuleSet(ec, compareScopeId, fileSide))
         }
 
         return [
@@ -372,6 +487,7 @@ class AutomationFacadeSupport {
                 compareScopeId   : compareScopeId,
                 inputModeEnumId  : deriveInputModeFromSources(sourcesByFileSide),
                 sourcesByFileSide: sourcesByFileSide,
+                filtersByFileSide: filtersByFileSide,
         ]
     }
 
@@ -387,11 +503,15 @@ class AutomationFacadeSupport {
     /**
      * One save#Automation `sources` entry per side the RUN defines: run-authoritative columns from the
      * derive, operator-owned columns carried over from the stored row. A side the run no longer
-     * defines disappears; a side the automation lacks is added. Filters are not copied: an automation reads
-     * its run's (DAR-BE-318 3b-2c).
+     * defines disappears; a side the automation lacks is added.
+     *
+     * excludeFilters is ALWAYS set (replace, not merge), and its rows are re-keyed to the declared
+     * `values` list parameter: seedFromRuleSet returns `filterValues`, which save#Automation does not
+     * declare and Moqui may strip before validateExcludeFilterPayload ever sees it.
      */
     static List<Map<String, Object>> mergeSyncedSourceEntries(List storedSources,
-            Map<String, Map<String, Object>> derivedByFileSide) {
+            Map<String, Map<String, Object>> derivedByFileSide,
+            Map<String, List<Map<String, Object>>> filtersByFileSide) {
         Map<String, Object> storedByFileSide = [:]
         (storedSources ?: []).each { def stored ->
             String fileSide = normalize(readField(stored, "fileSide"))
@@ -421,6 +541,7 @@ class AutomationFacadeSupport {
                         String preserved = stored != null ? normalize(readField(stored, fieldName)) : null
                         if (preserved) entry.put(fieldName, preserved)
                     }
+                    entry.put("excludeFilters", toDeclaredExcludeFilterRows(filtersByFileSide?.get(fileSide)))
                     return entry
                 } as List<Map<String, Object>>
     }
@@ -438,6 +559,16 @@ class AutomationFacadeSupport {
             if (fileSide) byFileSide.put(fileSide, entry)
         }
         return deriveInputModeFromSources(byFileSide)
+    }
+
+    /** Rule set filter rows re-keyed to save#Automation's declared excludeFilters sub-parameters. */
+    protected static List<Map<String, Object>> toDeclaredExcludeFilterRows(List<Map<String, Object>> rows) {
+        return (rows ?: []).collect { Map<String, Object> row ->
+            [fieldExpression: normalize(row?.get("fieldExpression")),
+             operator       : normalize(row?.get("operator")),
+             values         : SourceFilterSupport.splitValues(
+                     row?.containsKey("values") ? row.get("values") : row?.get("filterValues"))] as Map<String, Object>
+        } as List<Map<String, Object>>
     }
 
     /**
@@ -498,7 +629,8 @@ class AutomationFacadeSupport {
         // preserves operator-owned columns and keeps stored values where the run is blank, so comparing
         // the raw derive reports drift on fields sync will never change — permanent, unfixable drift.
         List<Map<String, Object>> merged = mergeSyncedSourceEntries(storedSources,
-                (derivedConfig?.sourcesByFileSide ?: [:]) as Map<String, Map<String, Object>>)
+                (derivedConfig?.sourcesByFileSide ?: [:]) as Map<String, Map<String, Object>>,
+                (derivedConfig?.filtersByFileSide ?: [:]) as Map<String, List<Map<String, Object>>>)
         Map<String, Map<String, Object>> mergedByFileSide = [:]
         merged.each { Map<String, Object> entry ->
             String fileSide = normalize(entry?.get("fileSide"))
@@ -538,11 +670,39 @@ class AutomationFacadeSupport {
                     changedFields.add("${fileSide}.${fieldName}".toString())
                 }
             }
+            List mergedFilters = (mergedEntry.get("excludeFilters") ?: []) as List
+            List storedFilters = toDeclaredExcludeFilterRows(
+                    filterRowsFromSource(stored) as List<Map<String, Object>>)
+            if (mergedFilters != storedFilters) changedFields.add("${fileSide}.excludeFilters".toString())
         }
 
         return [inSync           : changedFields.isEmpty(), changedFields: changedFields,
                 inputModeChanging: inputModeChanging, savedRunMissing: false]
     }
+
+    /** The excludeFilters list attached to a source row by attachCapturedFilters, or empty. */
+    protected static List<Map<String, Object>> filterRowsFromSource(def storedSource) {
+        Object attached = readField(storedSource, "excludeFilters")
+        return (attached instanceof Collection) ? new ArrayList<>((Collection) attached) : []
+    }
+
+    /**
+     * Source rows narrowed to the columns sync compares, with their own filter rows attached, so
+     * buildAutomationSyncStatus stays a pure comparison with no entity access of its own.
+     */
+    static List<Map<String, Object>> attachCapturedFilters(def ec, List sources, String automationId) {
+        Map<String, List<Map<String, Object>>> capturedByFileSide = captureSourceFiltersByFileSide(ec, automationId)
+        return (sources ?: []).collect { def source ->
+            String fileSide = normalize(readField(source, "fileSide"))
+            Map<String, Object> row = [fileSide: fileSide]
+            (RUN_AUTHORITATIVE_SOURCE_FIELDS + ["databaseSourceQueryId"]).each { String fieldName ->
+                row.put(fieldName, readField(source, fieldName))
+            }
+            row.put("excludeFilters", capturedByFileSide?.get(fileSide) ?: [])
+            return row
+        } as List<Map<String, Object>>
+    }
+
 
     protected static Map<String, Object> resolveSavedRunForSave(def ec, Map input) {
         Map savedRunPayload = (input.savedRun instanceof Map ? input.savedRun :

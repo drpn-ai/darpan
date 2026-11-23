@@ -100,6 +100,7 @@ facade.AgentFacadeServices.list#AgentQueryLogs
 facade.AgentReadFacadeServices.get#AgentAuditScope
 facade.AgentTurnFacadeServices.get#AgentConversation
 facade.AgentTurnFacadeServices.get#AgentStatus
+facade.AgentTurnFacadeServices.send#AgentQueryTurn
 facade.AgentTurnFacadeServices.send#AgentTurn
 facade.AppContentFacadeServices.get#AppContent
 facade.AuditFacadeServices.add#AuditStatement
@@ -305,8 +306,10 @@ facade.TenantConfigFacadeServices.get#TenantConfigVersions
 facade.TenantConfigFacadeServices.preview#TenantConfigRestore
 facade.TenantConfigFacadeServices.restore#TenantConfigVersion
 facade.TenantConfigFacadeServices.snapshot#TenantConfig
+facade.TenantScriptFacadeServices.create#TenantQueryProposal
 facade.TenantScriptFacadeServices.delete#TenantQuery
 facade.TenantScriptFacadeServices.delete#TenantQuerySchedule
+facade.TenantScriptFacadeServices.get#TenantQueryCatalog
 facade.TenantScriptFacadeServices.list#TenantQueries
 facade.TenantScriptFacadeServices.list#TenantQuerySchedules
 facade.TenantScriptFacadeServices.run#TenantQuery

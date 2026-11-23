@@ -129,8 +129,10 @@ class CliMethodAllowlist {
             "facade.TenantConfigFacadeServices.get#TenantConfigVersions",
 
             // DAR-BE-334: tenant queries and their schedules (moqui-jexl)
+            "facade.TenantScriptFacadeServices.create#TenantQueryProposal",
             "facade.TenantScriptFacadeServices.delete#TenantQuery",
             "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule",
+            "facade.TenantScriptFacadeServices.get#TenantQueryCatalog",
             "facade.TenantScriptFacadeServices.list#TenantQueries",
             "facade.TenantScriptFacadeServices.list#TenantQuerySchedules",
             "facade.TenantScriptFacadeServices.run#TenantQuery",
@@ -193,6 +195,7 @@ class CliMethodAllowlist {
             // runs a turn of this one or reads its panel.
             "facade.AgentTurnFacadeServices.get#AgentConversation",
             "facade.AgentTurnFacadeServices.get#AgentStatus",
+            "facade.AgentTurnFacadeServices.send#AgentQueryTurn",   // DAR-BE-334: the queries page's agent, same reason
             "facade.AgentTurnFacadeServices.send#AgentTurn",
             // DAR-BE-235: authoring data-defined reads is a super admin's, in the admin app; never a CLI session's.
             "facade.DataSourceDefinitionFacadeServices.create#DataSourceDefinition",

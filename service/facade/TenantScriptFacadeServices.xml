@@ -223,4 +223,64 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
+    <service verb="get" noun="TenantQueryCatalog" allow-remote="true" authenticate="true" authz-action="view">
+        <description>What the active tenant's queries may read: its kept datasets (with their kept fields; none listed = whole
+            records), its saved runs and its audits (with the finding fields). The agent writes queries from this.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="datasets" type="List"/>
+            <parameter name="savedRuns" type="List"/>
+            <parameter name="audits" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                Map catalog = darpan.query.QueryCatalog.catalog(ec, tenantId)
+                datasets = catalog.datasets; savedRuns = catalog.savedRuns; audits = catalog.audits
+            ]]></script></if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="TenantQueryProposal" allow-remote="true" authenticate="true" transaction="ignore">
+        <description>A query proposed for the active tenant (by the agent or a person): its read is checked against
+            get#TenantQueryCatalog and, when every source and field is in it, the query runs on the tenant's data so its
+            result can be shown first. Nothing is saved; accepting it is save#TenantQuery. status: PROPOSED or REFUSED (code
+            NOT_KEPT, UNKNOWN_SOURCE or INVALID_READ, with the field). Needs edit access.</description>
+        <in-parameters>
+            <parameter name="queryName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="readSpecJson" allow-html="any"/>
+            <parameter name="scriptBody" required="true" allow-html="any"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="status"/>
+            <parameter name="code"/>
+            <parameter name="field"/>
+            <parameter name="message"/>
+            <parameter name="proposal" type="Map"><description>{queryName, description, readSpecJson, scriptBody, readText}</description></parameter>
+            <parameter name="preview" type="Map"><description>As run#TenantQuery's result.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="canWrite" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change or run queries.', 'Choose a tenant first.')"/>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                Map out = darpan.query.QueryCatalog.propose(ec, tenantId, [queryName: queryName, description: description,
+                        readSpecJson: readSpecJson, scriptBody: scriptBody])
+                status = out?.status; code = out?.code; field = out?.field; message = out?.message
+                proposal = out?.proposal; preview = out?.preview
+            ]]></script></if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
 </services>

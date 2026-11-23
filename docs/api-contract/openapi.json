@@ -330,6 +330,9 @@
                                         "$ref": "#/components/schemas/GetAgentStatusRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/SendAgentQueryTurnRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SendAgentTurnRequest"
                                     },
                                     {
@@ -945,10 +948,16 @@
                                         "$ref": "#/components/schemas/SnapshotTenantConfigRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/CreateTenantQueryProposalRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteTenantQueryRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/DeleteTenantQueryScheduleRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetTenantQueryCatalogRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/ListTenantQueriesRequest"
@@ -1074,6 +1083,7 @@
                                         "facade.AgentReadFacadeServices.get#AgentAuditScope": "#/components/schemas/GetAgentAuditScopeRequest",
                                         "facade.AgentTurnFacadeServices.get#AgentConversation": "#/components/schemas/GetAgentConversationRequest",
                                         "facade.AgentTurnFacadeServices.get#AgentStatus": "#/components/schemas/GetAgentStatusRequest",
+                                        "facade.AgentTurnFacadeServices.send#AgentQueryTurn": "#/components/schemas/SendAgentQueryTurnRequest",
                                         "facade.AgentTurnFacadeServices.send#AgentTurn": "#/components/schemas/SendAgentTurnRequest",
                                         "facade.AppContentFacadeServices.get#AppContent": "#/components/schemas/GetAppContentRequest",
                                         "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
@@ -1279,8 +1289,10 @@
                                         "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "#/components/schemas/PreviewTenantConfigRestoreRequest",
                                         "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "#/components/schemas/RestoreTenantConfigVersionRequest",
                                         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "#/components/schemas/SnapshotTenantConfigRequest",
+                                        "facade.TenantScriptFacadeServices.create#TenantQueryProposal": "#/components/schemas/CreateTenantQueryProposalRequest",
                                         "facade.TenantScriptFacadeServices.delete#TenantQuery": "#/components/schemas/DeleteTenantQueryRequest",
                                         "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule": "#/components/schemas/DeleteTenantQueryScheduleRequest",
+                                        "facade.TenantScriptFacadeServices.get#TenantQueryCatalog": "#/components/schemas/GetTenantQueryCatalogRequest",
                                         "facade.TenantScriptFacadeServices.list#TenantQueries": "#/components/schemas/ListTenantQueriesRequest",
                                         "facade.TenantScriptFacadeServices.list#TenantQuerySchedules": "#/components/schemas/ListTenantQuerySchedulesRequest",
                                         "facade.TenantScriptFacadeServices.run#TenantQuery": "#/components/schemas/RunTenantQueryRequest",
@@ -1608,6 +1620,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAgentStatusResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SendAgentQueryTurnResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SendAgentTurnResponse"
@@ -2225,10 +2240,16 @@
                                             "$ref": "#/components/schemas/SnapshotTenantConfigResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/CreateTenantQueryProposalResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/DeleteTenantQueryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteTenantQueryScheduleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetTenantQueryCatalogResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListTenantQueriesResponse"
@@ -12296,6 +12317,111 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAgentStatusResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SendAgentQueryTurnParams": {
+                "type": "object",
+                "properties": {
+                    "conversationId": {
+                        "type": "string",
+                        "description": "Continue this query conversation; empty starts one."
+                    },
+                    "text": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "text"
+                ],
+                "description": "DAR-BE-334. One message from the queries page: the agent reads what the tenant's queries may read and\n            proposes one query that has already run on the tenant's data (queryProposal {proposal, preview}); nothing is\n            saved until the person saves it (save#TenantQuery). Same gates and outcomes as send#AgentTurn."
+            },
+            "SendAgentQueryTurnResult": {
+                "type": "object",
+                "properties": {
+                    "conversationId": {
+                        "type": "string"
+                    },
+                    "outcome": {
+                        "type": "string"
+                    },
+                    "reply": {
+                        "type": "string"
+                    },
+                    "queryProposal": {
+                        "type": "object",
+                        "description": "{proposal: {queryName, description, readSpecJson, scriptBody, readText}, preview} or empty."
+                    },
+                    "question": {
+                        "type": "object",
+                        "description": "{text, options, from} when the agent needs the person's answer."
+                    },
+                    "masked": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "The kinds of secret or personal data masked in the text (never the values)."
+                    }
+                }
+            },
+            "SendAgentQueryTurnRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AgentTurnFacadeServices.send#AgentQueryTurn",
+                "x-darpan-method": "facade.AgentTurnFacadeServices.send#AgentQueryTurn",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AgentTurnFacadeServices.send#AgentQueryTurn"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SendAgentQueryTurnParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SendAgentQueryTurnResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AgentTurnFacadeServices.send#AgentQueryTurn. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SendAgentQueryTurnResult"
                     }
                 },
                 "required": [
@@ -40103,6 +40229,128 @@
                     "result"
                 ]
             },
+            "CreateTenantQueryProposalParams": {
+                "type": "object",
+                "properties": {
+                    "queryName": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "readSpecJson": {
+                        "type": "string"
+                    },
+                    "scriptBody": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "queryName",
+                    "scriptBody"
+                ],
+                "description": "A query proposed for the active tenant (by the agent or a person): its read is checked against\n            get#TenantQueryCatalog and, when every source and field is in it, the query runs on the tenant's data so its\n            result can be shown first. Nothing is saved; accepting it is save#TenantQuery. status: PROPOSED or REFUSED (code\n            NOT_KEPT, UNKNOWN_SOURCE or INVALID_READ, with the field). Needs edit access."
+            },
+            "CreateTenantQueryProposalResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "field": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "proposal": {
+                        "type": "object",
+                        "description": "{queryName, description, readSpecJson, scriptBody, readText}"
+                    },
+                    "preview": {
+                        "type": "object",
+                        "description": "As run#TenantQuery's result."
+                    }
+                }
+            },
+            "CreateTenantQueryProposalRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.create#TenantQueryProposal",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.create#TenantQueryProposal",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.create#TenantQueryProposal"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateTenantQueryProposalParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateTenantQueryProposalResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.create#TenantQueryProposal. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateTenantQueryProposalResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteTenantQueryParams": {
                 "type": "object",
                 "properties": {
@@ -40280,6 +40528,111 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/DeleteTenantQueryScheduleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetTenantQueryCatalogParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "What the active tenant's queries may read: its kept datasets (with their kept fields; none listed = whole\n            records), its saved runs and its audits (with the finding fields). The agent writes queries from this."
+            },
+            "GetTenantQueryCatalogResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "datasets": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "savedRuns": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
+                    "audits": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "GetTenantQueryCatalogRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.get#TenantQueryCatalog",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.get#TenantQueryCatalog",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.get#TenantQueryCatalog"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTenantQueryCatalogParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTenantQueryCatalogResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.get#TenantQueryCatalog. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTenantQueryCatalogResult"
                     }
                 },
                 "required": [
@@ -41025,6 +41378,7 @@
         "facade.AgentReadFacadeServices.get#AgentAuditScope": "GetAgentAuditScope",
         "facade.AgentTurnFacadeServices.get#AgentConversation": "GetAgentConversation",
         "facade.AgentTurnFacadeServices.get#AgentStatus": "GetAgentStatus",
+        "facade.AgentTurnFacadeServices.send#AgentQueryTurn": "SendAgentQueryTurn",
         "facade.AgentTurnFacadeServices.send#AgentTurn": "SendAgentTurn",
         "facade.AppContentFacadeServices.get#AppContent": "GetAppContent",
         "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
@@ -41230,8 +41584,10 @@
         "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "PreviewTenantConfigRestore",
         "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "RestoreTenantConfigVersion",
         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "SnapshotTenantConfig",
+        "facade.TenantScriptFacadeServices.create#TenantQueryProposal": "CreateTenantQueryProposal",
         "facade.TenantScriptFacadeServices.delete#TenantQuery": "DeleteTenantQuery",
         "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule": "DeleteTenantQuerySchedule",
+        "facade.TenantScriptFacadeServices.get#TenantQueryCatalog": "GetTenantQueryCatalog",
         "facade.TenantScriptFacadeServices.list#TenantQueries": "ListTenantQueries",
         "facade.TenantScriptFacadeServices.list#TenantQuerySchedules": "ListTenantQuerySchedules",
         "facade.TenantScriptFacadeServices.run#TenantQuery": "RunTenantQuery",

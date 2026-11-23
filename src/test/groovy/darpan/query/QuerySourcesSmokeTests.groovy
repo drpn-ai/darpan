@@ -208,4 +208,59 @@ class QuerySourcesSmokeTests {
         assertNull(out.error, "${out.error}")
         assertEquals(["SO-1"], out.rows*.recordKey)
     }
+
+    // ---- Task 9: the read catalog and a proposal checked against it, then run before anyone sees it
+
+    private Map propose(Map read, String body = "size(input.orders)") {
+        QueryTestSupport.actAsKreweEditor(ec)
+        Map out = ec.service.sync().name("facade.TenantScriptFacadeServices.create#TenantQueryProposal").parameters([queryName: "Backorders now",
+                description: "Open backorders", readSpecJson: JsonOutput.toJson([inputs: [read]]), scriptBody: body]).call()
+        String errors = ec.message.errorsString
+        ec.message.clearErrors()
+        assertTrue(!errors, errors)
+        return out
+    }
+
+    @Test
+    void theCatalogListsWhatAQueryMayRead() {
+        DatasetQuerySource.keptFieldsOf = { def c, Map d -> ["id", "status", "createdAt"] as Set<String> }
+        QueryTestSupport.actAsKreweEditor(ec)
+        Map catalog = QueryCatalog.catalog(ec, KREWE)
+        Map ds = ((List<Map>) catalog.datasets).find { it.datasetId == "QS_DS_K" }
+        assertEquals(["createdAt", "id", "status"], ds.fields)
+        assertEquals("createdAt", ds.windowField)
+        assertTrue(((List<Map>) catalog.datasets).every { it.datasetId != "QS_DS_G" }, "another tenant's dataset is not listed")
+        assertEquals(AuditFindingQuerySource.FIELDS, ((List<Map>) catalog.audits).find { it.auditId == "QS_AUD_K" }.fields)
+        assertTrue(((List<Map>) catalog.audits).every { it.auditId != "QS_AUD_G" })
+    }
+
+    @Test
+    void aProposalWithAnUnkeptFieldIsRefused() {
+        DatasetQuerySource.keptFieldsOf = { def c, Map d -> ["id", "status", "createdAt"] as Set<String> }
+        Map out = propose(orders(fields: ["id", "qty"]))
+        assertEquals("REFUSED", out.status)
+        assertEquals("NOT_KEPT", out.code)
+        assertEquals("qty", out.field)
+        assertTrue((out.message as String).contains("not kept by any audit"), out.message as String)
+        assertNull(out.preview, "a refused read never runs")
+    }
+
+    @Test
+    void aProposalOnAnotherTenantsDatasetIsRefused() {
+        Map out = propose(orders(datasetId: "QS_DS_G"))
+        assertEquals(["REFUSED", "UNKNOWN_SOURCE"], [out.status, out.code])
+    }
+
+    @Test
+    void aValidProposalRunsBeforeItIsShown() {
+        DatasetQuerySource.keptFieldsOf = { def c, Map d -> ["id", "status", "createdAt"] as Set<String> }
+        long before = ec.entity.find("jexl.script.UserScript").disableAuthz().count()
+        Map out = propose(orders(where: [field: "status", op: "equals", value: "B"]))
+        assertEquals("PROPOSED", out.status, "${out}")
+        assertTrue(out.preview.ok as boolean, "${out.preview}")
+        assertEquals(3L, (out.preview.readCounts as Map).orders as long)
+        assertEquals("Backorders now", out.proposal.queryName)
+        assertTrue((out.proposal.readText as String).startsWith("Reads dataset QS_DS_K"), out.proposal.readText as String)
+        assertEquals(before, ec.entity.find("jexl.script.UserScript").disableAuthz().count(), "a proposal saves nothing")
+    }
 }

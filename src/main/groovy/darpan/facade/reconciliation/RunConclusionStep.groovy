@@ -186,11 +186,6 @@ class RunConclusionStep {
 
     private static long lastCaptureMillis = 0L
 
-    /** Restores the capture clock (DAR-OPS-026 shared-Moqui harness). */
-    static synchronized void resetForTests() {
-        lastCaptureMillis = 0L
-    }
-
     /** A capture name no earlier one in this JVM or folder holds, so two fetches in one millisecond never overwrite each other. */
     static synchronized String uniqueCaptureName(File lookupsDir, String name) {
         long millis = Math.max(System.currentTimeMillis(), lastCaptureMillis + 1)

@@ -7,13 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-/** DAR-OPS-026: BrainAnswerStore and BrainConclude resetForTests restore their seams and state. Pure: no Moqui. */
+/** DAR-OPS-026: BrainAnswerStore resetForTests restores its seams and state. Pure: no Moqui. */
 class BrainStoreResetForTestsTests {
 
     @AfterEach
     void cleanup() {
         BrainAnswerStore.resetForTests()
-        BrainConclude.resetForTests()
     }
 
     @Test
@@ -36,13 +35,5 @@ class BrainStoreResetForTestsTests {
         // a store written after reset is stamped by the real clock, not the frozen 1_000
         BrainAnswerStore.put("t1", "q", "s2", [a: 2])
         assertTrue(BrainAnswerStore.has("t1", "q", "s2"))
-    }
-
-    @Test
-    void "BrainConclude resetForTests restores fetchBatch"() {
-        BrainConclude.fetchBatch = 7
-        BrainConclude.resetForTests()
-        BrainConclude.resetForTests()
-        assertEquals(0, BrainConclude.fetchBatch)
     }
 }

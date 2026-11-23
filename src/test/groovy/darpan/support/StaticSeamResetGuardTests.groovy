@@ -31,6 +31,11 @@ class StaticSeamResetGuardTests {
             "JobScheduleRules.PARSED": "pure memo of parsed cron expressions keyed by expression; a stale entry is still correct",
             "TenantConfigPendingSupport.MARK_LOCKS": "registry of lock objects per key; holds no test-observable state",
             "OutboundHttpClient.sharedByConnectTimeout": "pool of stateless HttpClients keyed by connect timeout; no test-observable state",
+            // 2026-11-23: resetForTests removed from these three by Aditi's call (shipped in the DAR-UI-138 hotfix); a test that
+            // changes them must restore them itself.
+            "BrainConclude.fetchBatch": "test seam, 0 by default; resetForTests removed 2026-11-23, a test that sets it restores it",
+            "BrainEngine.CACHE": "compiled rule engines keyed by pack list; a stale entry is still correct; resetForTests removed 2026-11-23",
+            "RunConclusionStep.lastCaptureMillis": "monotonic capture-name clock; only ever moves forward, never asserted; resetForTests removed 2026-11-23",
     ]
 
     private static final Pattern FIELD = Pattern.compile(

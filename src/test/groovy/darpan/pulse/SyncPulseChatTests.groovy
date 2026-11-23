@@ -86,6 +86,7 @@ class SyncPulseChatTests {
     void reset() {
         ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPulsePresentKey", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod",
          "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
+        SyncPulseSupport.forgetPresentMemoryForTests()
         upstream.clear(); arrived.clear(); posts.clear(); pulseThreads.clear()
         upstreamFailure = null
         postsThrow = false

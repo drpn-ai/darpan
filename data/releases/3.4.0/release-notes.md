@@ -107,7 +107,8 @@ For tenant users:
   tables and their filters stay until it has run on prod and SM; a later release drops them.
 - moqui-jexl's seed (security groups, the query email template) rides as `darpan-seed` (`MoquiJexlSeedData.xml`, with a
   drift guard), like moqui-rules'.
-- Set `jexl_email_from` on prod and SM. moqui-jexl's scheduler checks every 60 seconds; with
+- Query email sends from the address Darpan's other mail uses (`DARPAN_MAIL_FROM`, else `support@drpn.ai`); nothing
+  new to set. moqui-jexl's scheduler checks every 60 seconds; with
   `scheduled_job_check_time=0` it does not start unless `jexl_deployment_check_seconds` is set.
 - QUERY results may be up to 8,000,000 characters / 400,000 values (about 20,000 rows x 20 columns); results are never
   stored and attachments stay capped.
@@ -163,7 +164,7 @@ For tenant users:
 
 1. Optional safety, read-only: dump `RECONCILIATION_AUTOMATION_SOURCE_FILTER` (80 rows) before the deploy.
 2. Backend image (all product refs at their 3.4.0-line tags) with the upgrade data.
-3. Set `jexl_email_from`, then `run#PendingMigrations` straight away: `AUTOMATION_FILTER_TABLE` drops the retired
+3. `run#PendingMigrations` straight away: `AUTOMATION_FILTER_TABLE` drops the retired
    table (dry run first is fine), then `TENANT_SCRIPTS_TO_QUERIES` copies scripts to queries (no dry run).
 4. The two checks above, then confirm `run_DataRetention_daily` runs.
 5. darpan-ui 4.4.0.

@@ -2,6 +2,7 @@ package darpan.agent.pipeline
 
 import darpan.agent.AgentCallMarker
 import darpan.facade.common.TenantAccessSupport
+import darpan.reconciliation.source.KeepPlanSupport
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import darpan.reconciliation.support.SharedMoqui
@@ -32,7 +33,6 @@ class AuditChangeApplySmokeTests {
     private static final String VERSION = "darpan.config.TenantConfigVersion"
     private static final String PENDING = "darpan.config.TenantConfigPending"
     private static final String FILTER = "darpan.rule.RuleSetCompareSourceFilter"
-    private static final String AUTO_FILTER = "darpan.reconciliation.ReconciliationAutomationSourceFilter"
     private static final String MINE = "KREWE"
     private static final String OTHER = "TAC_OTHER"
     private static final String USER = "TEST_CUSTOMER_USER"
@@ -176,7 +176,6 @@ class AuditChangeApplySmokeTests {
         asSystem { ruleRows().each { if (it.outcome != null) { it.set("outcome", null); it.update() } } }
         // Each automation starts exactly in sync with its run, as Sync leaves it.
         [AUTO, AUTO2].each { sync(it) }
-        assertEquals(filterRows(), automationFilterRows())
         ec.message.clearAll()
     }
 
@@ -274,7 +273,6 @@ class AuditChangeApplySmokeTests {
         List<Map> rows = filterRows()
         assertEquals([[fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN", filterValues: "HOTWAX"],
                       [fieldExpression: NEW_FIELD, operator: "EXCLUDE_IN", filterValues: "M1088731"]], rows)
-        assertEquals(rows, automationFilterRows(), "the automation was synced with its run")
         assertEquals(sourceBefore, sourceRow(), "the whole-run save resends the run's setup unchanged")
         List versions = asSystem { ec.entity.find(VERSION).condition("companyUserGroupId", MINE).orderBy("versionSeq").useCache(false).list() }
         assertEquals(["AGENT_APPLY", "AGENT_APPLY"], versions*.changeSource)
@@ -326,23 +324,18 @@ class AuditChangeApplySmokeTests {
     }
 
     @Test
-    void "exclusion apply refuses automation drift"() {
-        asSystem {
-            upsert(AUTO_FILTER, [automationId: AUTO, fileSide: "FILE_1", sequenceNum: 2L, fieldExpression: '$.records[*].status',
-                    operator: "EXCLUDE_IN", filterValues: "DRAFT", companyUserGroupId: MINE])
-        }
-        List<Map> before = filterRows()
+    void "an applied exclusion reaches the automation's scheduled read"() {
+        // DAR-BE-318 3b-2c: the lever writes the run's filter only. The automation reads it there, so no sync runs.
+        List<Map> sourcesBefore = automationSources(AUTO)
         Map p = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
-        Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
-        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
-        assertTrue(out.hadError as boolean)
-        assertTrue((out.errorText as String).contains("AUTOMATION_DRIFT: ${AUTO}"), out.errorText as String)
-        assertEquals(before, filterRows())
-        assertEquals(2, automationFilterRows().size(), "the automation's own filters are left as they were")
-        assertEquals(0L, versionCount())
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: call("plan#AuditChange", [proposalId: p.proposalId]).planHash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("APPLIED", out.status)
+        String compareScopeId = asSystem { ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", AUTO).one().compareScopeId }
+        List<Map> scheduled = asSystem { KeepPlanSupport.tenantRuleRows(ec, compareScopeId, "FILE_1", MINE) }
+        assertTrue(scheduled.any { (it.filterValues as String).contains("M1088731") }, "${scheduled}")
+        assertEquals(sourcesBefore, automationSources(AUTO), "no sync rewrote the automation's sources")
     }
-
-    // ------------------------------------------------------------------ other levers
 
     @Test
     void "statement narrowing resends the check whole"() {
@@ -544,35 +537,6 @@ class AuditChangeApplySmokeTests {
         assertFalse(out.hadError as boolean, out.errorText as String)
         assertEquals(2, filterRowsOf(scope2Id, "FILE_1").size())
         assertEquals([[fieldExpression: '$.records[*].status', operator: "EXCLUDE_IN", filterValues: "DRAFT"]], filterRowsOf(scope2Id, "FILE_2"))
-        assertEquals(filterRowsOf(scope2Id, "FILE_2"), automationFilterRowsOf(AUTO2, "FILE_2"), "the other side's filters survive the sync")
-        assertEquals(filterRowsOf(scope2Id, "FILE_1"), automationFilterRowsOf(AUTO2, "FILE_1"))
-    }
-
-    @Test
-    void "exclusion apply refuses drift on the other side's filters or a source"() {
-        Map p = propose("EXCLUSION_FILTER", [savedRunId: run2Id, fileSide: "FILE_1"], [fieldExpression: NEW_FIELD, filterValues: ["M1088731"]])
-        String hash = call("plan#AuditChange", [proposalId: p.proposalId]).planHash
-        asSystem {
-            upsert(AUTO_FILTER, [automationId: AUTO2, fileSide: "FILE_2", sequenceNum: 2L, fieldExpression: '$.records[*].memoOrigin',
-                    operator: "EXCLUDE_IN", filterValues: "SHOPIFY", companyUserGroupId: MINE])
-        }
-        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: hash])
-        assertTrue(out.hadError as boolean)
-        assertTrue((out.errorText as String).contains("AUTOMATION_DRIFT: ${AUTO2}"), out.errorText as String)
-        assertTrue((out.errorText as String).contains("FILE_2.excludeFilters"), out.errorText as String)
-        assertEquals(2, automationFilterRowsOf(AUTO2, "FILE_2").size(), "the operator's FILE_2 filter is left alone")
-
-        sync(AUTO2)
-        asSystem {
-            ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition([automationId: AUTO2, fileSide: "FILE_2"]).one()
-                    .set("systemEnumId", "NETSUITE").update()
-        }
-        Map source = call("apply#AuditChange", [proposalId: p.proposalId, planHash: hash])
-        assertTrue(source.hadError as boolean)
-        assertTrue((source.errorText as String).contains("AUTOMATION_DRIFT: ${AUTO2}"), source.errorText as String)
-        assertTrue((source.errorText as String).contains("FILE_2.systemEnumId"), source.errorText as String)
-        assertEquals(1, filterRowsOf(scope2Id, "FILE_1").size(), "nothing applied")
-        assertEquals(0L, versionCount())
     }
 
     @Test
@@ -851,7 +815,6 @@ class AuditChangeApplySmokeTests {
         assertEquals([[fieldExpression: '$.records[*].memoOrigin', operator: "INCLUDE_IN", filterValues: "HOTWAX"],
                       [fieldExpression: NEW_FIELD, operator: "EXCLUDE_IN", filterValues: "M1000001,M1000002,M1088731"]], filterRows(),
                 "the scope on memoOrigin stands and the earlier exclusions stay excluded")
-        assertEquals(filterRows(), automationFilterRows())
 
         // A second agent exclusion on the same field keeps the first one's value too.
         Map second = propose("EXCLUSION_FILTER", [savedRunId: runId, fileSide: "FILE_1"], [filterValues: ["Voided", "M1088731"]])
@@ -917,7 +880,6 @@ class AuditChangeApplySmokeTests {
         Map out = call("apply#AuditChange", [proposalId: r.newProposalId, planHash: r.planHash])
         assertFalse(out.hadError as boolean, out.errorText as String)
         assertEquals(before, filterRows(), "[A,B] again, in order")
-        assertEquals(filterRows(), automationFilterRows())
         assertEquals("REVERTED", proposal(p.proposalId).status)
     }
 
@@ -962,7 +924,6 @@ class AuditChangeApplySmokeTests {
         assertEquals("M1000001,M1000002,M1088731", filterRows().find { it.fieldExpression == NEW_FIELD }.filterValues)
         revertApplied(p1.proposalId)
         assertEquals(original, filterRows(), "newest first, both reverts land and the list is the original")
-        assertEquals(filterRows(), automationFilterRows())
     }
 
     @Test
@@ -1106,10 +1067,11 @@ class AuditChangeApplySmokeTests {
         }
     }
 
-    private List<Map> automationFilterRowsOf(String automationId, String side) {
+    /** The automation's source rows as stored, stamps included: a sync deletes and recreates them. */
+    private List<Map> automationSources(String automationId) {
         return asSystem {
-            ec.entity.find(AUTO_FILTER).condition("automationId", automationId).condition("fileSide", side).orderBy("sequenceNum")
-                    .useCache(false).list().collect { [fieldExpression: it.fieldExpression, operator: it.operator, filterValues: it.filterValues] as Map }
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", automationId).orderBy("fileSide")
+                    .useCache(false).list().collect { it.getMap() }
         }
     }
 
@@ -1124,13 +1086,6 @@ class AuditChangeApplySmokeTests {
                 .condition("tenantUserGroupId", MINE).condition("userId", USER).deleteAll()
         upsert(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [tenantUserGroupId: MINE, userId: USER,
                 permissionUserGroupId: permissionGroupId, fromDate: FROM])
-    }
-
-    private List<Map> automationFilterRows() {
-        return asSystem {
-            ec.entity.find(AUTO_FILTER).condition("automationId", AUTO).condition("fileSide", "FILE_1").orderBy("sequenceNum")
-                    .useCache(false).list().collect { [fieldExpression: it.fieldExpression, operator: it.operator, filterValues: it.filterValues] as Map }
-        }
     }
 
     private def link(String statementCode) {

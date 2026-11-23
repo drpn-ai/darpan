@@ -4,7 +4,7 @@
 
     <!-- DAR-BE-159. An agent's proposed audit change, from draft to live config (darpan.agent.pipeline.AuditChangePlanner).
          The agent only creates drafts (create#AuditChangeProposal, in-JVM, never remote); a person plans, applies, rejects
-         or reverts. Apply goes through the existing save of the lever (save#RuleSetRun + sync#Automation, save#AuditCheck,
+         or reverts. Apply goes through the existing save of the lever (save#RuleSetRun, save#AuditCheck,
          save#RunConclusions), only while the plan's hash still matches the config, with a config version kept before and
          after. Every service reads the ACTIVE tenant from the session; another tenant's proposal reads as not found. -->
 
@@ -67,8 +67,7 @@
     </service>
 
     <service verb="apply" noun="AuditChange" allow-remote="true" authenticate="true">
-        <description>A person applies a planned proposal. Refused without write access, for a BLOCKED proposal, and (an
-            exclusion) when an automation's filters differ from its run's (AUTOMATION_DRIFT). When the config changed since
+        <description>A person applies a planned proposal. Refused without write access and for a BLOCKED proposal. When the config changed since
             the plan the proposal turns STALE and nothing is written.</description>
         <in-parameters>
             <parameter name="proposalId" required="true"/>

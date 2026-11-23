@@ -403,12 +403,23 @@ class ConfigTransferImporter {
         })
     }
 
-    /** The filter rows of one side of the compare scope an automation record names, as the bundle carries them; null when not carried. */
+    /**
+     * The filter rows of one side of the compare scope an automation record names, as the bundle carries them; null when not
+     * carried. The run the bundle carries is the reference: a run with one scope is that scope whatever its id; a transfer
+     * names the scope by position (SCOPE:<run>#<index>); only a config version over a run with several scopes needs the
+     * tenant's live scope order to place its plain scope id.
+     */
     private static List runFiltersOf(Map ctx, Map automation, String side) {
         String scopeRef = text(((Map) automation.refs)?.compareScopeId)
         String runRef = null
         Integer index = null
-        if (scopeRef?.startsWith("${SCOPE}:")) {
+        String bundleRunRef = text(((Map) automation.refs)?.savedRunId) ?: text(((Map) automation.refs)?.ruleSetId) ?:
+                (text(((Map) automation.fields)?.ruleSetId) ? ref(RUN, text(((Map) automation.fields)?.ruleSetId)) : null)
+        Map bundleRun = bundleRunRef ? records(ctx, "runs").find { it.ref == bundleRunRef } : null
+        if (bundleRun != null && ((((Map) bundleRun.children)?.RuleSetCompareScope ?: []) as List).size() == 1) {
+            runRef = bundleRunRef
+            index = 0
+        } else if (scopeRef?.startsWith("${SCOPE}:")) {
             String body = scopeRef.substring(SCOPE.length() + 1)
             int hash = body.lastIndexOf('#')
             if (hash > 0 && body.substring(hash + 1).isInteger()) {

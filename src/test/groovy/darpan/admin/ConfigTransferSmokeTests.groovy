@@ -1610,6 +1610,25 @@ class ConfigTransferSmokeTests {
         }
     }
 
+    @Test
+    void anOldConfigVersionRestoresAfterAScopeWasAddedToItsRun() {
+        // Review M4: a version names its automation's scope by id; the run in the version is the reference, so a scope added
+        // to the run since (sorting before it, so the live order moved) must not send the comparison to the wrong scope.
+        withAutomation {
+            Map pack = withOldAutomationFilters(ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true),
+                    [[fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Closed"]])
+            create("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS_ADDED", ruleSetId: "XFER_RS", objectType: "AAA_FIRST",
+                    scopeMode: "COMPARE", description: "Added since", companyUserGroupId: SRC])
+            try {
+                Map preview = ConfigTransferImporter.preview(ec, SRC, pack, TenantConfigRestoreSupport.sameConnections(pack), null, true)
+                assertFalse(((preview.plan as Map).blocking as List<Map>)*.code.contains("AUTOMATION_FILTERS_DIFFER"),
+                        "${(preview.plan as Map).blocking}")
+            } finally {
+                ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", "XFER_CS_ADDED").disableAuthz().deleteAll()
+            }
+        }
+    }
+
     /** The bundle as an instance before DAR-BE-318 3b-2c exported it: XFER_AUTO's FILE_1 source carries its own filter rows. */
     private static Map withOldAutomationFilters(Map bundle, List<Map> rows) {
         Map old = copy(bundle)

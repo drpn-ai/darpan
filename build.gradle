@@ -118,6 +118,10 @@ dependencies {
     // component is installed beside darpan and its jar is on the Moqui classpath at run time; tests need it too.
     compileOnly project(':runtime:component:moqui-rules')
     testImplementation project(':runtime:component:moqui-rules')
+    // DAR-BE-334: tenant queries run on moqui-jexl (sandbox, read step, deliveries); like moqui-rules, the component is
+    // installed beside darpan and its jar is on the Moqui classpath at run time
+    compileOnly project(':runtime:component:moqui-jexl')
+    testImplementation project(':runtime:component:moqui-jexl')
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'

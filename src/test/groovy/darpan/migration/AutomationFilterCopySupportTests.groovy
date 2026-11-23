@@ -138,6 +138,8 @@ class AutomationFilterCopySupportTests {
         Path seed = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/data/MigrationRegistrySeedData.xml")
         def rows = new XmlSlurper().parse(seed.toFile()).'**'.findAll { it.name() == "darpan.migration.DarpanMigration" }
         assertTrue(rows.every { it.@migrationId != "AUTOMATION_FILTER_TABLE" })
+        List<String> sequences = rows.collect { it.@sequenceNum.toString() }
+        assertEquals(sequences.unique(false), sequences, "every migration has its own sequenceNum: ${sequences}")
         def copy = rows.find { it.@migrationId == "AUTOMATION_FILTER_COPY" }
         assertEquals([SERVICE, "Y", "Y"], [copy.@serviceName.toString(), copy.@enabled.toString(), copy.@supportsDryRun.toString()])
         def ledger = ec.entity.find("darpan.migration.DarpanMigration").condition("migrationId", "AUTOMATION_FILTER_TABLE").disableAuthz().one()

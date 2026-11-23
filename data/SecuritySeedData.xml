@@ -479,6 +479,10 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.script.TenantScriptDeployment"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <!-- DAR-BE-334 — tenant queries on moqui-jexl (jexl.script.*); every read also names the tenant. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JEXL_SCRIPT" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="jexl.script.UserScript" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JEXL_DEPLOYMENT" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="jexl.script.UserScriptDeployment" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JEXL_RUN" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="jexl.script.UserScriptRun" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <!-- DAR-BE-318 plan 2: the judge's tenant config. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_DECISION_OUTCOME" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.DecisionOutcome" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JUDGE_CHECK_DECISION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.judge.CheckDecision" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>

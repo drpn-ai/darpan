@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-334. Tenant queries run on moqui-jexl: each jexl.script row belongs to one tenant (DARPAN_SCOPE_JEXL_*), set
+  through moqui-jexl's ownerFields and approved by query.QueryHostServices.check#QueryOwnerFields (the caller's active
+  tenant only). A run record copies its deployment's tenant.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="UserScript" package="jexl.script">
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant.</description></field>
+        <index name="JEXL_SCRIPT_TENANT"><index-field name="companyUserGroupId"/><index-field name="scriptName"/></index>
+    </extend-entity>
+    <extend-entity entity-name="UserScriptDeployment" package="jexl.script">
+        <field name="companyUserGroupId" type="id" not-null="true"><description>The tenant; also the lane's owner key.</description></field>
+        <index name="JEXL_DEPLOY_TENANT"><index-field name="companyUserGroupId"/></index>
+    </extend-entity>
+    <extend-entity entity-name="UserScriptRun" package="jexl.script">
+        <field name="companyUserGroupId" type="id"><description>The tenant, copied from the deployment.</description></field>
+        <index name="JEXL_RUN_TENANT"><index-field name="companyUserGroupId"/></index>
+    </extend-entity>
+</entities>

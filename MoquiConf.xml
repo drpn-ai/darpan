@@ -4,6 +4,19 @@
          (the pod name, which spam filters read as a stray server). commons-email seeds its mail session
          from System properties, so this puts every Message-ID on the sending domain. -->
     <default-property name="mail.from" value="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}"/>
+    <!-- DAR-BE-334: tenant queries on moqui-jexl. The QUERY profile starts from SCRIPT and raises what a query over kept
+         data needs; the hooks hand moqui-jexl Darpan's busy reason, the tenant as owner key, and the owner-field check. -->
+    <default-property name="jexl_profiles" value="QUERY"/>
+    <default-property name="jexl_profile_QUERY_maxReadRows" value="20000"/>
+    <default-property name="jexl_profile_QUERY_maxInputValues" value="2000000"/>
+    <default-property name="jexl_profile_QUERY_maxCollectionSize" value="20000"/>
+    <default-property name="jexl_profile_QUERY_units" value="5000000"/>
+    <default-property name="jexl_profile_QUERY_timeoutMs" value="10000"/>
+    <default-property name="jexl_busy_service" value="query.QueryHostServices.get#QueryBusyReason"/>
+    <default-property name="jexl_owner_key_service" value="query.QueryHostServices.get#QueryOwnerKey"/>
+    <default-property name="jexl_owner_fields_service" value="query.QueryHostServices.check#QueryOwnerFields"/>
+    <default-property name="jexl_email_from" value="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}"/>
+    <default-property name="jexl_email_templates" value="JEXL_SCRIPT_RESULT,DARPAN_QUERY_RESULT"/>
     <webapp-list>
         <webapp name="webroot">
             <before-request>

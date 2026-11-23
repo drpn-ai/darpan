@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-334. Darpan's side of moqui-jexl: the hooks it calls (busy reason, owner key, owner-field check), the query
+     read sources and deliveries. None is remote: tenant users reach queries through facade.TenantScriptFacadeServices. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="QueryBusyReason" allow-remote="false" authenticate="anonymous-all">
+        <description>jexl_busy_service: why tenant queries wait now (reconciliation runs queued or at their cap), or none.</description>
+        <out-parameters><parameter name="busyReason"/></out-parameters>
+        <actions><set field="busyReason" from="darpan.query.QueryLoad.busyReason()"/></actions>
+    </service>
+
+    <service verb="get" noun="QueryOwnerKey" allow-remote="false" authenticate="anonymous-all">
+        <description>jexl_owner_key_service: a deployment's lane key is its tenant, so one tenant's queries run one at a time.</description>
+        <in-parameters><parameter name="scriptDeployment" type="Map" required="true"/></in-parameters>
+        <out-parameters><parameter name="ownerKey"/></out-parameters>
+        <actions><set field="ownerKey" from="scriptDeployment.companyUserGroupId"/></actions>
+    </service>
+
+    <service verb="check" noun="QueryOwnerFields" allow-remote="false">
+        <description>jexl_owner_fields_service: a query or schedule is stored only for the caller's active tenant, which the
+            caller must be an active member of.</description>
+        <in-parameters>
+            <parameter name="entityName"/>
+            <parameter name="ownerFields" type="Map"><description>The record's effective owner values (stored overlaid with given).</description></parameter>
+            <parameter name="existing" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="problem"/></out-parameters>
+        <actions><script><![CDATA[
+            String tenantId = ownerFields?.companyUserGroupId as String
+            String active = darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+            if (!tenantId) { problem = 'A query belongs to a tenant: companyUserGroupId is required.'; return }
+            if (!active || tenantId != active) { problem = "A query can be stored only for your active tenant, not ${tenantId}.".toString(); return }
+        ]]></script></actions>
+    </service>
+</services>

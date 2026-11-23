@@ -127,6 +127,10 @@ class TenantOwnedEntityFilterContractTests {
             "DARPAN_SCOPE_RULES_RULE_PIECE": "rules.RulePiece",
             "DARPAN_SCOPE_RULES_RULE_PIECE_CONDITION": "rules.RulePieceCondition",
             "DARPAN_SCOPE_RULES_FILE_CHECK": "rules.FileCheck",
+            // DAR-BE-334: tenant queries on moqui-jexl
+            "DARPAN_SCOPE_JEXL_SCRIPT": "jexl.script.UserScript",
+            "DARPAN_SCOPE_JEXL_DEPLOYMENT": "jexl.script.UserScriptDeployment",
+            "DARPAN_SCOPE_JEXL_RUN": "jexl.script.UserScriptRun",
             "DARPAN_SCOPE_RULES_FILE_CHECK_RECORD": "rules.FileCheckRecord",
             // DAR-BE-328 plan 1: peak periods and their run times
             "DARPAN_SCOPE_PEAK_PERIOD": "darpan.peak.PeakPeriod",

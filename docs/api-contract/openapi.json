@@ -11444,7 +11444,7 @@
                     "proposalId",
                     "planHash"
                 ],
-                "description": "A person applies a planned proposal. Refused without write access, for a BLOCKED proposal, and (an\n            exclusion) when an automation's filters differ from its run's (AUTOMATION_DRIFT). When the config changed since\n            the plan the proposal turns STALE and nothing is written."
+                "description": "A person applies a planned proposal. Refused without write access and for a BLOCKED proposal. When the config changed since\n            the plan the proposal turns STALE and nothing is written."
             },
             "ApplyAuditChangeResult": {
                 "type": "object",
@@ -31571,32 +31571,6 @@
                                 },
                                 "omsRestSourceConfigId": {
                                     "type": "string"
-                                },
-                                "excludeFilters": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "excludeFilter": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "fieldExpression": {
-                                                        "type": "string"
-                                                    },
-                                                    "operator": {
-                                                        "type": "string"
-                                                    },
-                                                    "values": {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "type": "string"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    },
-                                    "description": "Record-exclusion rules for this source's fileSide, mirroring the rule\n                        set's own filters. Omitted means leave the previously-saved rows unchanged (or, on\n                        a first save, seed from the rule set); an explicit list (including an empty one)\n                        replaces them. See save#Automation's source-recreate comment for why omission\n                        cannot mean \"no-op\" here the way it does elsewhere."
                                 }
                             }
                         }
@@ -33957,7 +33931,7 @@
                 "required": [
                     "automationId"
                 ],
-                "description": "Re-derive an automation's snapshot from its saved run. Overwrites the compare\n            scope, input mode, both source definitions and the exclusion filters; preserves the name,\n            schedule, window, chat space, active status, and the SFTP server, path and pattern the run\n            cannot supply. Never re-points the automation at a different run.\n\n            Writes nothing directly: it derives, merges the result over the stored source rows, and\n            delegates to save#Automation, which already deletes and recreates every source and filter\n            row on each save. That inherits the whole save path (validateSources, validateApiSource,\n            applyApiSourceMetadataDefaults, tenant stamping, the response builder) rather than growing\n            a second writer that would drift from it."
+                "description": "Re-derive an automation's snapshot from its saved run. Overwrites the compare\n            scope, input mode and both source definitions; preserves the name,\n            schedule, window, chat space, active status, and the SFTP server, path and pattern the run\n            cannot supply. Never re-points the automation at a different run.\n\n            Writes nothing directly: it derives, merges the result over the stored source rows, and\n            delegates to save#Automation, which already deletes and recreates every source row on each\n            save. That inherits the whole save path (validateSources, validateApiSource,\n            applyApiSourceMetadataDefaults, tenant stamping, the response builder) rather than growing\n            a second writer that would drift from it. Filters are never copied: an automation's runs\n            read its run's compare scope filters."
             },
             "SyncAutomationResult": {
                 "type": "object",

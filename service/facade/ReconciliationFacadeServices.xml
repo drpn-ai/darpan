@@ -3030,9 +3030,10 @@
 
             Writes nothing directly: it derives, merges the result over the stored source rows, and
             delegates to save#Automation, which already deletes and recreates every source row on each
-            save. Filters are never copied: an automation's runs read its run's compare scope filters. That inherits the whole save path (validateSources, validateApiSource,
+            save. That inherits the whole save path (validateSources, validateApiSource,
             applyApiSourceMetadataDefaults, tenant stamping, the response builder) rather than growing
-            a second writer that would drift from it.</description>
+            a second writer that would drift from it. Filters are never copied: an automation's runs
+            read its run's compare scope filters.</description>
         <in-parameters>
             <parameter name="automationId" required="true"/>
         </in-parameters>

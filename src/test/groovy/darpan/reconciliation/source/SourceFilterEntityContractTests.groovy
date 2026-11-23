@@ -64,26 +64,14 @@ class SourceFilterEntityContractTests {
     }
 
     @Test
-    void automationSourceFilterMirrorsTheRuleSetTable() {
-        Node node = entity("entity/ReconciliationEntities.xml", "ReconciliationAutomationSourceFilter")
-
-        assertEquals("darpan.reconciliation", node.@package)
-        assertEquals("configuration", node.@use)
-        assertEquals(["automationId", "fileSide", "sequenceNum"], pkFieldNames(node))
-        assertEquals("true", field(node, "fieldExpression").@'not-null')
-        assertEquals("true", field(node, "filterValues").@'not-null')
-        assertEquals("'EXCLUDE_IN'", field(node, "operator").@default)
-        assertNotNull(field(node, "companyUserGroupId"))
-        assertNotNull(field(node, "createdByUserId"))
-
-        Node parentRel = node.'relationship'.find { Node rel -> rel.@related == "darpan.reconciliation.ReconciliationAutomationSource" }
-        assertNotNull(parentRel, "Missing FK to ReconciliationAutomationSource")
-        assertEquals(["automationId", "fileSide"], parentRel.'key-map'.collect { Node km -> km.@'field-name' })
-        assertNotNull(node.'index'.find { Node index -> index.@name == "RECAUTSF_TENANT" })
+    void theAutomationFilterTableIsRetired() {
+        // DAR-BE-318 3b-2c: automations read their compare scope's filters; their own copy is gone.
+        Node entities = new XmlParser().parse(Paths.get("entity/ReconciliationEntities.xml").toFile())
+        assertTrue(entities.'entity'.findAll { Node e -> e.@'entity-name' == "ReconciliationAutomationSourceFilter" }.isEmpty())
     }
 
     @Test
-    void neitherTableShipsSeedOrUpgradeRows() {
+    void theFilterTableShipsNoSeedOrUpgradeRows() {
         // Backward compatibility: zero rows must mean today's behavior. Any seeded row would change
         // an existing tenant's extract silently on upgrade. Match row ELEMENTS only: DAR-BE-076's
         // EntityFilter rows legitimately name both entities in an entityName attribute.
@@ -91,8 +79,6 @@ class SourceFilterEntityContractTests {
             String text = Paths.get(relativePath).toFile().text
             assertTrue(!(text =~ /<(?:[\w.]+\.)?RuleSetCompareSourceFilter[\s\/>]/).find(),
                     "${relativePath} must not seed RuleSetCompareSourceFilter rows")
-            assertTrue(!(text =~ /<(?:[\w.]+\.)?ReconciliationAutomationSourceFilter[\s\/>]/).find(),
-                    "${relativePath} must not seed ReconciliationAutomationSourceFilter rows")
         }
     }
 }

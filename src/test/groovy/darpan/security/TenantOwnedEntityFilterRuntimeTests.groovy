@@ -75,7 +75,6 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.reconciliation.NsSuiteQlSourceQuery"               : "nsSuiteQlSourceQueryId",
             "darpan.reconciliation.Reconciliation"                     : "reconciliationId",
             "darpan.reconciliation.ReconciliationRun"                  : "reconciliationRunId",
-            "darpan.reconciliation.ReconciliationAutomationSourceFilter": "automationId",
             "darpan.reconciliation.ReconciliationRunStep"              : "reconciliationRunStepId",
             "darpan.reconciliation.SlackOAuthState"                    : "stateToken",
             "darpan.reconciliation.SlackWorkspaceInstall"              : "slackInstallId",
@@ -657,7 +656,6 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.reconciliation.NsSuiteQlSourceQuery": return "NSQ"
             case "darpan.reconciliation.Reconciliation": return "REC"
             case "darpan.reconciliation.ReconciliationRun": return "RUN"
-            case "darpan.reconciliation.ReconciliationAutomationSourceFilter": return "AUTO"
             case "darpan.reconciliation.AutomationStreak": return "STRK"
             case "darpan.reconciliation.AutomationStreakBadge": return "STRKB"
             case "darpan.reconciliation.TenantStreakQuest": return "STRKQ"
@@ -692,8 +690,6 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.reconciliation.NsSuiteQlSourceQuery": return [nsSuiteQlSourceQueryId: id]
             case "darpan.reconciliation.Reconciliation": return [reconciliationId: id, reconciliationName: "TOEF ${s}".toString(), isActive: "Y", isArchived: "N"]
             case "darpan.reconciliation.ReconciliationRun": return [reconciliationRunId: id, reconciliationId: "TOEF_REC_${s}".toString(), isActive: "Y"]
-            case "darpan.reconciliation.ReconciliationAutomationSourceFilter": return [automationId: id, fileSide: "FILE_1", sequenceNum: 1L,
-                    fieldExpression: "statusId", operator: "IN", filterValues: "X"]
             case "darpan.reconciliation.ReconciliationRunStep": return [reconciliationRunStepId: id, reconciliationRunResultId: "TOEF_RR_${s}".toString(), stageCode: "RESOLVE"]
             case "darpan.reconciliation.SlackOAuthState": return [stateToken: id]
             case "darpan.reconciliation.SlackWorkspaceInstall": return [slackInstallId: id, teamId: "T_${s}".toString()]

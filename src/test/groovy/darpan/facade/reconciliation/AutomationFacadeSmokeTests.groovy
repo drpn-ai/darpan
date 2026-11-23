@@ -1235,8 +1235,6 @@ class AutomationFacadeSmokeTests {
      */
     private void deleteSyncFixtureAutomation(String automationId) {
         if (!automationId) return
-        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
-                .condition("automationId", automationId).disableAuthz().deleteAll()
         ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
                 .condition("automationId", automationId).disableAuthz().deleteAll()
         ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
@@ -1346,8 +1344,6 @@ class AutomationFacadeSmokeTests {
             ])
             assertTrue((Boolean) saved.ok, saved.errors?.toString())
             assertEquals(scopeFiltersBefore, scopeFilters(automation.compareScopeId as String))
-            assertEquals(0, ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
-                    .condition("automationId", automationId).disableAuthz().useCache(false).count())
         } finally {
             deleteSyncFixtureAutomation(automationId)
         }

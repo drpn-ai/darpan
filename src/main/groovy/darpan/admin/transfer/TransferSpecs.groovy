@@ -181,10 +181,10 @@ class TransferSpecs {
              refFields: [ruleSetId: RUN, chatSpaceId: CHAT_SPACE], positionRefs: [compareScopeId: SCOPE],
              dropFields: ["isActive", "nextScheduledFireTime", "lastScheduledFireTime", "reconciliationRunId", "reconciliationMappingId"],
              versionPlainFields: ["ruleSetId", "chatSpaceId", "compareScopeId", "reconciliationRunId", "reconciliationMappingId"], children: [
+                    // an automation reads its run's filters (DAR-BE-318 3b-2c); an older bundle's filter rows are dropped or
+                    // refused on import (ConfigTransferImporter.dropRetiredAutomationFilters)
                     [entityName: "darpan.reconciliation.ReconciliationAutomationSource", parentFields: ["automationId"],
-                     orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET], children: [
-                            [entityName: "darpan.reconciliation.ReconciliationAutomationSourceFilter",
-                             parentFields: ["automationId", "fileSide"], orderBy: ["sequenceNum"]]]]]],
+                     orderBy: ["fileSide"], refFields: [nsRestletConfigId: NETSUITE_RESTLET]]]],
             // DAR-BE-161. Matched by id in its own version restore, else by entryKey within the target tenant; the importer
             // stamps the tenant, creator and date.
             [kind: KNOWLEDGE, entityName: "darpan.knowledge.KnowledgeEntry", pkField: "knowledgeEntryId", mintPrefix: "KE_",

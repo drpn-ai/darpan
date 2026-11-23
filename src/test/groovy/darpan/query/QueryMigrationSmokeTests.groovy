@@ -39,6 +39,9 @@ class QueryMigrationSmokeTests {
         insert(ec, "darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: "QM_DEPLOY", companyUserGroupId: GORJANA,
                 tenantScriptId: "QM_RUN", scheduleExpr: "0 0 9 * * ?", inputSavedRunId: "SAVED_7", chatSpaceId: "GORJANA_SPACE",
                 isActive: "Y", lastUpdatedByUserId: "GORJANA_ADMIN"])
+        insert(ec, "moqui.service.job.ServiceJob", [jobName: QueryMigration.OLD_JOB, serviceName: "script.TenantScriptServices.scan#DueScriptDeployments",
+                cronExpression: "0 0/5 * * * ?", paused: "N"])
+        insert(ec, "moqui.service.job.ServiceJobParameter", [jobName: QueryMigration.OLD_JOB, parameterName: "x", parameterValue: "1"])
         first = ec.service.sync().name("query.QueryHostServices.migrate#TenantScriptsToQueries").call()
     }
 
@@ -87,6 +90,12 @@ class QueryMigrationSmokeTests {
         def deliveries = ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "MIG_QM_DEPLOY").disableAuthz().useCache(false).list()
         assertEquals(["query.QueryHostServices.deliver#QueryChat"], deliveries*.deliveryServiceName)
         assertEquals([chatSpaceId: "GORJANA_SPACE"], new JsonSlurper().parseText(deliveries[0].parametersJson as String))
+    }
+
+    @Test
+    void theOldScanJobIsRemoved() {
+        assertNull(ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", QueryMigration.OLD_JOB).disableAuthz().useCache(false).one())
+        assertEquals(0L, ec.entity.find("moqui.service.job.ServiceJobParameter").condition("jobName", QueryMigration.OLD_JOB).disableAuthz().count())
     }
 
     @Test

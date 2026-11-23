@@ -1,8 +1,7 @@
 package darpan.query
 
+import darpan.facade.reconciliation.DiffDetailClassifier
 import darpan.facade.reconciliation.ReconciliationOutputSupport
-import darpan.script.ScriptDeploymentSupport
-import darpan.script.TenantScriptSupport
 
 /**
  * DAR-BE-334. The "runResult" read source: the differences of a saved run's newest result, read through the same
@@ -10,7 +9,7 @@ import darpan.script.TenantScriptSupport
  * data fields, flat.
  */
 class RunResultQuerySource {
-    private static final Closure<String> DEFAULT_RESULT_FILE = { def ec, String savedRunId -> ScriptDeploymentSupport.newestResultFileName(ec, savedRunId) }
+    private static final Closure<String> DEFAULT_RESULT_FILE = { def ec, String savedRunId -> newestResultFileName(ec, savedRunId) }
     private static final Closure<Map> DEFAULT_PAGE = { def ec, String fileName, int pageIndex, int pageSize ->
         ReconciliationOutputSupport.getGeneratedOutputDifferences(ec, fileName, pageIndex, pageSize, null, "all", null, false, null)
     }
@@ -35,7 +34,7 @@ class RunResultQuerySource {
             int pageSize = ReconciliationOutputSupport.MAX_DIFF_PAGE_SIZE
             // NOTE: an anonymous class in a static method cannot reach the outer class's statics; capture them
             Closure<Map> pageOf = differencesPage
-            Closure<Map> flat = { Object d -> RunResultQuerySource.flatten(TenantScriptSupport.withParsedData(d)) }
+            Closure<Map> flat = { Object d -> RunResultQuerySource.flatten(RunResultQuerySource.withParsedData(d)) }
             Iterator<Map> records = new Iterator<Map>() {
                 int pageIndex = 0
                 List<Map> page = null
@@ -56,6 +55,28 @@ class RunResultQuerySource {
             }
             return QueryRows.collect(records, input, null, maxRows)
         }
+    }
+
+    /** The newest finished result file of a saved run the active tenant can read; null when there is none. */
+    static String newestResultFileName(def ec, String savedRunId) {
+        if (!savedRunId) return null
+        Map<String, Object> listed = ReconciliationOutputSupport.listGeneratedOutputs(ec, savedRunId, null, null, 0, 20)
+        List outputs = (listed?.generatedOutputs instanceof List) ? (List) listed.generatedOutputs : []
+        Map newest = (Map) outputs.find { Object row ->
+            row instanceof Map && ((Map) row).fileName && ((Map) row).resultAvailable != false &&
+                    (((Map) row).savedRunId == null || ((Map) row).savedRunId == savedRunId)
+        }
+        return newest?.fileName?.toString()
+    }
+
+    /** A difference with its record's data parsed from its stored JSON text into a map. */
+    static Object withParsedData(Object difference) {
+        if (!(difference instanceof Map) || !(((Map) difference).get("record") instanceof Map)) return difference
+        Map record = new LinkedHashMap((Map) ((Map) difference).get("record"))
+        record.put("data", DiffDetailClassifier.parseDiffData(record.get("data")))
+        Map parsed = new LinkedHashMap((Map) difference)
+        parsed.put("record", record)
+        return parsed
     }
 
     /** A difference's scalar values, its record's scalar values, and the record's data fields, flat (data wins). */

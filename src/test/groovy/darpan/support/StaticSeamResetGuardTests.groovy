@@ -31,7 +31,6 @@ class StaticSeamResetGuardTests {
             "JobScheduleRules.PARSED": "pure memo of parsed cron expressions keyed by expression; a stale entry is still correct",
             "TenantConfigPendingSupport.MARK_LOCKS": "registry of lock objects per key; holds no test-observable state",
             "OutboundHttpClient.sharedByConnectTimeout": "pool of stateless HttpClients keyed by connect timeout; no test-observable state",
-            "ScriptSupervisor.threadCount": "monotonic counter used only to name worker threads",
     ]
 
     private static final Pattern FIELD = Pattern.compile(

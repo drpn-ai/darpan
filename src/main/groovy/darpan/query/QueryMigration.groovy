@@ -8,10 +8,13 @@ import groovy.json.JsonOutput
  * profile QUERY, same tenant, name, body) and every TenantScriptDeployment a schedule with one chat delivery to its space,
  * switched off (it runs again only once someone allowed to schedule turns it on and so owns it). A script that read a
  * run result gets a runResult read of that saved run, but its input changed shape (rows are flat now), so it arrives
- * switched off with a note to check it. Idempotent: rows already migrated (MIG_ ids) are skipped.
+ * switched off with a note to check it. Idempotent: rows already migrated (MIG_ ids) are skipped. The old engine's
+ * five-minute scan job (scan_TenantScriptDeployments_5m) is removed with its runs and parameters: its service is gone,
+ * and a seed load never deletes the row.
  */
 class QueryMigration {
     static final String PREFIX = "MIG_"
+    static final String OLD_JOB = "scan_TenantScriptDeployments_5m"
 
     static Map<String, Object> migrateAll(def ec) {
         boolean wasDisabled = ec.artifactExecution.disableAuthz()
@@ -49,6 +52,13 @@ class QueryMigration {
                             isActive: "Y"]).create()
                 }
                 schedules++
+            }
+            if (ec.entity.find("moqui.service.job.ServiceJob").condition("jobName", OLD_JOB).useCache(false).one() != null) {
+                ["moqui.service.job.ServiceJobRunLock", "moqui.service.job.ServiceJobRun", "moqui.service.job.ServiceJobParameter",
+                 "moqui.service.job.ServiceJobUser", "moqui.service.job.ServiceJob"].each { String entityName ->
+                    if (ec.entity.isEntityDefined(entityName)) ec.entity.find(entityName).condition("jobName", OLD_JOB).deleteAll()
+                }
+                notes << "Removed the old scripts' scan job ${OLD_JOB}.".toString()
             }
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()

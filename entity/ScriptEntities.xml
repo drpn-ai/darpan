@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   DAR-BE-164. Tenant scripts: JEXL a tenant writes and runs in Darpan as data, with no code commit. Tenant-scoped like
-  every tenant entity (DARPAN_SCOPE_TENANT_SCRIPT). Evaluated only by darpan.script.ScriptSupervisor.
+  every tenant entity (DARPAN_SCOPE_TENANT_SCRIPT).
+  RETIRED by DAR-BE-334: queries run on moqui-jexl (jexl.script.*) and nothing here runs any more. Kept only for the
+  TENANT_SCRIPTS_TO_QUERIES migration to read; drop these definitions and their entity filters once that migration is
+  recorded done on every instance (prod, SM).
 -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">

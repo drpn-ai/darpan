@@ -772,8 +772,7 @@ class RunVerificationSupport {
                 matchedCount       : result.get("matchedCount") ?: 0,
                 missingCount       : longValue(result.get("appendedCount")),
                 inTransitCount     : result.get("inTransitCount") ?: 0,
-                pendingCount       : result.get("pendingCount") ?: 0,
-                deferredLookupCount: result.get("deferredLookupCount") ?: 0] as Map<String, Object>
+                pendingCount       : result.get("pendingCount") ?: 0] as Map<String, Object>
     }
 
     /**

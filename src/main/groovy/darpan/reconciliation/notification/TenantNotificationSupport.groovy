@@ -549,8 +549,8 @@ class TenantNotificationSupport {
      * Classification lives here, at the presentation layer, rather than at the producer: the stored
      * artifact string stays byte-identical, so the run-result page's audit trail is untouched.
      * Matching is on the exact producer-owned prefix constants — deliberately NOT a loose
-     * "Exchange presence check" match, because that pass's real warnings ("… confirming the first N",
-     * "… could not write diff rows", "… skipped: manifest unreadable") share that opening. Fix I6:
+     * "Exchange presence check" match, because that pass's real warnings ("… could not write diff rows",
+     * "… skipped: manifest unreadable") share that opening. Fix I6:
      * ReturnPresenceVerificationSupport.AUDIT_NOTE_PREFIX ("Return presence check: ") was missing
      * from this list entirely, so every returns run — including all-clear ones — misclassified as
      * WITH ISSUES.

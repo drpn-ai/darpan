@@ -14,11 +14,11 @@ import java.util.regex.Pattern
  *
  * Evidence chain per Shopify exchange (keyed by the order's legacy id == OMS externalId):
  *   1. matched against the run's OMS exchange manifest (the extraction's sidecar) — free;
- *   2. unmatched candidates older than the sync grace get ONE chunked OMS point lookup
- *      (escapes window boundaries: an exchange order created after midnight still counts);
- *   3. only lookup-confirmed absences become rows. Sweep/lookup failures, young exchanges, and
- *      over-cap candidates never flag anything — conservative posture identical to the
- *      missing-diff verify pass.
+ *   2. EVERY unmatched candidate older than the sync grace gets a chunked OMS point lookup
+ *      (escapes window boundaries: an exchange order created after midnight still counts). No
+ *      per-run cap: a capped tail was never revisited, so a weekly window hid misses (DAR-BE-339);
+ *   3. only lookup-confirmed absences become rows. Sweep/lookup failures and young exchanges never
+ *      flag anything — conservative posture identical to the missing-diff verify pass.
  *
  * Appended rows use the same one-JSON-row-per-line contract writeDiffDatasetOutput produces and
  * MissingDiffVerificationSupport streams; the on-disk summary's running total lives under
@@ -30,16 +30,12 @@ class ExchangePairVerificationSupport {
     // into OMS — held as pending, never flagged. Sync itself completes in minutes (observed ~38min);
     // anything older than the grace with no OMS exchange order is a genuine import gap.
     static final int DEFAULT_GRACE_HOURS = 3
-    // Per-run latency bound on CONFIRMING point lookups (manifest matching is free): only unmatched
-    // candidates need a lookup. 200 covers the largest observed daily candidate set (102, gorjana
-    // 2026-07-30) with headroom; the deferral path stays as the pathological-case backstop.
-    static final int DEFAULT_MAX_LOOKUPS = 200
     // Mirrors OmsPairLookupSupport.PAIR_LOOKUP_MAX_IDS (darpan-hotwax): the OMS pair lookup service
     // hard-rejects any single call requesting more than this many externalIds.
     static final int OMS_PAIR_LOOKUP_CHUNK_SIZE = 100
     // Opening phrase of the always-emitted audit sentence, and the ONLY thing that distinguishes it
     // from this class's genuine warnings — which also open with "Exchange presence check" but
-    // continue "confirming"/"could not"/"skipped:" rather than an immediate colon. The notification
+    // continue "could not"/"skipped:" rather than an immediate colon. The notification
     // layer classifies on this exact constant (TenantNotificationSupport.partitionAuditNotes) so an
     // all-clear run is not headlined WITH ISSUES; changing the sentence means changing it here.
     static final String AUDIT_NOTE_PREFIX = "Exchange presence check: "
@@ -50,7 +46,7 @@ class ExchangePairVerificationSupport {
     static Map<String, Object> verifyExchangePairs(Map<String, Object> args) {
         List<String> warnings = []
         Map<String, Object> result = [performed: false, appendedCount: 0, sweepExchangeCount: 0,
-                matchedCount: 0, confirmedPresentCount: 0, pendingCount: 0, deferredLookupCount: 0, inTransitCount: 0,
+                matchedCount: 0, confirmedPresentCount: 0, pendingCount: 0, inTransitCount: 0,
                 sweepTruncated: false, lookupFailed: false, warnings: warnings, auditNote: null]
         File manifestFile = (File) args.manifestFile   // OPTIONAL: no sidecar just means zero OMS exchanges
         File diffFile = (File) args.diffFile
@@ -62,7 +58,6 @@ class ExchangePairVerificationSupport {
         String omsSideLabel = args.omsSideLabel?.toString()?.trim() ?: "OMS"
         String omsSummaryCountKey = "FILE_1" == args.omsFileSide?.toString() ? "onlyInFile2Count" : "onlyInFile1Count"
         int graceHours = (args.graceHours instanceof Number) ? ((Number) args.graceHours).intValue() : DEFAULT_GRACE_HOURS
-        int maxLookups = (args.maxLookups instanceof Number) ? ((Number) args.maxLookups).intValue() : DEFAULT_MAX_LOOKUPS
 
         if (diffFile == null || !diffFile.isFile() || shopifySweep == null || omsPairLookup == null) return result
 
@@ -106,11 +101,6 @@ class ExchangePairVerificationSupport {
             } else {
                 candidates.add(exchange)
             }
-        }
-        if (candidates.size() > maxLookups) {
-            result.deferredLookupCount = candidates.size() - maxLookups
-            candidates = candidates.subList(0, maxLookups)
-            warnings.add("Exchange presence check confirming the first ${maxLookups} unmatched candidates; ${result.deferredLookupCount} deferred to a later run.".toString())
         }
 
         List<Map> rows = []
@@ -186,7 +176,6 @@ class ExchangePairVerificationSupport {
                 "${result.matchedCount} matched in ${omsSideLabel}, ${result.confirmedPresentCount} confirmed by lookup, " +
                 "${missingRowCount} missing from ${omsSideLabel}, ${result.pendingCount} pending (younger than ${graceHours}h)."
         if ((result.inTransitCount as int) > 0) note += " ${result.inTransitCount} in transit (return not yet closed)."
-        if ((result.deferredLookupCount as int) > 0) note += " ${result.deferredLookupCount} deferred to a later run."
         if (result.sweepTruncated) note += " Sweep truncated — partial coverage."
         return note
     }

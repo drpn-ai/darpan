@@ -226,21 +226,6 @@ class ExchangePairVerificationSupportTests {
     }
 
     @Test
-    void lookupCapDefersExcessCandidatesWithVisibleQueue() {
-        File diff = diffFile()
-        String before = diff.text
-        List exchanges = (1..5).collect { sweepExchange("EXT${it}".toString()) }
-        List<String> lookedUp = []
-        Map result = runCheck([diffFile: diff, manifestFile: manifestFile([]), maxLookups: 2,
-                shopifySweep: { long s, long e -> sweepOk(exchanges) },
-                omsPairLookup: { List ids -> lookedUp.addAll(ids as List<String>); omsLookupWithExchange(ids as List<String>) }])
-        assertEquals(2, lookedUp.size())
-        assertEquals(3, result.deferredLookupCount)
-        assertEquals(before, diff.text)
-        assertTrue(result.auditNote.toString().contains("3 deferred"))
-    }
-
-    @Test
     void sweepFailureIsInertWithWarnings() {
         File diff = diffFile()
         String before = diff.text
@@ -302,15 +287,25 @@ class ExchangePairVerificationSupportTests {
     }
 
     @Test
-    void chunksCandidateLookupsToTheServiceCap() {
-        List exchanges = (1..150).collect { sweepExchange("EXT${it}".toString()) }
+    void weeklyWindowLooksUpEveryCandidateInServiceSizedChunks() {
+        // DAR-BE-339: a weekly gorjana window had 566 unmatched candidates; a 200 cap skipped 366 that
+        // no later run revisits. Past the old cap, the last chunk holds a real miss: it must flag.
+        List exchanges = (1..250).collect { sweepExchange("EXT${it}".toString()) }
         List<Integer> chunkSizes = []
-        Map result = runCheck([manifestFile: manifestFile([]), maxLookups: 150,
+        Map result = runCheck([manifestFile: manifestFile([]),
                 shopifySweep: { long s, long e -> sweepOk(exchanges) },
-                omsPairLookup: { List ids -> chunkSizes.add(ids.size()); omsLookupWithExchange(ids as List<String>) }])
-        assertEquals([100, 50], chunkSizes)
-        assertEquals(150, result.confirmedPresentCount)
-        assertEquals(0, result.appendedCount)
+                omsPairLookup: { List ids ->
+                    chunkSizes.add(ids.size())
+                    List<String> present = (ids as List<String>) - ["EXT250"]
+                    Map out = omsLookupWithExchange(present)
+                    if (ids.contains("EXT250")) ((Map) out.ordersByExternalId).put("EXT250", [])
+                    out
+                }])
+        assertEquals([100, 100, 50], chunkSizes)
+        assertEquals(249, result.confirmedPresentCount)
+        assertEquals(1, result.appendedCount)
+        assertFalse((result.warnings as List).any { it.toString().contains("deferred") })
+        assertFalse(result.auditNote.toString().contains("deferred"))
     }
 
     @Test

@@ -184,6 +184,7 @@ class ConfigTransferImporter {
         // records match by id (a renamed run is renamed back, not copied) and one deleted since comes back under its id.
         ctx.sameTenant = ownVersion && text(bundle.source?.tenantUserGroupId) == tenantId
         dropRetiredFields(ctx)
+        dropRetiredAutomationFilters(ctx)
         knowledgeGate(ctx)
         checkShape(ctx)
         checkRefs(ctx)
@@ -357,6 +358,92 @@ class ConfigTransferImporter {
                 return copy
             })
         }
+    }
+
+    /**
+     * DAR-BE-318 3b-2c. A bundle or config version made before automations stopped keeping their own filter rows still carries
+     * them under each automation source (ReconciliationAutomationSourceFilter). They are dropped when they equal the filters of
+     * the same side of the run the automation reads, which is what the automation now reads anyway; when they differ the
+     * import is refused by name, because taking the run's would silently change what the automation reads. Rules compare as
+     * sets: field, direction and values (trimmed, case-insensitive, in any order). The plan hash still covers the bundle as sent.
+     */
+    private static void dropRetiredAutomationFilters(Map ctx) {
+        String retired = "ReconciliationAutomationSourceFilter"
+        List carried = (((Map) ctx.bundle).get("automations") ?: []) as List
+        Closure<Boolean> carries = { Object rec ->
+            rec instanceof Map && ((((Map) rec).children as Map)?.ReconciliationAutomationSource as List)?.any { Object s ->
+                s instanceof Map && (((Map) s).children as Map)?.containsKey(retired)
+            }
+        }
+        if (!carried.any(carries)) return
+        ctx.bundle = new LinkedHashMap((Map) ctx.bundle)
+        ((Map) ctx.bundle).put("automations", carried.collect { Object rec ->
+            if (!carries(rec)) return rec
+            Map automation = (Map) rec
+            Map copy = new LinkedHashMap(automation)
+            Map children = new LinkedHashMap((Map) automation.children)
+            children.ReconciliationAutomationSource = ((List) children.ReconciliationAutomationSource).collect { Object s ->
+                Map source = (Map) s
+                Map sourceChildren = (source.children ?: [:]) as Map
+                if (!sourceChildren.containsKey(retired)) return source
+                String side = text(((Map) source.fields)?.fileSide)
+                Set own = filterSet((List) sourceChildren.get(retired))
+                if (own && own != filterSet(runFiltersOf(ctx, automation, side))) {
+                    block(ctx, "AUTOMATION_FILTERS_DIFFER", automation.ref, "${automation.label ?: automation.ref} keeps its own ${side} " +
+                            "filters, which differ from its run's. Automations now read their run's filters: sync the automation with " +
+                            "its run at the source and export again.")
+                }
+                Map stripped = new LinkedHashMap(source)
+                Map rest = sourceChildren.findAll { k, v -> k != retired }
+                if (rest) stripped.children = rest else stripped.remove("children")
+                return stripped
+            }
+            copy.children = children
+            return copy
+        })
+    }
+
+    /** The filter rows of one side of the compare scope an automation record names, as the bundle carries them; null when not carried. */
+    private static List runFiltersOf(Map ctx, Map automation, String side) {
+        String scopeRef = text(((Map) automation.refs)?.compareScopeId)
+        String runRef = null
+        Integer index = null
+        if (scopeRef?.startsWith("${SCOPE}:")) {
+            String body = scopeRef.substring(SCOPE.length() + 1)
+            int hash = body.lastIndexOf('#')
+            if (hash > 0 && body.substring(hash + 1).isInteger()) {
+                runRef = ref(RUN, body.substring(0, hash))
+                index = body.substring(hash + 1) as Integer
+            }
+        } else {
+            // a config version names its scope by id, in its own tenant: find the scope's run and its place in the run's order
+            String scopeId = text(((Map) automation.fields)?.compareScopeId)
+            Map scopeSpec = (spec(RUN).children as List<Map>).find { it.positionKind == SCOPE }
+            def scope = scopeId ? scoped(ctx, scopeSpec.entityName as String).condition("compareScopeId", scopeId).list().find() : null
+            def run = scope ? scoped(ctx, "darpan.rule.RuleSet").condition("ruleSetId", scope.ruleSetId).list().find() : null
+            if (run != null) {
+                runRef = ref(RUN, run.ruleSetId as String)
+                index = ConfigTransferExporter.childRows(ctx.ec, scopeSpec, run).findIndexOf { it.compareScopeId == scopeId }
+            }
+        }
+        Map run = runRef ? records(ctx, "runs").find { it.ref == runRef } : null
+        List scopes = (((Map) run?.children)?.RuleSetCompareScope ?: []) as List
+        Map scope = (index != null && index >= 0 && index < scopes.size()) ? (Map) scopes[index] : null
+        Map source = ((((Map) scope?.children)?.RuleSetCompareSource ?: []) as List<Map>).find { text(((Map) it.fields)?.fileSide) == side }
+        return source == null ? null : ((((Map) source.children)?.RuleSetCompareSourceFilter ?: []) as List)
+    }
+
+    /** Filter rows as a set of [field, direction, sorted values], so order and value spelling do not count as a difference. */
+    private static Set filterSet(List rows) {
+        return ((rows ?: []) as List).findAll { it instanceof Map }.collect { Object r ->
+            Map f = (((Map) r).fields ?: [:]) as Map
+            Object raw = f.filterValues
+            if (raw instanceof String && ((String) raw).trim().startsWith("[")) {
+                try { raw = new groovy.json.JsonSlurper().parseText((String) raw) } catch (Exception ignored) { }
+            }
+            [text(f.fieldExpression), (text(f.operator) ?: "EXCLUDE_IN").toUpperCase(Locale.ROOT),
+             darpan.reconciliation.source.SourceFilterSupport.splitValues(raw).collect { it.toUpperCase(Locale.ROOT) }.sort()]
+        } as Set
     }
 
     /** Kinds this instance lacks, columns its entities do not declare, and instance-local endpoints all block. */

@@ -3313,21 +3313,22 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void anAutomationDecidesPlacementFromItsOwnRecordRootNotTheRunsCurrentOne() {
-        // DAR-BE-338: an automation runs on its own copy; moving the run's record root changes nothing until a sync
+    void anAutomationDecidesPlacementFromTheCompareScopesRecordRootNotItsSnapshots() {
+        // DAR-BE-338 review I1: the compare ingests with RuleSetCompareSource's root (RuleSetCompareScopeAdapter), so the Keep gate
+        // decides on that root too; an automation copy's drifted root must not move Keep away from what is ingested
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
         addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
         ec.service.declaredInParameters = ["keepRuleFields"]
-        ec.entity.add("darpan.rule.RuleSetCompareSource", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", recordRootExpression: '$.orders[*]',
+        ec.entity.add("darpan.rule.RuleSetCompareSource", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", recordRootExpression: "records",
                 companyUserGroupId: "TENANT_A"])
-        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", "records")
-
-        assertEquals("SPARK", acmeExtract(ec, "FILE_1").result.sideKeep.placement, "its own root is records: Keep stays in Spark")
-
-        ec.entity.rows["darpan.rule.RuleSetCompareSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", "records")
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
-        // its own root is another array: Spark cannot keep it and its read no longer filters (Ruling 3b2b-25), whatever the run's root
+
+        assertEquals("SPARK", acmeExtract(ec, "FILE_1").result.sideKeep.placement, "the compare scope's root is records: Keep stays in Spark")
+
+        ec.entity.rows["darpan.rule.RuleSetCompareSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", "records")
+        // the compare scope's root is another array: Spark cannot keep it and its read no longer filters (Ruling 3b2b-25)
         IllegalArgumentException refused = assertThrows(IllegalArgumentException) { acmeExtract(ec, "FILE_1") }
         assertTrue(refused.message.contains("its records are not top-level"), refused.message)
     }

@@ -2577,8 +2577,9 @@ class AutomationExecutionSupport {
 
     /**
      * DAR-BE-318 (plan 3b-2b, Task 14), DAR-BE-338. One automation side's Keep plan (KeepPlanSupport's shape), from the
-     * automation's OWN filter rows (ReconciliationAutomationSourceFilter) and record root, read for the automation's tenant
-     * only: an automation runs on its own copy, so an edit to its run reaches it only through sync#Automation.
+     * automation's OWN filter rows (ReconciliationAutomationSourceFilter), read for the automation's tenant only: an automation
+     * runs on its own filter copy, so a filter edit on its run reaches it only through sync#Automation. Its keys and record root
+     * are the compare scope's, as the compare ingests them.
      * <ul>
      * <li>NONE (no filter parameter: uploads, databases): no rows are read, nothing is filtered, as today.</li>
      * <li>READ (a data-defined endpoint, Ruling 3b2b-16): the read gets the rows and filters, as today.</li>
@@ -2598,23 +2599,23 @@ class AutomationExecutionSupport {
         String fileSide = normalize(readField(source, "fileSide"))
         List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
                 fileSide, normalize(readField(automation, "companyUserGroupId")))
-        // DAR-BE-338: the record root is the automation's own copy, like its filters and connection; the keys are the compare
-        // scope's, as the compare, the audit re-check and the sync pulse have read them since DAR-BE-119
-        List<String> keyFields = placement == KeepPlanSupport.SPARK ? sideKeyFields(ec, automation, fileSide) : []
+        // the side's keys and record root are the compare scope's, as the compare ingests the side (RuleSetCompareScopeAdapter)
+        // and as the audit re-check and the sync pulse read them: Keep must decide on what is ingested (DAR-BE-338 review I1)
+        Map shape = placement == KeepPlanSupport.SPARK ? sideKeyShape(ec, automation, fileSide) : [recordRoot: null, keyFields: []]
         return KeepPlanSupport.effectiveSideKeep(ec, rows, connector, extractOptions,
                 serviceName ? ec.service.getServiceDefinition(serviceName) : null,
-                normalize(readField(source, "recordRootExpression")), keyFields, keepInSpark, landed, fileSide)
+                (String) shape.recordRoot, (List<String>) shape.keyFields, keepInSpark, landed, fileSide)
     }
 
     /**
-     * A side's key field expressions: the compare scope's key spec (RunConclusionStep.keySpec, as RunConclusionStep.keySpecFor
+     * A side's record root and key field expressions: the compare scope's (RunConclusionStep.keySpec, as RunConclusionStep.keySpecFor
      * reads it), with its rows read for the AUTOMATION's tenant by an explicit condition, since a scheduled run has no signed-in
      * user to pin the tenant.
      */
-    private static List<String> sideKeyFields(def ec, def automation, String fileSide) {
+    private static Map sideKeyShape(def ec, def automation, String fileSide) {
         String compareScopeId = normalize(readField(automation, "compareScopeId"))
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
-        if (!compareScopeId || !tenantId || !fileSide) return []
+        if (!compareScopeId || !tenantId || !fileSide) return [recordRoot: null, keyFields: []]
         String why = "automation path reads its compare scope's key spec; explicit companyUserGroupId condition applied"
         List keyRows = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSourceKeyField", why)
                 .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
@@ -2623,8 +2624,9 @@ class AutomationExecutionSupport {
         def sourceRow = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSource", why)
                 .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
                 .condition("companyUserGroupId", tenantId).useCache(false).list()?.find()
-        return (List<String>) RunConclusionStep.keySpec(keyRows.collect { normalize(readField(it, "fieldExpression")) },
-                normalize(readField(sourceRow, "primaryIdExpression")), null, null).keyFields
+        return [recordRoot: normalize(readField(sourceRow, "recordRootExpression")),
+                keyFields : (List<String>) RunConclusionStep.keySpec(keyRows.collect { normalize(readField(it, "fieldExpression")) },
+                        normalize(readField(sourceRow, "primaryIdExpression")), null, null).keyFields]
     }
 
     /**

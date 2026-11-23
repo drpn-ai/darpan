@@ -228,11 +228,13 @@ class SyncPulseSupport {
         // chunks, each in its own transaction: one bad key or a timeout loses at most its chunk, not every key of a big batch
         added.entrySet().toList().collate(PRESENT_WRITE_CHUNK).each { List<Map.Entry<String, Instant>> chunk ->
             writePresent(ec, "add ${chunk.size()} keys".toString()) {
+                // one read per chunk; a key already stored (another pulse got there first) is skipped
+                Set<String> stored = presentRows(ec, tenantId, syncPairId).condition("recordKey", EntityCondition.IN, chunk.collect { it.key }).list()
+                        .collect { it.get("recordKey") as String } as Set<String>
                 chunk.each { Map.Entry<String, Instant> e ->
-                    def value = ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: syncPairId, recordKey: e.key,
-                            companyUserGroupId: tenantId, sourceCreatedStamp: Timestamp.from(e.value)])
-                    // the key is known absent; a duplicate (another pulse got there first) is skipped
-                    if (presentRows(ec, tenantId, syncPairId).condition("recordKey", e.key).count() == 0) value.create()
+                    if (stored.contains(e.key)) return
+                    ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: syncPairId, recordKey: e.key,
+                            companyUserGroupId: tenantId, sourceCreatedStamp: Timestamp.from(e.value)]).create()
                 }
             }
         }

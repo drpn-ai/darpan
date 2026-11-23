@@ -540,7 +540,7 @@ class SyncPulseEngineSmokeTests {
         upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
         arrived << "#A1"
         SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
-        // a row for the same pair id and key under tenant B, and one only B holds
+        // a row under the same pair id stamped for tenant B: tenant A's pair must not load it
         ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: SP, recordKey: "#FOREIGN", companyUserGroupId: B,
                 sourceCreatedStamp: Timestamp.from(T0.minus(Duration.ofMinutes(5)))]).create()
         SyncPulseSupport.forgetPresentMemoryForTests()

@@ -26,12 +26,22 @@ class SyncPulseCascade {
         String tenant = normalize(tenantId)
         String pairId = normalize(syncPairId)
         if (!tenant || !pairId) return 0
-        ["darpan.pulse.PeakPeriodSync", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder",
-                "darpan.pulse.SyncPulsePresentKey"].each { String child ->
+        deletePresentKeysInPages(ec, tenant, pairId)
+        ["darpan.pulse.PeakPeriodSync", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder"].each { String child ->
             rows(ec, child, tenant).condition("syncPairId", pairId).deleteAll()
         }
         SyncPulseSupport.dropPresentMemory(pairId)
         return (int) rows(ec, "darpan.pulse.SyncPair", tenant).condition("syncPairId", pairId).deleteAll()
+    }
+
+    /** A busy pair holds tens of thousands of present keys: delete them in pages of their own transactions, before the request's. */
+    private static void deletePresentKeysInPages(def ec, String tenant, String pairId) {
+        while (true) {
+            List page = rows(ec, "darpan.pulse.SyncPulsePresentKey", tenant).condition("syncPairId", pairId).limit(2000).list()
+            if (!page) break
+            ec.transaction.runRequireNew(120, "Deleting present keys of sync pair ${pairId}".toString()) { page.each { it.delete() } }
+            if (page.size() < 2000) break
+        }
     }
 
     private static def rows(def ec, String entityName, String tenantId) {

@@ -274,11 +274,11 @@ class RetentionSupport {
     }
 
     /**
-     * Pulse present keys older than two days: they only help inside the pulse read window (hours), so this catches the rows
+     * Pulse present keys older than three days (the longest read window is about 60 hours): they only help inside the pulse read window (hours), so this catches the rows
      * of a pair deactivated while the process was down. Composite key, so pages are "the first batch found" until none are left.
      */
     private static long sweepPresentKeys(def ec, String tenantId, boolean dryRun, int batch) {
-        Timestamp cutoff = new Timestamp(System.currentTimeMillis() - 2L * 86_400_000L)
+        Timestamp cutoff = new Timestamp(System.currentTimeMillis() - 3L * 86_400_000L)
         Closure find = {
             TenantScopedFinder.findGlobalUnscoped(ec, "darpan.pulse.SyncPulsePresentKey", REASON).condition("companyUserGroupId", tenantId)
                     .condition("sourceCreatedStamp", EntityCondition.LESS_THAN, cutoff).useCache(false)

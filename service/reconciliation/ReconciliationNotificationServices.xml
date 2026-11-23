@@ -249,54 +249,47 @@
         </actions>
     </service>
 
-    <!-- Task 13 fix round 1, Critical 2: originally named facade.ReconciliationFacadeServices.migrate#
-         AutomationExcludeFilters with allow-remote="true"/authenticate="true". data/SecuritySeedData.xml
-         warns that facade.* is an auto-grant trap — the facade.* ArtifactGroupMember grants AUTHZA_ALL
-         to every tenant tier, so any authenticated user (including a view-only member of one tenant)
-         could invoke a cross-tenant migration and read the global automationsScanned count. Moved out of
-         facade.* and matched to this file's own migrate#TenantNotificationSettings posture: authenticate
-         ="false", no allow-remote (defaults false, so it is not reachable via /rpc/json at all). -->
-    <service verb="migrate" noun="AutomationExcludeFilters" authenticate="false" transaction="ignore">
-        <description>One-time backfill: copy each ruleset-backed automation's exclusion filters from its
-            rule set into the automation's own snapshot, across every tenant. Idempotent — a side that
-            already has filter rows is left untouched. Run once after deploying exclusion filters;
-            automations created afterwards are seeded at save time and do not need it. Internal only, not
-            remote: this reads and writes across every tenant with no per-request authorization check, so
-            it must be invoked from a trusted internal/admin path, never exposed to the SPA or
-            /rpc/json.</description>
+    <!-- DAR-BE-318 3b-2c: replaces migrate#AutomationExcludeFilters (retired: automations read their run's filters). Same
+         internal posture: authenticate="false", no allow-remote. transaction="ignore" because the drop runs as Moqui runs its own
+         table changes, outside any transaction (MySQL refuses DDL inside an XA transaction). -->
+    <service verb="retire" noun="AutomationSourceFilterTable" authenticate="false" transaction="ignore">
+        <description>One-time: drop the retired automation filter table (RECONCILIATION_AUTOMATION_SOURCE_FILTER). Automations
+            read their run's filters since DAR-BE-318 3b-2c, and the table's foreign key to the automation source would otherwise
+            fail every automation save, sync and delete that recreates a source with old rows under it. A dry run counts the rows
+            and changes nothing. Idempotent: with no table it does nothing. Internal only, not remote.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="automationsScanned" type="Integer"/>
-            <parameter name="automationsSkipped" type="Integer"/>
-            <parameter name="sidesSeeded" type="Integer"/>
-            <parameter name="rowsCreated" type="Integer"/>
+            <parameter name="tableFound" type="Boolean"/>
+            <parameter name="rowCount" type="Long"><description>The table's rows (dropped, or that a dry run would drop): the count run#PendingMigrations records.</description></parameter>
+            <parameter name="dropped" type="Boolean"/>
         </out-parameters>
         <actions>
-            <!-- Task 13 fix round 2, minor: snapshot BEFORE calling the sweep so ok/errors below
-                 reflect only what THIS call produced, not a stale error already sitting on ec.message
-                 from something unrelated earlier on the same execution context (ec.message is never
-                 cleared between service calls; a bare !ec.message.hasError() stays poisoned by that
-                 forever, as the round-1 fix report's own cross-test cascade demonstrated). -->
             <set field="preCallErrorCount" from="darpan.facade.common.FacadeSupport.getErrors(ec).size()"/>
-            <set field="backfillResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.backfillAutomationExcludeFilters(ec)"/>
-            <set field="automationsScanned" from="backfillResult.automationsScanned"/>
-            <set field="automationsSkipped" from="backfillResult.automationsSkipped"/>
-            <set field="sidesSeeded" from="backfillResult.sidesSeeded"/>
-            <set field="rowsCreated" from="backfillResult.rowsCreated"/>
-            <!-- Task 13 fix round 2, New Important 1: <message> must run BEFORE the messages set below
-                 — FacadeSupport.getMessages(ec) returns a snapshot, so a <message> added after that set
-                 already ran never appears in the messages out-parameter, matching every sibling service
-                 in ReconciliationFacadeServices.xml. -->
-            <message>Backfilled ${rowsCreated} exclusion filter rows across ${sidesSeeded} source sides (${automationsScanned} automations scanned, ${automationsSkipped} skipped).</message>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec).drop(preCallErrorCount)"/>
-            <set field="ok" from="errors.isEmpty()"/>
+            <set field="dropResult" from="darpan.migration.RetiredTableSupport.dropRetiredTable(ec, 'transactional', 'RECONCILIATION_AUTOMATION_SOURCE_FILTER', dryRun as boolean)"/>
+            <set field="tableFound" from="dropResult.tableFound"/>
+            <set field="rowCount" from="dropResult.rowCount"/>
+            <set field="dropped" from="dropResult.dropped"/>
+            <if condition="!tableFound">
+                <message>The retired automation filter table is already gone.</message>
+                <else-if condition="dryRun">
+                    <message>Would drop the retired automation filter table and its ${rowCount} rows.</message>
+                </else-if>
+                <else>
+                    <message>Dropped the retired automation filter table and its ${rowCount} rows.</message>
+                </else>
+            </if>
+            <set field="ok" from="darpan.facade.common.FacadeSupport.getErrors(ec).size() == preCallErrorCount"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
-    <!-- DAR-BE-144: same internal posture as migrate#AutomationExcludeFilters above. transaction="ignore" because each
+    <!-- DAR-BE-144: internal posture (authenticate="false", no allow-remote: not reachable via /rpc/json). transaction="ignore" because each
          automation's fold commits in its own transaction (AutomationStreakSupport.recordSlots), so one bad history
          cannot roll back every other tenant's streak. -->
     <service verb="migrate" noun="AutomationStreaks" authenticate="false" transaction="ignore">

@@ -24,12 +24,6 @@
             description="Clear chat space webhooks that can no longer be decrypted after a crypt key
                 change. Idempotent, and a no-op on an installation that never stored a webhook."/>
 
-    <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTERS" componentName="darpan"
-            serviceName="reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters"
-            sequenceNum="30" supportsDryRun="N"
-            description="Copy exclusion filters from the rule set into each automation's own
-                snapshot, across every tenant. Idempotent."/>
-
     <darpan.migration.DarpanMigration migrationId="RULE_TENANT_STAMPS" componentName="darpan"
             serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
             sequenceNum="40" supportsDryRun="N"
@@ -89,5 +83,12 @@
             description="Move each nightly purge job's edited retentionDays parameter into its darpan.purge.* setting and delete
                 the row, and delete the stuck-run reaper job's retired staleMinutes parameter (DAR-BE-306, DAR-BE-304). Seed loads
                 never delete, and a live parameter row would keep overriding the setting. Idempotent."/>
+
+    <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTER_TABLE" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.retire#AutomationSourceFilterTable"
+            sequenceNum="140" supportsDryRun="Y"
+            description="Drop the retired automation filter table (DAR-BE-318 3b-2c): automations read their run's filters
+                now, and the old table's foreign key would fail every automation save, sync and delete over an automation
+                that still has rows in it. Run right after the upgrade load. Idempotent: with no table it does nothing."/>
 
 </entity-facade-xml>

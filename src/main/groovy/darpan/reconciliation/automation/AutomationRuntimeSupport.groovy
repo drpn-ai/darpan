@@ -75,13 +75,10 @@ class AutomationRuntimeSupport {
      * guarantee is the same either way — the distinction matters only when reasoning about thread
      * affinity, e.g. that {@code work} must not assume thread-local caller state.
      *
-     * Task 13 fix round 2, New Important 3: {@code backfillAutomationExcludeFilters} chunks its sweep
-     * per automation specifically so one automation's failure cannot roll back automations already
-     * committed. {@code runInTransaction} would silently give up that guarantee if ever invoked from
-     * inside an already-open ambient transaction (it would join that transaction instead of starting
-     * its own), restoring the all-or-nothing exposure the chunking exists to remove. Use this helper
-     * wherever per-unit transactional isolation must hold unconditionally, not just when there is no
-     * ambient transaction. {@code runInTransaction}'s existing callers are unchanged.
+     * A sweep that commits per unit (one tenant, one claim) needs this, not {@code runInTransaction}: invoked inside an
+     * already-open ambient transaction, {@code runInTransaction} would join it instead of starting its own, so one unit's
+     * failure would roll back units already done. Use this helper wherever per-unit transactional isolation must hold
+     * unconditionally, not just when there is no ambient transaction.
      */
     static Object runInNewTransaction(def ec, String message, Closure work) {
         if (ec?.transaction?.metaClass?.respondsTo(ec.transaction, "runRequireNew", Integer, String, Closure)) {

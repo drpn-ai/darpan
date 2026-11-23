@@ -43,17 +43,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *       guarded by {@code metaClass.respondsTo}. KEPT BARE.</li>
  *   <li>{@code reconciliation/notification/TenantNotificationSupport.groovy:104} — service call.
  *       KEPT BARE.</li>
- *   <li>{@code facade/reconciliation/AutomationFacadeSupport.groovy} (second site, in
- *       {@code backfillAutomationExcludeFilters}) — one-time cross-tenant migration write; creates a
- *       {@code ReconciliationAutomationSourceFilter} row via {@code ec.service.sync()...call()}.
- *       {@code TenantScopedFinder} has no create-side equivalent (it only wraps reads), so this stays
- *       a bare service call like the other writes above. The read side of the same sweep
- *       ({@code ReconciliationAutomation} list and the per-automation/fileSide existence check) both
- *       route through {@code TenantScopedFinder.findGlobalUnscoped}, as
- *       {@code AutomationRuntimeSupport.loadAutomationSourceFilters} does (that read is also pinned to the
- *       automation's own companyUserGroupId since DAR-BE-318 plan 3b-2b Task 14, the run's Keep rows), and add
- *       nothing to this count.
- *       KEPT BARE.</li>
  * </ul>
  *
  * <p><strong>Ratchet rule (step 5 — fail-mode):</strong> the count MUST equal {@code BASELINE}
@@ -96,7 +85,8 @@ class DisableAuthzRatchetTest {
     // state (disables only when the caller already has it disabled), so side 2 reads the connector registry as side 1 does.
     // 16 since DAR-BE-303: EmailCopy.unguarded: anonymous reads of EmailCopyBlock config rows and the validated subject write
     // (an anonymous password-reset send has no authz on them); one site, restored in finally, no tenant data touched.
-    static final int BASELINE = 16
+    // 15 since DAR-BE-318 3b-2c: the exclusion-filter backfill's create write went with the retired automation filter table.
+    static final int BASELINE = 15
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>
@@ -178,8 +168,10 @@ class DisableAuthzRatchetTest {
      * upstream) stays outside the gate.
      */
     static final Map<String, Integer> COMPONENT_BASELINES = [
-            "darpan service+screen XML .disableAuthz("            : 66, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
-            "darpan service+screen XML disable-authz=\"true\""    : 35,
+            // 64 since DAR-BE-318 3b-2c: save#Automation and delete#Automation no longer clear automation filter rows.
+            "darpan service+screen XML .disableAuthz("            : 64, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
+            // 34 since DAR-BE-318 3b-2c: save#Automation no longer creates automation filter rows.
+            "darpan service+screen XML disable-authz=\"true\""    : 34,
             // DAR-BE-318: script/rules/RulesTenantGuard.xml, the moqui-rules write guard the rules.* EECAs run. Its one
             // unfiltered read (rulesGuardFind) loads the row written, or a row it names, by primary key to check its owner.
             "darpan script XML .disableAuthz("                    : 1,

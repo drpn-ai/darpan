@@ -53,7 +53,7 @@ class ScheduleJobDefaultsSmokeTests {
     @Test
     void freshLoadSchedulesEveryJob() {
         List<EntityValue> jobs = darpanJobs()
-        assertEquals(12, jobs.size(), jobs*.jobName.toString())
+        assertEquals(11, jobs.size(), jobs*.jobName.toString()) // DAR-BE-334 removed scan_TenantScriptDeployments_5m
         jobs.each { EntityValue j ->
             assertEquals(j.defaultCronExpression, j.cronExpression, j.jobName)
             assertEquals(j.defaultPaused ?: "N", j.paused, j.jobName)

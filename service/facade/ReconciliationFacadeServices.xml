@@ -3067,8 +3067,8 @@
             delegates to save#Automation, which already deletes and recreates every source and filter
             row on each save. That inherits the whole save path (validateSources, validateApiSource,
             applyApiSourceMetadataDefaults, tenant stamping, the response builder) rather than growing
-            a second writer that would drift from it. Filters are never copied: an automation's runs
-            read its run's compare scope filters.</description>
+            a second writer that would drift from it. An automation runs on this copy (DAR-BE-338): an
+            edit to its run reaches its scheduled runs only through this sync.</description>
         <in-parameters>
             <parameter name="automationId" required="true"/>
         </in-parameters>

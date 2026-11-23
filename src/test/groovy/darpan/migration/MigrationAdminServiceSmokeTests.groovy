@@ -211,7 +211,7 @@ class MigrationAdminServiceSmokeTests {
     void anAgentCanReadWhyAMigrationFailedWithoutDatabaseAccess() {
         // The closing of the loop: a failure is diagnosable entirely over the remote API.
         ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
-                .parameters([migrationId  : "AUTOMATION_FILTERS",
+                .parameters([migrationId  : "AUTOMATION_STREAKS",
                              statusId     : MigrationLedgerSupport.STATUS_FAILED,
                              messageDetail: "connection refused reaching the OMS host"])
                 .disableAuthz().call()
@@ -220,12 +220,12 @@ class MigrationAdminServiceSmokeTests {
                 .name("admin.MigrationAdminServices.get#MigrationStatus")
                 .parameters([:]).disableAuthz().call()
                 .migrations as List<Map<String, Object>>)
-                .find { it.migrationId == "AUTOMATION_FILTERS" }
+                .find { it.migrationId == "AUTOMATION_STREAKS" }
         assertEquals("connection refused reaching the OMS host", status.lastMessageDetail)
 
         Map<String, Object> history = ec.service.sync()
                 .name("admin.MigrationAdminServices.get#MigrationHistory")
-                .parameters([migrationId: "AUTOMATION_FILTERS"]).disableAuthz().call()
+                .parameters([migrationId: "AUTOMATION_STREAKS"]).disableAuthz().call()
         assertEquals(1, (history.attempts as List).size())
         assertEquals("connection refused reaching the OMS host",
                 (history.attempts as List<Map<String, Object>>)[0].messageDetail)
@@ -263,7 +263,7 @@ class MigrationAdminServiceSmokeTests {
         // admin through the admin.* fence, authz ON, no harness grant — and it must still read and
         // write the installation-wide migration rows.
         ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
-                .parameters([migrationId  : "AUTOMATION_FILTERS",
+                .parameters([migrationId  : "AUTOMATION_STREAKS",
                              statusId     : MigrationLedgerSupport.STATUS_FAILED,
                              messageDetail: "connection refused reaching the OMS host"])
                 .disableAuthz().call()
@@ -274,7 +274,7 @@ class MigrationAdminServiceSmokeTests {
             boolean refused
             try {
                 ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
-                        .parameters([migrationId: "AUTOMATION_FILTERS", statusId: "FAILED"]).call()
+                        .parameters([migrationId: "AUTOMATION_STREAKS", statusId: "FAILED"]).call()
                 refused = ec.message.hasError()
             } catch (Throwable expected) {
                 refused = true
@@ -284,7 +284,7 @@ class MigrationAdminServiceSmokeTests {
 
             Map<String, Object> history = ec.service.sync()
                     .name("admin.MigrationAdminServices.get#MigrationHistory")
-                    .parameters([migrationId: "AUTOMATION_FILTERS"]).call()
+                    .parameters([migrationId: "AUTOMATION_STREAKS"]).call()
             assertEquals([], ec.message.errors)
             assertTrue(history.ok as Boolean)
             assertEquals(["connection refused reaching the OMS host"],

@@ -278,7 +278,7 @@ class MigrationAgentSurfaceSmokeTests {
     @Test
     void statusCarriesTheFailureDetailSoAnAgentCanDiagnoseWithoutDatabaseAccess() {
         ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
-                .parameters([migrationId  : "AUTOMATION_FILTERS",
+                .parameters([migrationId  : "AUTOMATION_STREAKS",
                              statusId     : MigrationLedgerSupport.STATUS_FAILED,
                              messageDetail: "connection refused reaching the OMS host"])
                 .disableAuthz().call()
@@ -287,7 +287,7 @@ class MigrationAgentSurfaceSmokeTests {
                 .name("migration.MigrationServices.list#MigrationStatus")
                 .parameters([:]).disableAuthz().call()
                 .migrations as List<Map<String, Object>>)
-                .find { it.migrationId == "AUTOMATION_FILTERS" }
+                .find { it.migrationId == "AUTOMATION_STREAKS" }
 
         assertEquals("FAILED", row.lastStatusId)
         assertEquals("connection refused reaching the OMS host", row.lastMessageDetail,

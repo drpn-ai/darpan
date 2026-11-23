@@ -94,7 +94,7 @@ class MigrationLedgerSmokeTests {
         try {
             runId = ec.service.sync()
                     .name("migration.MigrationServices.record#MigrationRun")
-                    .parameters([migrationId  : "AUTOMATION_FILTERS",
+                    .parameters([migrationId  : "AUTOMATION_STREAKS",
                                  statusId     : MigrationLedgerSupport.STATUS_FAILED,
                                  messageDetail: "required parameters missing"])
                     .disableAuthz()
@@ -107,7 +107,7 @@ class MigrationLedgerSmokeTests {
         assertNotNull(runId, "record#MigrationRun returned no runId, so nothing was written")
 
         def row = ec.entity.find("darpan.migration.DarpanMigrationRun")
-                .condition("migrationId", "AUTOMATION_FILTERS")
+                .condition("migrationId", "AUTOMATION_STREAKS")
                 .condition("runId", runId)
                 .disableAuthz()
                 .one()

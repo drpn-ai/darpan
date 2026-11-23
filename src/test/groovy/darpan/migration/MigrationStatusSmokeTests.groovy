@@ -36,7 +36,7 @@ class MigrationStatusSmokeTests {
     @BeforeEach
     void resetLedger() {
         // everyRegistryRowIsListed... asserts attemptCount 0 for every row while
-        // anAppliedMigrationReports... writes two rows for AUTOMATION_FILTERS. JUnit 5 fixes no
+        // anAppliedMigrationReports... writes two rows for AUTOMATION_STREAKS. JUnit 5 fixes no
         // order, so the ledger is cleared rather than assumed empty.
         ec.entity.find("darpan.migration.DarpanMigrationRun").disableAuthz().deleteAll()
         ec.message.clearErrors()
@@ -60,11 +60,11 @@ class MigrationStatusSmokeTests {
     @Test
     void anAppliedMigrationReportsItsLastRunAndAttemptCount() {
         ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
-                .parameters([migrationId: "AUTOMATION_FILTERS",
+                .parameters([migrationId: "AUTOMATION_STREAKS",
                              statusId   : MigrationLedgerSupport.STATUS_FAILED])
                 .disableAuthz().call()
         ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
-                .parameters([migrationId : "AUTOMATION_FILTERS",
+                .parameters([migrationId : "AUTOMATION_STREAKS",
                              statusId    : MigrationLedgerSupport.STATUS_SUCCESS,
                              rowsAffected: 7])
                 .disableAuthz().call()
@@ -73,7 +73,7 @@ class MigrationStatusSmokeTests {
                 .name("migration.MigrationServices.list#MigrationStatus")
                 .parameters([:]).disableAuthz().call()
                 .migrations as List<Map<String, Object>>)
-                .find { it.migrationId == "AUTOMATION_FILTERS" }
+                .find { it.migrationId == "AUTOMATION_STREAKS" }
 
         assertEquals("APPLIED", row.status)
         assertEquals("SUCCESS", row.lastStatusId)

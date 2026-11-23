@@ -520,6 +520,19 @@ class SyncPulseEngineSmokeTests {
         assertEquals("SPS_OK", out.status)
         assertEquals(2, SyncPulseSupport.presentKeysOf(SP).size(), "the in-memory set keeps the keys")
         assertEquals(0, presentRows())
+        assertEquals(1, ec.entity.find("darpan.pulse.SyncPulseSample").condition("syncPairId", SP).disableAuthz().useCache(false).count(),
+                "the pulse's sample is written")
+    }
+
+    @Test
+    void aBadKeyLosesOnlyItsChunkOfTheWrite() {
+        upstream["#" + ("X" * 400)] = T0.minus(Duration.ofMinutes(10))   // first, so it is in the first chunk of 500
+        arrived << ("#" + ("X" * 400))
+        (1..599).each { int i -> String k = "#K${i}".toString(); upstream[k] = T0.minus(Duration.ofMinutes(10)); arrived << k }
+        Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals("SPS_OK", out.status)
+        assertEquals(600, SyncPulseSupport.presentKeysOf(SP).size())
+        assertEquals(100, presentRows(), "the second chunk of 100 is stored; the first chunk (with the bad key) is not")
     }
 
     @Test

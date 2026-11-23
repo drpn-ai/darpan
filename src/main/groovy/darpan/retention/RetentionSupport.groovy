@@ -228,6 +228,7 @@ class RetentionSupport {
                 Map closedOrders = sweepParents(ec, tenantId, dryRun, batch, "darpan.pulse.SyncPulseOrder", "pulseOrderId",
                         { find -> find.condition("closedStamp", EntityCondition.LESS_THAN, cutoff) }, [], [])
                 counts["darpan.pulse.SyncPulseOrder"] = closedOrders._rows
+                counts["darpan.pulse.SyncPulsePresentKey"] = sweepPresentKeys(ec, tenantId, dryRun, batch)
                 return counts
             default:
                 throw new IllegalArgumentException("Unknown retention table ${table}")
@@ -270,6 +271,28 @@ class RetentionSupport {
             if (ids.size() < batch) break
         }
         return counts
+    }
+
+    /**
+     * Pulse present keys older than two days: they only help inside the pulse read window (hours), so this catches the rows
+     * of a pair deactivated while the process was down. Composite key, so pages are "the first batch found" until none are left.
+     */
+    private static long sweepPresentKeys(def ec, String tenantId, boolean dryRun, int batch) {
+        Timestamp cutoff = new Timestamp(System.currentTimeMillis() - 2L * 86_400_000L)
+        Closure find = {
+            TenantScopedFinder.findGlobalUnscoped(ec, "darpan.pulse.SyncPulsePresentKey", REASON).condition("companyUserGroupId", tenantId)
+                    .condition("sourceCreatedStamp", EntityCondition.LESS_THAN, cutoff).useCache(false)
+        }
+        if (dryRun) return find.call().count()
+        long deleted = 0L
+        while (true) {
+            List rows = find.call().limit(batch).list()
+            if (!rows) break
+            ec.transaction.runRequireNew(300, "Retention batch of SyncPulsePresentKey for ${tenantId}".toString()) { rows.each { it.delete() } }
+            deleted += rows.size()
+            if (rows.size() < batch) break
+        }
+        return deleted
     }
 
     private static def childFind(def ec, Map child, List<String> ids, String tenantId) {

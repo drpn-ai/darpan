@@ -37,7 +37,7 @@ class RetentionSmokeTests {
             "darpan.audit.AuditFindingEvent", "darpan.audit.AuditFinding", "darpan.reconciliation.ReconciliationRunStep",
             "darpan.reconciliation.ReconciliationAutomationExecution", "darpan.reconciliation.ReconciliationRunResult",
             "darpan.agent.AgentMessage", "darpan.agent.AgentTurn", "darpan.agent.AgentConversation", "darpan.agent.AgentQueryLog",
-            "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPair"]
+            "darpan.pulse.SyncPulsePresentKey", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPair"]
 
     private ExecutionContext ec
 
@@ -106,6 +106,10 @@ class RetentionSmokeTests {
                     upsert("darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_${age}".toString(), syncPairId: "${t}_SP".toString(),
                             companyUserGroupId: t, recordKey: "#${age}".toString(), firstPastStamp: OLD, closedStamp: when])
                 }
+                [OLD: new Timestamp(System.currentTimeMillis() - 3L * DAY), NEW: RECENT].each { String age, Timestamp when ->
+                    upsert("darpan.pulse.SyncPulsePresentKey", [syncPairId: "${t}_SP".toString(), recordKey: "#P_${age}".toString(),
+                            companyUserGroupId: t, sourceCreatedStamp: when])
+                }
                 upsert("darpan.pulse.SyncPulseOrder", [pulseOrderId: "${t}_O_OPEN".toString(), syncPairId: "${t}_SP".toString(),
                         companyUserGroupId: t, recordKey: "#OPEN", firstPastStamp: OLD, closedStamp: null])
             }
@@ -115,6 +119,9 @@ class RetentionSmokeTests {
         Map pulse = table(out, RetentionSupport.SYNC_PULSE_SAMPLE)
         assertEquals([RetentionSupport.DELETED, 1L], [pulse.status, pulse.rows])
         assertEquals(1L, pulse.dependentRows["darpan.pulse.SyncPulseOrder"])
+        assertEquals(1L, pulse.dependentRows["darpan.pulse.SyncPulsePresentKey"])
+        assertEquals(["#P_NEW"], presentKeys(A), "present keys older than two days went")
+        assertEquals(["#P_NEW", "#P_OLD"], presentKeys(B), "another tenant's are not touched")
         assertEquals(["${A}_S_NEW".toString()], ids("darpan.pulse.SyncPulseSample", "sampleId", A))
         assertEquals(["${A}_O_NEW".toString(), "${A}_O_OPEN".toString()], ids("darpan.pulse.SyncPulseOrder", "pulseOrderId", A),
                 "the order closed long ago went; one closed yesterday and one still open stay")
@@ -310,6 +317,8 @@ class RetentionSmokeTests {
     private Map snapshot() {
         asSystem { WIPE.collectEntries { String e -> [(e): ec.entity.find(e).useCache(false).count()] } }
     }
+
+    private List<String> presentKeys(String tenant) { return ids("darpan.pulse.SyncPulsePresentKey", "recordKey", tenant) }
 
     private List<String> ids(String entity, String pk, String tenant = null) {
         asSystem {

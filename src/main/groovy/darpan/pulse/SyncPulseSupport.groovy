@@ -133,7 +133,7 @@ class SyncPulseSupport {
                 .condition("companyUserGroupId", tenantId).condition("syncPairId", syncPairId).useCache(false)
     }
 
-    /** Deletes the pair's rows, or only those whose source was created before olderThan. */
+    /** Deletes the pair's rows, or only those whose source was created before olderThan (found, then deleted row by row). */
     private static void deletePresentRows(def ec, String tenantId, String syncPairId, Instant olderThan) {
         def find = presentRows(ec, tenantId, syncPairId)
         if (olderThan != null) find.condition("sourceCreatedStamp", EntityCondition.LESS_THAN, Timestamp.from(olderThan))
@@ -218,15 +218,23 @@ class SyncPulseSupport {
         return added
     }
 
-    /** Stores the keys just remembered; never fails the pulse. */
+    private static final int PRESENT_WRITE_CHUNK = 500
+
+    /** Stores the keys just remembered, 500 per transaction; never fails the pulse. */
     private static void storePresent(def ec, Map pair, Map<String, Instant> added) {
         if (!added) return
         String tenantId = normalize(pair.companyUserGroupId)
         String syncPairId = normalize(pair.syncPairId)
-        writePresent(ec, "add") {
-            added.each { String k, Instant at ->
-                ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: syncPairId, recordKey: k,
-                        companyUserGroupId: tenantId, sourceCreatedStamp: Timestamp.from(at)]).createOrUpdate()
+        // chunks, each in its own transaction: one bad key or a timeout loses at most its chunk, not every key of a big batch
+        added.entrySet().toList().collate(PRESENT_WRITE_CHUNK).each { List<Map.Entry<String, Instant>> chunk ->
+            writePresent(ec, "add ${chunk.size()} keys".toString()) {
+                chunk.each { Map.Entry<String, Instant> e ->
+                    def value = ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: syncPairId, recordKey: e.key,
+                            companyUserGroupId: tenantId, sourceCreatedStamp: Timestamp.from(e.value)])
+                    // the key is known absent; a duplicate (another pulse got there first) is skipped
+                    if (ec.entity.find("darpan.pulse.SyncPulsePresentKey").condition("syncPairId", syncPairId)
+                            .condition("recordKey", e.key).disableAuthz().useCache(false).count() == 0) value.create()
+                }
             }
         }
     }
@@ -464,7 +472,9 @@ class SyncPulseSupport {
             // the target is asked only about keys it has not already confirmed; a confirmed key still counts as present
             PresentSet known = presentSetFor(ec, pair, presentSignature(ec, pair, automation), window.from as Instant)
             known.keys.entrySet().removeIf { Map.Entry<String, Instant> e -> e.value.isBefore(window.from as Instant) }
-            writePresent(ec, "prune") { deletePresentRows(ec, tenantId, syncPairId, window.from as Instant) }
+            if (presentRows(ec, tenantId, syncPairId).condition("sourceCreatedStamp", EntityCondition.LESS_THAN, Timestamp.from(window.from as Instant)).count() > 0) {
+                writePresent(ec, "prune") { deletePresentRows(ec, tenantId, syncPairId, window.from as Instant) }
+            }
             Set<String> confirmed = keys.findAll { known.keys.containsKey(it) } as Set<String>
             Set<String> toAsk = keys.findAll { !confirmed.contains(it) } as Set<String>
             Map target = presentInTarget(ec, pair, automation, toAsk)

@@ -148,8 +148,8 @@ class TenantConfigRestoreSmokeTests {
                 assertEquals("'version one'", ec.entity.find("jexl.script.UserScript").condition("userScriptId", "TCR_SCRIPT").useCache(false).one().scriptBody)
                 def deployment = ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCR_DEPLOY").useCache(false).one()
                 def chat = ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "TCR_DEPLOY").useCache(false).one()
-                assertEquals(["0 0 9 * * ?", '{"chatSpaceId":"TCR_SPACE"}', "Y"], [deployment.cronExpression, chat.parametersJson, deployment.isActive],
-                        "back under its own id, on its own space, and still on")
+                assertEquals(["0 0 9 * * ?", '{"chatSpaceId":"TCR_SPACE"}', "N"], [deployment.cronExpression, chat.parametersJson, deployment.isActive],
+                        "back under its own id, on its own space, and switched off for a tenant admin to turn on (DAR-BE-334)")
             }
             assertEquals(v1.hash, out.after.hash, "the config is exactly version 1 again")
         } finally {

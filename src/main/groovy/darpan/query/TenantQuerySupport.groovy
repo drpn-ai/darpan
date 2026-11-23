@@ -18,6 +18,8 @@ import java.sql.Timestamp
 class TenantQuerySupport {
     static final String PROFILE = "QUERY"
     static final String JEXL = "moqui.jexl.ScriptServices"
+    /** Email addresses one schedule may send to (to + cc). */
+    static final int MAX_RECIPIENTS = 50
 
     /** Every read here names the active tenant, or a schedule or query already checked as the tenant's (deliveries carry
      *  no tenant), or reads the owner's own membership rows. */
@@ -46,9 +48,22 @@ class TenantQuerySupport {
         return row?.companyUserGroupId == tenantId ? row : null
     }
 
+    /** A query a schedule runs sends what it computes to the schedule's addresses: changing or deleting it needs tenant admin. */
+    static boolean scheduledNeedsAdmin(def ec, String tenantId, String tenantQueryId) {
+        if (!tenantQueryId) return false
+        boolean scheduled = unscoped(ec, "jexl.script.UserScriptDeployment").condition("userScriptId", tenantQueryId)
+                .condition("companyUserGroupId", tenantId).useCache(false).count() > 0
+        if (scheduled && !TenantAccessSupport.isTenantAdmin(ec, tenantId)) {
+            ec.message.addError("This query has a schedule that sends its answer out, so changing or deleting it needs tenant-admin access.")
+            return true
+        }
+        return false
+    }
+
     static Map saveQuery(def ec, String tenantId, Map p) {
         String id = (p.tenantQueryId as String)?.trim() ?: null
         if (id && ownQuery(ec, tenantId, id) == null) { ec.message.addError("Query '${id}' was not found."); return null }
+        if (scheduledNeedsAdmin(ec, tenantId, id)) return null
         String name = (p.queryName as String)?.trim()
         if (!name) { ec.message.addError("A query needs a name."); return null }
         def clash = unscoped(ec, "jexl.script.UserScript").condition("companyUserGroupId", tenantId).useCache(false).list()
@@ -65,7 +80,8 @@ class TenantQuerySupport {
         String id = (p.tenantQueryId as String)?.trim() ?: null
         if (id && ownQuery(ec, tenantId, id) == null) { ec.message.addError("Query '${id}' was not found."); return null }
         Map params = [scriptProfile: PROFILE, ownerKey: tenantId]
-        if (id) params.userScriptId = id
+        // NOTE: given a userScriptId, moqui-jexl runs the SAVED body; a draft (a body given) runs as itself, scoped by ownerKey
+        if (id && p.scriptBody == null) params.userScriptId = id
         if (p.scriptBody != null) params.scriptBody = p.scriptBody
         if (p.readSpecJson != null) params.readSpecJson = p.readSpecJson
         if (!id && p.scriptBody == null) { ec.message.addError("Write a query, or choose a saved one."); return null }
@@ -84,6 +100,7 @@ class TenantQuerySupport {
     static void deleteQuery(def ec, String tenantId, String tenantQueryId) {
         def row = ownQuery(ec, tenantId, tenantQueryId)
         if (row == null) { ec.message.addError("Query '${tenantQueryId}' was not found."); return }
+        if (scheduledNeedsAdmin(ec, tenantId, tenantQueryId)) return
         unscoped(ec, "jexl.script.UserScriptDeployment").condition("userScriptId", tenantQueryId).useCache(false).list().each { d ->
             unscoped(ec, "jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", d.scriptDeploymentId).deleteAll()
             d.delete()
@@ -140,6 +157,16 @@ class TenantQuerySupport {
         if (p.emailTo) deliveries << [deliveryServiceName: QueryDelivery.EMAIL_SERVICE, parameters: [toAddresses: p.emailTo, ccAddresses: p.emailCc ?: null]]
         if (p.chatSpaceId) deliveries << [deliveryServiceName: QueryDelivery.CHAT_SERVICE, parameters: [chatSpaceId: p.chatSpaceId]]
         if (!deliveries) { ec.message.addError("Send it somewhere: an email address or a chat space."); return null }
+        if (p.chatSpaceId) {
+            def space = unscoped(ec, "darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", p.chatSpaceId)
+                    .condition("companyUserGroupId", tenantId).useCache(false).one()
+            if (space == null) { ec.message.addError("Chat space ${p.chatSpaceId} was not found."); return null }
+            if (space.isActive == "N") { ec.message.addError("Chat space '${space.spaceName}' is switched off."); return null }
+        }
+        List<String> addresses = ((p.emailTo ?: "") + "," + (p.emailCc ?: "")).toString().split(/[\s,;]+/).findAll { it } as List<String>
+        if (addresses.size() > MAX_RECIPIENTS) {
+            ec.message.addError("A schedule sends to at most ${MAX_RECIPIENTS} addresses; this one names ${addresses.size()}.".toString()); return null
+        }
         Map out = ec.service.sync().name("${JEXL}.store#UserScriptDeployment").parameters([scriptDeploymentId: scheduleId,
                 userScriptId: p.tenantQueryId, cronExpression: cron, timeZone: TenantNotificationSupport.resolveTenantZone(ec, tenantId).id,
                 isActive: p.isActive == true || p.isActive == "Y" ? "Y" : "N", deliveries: deliveries,
@@ -149,10 +176,35 @@ class TenantQuerySupport {
     }
 
     static Map runSchedule(def ec, String tenantId, String scheduleId, boolean send) {
-        if (ownSchedule(ec, tenantId, scheduleId) == null) { ec.message.addError("Schedule '${scheduleId}' was not found."); return null }
+        def row = ownSchedule(ec, tenantId, scheduleId)
+        if (row == null) { ec.message.addError("Schedule '${scheduleId}' was not found."); return null }
+        if (!send) {
+            // A preview is any tenant admin's: the schedule's saved query runs as the caller and nothing is sent
+            // (moqui-jexl's own preview is the owner's only).
+            Map run = runQuery(ec, tenantId, [tenantQueryId: row.userScriptId])
+            if (run == null) return null
+            Map schedule = toScheduleMap(ec, row)
+            String where = sendsToText(ec, tenantId, schedule)
+            String status = run.error ? ((Map) run.error).kind as String : (run.nothing ? "NOTHING_TO_SEND" : "PREVIEW")
+            String message = run.error ? ((Map) run.error).message as String
+                    : (run.nothing ? "Nothing to send: the query returned nothing." : "Preview only: nothing was sent. It would go to ${where}.".toString())
+            return [status: status, message: message, result: [summary: run.summary, files: run.files], readCounts: run.readCounts]
+        }
         Map out = ec.service.sync().name("${JEXL}.run#UserScriptDeployment").parameters([scriptDeploymentId: scheduleId, deliver: send]).call()
         if (ec.message.hasError()) return null
         return [status: out.status, message: out.message, result: out.normalizedResult, readCounts: out.readCounts, deliveries: out.deliveries]
+    }
+
+    private static String sendsToText(def ec, String tenantId, Map schedule) {
+        List<String> parts = []
+        int count = (schedule.recipientCount ?: 0) as int
+        if (count) parts << "${count} email address${count == 1 ? '' : 'es'}".toString()
+        if (schedule.chatSpaceId) {
+            def space = unscoped(ec, "darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", schedule.chatSpaceId)
+                    .condition("companyUserGroupId", tenantId).useCache(false).one()
+            parts << "the chat space ${space?.spaceName ?: schedule.chatSpaceId}".toString()
+        }
+        return parts ? parts.join(" and ") : "nowhere"
     }
 
     static void deleteSchedule(def ec, String tenantId, String scheduleId) {

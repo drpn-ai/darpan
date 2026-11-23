@@ -1,6 +1,8 @@
 package darpan.query
 
 import darpan.reconciliation.notification.TenantNotificationSupport
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 /**
  * DAR-BE-334. Darpan's deliveries for scheduled queries. Both run as the deployment's owner (moqui-jexl) and first
@@ -9,6 +11,7 @@ import darpan.reconciliation.notification.TenantNotificationSupport
  * deliver#ScriptEmail with Darpan's template, and writes one DataExportLog row per emailed file with its recipients.
  */
 class QueryDelivery {
+    private static final Logger logger = LoggerFactory.getLogger(QueryDelivery)
     static final String EMAIL_TEMPLATE = "DARPAN_QUERY_RESULT"
     static final String EMAIL_SERVICE = "query.QueryHostServices.deliver#QueryEmail"
     static final String CHAT_SERVICE = "query.QueryHostServices.deliver#QueryChat"
@@ -26,7 +29,7 @@ class QueryDelivery {
             List<String> lines = [result.summary ? "${name}: ${result.summary}".toString() : name]
             if (files) {
                 int people = emailRecipients(ec, deployment.scriptDeploymentId as String).size()
-                lines.add("Sent ${files.size()} file${files.size() == 1 ? '' : 's'} (${files*.name.join(', ')})${people ? ' to ' + people + ' ' + (people == 1 ? 'person' : 'people') : ''} by email.".toString())
+                if (people) lines.add("${files.size()} file${files.size() == 1 ? '' : 's'} (${files*.name.join(', ')}) go to ${people} ${people == 1 ? 'person' : 'people'} by email.".toString())
             }
             Map posted = TenantNotificationSupport.postToChatSpace(ec, tenantId, chatSpaceId, [text: lines.join("\n")])
             if (posted == null) return [error: "The chat space ${chatSpaceId} was deleted, switched off, has no webhook, or is not this tenant's.".toString()]
@@ -49,17 +52,37 @@ class QueryDelivery {
                 ec.message.clearErrors()
                 return [error: errors]
             }
-            if (out?.outcome in ["OK", "TOO_LARGE"]) {
-                String recipients = [parameters.toAddresses, parameters.ccAddresses].findAll { it }.join(", ")
+            // Only an email that carried its files logs them (TOO_LARGE sent the summary alone). A log that cannot be written
+            // never turns a sent email into a failure (which would send it again next run).
+            if (out?.outcome == "OK") {
+                String recipients = fitRecipients([parameters.toAddresses, parameters.ccAddresses].findAll { it }.join(", "))
                 files.each { Map f ->
-                    ec.entity.makeValue("darpan.admin.DataExportLog").setAll([dataExportLogId: ec.entity.sequencedIdPrimary("darpan.admin.DataExportLog", null, null),
-                            userId: deployment.ownerUserId, companyUserGroupId: tenantId, resourceType: "SCRIPT_EMAIL", resourceRef: f.name,
-                            format: "csv", byteCount: ((byte[]) f.contentBytes)?.length, serviceName: EMAIL_SERVICE,
-                            recipients: recipients, eventTimestamp: ec.user.nowTimestamp]).create()
+                    try {
+                        ec.entity.makeValue("darpan.admin.DataExportLog").setAll([dataExportLogId: ec.entity.sequencedIdPrimary("darpan.admin.DataExportLog", null, null),
+                                userId: deployment.ownerUserId, companyUserGroupId: tenantId, resourceType: "SCRIPT_EMAIL", resourceRef: f.name,
+                                format: "csv", byteCount: ((byte[]) f.contentBytes)?.length, serviceName: EMAIL_SERVICE,
+                                recipients: recipients, eventTimestamp: ec.user.nowTimestamp]).create()
+                    } catch (Exception e) {
+                        logger.error("Query email sent but its export log for ${f.name} could not be written", e)
+                        ec.message.clearErrors()
+                    }
                 }
             }
             return [outcome: out?.outcome ?: "OK", message: out?.message]
         }
+    }
+
+    /** The recipients column holds 255 characters: a longer list keeps what fits and says how many more. */
+    static String fitRecipients(String recipients) {
+        if (recipients == null || recipients.length() <= 255) return recipients
+        List<String> all = recipients.split(/,\s*/) as List<String>
+        List<String> kept = []
+        for (String r : all) {
+            String next = (kept + [r]).join(", ") + " (+${all.size() - kept.size() - 1} more)"
+            if (next.length() > 255) break
+            kept << r
+        }
+        return kept.join(", ") + " (+${all.size() - kept.size()} more)"
     }
 
     private static Map<String, Object> inTenant(def ec, Map deployment, Closure<Map> body) {

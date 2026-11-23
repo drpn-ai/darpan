@@ -143,7 +143,12 @@ class ConfigTransferExporter {
         // DAR-BE-236, DAR-BE-334: the tenant's queries travel with its automations, and the saved runs their reads name with them.
         List scripts = withAutomations ? finder(ec, spec(SCRIPT).entityName as String).condition("companyUserGroupId", tenantId)
                 .orderBy(["scriptName", "userScriptId"]).useCache(false).list() : []
-        scripts.each { s -> keyedValues(s.readSpecJson, "savedRunId").each { runIds.add(it) } }
+        // A read naming a run the tenant does not have (deleted since, or a typo) keeps that id plain: it fails closed when the
+        // query runs, and never stops a version or transfer of the rest.
+        Set<String> queryRunIds = scripts.collectMany { s -> keyedValues(s.readSpecJson, "savedRunId") } as Set<String>
+        Set<String> heldQueryRuns = queryRunIds ? (finder(ec, "darpan.rule.RuleSet").condition("companyUserGroupId", tenantId)
+                .condition("ruleSetId", "in", queryRunIds).useCache(false).list()*.ruleSetId.collect { it as String } as Set<String>) : ([] as Set<String>)
+        runIds.addAll(heldQueryRuns)
         List runs = runIds ? finder(ec, "darpan.rule.RuleSet").condition("companyUserGroupId", tenantId)
                 .condition("ruleSetId", "in", runIds).orderBy(["ruleSetName", "ruleSetId"]).useCache(false).list() : []
         (runIds - (runs*.ruleSetId.collect { it as String } as Set)).each { String id ->
@@ -191,7 +196,8 @@ class ConfigTransferExporter {
         }
 
         Map scriptSpec = forVersion ? versionSpec(spec(SCRIPT)) : spec(SCRIPT)
-        List<Map> scriptRecords = scripts.collect { labelled(record(ec, scriptSpec, it, namer), it.scriptName ?: it.tenantScriptId) }
+        Closure<String> scriptNamer = { String kind, Object id -> kind == RUN && !((id as String) in heldQueryRuns) ? text(id) : namer(kind, id) }
+        List<Map> scriptRecords = scripts.collect { labelled(record(ec, scriptSpec, it, scriptNamer), it.scriptName ?: it.userScriptId) }
 
         // DAR-BE-188: the chat spaces those automations (and DAR-BE-236 script deployments) post to, the tenant's own only.
         List<Map> chatSpaceRecords = []

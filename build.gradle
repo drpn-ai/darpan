@@ -413,6 +413,13 @@ tasks.register('testAll') {
 
 // Tests read side 2 after side 1: their harness contexts cannot make a worker context (AutomationExecutionSupport).
 tasks.withType(Test).configureEach { systemProperty 'darpan.reconciliation.automation.parallelSourceExtracts', 'false' }
+// DAR-BE-334: moqui-jexl's load gate reads real CPU and heap, which would make queries randomly wait in a test JVM (101
+// turns it off), and its deployment scheduler would run in the background of the shared test Moqui (0 does not start it).
+tasks.withType(Test).configureEach {
+    systemProperty 'jexl_hold_cpu_percent', '101'
+    systemProperty 'jexl_hold_heap_percent', '101'
+    systemProperty 'jexl_deployment_check_seconds', '0'
+}
 
 // Opt-in MySQL-backed suite (InnoDB lock behavior that H2 cannot reproduce — no FK parent-row
 // locking in H2). Requires a locally reachable darpan_test MySQL database; not part of `check` or

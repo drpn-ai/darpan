@@ -1370,19 +1370,18 @@ class ConfigTransferImporter {
     }
 
     /**
-     * DAR-BE-236. A script and its deployments. A deployment this import creates arrives switched off with no next run;
-     * one it updates keeps whether it is on and when it runs, which are the target's.
+     * DAR-BE-236, DAR-BE-334. A query and its schedules. A schedule sends what its query computes to its addresses, and
+     * turning one on needs tenant admin, while an import or restore needs only edit access: so every schedule of a query
+     * this import creates or changes arrives switched off with no next run, for an admin to turn on again.
      */
     private static void writeScript(Map ctx, Map t) {
         String action = ctx.actions[t.ref]
         if (!(action in [CREATE, "UPDATE"])) return
         Map scriptSpec = kindSpec(ctx, SCRIPT)
         Map deploymentSpec = ((scriptSpec.children ?: []) as List<Map>)[0]
-        Set<String> before = action == CREATE ? ([] as Set<String>) : (finder(ctx.ec, deploymentSpec.entityName as String)
-                .condition("userScriptId", ctx.idMap[t.ref]).useCache(false).list()*.scriptDeploymentId.collect { it as String } as Set<String>)
         writeTree(ctx, scriptSpec, t, "")
-        finder(ctx.ec, deploymentSpec.entityName as String).condition("userScriptId", ctx.idMap[t.ref]).useCache(false).list()
-                .findAll { !((it.scriptDeploymentId as String) in before) }.each { row ->
+        finder(ctx.ec, deploymentSpec.entityName as String).condition("userScriptId", ctx.idMap[t.ref]).useCache(false).list().each { row ->
+            if (row.isActive == "N" && row.nextRunDate == null) return
             row.set("isActive", "N")
             row.set("nextRunDate", null)
             row.update()

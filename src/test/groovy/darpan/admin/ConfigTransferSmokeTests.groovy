@@ -1562,6 +1562,26 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
+    void aQueryNamingARunTheTenantDoesNotHaveNeverStopsAVersionOrATransfer() {
+        withScript {
+            create("jexl.script.UserScript", [userScriptId: "XFER_STALE", companyUserGroupId: SRC, scriptName: "Stale read",
+                    scriptProfile: "QUERY", readSpecJson: '{"inputs":[{"name":"d","source":"runResult","savedRunId":"NO_SUCH_RUN","fields":["key"]}]}',
+                    scriptBody: "'x'", isActive: "Y"])
+            try {
+                Map pack = ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true)
+                assertFalse(ec.message.hasError(), ec.message.errorsString)
+                assertEquals("NO_SUCH_RUN", json(((pack.scripts as List<Map>).find { it.fields.scriptName == "Stale read" }).fields.readSpecJson).inputs[0].savedRunId)
+                Map bundle = exportWhole()
+                assertEquals("NO_SUCH_RUN", json(((bundle.scripts as List<Map>).find { it.fields.scriptName == "Stale read" }).fields.readSpecJson).inputs[0].savedRunId,
+                        "an id the tenant does not have stays plain, never a dangling ref")
+            } finally {
+                ec.message.clearErrors()
+                ec.entity.find("jexl.script.UserScript").condition("userScriptId", "XFER_STALE").disableAuthz().deleteAll()
+            }
+        }
+    }
+
+    @Test
     void aVersionKeepsADeploymentsSpaceAndRunAsPlainIds() {
         withScript {
             Map pack = ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true)

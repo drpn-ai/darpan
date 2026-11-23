@@ -95,6 +95,8 @@ class TenantQueryFacadeSmokeTests {
         Map out = call("run#TenantQuerySchedule", [scheduleId: saved.schedule.scheduleId])
         assertTrue(out.ok as boolean, "${out.errors}")
         assertEquals("PREVIEW", out.outcome.status)
+        assertTrue((out.outcome.message as String).contains("1 email address and the chat space Krewe ops"), out.outcome.message as String)
+        assertEquals("hi", out.outcome.result.summary)
         assertEquals(0, posts.size())
     }
 
@@ -130,6 +132,39 @@ class TenantQueryFacadeSmokeTests {
         } finally {
             adminRow.set("thruDate", null).update()
         }
+    }
+
+    @Test
+    void anEditorCannotChangeOrDeleteAScheduledQuery() {
+        String id = saveHello("Hello scheduled")
+        assertTrue(call("save#TenantQuerySchedule", [tenantQueryId: id, dailyAt: "09:00", emailTo: "ops@example.test"]).ok as boolean)
+        assertTrue(ec.user.internalLoginUser("qt.editor2"))
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
+        Map save = call("save#TenantQuery", [tenantQueryId: id, queryName: "Hello scheduled", scriptBody: "'changed'"])
+        assertTrue("${save.errors}".contains("tenant-admin"), "${save.errors}")
+        Map delete = call("delete#TenantQuery", [tenantQueryId: id])
+        assertTrue("${delete.errors}".contains("tenant-admin"), "${delete.errors}")
+        assertEquals(HELLO, ec.entity.find("jexl.script.UserScript").condition("userScriptId", id).disableAuthz().useCache(false).one().scriptBody)
+        // an unscheduled query stays any editor's
+        Map other = call("save#TenantQuery", [queryName: "Editor's own", scriptBody: HELLO])
+        assertTrue(other.ok as boolean, "${other.errors}")
+    }
+
+    @Test
+    void aDraftOfASavedQueryRunsAsWritten() {
+        String id = saveHello("Hello draft")
+        Map out = call("run#TenantQuery", [tenantQueryId: id, scriptBody: "{ 'summary': 'the draft' }"])
+        assertTrue(out.ok as boolean, "${out.errors}")
+        assertEquals("the draft", out.result.summary)
+    }
+
+    @Test
+    void aScheduleRefusesAnotherTenantsChatSpace() {
+        String id = saveHello("Hello space")
+        insert(ec, "darpan.reconciliation.TenantChatSpace", [chatSpaceId: "QT_G_SPACE", companyUserGroupId: GORJANA, spaceName: "Theirs",
+                webhookUrl: "https://chat.example.test/g", isActive: "Y"])
+        Map out = call("save#TenantQuerySchedule", [tenantQueryId: id, dailyAt: "09:00", chatSpaceId: "QT_G_SPACE"])
+        assertTrue("${out.errors}".contains("was not found"), "${out.errors}")
     }
 
     @Test

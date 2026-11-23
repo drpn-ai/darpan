@@ -71,8 +71,8 @@ collapses the key to one record. `FINDING`: every record under the repeated key 
 `DUPLICATE_IN_FILE_n` finding and the key is left out of the compare on both sides, so the other
 side's record is not reported missing.
 
-**Source filters.** Per-side filters (`RuleSetCompareSourceFilter`, read by interactive and scheduled
-runs alike) exclude matching records before compare;
+**Source filters.** Per-side filters (`RuleSetCompareSourceFilter`, and
+`ReconciliationAutomationSourceFilter` for automations) exclude matching records before compare;
 an `INCLUDE_IN` filter instead keeps only records whose value is listed. The run reports how many
 each filter removed. Support: `darpan/reconciliation/source/SourceFilterSupport.groovy`.
 

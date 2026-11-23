@@ -30,6 +30,7 @@ class TenantConfigAutomationSmokeTests {
     private static final String VERSION = "darpan.config.TenantConfigVersion"
     private static final String PENDING = "darpan.config.TenantConfigPending"
     private static final String AUTOMATION = "darpan.reconciliation.ReconciliationAutomation"
+    private static final String FILTER = "darpan.reconciliation.ReconciliationAutomationSourceFilter"
     private static final String MINE = "KREWE"                // seedCompanyScope's tenant
     private static final String AUTO_ID = "TCAU_AUTO"
     private static final String RUN_ID = "RS_TCAU"
@@ -59,13 +60,14 @@ class TenantConfigAutomationSmokeTests {
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
-    /** One paused-then-on automation of the run: a SuiteQL source naming the query (its filters are its run's). */
+    /** One paused-then-on automation of the run: a SuiteQL source naming the query, with one exclusion filter. */
     @BeforeEach
     void reset() {
         ec.message.clearErrors()
         sleep(500)   // lets any async pending mark from the last test land
         asSystem {
             ec.entity.find(VERSION).deleteAll()
+            ec.entity.find(FILTER).condition("companyUserGroupId", MINE).deleteAll()
             ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("companyUserGroupId", MINE).deleteAll()
             ec.entity.find(AUTOMATION).condition("companyUserGroupId", MINE).deleteAll()
             upsert(AUTOMATION, [automationId: AUTO_ID, automationName: "Morning invoices", companyUserGroupId: MINE,
@@ -74,13 +76,15 @@ class TenantConfigAutomationSmokeTests {
             upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUTO_ID, fileSide: "FILE_1",
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                     safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"' + QUERY_ID + '"}}'])
+            upsert(FILTER, [automationId: AUTO_ID, fileSide: "FILE_1", sequenceNum: 1L, companyUserGroupId: MINE,
+                    fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: '["Closed"]'])
         }
         sleep(1000)   // the fixture writes mark KREWE pending (async); let those land, then clear them
         asSystem { ec.entity.find(PENDING).deleteAll() }
     }
 
     @Test
-    void aVersionHoldsTheAutomationItsSourcesAndTheQueryItReads() {
+    void aVersionHoldsTheAutomationItsSourcesFiltersAndTheQueryItReads() {
         Map version = snapshot()
         assertEquals(1, version.counts.automations, "${version.counts}")
         Map pack = (Map) call("get#TenantConfigVersion", [id: version.id]).version.pack
@@ -95,7 +99,8 @@ class TenantConfigAutomationSmokeTests {
         Map metadata = (Map) new JsonSlurper().parseText(source.fields.safeMetadataJson as String)
         assertEquals("NETSUITE_SUITEQL:${QUERY_ID}".toString(), metadata.parameters.nsSuiteQlSourceQueryId,
                 "the query the source reads travels as a ref")
-        assertFalse(source.children as boolean, "an automation source carries no filters (DAR-BE-318 3b-2c): ${source.children}")
+        assertEquals([['Closed']], (source.children.ReconciliationAutomationSourceFilter as List<Map>)
+                .collect { new JsonSlurper().parseText(it.fields.filterValues as String) })
         assertTrue((pack.queries as List<Map>)*.ref.contains("NETSUITE_SUITEQL:${QUERY_ID}".toString()),
                 "a query only an automation reads is still in the version")
     }
@@ -118,9 +123,10 @@ class TenantConfigAutomationSmokeTests {
     }
 
     @Test
-    void aRestorePutsTheAutomationsScheduleBackAndLeavesItOn() {
+    void aRestorePutsTheAutomationsFilterAndScheduleBackAndLeavesItOn() {
         Map v1 = snapshot()
         asSystem {
+            ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().set("filterValues", '["Closed","Cancelled"]').update()
             ec.entity.find(AUTOMATION).condition("automationId", AUTO_ID).one().setAll([scheduleExpr: "0 0 9 * * ?",
                     nextScheduledFireTime: Timestamp.valueOf("2026-10-31 16:00:00")]).update()
         }
@@ -137,6 +143,7 @@ class TenantConfigAutomationSmokeTests {
         assertEquals("Y", automation.isActive, "a restore never pauses or starts an automation")
         assertNotEquals(Timestamp.valueOf("2026-10-31 16:00:00"), automation.nextScheduledFireTime,
                 "the next firing follows the restored schedule")
+        assertEquals('["Closed"]', asSystem { ec.entity.find(FILTER).condition("automationId", AUTO_ID).one().filterValues })
         assertEquals(v1.hash, out.after.hash, "exactly version 1 again")
     }
 

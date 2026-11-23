@@ -99,6 +99,8 @@ class NotificationRouteServicesTests {
             insert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: AUT_DAILY, fileSide: side,
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", primaryIdExpression: "orderId"])
         }
+        insert("darpan.reconciliation.ReconciliationAutomationSourceFilter", [automationId: AUT_DAILY, fileSide: "FILE_1",
+                sequenceNum: 1, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: '["CANCELLED"]', companyUserGroupId: MINE])
 
         // DAR-BE-334: query schedules (moqui-jexl) post to chat through a chat delivery; an email-only one is no route
         insert("jexl.script.UserScript", [userScriptId: "NR_SCRIPT_MINE", companyUserGroupId: MINE, scriptName: "Morning note",
@@ -166,9 +168,10 @@ class NotificationRouteServicesTests {
         assertEquals(["Posts to Bravo."], streaks.messages)
         assertEquals([SPACE_B, "America/Los_Angeles"], ["streaksChatSpaceId", "timeZone"].collect { row("darpan.auth.TenantSetting", "companyUserGroupId", MINE)[it] })
 
-        // Automation: chatSpaceId only. Its sources are the ones sync#Automation would rewrite.
+        // Automation: chatSpaceId only. Its sources and filters are the ones sync#Automation would rewrite.
         Map automationBefore = withoutSpace(row("darpan.reconciliation.ReconciliationAutomation", "automationId", AUT_DAILY))
         List sourcesBefore = children("darpan.reconciliation.ReconciliationAutomationSource")
+        List filtersBefore = children("darpan.reconciliation.ReconciliationAutomationSourceFilter")
         Map moved = facade("set#NotificationRoute", [sourceType: "AUTOMATION", sourceId: AUT_DAILY, chatSpaceId: SPACE_B])
         assertTrue(moved.ok as boolean, moved.errors?.toString())
         assertEquals(SPACE_B, (moved.route as Map).chatSpaceId)
@@ -176,7 +179,9 @@ class NotificationRouteServicesTests {
         assertEquals(SPACE_B, automationAfter.chatSpaceId)
         assertEquals(automationBefore, withoutSpace(automationAfter))
         assertEquals(sourcesBefore, children("darpan.reconciliation.ReconciliationAutomationSource"))
+        assertEquals(filtersBefore, children("darpan.reconciliation.ReconciliationAutomationSourceFilter"))
         assertEquals(2, sourcesBefore.size(), "the sources fixture is in place")
+        assertEquals(1, filtersBefore.size(), "the filter fixture is in place")
 
         // Query schedule: its chat delivery's space only; the schedule and its email delivery stay. Needs a tenant admin.
         Map deploymentBefore = withoutSpace(row("jexl.script.UserScriptDeployment", "scriptDeploymentId", DEP_MINE))

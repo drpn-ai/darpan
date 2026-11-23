@@ -137,7 +137,9 @@ class AuditSetupLeverSmokeTests {
                 check.delete()
             }
             ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("savedRunId", runIds[2]).list().each { automation ->
-                ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", automation.automationId).deleteAll()
+                ["darpan.reconciliation.ReconciliationAutomationSourceFilter", "darpan.reconciliation.ReconciliationAutomationSource"].each { String name ->
+                    ec.entity.find(name).condition("automationId", automation.automationId).deleteAll()
+                }
                 automation.delete()
             }
             ec.entity.find("darpan.audit.Audit").condition("auditId", AUDIT_ID).one()

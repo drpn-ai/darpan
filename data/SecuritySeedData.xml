@@ -298,6 +298,10 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.ReconciliationRun"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_SRC_FILTER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationAutomationSourceFilter"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_STEP"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.ReconciliationRunStep"

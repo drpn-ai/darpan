@@ -47,10 +47,9 @@ These are `allow-remote="false"` and are not reachable over `/rpc/json`.
 
 `save#Automation` persists one tenant-owned `ReconciliationAutomation` row and exactly two `ReconciliationAutomationSource` rows, one for `FILE_1` and one for `FILE_2`. Each source must match the selected saved-run file side.
 
-An automation snapshots its saved run's source wiring. Editing the saved run's sources does not
-change the automation until `sync#Automation` runs. Filters are not snapshotted: every run of the
-automation reads its compare scope's `RuleSetCompareSourceFilter` rows, for the automation's own
-tenant, so a filter edited on the run applies to the next scheduled run with no sync.
+An automation snapshots its saved run's source wiring, including per-side exclusion filters
+(`ReconciliationAutomationSourceFilter`, mirroring `RuleSetCompareSourceFilter`). Editing the saved
+run does not change the automation until `sync#Automation` runs.
 
 An automation may also set `chatSpaceId`, pointing at one `darpan.reconciliation.TenantChatSpace`
 row from the tenant's chat-space registry (Google Chat or Slack) (`facade.SettingsFacadeServices.list#TenantChatSpaces`).

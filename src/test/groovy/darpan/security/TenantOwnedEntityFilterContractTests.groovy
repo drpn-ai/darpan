@@ -29,13 +29,14 @@ class TenantOwnedEntityFilterContractTests {
     // (Moqui builds the filter with excludeNulls, so a null value would remove the condition).
     private static final String FILTER_MAP = "[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"
 
-    /** DAR-BE-076: the tenant-owned entities that had a companyUserGroupId but no filter (thirteen then; DAR-BE-318 3b-2c retired the automation filter table). */
+    /** DAR-BE-076: the thirteen tenant-owned entities that had a companyUserGroupId but no filter. */
     static final Map<String, String> DAR_BE_076_FILTERS = [
             "darpan.database.DatabaseSourceConfig"                     : "DARPAN_SCOPE_DB_SOURCE_CONFIG",
             "darpan.database.DatabaseSourceQuery"                      : "DARPAN_SCOPE_DB_SOURCE_QUERY",
             "darpan.reconciliation.NsSuiteQlSourceQuery"               : "DARPAN_SCOPE_NS_SUITEQL_QUERY",
             "darpan.reconciliation.Reconciliation"                     : "DARPAN_SCOPE_RECONCILIATION",
             "darpan.reconciliation.ReconciliationRun"                  : "DARPAN_SCOPE_RECON_RUN",
+            "darpan.reconciliation.ReconciliationAutomationSourceFilter": "DARPAN_SCOPE_AUTOMATION_SRC_FILTER",
             "darpan.reconciliation.ReconciliationRunStep"              : "DARPAN_SCOPE_RUN_STEP",
             "darpan.reconciliation.SlackOAuthState"                    : "DARPAN_SCOPE_SLACK_OAUTH_STATE",
             "darpan.reconciliation.SlackWorkspaceInstall"              : "DARPAN_SCOPE_SLACK_INSTALL",

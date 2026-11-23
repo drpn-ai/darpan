@@ -733,6 +733,7 @@ Summary of entities not covered in detail above. Read the entity XML for fields.
 | `darpan.reconciliation.ReconciliationRunStep` | One stage of one run (RESOLVE, EXTRACT_FILE1/2, COMPARE, VERIFY_*, CONCLUDE, WRITE_OUTPUT, NOTIFY): status, timings, heartbeat, record count, sanitized error, non-secret metrics. |
 | `darpan.rule.RuleSetCompareSourceKeyField` | One ordered field of a composite compare key for a compare source. |
 | `darpan.rule.RuleSetCompareSourceFilter` | One exclusion (or `INCLUDE_IN`) filter on a compare source's records. |
+| `darpan.reconciliation.ReconciliationAutomationSourceFilter` | The same filter, snapshotted on an automation source. |
 | `darpan.rule.RuleSetConclusionRule` / `RuleSetConclusionCondition` | Named conclusions a compare scope can reach about a finding, tried in order, nested up to three levels; and their conditions. |
 | `darpan.reconciliation.SourceSystemConnector` | Registry row that makes a source system's extraction, lookups and health checks data-driven. |
 | `darpan.reconciliation.SourceSystemConnectorField` | One selectable record field offered by a source endpoint's rules board. |

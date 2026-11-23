@@ -3,6 +3,7 @@ package darpan.agent.pipeline
 import darpan.audit.AuditSettingsSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.AutomationFacadeSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.conclusion.RunConclusionAuthoringSupport
 import groovy.json.JsonOutput
@@ -14,7 +15,7 @@ import static darpan.common.ValueSupport.normalize
 
 /**
  * DAR-BE-159. The five levers an agent proposal may move, each through the save a person already uses:
- * EXCLUSION_FILTER (save#RuleSetRun; its automations read the run's filters, DAR-BE-318 3b-2c), STATEMENT_NARROWING and EXPECTED_CAUSES (save#AuditCheck),
+ * EXCLUSION_FILTER (save#RuleSetRun, then sync#Automation), STATEMENT_NARROWING and EXPECTED_CAUSES (save#AuditCheck),
  * FIX_TEXT and CONCLUSION_ROWS (save#RunConclusions). EXPECTED_CAUSES is the check's run's expected causes (DAR-BE-196: a
  * cause no statement counts is expected on its run, so it reaches every check on that run).
  *
@@ -558,6 +559,11 @@ class AuditChangeLevers {
                     [fieldExpression: f.fieldExpression, operator: f.operator, values: f.filterValues]
                 }
                 ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun").parameters(params).call()
+                if (ec.message.hasError()) return
+                automationsOf(ec, run.savedRunId as String).each { String automationId ->
+                    if (ec.message.hasError()) return
+                    ec.service.sync().name("facade.ReconciliationFacadeServices.sync#Automation").parameters([automationId: automationId]).call()
+                }
                 break
             case "STATEMENT_NARROWING":
             case "EXPECTED_CAUSES":
@@ -678,6 +684,39 @@ class AuditChangeLevers {
             }
         }
         return out
+    }
+
+    /**
+     * Automations of the run (EXCLUSION_FILTER) that sync#Automation would change in any way TODAY, before the proposal:
+     * compare scope, input mode, either side's source or filters, a side added or removed. Applying syncs every automation
+     * of the run, which would silently overwrite such drift, so apply refuses instead. Uses the same derive and the same
+     * comparison sync#Automation reports (AutomationFacadeSupport.buildAutomationSyncStatus). Answers {automationId: fields}.
+     */
+    static Map<String, List<String>> automationDrift(def ec, Map state) {
+        Map<String, List<String>> drifted = new LinkedHashMap<String, List<String>>()
+        automationRowsOf(ec, ((Map) state.run).savedRunId as String).each { automation ->
+            String automationId = automation.automationId as String
+            List stored = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationAutomationSource",
+                    "agent apply: sources of an automation already read as the active tenant's").condition("automationId", automationId)
+                    .orderBy("fileSide").useCache(false).list() ?: []
+            Map derived = AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automation)
+            List<String> changed = (List<String>) AutomationFacadeSupport.buildAutomationSyncStatus(automation,
+                    AutomationFacadeSupport.attachCapturedFilters(ec, stored, automationId), derived).changedFields
+            if (changed) drifted.put(automationId, changed)
+        }
+        return drifted
+    }
+
+    private static List<String> automationsOf(def ec, String savedRunId) {
+        return automationRowsOf(ec, savedRunId)*.automationId.collect { it as String }
+    }
+
+    private static List automationRowsOf(def ec, String savedRunId) {
+        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        if (!tenantId || !savedRunId) return []
+        return ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("companyUserGroupId", tenantId)
+                .condition("savedRunId", savedRunId).orderBy("automationId").useCache(false).list()
+                .findAll { (normalize(it.savedRunType) ?: "ruleset").equalsIgnoreCase("ruleset") }
     }
 
     // ---------------------------------------------------------------- helpers

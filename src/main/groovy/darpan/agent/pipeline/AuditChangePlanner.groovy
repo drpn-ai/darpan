@@ -201,6 +201,14 @@ class AuditChangePlanner {
             row.update()
             return [status: "STALE", statusMessage: STALE_MESSAGE]
         }
+        if (kind == "EXCLUSION_FILTER") {
+            Map<String, List<String>> drifted = AuditChangeLevers.automationDrift(ec, current)
+            if (drifted) {
+                String fields = drifted.collect { String id, List<String> f -> "${id}: ${f.join(', ')}".toString() }.join("; ")
+                ec.message.addError("AUTOMATION_DRIFT: ${drifted.keySet().join(', ')}. Syncing would also change ${fields}; sync or edit the automation first.".toString())
+                return null
+            }
+        }
         String approver = TenantAccessSupport.currentUserId(ec)
         String reason = "Agent proposal ${row.proposalId} for ${row.proposedForUserId}, approved by ${approver}".toString()
         Map before = TenantConfigVersionSupport.snapshot(ec, tenantId, reason, CHANGE_SOURCE, approver)

@@ -36,6 +36,12 @@ class RunSideOptionsSmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MappingSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
+        // DAR-BE-318 (3b-2b Ruling 3b2b-29): a Spark-kept side needs its connector's Keep lines loaded. They come from the
+        // system repo's connector seed (darpan-hotwax: none of its own, "[]"), which a core test does not load.
+        ["OMS_GQL", "OMS_RETURNS_GQL"].each { String system ->
+            ec.entity.find("darpan.reconciliation.SourceSystemConnector").condition("systemEnumId", system).disableAuthz().one()
+                    ?.set("keepLinesJson", "[]")?.update()
+        }
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
     }
 

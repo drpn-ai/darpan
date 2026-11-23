@@ -2861,8 +2861,7 @@
                         optionKey: ((source.optionKey)?.toString()?.trim()),
                         sourceConfigId: ((source.sourceConfigId)?.toString()?.trim()),
                         shopifyAuthConfigId: ((source.shopifyAuthConfigId)?.toString()?.trim()),
-                        omsRestSourceConfigId: ((source.omsRestSourceConfigId)?.toString()?.trim()),
-                        excludeFilters: source.excludeFilters
+                        omsRestSourceConfigId: ((source.omsRestSourceConfigId)?.toString()?.trim())
                 ].findAll { it.value != null }"/>
                 <set field="ignoreSourceEntryAdd" from="sourceEntries.add(sourceEntry)"/>
             </iterate>

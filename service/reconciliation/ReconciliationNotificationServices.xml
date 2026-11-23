@@ -283,9 +283,9 @@
                     <message>Dropped the retired automation filter table and its ${rowCount} rows.</message>
                 </else>
             </if>
-            <set field="ok" from="darpan.facade.common.FacadeSupport.getErrors(ec).size() == preCallErrorCount"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec).drop(preCallErrorCount)"/>
+            <set field="ok" from="errors.isEmpty()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 

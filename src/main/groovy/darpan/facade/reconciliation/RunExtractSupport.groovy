@@ -44,7 +44,7 @@ import static darpan.common.ValueSupport.normalizeInt
  *  exclusion filters      the SAME store since plan 3b-2c: the compare scope's rows (KeepPlanSupport.tenantRuleRows),
  *                         read for the active tenant here and for the automation's own tenant there (sideKeepOf).
  *                         Spark Keep sets them aside at ingest; the read gets them from a data-defined source or an
- *                         extract still taking the filter parameter (3b2b-23)
+ *                         extract still taking the filter parameter (3b2b-23); an evaluate run keeps in Spark too
  *  state window mode      not supported                     isStateWindowMode + supportsStateExtract
  *                                                            sends NO date parameters at all
  *  status parameter       absent                            applyStatusParameter

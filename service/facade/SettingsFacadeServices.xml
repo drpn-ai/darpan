@@ -615,7 +615,7 @@
                     </else>
                 </if>
             </if>
-            <!-- Never sync#Automation: it rewrites the automation's sources and filters from its run. -->
+            <!-- Never sync#Automation: it rewrites the automation's sources from its run. -->
             <if condition="!ec.message.hasError() &amp;&amp; sourceTypeValue == 'AUTOMATION'">
                 <entity-find entity-name="darpan.reconciliation.ReconciliationAutomation" list="automationRows" cache="false">
                     <econdition field-name="automationId" from="sourceIdValue"/>

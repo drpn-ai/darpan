@@ -25,6 +25,9 @@
         <field name="lastPulseStamp" type="date-time"/>
         <field name="lastPulseStatusEnumId" type="id"/>
         <field name="lastPostedPastCount" type="number-integer"/>
+        <field name="presentSignature" type="text-medium">
+            <description>What the stored SyncPulsePresentKey rows were confirmed under; a different signature means they are dropped.</description>
+        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="SYNCPAIR_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
@@ -99,5 +102,20 @@
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
         <index name="SPORDER_PAIR_KEY"><index-field name="syncPairId"/><index-field name="recordKey"/></index>
+    </entity>
+
+    <entity entity-name="SyncPulsePresentKey" package="darpan.pulse" use="transactional">
+        <description>A record key the target system has confirmed it holds, so the next pulse need not ask again; survives a restart.</description>
+        <field name="syncPairId" type="id" is-pk="true"/>
+        <field name="recordKey" type="text-medium" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="sourceCreatedStamp" type="date-time" not-null="true"/>
+        <relationship type="one" related="darpan.pulse.SyncPair" fk-name="SPPRESENT_PAIR">
+            <key-map field-name="syncPairId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="SPPRESENT_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="SPPRESENT_PAIR_CREATED"><index-field name="syncPairId"/><index-field name="sourceCreatedStamp"/></index>
     </entity>
 </entities>

@@ -137,6 +137,7 @@ class TenantOwnedEntityFilterContractTests {
             "DARPAN_SCOPE_PEAK_PERIOD_SYNC": "darpan.pulse.PeakPeriodSync",
             "DARPAN_SCOPE_SYNC_PULSE_SAMPLE": "darpan.pulse.SyncPulseSample",
             "DARPAN_SCOPE_SYNC_PULSE_ORDER": "darpan.pulse.SyncPulseOrder",
+            "DARPAN_SCOPE_SYNC_PULSE_PRESENT_KEY": "darpan.pulse.SyncPulsePresentKey",
     ].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */

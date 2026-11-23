@@ -10,6 +10,7 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.moqui.context.ArtifactExecutionInfo
+import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -93,32 +94,99 @@ class SyncPulseSupport {
     /**
      * Per pair, the keys the target has already confirmed present, each with its source created time (DAR-BE-328 task 13:
      * a pulse asks the target only about keys not in here). In memory only: empty after a restart, so the first pulse asks
-     * about everything and correctness never depends on it. signature is what the target answers by (the check, its upstream
+     * about everything and correctness never depends on it. Write-through to SyncPulsePresentKey (task 14): a cold cache
+     * (after a restart) loads the pair's rows still inside the window, unless SyncPair.presentSignature differs, then the
+     * rows are deleted and it starts empty. signature is what the target answers by (the check, its upstream
      * side, its compare scope and that scope's last update); a change drops the set. Allowance and cadence are not in it: presence in the target does not
      * depend on them. A key deleted in the target after it was seen keeps counting as present until it prunes out of the
      * window (about allowance + 2 x cadence + 7 minutes); the daily check covers deletions.
      */
     private static class PresentSet {
         final String signature
+        final String tenantId
         final Map<String, Instant> keys = new ConcurrentHashMap<String, Instant>()
-        PresentSet(String signature) { this.signature = signature }
+        PresentSet(String signature, String tenantId) { this.signature = signature; this.tenantId = tenantId }
     }
 
     private static final ConcurrentHashMap<String, PresentSet> PRESENT_BY_PAIR = new ConcurrentHashMap<String, PresentSet>()
 
     static void resetForTests() { PRESENT_BY_PAIR.clear(); presentCap = DEFAULT_PRESENT_CAP; resetHooks() }
 
+    /** Test seam: forgets the in-memory sets only (a restart); the table rows stay. */
+    static void forgetPresentMemoryForTests() { PRESENT_BY_PAIR.clear() }
+
     /** The pair's remembered keys (a copy); empty when none. For tests and the engine. */
     static Set<String> presentKeysOf(String syncPairId) { return new LinkedHashSet<String>(PRESENT_BY_PAIR.get(syncPairId)?.keys?.keySet() ?: []) }
 
-    /** Forgets a pair's present keys (settings changed, pair inactive or deleted). */
-    static void dropPresent(String syncPairId) { if (syncPairId) PRESENT_BY_PAIR.remove(syncPairId) }
+    /** Forgets a pair's present keys in memory only (the pair's rows are the caller's to delete). */
+    static void dropPresentMemory(String syncPairId) { if (syncPairId) PRESENT_BY_PAIR.remove(syncPairId) }
 
-    /** The pair's set for these settings: a set made under other settings is dropped and a fresh one started. */
-    private static PresentSet presentSetFor(String syncPairId, String signature) {
+    /** Forgets a pair's present keys: memory and rows (pair inactive, no longer pulseable or deleted). */
+    static void dropPresent(def ec, String tenantId, String syncPairId) {
+        if (!syncPairId) return
+        PRESENT_BY_PAIR.remove(syncPairId)
+        writePresent(ec, "drop") { deletePresentRows(ec, tenantId, syncPairId, null) }
+    }
+
+    private static def presentRows(def ec, String tenantId, String syncPairId) {
+        return TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPulsePresentKey", WHY)
+                .condition("companyUserGroupId", tenantId).condition("syncPairId", syncPairId).useCache(false)
+    }
+
+    /** Deletes the pair's rows, or only those whose source was created before olderThan. */
+    private static void deletePresentRows(def ec, String tenantId, String syncPairId, Instant olderThan) {
+        def find = presentRows(ec, tenantId, syncPairId)
+        if (olderThan != null) find.condition("sourceCreatedStamp", EntityCondition.LESS_THAN, Timestamp.from(olderThan))
+        find.deleteAll()
+    }
+
+    /** Runs a present-key write in its own transaction. It never throws: one WARN, and the in-memory set stays. */
+    private static boolean writePresent(def ec, String what, Closure write) {
+        try {
+            ec.transaction.runRequireNew(60, "Sync pulse present keys (${what}) could not be written".toString(), write)
+            return true
+        } catch (Throwable t) {
+            logger.warn("Sync pulse present keys ({}) not written: {}", what, t.message ?: t.toString())
+            clearErrors(ec)
+            return false
+        }
+    }
+
+    /**
+     * The pair's set for these settings. Warm cache under the same signature: as is. A signature change (warm or cold)
+     * deletes the pair's rows and stores the new signature; cold under the same signature loads the rows inside the window.
+     */
+    private static PresentSet presentSetFor(def ec, Map pair, String signature, Instant windowFrom) {
+        String syncPairId = normalize(pair.syncPairId)
+        String tenantId = normalize(pair.companyUserGroupId)
         PresentSet set = PRESENT_BY_PAIR.get(syncPairId)
         if (set != null && set.signature == signature) return set
-        PresentSet fresh = new PresentSet(signature)
+        PresentSet fresh = new PresentSet(signature, tenantId)
+        try {
+            String stored = null
+            if (set == null) {
+                def row = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", WHY)
+                        .condition("syncPairId", syncPairId).condition("companyUserGroupId", tenantId).useCache(false).list()?.find()
+                stored = normalize(row?.get("presentSignature"))
+            }
+            if (set == null && stored == signature) {
+                presentRows(ec, tenantId, syncPairId).condition("sourceCreatedStamp", EntityCondition.GREATER_THAN_EQUAL_TO, Timestamp.from(windowFrom))
+                        .list().each { row ->
+                    if (fresh.keys.size() < presentCap) fresh.keys.put(row.get("recordKey") as String, (row.get("sourceCreatedStamp") as Timestamp).toInstant())
+                }
+            } else {
+                writePresent(ec, "reset") {
+                    deletePresentRows(ec, tenantId, syncPairId, null)
+                    def pairRow = TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPair", WHY)
+                            .condition("syncPairId", syncPairId).condition("companyUserGroupId", tenantId).useCache(false).list()?.find()
+                    if (pairRow != null) { pairRow.setAll([presentSignature: signature]); pairRow.update() }
+                }
+            }
+        } catch (Throwable t) {
+            logger.warn("Sync pulse present keys of {} not loaded, starting empty: {}", syncPairId, t.message ?: t.toString())
+            clearErrors(ec)
+            fresh.keys.clear()
+        }
         PRESENT_BY_PAIR.put(syncPairId, fresh)
         return fresh
     }
@@ -138,12 +206,28 @@ class SyncPulseSupport {
     }
 
     /** Adds the keys the target returned, with their created times, up to PRESENT_CAP; drops keys older than windowFrom. */
-    private static void rememberPresent(PresentSet set, Collection<String> returned, Map<String, Instant> createdByKey, Instant windowFrom) {
+    private static Map<String, Instant> rememberPresent(PresentSet set, Collection<String> returned, Map<String, Instant> createdByKey, Instant windowFrom) {
+        Map<String, Instant> added = [:]
         returned.each { String k ->
             Instant at = createdByKey.get(k)
             if (at == null || at.isBefore(windowFrom)) return
             if (set.keys.size() >= presentCap && !set.keys.containsKey(k)) return
             set.keys.put(k, at)
+            added.put(k, at)
+        }
+        return added
+    }
+
+    /** Stores the keys just remembered; never fails the pulse. */
+    private static void storePresent(def ec, Map pair, Map<String, Instant> added) {
+        if (!added) return
+        String tenantId = normalize(pair.companyUserGroupId)
+        String syncPairId = normalize(pair.syncPairId)
+        writePresent(ec, "add") {
+            added.each { String k, Instant at ->
+                ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: syncPairId, recordKey: k,
+                        companyUserGroupId: tenantId, sourceCreatedStamp: Timestamp.from(at)]).createOrUpdate()
+            }
         }
     }
 
@@ -236,7 +320,11 @@ class SyncPulseSupport {
                     .useCache(false).list() ?: []).findAll { (normalize(it.get("isActive")) ?: "Y") == "Y" }
             out.pairCount = pairs.size()
             Set<String> activeIds = pairs.collect { normalize(it.get("syncPairId")) } as Set<String>
-            PRESENT_BY_PAIR.keySet().retainAll(activeIds)   // an inactive or deleted pair drops its set
+            // an inactive or deleted pair drops its set and its rows
+            new ArrayList<String>(PRESENT_BY_PAIR.keySet()).findAll { !activeIds.contains(it) }.each { String id ->
+                PresentSet gone = PRESENT_BY_PAIR.remove(id)
+                if (gone != null) writePresent(ec, "drop") { deletePresentRows(ec, gone.tenantId, id, null) }
+            }
             if (!pairs) return out
             admission.drain()
             Map<String, Map> tenantDays = [:]
@@ -353,7 +441,7 @@ class SyncPulseSupport {
         List<Map> open = null
         try {
             Map automation = pulseableAutomation(ec, pair)
-            if (automation == null) { dropPresent(syncPairId); return empty }
+            if (automation == null) { dropPresent(ec, tenantId, syncPairId); return empty }
             Map day = tenantDay(ec, tenantId, now)
             Map effective = effectiveValues(pair, day.windows as List<PeakWindow>, periodRows(ec, pair), day.date as LocalDate)
             allowance = effective.allowanceMinutes as Integer
@@ -374,8 +462,9 @@ class SyncPulseSupport {
                 if (!createdByKey.containsKey(k) && o.sourceCreatedStamp != null) createdByKey.put(k, (o.sourceCreatedStamp as Timestamp).toInstant())
             }
             // the target is asked only about keys it has not already confirmed; a confirmed key still counts as present
-            PresentSet known = presentSetFor(syncPairId, presentSignature(ec, pair, automation))
+            PresentSet known = presentSetFor(ec, pair, presentSignature(ec, pair, automation), window.from as Instant)
             known.keys.entrySet().removeIf { Map.Entry<String, Instant> e -> e.value.isBefore(window.from as Instant) }
+            writePresent(ec, "prune") { deletePresentRows(ec, tenantId, syncPairId, window.from as Instant) }
             Set<String> confirmed = keys.findAll { known.keys.containsKey(it) } as Set<String>
             Set<String> toAsk = keys.findAll { !confirmed.contains(it) } as Set<String>
             Map target = presentInTarget(ec, pair, automation, toAsk)
@@ -389,7 +478,9 @@ class SyncPulseSupport {
             Set<String> upstreamKeys = new LinkedHashSet<String>()
             records.each { Map r -> String k = normalize(r.key); if (k) upstreamKeys << k }
             Map settled = settle(ec, pair, now, allowance, open, sorted, present, unasked, window.from as Instant, upstreamKeys)
-            if (settled.status == OK) rememberPresent(known, returned.findAll { toAsk.contains(it) }, createdByKey, window.from as Instant)
+            if (settled.status == OK) {
+                storePresent(ec, pair, rememberPresent(known, returned.findAll { toAsk.contains(it) }, createdByKey, window.from as Instant))
+            }
             return settled
         } catch (Throwable t) {
             String reason = normalize(t.message) ?: t.class.simpleName

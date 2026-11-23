@@ -26,9 +26,11 @@ class SyncPulseCascade {
         String tenant = normalize(tenantId)
         String pairId = normalize(syncPairId)
         if (!tenant || !pairId) return 0
-        ["darpan.pulse.PeakPeriodSync", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder"].each { String child ->
+        ["darpan.pulse.PeakPeriodSync", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder",
+                "darpan.pulse.SyncPulsePresentKey"].each { String child ->
             rows(ec, child, tenant).condition("syncPairId", pairId).deleteAll()
         }
+        SyncPulseSupport.dropPresentMemory(pairId)
         return (int) rows(ec, "darpan.pulse.SyncPair", tenant).condition("syncPairId", pairId).deleteAll()
     }
 

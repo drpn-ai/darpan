@@ -88,8 +88,8 @@ class SyncPulseEngineSmokeTests {
 
     @BeforeEach
     void reset() {
-        ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod",
-         "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
+        ["darpan.pulse.SyncPulsePresentKey", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.PeakPeriodSync",
+         "darpan.peak.PeakPeriod", "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
         upstream.clear(); arrived.clear(); upstreamCalls.clear(); targetCalls.clear(); pulseThreads.clear()
         upstreamFailure = null
         SyncPulseSupport.resetForTests()
@@ -412,13 +412,127 @@ class SyncPulseEngineSmokeTests {
         Instant later = T0.plus(Duration.ofMinutes(60))
         Map cached = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
 
-        SyncPulseSupport.dropPresent(SP)   // forget the cache only; resetForTests() also clears the readers (DAR-OPS-026)
+        SyncPulseSupport.dropPresent(ec, A, SP)   // forget the cache only; resetForTests() also clears the readers (DAR-OPS-026)
         Map fresh = SyncPulseSupport.runPulse(ec, pairMap(SP), later)
 
         assertTrue(targetCalls[1].size() < targetCalls[2].size(), "the cached pulse asked about fewer keys")
         assertEquals([fresh.status, fresh.waitingCount, fresh.pastCount],
                 [cached.status, cached.waitingCount, cached.pastCount])
         assertEquals(fresh.sample.pastAllowanceCount, cached.sample.pastAllowanceCount)
+    }
+
+    // ------------------------------------------------------------------------------------------ present keys survive a restart (task 14)
+
+    private int presentRows(String pairId = SP, String tenant = A) {
+        return (int) ec.entity.find("darpan.pulse.SyncPulsePresentKey").condition("syncPairId", pairId)
+                .condition("companyUserGroupId", tenant).disableAuthz().useCache(false).count()
+    }
+
+    @Test
+    void afterARestartTheNextPulseAsksOnlyAboutNewKeys() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(10))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, presentRows())
+
+        SyncPulseSupport.forgetPresentMemoryForTests()
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+        upstream["#A3"] = T0.plus(Duration.ofMinutes(20))
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofHours(1)))
+
+        assertEquals(["#A2", "#A3"] as Set, targetCalls.last() as Set, "#A1 came back from the table: not asked")
+        assertEquals(["#A1"] as Set, SyncPulseSupport.presentKeysOf(SP))
+    }
+
+    @Test
+    void aColdStartUnderAChangedSignatureAsksAboutEveryKey() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(80))
+        arrived << "#A1" << "#A2"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(2, presentRows())
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll([syncPairId: SP, presentSignature: "SOMETHING|ELSE"]).update()
+
+        SyncPulseSupport.forgetPresentMemoryForTests()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(10)))
+        assertEquals(["#A1", "#A2"] as Set, targetCalls.last() as Set)
+        assertEquals(2, presentRows(), "re-confirmed under the new signature")
+    }
+
+    @Test
+    void aWarmSignatureChangeDeletesTheRows() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, presentRows())
+        upstream.clear()
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll(pairMap(SP) + [upstreamSide: "FILE_2"]).update()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(30)))
+        assertEquals(0, presentRows())
+    }
+
+    @Test
+    void pruningDeletesRowsOlderThanTheWindow() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, presentRows())
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofHours(4)))
+        assertEquals(0, presentRows())
+    }
+
+    @Test
+    void deletingThePairOrTheAutomationRemovesItsRows() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, presentRows())
+        assertEquals(1, SyncPulseCascade.deletePair(ec, A, SP))
+        assertEquals(0, presentRows())
+        assertEquals([] as Set, SyncPulseSupport.presentKeysOf(SP))
+
+        pair(SP, AUTO, 60, 60)
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, presentRows())
+        assertEquals(1, SyncPulseCascade.deleteForAutomation(ec, A, AUTO))
+        assertEquals(0, presentRows())
+    }
+
+    @Test
+    void theScanDeletesAnInactivePairsRows() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(50))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals(1, presentRows())
+        ec.entity.makeValue("darpan.pulse.SyncPair").setAll(pairMap(SP) + [isActive: "N"]).update()
+        SyncPulseSupport.runDuePulses(ec, Timestamp.from(T0.plus(Duration.ofHours(1))))
+        assertEquals(0, presentRows())
+    }
+
+    @Test
+    void aKeyWriteFailureDoesNotFailThePulse() {
+        String tooLong = "#" + ("X" * 400)   // text-medium holds 255: the insert fails
+        upstream[tooLong] = T0.minus(Duration.ofMinutes(10))
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(20))
+        arrived << tooLong << "#A1"
+        Map out = SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        assertEquals("SPS_OK", out.status)
+        assertEquals(2, SyncPulseSupport.presentKeysOf(SP).size(), "the in-memory set keeps the keys")
+        assertEquals(0, presentRows())
+    }
+
+    @Test
+    void anotherTenantsRowsAreNeverLoaded() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        arrived << "#A1"
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0)
+        // a row for the same pair id and key under tenant B, and one only B holds
+        ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: SP, recordKey: "#FOREIGN", companyUserGroupId: B,
+                sourceCreatedStamp: Timestamp.from(T0.minus(Duration.ofMinutes(5)))]).create()
+        SyncPulseSupport.forgetPresentMemoryForTests()
+        SyncPulseSupport.runPulse(ec, pairMap(SP), T0.plus(Duration.ofMinutes(10)))
+        assertEquals(["#A1"] as Set, SyncPulseSupport.presentKeysOf(SP))
     }
 
     // ------------------------------------------------------------------------------------------------ the job

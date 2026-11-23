@@ -48,7 +48,7 @@ class SyncPulseSharedHelpersSmokeTests {
 
     @BeforeEach
     void reset() {
-        ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod", "darpan.pulse.SyncPair"]
+        ["darpan.pulse.SyncPulsePresentKey", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod", "darpan.pulse.SyncPair"]
                 .each { ec.entity.find(it).disableAuthz().deleteAll() }
         [P1, P2].each { String id ->
             ec.entity.makeValue("darpan.pulse.SyncPair").setAll([syncPairId: id, companyUserGroupId: A, automationId: AUTO,

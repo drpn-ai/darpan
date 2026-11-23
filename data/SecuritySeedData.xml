@@ -102,6 +102,7 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.pulse.PeakPeriodSync" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.pulse.SyncPulseSample" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.pulse.SyncPulseOrder" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.pulse.SyncPulsePresentKey" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <!-- DAR-BE-318 plan 3a: the kept copy of datasets (entity/DatasetEntities.xml). -->
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.dataset.Dataset" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.dataset.DatasetRead" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
@@ -495,6 +496,7 @@
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_PEAK_PERIOD_SYNC" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.pulse.PeakPeriodSync" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SYNC_PULSE_SAMPLE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.pulse.SyncPulseSample" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SYNC_PULSE_ORDER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.pulse.SyncPulseOrder" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SYNC_PULSE_PRESENT_KEY" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.pulse.SyncPulsePresentKey" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <!-- DAR-BE-318 plan 3a: the kept copy of datasets. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DATASET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.dataset.Dataset" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DATASET_READ" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.dataset.DatasetRead" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>

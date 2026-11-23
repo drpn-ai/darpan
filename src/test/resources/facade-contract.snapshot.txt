@@ -4407,6 +4407,7 @@ SERVICE get SyncPair
     syncPair.normalPulseEveryMinutes : String
     syncPair.pastAllowanceCount : String
     syncPair.periodName : String
+    syncPair.periodThruDate : String
     syncPair.pulseEveryMinutes : String
     syncPair.syncPairId : String
     syncPair.upstreamSide : String

@@ -39274,6 +39274,9 @@
                             "periodName": {
                                 "type": "string"
                             },
+                            "periodThruDate": {
+                                "type": "string"
+                            },
                             "chatSpaceId": {
                                 "type": "string"
                             },

@@ -232,8 +232,7 @@ class SyncPulseSupport {
                     def value = ec.entity.makeValue("darpan.pulse.SyncPulsePresentKey").setAll([syncPairId: syncPairId, recordKey: e.key,
                             companyUserGroupId: tenantId, sourceCreatedStamp: Timestamp.from(e.value)])
                     // the key is known absent; a duplicate (another pulse got there first) is skipped
-                    if (ec.entity.find("darpan.pulse.SyncPulsePresentKey").condition("syncPairId", syncPairId)
-                            .condition("recordKey", e.key).disableAuthz().useCache(false).count() == 0) value.create()
+                    if (presentRows(ec, tenantId, syncPairId).condition("recordKey", e.key).count() == 0) value.create()
                 }
             }
         }

@@ -430,5 +430,8 @@ class CliMethodAllowlist {
             "facade.TenantConfigFacadeServices.preview#TenantConfigRestore",
             "facade.TenantConfigFacadeServices.restore#TenantConfigVersion",
             "facade.TenantConfigFacadeServices.snapshot#TenantConfig",
+
+            // DAR-UI-138: the Queries page's pins, a browser preference like the dashboard pins; the CLI has no use for it.
+            "facade.TenantScriptFacadeServices.save#TenantQueryPins",
     ] as LinkedHashSet<String>).asImmutable()
 }

@@ -9,7 +9,8 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="list" noun="TenantQueries" allow-remote="true" authenticate="true" authz-action="view">
-        <description>The active tenant's queries by name, with the fn: library and the QUERY limits for the editor.</description>
+        <description>The active tenant's queries by name, with the fn: library and the QUERY limits for the editor, and the
+            signed-in user's pinned queries for this tenant (pin order; a deleted query drops out).</description>
         <in-parameters>
 
         </in-parameters>
@@ -20,6 +21,7 @@
             <parameter name="queries" type="List"/>
             <parameter name="library" type="List"/>
             <parameter name="limits" type="Map"/>
+            <parameter name="pinnedQueryIds" type="List"><parameter name="pinnedQueryId"/></parameter>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
@@ -29,6 +31,38 @@
                 library = org.moqui.jexl.ScriptSupervisor.libraryCatalog()
                 limits = org.moqui.jexl.ScriptProfiles.get('QUERY').toMap()
             ]]></script></if>
+            <if condition="!ec.message.hasError()">
+                <set field="queryIds" from="queries*.tenantQueryId as Set"/>
+                <set field="pinnedQueryIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.parsePinnedReconciliationMappingIds(ec.user.getPreference('darpan.queries.pinnedIds.' + tenantId)).findAll { queryIds.contains(it) }"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantQueryPins" allow-remote="true" authenticate="true" authz-action="view">
+        <description>DAR-UI-138. Pin the signed-in user's queries for the active tenant (a personal preference, so view access
+            is enough). Keeps the order given, once each, and only the active tenant's queries: an unknown id or another
+            tenant's is dropped, never an error. Stored per user and per tenant, so pins in one tenant leave the others alone.</description>
+        <in-parameters>
+            <parameter name="pinnedQueryIds" type="List"><parameter name="pinnedQueryId"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="pinnedQueryIds" type="List"><parameter name="pinnedQueryId"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="queryIds" from="darpan.query.TenantQuerySupport.listQueries(ec, tenantId)*.tenantQueryId as Set"/>
+                <set field="pinnedQueryIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.normalizePinnedReconciliationMappingIds(pinnedQueryIds).findAll { queryIds.contains(it) }"/>
+                <script>ec.user.setPreference('darpan.queries.pinnedIds.' + tenantId, groovy.json.JsonOutput.toJson(pinnedQueryIds))</script>
+                <else><set field="pinnedQueryIds" from="null"/></else>
+            </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

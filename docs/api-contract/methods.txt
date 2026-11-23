@@ -315,4 +315,5 @@ facade.TenantScriptFacadeServices.list#TenantQuerySchedules
 facade.TenantScriptFacadeServices.run#TenantQuery
 facade.TenantScriptFacadeServices.run#TenantQuerySchedule
 facade.TenantScriptFacadeServices.save#TenantQuery
+facade.TenantScriptFacadeServices.save#TenantQueryPins
 facade.TenantScriptFacadeServices.save#TenantQuerySchedule

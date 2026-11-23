@@ -183,6 +183,28 @@ class TenantQueryFacadeSmokeTests {
     }
 
     @Test
+    void pinsKeepTheTenantsOwnQueriesInOrder() {
+        String a = saveHello("Pinned A")
+        String b = saveHello("Pinned B")
+        ec.user.setPreference("darpan.queries.pinnedIds.${GORJANA}", '["QT_GORJANA"]')
+        Map saved = call("save#TenantQueryPins", [pinnedQueryIds: [b, "NO_SUCH_QUERY", "QT_GORJANA", a, b]])
+        assertTrue(saved.ok as boolean, "${saved.errors}")
+        assertEquals([b, a], saved.pinnedQueryIds)
+        assertEquals([b, a], call("list#TenantQueries", [:]).pinnedQueryIds)
+        // pins are kept per tenant: saving Krewe's leaves Gorjana's alone
+        assertEquals('["QT_GORJANA"]', ec.user.getPreference("darpan.queries.pinnedIds.${GORJANA}"))
+    }
+
+    @Test
+    void aDeletedQueryDropsOutOfThePins() {
+        String a = saveHello("Pinned gone")
+        String b = saveHello("Pinned kept")
+        assertTrue(call("save#TenantQueryPins", [pinnedQueryIds: [a, b]]).ok as boolean)
+        assertTrue(call("delete#TenantQuery", [tenantQueryId: a]).ok as boolean)
+        assertEquals([b], call("list#TenantQueries", [:]).pinnedQueryIds)
+    }
+
+    @Test
     void readTextDescribesTheRead() {
         assertEquals("Reads dataset D1, last 30 days, status = B, 2 fields",
                 TenantQuerySupport.readText('{"inputs":[{"name":"o","source":"dataset","datasetId":"D1","fields":["id","status"],"where":{"field":"status","op":"equals","value":"B"},"window":{"field":"createdAt","lastDays":30}}]}'))

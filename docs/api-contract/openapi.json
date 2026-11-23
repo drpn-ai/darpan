@@ -975,6 +975,9 @@
                                         "$ref": "#/components/schemas/SaveTenantQueryRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/SaveTenantQueryPinsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SaveTenantQueryScheduleRequest"
                                     }
                                 ],
@@ -1298,6 +1301,7 @@
                                         "facade.TenantScriptFacadeServices.run#TenantQuery": "#/components/schemas/RunTenantQueryRequest",
                                         "facade.TenantScriptFacadeServices.run#TenantQuerySchedule": "#/components/schemas/RunTenantQueryScheduleRequest",
                                         "facade.TenantScriptFacadeServices.save#TenantQuery": "#/components/schemas/SaveTenantQueryRequest",
+                                        "facade.TenantScriptFacadeServices.save#TenantQueryPins": "#/components/schemas/SaveTenantQueryPinsRequest",
                                         "facade.TenantScriptFacadeServices.save#TenantQuerySchedule": "#/components/schemas/SaveTenantQueryScheduleRequest"
                                     }
                                 }
@@ -2265,6 +2269,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveTenantQueryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveTenantQueryPinsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveTenantQueryScheduleResponse"
@@ -40679,7 +40686,7 @@
                 "properties": {
                     
                 },
-                "description": "The active tenant's queries by name, with the fn: library and the QUERY limits for the editor."
+                "description": "The active tenant's queries by name, with the fn: library and the QUERY limits for the editor, and the\n            signed-in user's pinned queries for this tenant (pin order; a deleted query drops out)."
             },
             "ListTenantQueriesResult": {
                 "type": "object",
@@ -40713,6 +40720,12 @@
                     },
                     "limits": {
                         "type": "object"
+                    },
+                    "pinnedQueryIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
                     }
                 }
             },
@@ -41191,6 +41204,104 @@
                     "result"
                 ]
             },
+            "SaveTenantQueryPinsParams": {
+                "type": "object",
+                "properties": {
+                    "pinnedQueryIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "description": "DAR-UI-138. Pin the signed-in user's queries for the active tenant (a personal preference, so view access\n            is enough). Keeps the order given, once each, and only the active tenant's queries: an unknown id or another\n            tenant's is dropped, never an error. Stored per user and per tenant, so pins in one tenant leave the others alone."
+            },
+            "SaveTenantQueryPinsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "pinnedQueryIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "SaveTenantQueryPinsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.save#TenantQueryPins",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.save#TenantQueryPins",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.save#TenantQueryPins"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveTenantQueryPinsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveTenantQueryPinsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.save#TenantQueryPins. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveTenantQueryPinsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveTenantQueryScheduleParams": {
                 "type": "object",
                 "properties": {
@@ -41627,6 +41738,7 @@
         "facade.TenantScriptFacadeServices.run#TenantQuery": "RunTenantQuery",
         "facade.TenantScriptFacadeServices.run#TenantQuerySchedule": "RunTenantQuerySchedule",
         "facade.TenantScriptFacadeServices.save#TenantQuery": "SaveTenantQuery",
+        "facade.TenantScriptFacadeServices.save#TenantQueryPins": "SaveTenantQueryPins",
         "facade.TenantScriptFacadeServices.save#TenantQuerySchedule": "SaveTenantQuerySchedule"
     }
 }

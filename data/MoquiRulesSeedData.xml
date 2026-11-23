@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+moqui-rules' data/RuleSeedData.xml, carried as darpan-seed. moqui-rules ships it as type "seed", which a Darpan
+deploy does not load (the entrypoint and loadDarpanUpgradeData load darpan-seed), and its fact conversion reads these
+rows: without them every fact is refused. The rows stay identical to moqui-rules' file
+(MoquiRulesSeedDataMirrorTests). moqui-rules itself stays Darpan-agnostic.
+-->
+<entity-facade-xml type="darpan-seed">
+    <moqui.basic.EnumerationType enumTypeId="FactValueType" description="Fact Value Type"/>
+    <moqui.basic.Enumeration enumTypeId="FactValueType" enumId="FVT_TEXT" enumCode="String" description="Text" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumTypeId="FactValueType" enumId="FVT_INTEGER" enumCode="Long" description="Integer" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumTypeId="FactValueType" enumId="FVT_DECIMAL" enumCode="BigDecimal" description="Decimal" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumTypeId="FactValueType" enumId="FVT_BOOLEAN" enumCode="Boolean" description="Boolean" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumTypeId="FactValueType" enumId="FVT_DATE_TIME" enumCode="Timestamp" description="Date and Time" sequenceNum="5"/>
+    <moqui.basic.Enumeration enumTypeId="FactValueType" enumId="FVT_LIST" enumCode="List" description="List of Facts" sequenceNum="6"/>
+
+    <moqui.basic.EnumerationType enumTypeId="FactNodeType" description="Fact Node Type"/>
+    <moqui.basic.Enumeration enumTypeId="FactNodeType" enumId="FNT_RECORD" enumCode="record" description="Read One Row" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumTypeId="FactNodeType" enumId="FNT_VALUE" enumCode="value" description="Fill One Field" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumTypeId="FactNodeType" enumId="FNT_LIST" enumCode="list" description="Read Many Rows" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumTypeId="FactNodeType" enumId="FNT_COUNT" enumCode="count" description="Count Rows" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumTypeId="FactNodeType" enumId="FNT_AGE" enumCode="age" description="Count Whole Days Since a Date" sequenceNum="5"/>
+
+
+    <rules.RuleConditionType conditionTypeId="RCT_COMPARE" description="Compare a Field"
+            prepareServiceName="moqui.rules.RuleLineServices.prepare#CompareLine"/>
+    <rules.RuleConditionType conditionTypeId="RCT_ALL" description="All Lines Match"
+            prepareServiceName="moqui.rules.RuleLineServices.prepare#AllLine"/>
+    <rules.RuleConditionType conditionTypeId="RCT_ANY" description="Any Line Matches"
+            prepareServiceName="moqui.rules.RuleLineServices.prepare#AnyLine"/>
+    <rules.RuleConditionType conditionTypeId="RCT_NOT" description="No Line Matches"
+            prepareServiceName="moqui.rules.RuleLineServices.prepare#NotLine"/>
+    <rules.RuleConditionType conditionTypeId="RCT_EXISTS" description="One List Item Matches"
+            prepareServiceName="moqui.rules.RuleLineServices.prepare#ExistsLine"/>
+
+    <rules.RuleConditionType conditionTypeId="RCT_COMPARE_FIELD" description="Compare Two Fields"
+            prepareServiceName="moqui.rules.RuleLineServices.prepare#CompareFieldLine"/>
+
+    <rules.RuleConditionType conditionTypeId="RCT_PIECE" description="A Named Piece"
+            prepareServiceName="moqui.rules.RuleLineServices.prepare#PieceLine"/>
+
+    <moqui.basic.EnumerationType enumTypeId="FieldPairOperator" description="Operator Between Two Fields"/>
+    <moqui.basic.Enumeration enumTypeId="FieldPairOperator" enumId="FPO_REQUIRES" description="requires" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumTypeId="FieldPairOperator" enumId="FPO_REQUIRED_BY" description="required by" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumTypeId="FieldPairOperator" enumId="FPO_ALL_IN" description="all in" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumTypeId="FieldPairOperator" enumId="FPO_CONTAINS_ALL" description="contains all" sequenceNum="4"/>
+
+    <rules.RuleActionType actionTypeId="RAT_OUTCOME" description="Return an Outcome"
+            prepareServiceName="moqui.rules.RuleActionServices.prepare#OutcomeAction"/>
+    <rules.RuleActionType actionTypeId="RAT_ADD_FACT" description="Add a Fact"
+            prepareServiceName="moqui.rules.RuleActionServices.prepare#AddFactAction"/>
+</entity-facade-xml>

@@ -429,7 +429,7 @@ class KeepPlanSupportTests {
         Map skipped = placedFor("KP_SCOPE_A", "FILE_1", A, "ACME", [onlyCancelled: true])
         assertEquals(["BUILT_IN:2", "A:1", "A:2"], skipped.rules*.id, "an entry is skipped when the side sets its appliesUnless option")
 
-        // rows handed in directly in getter shape (what tenantRuleRows reads) plan the same as rows read from the store
+        // Ruling 3b2b-15: the automation path brings its own filter rows (loadAutomationSourceFilters' getter shape)
         List<Map<String, Object>> automationRows = [[sequenceNum: 1, fieldExpression: "kind", operator: "INCLUDE_PREFIX", filterValues: "EXC-"]]
         Map automation = placed(automationRows, "ACME")
         assertEquals(["BUILT_IN:1", "BUILT_IN:2", "A:1"], automation.rules*.id)

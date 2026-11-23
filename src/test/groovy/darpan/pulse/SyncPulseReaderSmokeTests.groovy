@@ -84,7 +84,7 @@ class SyncPulseReaderSmokeTests {
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${AUTO}" fileSide="FILE_2" companyUserGroupId="${A}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${LEDGER}"
                 safeMetadataJson='{"extractServiceName":"${NS}","parameters":{"pulseQueryId":"PULSE_Q"}}'/>
-            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="PULSE_SCOPE" fileSide="FILE_1" sequenceNum="1"
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${AUTO}" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].productStoreId" operator="EXCLUDE_IN" filterValues="TEST_STORE" companyUserGroupId="${A}"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="${FILTERED}" extractServiceName="${GQL}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters" enabled="Y"/>
@@ -112,9 +112,9 @@ class SyncPulseReaderSmokeTests {
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${KEEP_AUTO}" fileSide="FILE_2" companyUserGroupId="${A}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${ACME}"
                 safeMetadataJson='{"extractServiceName":"${ACME_EXTRACT}"}'/>
-            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_1" sequenceNum="1"
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${KEEP_AUTO}" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].status" operator="EXCLUDE_IN" filterValues="VOID" companyUserGroupId="${A}"/>
-            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_2" sequenceNum="1"
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${KEEP_AUTO}" fileSide="FILE_2" sequenceNum="1"
                 fieldExpression="status" operator="EXCLUDE_IN" filterValues="CLOSED" companyUserGroupId="${A}"/>
         </entity-facade-xml>""").load()
         automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", AUTO).one().getMap()
@@ -350,12 +350,12 @@ class SyncPulseReaderSmokeTests {
     }
 
     /**
-     * The shared gate's records guard (review M5/M6) takes its record root from the compare scope, as the run does (I1): a
-     * pulse only runs on a scope rooted at records (SyncPulseFacadeSupport.pulseBlockFor), so a drifted automation snapshot's
-     * root never moves the side out of Spark: it is still read unfiltered and its Keep still runs.
+     * DAR-BE-338: the shared gate's records guard (review M5/M6) takes the AUTOMATION's own record root, as every automation
+     * path does. ACME's extract no longer filters at the read, so an automation whose own root is another array cannot be
+     * filtered anywhere and its pulse read fails by name (Ruling 3b2b-25), whatever root its run has moved to since.
      */
     @Test
-    void aDriftedSnapshotRecordRootDoesNotMoveASideOutOfSparkInThePulse() {
+    void anAutomationWhoseOwnRecordRootIsAnotherArrayFailsItsPulseReadByName() {
         def source = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", KEEP_AUTO)
                 .condition("fileSide", "FILE_1").forUpdate(true).one()
         source.set("recordRootExpression", "\$.orders[*]")
@@ -367,11 +367,8 @@ class SyncPulseReaderSmokeTests {
 
             Map up = SyncPulseReader.readUpstream(ec, keepPair, keepAutomation, FROM, THRU)
 
-            assertEquals(true, up.ok, up.toString())
-            Map sent = calls[0].params as Map
-            assertNull(sent.sourceFilters, "the compare scope's root is records: the side is read unfiltered")
-            assertEquals(["status"], sent.keepRuleFields)
-            assertEquals(["#P1", "#P3"], up.records*.key, "and its Keep ran")
+            assertEquals(false, up.ok, up.toString())
+            assertTrue((up.errors as List).any { it.toString().contains("its records are not top-level") }, up.toString())
         } finally {
             source.set("recordRootExpression", null)
             source.update()

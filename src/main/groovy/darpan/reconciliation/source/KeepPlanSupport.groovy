@@ -19,9 +19,9 @@ import static darpan.common.ValueSupport.normalize
  * KeepLineTranslator.declared, Ruling 3b2b-12) and then the tenant's rules (front-end A), in that order.</li>
  * </ul>
  *
- * Every path places a side through effectiveSideKeep with the compare scope's RuleSetCompareSourceFilter rows read for one named
- * tenant (tenantRuleRows): the interactive run for its active tenant, the automation path for the automation's (plan 3b-2c: one
- * filter store). Built-ins are data on the connector row; this class holds no system name.
+ * Every path places a side through effectiveSideKeep, handing in the tenant's rows from its own store: the interactive run reads
+ * the compare scope's RuleSetCompareSourceFilter rows for one named tenant (tenantRuleRows); the automation path keeps reading
+ * its own filter store (ReconciliationAutomationSourceFilter, DAR-BE-338: an automation runs on its own copy). Built-ins are data on the connector row; this class holds no system name.
  */
 class KeepPlanSupport {
 
@@ -69,7 +69,8 @@ class KeepPlanSupport {
      * The gate is checked before the Spark plan is built, so a connector's declared Keep lines are compiled only for a side that
      * runs them or that the 3b2b-25 check has to weigh. READ and NONE placements get their plan as before.
      *
-     * @param recordFieldRows the side's filter rows in getter shape (tenantRuleRows)
+     * @param recordFieldRows the side's filter rows in getter shape, from whichever store the path reads (tenantRuleRows, or the
+     *        automation's own, Ruling 3b2b-15)
      * @param extractServiceDefinition the side's extract service definition (ec.service.getServiceDefinition), or null
      * @param recordRootExpression the side's RuleSetCompareSource.recordRootExpression
      * @param keyExpressions the side's key field expressions (composite key fields, else its primaryIdExpression)

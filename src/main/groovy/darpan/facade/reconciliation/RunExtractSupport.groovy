@@ -41,10 +41,14 @@ import static darpan.common.ValueSupport.normalizeInt
  *  window value type      ISO-8601 instant STRING           raw java.sql.Timestamp
  *  missing service        ec.message error, returns [:]      THROWS IllegalStateException
  *  allowlist              shape check only                  allowedServiceNames + shape + installed
- *  exclusion filters      the SAME store since plan 3b-2c: the compare scope's rows (KeepPlanSupport.tenantRuleRows),
- *                         read for the active tenant here and for the automation's own tenant there (sideKeepOf).
- *                         Spark Keep sets them aside at ingest; the read gets them from a data-defined source or an
- *                         extract still taking the filter parameter (3b2b-23); an evaluate run keeps in Spark too
+ *  exclusion filters      sideKeep: the compare scope's      loadAutomationSourceFilters(automationId,
+ *                         rows for the active tenant           fileSide, tenant) -- a DIFFERENT STORE, by
+ *                         (KeepPlanSupport). Spark Keep sets    design (DAR-BE-338: an automation runs on
+ *                         them aside at ingest; the read gets   its own copy, so a run edit reaches it only
+ *                         them from a data-defined source or    through sync#Automation)
+ *                         an extract still taking the filter
+ *                         parameter (3b2b-23); an evaluate run
+ *                         keeps in Spark too
  *  state window mode      not supported                     isStateWindowMode + supportsStateExtract
  *                                                            sends NO date parameters at all
  *  status parameter       absent                            applyStatusParameter
@@ -53,7 +57,8 @@ import static darpan.common.ValueSupport.normalizeInt
  *  errors                 accumulate on ec.message           THROW joined
  * </pre>
  * Any convergence has to decide each of those explicitly. Adopting this class's defaults wholesale
- * would change which date fields a scheduled extract queries — silent, and production.
+ * would change which date fields a scheduled extract queries and which filter store it reads — both
+ * silent, both production.
  */
 class RunExtractSupport {
     private static final Logger logger = LoggerFactory.getLogger(RunExtractSupport)

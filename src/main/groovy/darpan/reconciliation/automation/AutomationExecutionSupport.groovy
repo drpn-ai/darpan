@@ -52,6 +52,7 @@ import static darpan.common.ValueSupport.normalizeInt
 import static darpan.common.ValueSupport.readField
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.currentUserId
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomation
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSourceFilters
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSources
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.normalizeDataManagerPath
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.nowTimestamp
@@ -2456,7 +2457,7 @@ class AutomationExecutionSupport {
         applyWindowParameters(serviceParams, automation, source, connectorForService, window)
         if (connectorForService?.preserveWindowInstants) serviceParams.preserveWindowInstants = true
 
-        // DAR-BE-318 (plan 3b-2b Task 14, 3b-2c): the side's Keep plan, from its compare scope's filter rows for the automation's tenant.
+        // DAR-BE-318 (plan 3b-2b, Task 14), DAR-BE-338: the side's Keep plan, from the automation's own filter rows.
         // The read gets the rows only when Keep runs there (sideKeepOf); a Spark side's Keep runs at the compare's ingest.
         Map sideKeep = sideKeepOf(ec, automation, source, connectorForService, serviceName, new LinkedHashMap<String, Object>(serviceParams),
                 params?.get(KEEP_IN_SPARK) == true)
@@ -2575,10 +2576,9 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * DAR-BE-318 (plan 3b-2b Task 14, plan 3b-2c). One automation side's Keep plan (KeepPlanSupport's shape), from its compare
-     * scope's filter rows (KeepPlanSupport.tenantRuleRows, the store the interactive run reads), read for the AUTOMATION's
-     * tenant: a scheduled run has no signed-in user to pin it, so a blank tenant throws and another tenant's rows are never read.
-     * An automation with no compare scope (a lifecycle automation) reads none.
+     * DAR-BE-318 (plan 3b-2b, Task 14), DAR-BE-338. One automation side's Keep plan (KeepPlanSupport's shape), from the
+     * automation's OWN filter rows (ReconciliationAutomationSourceFilter) and record root, read for the automation's tenant
+     * only: an automation runs on its own copy, so an edit to its run reaches it only through sync#Automation.
      * <ul>
      * <li>NONE (no filter parameter: uploads, databases): no rows are read, nothing is filtered, as today.</li>
      * <li>READ (a data-defined endpoint, Ruling 3b2b-16): the read gets the rows and filters, as today.</li>
@@ -2596,24 +2596,25 @@ class AutomationExecutionSupport {
         // NONE reads no filter rows: the gate hands back its empty plan as for any NONE side
         if (placement == KeepPlanSupport.NONE) return KeepPlanSupport.effectiveSideKeep(ec, [], connector, extractOptions, null, null, [], keepInSpark)
         String fileSide = normalize(readField(source, "fileSide"))
-        List<Map<String, Object>> rows = KeepPlanSupport.tenantRuleRows(ec, normalize(readField(automation, "compareScopeId")), fileSide,
-                normalize(readField(automation, "companyUserGroupId")))
-        // the side's keys and record root, as RunExtractSupport.sideKeep takes them: both from the compare scope, not the automation's snapshot
-        Map shape = placement == KeepPlanSupport.SPARK ? sideKeyShape(ec, automation, fileSide) : [recordRoot: null, keyFields: []]
+        List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
+                fileSide, normalize(readField(automation, "companyUserGroupId")))
+        // DAR-BE-338: the record root is the automation's own copy, like its filters and connection; the keys are the compare
+        // scope's, as the compare, the audit re-check and the sync pulse have read them since DAR-BE-119
+        List<String> keyFields = placement == KeepPlanSupport.SPARK ? sideKeyFields(ec, automation, fileSide) : []
         return KeepPlanSupport.effectiveSideKeep(ec, rows, connector, extractOptions,
                 serviceName ? ec.service.getServiceDefinition(serviceName) : null,
-                (String) shape.recordRoot, (List<String>) shape.keyFields, keepInSpark, landed, fileSide)
+                normalize(readField(source, "recordRootExpression")), keyFields, keepInSpark, landed, fileSide)
     }
 
     /**
-     * A side's record root and key field expressions: the compare scope's (RunConclusionStep.keySpec, as RunConclusionStep.keySpecFor
+     * A side's key field expressions: the compare scope's key spec (RunConclusionStep.keySpec, as RunConclusionStep.keySpecFor
      * reads it), with its rows read for the AUTOMATION's tenant by an explicit condition, since a scheduled run has no signed-in
      * user to pin the tenant.
      */
-    private static Map sideKeyShape(def ec, def automation, String fileSide) {
+    private static List<String> sideKeyFields(def ec, def automation, String fileSide) {
         String compareScopeId = normalize(readField(automation, "compareScopeId"))
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
-        if (!compareScopeId || !tenantId || !fileSide) return [recordRoot: null, keyFields: []]
+        if (!compareScopeId || !tenantId || !fileSide) return []
         String why = "automation path reads its compare scope's key spec; explicit companyUserGroupId condition applied"
         List keyRows = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSourceKeyField", why)
                 .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
@@ -2622,10 +2623,8 @@ class AutomationExecutionSupport {
         def sourceRow = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSource", why)
                 .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
                 .condition("companyUserGroupId", tenantId).useCache(false).list()?.find()
-        // the record root is the compare scope's too (RunExtractSupport.sideKeep, the compare adapter), never the automation snapshot's
-        return [recordRoot: normalize(readField(sourceRow, "recordRootExpression")),
-                keyFields : (List<String>) RunConclusionStep.keySpec(keyRows.collect { normalize(readField(it, "fieldExpression")) },
-                        normalize(readField(sourceRow, "primaryIdExpression")), null, null).keyFields]
+        return (List<String>) RunConclusionStep.keySpec(keyRows.collect { normalize(readField(it, "fieldExpression")) },
+                normalize(readField(sourceRow, "primaryIdExpression")), null, null).keyFields
     }
 
     /**

@@ -486,7 +486,7 @@ class KeptCopySupportTests {
                 order("web-2", "2026-11-11T07:00:00Z", [sourceName: "web"]),
                 order("web-out", "2026-11-11T09:00:00Z", [sourceName: "web"]),
         ])
-        // one filter, on the compare scope both paths read
+        // one filter, in each path's own store
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
             <darpan.rule.RuleSet ruleSetId="KC_RS" companyUserGroupId="${A}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="KC_SCOPE" ruleSetId="KC_RS" companyUserGroupId="${A}"/>
@@ -494,9 +494,11 @@ class KeptCopySupportTests {
             <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KC_SCOPE" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].sourceName" operator="EXCLUDE_IN" filterValues="POS" companyUserGroupId="${A}"/>
             <darpan.reconciliation.ReconciliationAutomation automationId="KC_AUTO" automationName="kept copy" companyUserGroupId="${A}"
-                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KC_RS" compareScopeId="KC_SCOPE"/>
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KC_RS"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="KC_AUTO" fileSide="FILE_1" companyUserGroupId="${A}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="KC_ISO"/>
+            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KC_AUTO" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].sourceName" operator="EXCLUDE_IN" filterValues="POS" companyUserGroupId="${A}"/>
         </entity-facade-xml>""").dummyFks(true).load()
 
         List<Map> calls = []
@@ -504,8 +506,7 @@ class KeptCopySupportTests {
         assertEquals([], run.errors)
         assertEquals(0, calls.size(), "the interactive side is served")
 
-        Map automation = [automationId: "KC_AUTO", companyUserGroupId: A, compareScopeId: "KC_SCOPE",
-                          relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
+        Map automation = [automationId: "KC_AUTO", companyUserGroupId: A, relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY]
         Map source = [automationId: "KC_AUTO", fileSide: "FILE_1", systemEnumId: "KC_ISO", companyUserGroupId: A,
                       sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API,
                       safeMetadataJson: JsonOutput.toJson([extractServiceName: ISO_EXTRACT,

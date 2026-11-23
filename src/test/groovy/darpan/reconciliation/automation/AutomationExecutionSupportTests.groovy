@@ -3108,56 +3108,89 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void anAutomationSidesReadFiltersComeFromItsScopeInSequenceOrder() {
-        // SourceFilterSupport.evaluate returns the FIRST rejecting rule in list order, and that rule owns the excluded
-        // count. The scope's rows are seeded out of order (2 before 1): a read that lost its orderBy("sequenceNum") would
-        // send them in insertion order. A data-defined side filters at its read, so the read is sent the rows.
+    void automationSourceFiltersAreReturnedInSequenceOrder() {
+        // Fix round 1: SourceFilterSupport.evaluate returns the FIRST rejecting rule in list
+        // order, and that rule owns the excluded count (ReconciliationEntities.xml:381-382 on
+        // ReconciliationAutomationSourceFilter.sequenceNum). Seed the rows through the fake OUT of
+        // sequence order (sequenceNum 2 before 1) — a loader that lost its .orderBy("sequenceNum") call
+        // would return them in this insertion order, [2, 1], and this test would fail.
         FakeEc ec = fakeEc()
-        seedAcmeSides(ec, [dataSourceDefinitionId: "ACME_ORDERS_DEF"])
-        addAutomationFilter(ec, "TENANT_A", "FILE_1", 2, "returnWorkflowStatus", "EXCLUDE_IN", "CLOSED")
-        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "salesChannelEnumId", "EXCLUDE_IN", "POS_SALES_CHANNEL")
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
+                automationId   : "AUTO_API",
+                companyUserGroupId: "TENANT_A",
+                fileSide       : "FILE_1",
+                sequenceNum    : 2,
+                fieldExpression: "returnWorkflowStatus",
+                operator       : "EXCLUDE_IN",
+                filterValues   : "CLOSED",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
+                automationId   : "AUTO_API",
+                companyUserGroupId: "TENANT_A",
+                fileSide       : "FILE_1",
+                sequenceNum    : 1,
+                fieldExpression: "salesChannelEnumId",
+                operator       : "EXCLUDE_IN",
+                filterValues   : "POS_SALES_CHANNEL",
+        ])
 
-        List<Map> sent = (List<Map>) acmeExtract(ec, "FILE_1").params.sourceFilters
+        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", "TENANT_A")
 
-        assertEquals([1, 2], sent*.sequenceNum)
-        assertEquals(["salesChannelEnumId", "returnWorkflowStatus"], sent*.fieldExpression)
+        assertEquals([1, 2], filters*.sequenceNum)
+        assertEquals("salesChannelEnumId", filters[0].fieldExpression)
+        assertEquals("returnWorkflowStatus", filters[1].fieldExpression)
     }
 
     @Test
-    void aBoardConfiguredJsonPathScopeFilterActuallyExcludesARawRecordOnTheScheduledPath() {
-        // FINAL-REVIEW CRITICAL 1a, scheduled half. The scope's rows carry the board's JSONPath, but the getter scans
-        // top-level record keys: the scheduled read reduces them (KeepPlanSupport.tenantRuleRows), as the interactive one does.
+    void aBoardConfiguredJsonPathSnapshotActuallyExcludesARawRecordOnTheScheduledPath() {
+        // FINAL-REVIEW CRITICAL 1a, scheduled half. An automation's snapshot rows are copied VERBATIM
+        // from the rule set, so they carry the board's JSONPath — but the getter scans top-level record
+        // keys. Without the reduction in loadAutomationSourceFilters, a scheduled run silently excludes
+        // nothing while its interactive twin excludes correctly: exactly the divergence the mirrored
+        // snapshot exists to prevent.
         FakeEc ec = fakeEc()
-        seedAcmeSides(ec, [dataSourceDefinitionId: "ACME_ORDERS_DEF"])
-        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, '$.records[*].salesChannelEnumId', "EXCLUDE_IN", "POS_SALES_CHANNEL")
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
+                automationId   : "AUTO_API",
+                companyUserGroupId: "TENANT_A",
+                fileSide       : "FILE_1",
+                sequenceNum    : 1,
+                fieldExpression: '$.records[*].salesChannelEnumId',
+                operator       : "EXCLUDE_IN",
+                filterValues   : "POS_SALES_CHANNEL",
+        ])
 
-        List<Map<String, Object>> sent = (List<Map<String, Object>>) acmeExtract(ec, "FILE_1").params.sourceFilters
+        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", "TENANT_A")
 
-        assertEquals("salesChannelEnumId", sent[0].fieldExpression)
-        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(sent)
-        assertNotNull(SourceFilterSupport.evaluate([orderId: "O-1", salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
-        assertNull(SourceFilterSupport.evaluate([orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
+        assertEquals("salesChannelEnumId", filters[0].fieldExpression)
+        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(filters)
+        assertNotNull(SourceFilterSupport.evaluate(
+                [orderId: "O-1", salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
+        assertNull(SourceFilterSupport.evaluate(
+                [orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
     }
 
     // ==================================================================================================
-    // DAR-BE-318 plan 3b-2b, Task 14 / plan 3b-2c: the automation path keeps in Spark, from its compare scope's filter
-    // rows, read for the automation's tenant only. ACME is a made-up system: core runs with no system
+    // DAR-BE-318 plan 3b-2b, Task 14: the automation path keeps in Spark, from the automation's OWN filter rows
+    // (Ruling 3b2b-15), read for the automation's tenant only. ACME is a made-up system: core runs with no system
     // repo loaded. The compare is the fake's; the Spark side of it is AutomationKeepParityTests.
     // ==================================================================================================
 
     private static final String ACME_EXTRACT = "reconciliation.AcmeKeepExtractionServices.extract#AcmeRecords"
 
     @Test
-    void anotherTenantsScopeFiltersAreNeverReadForAnAutomation() {
-        // Review Focus 1. The scheduler has no active tenant, so nothing but the explicit condition keeps tenant B's rows
-        // out: a scope row stamped for B under A's compare scope id (a copied or mis-stamped row) is never read.
+    void anotherTenantsFilterRowsAreNeverRead() {
+        // Review Focus 4. The scheduler has no active tenant, so nothing but the explicit condition keeps tenant B's
+        // rows out: a row stamped for B under A's automation id (a copied or mis-stamped row) is never read.
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
         addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
         addAutomationFilter(ec, "TENANT_B", "FILE_1", 2, "status", "EXCLUDE_IN", "OPEN")
         addAutomationFilter(ec, "TENANT_B", "FILE_1", 3, "region", "INCLUDE_IN", "NORTH")
 
-        // The run's Spark Keep for that side holds A's rule alone.
+        List<Map<String, Object>> rows = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", "TENANT_A")
+        assertEquals([1], rows*.sequenceNum)
+
+        // ...and the run's Spark Keep for that side holds A's rule alone.
         Map extracted = acmeExtract(ec, "FILE_1")
         assertEquals(["A:1"], ((List<Map>) extracted.result.sideKeep.rules)*.id)
         assertEquals([["VOID"]], ((List<Map>) extracted.result.sideKeep.rules)*.values)
@@ -3168,48 +3201,16 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void onlyAnotherTenantsScopeFiltersMeansTheSideReadsNone() {
-        FakeEc ec = fakeEc()
-        seedAcmeSides(ec, [dataSourceDefinitionId: "ACME_ORDERS_DEF"])
-        addAutomationFilter(ec, "TENANT_B", "FILE_1", 1, "status", "EXCLUDE_IN", "OPEN")
-
-        Map extracted = acmeExtract(ec, "FILE_1")
-
-        assertEquals([], extracted.result.sideKeep.readFilters)
-        assertFalse(extracted.params.containsKey("sourceFilters"))
-    }
-
-    @Test
     void anAutomationWithNoTenantHasItsFilterRowsRefused() {
         FakeEc ec = fakeEc()
-        seedAcmeSides(ec)
-        def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
-        automation.put("companyUserGroupId", " ")
-        def source = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.automationId == "AUTO_API" && it.fileSide == "FILE_1" }
-        Map connector = SourceSystemConnectorSupport.resolve(ec, "ACME")
         IllegalArgumentException refused = assertThrows(IllegalArgumentException) {
-            AutomationExecutionSupport.sideKeepOf(ec, automation, source, connector, ACME_EXTRACT, [:], true)
+            AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1", " ")
         }
-        assertTrue(refused.message.contains("one named tenant"), refused.message)
+        assertTrue(refused.message.contains("its own tenant"), refused.message)
     }
 
     @Test
-    void anAutomationWithoutACompareScopeReadsNoFilters() {
-        // Review Focus 2: a lifecycle automation names no compare scope; its sides take no filters and do not throw.
-        FakeEc ec = fakeEc()
-        seedAcmeSides(ec, [dataSourceDefinitionId: "ACME_ORDERS_DEF"])
-        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
-        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }.put("compareScopeId", null)
-
-        Map extracted = acmeExtract(ec, "FILE_1")
-
-        assertEquals("READ", extracted.result.sideKeep.placement)
-        assertEquals([], extracted.result.sideKeep.readFilters)
-        assertFalse(extracted.params.containsKey("sourceFilters"))
-    }
-
-    @Test
-    void aScheduledRunKeepsInSparkFromItsScopesFilters() {
+    void aScheduledRunKeepsInSparkFromItsOwnFilters() {
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
         addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, '$.records[*].status', "EXCLUDE_IN", "VOID,CANCELLED")
@@ -3312,23 +3313,39 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void anAutomationDecidesPlacementFromTheCompareScopesRecordRootNotItsSnapshots() {
-        // the run path and the compare adapter take the root from RuleSetCompareSource; a drifted snapshot must not move Keep
+    void anAutomationDecidesPlacementFromItsOwnRecordRootNotTheRunsCurrentOne() {
+        // DAR-BE-338: an automation runs on its own copy; moving the run's record root changes nothing until a sync
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
         addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
         ec.service.declaredInParameters = ["keepRuleFields"]
-        ec.entity.add("darpan.rule.RuleSetCompareSource", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", recordRootExpression: "records",
+        ec.entity.add("darpan.rule.RuleSetCompareSource", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", recordRootExpression: '$.orders[*]',
                 companyUserGroupId: "TENANT_A"])
-        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
-
-        assertEquals("SPARK", acmeExtract(ec, "FILE_1").result.sideKeep.placement, "the compare scope's root is records: Keep stays in Spark")
-
-        ec.entity.rows["darpan.rule.RuleSetCompareSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", "records")
-        // the compare scope's root is another array: Spark cannot keep it and its read no longer filters (Ruling 3b2b-25)
+
+        assertEquals("SPARK", acmeExtract(ec, "FILE_1").result.sideKeep.placement, "its own root is records: Keep stays in Spark")
+
+        ec.entity.rows["darpan.rule.RuleSetCompareSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", "records")
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" }.put("recordRootExpression", '$.orders[*]')
+        // its own root is another array: Spark cannot keep it and its read no longer filters (Ruling 3b2b-25), whatever the run's root
         IllegalArgumentException refused = assertThrows(IllegalArgumentException) { acmeExtract(ec, "FILE_1") }
         assertTrue(refused.message.contains("its records are not top-level"), refused.message)
+    }
+
+    @Test
+    void aRetryWithNoCarriedKeepPlanReadsTheAutomationsOwnFilters() {
+        // DAR-BE-338: a retry replaying an earlier attempt's file asks for the plan again; it is still the automation's copy
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "productId", "EXCLUDE_IN", "142036")
+        ec.entity.add("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", sequenceNum: 1,
+                fieldExpression: "productId", operator: "EXCLUDE_IN", filterValues: "999", companyUserGroupId: "TENANT_A"])
+        def automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+        def source = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.automationId == "AUTO_API" && it.fileSide == "FILE_1" }
+
+        Map keep = AutomationExecutionSupport.sideKeepOfResult(ec, automation, source, [dataAvailable: true, recordCount: 3], [:])
+
+        assertEquals([["142036"]], ((List<Map>) keep.rules)*.values, "the automation's row, never the run's 999")
     }
 
     @Test
@@ -3351,19 +3368,20 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void aRunFilterEditReachesTheScheduledRunWithoutASync() {
-        // Review Focus 3 (MALBON 100513): a filter added to the run after the automation was last synced is in the next
-        // scheduled run's Keep, and no automation row is written to get it there.
+    void aDriftedAutomationStillReadsItsOwnFilters() {
+        // Ruling 3b2b-15 (overrides 3b2b-6 for automations in this plan): an automation whose rows drifted from its
+        // compare scope's keeps reading its own; switching stores is plan 3b-2c. The scope's rows are never read.
         FakeEc ec = fakeEc()
         seedAcmeSides(ec)
-        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "unitState", "INCLUDE_IN", "COMPLETED")
-        addAutomationFilter(ec, "TENANT_A", "FILE_1", 2, "productId", "EXCLUDE_IN", "142036")
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "EXCLUDE_IN", "VOID")
+        ec.entity.add("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "SCOPE_ORDER", fileSide: "FILE_1", sequenceNum: 1,
+                fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "CANCELLED", companyUserGroupId: "TENANT_A"])
 
         Map run = runAcmeAutomation(ec, [:])
 
         Map keep1 = (Map) ((Map) run.reconcile.params.keepBySide).FILE_1
-        assertEquals([["COMPLETED"], ["142036"]], ((List<Map>) keep1.rules)*.values)
-        assertEquals([], ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationSource") ?: [])
+        assertEquals([["VOID"]], ((List<Map>) keep1.rules)*.values)
+        assertEquals(0, ec.entity.listCount("darpan.rule.RuleSetCompareSourceFilter"))
     }
 
     @Test
@@ -3416,7 +3434,7 @@ class AutomationExecutionSupportTests {
 
         AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
 
-        assertEquals(0, ec.entity.listCount("darpan.rule.RuleSetCompareSourceFilter"))
+        assertEquals(0, ec.entity.listCount("darpan.reconciliation.ReconciliationAutomationSourceFilter"))
         FakeServiceCall reconcile = ec.service.calls.find { it.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope" }
         assertFalse(reconcile.params.containsKey("keepBySide"))
     }
@@ -3445,10 +3463,9 @@ class AutomationExecutionSupportTests {
         }
     }
 
-    /** One of AUTO_API's compare scope's (SCOPE_ORDER) filter rows: the store a scheduled run reads (plan 3b-2c). */
     private static void addAutomationFilter(FakeEc ec, String tenant, String fileSide, int sequenceNum, String field,
                                             String operator, String values) {
-        ec.entity.add("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "SCOPE_ORDER", fileSide: fileSide,
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [automationId: "AUTO_API", fileSide: fileSide,
                 sequenceNum: sequenceNum, fieldExpression: field, operator: operator, filterValues: values, companyUserGroupId: tenant])
     }
 
@@ -3988,7 +4005,7 @@ class AutomationExecutionSupportTests {
             return this
         }
 
-        // Task 6 (automation exclusion filters), fix round 1: the scheduled filter read (KeepPlanSupport.tenantRuleRows) chains
+        // Task 6 (automation exclusion filters), fix round 1: loadAutomationSourceFilters chains
         // .orderBy("sequenceNum") on every extractor dispatch — the ordering is load-bearing (the first
         // rejecting rule in SourceFilterSupport.evaluate owns the excluded count). list() below
         // sorts by this field ONLY when orderBy() was actually called, so a dropped/typo'd .orderBy(...)

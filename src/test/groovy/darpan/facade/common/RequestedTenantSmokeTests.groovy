@@ -1,5 +1,6 @@
 package darpan.facade.common
 
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -10,6 +11,7 @@ import org.moqui.context.ArtifactAuthorizationException
 import org.moqui.context.ExecutionContext
 
 import java.sql.Timestamp
+import java.util.concurrent.Future
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
@@ -165,6 +167,34 @@ class RequestedTenantSmokeTests {
             TenantAccessSupport.currentActiveTenantUserGroupId(ec) })
         assertEquals(TENANT_A, TenantAccessSupport.withCallerTenant(ec, null) {
             TenantAccessSupport.currentActiveTenantUserGroupId(ec) })
+    }
+
+    /**
+     * DAR-BE-341, prod 2026-11-23: a Run now under a requested tenant (CLI / per-tab X-Darpan-Tenant) read side 2 on the
+     * parallel worker in the user's saved tenant, so its compare scope "read as none" and side 2 was read without its
+     * rules' fields (RAILS Outlet: HotWax rows with no itemQuantity). The worker must read under the caller's tenant.
+     */
+    @Test
+    void "side 2's parallel read runs under the requested tenant, not the saved preference"() {
+        String property = AutomationExecutionSupport.PARALLEL_SOURCE_EXTRACTS_PROPERTY
+        String before = System.getProperty(property)
+        System.setProperty(property, "true")
+        AutomationExecutionSupport.setSourceExtractor { def sideEc, def ignoredAutomation, def ignoredSource,
+                Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
+            return [tenant: TenantAccessSupport.currentActiveTenantUserGroupId(sideEc)]
+        }
+        try {
+            Future<Map<String, Object>> side2 = TenantAccessSupport.withRequestedTenant(TENANT_B) {
+                AutomationExecutionSupport.startParallelSourceExtract(ec, [automationId: "DAR_BE_341"],
+                        [fileSide: AutomationExecutionSupport.FILE_SIDE_2], [:], [automationExecutionId: "DAR_BE_341"])
+            }
+            assertNotNull(side2, "parallel side reads are switched on for this test")
+            assertEquals(TENANT_B, side2.get().tenant, "side 2 resolved the saved preference instead of the requested tenant")
+            assertEquals(TENANT_A, ec.user.getPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY))
+        } finally {
+            AutomationExecutionSupport.resetExecutionHooks()
+            if (before == null) System.clearProperty(property) else System.setProperty(property, before)
+        }
     }
 
     private void seedTenant(String tenantId, String label, Timestamp thruDate, boolean member = true) {

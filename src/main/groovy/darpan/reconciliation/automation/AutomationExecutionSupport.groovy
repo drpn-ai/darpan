@@ -420,6 +420,10 @@ class AutomationExecutionSupport {
         // what lets an authenticate="true" extract run; the worker must carry that too.
         boolean callerAnonymous = ec.user.loggedInAnonymous
         String systemTenant = TenantAccessSupport.activeSystemTenantUserGroupId()
+        // DAR-BE-341: a user's run carries the tenant this request resolved (X-Darpan-Tenant / requested ThreadLocal), which
+        // the worker cannot see; without it side 2 resolved the user's saved tenant, its compare scope read as none, and it
+        // was read without its rules' fields. A run with no user keeps the system tenant alone.
+        String callerTenant = username ? TenantAccessSupport.currentActiveTenantUserGroupId(ec) : null
         // The worker carries the run thread's authz state, as side 1 reads the connector registry with it.
         boolean callerAuthzDisabled = ec.artifactExecution.authzDisabled
         // Its own folder: two same-system sides starting together (an NS-vs-NS check) would otherwise write one file.
@@ -433,7 +437,9 @@ class AutomationExecutionSupport {
                 else if (callerAnonymous) sideEc.user.loginAnonymousIfNoUser()
                 if (callerAuthzDisabled) sideEc.artifactExecution.disableAuthz()
                 return (Map<String, Object>) TenantAccessSupport.withSystemTenant(systemTenant) { ->
-                    sourceExtractor.call(sideEc, automation, source, window, sideParams)
+                    TenantAccessSupport.withCallerTenant(sideEc, callerTenant) { ->
+                        sourceExtractor.call(sideEc, automation, source, window, sideParams)
+                    }
                 }
             } finally {
                 sideEc.destroy()

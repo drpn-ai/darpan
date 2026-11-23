@@ -22,6 +22,9 @@ class RuleSetCompareScopeAdapter {
     private static final List<String> SCOPE_MODES = [SCOPE_MODE_COMPARE, SCOPE_MODE_EVALUATE].asImmutable()
     private static final Map<String, String> SIDE_FALLBACK_LABEL_BY_SIDE = [FILE_1: "File 1", FILE_2: "File 2"].asImmutable()
     private static final Set<String> SUPPORTED_FILE_TYPES = ["CSV", "JSON"] as Set
+    /** DAR-BE-337: how the repeated-key warning ends, so RunConclusionSupport.applyHidden can withdraw it once a rule hid
+     *  every repeated-key row. */
+    static final String DUPLICATE_KEY_WARNING_TAIL = "every record under them is reported as a duplicate finding and left out of the compare."
     private static final int MAX_COMPOSITE_KEY_FIELDS = 5
 
     /**
@@ -287,9 +290,9 @@ class RuleSetCompareScopeAdapter {
                     splitDuplicateKeys(ingestBySide)
             ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
             ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
-                if (count > 0) processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} " +
+                if (count > 0) processingWarnings.add(("Compare scope '${compareScopeLabel}' ${fileSide} " +
                         "(${((Map) sidePlanBySide[fileSide]).label}) has ${count} key(s) on more than one record; " +
-                        "every record under them is reported as a duplicate finding and left out of the compare.".toString())
+                        DUPLICATE_KEY_WARNING_TAIL).toString())
             }
             Map<String, Object> ingest1 = (Map<String, Object>) ingestBySide.FILE_1
             Map<String, Object> ingest2 = (Map<String, Object>) ingestBySide.FILE_2

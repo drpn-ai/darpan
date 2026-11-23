@@ -673,4 +673,25 @@ class RunConclusionSupportTests {
         RunConclusionSupport.applyHidden(untouched, null)
         assertEquals([differenceCount: 3], untouched)
     }
+
+    // DAR-BE-337: gorjana's split Happiness Guarantee RMAs. A rule that hides every repeated-key row takes the warning with it;
+    // one repeat it does not explain keeps the warning, so the run still says it did not finish cleanly.
+    @Test
+    void theRepeatedKeyWarningGoesOnlyWhenARuleHidEveryRepeat() {
+        String repeats = "Compare scope 'Returns' FILE_2 (NetSuite SuiteQL) has 38 key(s) on more than one record; " +
+                darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL
+        String other = "The NetSuite read stopped at its row cap."
+        Map all = [differenceCount: 127, onlyInFile1Count: 51, duplicateDifferenceCount: 76, processingWarnings: [repeats, other]]
+        RunConclusionSupport.applyHidden(all, [DUPLICATE_IN_FILE_2: 76])
+        assertEquals([differenceCount: 51, onlyInFile1Count: 51, duplicateDifferenceCount: 0, processingWarnings: [other]], all)
+
+        Map some = [differenceCount: 78, duplicateDifferenceCount: 78, processingWarnings: [repeats]]
+        RunConclusionSupport.applyHidden(some, [DUPLICATE_IN_FILE_2: 76])
+        assertEquals([differenceCount: 2, duplicateDifferenceCount: 2, processingWarnings: [repeats]], some,
+                "two rows of a repeat no rule explains keep the warning")
+
+        Map missingOnly = [differenceCount: 5, duplicateDifferenceCount: 0, processingWarnings: [repeats]]
+        RunConclusionSupport.applyHidden(missingOnly, [MISSING_FROM_FILE_2: 5])
+        assertEquals([repeats], missingOnly.processingWarnings, "hiding missing rows says nothing about repeats")
+    }
 }

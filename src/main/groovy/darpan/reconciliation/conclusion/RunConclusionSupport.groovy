@@ -84,6 +84,16 @@ class RunConclusionSupport {
         minus("missingInFile1Count", onlyIn2)
         // The run result page shows this one (a hidden row is a missing-object row by construction).
         minus("missingObjectDifferenceCount", onlyIn1 + onlyIn2)
+        // DAR-BE-337: a rule can explain repeated keys too (gorjana: a Happiness Guarantee return with two resolutions has one RMA
+        // per resolution). Once it hid every repeated-key row, the warning that announced them goes with them; a repeat no rule
+        // explains keeps it, and the run still says it did not finish cleanly.
+        int duplicates = (hiddenByBucket.findAll { k, v -> k?.toString()?.startsWith("DUPLICATE_IN_FILE_") }.values().sum(0) ?: 0) as int
+        minus("duplicateDifferenceCount", duplicates)
+        if (duplicates && counts.get("duplicateDifferenceCount") == 0 && counts.get("processingWarnings") instanceof List) {
+            counts.put("processingWarnings", ((List) counts.get("processingWarnings")).findAll {
+                !it?.toString()?.endsWith(darpan.reconciliation.core.RuleSetCompareScopeAdapter.DUPLICATE_KEY_WARNING_TAIL)
+            })
+        }
     }
 
     /**

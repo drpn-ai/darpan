@@ -65,6 +65,51 @@ class ConclusionEntityContractTests {
                 .contains('"evidenceFieldsJson"'), "toConnectorMap whitelists fields; a missing entry drops it silently")
     }
 
+    /** systemEnumId -> attributes of every SourceSystemConnector row in one data file. */
+    private static Map<String, Map<String, String>> connectorRows(String rel) {
+        def root = new groovy.xml.XmlSlurper().parseText(read(rel))
+        return root.'**'.findAll { it.name() == 'darpan.reconciliation.SourceSystemConnector' }
+                .collectEntries { [(it.@systemEnumId.text()): it.attributes()] } as Map<String, Map<String, String>>
+    }
+
+    /**
+     * DAR-BE-336: a run's expanded row shows a found record's status and facts from its connector's evidenceFieldsJson;
+     * a row without one shows a blank card. DATABASE is exempt: its fields are whatever the tenant's query returns.
+     */
+    @Test
+    void everyRecordReadingConnectorSaysWhatItsCardShows() {
+        List<String> missing = connectorRows("data/SourceSystemConnectorSeedData.xml").findAll { String id, Map<String, String> row ->
+            row.enabled == "Y" && row.extractServiceName && id != "DATABASE" && !row.evidenceFieldsJson
+        }.keySet().toList()
+        assertTrue(missing.isEmpty(), "no evidenceFieldsJson, so a found record's card is blank: ${missing}")
+    }
+
+    /**
+     * DAR-BE-336: a connector that trims records to keep fields never adds the evidence fields to them, so a status or
+     * fact outside keepFieldsBase is gone from every record by conclude time and the card is blank anyway.
+     */
+    @Test
+    void evidenceOnATrimmedConnectorReadsOnlyKeptFields() {
+        connectorRows("data/SourceSystemConnectorSeedData.xml").each { String id, Map<String, String> row ->
+            if (!row.keepFieldsParameterName || !row.evidenceFieldsJson) return
+            Set<String> kept = (row.keepFieldsBase ?: "").split(",")*.trim().findAll { it } as Set<String>
+            Map evidence = (Map) new groovy.json.JsonSlurper().parseText(row.evidenceFieldsJson)
+            List<String> read = ([evidence.state] + (List) (evidence.facts ?: [])).findAll { it }*.toString()
+            assertTrue(kept.containsAll(read), "${id}: evidence reads ${read - kept} which keepFieldsBase trims away")
+        }
+    }
+
+    /** DAR-BE-336: the upgrade pack's evidence rows are the seed's, or an existing DB gets a different card than a fresh one. */
+    @Test
+    void upgradePackEvidenceMatchesTheSeed() {
+        Map<String, Map<String, String>> seed = connectorRows("data/SourceSystemConnectorSeedData.xml")
+        ["OMS_GQL", "OMS_RETURNS_GQL", "SHOPIFY_RETURN_REFS"].each { String id ->
+            Map<String, String> pack = connectorRows("data/upgrade-data.xml").get(id)
+            assertTrue(pack != null, "${id} missing from the upgrade pack")
+            assertTrue(pack.evidenceFieldsJson == seed.get(id).evidenceFieldsJson, "${id}: pack evidence differs from the seed")
+        }
+    }
+
     @Test
     void unexplainedIsSeededAndSeedIsSeed() {
         String data = read("data/ConclusionCatalogSeedData.xml")

@@ -1966,6 +1966,10 @@ Review each record before loading into an environment.
     <!-- Added records from data/ConclusionCatalogSeedData.xml (DAR-BE-192, 2026-11-21: brain cause, seed rows never reach an existing DB) -->
     <moqui.basic.Enumeration enumId="EXC_NOT_SENT" enumTypeId="DarpanConclusion" enumCode="EXC_NOT_SENT" description="Exchange not sent, return credited"/>
     <moqui.basic.Enumeration enumId="NS_IN_FLIGHT" enumTypeId="DarpanConclusion" enumCode="NS_IN_FLIGHT" description="On its way to NetSuite"/>
+    <!-- Modified records from data/SourceSystemConnectorSeedData.xml (DAR-BE-336, 2026-11-21: a found HotWax order or return's card in the expanded row was blank; key + evidence only, the rest of each row stays as loaded) -->
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_GQL" evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ORDER_CREATED":"Created","ORDER_APPROVED":"Approved","ORDER_COMPLETED":"Completed","ORDER_CANCELLED":"Cancelled"},"facts":["orderName","orderId","externalId","grandTotal"]}'/>
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_RETURNS_GQL" evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"RETURN_REQUESTED":"Requested","RETURN_COMPLETED":"Completed","RETURN_CANCELLED":"Cancelled"},"facts":["returnId","externalId","orderExternalId","returnTotal"]}'/>
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY_RETURN_REFS" evidenceFieldsJson='{"system":"Shopify","state":"orderReturnStatus","stateLabels":{"IN_PROGRESS":"Return in progress","RETURNED":"Returned","NO_RETURN":"No return"},"facts":["refundOrReturnType","refundOrReturnId","orderName","returnIds"]}'/>
     <!-- Added records from data/zzScheduleJobDefaultsApply.xml -->
     <schedule.ScheduleServices.apply-JobDefaults/>
 </entity-facade-xml>

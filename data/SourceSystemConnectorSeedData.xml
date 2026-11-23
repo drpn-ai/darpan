@@ -30,6 +30,7 @@
             filterParameterName="sourceFilters"
             pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ORDER_CREATED":"Created","ORDER_APPROVED":"Approved","ORDER_COMPLETED":"Completed","ORDER_CANCELLED":"Cancelled"},"facts":["orderName","orderId","externalId","grandTotal"]}'
             enabled="Y"/>
 
     <!-- OMS_PRODUCTS_GQL (DAR-BE-157): every sellable HotWax product keyed by NETSUITE_PRODUCT_ID, for the two-way
@@ -164,6 +165,7 @@
             lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
             lookupIdsParameterName="externalIds"
             extractOptionsJson='[{"name":"includeReturnsWithoutShopifyRef","label":"Include returns with no Shopify reference","type":"boolean"},{"name":"onlyCancelledReturns","label":"Only cancelled returns","type":"boolean"},{"name":"withReturnCredit","label":"Credit HotWax gave"}]'
+            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"RETURN_REQUESTED":"Requested","RETURN_COMPLETED":"Completed","RETURN_CANCELLED":"Cancelled"},"facts":["returnId","externalId","orderExternalId","returnTotal"]}'
             enabled="Y"/>
 
     <!-- Shopify per-EVENT (refund or return) records for returns reconciliation (DAR-BE-018;
@@ -199,6 +201,7 @@
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
             lookupIdField="refundOrReturnId"
+            evidenceFieldsJson='{"system":"Shopify","state":"orderReturnStatus","stateLabels":{"IN_PROGRESS":"Return in progress","RETURNED":"Returned","NO_RETURN":"No return"},"facts":["refundOrReturnType","refundOrReturnId","orderName","returnIds"]}'
             enabled="Y"
             extractOptionsJson='[{"name":"completedReturns","label":"Completed returns, one row per order: refunded, exchanged or orderRefunded","type":"text"}]'/>
 

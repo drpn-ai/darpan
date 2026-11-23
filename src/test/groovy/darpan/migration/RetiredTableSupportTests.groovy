@@ -1,6 +1,7 @@
 package darpan.migration
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import darpan.reconciliation.support.SharedMoqui
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * foreign key to ReconciliationAutomationSource, so its rows would block every automation save once no code clears them.
  * The table no longer has an entity definition, so each test makes it by hand.
  */
+@SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RetiredTableSupportTests {
     private static final String TABLE = "RECONCILIATION_AUTOMATION_SOURCE_FILTER"

@@ -160,14 +160,14 @@ class MigrationAdminServiceSmokeTests {
                 .name("admin.MigrationAdminServices.get#MigrationStatus")
                 .parameters([:]).disableAuthz().call()
         assertTrue(before.ok as Boolean)
-        assertEquals(12, (before.migrations as List).size())
+        assertEquals(MigrationRegistrySmokeTests.registeredInSeed().size(), (before.migrations as List).size())
         (before.migrations as List<Map<String, Object>>).each { assertEquals("PENDING", it.status) }
 
         Map<String, Object> run = ec.service.sync()
                 .name("admin.MigrationAdminServices.run#PendingMigrations")
                 .parameters([:]).disableAuthz().call()
         assertTrue(run.ok as Boolean, "run reported failure: ${run.results}")
-        assertEquals(12, run.appliedCount)
+        assertEquals(MigrationRegistrySmokeTests.registeredInSeed().size(), run.appliedCount)
 
         Map<String, Object> after = ec.service.sync()
                 .name("admin.MigrationAdminServices.get#MigrationStatus")
@@ -197,7 +197,7 @@ class MigrationAdminServiceSmokeTests {
         Map<String, Object> run = ec.service.sync()
                 .name("admin.MigrationAdminServices.run#PendingMigrations")
                 .parameters([:]).disableAuthz().call()
-        assertEquals(11, run.appliedCount, "parking one migration must not strand the other eleven")
+        assertEquals(MigrationRegistrySmokeTests.registeredInSeed().size() - 1, run.appliedCount, "parking one migration must not strand the others")
 
         Map<String, Object> row = (ec.service.sync()
                 .name("admin.MigrationAdminServices.get#MigrationStatus")
@@ -341,7 +341,7 @@ class MigrationAdminServiceSmokeTests {
         Map pending = rows("PENDING").last()
         assertEquals(pendingBefore + 1, rows("PENDING").size())
         assertEquals("admin.MigrationAdminServices.run#PendingMigrations", pending.serviceName)
-        assertTrue((pending.detailText as String).startsWith("Ran pending migrations: applied 10,"), "${pending.detailText}")
+        assertTrue((pending.detailText as String).startsWith("Ran pending migrations: applied ${MigrationRegistrySmokeTests.registeredInSeed().size() - 2},"), "${pending.detailText}")
     }
 
     @Test

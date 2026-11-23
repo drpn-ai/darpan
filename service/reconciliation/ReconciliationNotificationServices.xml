@@ -249,14 +249,13 @@
         </actions>
     </service>
 
-    <!-- DAR-BE-318 3b-2c: replaces migrate#AutomationExcludeFilters (retired: automations read their run's filters). Same
-         internal posture: authenticate="false", no allow-remote. transaction="ignore" because the drop runs as Moqui runs its own
-         table changes, outside any transaction (MySQL refuses DDL inside an XA transaction). -->
-    <service verb="retire" noun="AutomationSourceFilterTable" authenticate="false" transaction="ignore">
-        <description>One-time: drop the retired automation filter table (RECONCILIATION_AUTOMATION_SOURCE_FILTER). Automations
-            read their run's filters since DAR-BE-318 3b-2c, and the table's foreign key to the automation source would otherwise
-            fail every automation save, sync and delete that recreates a source with old rows under it. A dry run counts the rows
-            and changes nothing. Idempotent: with no table it does nothing. Internal only, not remote.</description>
+    <!-- DAR-BE-338: replaces retire#AutomationSourceFilterTable (retired: automations keep their own filter copy again). Same
+         internal posture: authenticate="false", no allow-remote. -->
+    <service verb="restore" noun="AutomationSourceFilters" authenticate="false">
+        <description>One-time: rebuild each automation's own filter rows where 3.4.0's AUTOMATION_FILTER_TABLE dropped them. Every
+            automation side with no filter rows takes its run's rows of the same side, read for the automation's own tenant; a side
+            that has rows is left alone. Where the drop never ran nothing is written. A dry run counts and writes nothing.
+            Idempotent. Internal only, not remote.</description>
         <in-parameters>
             <parameter name="dryRun" type="Boolean" default="false"/>
         </in-parameters>
@@ -264,23 +263,21 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="tableFound" type="Boolean"/>
-            <parameter name="rowCount" type="Long"><description>The table's rows (dropped, or that a dry run would drop): the count run#PendingMigrations records.</description></parameter>
-            <parameter name="dropped" type="Boolean"/>
+            <parameter name="rowsWritten" type="Integer"><description>Filter rows written (or that a dry run would write): the count run#PendingMigrations records.</description></parameter>
+            <parameter name="sidesFilled" type="Integer"/>
         </out-parameters>
         <actions>
             <set field="preCallErrorCount" from="darpan.facade.common.FacadeSupport.getErrors(ec).size()"/>
-            <set field="dropResult" from="darpan.migration.RetiredTableSupport.dropRetiredTable(ec, 'transactional', 'RECONCILIATION_AUTOMATION_SOURCE_FILTER', dryRun as boolean)"/>
-            <set field="tableFound" from="dropResult.tableFound"/>
-            <set field="rowCount" from="dropResult.rowCount"/>
-            <set field="dropped" from="dropResult.dropped"/>
-            <if condition="!tableFound">
-                <message>The retired automation filter table is already gone.</message>
+            <set field="copyResult" from="darpan.migration.AutomationFilterCopySupport.copyFromRuns(ec, dryRun as boolean)"/>
+            <set field="rowsWritten" from="copyResult.rowsWritten"/>
+            <set field="sidesFilled" from="copyResult.sidesFilled"/>
+            <if condition="copyResult.skipped">
+                <message>Nothing to restore: the automation filter table was never dropped on this instance.</message>
                 <else-if condition="dryRun">
-                    <message>Would drop the retired automation filter table and its ${rowCount} rows.</message>
+                    <message>Would restore ${rowsWritten} filter rows on ${sidesFilled} automation sides from their runs.</message>
                 </else-if>
                 <else>
-                    <message>Dropped the retired automation filter table and its ${rowCount} rows.</message>
+                    <message>Restored ${rowsWritten} filter rows on ${sidesFilled} automation sides from their runs.</message>
                 </else>
             </if>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec).drop(preCallErrorCount)"/>

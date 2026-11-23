@@ -43,6 +43,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *       guarded by {@code metaClass.respondsTo}. KEPT BARE.</li>
  *   <li>{@code reconciliation/notification/TenantNotificationSupport.groovy:104} — service call.
  *       KEPT BARE.</li>
+ *   <li>{@code migration/AutomationFilterCopySupport.groovy} — DAR-BE-338 one-time cross-tenant migration write; creates
+ *       {@code ReconciliationAutomationSourceFilter} rows via {@code ec.service.sync()...call()}. Its reads route through
+ *       {@code TenantScopedFinder.findGlobalUnscoped} with the automation's own companyUserGroupId. KEPT BARE.</li>
  * </ul>
  *
  * <p><strong>Ratchet rule (step 5 — fail-mode):</strong> the count MUST equal {@code BASELINE}
@@ -89,7 +92,9 @@ class DisableAuthzRatchetTest {
     // 17 since DAR-BE-334: two authz lifts with no finder equivalent, each restored in finally. QuerySourceScope.withTenant
     // runs a query's read as its owner inside the owner's own tenant (checked first), so the existing tenant-checked readers
     // need no per-entity grant; QueryMigration's one-time copy of every tenant's old scripts runs with no user.
-    static final int BASELINE = 17
+    // 18 since DAR-BE-338: AUTOMATION_FILTER_COPY's create write (migration/AutomationFilterCopySupport) rebuilds each automation's
+    // own filter rows from its run, cross-tenant, pinned to the automation's tenant; TenantScopedFinder wraps reads only. KEPT BARE.
+    static final int BASELINE = 18
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>
@@ -171,10 +176,10 @@ class DisableAuthzRatchetTest {
      * upstream) stays outside the gate.
      */
     static final Map<String, Integer> COMPONENT_BASELINES = [
-            // 64 since DAR-BE-318 3b-2c: save#Automation and delete#Automation no longer clear automation filter rows.
-            "darpan service+screen XML .disableAuthz("            : 64, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
-            // 34 since DAR-BE-318 3b-2c: save#Automation no longer creates automation filter rows.
-            "darpan service+screen XML disable-authz=\"true\""    : 34,
+            // 66 again since DAR-BE-338: save#Automation and delete#Automation clear the automation's own filter rows again.
+            "darpan service+screen XML .disableAuthz("            : 66, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
+            // 35 again since DAR-BE-338: save#Automation creates the automation's own filter rows again.
+            "darpan service+screen XML disable-authz=\"true\""    : 35,
             // DAR-BE-318: script/rules/RulesTenantGuard.xml, the moqui-rules write guard the rules.* EECAs run. Its one
             // unfiltered read (rulesGuardFind) loads the row written, or a row it names, by primary key to check its owner.
             "darpan script XML .disableAuthz("                    : 1,

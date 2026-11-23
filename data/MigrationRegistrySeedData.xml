@@ -89,11 +89,11 @@
             description="DAR-BE-334: the old tenant scripts become queries on moqui-jexl and their deployments chat-only
                 schedules, switched off until someone allowed to schedule turns them on. Idempotent (MIG_ ids)."/>
 
-    <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTER_TABLE" componentName="darpan"
-            serviceName="reconciliation.ReconciliationNotificationServices.retire#AutomationSourceFilterTable"
-            sequenceNum="140" supportsDryRun="Y"
-            description="Drop the retired automation filter table (DAR-BE-318 3b-2c): automations read their run's filters
-                now, and the old table's foreign key would fail every automation save, sync and delete over an automation
-                that still has rows in it. Run right after the upgrade load. Idempotent: with no table it does nothing."/>
+    <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTER_COPY" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.restore#AutomationSourceFilters"
+            sequenceNum="150" supportsDryRun="Y" enabled="Y"
+            description="Rebuild each automation's own filter rows from its run's where 3.4.0's AUTOMATION_FILTER_TABLE dropped them
+                (DAR-BE-338: automations run on their own copy again). Sides that have rows are left alone; where the drop never
+                ran nothing is written. Idempotent."/>
 
 </entity-facade-xml>

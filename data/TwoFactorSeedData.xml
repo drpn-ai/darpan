@@ -46,6 +46,6 @@
             fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
             bodyScreenLocation="component://darpan/screen/email/TwoFactorReminder.xml"/>
     <!-- DAR-BE-297: daily at 15:00 server time; reminds anyone the EVERYONE (or a role) policy covers who has no factor yet. -->
-    <moqui.service.job.ServiceJob jobName="send_TwoFactorReminders_daily" description="Remind everyone two-factor is required for, who has not set up a method, on the 7/3/1/0-days-before then weekly cadence."
+    <moqui.service.job.ServiceJob jobName="send_TwoFactorReminders_daily" expireLockTime="360" description="Remind everyone two-factor is required for, who has not set up a method, on the 7/3/1/0-days-before then weekly cadence."
             serviceName="auth.TwoFactorServices.send#TwoFactorReminders" defaultCronExpression="0 0 15 * * ?" defaultPaused="N" minIntervalMinutes="1440"/>
 </entity-facade-xml>

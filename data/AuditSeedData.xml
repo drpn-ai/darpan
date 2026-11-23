@@ -77,7 +77,7 @@
             description="After each audit run" sequenceNum="3"/>
     <!-- DAR-BE-102. Audit digests: each is due once a day at its own time in its tenant's zone; a 15-minute scan
          sends it within a quarter hour of that time. -->
-    <moqui.service.job.ServiceJob jobName="send_AuditDigests_15m"
+    <moqui.service.job.ServiceJob jobName="send_AuditDigests_15m" expireLockTime="360"
             description="Send the audit run digests that are due."
             serviceName="audit.AuditDigestServices.send#DueAuditDigests"
             defaultCronExpression="0 0/15 * * * ?" defaultPaused="N" minIntervalMinutes="5"/>

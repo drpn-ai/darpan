@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <entity-facade-xml type="darpan-seed">
     <moqui.service.job.ServiceJob
-            jobName="purge_ReconciliationGeneratedFiles_daily"
+            jobName="purge_ReconciliationGeneratedFiles_daily" expireLockTime="360"
             description="Purge generated reconciliation output files older than the generated-output retention setting."
             serviceName="reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles"
             defaultCronExpression="0 0 2 * * ?"
@@ -10,14 +10,14 @@
     <!-- DAR-BE-271: raw source extracts are kept 7 days (Aditi 2026-11-13); results keep the 15-day job above. Both periods are the
          darpan.purge.* settings (DAR-BE-306), so neither job seeds a retentionDays parameter. -->
     <moqui.service.job.ServiceJob
-            jobName="purge_ReconciliationExtractFiles_daily"
+            jobName="purge_ReconciliationExtractFiles_daily" expireLockTime="360"
             description="Purge raw source extract files older than the extract retention setting (never result files)."
             serviceName="reconciliation.ReconciliationGenericServices.purge#ExtractFiles"
             defaultCronExpression="0 15 2 * * ?"
             defaultPaused="N" minIntervalMinutes="360"/>
 
     <moqui.service.job.ServiceJob
-            jobName="scan_ReconciliationAutomations_5m"
+            jobName="scan_ReconciliationAutomations_5m" expireLockTime="360"
             description="Scan due reconciliation automations and execute scheduled windows."
             serviceName="reconciliation.ReconciliationAutomationServices.scan#DueAutomations"
             defaultCronExpression="0 0/5 * * * ?"
@@ -31,7 +31,7 @@
     <!-- DAR-BE-328 plan 3: the sync pulse. Seeded running: it does nothing until a sync pair has a pulse cadence. Every 5 minutes
          at 2:30 past, off the automation scan's second (which also takes RunAdmission slots). -->
     <moqui.service.job.ServiceJob
-            jobName="run_SyncPulse"
+            jobName="run_SyncPulse" expireLockTime="360"
             description="Sample every due sync pair: orders waiting on the other system and orders past their allowance."
             serviceName="pulse.SyncPulseServices.run#DuePulses"
             defaultCronExpression="30 2/5 * * * ?"
@@ -41,7 +41,7 @@
          reconciliation rows to FAILED so the UI stops blocking re-triggers and the scanner stops
          skipping those windows. Threshold: the reaperStaleMinutes setting. -->
     <moqui.service.job.ServiceJob
-            jobName="sweep_StuckReconciliationRuns_10m"
+            jobName="sweep_StuckReconciliationRuns_10m" expireLockTime="360"
             description="Reap reconciliation runs / automation executions wedged in RUNNING after crash."
             serviceName="reconciliation.ReconciliationAutomationServices.sweep#StuckReconciliationRuns"
             defaultCronExpression="0 0/10 * * * ?"
@@ -50,7 +50,7 @@
     <!-- MACH P1: backfill denormalized tenant stamps on Rule children; idempotent no-op after
          the first pass (NULL-stamp query walks the tenant index and finds nothing). -->
     <moqui.service.job.ServiceJob
-            jobName="sweep_RuleChildTenantStamps_hourly"
+            jobName="sweep_RuleChildTenantStamps_hourly" expireLockTime="360"
             description="Backfill companyUserGroupId on Rule/RuleSetCompareScope/RuleSetCompareSource from the parent RuleSet."
             serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
             defaultCronExpression="0 15 * * * ?"
@@ -59,7 +59,7 @@
     <!-- DAR-BE-266: per-table retention. Seeded PAUSED, and every period (darpan.retention.<table>.days) is unset by
          default, which keeps the table forever: resuming the job deletes nothing until a period is set. -->
     <moqui.service.job.ServiceJob
-            jobName="run_DataRetention_daily"
+            jobName="run_DataRetention_daily" expireLockTime="360"
             description="Delete audit findings, run results, AI transcripts, agent query logs and sync pulse samples older than their configured retention periods."
             serviceName="retention.RetentionServices.run#Retention"
             defaultCronExpression="0 30 3 * * ?"
@@ -68,7 +68,7 @@
     <!-- DAR-BE-318 plan 3a: refresh the kept copy of datasets (dataset.DatasetServices). Seeded PAUSED: nothing reads a
          source for a dataset until the job is switched on, and only ACTIVE datasets are read. -->
     <moqui.service.job.ServiceJob
-            jobName="scan_DueDatasets_30m"
+            jobName="scan_DueDatasets_30m" expireLockTime="360"
             description="Start the due refreshes of the kept copy of datasets, each as its dataset's tenant."
             serviceName="dataset.DatasetServices.scan#DueDatasets"
             defaultCronExpression="0 0/30 * * * ?"

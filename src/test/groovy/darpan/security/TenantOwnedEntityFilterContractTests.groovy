@@ -105,43 +105,9 @@ class TenantOwnedEntityFilterContractTests {
     // 3.0.0 shipped all 16 (DAR-BE-159/160/161/164/167/194/195/209, DAR-CLI-003); DAR-BE-265/275's two went into
     // upgrade-data.xml with DAR-BE-282, which restates every row (filterMap now fails closed)
     // DAR-BE-318 plan 2: every moqui-rules row and judge config row belongs to one tenant (15 rules.* + 5 darpan.judge.*)
-    static final Map<String, String> PENDING_NEXT_PACK = [
-            "DARPAN_SCOPE_JUDGE_DECISION_OUTCOME": "darpan.judge.DecisionOutcome",
-            "DARPAN_SCOPE_JUDGE_CHECK_DECISION": "darpan.judge.CheckDecision",
-            "DARPAN_SCOPE_JUDGE_CHECK_PARAMETER_SET": "darpan.judge.CheckParameterSet",
-            "DARPAN_SCOPE_JUDGE_CHECK_PARAMETER": "darpan.judge.CheckParameter",
-            "DARPAN_SCOPE_JUDGE_CHECK_ASK": "darpan.judge.CheckAsk",
-            "DARPAN_SCOPE_DATASET": "darpan.dataset.Dataset",
-            "DARPAN_SCOPE_DATASET_READ": "darpan.dataset.DatasetRead",
-            "DARPAN_SCOPE_RULES_FACT_TYPE": "rules.FactType",
-            "DARPAN_SCOPE_RULES_FACT_FIELD": "rules.FactField",
-            "DARPAN_SCOPE_RULES_FACT_NODE": "rules.FactNode",
-            "DARPAN_SCOPE_RULES_FACT_NODE_CONDITION": "rules.FactNodeCondition",
-            "DARPAN_SCOPE_RULES_RULE_SET": "rules.RuleSet",
-            "DARPAN_SCOPE_RULES_RULE_SET_FACT_TYPE": "rules.RuleSetFactType",
-            "DARPAN_SCOPE_RULES_RULE_SET_OUTCOME": "rules.RuleSetOutcome",
-            "DARPAN_SCOPE_RULES_RULE_SET_RULE": "rules.RuleSetRule",
-            "DARPAN_SCOPE_RULES_RULE_SET_CONDITION": "rules.RuleSetCondition",
-            "DARPAN_SCOPE_RULES_RULE_SET_ACTION": "rules.RuleSetAction",
-            "DARPAN_SCOPE_RULES_RULE_SET_ACTION_FIELD": "rules.RuleSetActionField",
-            "DARPAN_SCOPE_RULES_RULE_PIECE": "rules.RulePiece",
-            "DARPAN_SCOPE_RULES_RULE_PIECE_CONDITION": "rules.RulePieceCondition",
-            "DARPAN_SCOPE_RULES_FILE_CHECK": "rules.FileCheck",
-            // DAR-BE-334: tenant queries on moqui-jexl
-            "DARPAN_SCOPE_JEXL_SCRIPT": "jexl.script.UserScript",
-            "DARPAN_SCOPE_JEXL_DEPLOYMENT": "jexl.script.UserScriptDeployment",
-            "DARPAN_SCOPE_JEXL_RUN": "jexl.script.UserScriptRun",
-            "DARPAN_SCOPE_RULES_FILE_CHECK_RECORD": "rules.FileCheckRecord",
-            // DAR-BE-328 plan 1: peak periods and their run times
-            "DARPAN_SCOPE_PEAK_PERIOD": "darpan.peak.PeakPeriod",
-            "DARPAN_SCOPE_PEAK_PERIOD_RUN_TIME": "darpan.peak.PeakPeriodRunTime",
-            // DAR-BE-328 plan 3: sync pairs and the sync pulse
-            "DARPAN_SCOPE_SYNC_PAIR": "darpan.pulse.SyncPair",
-            "DARPAN_SCOPE_PEAK_PERIOD_SYNC": "darpan.pulse.PeakPeriodSync",
-            "DARPAN_SCOPE_SYNC_PULSE_SAMPLE": "darpan.pulse.SyncPulseSample",
-            "DARPAN_SCOPE_SYNC_PULSE_ORDER": "darpan.pulse.SyncPulseOrder",
-            "DARPAN_SCOPE_SYNC_PULSE_PRESENT_KEY": "darpan.pulse.SyncPulsePresentKey",
-    ].asImmutable() as Map<String, String>
+    // 3.4.0 shipped all 32 (DAR-BE-318 plan 2: 15 rules.* + 5 darpan.judge.*; plan 3a: 2 darpan.dataset.*;
+    // DAR-BE-328 plans 1 and 3: 7 darpan.peak.* / darpan.pulse.*; DAR-BE-334: 3 jexl.script.*)
+    static final Map<String, String> PENDING_NEXT_PACK = [:].asImmutable() as Map<String, String>
 
     /** Every filter row this class pins by id, with its entity. */
     static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS + DAR_BE_138_FILTERS + DAR_BE_265_FILTERS).asImmutable()

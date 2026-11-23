@@ -35,7 +35,7 @@
             <parameter name="syncPair" type="Map">
                 <parameter name="syncPairId"/><parameter name="label"/><parameter name="automationId"/><parameter name="automationName"/>
                 <parameter name="upstreamSide"/><parameter name="allowanceMinutes"/><parameter name="pulseEveryMinutes"/>
-                <parameter name="normalAllowanceMinutes"/><parameter name="normalPulseEveryMinutes"/><parameter name="periodName"/>
+                <parameter name="normalAllowanceMinutes"/><parameter name="normalPulseEveryMinutes"/><parameter name="periodName"/><parameter name="periodThruDate"/>
                 <parameter name="chatSpaceId"/><parameter name="hourlySummary"/><parameter name="isActive"/>
                 <parameter name="lastPulseStamp"/><parameter name="lastPulseStatusEnumId"/>
                 <parameter name="waitingCount"/><parameter name="pastAllowanceCount"/>

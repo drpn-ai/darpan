@@ -92,7 +92,9 @@ class SyncPulseFacadeSupportTests {
         assertEquals("R3", SyncPulseFacadeSupport.reportedInRun(runs, ts(a), ts(d2.plusSeconds(100))))
         assertEquals("R2", SyncPulseFacadeSupport.reportedInRun(runs, ts(a), null), "no created stamp: the first run after the flag")
         assertEquals("R2", SyncPulseFacadeSupport.reportedInRun(runs, ts(a), ts(d1.minusSeconds(100))), "no window holds it: the first run after the flag")
-        assertEquals(null, SyncPulseFacadeSupport.reportedInRun(runs, ts(a.plusSeconds(999999)), ts(d1)))
+        assertEquals("R2", SyncPulseFacadeSupport.reportedInRun(runs, ts(a.plusSeconds(7200)), ts(d1.plusSeconds(100))), "flagged after its day's run started: still that run")
+        assertEquals("R3", SyncPulseFacadeSupport.reportedInRun(runs, ts(a.plusSeconds(999999)), ts(d2.plusSeconds(100))), "a window holds it, whenever the flag came")
+        assertEquals(null, SyncPulseFacadeSupport.reportedInRun(runs, ts(a.plusSeconds(999999)), ts(d1.minusSeconds(100))), "no window holds it and no run after the flag")
         assertEquals(null, SyncPulseFacadeSupport.reportedInRun([], ts(a), ts(d1)))
     }
 

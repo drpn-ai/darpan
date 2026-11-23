@@ -110,6 +110,7 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         assertEquals(120, got.syncPair.normalAllowanceMinutes)
         assertEquals(60, got.syncPair.normalPulseEveryMinutes)
         assertNull(got.syncPair.periodName)
+        assertNull(got.syncPair.periodThruDate)
         assertEquals(["SPF_O1", "SPF_O2"], ((List) got.pastOrders).collect { it.recordKey }, "oldest first")
         assertTrue(((List) got.pastOrders).every { it.containsKey("reportedInRunId") && it.reportedInRunId == null })
         assertEquals(1, ((List) got.samplesToday).size())
@@ -182,6 +183,7 @@ class SyncPulseFacadeCrossTenantSmokeTests {
         try {
             Map sp = call("get#SyncPair", [syncPairId: pairA]).syncPair
             assertEquals("Sale", sp.periodName)
+            assertEquals(today, sp.periodThruDate, "the overriding period's last day, tenant-local")
             assertEquals(30, sp.allowanceMinutes)
             assertEquals(0, sp.pulseEveryMinutes, "a period cadence of 0 is pulse off")
             assertEquals(120, sp.normalAllowanceMinutes)
@@ -330,6 +332,34 @@ class SyncPulseFacadeCrossTenantSmokeTests {
             Map o = ((List) call("get#SyncPair", [syncPairId: pairA]).pastOrders).find { it.recordKey == "RWO" }
             assertEquals("SPF_RW1", o.reportedInRunId, "the run that read Nov 20, not the newest")
         } finally { dropRuns(["SPF_RW1", "SPF_RW2"], ["SPF_RW_O"]) }
+    }
+
+    @Test
+    void anOrderFlaggedAfterItsDaysRunStartedLinksToThatDaysRun() {
+        actAs(A)
+        seedRun("SPF_RF1", A, "SPF_A_DAILY", "2026-11-21T08:00:00Z", "2026-11-20T00:00:00Z", "2026-11-21T00:00:00Z")
+        seedRun("SPF_RF2", A, "SPF_A_DAILY", "2026-11-22T08:00:00Z", "2026-11-21T00:00:00Z", "2026-11-22T00:00:00Z")
+        ec.entity.makeValue("darpan.pulse.SyncPulseOrder").setAll([pulseOrderId: "SPF_RF_O", syncPairId: pairA, companyUserGroupId: A, recordKey: "RFO",
+                sourceCreatedStamp: Timestamp.from(Instant.parse("2026-11-20T10:00:00Z")), firstPastStamp: Timestamp.from(Instant.parse("2026-11-21T09:00:00Z"))]).createOrUpdate()
+        try {
+            Map o = ((List) call("get#SyncPair", [syncPairId: pairA]).pastOrders).find { it.recordKey == "RFO" }
+            assertEquals("SPF_RF1", o.reportedInRunId, "flagged after Nov 20's run started, still that run's day")
+        } finally { dropRuns(["SPF_RF1", "SPF_RF2"], ["SPF_RF_O"]) }
+    }
+
+    @Test
+    void noOpenOrdersMeansNoPastOrdersAndNoRunLookup() {
+        actAs(A)
+        seedRun("SPF_RN1", A, "SPF_A_DAILY", "2026-11-21T08:00:00Z", "2026-11-20T00:00:00Z", "2026-11-21T00:00:00Z")
+        def open = ec.entity.find("darpan.pulse.SyncPulseOrder").condition("syncPairId", pairA).condition("closedStamp", null).disableAuthz().useCache(false).list()
+        Timestamp closed = new Timestamp(System.currentTimeMillis())
+        open.each { it.set("closedStamp", closed); it.update() }
+        try {
+            assertEquals([], call("get#SyncPair", [syncPairId: pairA]).pastOrders)
+        } finally {
+            open.each { it.set("closedStamp", null); it.update() }
+            dropRuns(["SPF_RN1"], [])
+        }
     }
 
     private Map call(String name, Map params, String service = "facade.SyncPulseFacadeServices") {

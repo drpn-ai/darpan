@@ -192,7 +192,9 @@ class SyncPulseFacadeSupport {
         Map eff = SyncPulseSupport.effectiveValues(pair, windows, periodRows, today)
         Map periodRow = eff.peakPeriodId ? periodRows[eff.peakPeriodId as String] : null
         boolean overrides = periodRow != null && (periodRow.get("allowanceMinutes") != null || periodRow.get("pulseEveryMinutes") != null)
-        String periodName = overrides ? windows.find { it.peakPeriodId == eff.peakPeriodId }?.periodName : null
+        def periodWindow = overrides ? windows.find { it.peakPeriodId == eff.peakPeriodId } : null
+        String periodName = periodWindow?.periodName
+        String periodThruDate = periodWindow?.thruDate?.toString()
         Map automation = automationOf(ec, tenantId, normalize(pair.get("automationId")))
 
         Map counts = SyncPulseSupport.pairCounts(ec, tenantId, id)
@@ -200,7 +202,7 @@ class SyncPulseFacadeSupport {
                         automationName: normalize(automation?.get("automationName")), upstreamSide: normalize(pair.get("upstreamSide")),
                         allowanceMinutes: eff.allowanceMinutes, pulseEveryMinutes: eff.pulseEveryMinutes,
                         normalAllowanceMinutes: pair.get("allowanceMinutes"), normalPulseEveryMinutes: pair.get("pulseEveryMinutes"),
-                        periodName: periodName, chatSpaceId: normalize(pair.get("chatSpaceId")),
+                        periodName: periodName, periodThruDate: periodThruDate, chatSpaceId: normalize(pair.get("chatSpaceId")),
                         hourlySummary: normalize(pair.get("hourlySummary")) ?: "N", isActive: normalize(pair.get("isActive")) ?: "Y",
                         lastPulseStamp: iso(pair.get("lastPulseStamp")), lastPulseStatusEnumId: normalize(pair.get("lastPulseStatusEnumId"))]
 
@@ -214,8 +216,10 @@ class SyncPulseFacadeSupport {
         }
         List<Map> openOrders = (rows(ec, "darpan.pulse.SyncPulseOrder", tenantId).condition("syncPairId", id).condition("closedStamp", null)
                 .orderBy("sourceCreatedStamp").list() ?: [])
-        Instant oldestFlag = openOrders.collect { instantOf(it.get("firstPastStamp")) }.findAll { it != null }.min()
-        List<Map> runs = pairRuns(ec, tenantId, normalize(pair.get("automationId")), oldestFlag)
+        Instant oldestCreated = openOrders.collect { instantOf(it.get("sourceCreatedStamp")) }.findAll { it != null }.min()
+        // no open orders: no run is looked up; an order with no created stamp is never read by a window, so bound by the oldest flag then
+        Instant oldestBound = oldestCreated ?: openOrders.collect { instantOf(it.get("firstPastStamp")) }.findAll { it != null }.min()
+        List<Map> runs = openOrders.isEmpty() ? [] : pairRuns(ec, tenantId, normalize(pair.get("automationId")), oldestBound)
         List<Map> past = openOrders.collect { o ->
             Object created = o.get("sourceCreatedStamp") ?: o.get("firstPastStamp")
             String reportedId = reportedInRun(runs, o.get("firstPastStamp"), o.get("sourceCreatedStamp"))
@@ -238,12 +242,19 @@ class SyncPulseFacadeSupport {
 
     /**
      * The automation's run results the tenant owns, newest start first: [reconciliationRunResultId, start, windowStart, windowEnd]
-     * (Instants; the window is what the run's execution read, null when unrecorded). With after, only runs that started after it.
+     * (Instants; the window is what the run's execution read, null when unrecorded). With oldest, only runs whose window
+     * ends after it (or has no recorded end): a run that read nothing from that point on cannot have reported an order created then.
      */
-    static List<Map> pairRuns(def ec, String tenantId, String automationId, Instant after = null) {
+    static List<Map> pairRuns(def ec, String tenantId, String automationId, Instant oldest = null) {
         if (!automationId) return []
         Map<String, Map> windows = [:]
-        (rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationId", automationId).list() ?: []).each { e ->
+        def execFind = rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationId", automationId)
+        if (oldest != null) {
+            def cf = ec.entity.conditionFactory
+            execFind.condition(cf.makeCondition([cf.makeCondition("windowEndDate", org.moqui.entity.EntityCondition.GREATER_THAN, Timestamp.from(oldest)),
+                                                 cf.makeCondition("windowEndDate", org.moqui.entity.EntityCondition.EQUALS, null)], org.moqui.entity.EntityCondition.OR))
+        }
+        (execFind.list() ?: []).each { e ->
             String runId = normalize(e.get("reconciliationRunResultId"))
             if (runId) windows[runId] = [from: instantOf(e.get("windowStartDate")), thru: instantOf(e.get("windowEndDate"))]
         }
@@ -252,20 +263,21 @@ class SyncPulseFacadeSupport {
                 .condition("reconciliationRunResultId", org.moqui.entity.EntityCondition.IN, windows.keySet() as List).list() ?: []).collect { r ->
             String id = normalize(r.get("reconciliationRunResultId"))
             [reconciliationRunResultId: id, start: runStart(r.getMap()), windowStart: windows[id]?.from, windowEnd: windows[id]?.thru] as Map
-        }.findAll { it.start != null && (after == null || (it.start as Instant).isAfter(after)) }
+        }.findAll { it.start != null }
         return out.sort { Map a, Map b -> (b.start as Instant) <=> (a.start as Instant) }
     }
 
     /**
      * The run that reported an order: the newest run (runs newest first) whose read window contains the order's
-     * sourceCreatedStamp and that started after the flag; else the first run that started after the flag. Null when none.
+     * sourceCreatedStamp, whenever it started (an order flagged after its own day's run began is still in that run's day);
+     * only when no window holds it, the first run that started after the flag. Null when none.
      */
     static String reportedInRun(List<Map> runs, Object firstPastStamp, Object sourceCreatedStamp = null) {
         Instant flagged = instantOf(firstPastStamp)
         if (flagged == null) return null
         List<Map> after = (runs ?: []).findAll { (it.start as Instant).isAfter(flagged) }
         Instant created = instantOf(sourceCreatedStamp)
-        Map hit = created == null ? null : after.find { Instant f = it.windowStart as Instant; Instant t = it.windowEnd as Instant
+        Map hit = created == null ? null : (runs ?: []).find { Instant f = it.windowStart as Instant; Instant t = it.windowEnd as Instant
             f != null && t != null && !created.isBefore(f) && created.isBefore(t) }
         return ((hit ?: (after ? after.last() : null))?.get("reconciliationRunResultId")) as String
     }

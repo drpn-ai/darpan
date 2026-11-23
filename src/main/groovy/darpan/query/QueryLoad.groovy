@@ -21,9 +21,6 @@ class QueryLoad {
 
     /** Why queries must wait right now, or null. */
     static String busyReason() {
-        // An instance with its scheduler off (scheduled_job_check_time 0: a rehearsal, or prod before cutover) sends no
-        // scheduled query either; moqui-jexl's own scheduler does not read that setting.
-        if (org.moqui.util.SystemBinding.getPropOrEnv("scheduled_job_check_time")?.trim() == "0") return "scheduled jobs are switched off on this instance"
         Map<String, Object> runs
         try {
             runs = probe.call()

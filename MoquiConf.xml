@@ -12,6 +12,10 @@
     <default-property name="jexl_profile_QUERY_maxCollectionSize" value="20000"/>
     <default-property name="jexl_profile_QUERY_units" value="5000000"/>
     <default-property name="jexl_profile_QUERY_timeoutMs" value="10000"/>
+    <!-- a query returns files: room for a 20,000-row file of about 20 columns (the result is never stored; attachments
+         stay capped by jexl_email_attachment_bytes) -->
+    <default-property name="jexl_profile_QUERY_maxOutputJsonChars" value="8000000"/>
+    <default-property name="jexl_profile_QUERY_maxOutputNodes" value="400000"/>
     <default-property name="jexl_busy_service" value="query.QueryHostServices.get#QueryBusyReason"/>
     <default-property name="jexl_owner_key_service" value="query.QueryHostServices.get#QueryOwnerKey"/>
     <default-property name="jexl_owner_fields_service" value="query.QueryHostServices.check#QueryOwnerFields"/>

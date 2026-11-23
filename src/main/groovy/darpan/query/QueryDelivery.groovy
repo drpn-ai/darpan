@@ -29,7 +29,7 @@ class QueryDelivery {
             List<String> lines = [result.summary ? "${name}: ${result.summary}".toString() : name]
             if (files) {
                 int people = emailRecipients(ec, deployment.scriptDeploymentId as String).size()
-                if (people) lines.add("${files.size()} file${files.size() == 1 ? '' : 's'} (${files*.name.join(', ')}) go to ${people} ${people == 1 ? 'person' : 'people'} by email.".toString())
+                if (people) lines.add("${files.size()} file${files.size() == 1 ? '' : 's'} (${files*.name.join(', ')}) ${files.size() == 1 ? 'goes' : 'go'} to ${people} ${people == 1 ? 'person' : 'people'} by email.".toString())
             }
             Map posted = TenantNotificationSupport.postToChatSpace(ec, tenantId, chatSpaceId, [text: lines.join("\n")])
             if (posted == null) return [error: "The chat space ${chatSpaceId} was deleted, switched off, has no webhook, or is not this tenant's.".toString()]

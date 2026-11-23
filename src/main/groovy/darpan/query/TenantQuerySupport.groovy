@@ -158,8 +158,7 @@ class TenantQuerySupport {
         if (p.chatSpaceId) deliveries << [deliveryServiceName: QueryDelivery.CHAT_SERVICE, parameters: [chatSpaceId: p.chatSpaceId]]
         if (!deliveries) { ec.message.addError("Send it somewhere: an email address or a chat space."); return null }
         if (p.chatSpaceId) {
-            def space = unscoped(ec, "darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", p.chatSpaceId)
-                    .condition("companyUserGroupId", tenantId).useCache(false).one()
+            def space = ownChatSpace(ec, tenantId, p.chatSpaceId as String)
             if (space == null) { ec.message.addError("Chat space ${p.chatSpaceId} was not found."); return null }
             if (space.isActive == "N") { ec.message.addError("Chat space '${space.spaceName}' is switched off."); return null }
         }
@@ -195,13 +194,19 @@ class TenantQuerySupport {
         return [status: out.status, message: out.message, result: out.normalizedResult, readCounts: out.readCounts, deliveries: out.deliveries]
     }
 
+    /** The tenant's chat space, or null. By its key, the tenant compared here: Moqui drops a condition beside a full key. */
+    private static def ownChatSpace(def ec, String tenantId, String chatSpaceId) {
+        if (!chatSpaceId) return null
+        def space = unscoped(ec, "darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", chatSpaceId).useCache(false).one()
+        return space?.companyUserGroupId == tenantId ? space : null
+    }
+
     private static String sendsToText(def ec, String tenantId, Map schedule) {
         List<String> parts = []
         int count = (schedule.recipientCount ?: 0) as int
         if (count) parts << "${count} email address${count == 1 ? '' : 'es'}".toString()
         if (schedule.chatSpaceId) {
-            def space = unscoped(ec, "darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", schedule.chatSpaceId)
-                    .condition("companyUserGroupId", tenantId).useCache(false).one()
+            def space = ownChatSpace(ec, tenantId, schedule.chatSpaceId as String)
             parts << "the chat space ${space?.spaceName ?: schedule.chatSpaceId}".toString()
         }
         return parts ? parts.join(" and ") : "nowhere"

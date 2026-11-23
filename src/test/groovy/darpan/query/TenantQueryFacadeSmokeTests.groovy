@@ -161,9 +161,10 @@ class TenantQueryFacadeSmokeTests {
     @Test
     void aScheduleRefusesAnotherTenantsChatSpace() {
         String id = saveHello("Hello space")
-        insert(ec, "darpan.reconciliation.TenantChatSpace", [chatSpaceId: "QT_G_SPACE", companyUserGroupId: GORJANA, spaceName: "Theirs",
-                webhookUrl: "https://chat.example.test/g", isActive: "Y"])
-        Map out = call("save#TenantQuerySchedule", [tenantQueryId: id, dailyAt: "09:00", chatSpaceId: "QT_G_SPACE"])
+        // direct: a create made while KREWE is active would be stamped KREWE by the tenant stamp
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, "darpan.reconciliation.TenantChatSpace", [chatSpaceId: "QT_GORJANA_SPACE",
+                companyUserGroupId: GORJANA, spaceName: "Theirs", webhookUrl: "https://chat.example.test/g", isActive: "Y"])
+        Map out = call("save#TenantQuerySchedule", [tenantQueryId: id, dailyAt: "09:00", chatSpaceId: "QT_GORJANA_SPACE"])
         assertTrue("${out.errors}".contains("was not found"), "${out.errors}")
     }
 

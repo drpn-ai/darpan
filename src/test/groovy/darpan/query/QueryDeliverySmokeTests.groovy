@@ -81,7 +81,7 @@ class QueryDeliverySmokeTests {
     @Test
     void chatSaysWhatWasEmailed() {
         deliver("deliver#QueryChat", "QD_K_D", [chatSpaceId: "QD_KREWE_SPACE"])
-        assertTrue((posts[0].text as String).contains("Sent 1 file (late.csv) to 2 people by email."), posts[0].text as String)
+        assertTrue((posts[0].text as String).contains("1 file (late.csv) goes to 2 people by email."), posts[0].text as String)
     }
 
     @Test

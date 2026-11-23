@@ -1,28 +1,12 @@
 package darpan.query
 
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
-import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-/** DAR-BE-334 review fixes that need no Moqui: the scheduler switch reaches query schedules; recipient lists fit their column. */
-class QueryLoadAndDeliveryUnitTests {
-    @AfterEach
-    void reset() {
-        System.clearProperty("scheduled_job_check_time")
-        QueryLoad.resetForTests()
-    }
-
-    @Test
-    void anInstanceWithItsSchedulerOffHoldsQuerySchedules() {
-        QueryLoad.probe = { -> [runsQueued: 0, runsRunning: 0, runsCap: 8] }
-        assertNull(QueryLoad.busyReason())
-        System.setProperty("scheduled_job_check_time", "0")
-        assertEquals("scheduled jobs are switched off on this instance", QueryLoad.busyReason())
-    }
-
+/** DAR-BE-334 review fix that needs no Moqui: a long recipient list fits the export log's column. */
+class QueryDeliveryUnitTests {
     @Test
     void aLongRecipientListKeepsWhatFitsAndCountsTheRest() {
         List<String> many = (1..30).collect { "person${it}@example.test" }

@@ -50,7 +50,11 @@ class ApiContractGenerator {
     //            when chat webhooks moved to clear text; googleChatWebhookUrl replaces it.
     // 4 (3.0.0): list#/save#HotWaxOmsRestSourceConfig dropped ordersPath and returnsPageSize
     //            (OMS reads are GraphQL only, DAR-BE-052).
-    static final int CONTRACT_VERSION = 4
+    // 5 (3.4.0): the eight facade.TenantScriptFacadeServices TenantScript / TenantScriptDeployment methods are gone,
+    //            replaced by the TenantQuery / TenantQuerySchedule methods on moqui-jexl (DAR-BE-334); also
+    //            save#Automation no longer takes sources[].excludeFilters (DAR-BE-318) and add#TenantMember's
+    //            welcomeQueued became welcomeSent / welcomeWithPassword.
+    static final int CONTRACT_VERSION = 5
 
     static final Map<String, Map<String, Object>> SCALAR_TYPES = [
             String    : [type: "string"],

@@ -531,12 +531,12 @@ class SyncPulseSupport {
             open.each { Map o ->
                 String key = o.recordKey as String
                 if (present.contains(key)) {
-                    closed << updateOrder(ec, o, [closedStamp: stamp, lastCheckedStamp: stamp])
+                    closed << updateOrder(ec, o, [closedStamp: stamp, lastCheckedStamp: stamp, closeReason: ARRIVED])
                 } else if (unasked.contains(key)) {
                     stillOpen << o
                 } else if (leftTheCheck(o, now, allowance, windowFrom, upstreamKeys)) {
                     // never "synced": it left the check (cancelled or filtered upstream, or the daily check owns it now)
-                    dropped << updateOrder(ec, o, [closedStamp: stamp, lastCheckedStamp: stamp])
+                    dropped << updateOrder(ec, o, [closedStamp: stamp, lastCheckedStamp: stamp, closeReason: DROPPED])
                 } else {
                     stillOpen << updateOrder(ec, o, [lastCheckedStamp: stamp])
                 }
@@ -724,6 +724,9 @@ class SyncPulseSupport {
 
     private static final String ARROW = "→"
     private static final String DOT = " · "
+    /** SyncPulseOrder.closeReason: it reached the target, or it left the check (cancelled, filtered, aged out). */
+    static final String ARRIVED = "ARRIVED"
+    static final String DROPPED = "DROPPED"
     private static final String DASH = "–"
     private static final DateTimeFormatter MONTH_DAY = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
 
@@ -760,9 +763,10 @@ class SyncPulseSupport {
                 "Oldest ${oldest?.get('orderName') ?: 'unknown'}, ${oldestWords(oldest)}${DOT}${waiting ?: 0} waiting".toString()
     }
 
-    static String clearText(String label, Integer allowance, Map oldest, Integer waiting, int closedCount) {
+    static String clearText(String label, Integer allowance, Map oldest, Integer waiting, int closedCount, int droppedCount = 0) {
         return "${label}: caught up. Nothing past the ${allowanceWords(allowance)} allowance.\n".toString() +
-                "${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${closedCount} findings closed".toString()
+                "${waiting ?: 0} waiting${DOT}oldest ${oldestWords(oldest)}${DOT}${closedCount} ${closedCount == 1 ? 'finding' : 'findings'} closed".toString() +
+                (droppedCount > 0 ? "${DOT}${droppedCount} left the check".toString() : "")
     }
 
     static String summaryText(String label, Integer waiting, Map oldest, int pastCount) {
@@ -796,7 +800,10 @@ class SyncPulseSupport {
             return [kind: "past", text: pastText(label, allowance, past, oldest, waiting), lastPostedPastCount: past]
         }
         if (past == 0 && prior > 0) {
-            return [kind: "clear", text: clearText(label, allowance, oldest, waiting, ((result.get("closed") ?: []) as List).size()),
+            // the episode's own counts when the caller read them; this pulse's alone otherwise (an episode that began before they were kept)
+            int closedCount = (result.get("episodeClosed") ?: ((result.get("closed") ?: []) as List).size()) as int
+            int droppedCount = (result.get("episodeDropped") ?: ((result.get("dropped") ?: []) as List).size()) as int
+            return [kind: "clear", text: clearText(label, allowance, oldest, waiting, closedCount, droppedCount),
                     lastPostedPastCount: 0]
         }
         // a count that changed but stays above zero announces nothing (the hourly summary carries it); the stored count follows
@@ -829,13 +836,21 @@ class SyncPulseSupport {
                         .equals(now.atZone(zone).truncatedTo(java.time.temporal.ChronoUnit.HOURS))
             }
             Map names = pairNames(ec, pair)
+            Timestamp episodeStart = row.get("episodeStartStamp") as Timestamp
+            if (episodeStart != null && (result.get("pastCount") ?: 0) as int == 0 && (row.get("lastPostedPastCount") ?: 0) as int > 0) {
+                result = new LinkedHashMap(result) + episodeCounts(ec, tenantId, normalize(pair.syncPairId), episodeStart)
+            }
             Map decision = decidePost(names.label as String, result, row.get("lastPostedPastCount") as Integer,
                     samples.collect { normalize(it.get("statusEnumId")) }, normalize(row.get("hourlySummary")) == "Y", topOfHour)
             boolean posted = decision.text == null || postChat(ec, tenantId, chatSpaceId, decision.text as String)
             Integer wanted = decision.lastPostedPastCount as Integer
-            if (posted && wanted != (row.get("lastPostedPastCount") as Integer)) {
+            // the episode opens with the 0 -> >0 post and ends with the >0 -> 0 post
+            boolean episodeChange = posted && (decision.kind == "past" || decision.kind == "clear")
+            if (posted && (wanted != (row.get("lastPostedPastCount") as Integer) || episodeChange)) {
                 ec.transaction.runUseOrBegin(30, "Sync pulse ${pair.syncPairId} could not store its posted count".toString()) {
                     row.set("lastPostedPastCount", wanted)
+                    if (decision.kind == "past") row.set("episodeStartStamp", Timestamp.from(now))
+                    else if (decision.kind == "clear") row.set("episodeStartStamp", null)
                     row.update()
                 }
             }
@@ -843,6 +858,16 @@ class SyncPulseSupport {
             logger.warn("Sync pulse {} chat post skipped: {}", pair?.syncPairId, t.message ?: t.toString())
             clearErrors(ec)
         }
+    }
+
+    /** [episodeClosed, episodeDropped]: the pair's orders closed since the episode began, split by how they closed. */
+    private static Map episodeCounts(def ec, String tenantId, String pairId, Timestamp episodeStart) {
+        List<Map> closedRows = (TenantScopedFinder.findGlobalUnscopedPerRequest(ec, "darpan.pulse.SyncPulseOrder", WHY)
+                .condition("syncPairId", pairId).condition("companyUserGroupId", tenantId)
+                .condition("closedStamp", EntityCondition.GREATER_THAN_EQUAL_TO, episodeStart).useCache(false).list() ?: [])
+                .collect { it.getMap() as Map }
+        return [episodeClosed : closedRows.count { normalize(it.get("closeReason")) != DROPPED },
+                episodeDropped: closedRows.count { normalize(it.get("closeReason")) == DROPPED }]
     }
 
     /** One post; false when it could not be delivered. Never throws. */

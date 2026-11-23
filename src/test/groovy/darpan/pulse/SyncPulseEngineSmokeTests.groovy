@@ -187,7 +187,7 @@ class SyncPulseEngineSmokeTests {
         assertEquals(Timestamp.from(later), orders("#A1")[0].closedStamp)
         Map post = SyncPulseSupport.decidePost("L", out, 1, ["SPS_OK"], false, false)
         assertEquals("clear", post.kind, "past reached 0: the caught-up post still fires")
-        assertTrue((post.text as String).endsWith("0 findings closed"), post.text as String)
+        assertTrue((post.text as String).endsWith("0 findings closed \u00b7 1 left the check"), post.text as String)
     }
 
     @Test

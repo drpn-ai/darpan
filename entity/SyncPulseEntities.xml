@@ -25,6 +25,9 @@
         <field name="lastPulseStamp" type="date-time"/>
         <field name="lastPulseStatusEnumId" type="id"/>
         <field name="lastPostedPastCount" type="number-integer"/>
+        <field name="episodeStartStamp" type="date-time">
+            <description>When the current past-allowance episode was announced (the 0 to above-0 post); cleared by the caught-up post.</description>
+        </field>
         <field name="presentSignature" type="text-medium">
             <description>What the stored SyncPulsePresentKey rows were confirmed under; a different signature means they are dropped.</description>
         </field>
@@ -95,6 +98,9 @@
         <field name="firstPastStamp" type="date-time"/>
         <field name="lastCheckedStamp" type="date-time"/>
         <field name="closedStamp" type="date-time"/>
+        <field name="closeReason" type="text-short">
+            <description>ARRIVED (it reached the target) or DROPPED (it left the check); null while open and on rows closed before this was kept.</description>
+        </field>
         <relationship type="one" related="darpan.pulse.SyncPair" fk-name="SPORDER_PAIR">
             <key-map field-name="syncPairId"/>
         </relationship>

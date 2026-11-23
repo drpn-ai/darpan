@@ -84,7 +84,7 @@ class SyncPulseChatTests {
 
     @BeforeEach
     void reset() {
-        ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod",
+        ["darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPulsePresentKey", "darpan.pulse.PeakPeriodSync", "darpan.peak.PeakPeriod",
          "darpan.pulse.SyncPair"].each { ec.entity.find(it).disableAuthz().deleteAll() }
         upstream.clear(); arrived.clear(); posts.clear(); pulseThreads.clear()
         upstreamFailure = null
@@ -144,10 +144,64 @@ class SyncPulseChatTests {
         arrived << "#A1"
         pulse(T0.plus(Duration.ofHours(6)))
 
-        assertEquals([[ref: URL1, text: "${LABEL}: caught up. Nothing past the 1h allowance.\n0 waiting${DOT}oldest none${DOT}1 findings closed".toString()]], posts)
+        assertEquals([[ref: URL1, text: "${LABEL}: caught up. Nothing past the 1h allowance.\n0 waiting${DOT}oldest none${DOT}1 finding closed".toString()]], posts)
         assertEquals(0, pairMap(SP).lastPostedPastCount as Integer)
         pulse(T0.plus(Duration.ofHours(6)).plus(Duration.ofMinutes(5)))
         assertEquals(1, posts.size(), "caught up is said once")
+    }
+
+    @Test
+    void clearCountsTheWholeEpisodeNotOnePulse() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(95))
+        upstream["#A3"] = T0.minus(Duration.ofMinutes(100))
+        pulse(T0)
+        assertEquals(1, posts.size())
+        assertNotNull(pairMap(SP).episodeStartStamp)
+        posts.clear()
+
+        arrived << "#A1"
+        pulse(T0.plus(Duration.ofMinutes(5)))
+        arrived << "#A2"
+        pulse(T0.plus(Duration.ofMinutes(10)))
+        assertEquals([], posts, "still one past: silent")
+        arrived << "#A3"
+        pulse(T0.plus(Duration.ofMinutes(15)))
+
+        assertEquals(["${LABEL}: caught up. Nothing past the 1h allowance.\n0 waiting${DOT}oldest none${DOT}3 findings closed".toString()], posts*.text)
+        assertNull(pairMap(SP).episodeStartStamp, "the clear post ends the episode")
+    }
+
+    @Test
+    void clearCountsArrivalsAndNamesWhatLeftTheCheck() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        upstream["#A2"] = T0.minus(Duration.ofMinutes(95))
+        pulse(T0)
+        posts.clear()
+
+        arrived << "#A1"
+        upstream.remove("#A2")
+        pulse(T0.plus(Duration.ofMinutes(60)))
+
+        assertEquals(["${LABEL}: caught up. Nothing past the 1h allowance.\n0 waiting${DOT}oldest none${DOT}1 finding closed${DOT}1 left the check".toString()], posts*.text)
+    }
+
+    @Test
+    void aFreshEpisodeCountsFromZero() {
+        upstream["#A1"] = T0.minus(Duration.ofMinutes(90))
+        pulse(T0)
+        arrived << "#A1"
+        pulse(T0.plus(Duration.ofMinutes(5)))
+        posts.clear()
+
+        upstream["#B1"] = T0.plus(Duration.ofMinutes(10)).minus(Duration.ofMinutes(90))
+        pulse(T0.plus(Duration.ofMinutes(10)))
+        assertEquals(1, posts.size(), "a new episode is announced")
+        arrived << "#B1"
+        pulse(T0.plus(Duration.ofMinutes(15)))
+
+        assertEquals("${LABEL}: caught up. Nothing past the 1h allowance.\n0 waiting${DOT}oldest none${DOT}1 finding closed".toString(), posts[1].text,
+                "the first episode's arrival is not carried over")
     }
 
     @Test

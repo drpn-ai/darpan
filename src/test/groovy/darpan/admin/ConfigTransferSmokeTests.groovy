@@ -1657,6 +1657,36 @@ class ConfigTransferSmokeTests {
         }
     }
 
+    @Test
+    void aConfigVersionFrom340TakesItsOwnScopesFiltersAfterAScopeWasAddedToItsRun() {
+        // review M3 (was Review M4 of 3b-2c): a version names its automation's scope by id; a scope added to the run since,
+        // sorting before it with filters of its own, must not hand the automation those filters
+        withAutomation {
+            withRunFilter("Open") {
+                Map pack = as340(ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true))
+                ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
+                create("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS_ADDED", ruleSetId: "XFER_RS", objectType: "AAA_FIRST",
+                        scopeMode: "COMPARE", description: "Added since", companyUserGroupId: SRC])
+                create("darpan.rule.RuleSetCompareSource", [compareScopeId: "XFER_CS_ADDED", fileSide: "FILE_1", systemEnumId: "NETSUITE",
+                        sourceTypeEnumId: "AUT_SRC_API", primaryIdExpression: "id", companyUserGroupId: SRC])
+                create("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "XFER_CS_ADDED", fileSide: "FILE_1", sequenceNum: 1L,
+                        companyUserGroupId: SRC, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Wrong"])
+                try {
+                    // the restore itself is refused here for another reason (SCOPE_IN_USE: a version maps scopes by position);
+                    // what the automation would be given is the analysed bundle's
+                    Map ctx = (Map) ConfigTransferImporter.analyse(ec, SRC, pack, TenantConfigRestoreSupport.sameConnections(pack), null, true)
+                    Map automation = (((Map) ctx.bundle).automations as List<Map>).find { it.ref == AUTO_REF || it.fields?.automationName == "Returns every morning" }
+                    Map source = ((automation.children as Map).ReconciliationAutomationSource as List<Map>).find { it.fields.fileSide == "FILE_1" }
+                    assertEquals(["Open"], ((source.children as Map).ReconciliationAutomationSourceFilter as List<Map>)*.fields*.filterValues)
+                } finally {
+                    ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", "XFER_CS_ADDED").disableAuthz().deleteAll()
+                    ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", "XFER_CS_ADDED").disableAuthz().deleteAll()
+                    ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", "XFER_CS_ADDED").disableAuthz().deleteAll()
+                }
+            }
+        }
+    }
+
     /** A bundle as 3.4.0 exported it: automation sources carry no filter child. */
     private static Map as340(Map bundle) {
         Map old = copy(bundle)

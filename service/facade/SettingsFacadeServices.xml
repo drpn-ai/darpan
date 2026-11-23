@@ -363,7 +363,7 @@
                 <set field="automationRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
                 <set field="subscriptionRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
                 <set field="streaksSpaceRef" from="darpan.facade.common.TenantAccessSupport.readStoredStreaksChatSpaceId(ec, tenantId) == chatSpaceIdValue"/>
-                <set field="deploymentRefCount" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScriptDeployment', 'script deployments posting to a chat space being deleted, pinned to the active tenant by condition').condition('companyUserGroupId', tenantId).condition('chatSpaceId', chatSpaceIdValue).useCache(false).count()"/>
+                <set field="deploymentRefCount" from="darpan.query.TenantQuerySupport.chatScheduleCount(ec, tenantId, chatSpaceIdValue)"/>
                 <if condition="automationRefCount &gt; 0 || subscriptionRefCount &gt; 0 || streaksSpaceRef || deploymentRefCount &gt; 0">
                     <message error="true">Chat space '${spaceRow.spaceName}' is in use; deactivate it instead of deleting.</message>
                 </if>
@@ -431,7 +431,7 @@
 
     <!-- DAR-UI-123. The notifications page: a grid of everything that posts to chat against the tenant's spaces, one dot a
          row. Each source keeps storing its own space (TenantSetting.streaksChatSpaceId, the audit's run digest,
-         ReconciliationAutomation.chatSpaceId, TenantScriptDeployment.chatSpaceId); these services read and move them. -->
+         ReconciliationAutomation.chatSpaceId, a query schedule's chat delivery); these services read and move them. -->
     <service verb="get" noun="NotificationRoutes" authz-action="view" allow-remote="true" authenticate="true">
         <description>DAR-UI-123. The active tenant's chat spaces and, for each thing that posts to chat, the one space it
             posts to: the streaks messages, each audit's run update, each automation (paused ones too, archived ones not)
@@ -510,19 +510,8 @@
                             when: dailyTime ? 'Daily ' + dailyTime : null, paused: automationRow.isActive == 'N', chatSpaceId: automationRow.chatSpaceId ?: null])"/>
                 </iterate>
 
-                <entity-find entity-name="darpan.script.TenantScript" list="scriptRows" cache="false">
-                    <econdition field-name="companyUserGroupId" from="tenantId"/>
-                </entity-find>
-                <entity-find entity-name="darpan.script.TenantScriptDeployment" list="deploymentRows" cache="false">
-                    <econdition field-name="companyUserGroupId" from="tenantId"/>
-                    <order-by field-name="createdDate"/>
-                </entity-find>
-                <iterate list="deploymentRows" entry="deploymentRow">
-                    <set field="dailyTime" from="darpan.audit.AuditSettingsSupport.timeOf(deploymentRow.scheduleExpr as String)"/>
-                    <set field="ignoreRoute" from="routes.add([sourceType: 'SCRIPT', sourceId: deploymentRow.tenantScriptDeploymentId,
-                            label: scriptRows.find { it.tenantScriptId == deploymentRow.tenantScriptId }?.scriptName ?: deploymentRow.tenantScriptId,
-                            when: dailyTime ? 'Daily ' + dailyTime : null, paused: deploymentRow.isActive != 'Y', chatSpaceId: deploymentRow.chatSpaceId])"/>
-                </iterate>
+                <!-- DAR-BE-334: each query schedule that posts to chat -->
+                <set field="ignoreRoutes" from="routes.addAll(darpan.query.TenantQuerySupport.chatRoutes(ec, tenantId))"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -534,12 +523,13 @@
         <description>DAR-UI-123. Moves one thing that posts to chat to another of the active tenant's spaces, or to none.
             Writes only that source's space field, nothing else on it. The space must be the tenant's and switched on; the
             automation, audit or deployment must be the tenant's. Needs edit access to the tenant, and for an audit's update
-            tenant admin rights as well (as save#AuditSettings asks for its runEmail). A deployed script always posts
-            somewhere: to stop it, turn its schedule off on the Scripts page.</description>
+            tenant admin rights as well (as save#AuditSettings asks for its runEmail), and for a query schedule too
+            (as save#TenantQuerySchedule does). A query schedule always posts somewhere: to stop it, switch it off on the
+            Queries page.</description>
         <in-parameters>
             <parameter name="sourceType" required="true"><description>STREAKS, AUDIT_UPDATE, AUTOMATION or SCRIPT.</description></parameter>
             <parameter name="sourceId"><description>Blank for STREAKS; the audit's code for AUDIT_UPDATE; the automationId for
-                AUTOMATION; the tenantScriptDeploymentId for SCRIPT.</description></parameter>
+                AUTOMATION; the query schedule's id for SCRIPT.</description></parameter>
             <parameter name="chatSpaceId"><description>The space to post to; blank posts nowhere (refused for SCRIPT).</description></parameter>
         </in-parameters>
         <out-parameters>
@@ -563,13 +553,17 @@
                 <message error="true">${sourceType} does not post to chat. Use STREAKS, AUDIT_UPDATE, AUTOMATION or SCRIPT.</message>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; sourceTypeValue != 'STREAKS' &amp;&amp; !sourceIdValue">
-                <message error="true">Say which ${sourceTypeValue == 'AUDIT_UPDATE' ? 'audit' : (sourceTypeValue == 'AUTOMATION' ? 'automation' : 'deployed script')} to move.</message>
+                <message error="true">Say which ${sourceTypeValue == 'AUDIT_UPDATE' ? 'audit' : (sourceTypeValue == 'AUTOMATION' ? 'automation' : 'query schedule')} to move.</message>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; sourceTypeValue == 'SCRIPT' &amp;&amp; !chatSpaceIdValue">
-                <message error="true">A deployed script needs a space. Turn its schedule off instead.</message>
+                <message error="true">A query schedule needs a space. Switch it off instead.</message>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; sourceTypeValue == 'AUDIT_UPDATE'">
                 <set field="ignoreAdmin" from="darpan.facade.common.TenantAccessSupport.requireTenantAdmin(ec, tenantId, 'Only a tenant admin can change where an audit update posts.')"/>
+            </if>
+            <!-- DAR-BE-334: a query schedule sends the tenant's data out, so moving it needs tenant admin, as saving it does -->
+            <if condition="!ec.message.hasError() &amp;&amp; sourceTypeValue == 'SCRIPT'">
+                <set field="ignoreAdmin" from="darpan.facade.common.TenantAccessSupport.requireTenantAdmin(ec, tenantId, 'Only a tenant admin can change where a query schedule posts.')"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; chatSpaceIdValue">
                 <entity-find entity-name="darpan.reconciliation.TenantChatSpace" list="spaceRows" cache="false">
@@ -631,18 +625,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; sourceTypeValue == 'SCRIPT'">
-                <entity-find entity-name="darpan.script.TenantScriptDeployment" list="deploymentRows" cache="false">
-                    <econdition field-name="tenantScriptDeploymentId" from="sourceIdValue"/>
-                    <econdition field-name="companyUserGroupId" from="tenantId"/>
-                </entity-find>
-                <if condition="!deploymentRows">
-                    <message error="true">Deployed script ${sourceIdValue} was not found.</message>
-                    <else>
-                        <set field="deploymentRow" from="deploymentRows[0]"/>
-                        <set field="ignoreSet" from="deploymentRow.set('chatSpaceId', chatSpaceIdValue)"/>
-                        <entity-update value-field="deploymentRow"/>
-                    </else>
-                </if>
+                <script>darpan.query.TenantQuerySupport.moveChatRoute(ec, tenantId, sourceIdValue, chatSpaceIdValue)</script>
             </if>
 
             <if condition="!ec.message.hasError()">

@@ -100,15 +100,26 @@ class NotificationRouteServicesTests {
                     companyUserGroupId: MINE, sourceTypeEnumId: "AUT_SRC_API", primaryIdExpression: "orderId"])
         }
 
-        insert("darpan.script.TenantScript", [tenantScriptId: "NR_SCRIPT_MINE", companyUserGroupId: MINE, scriptName: "Morning note",
-                scriptProfile: "EXPRESSION", inputSource: "SAMPLE", scriptBody: "'hi'", isActive: "Y"])
-        insert("darpan.script.TenantScript", [tenantScriptId: "NR_SCRIPT_OTHER", companyUserGroupId: OTHER, scriptName: "Their note",
-                scriptProfile: "EXPRESSION", inputSource: "SAMPLE", scriptBody: "'hi'", isActive: "Y"])
-        insert("darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: DEP_MINE, companyUserGroupId: MINE,
-                tenantScriptId: "NR_SCRIPT_MINE", scheduleExpr: "0 0 9 * * ?", inputSavedRunId: "NR_SAVED_RUN", chatSpaceId: SPACE_A,
-                isActive: "Y", nextRunDate: Timestamp.valueOf("2026-11-19 09:00:00"), createdDate: FROM])
-        insert("darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: DEP_OTHER, companyUserGroupId: OTHER,
-                tenantScriptId: "NR_SCRIPT_OTHER", scheduleExpr: "0 0 9 * * ?", chatSpaceId: OTHER_SPACE, isActive: "Y", createdDate: FROM])
+        // DAR-BE-334: query schedules (moqui-jexl) post to chat through a chat delivery; an email-only one is no route
+        insert("jexl.script.UserScript", [userScriptId: "NR_SCRIPT_MINE", companyUserGroupId: MINE, scriptName: "Morning note",
+                scriptProfile: "QUERY", scriptBody: "'hi'", isActive: "Y"])
+        insert("jexl.script.UserScript", [userScriptId: "NR_SCRIPT_OTHER", companyUserGroupId: OTHER, scriptName: "Their note",
+                scriptProfile: "QUERY", scriptBody: "'hi'", isActive: "Y"])
+        insert("jexl.script.UserScriptDeployment", [scriptDeploymentId: DEP_MINE, companyUserGroupId: MINE, userScriptId: "NR_SCRIPT_MINE",
+                cronExpression: "0 0 9 * * ?", timeZone: "UTC", ownerUserId: ec.user.userId, isActive: "Y",
+                nextRunDate: Timestamp.valueOf("2026-11-19 09:00:00")])
+        insert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: DEP_MINE, deliverySeqId: "01",
+                deliveryServiceName: "query.QueryHostServices.deliver#QueryEmail", parametersJson: '{"toAddresses":"ops@krewe.example"}', isActive: "Y"])
+        insert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: DEP_MINE, deliverySeqId: "02",
+                deliveryServiceName: "query.QueryHostServices.deliver#QueryChat", parametersJson: '{"chatSpaceId":"' + SPACE_A + '"}', isActive: "Y"])
+        insert("jexl.script.UserScriptDeployment", [scriptDeploymentId: "NR_DEP_EMAIL_ONLY", companyUserGroupId: MINE, userScriptId: "NR_SCRIPT_MINE",
+                cronExpression: "0 0 10 * * ?", timeZone: "UTC", ownerUserId: ec.user.userId, isActive: "Y"])
+        insert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "NR_DEP_EMAIL_ONLY", deliverySeqId: "01",
+                deliveryServiceName: "query.QueryHostServices.deliver#QueryEmail", parametersJson: '{"toAddresses":"ops@krewe.example"}', isActive: "Y"])
+        insert("jexl.script.UserScriptDeployment", [scriptDeploymentId: DEP_OTHER, companyUserGroupId: OTHER, userScriptId: "NR_SCRIPT_OTHER",
+                cronExpression: "0 0 9 * * ?", timeZone: "UTC", ownerUserId: ec.user.userId, isActive: "Y"])
+        insert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: DEP_OTHER, deliverySeqId: "01",
+                deliveryServiceName: "query.QueryHostServices.deliver#QueryChat", parametersJson: '{"chatSpaceId":"' + OTHER_SPACE + '"}', isActive: "Y"])
         ec.message.clearErrors()
     }
 
@@ -167,14 +178,18 @@ class NotificationRouteServicesTests {
         assertEquals(sourcesBefore, children("darpan.reconciliation.ReconciliationAutomationSource"))
         assertEquals(2, sourcesBefore.size(), "the sources fixture is in place")
 
-        // Deployed script: chatSpaceId only; schedule, saved run, on/off and next run stay.
-        Map deploymentBefore = withoutSpace(row("darpan.script.TenantScriptDeployment", "tenantScriptDeploymentId", DEP_MINE))
-        Map script = facade("set#NotificationRoute", [sourceType: "SCRIPT", sourceId: DEP_MINE, chatSpaceId: SPACE_B])
-        assertTrue(script.ok as boolean, script.errors?.toString())
-        Map deploymentAfter = row("darpan.script.TenantScriptDeployment", "tenantScriptDeploymentId", DEP_MINE)
-        assertEquals(SPACE_B, deploymentAfter.chatSpaceId)
-        assertEquals(deploymentBefore, withoutSpace(deploymentAfter))
-        assertEquals(["0 0 9 * * ?", "NR_SAVED_RUN", "Y"], ["scheduleExpr", "inputSavedRunId", "isActive"].collect { deploymentAfter[it] })
+        // Query schedule: its chat delivery's space only; the schedule and its email delivery stay. Needs a tenant admin.
+        Map deploymentBefore = withoutSpace(row("jexl.script.UserScriptDeployment", "scriptDeploymentId", DEP_MINE))
+        String emailBefore = delivery(DEP_MINE, "01").parametersJson
+        assertEquals(["Only a tenant admin can change where a query schedule posts."],
+                facade("set#NotificationRoute", [sourceType: "SCRIPT", sourceId: DEP_MINE, chatSpaceId: SPACE_B]).errors)
+        asTenantAdmin {
+            Map script = facade("set#NotificationRoute", [sourceType: "SCRIPT", sourceId: DEP_MINE, chatSpaceId: SPACE_B])
+            assertTrue(script.ok as boolean, script.errors?.toString())
+        }
+        assertEquals(SPACE_B, chatSpaceOf(DEP_MINE))
+        assertEquals(deploymentBefore, withoutSpace(row("jexl.script.UserScriptDeployment", "scriptDeploymentId", DEP_MINE)))
+        assertEquals(emailBefore, delivery(DEP_MINE, "01").parametersJson)
 
         // Audit update: the run digest's chatSpaceId only; its addresses and on/off stay. Needs a tenant admin.
         asTenantAdmin {
@@ -206,10 +221,12 @@ class NotificationRouteServicesTests {
         }
         assertNull(row("darpan.audit.AuditDigest", "auditDigestId", "RUN_NR_MINE_MC").chatSpaceId)
 
-        Map script = facade("set#NotificationRoute", [sourceType: "SCRIPT", sourceId: DEP_MINE, chatSpaceId: ""])
-        assertFalse(script.ok as boolean)
-        assertEquals(["A deployed script needs a space. Turn its schedule off instead."], script.errors)
-        assertEquals(SPACE_A, row("darpan.script.TenantScriptDeployment", "tenantScriptDeploymentId", DEP_MINE).chatSpaceId)
+        asTenantAdmin {
+            Map script = facade("set#NotificationRoute", [sourceType: "SCRIPT", sourceId: DEP_MINE, chatSpaceId: ""])
+            assertFalse(script.ok as boolean)
+            assertEquals(["A query schedule needs a space. Switch it off instead."], script.errors)
+        }
+        assertEquals(SPACE_A, chatSpaceOf(DEP_MINE))
     }
 
     @Test
@@ -229,9 +246,11 @@ class NotificationRouteServicesTests {
         assertEquals(["Automation ${AUT_OTHER} was not found.".toString()], foreignAutomation.errors)
         assertEquals(OTHER_SPACE, row("darpan.reconciliation.ReconciliationAutomation", "automationId", AUT_OTHER).chatSpaceId)
 
-        Map foreignScript = facade("set#NotificationRoute", [sourceType: "SCRIPT", sourceId: DEP_OTHER, chatSpaceId: SPACE_A])
-        assertEquals(["Deployed script ${DEP_OTHER} was not found.".toString()], foreignScript.errors)
-        assertEquals(OTHER_SPACE, row("darpan.script.TenantScriptDeployment", "tenantScriptDeploymentId", DEP_OTHER).chatSpaceId)
+        asTenantAdmin {
+            Map foreignScript = facade("set#NotificationRoute", [sourceType: "SCRIPT", sourceId: DEP_OTHER, chatSpaceId: SPACE_A])
+            assertEquals(["Schedule ${DEP_OTHER} was not found.".toString()], foreignScript.errors)
+        }
+        assertEquals(OTHER_SPACE, chatSpaceOf(DEP_OTHER))
 
         asTenantAdmin {
             Map foreignAudit = facade("set#NotificationRoute", [sourceType: "AUDIT_UPDATE", sourceId: "other-only", chatSpaceId: SPACE_A])
@@ -336,6 +355,17 @@ class NotificationRouteServicesTests {
     private List<Map> children(String entityName) {
         return ec.entity.find(entityName).condition("automationId", AUT_DAILY).orderBy("fileSide").disableAuthz().useCache(false)
                 .list()*.getMap().collect { withoutSpace(it) }
+    }
+
+    private def delivery(String scheduleId, String seqId) {
+        return ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition([scriptDeploymentId: scheduleId, deliverySeqId: seqId])
+                .disableAuthz().useCache(false).one()
+    }
+
+    private String chatSpaceOf(String scheduleId) {
+        def chat = ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", scheduleId)
+                .condition("deliveryServiceName", "query.QueryHostServices.deliver#QueryChat").disableAuthz().useCache(false).one()
+        return new groovy.json.JsonSlurper().parseText(chat.parametersJson as String).chatSpaceId
     }
 
     /** The row without the field the move writes, and without the stamp Moqui sets on any update. */

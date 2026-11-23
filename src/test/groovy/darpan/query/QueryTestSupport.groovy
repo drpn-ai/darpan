@@ -29,6 +29,7 @@ class QueryTestSupport {
         ExecutionContext ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, name)
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ec.entity.makeDataLoader().location("component://moqui-jexl/data/JexlSecurityData.xml").dummyFks(true).load()
+        ec.entity.makeDataLoader().location("component://darpan/data/QuerySeedData.xml").dummyFks(true).load()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         insert(ec, "moqui.security.UserGroup", [userGroupId: GORJANA, description: "Gorjana",
                                                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])

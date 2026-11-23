@@ -918,6 +918,7 @@ class ConfigTransferImporter {
             Object v = text(recFields[k]) ?: defaultOf(ed, k)
             if (v == null) return
             fields[k] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> idOf(item.sourceConfigId) }
+                    : JSON_KEYED_REF_FIELDS.containsKey(k) ? ConfigTransferExporter.mapKeyedRefs(v, JSON_KEYED_REF_FIELDS[k]) { String ref -> idOf(ref) }
                     : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> idOf(ref) }
                     : k in JSON_CONC_REF_FIELDS ? ConfigTransferExporter.rewriteConclusionRules(v) { Object ref -> idOf(ref) } : text(v)
         }
@@ -1220,7 +1221,7 @@ class ConfigTransferImporter {
     /** The entity and key behind a ref of each kind, children included, for checking who owns an id. */
     private static final Map<String, List<String>> CHILD_ENTITIES = [(RULE): ["darpan.rule.Rule", "ruleId"],
             (QUESTION): ["darpan.reconciliation.ReconciliationRun", "reconciliationRunId"],
-            (DEPLOYMENT): ["darpan.script.TenantScriptDeployment", "tenantScriptDeploymentId"]].asImmutable()
+            (DEPLOYMENT): ["jexl.script.UserScriptDeployment", "scriptDeploymentId"]].asImmutable()
 
     /** True when the id names a row of this kind that belongs to the importing tenant (read by key, owner compared in code). */
     private static boolean ownedByTenant(Map ctx, String kind, String id) {
@@ -1378,10 +1379,10 @@ class ConfigTransferImporter {
         Map scriptSpec = kindSpec(ctx, SCRIPT)
         Map deploymentSpec = ((scriptSpec.children ?: []) as List<Map>)[0]
         Set<String> before = action == CREATE ? ([] as Set<String>) : (finder(ctx.ec, deploymentSpec.entityName as String)
-                .condition("tenantScriptId", ctx.idMap[t.ref]).useCache(false).list()*.tenantScriptDeploymentId.collect { it as String } as Set<String>)
+                .condition("userScriptId", ctx.idMap[t.ref]).useCache(false).list()*.scriptDeploymentId.collect { it as String } as Set<String>)
         writeTree(ctx, scriptSpec, t, "")
-        finder(ctx.ec, deploymentSpec.entityName as String).condition("tenantScriptId", ctx.idMap[t.ref]).useCache(false).list()
-                .findAll { !((it.tenantScriptDeploymentId as String) in before) }.each { row ->
+        finder(ctx.ec, deploymentSpec.entityName as String).condition("userScriptId", ctx.idMap[t.ref]).useCache(false).list()
+                .findAll { !((it.scriptDeploymentId as String) in before) }.each { row ->
             row.set("isActive", "N")
             row.set("nextRunDate", null)
             row.update()
@@ -1459,6 +1460,7 @@ class ConfigTransferImporter {
         Set<String> lists = ((spec.textListRefs ?: [:]) as Map).keySet() as Set<String>
         ((rec.fields ?: [:]) as Map).findAll { k, v -> k in values }.each { k, v ->
             out[k as String] = k in JSON_REF_FIELDS ? ConfigTransferExporter.rewriteLookups(v) { Map item -> targetId(ctx, item.sourceConfigId) }
+                    : JSON_KEYED_REF_FIELDS.containsKey(k) ? ConfigTransferExporter.mapKeyedRefs(v, JSON_KEYED_REF_FIELDS[k]) { String ref -> targetId(ctx, ref) }
                     : k in JSON_PARAM_REF_FIELDS ? ConfigTransferExporter.mapParamRefs(v) { String ref -> targetId(ctx, ref) }
                     : k in JSON_CONC_REF_FIELDS ? ConfigTransferExporter.rewriteConclusionRules(v) { Object ref -> targetId(ctx, ref) } : text(v)
         }
@@ -1486,6 +1488,8 @@ class ConfigTransferImporter {
         if (ed.isField("companyUserGroupId")) value.set("companyUserGroupId", ctx.tenantId)
         if (creating && ed.isField("createdDate")) value.set("createdDate", ctx.now)
         if (creating && ed.isField("createdByUserId")) value.set("createdByUserId", ctx.userId)
+        // DAR-BE-334: a query or schedule an import creates is owned by the admin who imports it
+        if (creating && ed.isField("ownerUserId")) value.set("ownerUserId", ctx.userId)
         if (ed.isField("lastUpdatedDate")) value.set("lastUpdatedDate", ctx.now)
     }
 
@@ -1577,6 +1581,7 @@ class ConfigTransferImporter {
         ((rec.fields ?: [:]) as Map).each { k, v ->
             if (k in JSON_REF_FIELDS) ConfigTransferExporter.rewriteLookups(v) { Map item -> out << (item.sourceConfigId as String); item.sourceConfigId }
             if (k in JSON_PARAM_REF_FIELDS) ConfigTransferExporter.mapParamRefs(v) { String ref -> out << ref; ref }
+            if (JSON_KEYED_REF_FIELDS.containsKey(k)) ConfigTransferExporter.mapKeyedRefs(v, JSON_KEYED_REF_FIELDS[k as String]) { String ref -> out << ref; ref }
             if (k in JSON_CONC_REF_FIELDS) ConfigTransferExporter.rewriteConclusionRules(v) { Object ref -> out << (ref as String); ref }
         }
         ((rec.children ?: [:]) as Map).values().each { ((List) it).each { out.addAll(allRefs((Map) it)) } }

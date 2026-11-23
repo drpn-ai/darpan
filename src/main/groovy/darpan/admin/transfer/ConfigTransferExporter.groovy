@@ -140,14 +140,10 @@ class ConfigTransferExporter {
                     .condition("reconciliationId", "in", lifecycles*.reconciliationId).useCache(false).list()
                     .findAll { it.isActive != "N" && it.ruleSetId }.each { runIds.add(it.ruleSetId as String) }
         }
-        // DAR-BE-236: the tenant's scripts travel with its automations, and the runs their deployments read with them.
+        // DAR-BE-236, DAR-BE-334: the tenant's queries travel with its automations, and the saved runs their reads name with them.
         List scripts = withAutomations ? finder(ec, spec(SCRIPT).entityName as String).condition("companyUserGroupId", tenantId)
-                .orderBy(["scriptName", "tenantScriptId"]).useCache(false).list() : []
-        if (scripts) {
-            finder(ec, "darpan.script.TenantScriptDeployment").condition("companyUserGroupId", tenantId)
-                    .condition("tenantScriptId", "in", scripts*.tenantScriptId).useCache(false).list()
-                    .findAll { it.inputSavedRunId != null }.each { runIds.add(it.inputSavedRunId as String) }   // EntityList.findAll wants a Boolean
-        }
+                .orderBy(["scriptName", "userScriptId"]).useCache(false).list() : []
+        scripts.each { s -> keyedValues(s.readSpecJson, "savedRunId").each { runIds.add(it) } }
         List runs = runIds ? finder(ec, "darpan.rule.RuleSet").condition("companyUserGroupId", tenantId)
                 .condition("ruleSetId", "in", runIds).orderBy(["ruleSetName", "ruleSetId"]).useCache(false).list() : []
         (runIds - (runs*.ruleSetId.collect { it as String } as Set)).each { String id ->
@@ -323,6 +319,8 @@ class ConfigTransferExporter {
                 fields[f] = rewriteLookups(value) { Map item -> namer(lookupKind(ec, item.systemEnumId) ?: "UNKNOWN", item.sourceConfigId) }
             } else if (f in JSON_CONC_REF_FIELDS) {
                 fields[f] = rewriteConclusionRules(value) { Object id -> namer(CONC, id) }
+            } else if (JSON_KEYED_REF_FIELDS.containsKey(f) && !(f in ((spec.plainJsonFields ?: []) as List<String>))) {
+                fields[f] = rewriteKeyed(value, JSON_KEYED_REF_FIELDS[f]) { String kind, Object v -> namer(kind, v) }
             } else if (f in JSON_PARAM_REF_FIELDS) {
                 // The row's connector says which parameter holds its config id, and of what kind.
                 Map connector = text(row.get("systemEnumId")) ? SourceSystemConnectorSupport.resolve(ec, text(row.get("systemEnumId"))) : null
@@ -472,6 +470,49 @@ class ConfigTransferExporter {
             copy.conclusionEnumId = mapId(copy.conclusionEnumId)
             return copy
         })
+    }
+
+    /**
+     * DAR-BE-334. A JSON document with each value under one of keyKinds' keys (at any depth) passed through
+     * mapValue(kind, value); text that is not JSON is kept as it is.
+     */
+    static String rewriteKeyed(Object raw, Map<String, String> keyKinds, Closure<Object> mapValue) {
+        String json = text(raw)
+        if (!json?.trim()) return json
+        Object parsed
+        try {
+            parsed = new JsonSlurper().parseText(json)
+        } catch (Exception ignored) {
+            return json
+        }
+        if (!(parsed instanceof Map) && !(parsed instanceof List)) return json
+        Closure walk
+        walk = { Object node ->
+            if (node instanceof Map) {
+                return ((Map) node).collectEntries { k, v ->
+                    String kind = keyKinds[k as String]
+                    [(k): kind && (v instanceof CharSequence || v instanceof Number) && text(v) ? mapValue(kind, v) : walk(v)]
+                }
+            }
+            if (node instanceof List) return ((List) node).collect { walk(it) }
+            return node
+        }
+        return JsonOutput.toJson(walk(parsed))
+    }
+
+    /** The import side of rewriteKeyed: a keyed value that is a ref of a transfer kind maps through mapRef. */
+    static String mapKeyedRefs(Object raw, Map<String, String> keyKinds, Closure<String> mapRef) {
+        return rewriteKeyed(raw, keyKinds) { String kind, Object v ->
+            List<String> parsed = parseRef(v)
+            parsed && parsed[0] in KIND_NAMES ? mapRef(v as String) : v
+        }
+    }
+
+    /** Every value under key, at any depth, of a JSON document (none when it is not JSON). */
+    static List<String> keyedValues(Object raw, String key) {
+        List<String> out = []
+        rewriteKeyed(raw, [(key): "_"]) { String kind, Object v -> out << (v as String); v }
+        return out
     }
 
     /** The import side of rewriteParams: a parameter value that is a ref of a transfer kind maps through mapRef. */

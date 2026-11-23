@@ -56,10 +56,10 @@ class TransferSpecs {
      */
     static final String KNOWLEDGE = "KNOWLEDGE"
     /**
-     * DAR-BE-236. A tenant's scripts (darpan.script.TenantScript) with their deployments, carried with automations (a
-     * whole-tenant transfer, and every config version). A deployment's chat space and saved run travel as refs in a
-     * transfer and as plain ids in a version; when it runs is operational and stays the target's, and one created by an
-     * import arrives switched off.
+     * DAR-BE-236, DAR-BE-334. A tenant's queries (jexl.script.UserScript) with their schedules and deliveries, carried with
+     * automations (a whole-tenant transfer, and every config version). A read's saved run and a delivery's chat space
+     * travel as refs (JSON_KEYED_REF_FIELDS); who owns it and when it runs stay the target's (the importer owns what it
+     * creates), and a schedule created by an import arrives switched off.
      */
     static final String SCRIPT = "SCRIPT"
     /** DAR-BE-237. A script's deployment, a child kind like RULE: its ref lets a version restore put it back under its own id. */
@@ -87,6 +87,15 @@ class TransferSpecs {
 
     /** DAR-BE-160. Text columns holding a JSON list whose items name a conclusion code by conclusionEnumId (a lifecycle's rules). */
     static final List<String> JSON_CONC_REF_FIELDS = ["conclusionRules"].asImmutable()
+    /**
+     * DAR-BE-334. JSON columns whose ids sit under known keys anywhere in the document: a query's read names its saved run
+     * (savedRunId), a schedule's delivery its chat space (chatSpaceId). Dataset and audit ids in a read stay plain (they
+     * are this instance's; a source refuses one that is not the tenant's).
+     */
+    static final Map<String, Map<String, String>> JSON_KEYED_REF_FIELDS = [
+            readSpecJson  : [savedRunId: "RUN"],
+            parametersJson: [chatSpaceId: "CHAT_SPACE"],
+    ].asImmutable() as Map<String, Map<String, String>>
 
     static final String CONCLUSION_ENUM_TYPE = "DarpanConclusion"
 
@@ -107,11 +116,14 @@ class TransferSpecs {
                     [entityName: "darpan.rule.RuleSetConclusionCondition", parentFields: ["compareScopeId", "sequenceNum"],
                      orderBy: ["conditionSeq"]]]]]]
 
+    /** DAR-BE-334. A schedule's deliveries, by position under it; their last outcome is the target's own. */
+    private static final Map DELIVERY_CHILD = [entityName: "jexl.script.UserScriptDeploymentDelivery", parentFields: ["scriptDeploymentId"],
+            orderBy: ["deliverySeqId"], dropFields: ["lastOutcome", "lastMessage"], versionPlainFields: ["parametersJson"]]
     /** DAR-BE-236. A deployment keeps its target id by position under its script, like a rule under its run. */
-    private static final Map DEPLOYMENT_CHILD = [kind: DEPLOYMENT, entityName: "darpan.script.TenantScriptDeployment", pkField: "tenantScriptDeploymentId",
-            parentFields: ["tenantScriptId"], orderBy: ["createdDate", "tenantScriptDeploymentId"],
-            refFields: [chatSpaceId: CHAT_SPACE, inputSavedRunId: RUN], versionPlainFields: ["chatSpaceId", "inputSavedRunId"],
-            dropFields: ["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage", "lastRunUnits", "lastUpdatedByUserId"]]
+    private static final Map DEPLOYMENT_CHILD = [kind: DEPLOYMENT, entityName: "jexl.script.UserScriptDeployment", pkField: "scriptDeploymentId",
+            parentFields: ["userScriptId"], orderBy: ["scriptDeploymentId"],
+            dropFields: ["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage", "lastRunUnits", "ownerUserId"],
+            children: [DELIVERY_CHILD]]
 
     /** Creation order. naturalKey matches a record on the target; null means the operator maps it (connections). */
     static final List<Map> KINDS = [
@@ -190,8 +202,8 @@ class TransferSpecs {
             [kind: KNOWLEDGE, entityName: "darpan.knowledge.KnowledgeEntry", pkField: "knowledgeEntryId", mintPrefix: "KE_",
              naturalKey: "entryKey"],
             // DAR-BE-236. After the chat spaces and runs its deployments name. A script's own isActive is its content.
-            [kind: SCRIPT, entityName: "darpan.script.TenantScript", pkField: "tenantScriptId", naturalKey: "scriptName",
-             dropFields: ["lastUpdatedByUserId"], children: [DEPLOYMENT_CHILD]],
+            [kind: SCRIPT, entityName: "jexl.script.UserScript", pkField: "userScriptId", naturalKey: "scriptName",
+             dropFields: ["ownerUserId"], versionPlainFields: ["readSpecJson"], children: [DEPLOYMENT_CHILD]],
     ].asImmutable()
 
     /** Every kind's name, for telling a ref inside JSON from a plain value. */
@@ -228,6 +240,8 @@ class TransferSpecs {
         out.refFields = ((spec.refFields ?: [:]) as Map).findAll { k, v -> !(k in plain) }
         out.positionRefs = ((spec.positionRefs ?: [:]) as Map).findAll { k, v -> !(k in plain) }
         out.dropFields = ((spec.dropFields ?: []) as List<String>).findAll { !(it in plain) }
+        // DAR-BE-334: a JSON column whose ids stay plain in a version (JSON_KEYED_REF_FIELDS are refs only in a transfer)
+        out.plainJsonFields = plain.findAll { JSON_KEYED_REF_FIELDS.containsKey(it) }
         out.remove("versionPlainFields")
         return out.asImmutable()
     }

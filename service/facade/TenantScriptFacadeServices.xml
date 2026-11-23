@@ -1,50 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  The active tenant's scripts and their scheduled deployments: JEXL a tenant writes and runs as data, no code commit.
-  Every read and write names the active tenant, so another tenant's script reads as not found; only
-  darpan.script.ScriptSupervisor runs a script.
+  DAR-BE-334. The active tenant's queries (a read over its kept data and Darpan results, plus a JEXL script) and their
+  schedules (email and chat), on moqui-jexl. Every read and write names the active tenant, so another tenant's query
+  reads as not found (darpan.query.TenantQuerySupport). Writing and running need tenant edit access; scheduling needs
+  tenant admin, since a schedule sends the tenant's data out.
 -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="list" noun="TenantScripts" authz-action="view" allow-remote="true" authenticate="true">
-        <description>The active tenant's scripts by name, plus the d: library and the limits, for the editor.</description>
+    <service verb="list" noun="TenantQueries" allow-remote="true" authenticate="true" authz-action="view">
+        <description>The active tenant's queries by name, with the fn: library and the QUERY limits for the editor.</description>
+        <in-parameters>
+
+        </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="scripts" type="List"><description>[{tenantScriptId, scriptName, description, scriptProfile,
-                inputSource, scriptBody, sampleInputJson, isActive, createdByUserId, createdDate, lastUpdatedDate}]</description></parameter>
-            <parameter name="library" type="List"><description>[{name, help}]: the d: functions.</description></parameter>
-            <parameter name="limits" type="Map"><description>{EXPRESSION: {maxSourceChars, unitLimit, timeoutMs}, SCRIPT: {...}}</description></parameter>
+            <parameter name="queries" type="List"/>
+            <parameter name="library" type="List"/>
+            <parameter name="limits" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="scripts" from="[]"/>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
-            <if condition="tenantId">
-                <set field="scriptRows" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScript', 'DAR-BE-164 tenant scripts list, pinned to the active tenant by condition').condition('companyUserGroupId', tenantId).orderBy('scriptName').useCache(false).list()"/>
-                <set field="scripts" from="scriptRows.collect { darpan.script.TenantScriptSupport.toScriptMap(it) }"/>
-            </if>
-            <set field="library" from="darpan.script.ScriptSupervisor.libraryCatalog()"/>
-            <set field="limits" from="darpan.script.ScriptSupervisor.LIMITS"/>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                queries = darpan.query.TenantQuerySupport.listQueries(ec, tenantId)
+                library = org.moqui.jexl.ScriptSupervisor.libraryCatalog()
+                limits = org.moqui.jexl.ScriptProfiles.get('QUERY').toMap()
+            ]]></script></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
-    <service verb="save" noun="TenantScript" transaction="ignore" allow-remote="true" authenticate="true">
-        <description>Create or update one of the active tenant's scripts. The body must parse under its profile and run
-            cleanly on its sample input; a script that does not is refused with the line, never saved half-checked. No
-            transaction is open while the trial run runs; the store opens its own. Needs edit access to the tenant.</description>
+    <service verb="save" noun="TenantQuery" allow-remote="true" authenticate="true" transaction="ignore">
+        <description>Create or update one of the active tenant's queries: a read over its kept data and Darpan results, and a JEXL script (profile QUERY). The script must parse and run on its sample; the read's sources must exist. Needs edit access to the tenant.</description>
         <in-parameters>
-            <parameter name="tenantScriptId"/>
-            <parameter name="scriptName" required="true"/>
+            <parameter name="tenantQueryId"/>
+            <parameter name="queryName" required="true"/>
             <parameter name="description"/>
-            <parameter name="scriptProfile" default-value="SCRIPT"><description>EXPRESSION or SCRIPT.</description></parameter>
-            <parameter name="inputSource" default-value="SAMPLE"><description>SAMPLE or RUN_RESULT.</description></parameter>
-            <parameter name="scriptBody" required="true" allow-html="any"><description>JEXL; holds &lt; and &gt;.</description></parameter>
+            <parameter name="readSpecJson" allow-html="any"/>
+            <parameter name="scriptBody" required="true" allow-html="any"/>
             <parameter name="sampleInputJson" allow-html="any"/>
             <parameter name="isActive" type="Boolean" default-value="true"/>
         </in-parameters>
@@ -52,278 +50,174 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="script" type="Map"/>
-            <parameter name="validation" type="Map"><description>{ok, profile, variables, error: {kind, message, line, column},
-                problems: [{rule, line, message}], notes: [text]}</description></parameter>
+            <parameter name="query" type="Map"/>
+            <parameter name="notes" type="List"/>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change scripts.', 'Choose a tenant first.')"/>
-            <set field="scriptIdValue" from="tenantScriptId?.toString()?.trim()"/>
-            <set field="nameValue" from="scriptName?.toString()?.trim()"/>
-            <set field="profileValue" from="darpan.script.ScriptSupervisor.profileOf(scriptProfile)"/>
-            <set field="sourceValue" from="darpan.script.TenantScriptSupport.inputSourceOf(inputSource)"/>
-            <set field="existing" from="(!ec.message.hasError() &amp;&amp; scriptIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', scriptIdValue, tenantId, 'DAR-BE-164 script edit target verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; scriptIdValue &amp;&amp; existing == null">
-                <message error="true">Script '${scriptIdValue}' was not found.</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <if condition="!nameValue"><message error="true">A script needs a name.</message></if>
-                <if condition="profileValue == null"><message error="true">Profile must be EXPRESSION or SCRIPT.</message></if>
-                <if condition="sourceValue == null"><message error="true">Input must be SAMPLE or RUN_RESULT.</message></if>
-                <set field="nameClash" from="nameValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScript', 'DAR-BE-164 script name uniqueness within the active tenant').condition('companyUserGroupId', tenantId).useCache(false).list().find { it.tenantScriptId != scriptIdValue &amp;&amp; it.scriptName?.toString()?.trim()?.equalsIgnoreCase(nameValue) } : null"/>
-                <if condition="nameClash != null"><message error="true">A script named '${nameValue}' already exists.</message></if>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="validation" from="darpan.script.ScriptSupervisor.validate(profileValue, scriptBody)"/>
-                <if condition="!validation.ok">
-                    <message error="true">${validation.error.line ? 'Line ' + validation.error.line + ': ' : ''}${validation.error.message}</message>
-                </if>
-            </if>
-            <!-- a trial run on the sample input refuses a script that fails on it or is too heavy -->
-            <if condition="!ec.message.hasError()">
-                <set field="check" from="darpan.script.ScriptSupervisor.check(profileValue, scriptBody, sampleInputJson?.toString())"/>
-                <set field="validation.problems" from="check.problems"/>
-                <set field="validation.notes" from="check.notes"/>
-                <set field="validation.ok" from="check.ok"/>
-                <iterate list="check.problems" entry="problem">
-                    <message error="true">${problem.line ? 'Line ' + problem.line + ': ' : ''}${problem.message}</message>
-                </iterate>
-                <iterate list="check.notes" entry="note"><message>${note}</message></iterate>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="userIdValue" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
-                <set field="scriptIdValue" from="scriptIdValue ?: darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.script.TenantScript', 'tenantScriptId')"/>
-                <set field="scriptMap" from="[tenantScriptId: scriptIdValue, companyUserGroupId: tenantId, scriptName: nameValue,
-                        description: description?.toString()?.trim() ?: null, scriptProfile: profileValue, inputSource: sourceValue,
-                        scriptBody: scriptBody, sampleInputJson: sampleInputJson?.toString()?.trim() ? sampleInputJson : null,
-                        isActive: (isActive == null || isActive) ? 'Y' : 'N',
-                        createdByUserId: existing?.createdByUserId ?: userIdValue, createdDate: existing?.createdDate ?: nowTs,
-                        lastUpdatedByUserId: userIdValue, lastUpdatedDate: nowTs]"/>
-                <service-call name="store#darpan.script.TenantScript" in-map="scriptMap"/>
-                <if condition="!ec.message.hasError()"><message>Saved script.</message></if>
-            </if>
-            <set field="savedRow" from="(!ec.message.hasError() &amp;&amp; scriptIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', scriptIdValue, tenantId, 'DAR-BE-164 saved script read back for the active tenant') : null"/>
-            <set field="script" from="darpan.script.TenantScriptSupport.toScriptMap(savedRow)"/>
+            <set field="canWrite" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change or run queries.', 'Choose a tenant first.')"/>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                Map saved = darpan.query.TenantQuerySupport.saveQuery(ec, tenantId, [tenantQueryId: tenantQueryId, queryName: queryName,
+                        description: description, readSpecJson: readSpecJson, scriptBody: scriptBody, sampleInputJson: sampleInputJson, isActive: isActive])
+                query = saved?.query; notes = saved?.notes
+            ]]></script></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
-    <service verb="delete" noun="TenantScript" allow-remote="true" authenticate="true">
-        <description>Delete one of the active tenant's scripts. Needs edit access to the tenant.</description>
-        <in-parameters><parameter name="tenantScriptId" required="true"/></in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-        </out-parameters>
-        <actions>
-            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change scripts.', 'Choose a tenant first.')"/>
-            <set field="scriptRow" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', tenantScriptId, tenantId, 'DAR-BE-164 script delete target verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; scriptRow == null">
-                <message error="true">Script '${tenantScriptId}' was not found.</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <!-- its deployments go with it, so nothing keeps firing a script that is gone -->
-                <entity-delete-by-condition entity-name="darpan.script.TenantScriptDeployment">
-                    <econdition field-name="companyUserGroupId" from="tenantId"/>
-                    <econdition field-name="tenantScriptId" from="scriptRow.tenantScriptId"/>
-                </entity-delete-by-condition>
-                <set field="ignoreDelete" from="scriptRow.delete()"/>
-                <message>Deleted script.</message>
-            </if>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
-        </actions>
-    </service>
-
-    <service verb="run" noun="TenantScript" transaction="ignore" allow-remote="true" authenticate="true">
-        <description>Runs a script and returns what it gave back; writes nothing. Either a saved script (tenantScriptId) or
-            an unsaved draft (scriptBody + scriptProfile; these also override a saved script's, so the editor can try an
-            edit before saving). The input is read first, then the script runs with no transaction open. A script error
-            is a result (run.ok false, run.error), not a service error. Needs edit access to the tenant.</description>
+    <service verb="delete" noun="TenantQuery" allow-remote="true" authenticate="true">
+        <description>Delete one of the active tenant's queries and its schedules. Needs edit access.</description>
         <in-parameters>
-            <parameter name="tenantScriptId"/>
-            <parameter name="scriptBody" allow-html="any"/>
-            <parameter name="scriptProfile"/>
-            <parameter name="inputSource"><description>SAMPLE or RUN_RESULT; defaults to the saved script's, else SAMPLE.</description></parameter>
-            <parameter name="inputJson" allow-html="any"><description>SAMPLE input; defaults to the saved sample.</description></parameter>
-            <parameter name="fileName"><description>RUN_RESULT: the run result file, as list#GeneratedOutputs names it.</description></parameter>
+            <parameter name="tenantQueryId" required="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="run" type="Map"><description>{ok, profile, result, units, elapsedMs, logs, error: {kind, message, line, column}}</description></parameter>
-            <parameter name="inputSummary" type="Map"><description>{source, characters} or {source, fileName, records, totalDifferences, truncated}</description></parameter>
+
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot run scripts.', 'Choose a tenant first.')"/>
-            <set field="scriptIdValue" from="tenantScriptId?.toString()?.trim()"/>
-            <set field="saved" from="(!ec.message.hasError() &amp;&amp; scriptIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', scriptIdValue, tenantId, 'DAR-BE-164 script run target verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; scriptIdValue &amp;&amp; saved == null">
-                <message error="true">Script '${scriptIdValue}' was not found.</message>
-            </if>
-            <set field="bodyValue" from="scriptBody != null ? scriptBody.toString() : saved?.scriptBody"/>
-            <set field="profileValue" from="scriptProfile ?: saved?.scriptProfile ?: 'SCRIPT'"/>
-            <set field="sourceValue" from="darpan.script.TenantScriptSupport.inputSourceOf(inputSource ?: saved?.inputSource)"/>
-            <if condition="!ec.message.hasError()">
-                <if condition="!bodyValue?.trim()"><message error="true">Write a script, or choose a saved one.</message></if>
-                <if condition="sourceValue == null"><message error="true">Input must be SAMPLE or RUN_RESULT.</message></if>
-            </if>
-            <set field="prepared" from="!ec.message.hasError() ? darpan.script.TenantScriptSupport.runInput(ec, sourceValue, inputJson?.toString(), saved?.sampleInputJson, fileName?.toString()) : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; prepared != null">
-                <set field="run" from="darpan.script.ScriptSupervisor.evaluate(profileValue, bodyValue, prepared.input)"/>
-                <set field="inputSummary" from="prepared.inputSummary"/>
-            </if>
+            <set field="canWrite" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change or run queries.', 'Choose a tenant first.')"/>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                darpan.query.TenantQuerySupport.deleteQuery(ec, tenantId, tenantQueryId)
+            ]]></script></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
-    <!-- deployments: a saved script run on a schedule, its text posted to a chat space -->
-
-    <service verb="list" noun="TenantScriptDeployments" authz-action="view" allow-remote="true" authenticate="true">
-        <description>The active tenant's script deployments, optionally for one script.</description>
-        <in-parameters><parameter name="tenantScriptId"/></in-parameters>
+    <service verb="run" noun="TenantQuery" allow-remote="true" authenticate="true" transaction="ignore">
+        <description>Run a saved query, or the read and script given, on the active tenant's data now. Nothing is sent. Needs edit access.</description>
+        <in-parameters>
+            <parameter name="tenantQueryId"/>
+            <parameter name="readSpecJson" allow-html="any"/>
+            <parameter name="scriptBody" allow-html="any"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="deployments" type="List"><description>[{tenantScriptDeploymentId, tenantScriptId, scheduleExpr,
-                inputSavedRunId, chatSpaceId, isActive, nextRunDate, lastRunDate, lastRunStatus, lastRunMessage, lastRunUnits}]</description></parameter>
-            <parameter name="timeZone"><description>The tenant's zone, which every schedule is read in.</description></parameter>
+            <parameter name="result" type="Map"><description>{ok, summary, files: [{name, columns, rowCount, previewRows}], data, nothing, invalid, readCounts, units, elapsedMs, logs, error, readText}</description></parameter>
         </out-parameters>
         <actions>
-            <set field="deployments" from="[]"/>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="canWrite" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change or run queries.', 'Choose a tenant first.')"/>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                result = darpan.query.TenantQuerySupport.runQuery(ec, tenantId, [tenantQueryId: tenantQueryId, readSpecJson: readSpecJson, scriptBody: scriptBody])
+            ]]></script></if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="TenantQuerySchedules" allow-remote="true" authenticate="true" authz-action="view">
+        <description>The active tenant's query schedules (optionally for one query): owner, recipients, last run.</description>
+        <in-parameters>
+            <parameter name="tenantQueryId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="schedules" type="List"/>
+            <parameter name="timeZone"/>
+        </out-parameters>
+        <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
-            <if condition="tenantId">
-                <set field="finder" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.script.TenantScriptDeployment', 'DAR-BE-167 deployments list, pinned to the active tenant by condition').condition('companyUserGroupId', tenantId)"/>
-                <if condition="tenantScriptId"><set field="finder" from="finder.condition('tenantScriptId', tenantScriptId)"/></if>
-                <set field="deployments" from="finder.orderBy('createdDate').useCache(false).list().collect { darpan.script.ScriptDeploymentSupport.toDeploymentMap(it) }"/>
-                <set field="timeZone" from="darpan.reconciliation.notification.TenantNotificationSupport.resolveTenantZone(ec, tenantId).id"/>
-            </if>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                schedules = darpan.query.TenantQuerySupport.listSchedules(ec, tenantId, tenantQueryId)
+                timeZone = darpan.reconciliation.notification.TenantNotificationSupport.resolveTenantZone(ec, tenantId).id
+            ]]></script></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
-    <service verb="save" noun="TenantScriptDeployment" allow-remote="true" authenticate="true">
-        <description>Create or update a deployment of one of the active tenant's scripts. The schedule must be a cron the
-            scheduler understands; the chat space must be the tenant's and switched on; a script that reads a run result
-            needs the saved run. A deployment that is on gets its next run date. Needs edit access to the tenant.</description>
+    <service verb="save" noun="TenantQuerySchedule" allow-remote="true" authenticate="true">
+        <description>Create or update a schedule of one of the active tenant's queries: when (daily at HH:mm, or a cron), in the tenant's zone, and where its answer goes (email addresses, a chat space). Whoever saves it owns it. Needs tenant-admin access.</description>
         <in-parameters>
-            <parameter name="tenantScriptDeploymentId"/>
-            <parameter name="tenantScriptId" required="true"/>
-            <parameter name="scheduleExpr" required="true"><description>Quartz cron, e.g. 0 0 9 * * ? for 09:00 daily.</description></parameter>
-            <parameter name="inputSavedRunId"/>
-            <parameter name="chatSpaceId" required="true"/>
+            <parameter name="scheduleId"/>
+            <parameter name="tenantQueryId" required="true"/>
+            <parameter name="dailyAt"/>
+            <parameter name="cronExpression"/>
             <parameter name="isActive" type="Boolean" default-value="false"/>
+            <parameter name="emailTo"/>
+            <parameter name="emailCc"/>
+            <parameter name="chatSpaceId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="deployment" type="Map"/>
+            <parameter name="schedule" type="Map"/>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change scripts.', 'Choose a tenant first.')"/>
-            <set field="deploymentIdValue" from="tenantScriptDeploymentId?.toString()?.trim()"/>
-            <set field="existing" from="(!ec.message.hasError() &amp;&amp; deploymentIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScriptDeployment', 'tenantScriptDeploymentId', deploymentIdValue, tenantId, 'DAR-BE-167 deployment edit target verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; deploymentIdValue &amp;&amp; existing == null">
-                <message error="true">Deployment '${deploymentIdValue}' was not found.</message>
-            </if>
-            <set field="scriptRow" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScript', 'tenantScriptId', tenantScriptId, tenantId, 'DAR-BE-167 deployed script verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; scriptRow == null"><message error="true">Script '${tenantScriptId}' was not found.</message></if>
-            <set field="spaceRow" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', chatSpaceId, tenantId, 'DAR-BE-167 deployment chat space verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; (spaceRow == null || spaceRow.isActive == 'N')"><message error="true">Chat space '${chatSpaceId}' was not found or is switched off.</message></if>
-            <set field="scheduleValue" from="scheduleExpr?.toString()?.trim()"/>
-            <set field="nowTs" from="ec.user.nowTimestamp"/>
-            <set field="nextRun" from="!ec.message.hasError() ? darpan.script.ScriptDeploymentSupport.nextRunDate(ec, tenantId, scheduleValue, nowTs) : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; nextRun == null"><message error="true">'${scheduleValue}' is not a schedule Darpan understands; use a cron like 0 0 9 * * ? (09:00 daily).</message></if>
-            <set field="savedRunValue" from="inputSavedRunId?.toString()?.trim() ?: null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; scriptRow.inputSource == darpan.script.TenantScriptSupport.SOURCE_RUN_RESULT &amp;&amp; !savedRunValue"><message error="true">This script reads a run result: choose the saved run whose newest result it reads.</message></if>
-            <if condition="!ec.message.hasError()">
-                <set field="userIdValue" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
-                <set field="deploymentIdValue" from="deploymentIdValue ?: darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.script.TenantScriptDeployment', 'tenantScriptDeploymentId')"/>
-                <set field="activeValue" from="isActive ? 'Y' : 'N'"/>
-                <set field="deploymentMap" from="[tenantScriptDeploymentId: deploymentIdValue, companyUserGroupId: tenantId, tenantScriptId: scriptRow.tenantScriptId,
-                        scheduleExpr: scheduleValue, inputSavedRunId: scriptRow.inputSource == darpan.script.TenantScriptSupport.SOURCE_RUN_RESULT ? savedRunValue : null,
-                        chatSpaceId: spaceRow.chatSpaceId, isActive: activeValue, nextRunDate: activeValue == 'Y' ? nextRun : null,
-                        createdByUserId: existing?.createdByUserId ?: userIdValue, createdDate: existing?.createdDate ?: nowTs,
-                        lastUpdatedByUserId: userIdValue, lastUpdatedDate: nowTs]"/>
-                <service-call name="store#darpan.script.TenantScriptDeployment" in-map="deploymentMap"/>
-                <if condition="!ec.message.hasError()"><message>Saved deployment.</message></if>
-            </if>
-            <set field="savedRow" from="(!ec.message.hasError() &amp;&amp; deploymentIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScriptDeployment', 'tenantScriptDeploymentId', deploymentIdValue, tenantId, 'DAR-BE-167 saved deployment read back for the active tenant') : null"/>
-            <set field="deployment" from="darpan.script.ScriptDeploymentSupport.toDeploymentMap(savedRow)"/>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="tenantId &amp;&amp; !darpan.facade.common.TenantAccessSupport.isTenantAdmin(ec, tenantId)">
+                <message error="true">Scheduling a query sends the tenant's data out, so it needs tenant-admin access.</message></if>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                schedule = darpan.query.TenantQuerySupport.saveSchedule(ec, tenantId, [scheduleId: scheduleId, tenantQueryId: tenantQueryId,
+                        dailyAt: dailyAt, cronExpression: cronExpression, isActive: isActive, emailTo: emailTo, emailCc: emailCc, chatSpaceId: chatSpaceId])?.schedule
+            ]]></script></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
-    <service verb="delete" noun="TenantScriptDeployment" allow-remote="true" authenticate="true">
-        <description>Delete one of the active tenant's script deployments. Needs edit access to the tenant.</description>
-        <in-parameters><parameter name="tenantScriptDeploymentId" required="true"/></in-parameters>
+    <service verb="delete" noun="TenantQuerySchedule" allow-remote="true" authenticate="true">
+        <description>Delete one of the active tenant's query schedules. Needs tenant-admin access.</description>
+        <in-parameters>
+            <parameter name="scheduleId" required="true"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
+
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change scripts.', 'Choose a tenant first.')"/>
-            <set field="row" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScriptDeployment', 'tenantScriptDeploymentId', tenantScriptDeploymentId, tenantId, 'DAR-BE-167 deployment delete target verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; row == null"><message error="true">Deployment '${tenantScriptDeploymentId}' was not found.</message></if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreDelete" from="row.delete()"/>
-                <message>Deleted deployment.</message>
-            </if>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="tenantId &amp;&amp; !darpan.facade.common.TenantAccessSupport.isTenantAdmin(ec, tenantId)">
+                <message error="true">Scheduling a query sends the tenant's data out, so it needs tenant-admin access.</message></if>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                darpan.query.TenantQuerySupport.deleteSchedule(ec, tenantId, scheduleId)
+            ]]></script></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
-    <service verb="run" noun="TenantScriptDeployment" transaction="ignore" allow-remote="true" authenticate="true">
-        <description>Runs a saved deployment now, exactly as the schedule would (the script's newest input, its chat
-            space). send=false (the default) is a preview: the text comes back and nothing is posted or recorded.
-            send=true posts it and stamps the outcome on the deployment. Needs edit access to the tenant.</description>
+    <service verb="run" noun="TenantQuerySchedule" allow-remote="true" authenticate="true" transaction="ignore">
+        <description>Run a schedule now: a preview by default (nothing sent); send=true delivers it and records the run. Only its owner can run it by hand.</description>
         <in-parameters>
-            <parameter name="tenantScriptDeploymentId" required="true"/>
+            <parameter name="scheduleId" required="true"/>
             <parameter name="send" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="outcome" type="Map"><description>{status (PREVIEW, SENT, NOTHING_TO_SEND, SCRIPT_ERROR, NO_INPUT,
-                NOT_DELIVERED, SCRIPT_MISSING), message, text, run, inputSummary, fileName}</description></parameter>
-            <parameter name="deployment" type="Map"/>
+            <parameter name="outcome" type="Map"/>
         </out-parameters>
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot run scripts.', 'Choose a tenant first.')"/>
-            <set field="row" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScriptDeployment', 'tenantScriptDeploymentId', tenantScriptDeploymentId, tenantId, 'DAR-BE-167 deployment run target verified against the active tenant after a primary-key read') : null"/>
-            <if condition="!ec.message.hasError() &amp;&amp; row == null"><message error="true">Deployment '${tenantScriptDeploymentId}' was not found.</message></if>
-            <if condition="!ec.message.hasError()">
-                <set field="outcome" from="darpan.script.ScriptDeploymentSupport.execute(ec, row, send == true)"/>
-                <if condition="send == true">
-                    <set field="ignoreRecord" from="darpan.script.ScriptDeploymentSupport.recordOutcome(ec, row, outcome)"/>
-                </if>
-                <set field="deployment" from="darpan.script.ScriptDeploymentSupport.toDeploymentMap(darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.script.TenantScriptDeployment', 'tenantScriptDeploymentId', tenantScriptDeploymentId, tenantId, 'DAR-BE-167 deployment read back after a run'))"/>
-            </if>
+            <if condition="!tenantId"><message error="true">Choose a tenant first.</message></if>
+            <if condition="tenantId &amp;&amp; !darpan.facade.common.TenantAccessSupport.isTenantAdmin(ec, tenantId)">
+                <message error="true">Scheduling a query sends the tenant's data out, so it needs tenant-admin access.</message></if>
+            <if condition="!ec.message.hasError()"><script><![CDATA[
+                outcome = darpan.query.TenantQuerySupport.runSchedule(ec, tenantId, scheduleId, send as boolean)
+            ]]></script></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

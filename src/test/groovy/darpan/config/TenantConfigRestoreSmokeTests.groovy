@@ -125,16 +125,18 @@ class TenantConfigRestoreSmokeTests {
             asSystem {
                 upsert("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TCR_SPACE", companyUserGroupId: MINE, spaceName: "Digest",
                         isActive: "Y"])
-                upsert("darpan.script.TenantScript", [tenantScriptId: "TCR_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
-                        scriptProfile: "EXPRESSION", inputSource: "SAMPLE", scriptBody: "'version one'", isActive: "Y"])
-                upsert("darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: "TCR_DEPLOY", companyUserGroupId: MINE,
-                        tenantScriptId: "TCR_SCRIPT", scheduleExpr: "0 0 9 * * ?", chatSpaceId: "TCR_SPACE", isActive: "Y"])
+                upsert("jexl.script.UserScript", [userScriptId: "TCR_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
+                        scriptProfile: "QUERY", scriptBody: "'version one'", isActive: "Y"])
+                upsert("jexl.script.UserScriptDeployment", [scriptDeploymentId: "TCR_DEPLOY", companyUserGroupId: MINE, userScriptId: "TCR_SCRIPT",
+                        cronExpression: "0 0 9 * * ?", timeZone: "UTC", ownerUserId: ec.user.userId, isActive: "Y"])
+                upsert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "TCR_DEPLOY", deliverySeqId: "01",
+                        deliveryServiceName: "query.QueryHostServices.deliver#QueryChat", parametersJson: '{"chatSpaceId":"TCR_SPACE"}', isActive: "Y"])
             }
             Map v1 = snapshot()
             asSystem {
-                ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", "TCR_SCRIPT").one().set("scriptBody", "'version two'").update()
-                ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "TCR_DEPLOY").one()
-                        .set("scheduleExpr", "0 30 17 * * ?").update()
+                ec.entity.find("jexl.script.UserScript").condition("userScriptId", "TCR_SCRIPT").one().set("scriptBody", "'version two'").update()
+                ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCR_DEPLOY").one()
+                        .set("cronExpression", "0 30 17 * * ?").update()
             }
             Map preview = call("preview#TenantConfigRestore", [id: v1.id])
             assertFalse(preview.hadError as boolean, preview.errorText as String)
@@ -143,16 +145,18 @@ class TenantConfigRestoreSmokeTests {
             Map out = call("restore#TenantConfigVersion", [id: v1.id, planHash: preview.planHash])
             assertFalse(out.hadError as boolean, out.errorText as String)
             asSystem {
-                assertEquals("'version one'", ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", "TCR_SCRIPT").useCache(false).one().scriptBody)
-                def deployment = ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "TCR_DEPLOY").useCache(false).one()
-                assertEquals(["0 0 9 * * ?", "TCR_SPACE", "Y"], [deployment.scheduleExpr, deployment.chatSpaceId, deployment.isActive],
+                assertEquals("'version one'", ec.entity.find("jexl.script.UserScript").condition("userScriptId", "TCR_SCRIPT").useCache(false).one().scriptBody)
+                def deployment = ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCR_DEPLOY").useCache(false).one()
+                def chat = ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "TCR_DEPLOY").useCache(false).one()
+                assertEquals(["0 0 9 * * ?", '{"chatSpaceId":"TCR_SPACE"}', "Y"], [deployment.cronExpression, chat.parametersJson, deployment.isActive],
                         "back under its own id, on its own space, and still on")
             }
             assertEquals(v1.hash, out.after.hash, "the config is exactly version 1 again")
         } finally {
             asSystem {
-                ec.entity.find("darpan.script.TenantScriptDeployment").condition("companyUserGroupId", MINE).deleteAll()
-                ec.entity.find("darpan.script.TenantScript").condition("companyUserGroupId", MINE).deleteAll()
+                ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "TCR_DEPLOY").deleteAll()
+                ec.entity.find("jexl.script.UserScriptDeployment").condition("companyUserGroupId", MINE).deleteAll()
+                ec.entity.find("jexl.script.UserScript").condition("companyUserGroupId", MINE).deleteAll()
                 ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "TCR_SPACE").deleteAll()
             }
         }

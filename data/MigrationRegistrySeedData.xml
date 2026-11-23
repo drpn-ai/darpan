@@ -83,6 +83,11 @@
             description="Move each nightly purge job's edited retentionDays parameter into its darpan.purge.* setting and delete
                 the row, and delete the stuck-run reaper job's retired staleMinutes parameter (DAR-BE-306, DAR-BE-304). Seed loads
                 never delete, and a live parameter row would keep overriding the setting. Idempotent."/>
+    <darpan.migration.DarpanMigration migrationId="TENANT_SCRIPTS_TO_QUERIES" componentName="darpan"
+            serviceName="query.QueryHostServices.migrate#TenantScriptsToQueries"
+            sequenceNum="140" supportsDryRun="N"
+            description="DAR-BE-334: the old tenant scripts become queries on moqui-jexl and their deployments chat-only
+                schedules, switched off until someone allowed to schedule turns them on. Idempotent (MIG_ ids)."/>
 
     <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTER_TABLE" componentName="darpan"
             serviceName="reconciliation.ReconciliationNotificationServices.retire#AutomationSourceFilterTable"

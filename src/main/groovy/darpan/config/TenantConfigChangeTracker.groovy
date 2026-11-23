@@ -42,6 +42,7 @@ class TenantConfigChangeTracker {
             "darpan.audit.AuditStatementCheck"               : ["darpan.audit.AuditStatement", "statementId"],
             "darpan.reconciliation.ReconciliationAutomationSource"      : ["darpan.reconciliation.ReconciliationAutomation", "automationId"],
             "darpan.reconciliation.ReconciliationRun"                   : ["darpan.reconciliation.Reconciliation", "reconciliationId"],
+            "jexl.script.UserScriptDeploymentDelivery"                  : ["jexl.script.UserScriptDeployment", "scriptDeploymentId"],
     ].asImmutable()
 
     /**
@@ -55,8 +56,10 @@ class TenantConfigChangeTracker {
             "darpan.audit.AuditCheck"                       : (["pairFactTypeId"] as Set<String>),
             "darpan.reconciliation.ReconciliationAutomation": (["isActive", "nextScheduledFireTime", "lastScheduledFireTime"] as Set<String>),
             // DAR-BE-237: every run of a script deployment writes when it ran, how it went and when it runs next.
-            "darpan.script.TenantScriptDeployment"          : (["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage",
-                                                                "lastRunUnits", "lastUpdatedByUserId"] as Set<String>),
+            "jexl.script.UserScriptDeployment"              : (["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage",
+                                                                "lastRunUnits", "ownerUserId"] as Set<String>),
+            // DAR-BE-334: every run writes each delivery's last outcome
+            "jexl.script.UserScriptDeploymentDelivery"      : (["lastOutcome", "lastMessage"] as Set<String>),
     ].asImmutable()
 
     /** Called by the EECA rules with their entity's name (a write may hand over a plain Map). Never throws. */

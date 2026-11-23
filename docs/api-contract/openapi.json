@@ -945,28 +945,28 @@
                                         "$ref": "#/components/schemas/SnapshotTenantConfigRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/DeleteTenantScriptRequest"
+                                        "$ref": "#/components/schemas/DeleteTenantQueryRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/DeleteTenantScriptDeploymentRequest"
+                                        "$ref": "#/components/schemas/DeleteTenantQueryScheduleRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/ListTenantScriptDeploymentsRequest"
+                                        "$ref": "#/components/schemas/ListTenantQueriesRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/ListTenantScriptsRequest"
+                                        "$ref": "#/components/schemas/ListTenantQuerySchedulesRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/RunTenantScriptRequest"
+                                        "$ref": "#/components/schemas/RunTenantQueryRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/RunTenantScriptDeploymentRequest"
+                                        "$ref": "#/components/schemas/RunTenantQueryScheduleRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/SaveTenantScriptRequest"
+                                        "$ref": "#/components/schemas/SaveTenantQueryRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/SaveTenantScriptDeploymentRequest"
+                                        "$ref": "#/components/schemas/SaveTenantQueryScheduleRequest"
                                     }
                                 ],
                                 "discriminator": {
@@ -1279,14 +1279,14 @@
                                         "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "#/components/schemas/PreviewTenantConfigRestoreRequest",
                                         "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "#/components/schemas/RestoreTenantConfigVersionRequest",
                                         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "#/components/schemas/SnapshotTenantConfigRequest",
-                                        "facade.TenantScriptFacadeServices.delete#TenantScript": "#/components/schemas/DeleteTenantScriptRequest",
-                                        "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment": "#/components/schemas/DeleteTenantScriptDeploymentRequest",
-                                        "facade.TenantScriptFacadeServices.list#TenantScriptDeployments": "#/components/schemas/ListTenantScriptDeploymentsRequest",
-                                        "facade.TenantScriptFacadeServices.list#TenantScripts": "#/components/schemas/ListTenantScriptsRequest",
-                                        "facade.TenantScriptFacadeServices.run#TenantScript": "#/components/schemas/RunTenantScriptRequest",
-                                        "facade.TenantScriptFacadeServices.run#TenantScriptDeployment": "#/components/schemas/RunTenantScriptDeploymentRequest",
-                                        "facade.TenantScriptFacadeServices.save#TenantScript": "#/components/schemas/SaveTenantScriptRequest",
-                                        "facade.TenantScriptFacadeServices.save#TenantScriptDeployment": "#/components/schemas/SaveTenantScriptDeploymentRequest"
+                                        "facade.TenantScriptFacadeServices.delete#TenantQuery": "#/components/schemas/DeleteTenantQueryRequest",
+                                        "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule": "#/components/schemas/DeleteTenantQueryScheduleRequest",
+                                        "facade.TenantScriptFacadeServices.list#TenantQueries": "#/components/schemas/ListTenantQueriesRequest",
+                                        "facade.TenantScriptFacadeServices.list#TenantQuerySchedules": "#/components/schemas/ListTenantQuerySchedulesRequest",
+                                        "facade.TenantScriptFacadeServices.run#TenantQuery": "#/components/schemas/RunTenantQueryRequest",
+                                        "facade.TenantScriptFacadeServices.run#TenantQuerySchedule": "#/components/schemas/RunTenantQueryScheduleRequest",
+                                        "facade.TenantScriptFacadeServices.save#TenantQuery": "#/components/schemas/SaveTenantQueryRequest",
+                                        "facade.TenantScriptFacadeServices.save#TenantQuerySchedule": "#/components/schemas/SaveTenantQueryScheduleRequest"
                                     }
                                 }
                             }
@@ -2225,28 +2225,28 @@
                                             "$ref": "#/components/schemas/SnapshotTenantConfigResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/DeleteTenantScriptResponse"
+                                            "$ref": "#/components/schemas/DeleteTenantQueryResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/DeleteTenantScriptDeploymentResponse"
+                                            "$ref": "#/components/schemas/DeleteTenantQueryScheduleResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/ListTenantScriptDeploymentsResponse"
+                                            "$ref": "#/components/schemas/ListTenantQueriesResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/ListTenantScriptsResponse"
+                                            "$ref": "#/components/schemas/ListTenantQuerySchedulesResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/RunTenantScriptResponse"
+                                            "$ref": "#/components/schemas/RunTenantQueryResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/RunTenantScriptDeploymentResponse"
+                                            "$ref": "#/components/schemas/RunTenantQueryScheduleResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/SaveTenantScriptResponse"
+                                            "$ref": "#/components/schemas/SaveTenantQueryResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/SaveTenantScriptDeploymentResponse"
+                                            "$ref": "#/components/schemas/SaveTenantQueryScheduleResponse"
                                         }
                                     ]
                                 }
@@ -37103,7 +37103,7 @@
                     },
                     "sourceId": {
                         "type": "string",
-                        "description": "Blank for STREAKS; the audit's code for AUDIT_UPDATE; the automationId for\n                AUTOMATION; the tenantScriptDeploymentId for SCRIPT."
+                        "description": "Blank for STREAKS; the audit's code for AUDIT_UPDATE; the automationId for\n                AUTOMATION; the query schedule's id for SCRIPT."
                     },
                     "chatSpaceId": {
                         "type": "string",
@@ -37113,7 +37113,7 @@
                 "required": [
                     "sourceType"
                 ],
-                "description": "DAR-UI-123. Moves one thing that posts to chat to another of the active tenant's spaces, or to none.\n            Writes only that source's space field, nothing else on it. The space must be the tenant's and switched on; the\n            automation, audit or deployment must be the tenant's. Needs edit access to the tenant, and for an audit's update\n            tenant admin rights as well (as save#AuditSettings asks for its runEmail). A deployed script always posts\n            somewhere: to stop it, turn its schedule off on the Scripts page."
+                "description": "DAR-UI-123. Moves one thing that posts to chat to another of the active tenant's spaces, or to none.\n            Writes only that source's space field, nothing else on it. The space must be the tenant's and switched on; the\n            automation, audit or deployment must be the tenant's. Needs edit access to the tenant, and for an audit's update\n            tenant admin rights as well (as save#AuditSettings asks for its runEmail), and for a query schedule too\n            (as save#TenantQuerySchedule does). A query schedule always posts somewhere: to stop it, switch it off on the\n            Queries page."
             },
             "SetNotificationRouteResult": {
                 "type": "object",
@@ -40103,19 +40103,19 @@
                     "result"
                 ]
             },
-            "DeleteTenantScriptParams": {
+            "DeleteTenantQueryParams": {
                 "type": "object",
                 "properties": {
-                    "tenantScriptId": {
+                    "tenantQueryId": {
                         "type": "string"
                     }
                 },
                 "required": [
-                    "tenantScriptId"
+                    "tenantQueryId"
                 ],
-                "description": "Delete one of the active tenant's scripts. Needs edit access to the tenant."
+                "description": "Delete one of the active tenant's queries and its schedules. Needs edit access."
             },
-            "DeleteTenantScriptResult": {
+            "DeleteTenantQueryResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -40135,10 +40135,10 @@
                     }
                 }
             },
-            "DeleteTenantScriptRequest": {
+            "DeleteTenantQueryRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.delete#TenantScript",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.delete#TenantScript",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.delete#TenantQuery",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.delete#TenantQuery",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40156,10 +40156,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.delete#TenantScript"
+                        "const": "facade.TenantScriptFacadeServices.delete#TenantQuery"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/DeleteTenantScriptParams"
+                        "$ref": "#/components/schemas/DeleteTenantQueryParams"
                     }
                 },
                 "required": [
@@ -40168,9 +40168,9 @@
                     "method"
                 ]
             },
-            "DeleteTenantScriptResponse": {
+            "DeleteTenantQueryResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.delete#TenantScript. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.delete#TenantQuery. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40187,7 +40187,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/DeleteTenantScriptResult"
+                        "$ref": "#/components/schemas/DeleteTenantQueryResult"
                     }
                 },
                 "required": [
@@ -40195,19 +40195,19 @@
                     "result"
                 ]
             },
-            "DeleteTenantScriptDeploymentParams": {
+            "DeleteTenantQueryScheduleParams": {
                 "type": "object",
                 "properties": {
-                    "tenantScriptDeploymentId": {
+                    "scheduleId": {
                         "type": "string"
                     }
                 },
                 "required": [
-                    "tenantScriptDeploymentId"
+                    "scheduleId"
                 ],
-                "description": "Delete one of the active tenant's script deployments. Needs edit access to the tenant."
+                "description": "Delete one of the active tenant's query schedules. Needs tenant-admin access."
             },
-            "DeleteTenantScriptDeploymentResult": {
+            "DeleteTenantQueryScheduleResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -40227,10 +40227,10 @@
                     }
                 }
             },
-            "DeleteTenantScriptDeploymentRequest": {
+            "DeleteTenantQueryScheduleRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.delete#TenantScriptDeployment",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.delete#TenantQuerySchedule",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40248,10 +40248,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment"
+                        "const": "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/DeleteTenantScriptDeploymentParams"
+                        "$ref": "#/components/schemas/DeleteTenantQueryScheduleParams"
                     }
                 },
                 "required": [
@@ -40260,9 +40260,9 @@
                     "method"
                 ]
             },
-            "DeleteTenantScriptDeploymentResponse": {
+            "DeleteTenantQueryScheduleResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.delete#TenantScriptDeployment. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.delete#TenantQuerySchedule. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40279,7 +40279,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/DeleteTenantScriptDeploymentResult"
+                        "$ref": "#/components/schemas/DeleteTenantQueryScheduleResult"
                     }
                 },
                 "required": [
@@ -40287,114 +40287,14 @@
                     "result"
                 ]
             },
-            "ListTenantScriptDeploymentsParams": {
-                "type": "object",
-                "properties": {
-                    "tenantScriptId": {
-                        "type": "string"
-                    }
-                },
-                "description": "The active tenant's script deployments, optionally for one script."
-            },
-            "ListTenantScriptDeploymentsResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "deployments": {
-                        "type": "array",
-                        "items": {
-                            
-                        },
-                        "description": "[{tenantScriptDeploymentId, tenantScriptId, scheduleExpr,\n                inputSavedRunId, chatSpaceId, isActive, nextRunDate, lastRunDate, lastRunStatus, lastRunMessage, lastRunUnits}]"
-                    },
-                    "timeZone": {
-                        "type": "string",
-                        "description": "The tenant's zone, which every schedule is read in."
-                    }
-                }
-            },
-            "ListTenantScriptDeploymentsRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.list#TenantScriptDeployments",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.list#TenantScriptDeployments",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.list#TenantScriptDeployments"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/ListTenantScriptDeploymentsParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "ListTenantScriptDeploymentsResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.list#TenantScriptDeployments. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/ListTenantScriptDeploymentsResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "ListTenantScriptsParams": {
+            "ListTenantQueriesParams": {
                 "type": "object",
                 "properties": {
                     
                 },
-                "description": "The active tenant's scripts by name, plus the d: library and the limits, for the editor."
+                "description": "The active tenant's queries by name, with the fn: library and the QUERY limits for the editor."
             },
-            "ListTenantScriptsResult": {
+            "ListTenantQueriesResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -40412,30 +40312,27 @@
                             "type": "string"
                         }
                     },
-                    "scripts": {
+                    "queries": {
                         "type": "array",
                         "items": {
                             
-                        },
-                        "description": "[{tenantScriptId, scriptName, description, scriptProfile,\n                inputSource, scriptBody, sampleInputJson, isActive, createdByUserId, createdDate, lastUpdatedDate}]"
+                        }
                     },
                     "library": {
                         "type": "array",
                         "items": {
                             
-                        },
-                        "description": "[{name, help}]: the d: functions."
+                        }
                     },
                     "limits": {
-                        "type": "object",
-                        "description": "{EXPRESSION: {maxSourceChars, unitLimit, timeoutMs}, SCRIPT: {...}}"
+                        "type": "object"
                     }
                 }
             },
-            "ListTenantScriptsRequest": {
+            "ListTenantQueriesRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.list#TenantScripts",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.list#TenantScripts",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.list#TenantQueries",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.list#TenantQueries",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40453,10 +40350,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.list#TenantScripts"
+                        "const": "facade.TenantScriptFacadeServices.list#TenantQueries"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/ListTenantScriptsParams"
+                        "$ref": "#/components/schemas/ListTenantQueriesParams"
                     }
                 },
                 "required": [
@@ -40465,9 +40362,9 @@
                     "method"
                 ]
             },
-            "ListTenantScriptsResponse": {
+            "ListTenantQueriesResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.list#TenantScripts. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.list#TenantQueries. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40484,7 +40381,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/ListTenantScriptsResult"
+                        "$ref": "#/components/schemas/ListTenantQueriesResult"
                     }
                 },
                 "required": [
@@ -40492,34 +40389,16 @@
                     "result"
                 ]
             },
-            "RunTenantScriptParams": {
+            "ListTenantQuerySchedulesParams": {
                 "type": "object",
                 "properties": {
-                    "tenantScriptId": {
+                    "tenantQueryId": {
                         "type": "string"
-                    },
-                    "scriptBody": {
-                        "type": "string"
-                    },
-                    "scriptProfile": {
-                        "type": "string"
-                    },
-                    "inputSource": {
-                        "type": "string",
-                        "description": "SAMPLE or RUN_RESULT; defaults to the saved script's, else SAMPLE."
-                    },
-                    "inputJson": {
-                        "type": "string",
-                        "description": "SAMPLE input; defaults to the saved sample."
-                    },
-                    "fileName": {
-                        "type": "string",
-                        "description": "RUN_RESULT: the run result file, as list#GeneratedOutputs names it."
                     }
                 },
-                "description": "Runs a script and returns what it gave back; writes nothing. Either a saved script (tenantScriptId) or\n            an unsaved draft (scriptBody + scriptProfile; these also override a saved script's, so the editor can try an\n            edit before saving). The input is read first, then the script runs with no transaction open. A script error\n            is a result (run.ok false, run.error), not a service error. Needs edit access to the tenant."
+                "description": "The active tenant's query schedules (optionally for one query): owner, recipients, last run."
             },
-            "RunTenantScriptResult": {
+            "ListTenantQuerySchedulesResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -40537,20 +40416,21 @@
                             "type": "string"
                         }
                     },
-                    "run": {
-                        "type": "object",
-                        "description": "{ok, profile, result, units, elapsedMs, logs, error: {kind, message, line, column}}"
+                    "schedules": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
                     },
-                    "inputSummary": {
-                        "type": "object",
-                        "description": "{source, characters} or {source, fileName, records, totalDifferences, truncated}"
+                    "timeZone": {
+                        "type": "string"
                     }
                 }
             },
-            "RunTenantScriptRequest": {
+            "ListTenantQuerySchedulesRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.run#TenantScript",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.run#TenantScript",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.list#TenantQuerySchedules",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.list#TenantQuerySchedules",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40568,10 +40448,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.run#TenantScript"
+                        "const": "facade.TenantScriptFacadeServices.list#TenantQuerySchedules"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/RunTenantScriptParams"
+                        "$ref": "#/components/schemas/ListTenantQuerySchedulesParams"
                     }
                 },
                 "required": [
@@ -40580,9 +40460,9 @@
                     "method"
                 ]
             },
-            "RunTenantScriptResponse": {
+            "ListTenantQuerySchedulesResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.run#TenantScript. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.list#TenantQuerySchedules. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40599,7 +40479,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/RunTenantScriptResult"
+                        "$ref": "#/components/schemas/ListTenantQuerySchedulesResult"
                     }
                 },
                 "required": [
@@ -40607,10 +40487,109 @@
                     "result"
                 ]
             },
-            "RunTenantScriptDeploymentParams": {
+            "RunTenantQueryParams": {
                 "type": "object",
                 "properties": {
-                    "tenantScriptDeploymentId": {
+                    "tenantQueryId": {
+                        "type": "string"
+                    },
+                    "readSpecJson": {
+                        "type": "string"
+                    },
+                    "scriptBody": {
+                        "type": "string"
+                    }
+                },
+                "description": "Run a saved query, or the read and script given, on the active tenant's data now. Nothing is sent. Needs edit access."
+            },
+            "RunTenantQueryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "result": {
+                        "type": "object",
+                        "description": "{ok, summary, files: [{name, columns, rowCount, previewRows}], data, nothing, invalid, readCounts, units, elapsedMs, logs, error, readText}"
+                    }
+                }
+            },
+            "RunTenantQueryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.run#TenantQuery",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.run#TenantQuery",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.TenantScriptFacadeServices.run#TenantQuery"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunTenantQueryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunTenantQueryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.run#TenantQuery. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunTenantQueryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RunTenantQueryScheduleParams": {
+                "type": "object",
+                "properties": {
+                    "scheduleId": {
                         "type": "string"
                     },
                     "send": {
@@ -40618,11 +40597,11 @@
                     }
                 },
                 "required": [
-                    "tenantScriptDeploymentId"
+                    "scheduleId"
                 ],
-                "description": "Runs a saved deployment now, exactly as the schedule would (the script's newest input, its chat\n            space). send=false (the default) is a preview: the text comes back and nothing is posted or recorded.\n            send=true posts it and stamps the outcome on the deployment. Needs edit access to the tenant."
+                "description": "Run a schedule now: a preview by default (nothing sent); send=true delivers it and records the run. Only its owner can run it by hand."
             },
-            "RunTenantScriptDeploymentResult": {
+            "RunTenantQueryScheduleResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -40641,18 +40620,14 @@
                         }
                     },
                     "outcome": {
-                        "type": "object",
-                        "description": "{status (PREVIEW, SENT, NOTHING_TO_SEND, SCRIPT_ERROR, NO_INPUT,\n                NOT_DELIVERED, SCRIPT_MISSING), message, text, run, inputSummary, fileName}"
-                    },
-                    "deployment": {
                         "type": "object"
                     }
                 }
             },
-            "RunTenantScriptDeploymentRequest": {
+            "RunTenantQueryScheduleRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.run#TenantQuerySchedule",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.run#TenantQuerySchedule",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40670,10 +40645,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.run#TenantScriptDeployment"
+                        "const": "facade.TenantScriptFacadeServices.run#TenantQuerySchedule"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/RunTenantScriptDeploymentParams"
+                        "$ref": "#/components/schemas/RunTenantQueryScheduleParams"
                     }
                 },
                 "required": [
@@ -40682,9 +40657,9 @@
                     "method"
                 ]
             },
-            "RunTenantScriptDeploymentResponse": {
+            "RunTenantQueryScheduleResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.run#TenantScriptDeployment. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.run#TenantQuerySchedule. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40701,7 +40676,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/RunTenantScriptDeploymentResult"
+                        "$ref": "#/components/schemas/RunTenantQueryScheduleResult"
                     }
                 },
                 "required": [
@@ -40709,29 +40684,23 @@
                     "result"
                 ]
             },
-            "SaveTenantScriptParams": {
+            "SaveTenantQueryParams": {
                 "type": "object",
                 "properties": {
-                    "tenantScriptId": {
+                    "tenantQueryId": {
                         "type": "string"
                     },
-                    "scriptName": {
+                    "queryName": {
                         "type": "string"
                     },
                     "description": {
                         "type": "string"
                     },
-                    "scriptProfile": {
-                        "type": "string",
-                        "description": "EXPRESSION or SCRIPT."
-                    },
-                    "inputSource": {
-                        "type": "string",
-                        "description": "SAMPLE or RUN_RESULT."
+                    "readSpecJson": {
+                        "type": "string"
                     },
                     "scriptBody": {
-                        "type": "string",
-                        "description": "JEXL; holds < and >."
+                        "type": "string"
                     },
                     "sampleInputJson": {
                         "type": "string"
@@ -40741,12 +40710,12 @@
                     }
                 },
                 "required": [
-                    "scriptName",
+                    "queryName",
                     "scriptBody"
                 ],
-                "description": "Create or update one of the active tenant's scripts. The body must parse under its profile and run\n            cleanly on its sample input; a script that does not is refused with the line, never saved half-checked. No\n            transaction is open while the trial run runs; the store opens its own. Needs edit access to the tenant."
+                "description": "Create or update one of the active tenant's queries: a read over its kept data and Darpan results, and a JEXL script (profile QUERY). The script must parse and run on its sample; the read's sources must exist. Needs edit access to the tenant."
             },
-            "SaveTenantScriptResult": {
+            "SaveTenantQueryResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -40764,19 +40733,21 @@
                             "type": "string"
                         }
                     },
-                    "script": {
+                    "query": {
                         "type": "object"
                     },
-                    "validation": {
-                        "type": "object",
-                        "description": "{ok, profile, variables, error: {kind, message, line, column},\n                problems: [{rule, line, message}], notes: [text]}"
+                    "notes": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
                     }
                 }
             },
-            "SaveTenantScriptRequest": {
+            "SaveTenantQueryRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.save#TenantScript",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.save#TenantScript",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.save#TenantQuery",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.save#TenantQuery",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40794,10 +40765,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.save#TenantScript"
+                        "const": "facade.TenantScriptFacadeServices.save#TenantQuery"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/SaveTenantScriptParams"
+                        "$ref": "#/components/schemas/SaveTenantQueryParams"
                     }
                 },
                 "required": [
@@ -40806,9 +40777,9 @@
                     "method"
                 ]
             },
-            "SaveTenantScriptResponse": {
+            "SaveTenantQueryResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.save#TenantScript. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.save#TenantQuery. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40825,7 +40796,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/SaveTenantScriptResult"
+                        "$ref": "#/components/schemas/SaveTenantQueryResult"
                     }
                 },
                 "required": [
@@ -40833,37 +40804,40 @@
                     "result"
                 ]
             },
-            "SaveTenantScriptDeploymentParams": {
+            "SaveTenantQueryScheduleParams": {
                 "type": "object",
                 "properties": {
-                    "tenantScriptDeploymentId": {
+                    "scheduleId": {
                         "type": "string"
                     },
-                    "tenantScriptId": {
+                    "tenantQueryId": {
                         "type": "string"
                     },
-                    "scheduleExpr": {
-                        "type": "string",
-                        "description": "Quartz cron, e.g. 0 0 9 * * ? for 09:00 daily."
-                    },
-                    "inputSavedRunId": {
+                    "dailyAt": {
                         "type": "string"
                     },
-                    "chatSpaceId": {
+                    "cronExpression": {
                         "type": "string"
                     },
                     "isActive": {
                         "type": "boolean"
+                    },
+                    "emailTo": {
+                        "type": "string"
+                    },
+                    "emailCc": {
+                        "type": "string"
+                    },
+                    "chatSpaceId": {
+                        "type": "string"
                     }
                 },
                 "required": [
-                    "tenantScriptId",
-                    "scheduleExpr",
-                    "chatSpaceId"
+                    "tenantQueryId"
                 ],
-                "description": "Create or update a deployment of one of the active tenant's scripts. The schedule must be a cron the\n            scheduler understands; the chat space must be the tenant's and switched on; a script that reads a run result\n            needs the saved run. A deployment that is on gets its next run date. Needs edit access to the tenant."
+                "description": "Create or update a schedule of one of the active tenant's queries: when (daily at HH:mm, or a cron), in the tenant's zone, and where its answer goes (email addresses, a chat space). Whoever saves it owns it. Needs tenant-admin access."
             },
-            "SaveTenantScriptDeploymentResult": {
+            "SaveTenantQueryScheduleResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -40881,15 +40855,15 @@
                             "type": "string"
                         }
                     },
-                    "deployment": {
+                    "schedule": {
                         "type": "object"
                     }
                 }
             },
-            "SaveTenantScriptDeploymentRequest": {
+            "SaveTenantQueryScheduleRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.save#TenantScriptDeployment",
-                "x-darpan-method": "facade.TenantScriptFacadeServices.save#TenantScriptDeployment",
+                "description": "JSON-RPC request envelope for facade.TenantScriptFacadeServices.save#TenantQuerySchedule",
+                "x-darpan-method": "facade.TenantScriptFacadeServices.save#TenantQuerySchedule",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40907,10 +40881,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.TenantScriptFacadeServices.save#TenantScriptDeployment"
+                        "const": "facade.TenantScriptFacadeServices.save#TenantQuerySchedule"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/SaveTenantScriptDeploymentParams"
+                        "$ref": "#/components/schemas/SaveTenantQueryScheduleParams"
                     }
                 },
                 "required": [
@@ -40919,9 +40893,9 @@
                     "method"
                 ]
             },
-            "SaveTenantScriptDeploymentResponse": {
+            "SaveTenantQueryScheduleResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.save#TenantScriptDeployment. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.TenantScriptFacadeServices.save#TenantQuerySchedule. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -40938,7 +40912,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/SaveTenantScriptDeploymentResult"
+                        "$ref": "#/components/schemas/SaveTenantQueryScheduleResult"
                     }
                 },
                 "required": [
@@ -41256,13 +41230,13 @@
         "facade.TenantConfigFacadeServices.preview#TenantConfigRestore": "PreviewTenantConfigRestore",
         "facade.TenantConfigFacadeServices.restore#TenantConfigVersion": "RestoreTenantConfigVersion",
         "facade.TenantConfigFacadeServices.snapshot#TenantConfig": "SnapshotTenantConfig",
-        "facade.TenantScriptFacadeServices.delete#TenantScript": "DeleteTenantScript",
-        "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment": "DeleteTenantScriptDeployment",
-        "facade.TenantScriptFacadeServices.list#TenantScriptDeployments": "ListTenantScriptDeployments",
-        "facade.TenantScriptFacadeServices.list#TenantScripts": "ListTenantScripts",
-        "facade.TenantScriptFacadeServices.run#TenantScript": "RunTenantScript",
-        "facade.TenantScriptFacadeServices.run#TenantScriptDeployment": "RunTenantScriptDeployment",
-        "facade.TenantScriptFacadeServices.save#TenantScript": "SaveTenantScript",
-        "facade.TenantScriptFacadeServices.save#TenantScriptDeployment": "SaveTenantScriptDeployment"
+        "facade.TenantScriptFacadeServices.delete#TenantQuery": "DeleteTenantQuery",
+        "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule": "DeleteTenantQuerySchedule",
+        "facade.TenantScriptFacadeServices.list#TenantQueries": "ListTenantQueries",
+        "facade.TenantScriptFacadeServices.list#TenantQuerySchedules": "ListTenantQuerySchedules",
+        "facade.TenantScriptFacadeServices.run#TenantQuery": "RunTenantQuery",
+        "facade.TenantScriptFacadeServices.run#TenantQuerySchedule": "RunTenantQuerySchedule",
+        "facade.TenantScriptFacadeServices.save#TenantQuery": "SaveTenantQuery",
+        "facade.TenantScriptFacadeServices.save#TenantQuerySchedule": "SaveTenantQuerySchedule"
     }
 }

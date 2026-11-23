@@ -138,9 +138,9 @@ class RpcMethodFenceTests {
         assertNull(RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO]))
         assertNull(RpcMethodFence.cliRejection("/rpc/json", [SESSION_INFO, SAVED_RUNS]))
         assertNull(RpcMethodFence.cliRejection("/rpc/json", []))
-        assertNull(RpcMethodFence.cliRejection("/rpc/json/", ["facade.TenantScriptFacadeServices.save#TenantScript"]))
-        // Aditi 2026-11-04: any script deployment can be done via the CLI, send-now included
-        assertNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantScriptFacadeServices.run#TenantScriptDeployment"]))
+        assertNull(RpcMethodFence.cliRejection("/rpc/json/", ["facade.TenantScriptFacadeServices.save#TenantQuery"]))
+        // Aditi 2026-11-04: any script deployment (now a query schedule, DAR-BE-334) can be done via the CLI, send-now included
+        assertNull(RpcMethodFence.cliRejection("/rpc/json", ["facade.TenantScriptFacadeServices.run#TenantQuerySchedule"]))
     }
 
     @Test

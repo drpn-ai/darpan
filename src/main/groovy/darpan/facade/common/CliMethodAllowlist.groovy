@@ -128,15 +128,16 @@ class CliMethodAllowlist {
 
             "facade.TenantConfigFacadeServices.get#TenantConfigVersions",
 
-            "facade.TenantScriptFacadeServices.delete#TenantScript",
-            "facade.TenantScriptFacadeServices.delete#TenantScriptDeployment",
-            "facade.TenantScriptFacadeServices.list#TenantScriptDeployments",
-            "facade.TenantScriptFacadeServices.list#TenantScripts",
-            "facade.TenantScriptFacadeServices.run#TenantScript",
-            // send=true posts to the deployment's chat space now (Aditi 2026-11-04: any script deployment via the CLI)
-            "facade.TenantScriptFacadeServices.run#TenantScriptDeployment",
-            "facade.TenantScriptFacadeServices.save#TenantScript",
-            "facade.TenantScriptFacadeServices.save#TenantScriptDeployment",
+            // DAR-BE-334: tenant queries and their schedules (moqui-jexl)
+            "facade.TenantScriptFacadeServices.delete#TenantQuery",
+            "facade.TenantScriptFacadeServices.delete#TenantQuerySchedule",
+            "facade.TenantScriptFacadeServices.list#TenantQueries",
+            "facade.TenantScriptFacadeServices.list#TenantQuerySchedules",
+            "facade.TenantScriptFacadeServices.run#TenantQuery",
+            // send=true delivers the schedule now, by hand its owner only (Aditi 2026-11-04: any script deployment via the CLI)
+            "facade.TenantScriptFacadeServices.run#TenantQuerySchedule",
+            "facade.TenantScriptFacadeServices.save#TenantQuery",
+            "facade.TenantScriptFacadeServices.save#TenantQuerySchedule",
     ] as LinkedHashSet<String>).asImmutable()
 
     static final Set<String> EXCLUDED = ([

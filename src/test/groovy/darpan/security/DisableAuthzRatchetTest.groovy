@@ -86,7 +86,10 @@ class DisableAuthzRatchetTest {
     // 16 since DAR-BE-303: EmailCopy.unguarded: anonymous reads of EmailCopyBlock config rows and the validated subject write
     // (an anonymous password-reset send has no authz on them); one site, restored in finally, no tenant data touched.
     // 15 since DAR-BE-318 3b-2c: the exclusion-filter backfill's create write went with the retired automation filter table.
-    static final int BASELINE = 15
+    // 17 since DAR-BE-334: two authz lifts with no finder equivalent, each restored in finally. QuerySourceScope.withTenant
+    // runs a query's read as its owner inside the owner's own tenant (checked first), so the existing tenant-checked readers
+    // need no per-entity grant; QueryMigration's one-time copy of every tenant's old scripts runs with no user.
+    static final int BASELINE = 17
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>

@@ -15,6 +15,7 @@
     <default-property name="jexl_busy_service" value="query.QueryHostServices.get#QueryBusyReason"/>
     <default-property name="jexl_owner_key_service" value="query.QueryHostServices.get#QueryOwnerKey"/>
     <default-property name="jexl_owner_fields_service" value="query.QueryHostServices.check#QueryOwnerFields"/>
+    <default-property name="jexl_owner_check_service" value="query.QueryHostServices.check#QueryDeploymentOwner"/>
     <default-property name="jexl_email_from" value="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}"/>
     <default-property name="jexl_email_templates" value="JEXL_SCRIPT_RESULT,DARPAN_QUERY_RESULT"/>
     <webapp-list>

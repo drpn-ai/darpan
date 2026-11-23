@@ -33,4 +33,95 @@
             if (!active || tenantId != active) { problem = "A query can be stored only for your active tenant, not ${tenantId}.".toString(); return }
         ]]></script></actions>
     </service>
+
+    <service verb="read" noun="DatasetSource" allow-remote="false">
+        <description>The "dataset" read source (darpan.query.DatasetQuerySource): input datasetId; a tenant's kept copy,
+            only fields audits keep.</description>
+        <implements service="moqui.jexl.ScriptServices.read#ScriptSource"/>
+        <actions><script><![CDATA[
+            Map out = darpan.query.DatasetQuerySource.read(ec, [input: input, ownerUserId: ownerUserId, userScriptId: userScriptId,
+                    ownerKey: ownerKey, runDate: runDate, timeZone: timeZone, maxRows: maxRows])
+            rows = out.rows; rowCount = out.rowCount; error = out.error
+        ]]></script></actions>
+    </service>
+
+    <service verb="read" noun="RunResultSource" allow-remote="false">
+        <description>The "runResult" read source (darpan.query.RunResultQuerySource): input savedRunId; the newest result's
+            differences.</description>
+        <implements service="moqui.jexl.ScriptServices.read#ScriptSource"/>
+        <actions><script><![CDATA[
+            Map out = darpan.query.RunResultQuerySource.read(ec, [input: input, ownerUserId: ownerUserId, userScriptId: userScriptId,
+                    ownerKey: ownerKey, runDate: runDate, timeZone: timeZone, maxRows: maxRows])
+            rows = out.rows; rowCount = out.rowCount; error = out.error
+        ]]></script></actions>
+    </service>
+
+    <service verb="read" noun="AuditFindingSource" allow-remote="false">
+        <description>The "auditFindings" read source (darpan.query.AuditFindingQuerySource): input auditId (and includeClosed);
+            one row per finding with a fixed list of fields.</description>
+        <implements service="moqui.jexl.ScriptServices.read#ScriptSource"/>
+        <actions><script><![CDATA[
+            Map out = darpan.query.AuditFindingQuerySource.read(ec, [input: input, ownerUserId: ownerUserId, userScriptId: userScriptId,
+                    ownerKey: ownerKey, runDate: runDate, timeZone: timeZone, maxRows: maxRows])
+            rows = out.rows; rowCount = out.rowCount; error = out.error
+        ]]></script></actions>
+    </service>
+
+    <service verb="deliver" noun="QueryChat" allow-remote="false">
+        <description>Delivery for scheduled queries (parameters: chatSpaceId): posts the summary, and which files went by
+            email, to one of the tenant's chat spaces. Never files.</description>
+        <implements service="moqui.jexl.ScriptServices.deliver#UserScriptDeploymentResult"/>
+        <actions><script><![CDATA[
+            Map out = darpan.query.QueryDelivery.chat(ec, [scriptDeployment: scriptDeployment, delivery: delivery, scriptResult: scriptResult, files: files])
+            if (out.error) { ec.message.addError(out.error as String); return }
+            outcome = out.outcome; message = out.message
+        ]]></script></actions>
+    </service>
+
+    <service verb="deliver" noun="QueryEmail" allow-remote="false">
+        <description>Delivery for scheduled queries (parameters: toAddresses, ccAddresses): emails the summary with the files
+            as CSV (template DARPAN_QUERY_RESULT), and records each emailed file and its recipients in DataExportLog.</description>
+        <implements service="moqui.jexl.ScriptServices.deliver#UserScriptDeploymentResult"/>
+        <actions><script><![CDATA[
+            Map out = darpan.query.QueryDelivery.email(ec, [scriptDeployment: scriptDeployment, delivery: delivery, scriptResult: scriptResult,
+                    files: files, scriptRunId: scriptRunId])
+            if (out.error) { ec.message.addError(out.error as String); return }
+            outcome = out.outcome; message = out.message
+        ]]></script></actions>
+    </service>
+
+    <service verb="check" noun="QueryDeploymentOwner" allow-remote="false" authenticate="anonymous-all">
+        <description>jexl_owner_check_service: at every run, the schedule's owner must still be an active member and an
+            admin of its tenant (scheduling sends the tenant's data out); otherwise moqui-jexl switches it off (OWNER_LOST).</description>
+        <in-parameters>
+            <parameter name="scriptDeployment" type="Map" required="true"/>
+            <parameter name="ownerUserId"/>
+        </in-parameters>
+        <out-parameters><parameter name="problem"/></out-parameters>
+        <actions><set field="problem" from="darpan.query.TenantQuerySupport.ownerProblem(ec, ownerUserId, scriptDeployment.companyUserGroupId as String)"/></actions>
+    </service>
+
+    <service verb="migrate" noun="TenantScriptsToQueries" authenticate="false" transaction="ignore" allow-remote="false">
+        <description>One-time migration TENANT_SCRIPTS_TO_QUERIES (darpan.query.QueryMigration): the old tenant scripts become
+            queries and their deployments chat-only schedules, switched off. Idempotent. Internal only, not remote.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="queries" type="Integer"/>
+            <parameter name="schedules" type="Integer"/>
+            <parameter name="skipped" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="migrated" from="darpan.query.QueryMigration.migrateAll(ec)"/>
+            <set field="queries" from="migrated.queries"/>
+            <set field="schedules" from="migrated.schedules"/>
+            <set field="skipped" from="migrated.skipped"/>
+            <message>Migrated ${queries} scripts to queries and ${schedules} deployments to schedules (switched off); ${skipped} already done.</message>
+            <iterate list="migrated.notes" entry="note"><message>${note}</message></iterate>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
 </services>

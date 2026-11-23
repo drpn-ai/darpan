@@ -145,10 +145,12 @@ class TenantConfigAutoVersionSmokeTests {
                 asSystem {
                     upsert("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "TCA_SPACE", companyUserGroupId: MINE, spaceName: "Digest",
                             isActive: "Y"])
-                    upsert("darpan.script.TenantScript", [tenantScriptId: "TCA_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
-                            scriptProfile: "EXPRESSION", inputSource: "SAMPLE", scriptBody: "'hello'", isActive: "Y"])
-                    upsert("darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: "TCA_DEPLOY", companyUserGroupId: MINE,
-                            tenantScriptId: "TCA_SCRIPT", scheduleExpr: "0 0 9 * * ?", chatSpaceId: "TCA_SPACE", isActive: "Y"])
+                    upsert("jexl.script.UserScript", [userScriptId: "TCA_SCRIPT", companyUserGroupId: MINE, scriptName: "Digest",
+                            scriptProfile: "QUERY", scriptBody: "'hello'", isActive: "Y"])
+                    upsert("jexl.script.UserScriptDeployment", [scriptDeploymentId: "TCA_DEPLOY", companyUserGroupId: MINE, userScriptId: "TCA_SCRIPT",
+                            cronExpression: "0 0 9 * * ?", timeZone: "UTC", ownerUserId: ec.user.userId, isActive: "Y"])
+                    upsert("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "TCA_DEPLOY", deliverySeqId: "01",
+                            deliveryServiceName: "query.QueryHostServices.deliver#QueryChat", parametersJson: '{"chatSpaceId":"TCA_SPACE"}', isActive: "Y"])
                 }
             }
             assertNotNull(waitForPending(MINE), "saving a script marks its tenant")
@@ -160,8 +162,10 @@ class TenantConfigAutoVersionSmokeTests {
             asSystem { ec.entity.find(PENDING).deleteAll() }
             inTransaction {
                 asSystem {
-                    ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "TCA_DEPLOY").one()
+                    ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCA_DEPLOY").one()
                             .setAll([lastRunDate: T, lastRunStatus: "SENT", lastRunMessage: "posted", nextRunDate: T]).update()
+                    ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition([scriptDeploymentId: "TCA_DEPLOY", deliverySeqId: "01"]).one()
+                            .setAll([lastOutcome: "SENT", lastMessage: "posted"]).update()
                 }
             }
             settle()
@@ -169,8 +173,9 @@ class TenantConfigAutoVersionSmokeTests {
         } finally {
             settle()
             asSystem {
-                ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "TCA_DEPLOY").deleteAll()
-                ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", "TCA_SCRIPT").deleteAll()
+                ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "TCA_DEPLOY").deleteAll()
+                ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "TCA_DEPLOY").deleteAll()
+                ec.entity.find("jexl.script.UserScript").condition("userScriptId", "TCA_SCRIPT").deleteAll()
                 ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "TCA_SPACE").deleteAll()
             }
         }

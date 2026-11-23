@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-334. Tenant queries on moqui-jexl: Darpan's read sources, and who may use them. The sources check the tenant
+     themselves (the query's tenant, the owner a current member), so every Darpan user may call them. -->
+<entity-facade-xml type="darpan-seed">
+    <jexl.script.ScriptSource sourceName="dataset" serviceName="query.QueryHostServices.read#DatasetSource"
+            description="A tenant's kept copy of a source read (fields audits keep)"/>
+    <jexl.script.ScriptSource sourceName="auditFindings" serviceName="query.QueryHostServices.read#AuditFindingSource"
+            description="The findings of an audit (open ones unless includeClosed)"/>
+    <jexl.script.ScriptSource sourceName="runResult" serviceName="query.QueryHostServices.read#RunResultSource"
+            description="The differences of a saved run's newest result"/>
+
+    <moqui.security.ArtifactGroupMember artifactGroupId="JEXL_SOURCES" artifactName="query.QueryHostServices.read#DatasetSource"
+            nameIsPattern="N" artifactTypeEnumId="AT_SERVICE" inheritAuthz="N"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="JEXL_SOURCES" artifactName="query.QueryHostServices.read#RunResultSource"
+            nameIsPattern="N" artifactTypeEnumId="AT_SERVICE" inheritAuthz="N"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="JEXL_SOURCES" artifactName="query.QueryHostServices.read#AuditFindingSource"
+            nameIsPattern="N" artifactTypeEnumId="AT_SERVICE" inheritAuthz="N"/>
+    <!-- the query deliveries: whoever may schedule queries may use them -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="JEXL_SCRIPT_SCHEDULE" artifactName="query.QueryHostServices.deliver#QueryChat"
+            nameIsPattern="N" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="JEXL_SCRIPT_SCHEDULE" artifactName="query.QueryHostServices.deliver#QueryEmail"
+            nameIsPattern="N" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="JEXL_SOURCES_DARPAN_USER" userGroupId="DARPAN_USER" artifactGroupId="JEXL_SOURCES"
+            authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- moqui-jexl's own gates go to every Darpan user; Darpan's facade enforces the per-tenant rule (edit access to write
+         and run queries, tenant admin to schedule) and jexl_owner_check_service re-checks a schedule's owner every run -->
+    <moqui.security.ArtifactAuthz artifactAuthzId="JEXL_SCRIPT_EDIT_DARPAN_USER" userGroupId="DARPAN_USER" artifactGroupId="JEXL_SCRIPT_EDIT"
+            authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="JEXL_SCRIPT_SCHEDULE_DARPAN_USER" userGroupId="DARPAN_USER" artifactGroupId="JEXL_SCRIPT_SCHEDULE"
+            authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

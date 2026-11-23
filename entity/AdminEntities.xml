@@ -43,7 +43,8 @@
                 with no tenant selected.</description></field>
         <field name="resourceType" type="text-short" not-null="true">
             <description>What was served: GENERATED_OUTPUT (a run result or a run's source file through
-                get#GeneratedOutput) or LEGACY_DIFF_FILE (the super-admin screen download).</description></field>
+                get#GeneratedOutput), LEGACY_DIFF_FILE (the super-admin screen download), or SCRIPT_EMAIL (a file a scheduled
+                query emailed; userId is the schedule's owner).</description></field>
         <field name="resourceRef" type="text-medium" not-null="true">
             <description>The file name or data-manager relative path that was asked for.</description></field>
         <field name="format" type="text-short">
@@ -52,6 +53,8 @@
             <description>Characters served, when known.</description></field>
         <field name="serviceName" type="text-medium" not-null="true">
             <description>The service or screen transition that served it.</description></field>
+        <field name="recipients" type="text-medium">
+            <description>DAR-BE-334: for resourceType SCRIPT_EMAIL (a scheduled query's emailed file), the addresses it went to.</description></field>
         <field name="eventTimestamp" type="date-time" not-null="true"/>
         <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user">
             <key-map field-name="userId"/>

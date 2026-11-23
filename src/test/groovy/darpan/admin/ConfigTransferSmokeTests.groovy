@@ -48,8 +48,8 @@ class ConfigTransferSmokeTests {
 
     /** Every entity a transfer writes, children first, so a wipe never trips a foreign key. */
     private static final List<String> TRANSFER_ENTITIES = [
-            // DAR-BE-236: a deployment names its script, chat space and run, so it goes first.
-            "darpan.script.TenantScriptDeployment", "darpan.script.TenantScript",
+            // DAR-BE-236, DAR-BE-334: a query's schedules name it, so they go first (their deliveries are wiped by schedule).
+            "jexl.script.UserScriptDeployment", "jexl.script.UserScript",
             "darpan.reconciliation.ReconciliationRunResult",
             "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
             "darpan.reconciliation.ReconciliationAutomationSource",
@@ -1452,31 +1452,40 @@ class ConfigTransferSmokeTests {
     private static final String WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=hook-secret-xfer"
     private static final String OLD_WEBHOOK = "https://chat.googleapis.com/v1/spaces/XFER/messages?key=old-hook-secret-xfer"
     private static final String SPACE_REF = "CHAT_SPACE:XFER_SPACE"
-    // ---------------------------------------------------------------- DAR-BE-236 scripts and their deployments
+    // ------------------------------------------------- DAR-BE-236, DAR-BE-334 queries, their schedules and deliveries
 
     private static final String SCRIPT_REF = "SCRIPT:XFER_SCRIPT"
     private static final String SCRIPT_BODY = "'open: ' + size(input.differences)"
+    private static final String READ = '{"inputs":[{"name":"differences","source":"runResult","savedRunId":"XFER_RS","fields":["bucket"]}]}'
 
-    /** SRC's script posts a morning digest of XFER_RS to its space (withAutomation's); OTHER has a script of its own. */
+    /** SRC's query reads XFER_RS and its schedule posts to its space (withAutomation's) and mails ops; OTHER has a query of its own. */
     private void withScript(Closure body) {
         withAutomation {
-            create("darpan.script.TenantScript", [tenantScriptId: "XFER_SCRIPT", companyUserGroupId: SRC, scriptName: "Morning digest",
-                    scriptProfile: "EXPRESSION", inputSource: "RUN_RESULT", scriptBody: SCRIPT_BODY, isActive: "Y"])
-            create("darpan.script.TenantScriptDeployment", [tenantScriptDeploymentId: "XFER_DEPLOY", companyUserGroupId: SRC,
-                    tenantScriptId: "XFER_SCRIPT", scheduleExpr: "0 0 9 * * ?", inputSavedRunId: "XFER_RS", chatSpaceId: "XFER_SPACE",
-                    isActive: "Y", nextRunDate: T0, lastRunDate: T0, lastRunStatus: "SENT", lastRunMessage: "posted", createdDate: T0])
-            create("darpan.script.TenantScript", [tenantScriptId: "XFER_OTHER_SCRIPT", companyUserGroupId: OTHER, scriptName: "Elsewhere only",
-                    scriptProfile: "EXPRESSION", inputSource: "SAMPLE", scriptBody: "'x'", isActive: "Y"])
+            create("jexl.script.UserScript", [userScriptId: "XFER_SCRIPT", companyUserGroupId: SRC, scriptName: "Morning digest",
+                    scriptProfile: "QUERY", readSpecJson: READ, scriptBody: SCRIPT_BODY, ownerUserId: "XFER_OWNER", isActive: "Y"])
+            create("jexl.script.UserScriptDeployment", [scriptDeploymentId: "XFER_DEPLOY", companyUserGroupId: SRC, userScriptId: "XFER_SCRIPT",
+                    cronExpression: "0 0 9 * * ?", timeZone: "UTC", ownerUserId: "XFER_OWNER", isActive: "Y", nextRunDate: T0,
+                    lastRunDate: T0, lastRunStatus: "SENT", lastRunMessage: "posted"])
+            create("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "XFER_DEPLOY", deliverySeqId: "01",
+                    deliveryServiceName: "query.QueryHostServices.deliver#QueryEmail", parametersJson: '{"toAddresses":"ops@example.test"}',
+                    isActive: "Y", lastOutcome: "OK"])
+            create("jexl.script.UserScriptDeploymentDelivery", [scriptDeploymentId: "XFER_DEPLOY", deliverySeqId: "02",
+                    deliveryServiceName: "query.QueryHostServices.deliver#QueryChat", parametersJson: '{"chatSpaceId":"XFER_SPACE"}', isActive: "Y"])
+            create("jexl.script.UserScript", [userScriptId: "XFER_OTHER_SCRIPT", companyUserGroupId: OTHER, scriptName: "Elsewhere only",
+                    scriptProfile: "QUERY", scriptBody: "'x'", isActive: "Y"])
             try {
                 body()
             } finally {
                 wipeTenant(DST)
-                ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptDeploymentId", "XFER_DEPLOY").disableAuthz().deleteAll()
-                ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", "in", ["XFER_SCRIPT", "XFER_OTHER_SCRIPT"])
+                ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "XFER_DEPLOY").disableAuthz().deleteAll()
+                ec.entity.find("jexl.script.UserScriptDeployment").condition("scriptDeploymentId", "XFER_DEPLOY").disableAuthz().deleteAll()
+                ec.entity.find("jexl.script.UserScript").condition("userScriptId", "in", ["XFER_SCRIPT", "XFER_OTHER_SCRIPT"])
                         .disableAuthz().deleteAll()
             }
         }
     }
+
+    private static Map json(Object text) { (Map) new groovy.json.JsonSlurper().parseText(text as String) }
 
     @Test
     void aWholeTenantTransferCarriesItsScriptsAndNeverAnotherTenants() {
@@ -1487,13 +1496,17 @@ class ConfigTransferSmokeTests {
             Map script = scripts[0]
             assertEquals(SCRIPT_BODY, script.fields.scriptBody)
             assertEquals("Y", script.fields.isActive, "a script's own switch is its content")
-            Map deployment = (script.children.TenantScriptDeployment as List<Map>)[0]
-            assertEquals([chatSpaceId: SPACE_REF, inputSavedRunId: "RUN:XFER_RS"], deployment.refs)
-            assertEquals("0 0 9 * * ?", deployment.fields.scheduleExpr)
-            ["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage", "chatSpaceId", "inputSavedRunId",
-             "tenantScriptDeploymentId", "tenantScriptId", "companyUserGroupId"].each {
+            assertEquals("RUN:XFER_RS", json(script.fields.readSpecJson).inputs[0].savedRunId, "the read names the run as a ref")
+            assertFalse(script.fields.containsKey("ownerUserId"), "who owns it stays behind")
+            Map deployment = (script.children.UserScriptDeployment as List<Map>)[0]
+            assertEquals("0 0 9 * * ?", deployment.fields.cronExpression)
+            ["isActive", "nextRunDate", "lastRunDate", "lastRunStatus", "lastRunMessage", "ownerUserId",
+             "scriptDeploymentId", "userScriptId", "companyUserGroupId"].each {
                 assertFalse(deployment.fields.containsKey(it), "${it} does not travel as a value")
             }
+            List<Map> deliveries = deployment.children.UserScriptDeploymentDelivery as List<Map>
+            assertEquals([[toAddresses: "ops@example.test"], [chatSpaceId: SPACE_REF]], deliveries.collect { json(it.fields.parametersJson) })
+            assertFalse(deliveries[0].fields.containsKey("lastOutcome"), "a delivery's last outcome stays behind")
             assertTrue((bundle.chatSpaces as List<Map>)*.ref.contains(SPACE_REF), "the space it posts to travels")
             String all = JsonOutput.toJson(bundle)
             assertFalse(all.contains("XFER_OTHER_SCRIPT") || all.contains("Elsewhere only"), "another tenant's script never travels")
@@ -1519,16 +1532,22 @@ class ConfigTransferSmokeTests {
             assertNoErrors(applied)
             Map idMap = applied.result.idMap as Map
 
-            def script = ec.entity.find("darpan.script.TenantScript").condition("tenantScriptId", idMap[SCRIPT_REF]).disableAuthz().useCache(false).one()
+            def script = ec.entity.find("jexl.script.UserScript").condition("userScriptId", idMap[SCRIPT_REF]).disableAuthz().useCache(false).one()
             assertEquals([DST, "Morning digest", SCRIPT_BODY, "Y"], [script.companyUserGroupId, script.scriptName, script.scriptBody, script.isActive])
-            def deployment = ec.entity.find("darpan.script.TenantScriptDeployment").condition("tenantScriptId", script.tenantScriptId)
+            assertEquals(idMap["RUN:XFER_RS"], json(script.readSpecJson).inputs[0].savedRunId, "the read re-pointed to the target's run")
+            String importer = ec.entity.find("moqui.security.UserAccount").condition("username", SUPER_USERNAME).disableAuthz().one().userId
+            assertEquals(importer, script.ownerUserId, "the admin who imports it owns it")
+            def deployment = ec.entity.find("jexl.script.UserScriptDeployment").condition("userScriptId", script.userScriptId)
                     .disableAuthz().useCache(false).one()
-            assertNotEquals("XFER_DEPLOY", deployment.tenantScriptDeploymentId)
-            assertEquals(DST, deployment.companyUserGroupId)
-            assertEquals("0 0 9 * * ?", deployment.scheduleExpr)
-            assertEquals(idMap[SPACE_REF], deployment.chatSpaceId, "re-pointed to the target's space")
-            assertNotEquals("XFER_SPACE", deployment.chatSpaceId)
-            assertEquals(idMap["RUN:XFER_RS"], deployment.inputSavedRunId, "re-pointed to the target's run")
+            assertNotEquals("XFER_DEPLOY", deployment.scriptDeploymentId)
+            assertEquals([DST, "0 0 9 * * ?", importer], [deployment.companyUserGroupId, deployment.cronExpression, deployment.ownerUserId])
+            List deliveries = ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", deployment.scriptDeploymentId)
+                    .orderBy("deliverySeqId").disableAuthz().useCache(false).list()
+            assertEquals("ops@example.test", json(deliveries[0].parametersJson).toAddresses)
+            assertNull(deliveries[0].lastOutcome)
+            String spaceId = json(deliveries[1].parametersJson).chatSpaceId
+            assertEquals(idMap[SPACE_REF], spaceId, "re-pointed to the target's space")
+            assertNotEquals("XFER_SPACE", spaceId)
             assertEquals("N", deployment.isActive, "an imported deployment arrives switched off")
             assertNull(deployment.nextRunDate)
             assertNull(deployment.lastRunStatus, "the source's run state stays behind")
@@ -1546,9 +1565,10 @@ class ConfigTransferSmokeTests {
     void aVersionKeepsADeploymentsSpaceAndRunAsPlainIds() {
         withScript {
             Map pack = ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true)
-            Map deployment = (((pack.scripts as List<Map>)[0].children as Map).TenantScriptDeployment as List<Map>)[0]
-            assertEquals(["XFER_SPACE", "XFER_RS"], [deployment.fields.chatSpaceId, deployment.fields.inputSavedRunId])
-            assertEquals([:], deployment.refs)
+            Map script = (pack.scripts as List<Map>)[0]
+            assertEquals("XFER_RS", json(script.fields.readSpecJson).inputs[0].savedRunId)
+            Map deployment = ((script.children as Map).UserScriptDeployment as List<Map>)[0]
+            assertEquals("XFER_SPACE", json(((deployment.children as Map).UserScriptDeploymentDelivery as List<Map>)[1].fields.parametersJson).chatSpaceId)
             assertFalse(pack.containsKey("chatSpaces"), "a version holds no space")
         }
     }
@@ -1932,6 +1952,11 @@ class ConfigTransferSmokeTests {
         ec.entity.find("darpan.reconciliation.ReconciliationRun").condition("companyUserGroupId", tenantId)
                 .condition("parentReconciliationRunId", "is-not-null", null).disableAuthz().useCache(false).list()
                 .each { it.set("parentReconciliationRunId", null); it.update() }
+        // DAR-BE-334: a schedule's deliveries carry no tenant; they go by their schedule, before it
+        List<String> scheduleIds = ec.entity.find("jexl.script.UserScriptDeployment").condition("companyUserGroupId", tenantId)
+                .disableAuthz().useCache(false).list()*.scriptDeploymentId.collect { it as String }
+        if (scheduleIds) ec.entity.find("jexl.script.UserScriptDeploymentDelivery").condition("scriptDeploymentId", "in", scheduleIds)
+                .disableAuthz().deleteAll()
         TRANSFER_ENTITIES.each { String entityName ->
             def find = ec.entity.find(entityName).disableAuthz()
             if (entityName.startsWith("darpan.rule.") && entityName != "darpan.rule.RuleSet" && entityName != "darpan.rule.TenantConclusion") {

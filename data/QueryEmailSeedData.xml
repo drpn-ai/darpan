@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<entity-facade-xml type="darpan-seed">
+    <!-- DAR-BE-334 — a scheduled query's email (query.QueryHostServices.deliver#QueryEmail through moqui-jexl's
+         deliver#ScriptEmail). Body parameters: scriptName, summary, fileNames, filesTooLarge. The words are EmailCopyBlock
+         rows (editable in prod); PasswordResetEmailSeedData.xml seeds the SYSTEM EmailServer this FKs. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_QUERY_RESULT" description="Darpan scheduled query result"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${scriptName}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/QueryResult.xml"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_QUERY_RESULT" blockId="intro" defaultText="Here is ${scriptName}, fresh from Darpan."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_QUERY_RESULT" blockId="files" defaultText="Attached: ${fileList}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_QUERY_RESULT" blockId="tooLarge" defaultText="The files (${fileList}) were too big to attach. Narrow the query, or group it, and they will fit."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_QUERY_RESULT" blockId="note" defaultText="This is a scheduled Darpan query. Its owner can change what it says and who gets it."/>
+</entity-facade-xml>

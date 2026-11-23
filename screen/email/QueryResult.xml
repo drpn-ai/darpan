@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-334 scheduled query result: the query's summary, then its files (attached as CSV) or a note that they were too
+     big. Wears EmailFrame like the other Darpan mail; the words are EmailCopyBlock rows (the darpan-email skill holds the
+     voice rules). No bold, no links. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
+    <actions>
+        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · QUERY')"/>
+        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="fileList" from="(fileNames ?: []).join(', ')"/>
+        <set field="copyVars" from="[scriptName: scriptName, fileList: fileList]"/>
+        <set field="copyIntro" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_QUERY_RESULT&quot;, &quot;intro&quot;, copyVars)"/>
+        <set field="copyFiles" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_QUERY_RESULT&quot;, &quot;files&quot;, copyVars)"/>
+        <set field="copyTooLarge" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_QUERY_RESULT&quot;, &quot;tooLarge&quot;, copyVars)"/>
+        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_QUERY_RESULT&quot;, &quot;note&quot;, copyVars)"/>
+        <set field="filesLine" from="fileNames ? (filesTooLarge ? copyTooLarge : copyFiles) : null"/>
+        <set field="emailText" from="darpan.email.EmailFrame.textOf([copyIntro, summary, filesLine, copyNote, '— Darpan'].findAll { it })"/>
+    </actions>
+    <widgets>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
+        <container style="dp-p"><label text="${copyIntro}"/></container>
+        <section name="Summary" condition="summary"><widgets><container style="dp-p"><label text="${summary}"/></container></widgets></section>
+        <section name="Files" condition="filesLine"><widgets><container style="dp-p"><label text="${filesLine}"/></container></widgets></section>
+        <container style="dp-note"><label text="${copyNote}"/></container>
+        <container style="dp-sign"><label text="— Darpan"/></container>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${emailText}]]></text>
+        </render-mode>
+    </widgets>
+</screen>

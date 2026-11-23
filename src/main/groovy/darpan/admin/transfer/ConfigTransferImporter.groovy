@@ -184,7 +184,7 @@ class ConfigTransferImporter {
         // records match by id (a renamed run is renamed back, not copied) and one deleted since comes back under its id.
         ctx.sameTenant = ownVersion && text(bundle.source?.tenantUserGroupId) == tenantId
         dropRetiredFields(ctx)
-        dropRetiredAutomationFilters(ctx)
+        fillAutomationFiltersFromRun(ctx)
         knowledgeGate(ctx)
         checkShape(ctx)
         checkRefs(ctx)
@@ -339,64 +339,35 @@ class ConfigTransferImporter {
     // ---------------------------------------------------------------- shape gates
 
     /**
-     * DAR-BE-206. A column this instance has retired (a kind's retiredFields) is dropped from every record still carrying
-     * it, so a bundle or config version exported before the retirement imports as before. Only those: a column this
-     * instance never had still blocks as UNKNOWN_FIELD. The plan hash still covers the bundle as sent.
+     * DAR-BE-338. Darpan 3.4.0 kept no automation filter rows (automations read their run's then), so its bundles and config
+     * versions carry automation sources with no ReconciliationAutomationSourceFilter child at all; every other export writes
+     * the child, empty or not. Such a source takes the filter rows of the same side of the run the automation names, as the
+     * bundle carries them: that is what the automation ran with. A source that carries the child, even empty, imports as carried.
      */
-    private static void dropRetiredFields(Map ctx) {
-        KINDS.findAll { it.retiredFields }.each { Map kindSpec ->
-            String list = BUNDLE_LISTS[kindSpec.kind as String]
-            Set<String> retired = (kindSpec.retiredFields as List<String>) as Set<String>
-            List carried = (((Map) ctx.bundle).get(list) ?: []) as List
-            Closure<Boolean> carries = { Object rec -> rec instanceof Map && rec.fields instanceof Map && ((Map) rec.fields).keySet().any { it in retired } }
-            if (!carried.any(carries)) return
-            ctx.bundle = new LinkedHashMap((Map) ctx.bundle)
-            ((Map) ctx.bundle).put(list, carried.collect { Object rec ->
-                if (!carries(rec)) return rec
-                Map copy = new LinkedHashMap((Map) rec)
-                copy.fields = ((Map) ((Map) rec).fields).findAll { k, v -> !(k in retired) }
-                return copy
-            })
-        }
-    }
-
-    /**
-     * DAR-BE-318 3b-2c. A bundle or config version made before automations stopped keeping their own filter rows still carries
-     * them under each automation source (ReconciliationAutomationSourceFilter). They are dropped when they equal the filters of
-     * the same side of the run the automation reads, which is what the automation now reads anyway; when they differ the
-     * import is refused by name, because taking the run's would silently change what the automation reads. Rules compare as
-     * sets: field, direction and values (trimmed, case-insensitive, in any order). The plan hash still covers the bundle as sent.
-     */
-    private static void dropRetiredAutomationFilters(Map ctx) {
-        String retired = "ReconciliationAutomationSourceFilter"
+    private static void fillAutomationFiltersFromRun(Map ctx) {
+        String child = shortName("darpan.reconciliation.ReconciliationAutomationSourceFilter")
         List carried = (((Map) ctx.bundle).get("automations") ?: []) as List
-        Closure<Boolean> carries = { Object rec ->
-            rec instanceof Map && ((((Map) rec).children as Map)?.ReconciliationAutomationSource as List)?.any { Object s ->
-                s instanceof Map && (((Map) s).children as Map)?.containsKey(retired)
-            }
-        }
-        if (!carried.any(carries)) return
+        Closure<Boolean> lacks = { Object s -> s instanceof Map && !((((Map) s).children ?: [:]) as Map).containsKey(child) }
+        Closure<List> sourcesOf = { Object rec -> (((((Map) rec).children ?: [:]) as Map).ReconciliationAutomationSource ?: []) as List }
+        if (!carried.any { Object rec -> rec instanceof Map && sourcesOf(rec).any(lacks) }) return
+        Map childSpec = ((((spec(AUTOMATION).children as List<Map>)[0]).children as List<Map>)[0])
+        Set<String> allowed = valueFields(ctx.ec, childSpec) as Set<String>
         ctx.bundle = new LinkedHashMap((Map) ctx.bundle)
         ((Map) ctx.bundle).put("automations", carried.collect { Object rec ->
-            if (!carries(rec)) return rec
+            if (!(rec instanceof Map) || !sourcesOf(rec).any(lacks)) return rec
             Map automation = (Map) rec
             Map copy = new LinkedHashMap(automation)
             Map children = new LinkedHashMap((Map) automation.children)
-            children.ReconciliationAutomationSource = ((List) children.ReconciliationAutomationSource).collect { Object s ->
-                Map source = (Map) s
-                Map sourceChildren = (source.children ?: [:]) as Map
-                if (!sourceChildren.containsKey(retired)) return source
+            children.ReconciliationAutomationSource = sourcesOf(automation).collect { Object s ->
+                if (!lacks(s)) return s
+                Map source = new LinkedHashMap((Map) s)
                 String side = text(((Map) source.fields)?.fileSide)
-                Set own = filterSet((List) sourceChildren.get(retired))
-                if (own && own != filterSet(runFiltersOf(ctx, automation, side))) {
-                    block(ctx, "AUTOMATION_FILTERS_DIFFER", automation.ref, "${automation.label ?: automation.ref} keeps its own ${side} " +
-                            "filters, which differ from its run's. Automations now read their run's filters: sync the automation with " +
-                            "its run at the source and export again.")
-                }
-                Map stripped = new LinkedHashMap(source)
-                Map rest = sourceChildren.findAll { k, v -> k != retired }
-                if (rest) stripped.children = rest else stripped.remove("children")
-                return stripped
+                List runRows = (runFiltersOf(ctx, automation, side) ?: []) as List
+                source.children = new LinkedHashMap(((source.children ?: [:]) as Map))
+                ((Map) source.children).put(child, runRows.findAll { it instanceof Map }.collect { Object r ->
+                    [fields: ((((Map) r).fields ?: [:]) as Map).findAll { k, v -> k in allowed }, refs: [:]]
+                })
+                return source
             }
             copy.children = children
             return copy
@@ -444,17 +415,26 @@ class ConfigTransferImporter {
         return source == null ? null : ((((Map) source.children)?.RuleSetCompareSourceFilter ?: []) as List)
     }
 
-    /** Filter rows as a set of [field, direction, sorted values], so order and value spelling do not count as a difference. */
-    private static Set filterSet(List rows) {
-        return ((rows ?: []) as List).findAll { it instanceof Map }.collect { Object r ->
-            Map f = (((Map) r).fields ?: [:]) as Map
-            Object raw = f.filterValues
-            if (raw instanceof String && ((String) raw).trim().startsWith("[")) {
-                try { raw = new groovy.json.JsonSlurper().parseText((String) raw) } catch (Exception ignored) { }
-            }
-            [text(f.fieldExpression), (text(f.operator) ?: "EXCLUDE_IN").toUpperCase(Locale.ROOT),
-             darpan.reconciliation.source.SourceFilterSupport.splitValues(raw).collect { it.toUpperCase(Locale.ROOT) }.sort()]
-        } as Set
+    /**
+     * DAR-BE-206. A column this instance has retired (a kind's retiredFields) is dropped from every record still carrying
+     * it, so a bundle or config version exported before the retirement imports as before. Only those: a column this
+     * instance never had still blocks as UNKNOWN_FIELD. The plan hash still covers the bundle as sent.
+     */
+    private static void dropRetiredFields(Map ctx) {
+        KINDS.findAll { it.retiredFields }.each { Map kindSpec ->
+            String list = BUNDLE_LISTS[kindSpec.kind as String]
+            Set<String> retired = (kindSpec.retiredFields as List<String>) as Set<String>
+            List carried = (((Map) ctx.bundle).get(list) ?: []) as List
+            Closure<Boolean> carries = { Object rec -> rec instanceof Map && rec.fields instanceof Map && ((Map) rec.fields).keySet().any { it in retired } }
+            if (!carried.any(carries)) return
+            ctx.bundle = new LinkedHashMap((Map) ctx.bundle)
+            ((Map) ctx.bundle).put(list, carried.collect { Object rec ->
+                if (!carries(rec)) return rec
+                Map copy = new LinkedHashMap((Map) rec)
+                copy.fields = ((Map) ((Map) rec).fields).findAll { k, v -> !(k in retired) }
+                return copy
+            })
+        }
     }
 
     /** Kinds this instance lacks, columns its entities do not declare, and instance-local endpoints all block. */

@@ -52,7 +52,7 @@ class ConfigTransferSmokeTests {
             "jexl.script.UserScriptDeployment", "jexl.script.UserScript",
             "darpan.reconciliation.ReconciliationRunResult",
             "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
-            "darpan.reconciliation.ReconciliationAutomationSource",
+            "darpan.reconciliation.ReconciliationAutomationSourceFilter", "darpan.reconciliation.ReconciliationAutomationSource",
             "darpan.reconciliation.ReconciliationAutomation", "darpan.reconciliation.TenantChatSpace",
             "darpan.reconciliation.ReconciliationRun", "darpan.reconciliation.Reconciliation",
             "darpan.rule.RuleSetConclusionCondition", "darpan.rule.RuleSetConclusionRule",
@@ -1148,8 +1148,8 @@ class ConfigTransferSmokeTests {
             def source = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", automation.automationId)
                     .disableAuthz().useCache(false).one()
             assertEquals(idMap["NETSUITE_SUITEQL:XFER_Q1"], (new JsonSlurper().parseText(source.safeMetadataJson as String) as Map).parameters.nsSuiteQlSourceQueryId)
-            assertEquals(1L, ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", automation.compareScopeId)
-                    .disableAuthz().useCache(false).count(), "the automation's filter is its run's, carried with the run")
+            assertEquals(1L, ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                    .condition("automationId", automation.automationId).disableAuthz().useCache(false).count())
 
             String everythingSaid = JsonOutput.toJson([preview.result, applied.result,
                     ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()*.getMap()])
@@ -1594,95 +1594,100 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
-    void anExportCarriesNoAutomationFilterRows() {
+    void aBundleCarriesAnAutomationsOwnFiltersAndImportsThemAsCarriedNotTheRuns() {
+        // DAR-BE-338: an automation runs on its own copy; its filters travel with it, even when its run's differ
         withAutomation {
-            Map automation = (exportWhole().automations as List<Map>).find { it.ref == AUTO_REF }
-            assertTrue(((automation.children as Map).ReconciliationAutomationSource as List<Map>).every { !it.children },
-                    "an automation source carries no filters (DAR-BE-318 3b-2c): ${automation.children}")
-        }
-    }
+            withRunFilter("Open") {
+                Map bundle = exportWhole()
+                Map automation = (bundle.automations as List<Map>).find { it.ref == AUTO_REF }
+                Map source = ((automation.children as Map).ReconciliationAutomationSource as List<Map>).find { it.fields.fileSide == "FILE_1" }
+                assertEquals(['["Closed"]'], ((source.children as Map).ReconciliationAutomationSourceFilter as List<Map>)*.fields*.filterValues)
 
-    @Test
-    void anOldBundleWhoseAutomationFiltersMatchItsRunImports() {
-        withAutomation {
-            Map bundle = withOldAutomationFilters(exportWhole(), [[fieldExpression: "status", operator: "exclude_in", filterValues: "Closed"]])
-            Map plan = importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan as Map
-            assertEquals([], plan.blocking, "rows equal to the run's are dropped: ${plan.blocking}")
-            assertEquals("CREATE", (plan.lines as List<Map>).find { it.ref == AUTO_REF }?.action)
-        }
-    }
+                assertNoErrors(applyPlan(DST, bundle, [(AUTH_REF): "CREATE"]))
 
-    @Test
-    void anOldBundleWhoseAutomationFiltersDifferIsRefusedByName() {
-        withAutomation {
-            Map bundle = withOldAutomationFilters(exportWhole(), [[fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Closed,Void"]])
-            Map plan = importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan as Map
-            Map block = (plan.blocking as List<Map>).find { it.code == "AUTOMATION_FILTERS_DIFFER" }
-            assertNotNull(block, "${plan.blocking}")
-            assertEquals(AUTO_REF, block.ref)
-            assertTrue((block.message as String).contains("Returns every morning") && (block.message as String).contains("FILE_1"), block.message)
-        }
-    }
-
-    @Test
-    void anOldBundleWhoseAutomationFiltersMatchInAnotherOrderImports() {
-        withAutomation {
-            create("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "XFER_CS", fileSide: "FILE_1", sequenceNum: 2L,
-                    companyUserGroupId: SRC, fieldExpression: "kind", operator: "INCLUDE_IN", filterValues: "B,A"])
-            Map bundle = withOldAutomationFilters(exportWhole(), [[fieldExpression: "kind", operator: "INCLUDE_IN", filterValues: "A,B"],
-                                                                  [fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Closed"]])
-            assertEquals([], (importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan as Map).blocking)
-        }
-    }
-
-    @Test
-    void anOldConfigVersionRestoresWhenItsAutomationFiltersMatch() {
-        withAutomation {
-            Map pack = withOldAutomationFilters(ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true),
-                    [[fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Closed"]])
-            Map matching = ConfigTransferImporter.preview(ec, SRC, pack, TenantConfigRestoreSupport.sameConnections(pack), null, true)
-            assertEquals([], (matching.plan as Map).blocking)
-
-            Map drifted = withOldAutomationFilters(ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true),
-                    [[fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Open"]])
-            Map refused = ConfigTransferImporter.preview(ec, SRC, drifted, TenantConfigRestoreSupport.sameConnections(drifted), null, true)
-            assertEquals(["AUTOMATION_FILTERS_DIFFER"], ((refused.plan as Map).blocking as List<Map>)*.code)
-        }
-    }
-
-    @Test
-    void anOldConfigVersionRestoresAfterAScopeWasAddedToItsRun() {
-        // Review M4: a version names its automation's scope by id; the run in the version is the reference, so a scope added
-        // to the run since (sorting before it, so the live order moved) must not send the comparison to the wrong scope.
-        withAutomation {
-            Map pack = withOldAutomationFilters(ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true),
-                    [[fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Closed"]])
-            create("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS_ADDED", ruleSetId: "XFER_RS", objectType: "AAA_FIRST",
-                    scopeMode: "COMPARE", description: "Added since", companyUserGroupId: SRC])
-            try {
-                Map preview = ConfigTransferImporter.preview(ec, SRC, pack, TenantConfigRestoreSupport.sameConnections(pack), null, true)
-                assertFalse(((preview.plan as Map).blocking as List<Map>)*.code.contains("AUTOMATION_FILTERS_DIFFER"),
-                        "${(preview.plan as Map).blocking}")
-            } finally {
-                ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", "XFER_CS_ADDED").disableAuthz().deleteAll()
+                assertEquals(['["Closed"]'], automationFilterValues(DST))
             }
         }
     }
 
-    /** The bundle as an instance before DAR-BE-318 3b-2c exported it: XFER_AUTO's FILE_1 source carries its own filter rows. */
-    private static Map withOldAutomationFilters(Map bundle, List<Map> rows) {
+    @Test
+    void aBundleFrom340WithNoAutomationFilterKeyGivesTheAutomationItsRunsFilters() {
+        // 3.4.0 exported automation sources with no filter child at all (automations read their run's then)
+        withAutomation {
+            withRunFilter("Open") {
+                Map bundle = as340(exportWhole())
+
+                assertNoErrors(applyPlan(DST, bundle, [(AUTH_REF): "CREATE"]))
+
+                assertEquals(["Open"], automationFilterValues(DST))
+            }
+        }
+    }
+
+    @Test
+    void anEmptyAutomationFilterKeyImportsNoFilters() {
+        withAutomation {
+            withRunFilter("Open") {
+                Map bundle = copy(exportWhole())
+                Map automation = (bundle.automations as List<Map>).find { it.ref == AUTO_REF }
+                ((automation.children as Map).ReconciliationAutomationSource as List<Map>).each { it.children = [ReconciliationAutomationSourceFilter: []] }
+
+                assertNoErrors(applyPlan(DST, bundle, [(AUTH_REF): "CREATE"]))
+
+                assertEquals([], automationFilterValues(DST))
+            }
+        }
+    }
+
+    @Test
+    void aConfigVersionFrom340RestoresItsRunsFiltersToItsAutomation() {
+        withAutomation {
+            withRunFilter("Open") {
+                Map pack = as340(ConfigTransferExporter.bundle(ec, SRC, ["month-close"], [], [], null, null, true))
+                ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
+                Map connections = TenantConfigRestoreSupport.sameConnections(pack)
+                Map preview = ConfigTransferImporter.preview(ec, SRC, pack, connections, null, true)
+                assertEquals([], (preview.plan as Map).blocking)
+
+                ConfigTransferImporter.apply(ec, SRC, pack, connections, preview.planHash as String, "version", null,
+                        ConfigTransferImporter.SERVICE_NAME, true)
+
+                assertEquals(["Open"], automationFilterValues(SRC))
+            }
+        }
+    }
+
+    /** A bundle as 3.4.0 exported it: automation sources carry no filter child. */
+    private static Map as340(Map bundle) {
         Map old = copy(bundle)
-        Map automation = (old.automations as List<Map>).find { it.ref == AUTO_REF }
-        Map source = ((automation.children as Map).ReconciliationAutomationSource as List<Map>).find { it.fields.fileSide == "FILE_1" }
-        source.children = [ReconciliationAutomationSourceFilter: rows.withIndex().collect { Map r, int i ->
-            [fields: [fileSide: "FILE_1", sequenceNum: i + 1] + r]
-        }]
+        (old.automations as List<Map>).each { Map automation ->
+            ((automation.children as Map)?.ReconciliationAutomationSource as List<Map>)?.each { Map source -> source.remove("children") }
+        }
         return old
+    }
+
+    /** XFER_AUTO's run (XFER_CS) FILE_1 filter, which differs from the automation's own ["Closed"]. */
+    private void withRunFilter(String value, Closure body) {
+        create("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "XFER_CS", fileSide: "FILE_1", sequenceNum: 1L,
+                companyUserGroupId: SRC, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: value])
+        try {
+            body()
+        } finally {
+            ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition([compareScopeId: "XFER_CS", fileSide: "FILE_1"]).disableAuthz().deleteAll()
+        }
+    }
+
+    /** The FILE_1 filter values of the automation named "Returns every morning" in a tenant. */
+    private List<String> automationFilterValues(String tenantId) {
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("companyUserGroupId", tenantId)
+                .condition("automationName", "Returns every morning").disableAuthz().useCache(false).one()
+        return ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("automationId", automation.automationId)
+                .condition("fileSide", "FILE_1").orderBy("sequenceNum").disableAuthz().useCache(false).list()*.filterValues
     }
 
     private static final String AUTO_REF = "AUTOMATION:XFER_AUTO"
 
-    /** SRC's run gets a morning automation posting to its Google Chat space (and OTHER a space of the same name), and a filter. */
+    /** SRC's run gets a morning automation posting to its Google Chat space (and OTHER a space of the same name). */
     private void withAutomation(Closure body) {
         create("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "XFER_SPACE", companyUserGroupId: SRC, spaceName: "Ops alerts",
                 chatProviderEnumId: "CHAT_PROV_GOOGLE", webhookUrl: WEBHOOK, googleChatWebhookUrl: OLD_WEBHOOK, isActive: "Y",
@@ -1696,13 +1701,13 @@ class ConfigTransferSmokeTests {
         create("darpan.reconciliation.ReconciliationAutomationSource", [automationId: "XFER_AUTO", fileSide: "FILE_1",
                 companyUserGroupId: SRC, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL",
                 safeMetadataJson: '{"parameters":{"nsSuiteQlSourceQueryId":"XFER_Q1"}}'])
-        create("darpan.rule.RuleSetCompareSourceFilter", [compareScopeId: "XFER_CS", fileSide: "FILE_1",
-                sequenceNum: 1L, companyUserGroupId: SRC, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "Closed"])
+        create("darpan.reconciliation.ReconciliationAutomationSourceFilter", [automationId: "XFER_AUTO", fileSide: "FILE_1",
+                sequenceNum: 1L, companyUserGroupId: SRC, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: '["Closed"]'])
         try {
             body()
         } finally {
             wipeTenant(DST)
-            ec.entity.find("darpan.rule.RuleSetCompareSourceFilter").condition("compareScopeId", "XFER_CS").disableAuthz().deleteAll()
+            ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
             ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
             ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", "XFER_AUTO").disableAuthz().deleteAll()
             ec.entity.find("darpan.reconciliation.TenantChatSpace").condition("chatSpaceId", "in", ["XFER_SPACE", "XFER_OTHER_SPACE"])

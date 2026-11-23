@@ -52,7 +52,6 @@ import static darpan.common.ValueSupport.normalizeInt
 import static darpan.common.ValueSupport.readField
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.currentUserId
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomation
-import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSourceFilters
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSources
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.normalizeDataManagerPath
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.nowTimestamp
@@ -2457,7 +2456,7 @@ class AutomationExecutionSupport {
         applyWindowParameters(serviceParams, automation, source, connectorForService, window)
         if (connectorForService?.preserveWindowInstants) serviceParams.preserveWindowInstants = true
 
-        // DAR-BE-318 (plan 3b-2b, Task 14): the side's Keep plan, from the automation's own filter rows (Ruling 3b2b-15).
+        // DAR-BE-318 (plan 3b-2b Task 14, 3b-2c): the side's Keep plan, from its compare scope's filter rows for the automation's tenant.
         // The read gets the rows only when Keep runs there (sideKeepOf); a Spark side's Keep runs at the compare's ingest.
         Map sideKeep = sideKeepOf(ec, automation, source, connectorForService, serviceName, new LinkedHashMap<String, Object>(serviceParams),
                 params?.get(KEEP_IN_SPARK) == true)
@@ -2576,9 +2575,10 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * DAR-BE-318 (plan 3b-2b, Task 14). One automation side's Keep plan (KeepPlanSupport's shape), from the automation's
-     * OWN filter rows (ReconciliationAutomationSourceFilter, Ruling 3b2b-15: the store switch to the compare scope is plan
-     * 3b-2c), read for the automation's tenant only.
+     * DAR-BE-318 (plan 3b-2b Task 14, plan 3b-2c). One automation side's Keep plan (KeepPlanSupport's shape), from its compare
+     * scope's filter rows (KeepPlanSupport.tenantRuleRows, the store the interactive run reads), read for the AUTOMATION's
+     * tenant: a scheduled run has no signed-in user to pin it, so a blank tenant throws and another tenant's rows are never read.
+     * An automation with no compare scope (a lifecycle automation) reads none.
      * <ul>
      * <li>NONE (no filter parameter: uploads, databases): no rows are read, nothing is filtered, as today.</li>
      * <li>READ (a data-defined endpoint, Ruling 3b2b-16): the read gets the rows and filters, as today.</li>
@@ -2595,15 +2595,14 @@ class AutomationExecutionSupport {
         String placement = KeepPlanSupport.placement(connector)
         // NONE reads no filter rows: the gate hands back its empty plan as for any NONE side
         if (placement == KeepPlanSupport.NONE) return KeepPlanSupport.effectiveSideKeep(ec, [], connector, extractOptions, null, null, [], keepInSpark)
-        List<Map<String, Object>> rows = loadAutomationSourceFilters(ec, normalize(readField(automation, "automationId")),
-                normalize(readField(source, "fileSide")), normalize(readField(automation, "companyUserGroupId")))
+        String fileSide = normalize(readField(source, "fileSide"))
+        List<Map<String, Object>> rows = KeepPlanSupport.tenantRuleRows(ec, normalize(readField(automation, "compareScopeId")), fileSide,
+                normalize(readField(automation, "companyUserGroupId")))
         // the side's keys and record root, as RunExtractSupport.sideKeep takes them: both from the compare scope, not the automation's snapshot
-        Map shape = placement == KeepPlanSupport.SPARK ? sideKeyShape(ec, automation, normalize(readField(source, "fileSide"))) :
-                [recordRoot: null, keyFields: []]
+        Map shape = placement == KeepPlanSupport.SPARK ? sideKeyShape(ec, automation, fileSide) : [recordRoot: null, keyFields: []]
         return KeepPlanSupport.effectiveSideKeep(ec, rows, connector, extractOptions,
                 serviceName ? ec.service.getServiceDefinition(serviceName) : null,
-                (String) shape.recordRoot, (List<String>) shape.keyFields, keepInSpark, landed,
-                normalize(readField(source, "fileSide")))
+                (String) shape.recordRoot, (List<String>) shape.keyFields, keepInSpark, landed, fileSide)
     }
 
     /**

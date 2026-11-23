@@ -597,15 +597,7 @@ class AutomationKeepParityTests {
                 safeMetadataJson="${metadata(side1[1] as String, side1.size() > 3 ? side1[3] : false)}"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${id}" fileSide="FILE_2" companyUserGroupId="${TENANT}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
-                safeMetadataJson="${metadata(LEDGER_EXTRACT, side1[2] as boolean)}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="1"
-                fieldExpression="\$.records[*].status" operator="EXCLUDE_IN" filterValues="VOID,CANCELLED" companyUserGroupId="${TENANT}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="2"
-                fieldExpression="\$.records[*].region" operator="INCLUDE_PREFIX" filterValues="NO" companyUserGroupId="${TENANT}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="3"
-                fieldExpression="total" operator="EXCLUDE_IN" filterValues="24.00" companyUserGroupId="${TENANT}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="4"
-                fieldExpression="id" operator="EXCLUDE_IN" filterValues="K1,K7,K8" companyUserGroupId="${OTHER_TENANT}"/>"""
+                safeMetadataJson="${metadata(LEDGER_EXTRACT, side1[2] as boolean)}"/>"""
         }
         // Task 16b: the same side and rows on an EVALUATE scope, one source each: today's filtering read, and the Spark side
         String evaluateAutomations = [KAP_EVAL_READ: ["ACME_READ", READ_EXTRACT], KAP_EVAL_SPARK: ["ACME_SPARK", SPARK_EXTRACT],
@@ -617,13 +609,7 @@ class AutomationKeepParityTests {
                 relativeWindowCount="1" windowTimeZone="UTC" isActive="N"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${id}" fileSide="FILE_1" companyUserGroupId="${TENANT}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${side1[0]}" fileTypeEnumId="DftJson"
-                safeMetadataJson="${metadata(side1[1] as String, false)}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="1"
-                fieldExpression="\$.records[*].status" operator="EXCLUDE_IN" filterValues="VOID,CANCELLED" companyUserGroupId="${TENANT}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="2"
-                fieldExpression="\$.records[*].region" operator="INCLUDE_PREFIX" filterValues="NO" companyUserGroupId="${TENANT}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${id}" fileSide="FILE_1" sequenceNum="3"
-                fieldExpression="total" operator="EXCLUDE_IN" filterValues="24.00" companyUserGroupId="${TENANT}"/>"""
+                safeMetadataJson="${metadata(side1[1] as String, false)}"/>"""
         }.join("")
         // Task 16e: side 1 under orders (not top-level records), first read through the filtering extract
         String nestedAutomation = """
@@ -636,24 +622,19 @@ class AutomationKeepParityTests {
                 safeMetadataJson="${metadata(READ_EXTRACT, false)}"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="KAP_RETRY_NEST" fileSide="FILE_2" companyUserGroupId="${TENANT}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
-                safeMetadataJson="${metadata(LEDGER_EXTRACT, false)}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KAP_RETRY_NEST" fileSide="FILE_1" sequenceNum="1"
-                fieldExpression="status" operator="EXCLUDE_IN" filterValues="VOID,CANCELLED" companyUserGroupId="${TENANT}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KAP_RETRY_NEST" fileSide="FILE_1" sequenceNum="2"
-                fieldExpression="region" operator="INCLUDE_PREFIX" filterValues="NO" companyUserGroupId="${TENANT}"/>"""
-        // review 16d-M6: the same nested side with no tenant rule
-        String builtInOnly = nestedAutomation.replace("KAP_RETRY_NEST", "KAP_RETRY_BUILT_IN").replaceAll(/(?s)\s*<darpan\.reconciliation\.ReconciliationAutomationSourceFilter .*/, "")
+                safeMetadataJson="${metadata(LEDGER_EXTRACT, false)}"/>"""
+        // review 16d-M6: the same nested side with no tenant rule (its own scope, which has no filter rows)
+        String builtInOnly = nestedAutomation.replace("KAP_RETRY_NEST", "KAP_RETRY_BUILT_IN").replace("KAP_NEST_RS", "KAP_BUILT_IN_RS")
+                .replace("KAP_NEST_SCOPE", "KAP_BUILT_IN_SCOPE")
         // review 16b-M1: an evaluate run on the Spark side whose one rule sets every record aside
         String keepsNothing = """
             <darpan.reconciliation.ReconciliationAutomation automationId="KAP_EVAL_NONE" automationName="KAP_EVAL_NONE" companyUserGroupId="${TENANT}"
-                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_EVAL_RS" savedRunType="ruleset"
-                ruleSetId="KAP_EVAL_RS" compareScopeId="KAP_EVAL_SCOPE" relativeWindowTypeEnumId="${AutomationExecutionSupport.WINDOW_PREVIOUS_DAY}"
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KAP_EVAL_NONE_RS" savedRunType="ruleset"
+                ruleSetId="KAP_EVAL_NONE_RS" compareScopeId="KAP_EVAL_NONE_SCOPE" relativeWindowTypeEnumId="${AutomationExecutionSupport.WINDOW_PREVIOUS_DAY}"
                 relativeWindowCount="1" windowTimeZone="UTC" isActive="N"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="KAP_EVAL_NONE" fileSide="FILE_1" companyUserGroupId="${TENANT}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="ACME_SPARK" fileTypeEnumId="DftJson"
-                safeMetadataJson="${metadata(SPARK_EXTRACT, false)}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KAP_EVAL_NONE" fileSide="FILE_1" sequenceNum="1"
-                fieldExpression="status" operator="INCLUDE_IN" filterValues="CLOSED" companyUserGroupId="${TENANT}"/>"""
+                safeMetadataJson="${metadata(SPARK_EXTRACT, false)}"/>"""
         ec.entity.makeDataLoader().xmlText("""<entity-facade-xml type="seed">
             <moqui.security.UserGroup userGroupId="${OTHER_TENANT}" description="Bravo"
                 groupTypeEnumId="${TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID}"/>
@@ -688,13 +669,34 @@ class AutomationKeepParityTests {
                 recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
             <darpan.rule.RuleSetCompareSource compareScopeId="KAP_SCOPE" fileSide="FILE_2" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_SCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].status" operator="EXCLUDE_IN" filterValues="VOID,CANCELLED" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_SCOPE" fileSide="FILE_1" sequenceNum="2"
+                fieldExpression="\$.records[*].region" operator="INCLUDE_PREFIX" filterValues="NO" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_SCOPE" fileSide="FILE_1" sequenceNum="3"
+                fieldExpression="total" operator="EXCLUDE_IN" filterValues="24.00" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_SCOPE" fileSide="FILE_1" sequenceNum="4"
+                fieldExpression="id" operator="EXCLUDE_IN" filterValues="K1,K7,K8" companyUserGroupId="${OTHER_TENANT}"/>
             ${automations}
             <darpan.rule.RuleSet ruleSetId="KAP_EVAL_RS" ruleSetName="ACME orders, one side" companyUserGroupId="${TENANT}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="KAP_EVAL_SCOPE" ruleSetId="KAP_EVAL_RS" objectType="ORDER" scopeMode="EVALUATE"
                 companyUserGroupId="${TENANT}"/>
             <darpan.rule.RuleSetCompareSource compareScopeId="KAP_EVAL_SCOPE" fileSide="FILE_1" systemEnumId="ACME_SPARK" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_EVAL_SCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="\$.records[*].status" operator="EXCLUDE_IN" filterValues="VOID,CANCELLED" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_EVAL_SCOPE" fileSide="FILE_1" sequenceNum="2"
+                fieldExpression="\$.records[*].region" operator="INCLUDE_PREFIX" filterValues="NO" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_EVAL_SCOPE" fileSide="FILE_1" sequenceNum="3"
+                fieldExpression="total" operator="EXCLUDE_IN" filterValues="24.00" companyUserGroupId="${TENANT}"/>
             ${evaluateAutomations}
+            <darpan.rule.RuleSet ruleSetId="KAP_EVAL_NONE_RS" ruleSetName="ACME orders, one side, keeps none" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="KAP_EVAL_NONE_SCOPE" ruleSetId="KAP_EVAL_NONE_RS" objectType="ORDER" scopeMode="EVALUATE"
+                companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KAP_EVAL_NONE_SCOPE" fileSide="FILE_1" systemEnumId="ACME_SPARK" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_EVAL_NONE_SCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="status" operator="INCLUDE_IN" filterValues="CLOSED" companyUserGroupId="${TENANT}"/>
             ${keepsNothing}
             <darpan.rule.RuleSet ruleSetId="KAP_NEST_RS" ruleSetName="ACME orders under orders vs ledger" companyUserGroupId="${TENANT}"/>
             <darpan.rule.RuleSetCompareScope compareScopeId="KAP_NEST_SCOPE" ruleSetId="KAP_NEST_RS" objectType="ORDER" companyUserGroupId="${TENANT}"/>
@@ -702,7 +704,17 @@ class AutomationKeepParityTests {
                 recordRootExpression="orders" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
             <darpan.rule.RuleSetCompareSource compareScopeId="KAP_NEST_SCOPE" fileSide="FILE_2" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
                 recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_NEST_SCOPE" fileSide="FILE_1" sequenceNum="1"
+                fieldExpression="status" operator="EXCLUDE_IN" filterValues="VOID,CANCELLED" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KAP_NEST_SCOPE" fileSide="FILE_1" sequenceNum="2"
+                fieldExpression="region" operator="INCLUDE_PREFIX" filterValues="NO" companyUserGroupId="${TENANT}"/>
             ${nestedAutomation}
+            <darpan.rule.RuleSet ruleSetId="KAP_BUILT_IN_RS" ruleSetName="ACME orders under orders, built-ins only" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareScope compareScopeId="KAP_BUILT_IN_SCOPE" ruleSetId="KAP_BUILT_IN_RS" objectType="ORDER" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KAP_BUILT_IN_SCOPE" fileSide="FILE_1" systemEnumId="ACME_SPARK" fileTypeEnumId="DftJson"
+                recordRootExpression="orders" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
+            <darpan.rule.RuleSetCompareSource compareScopeId="KAP_BUILT_IN_SCOPE" fileSide="FILE_2" systemEnumId="ACME_LEDGER" fileTypeEnumId="DftJson"
+                recordRootExpression="records" primaryIdExpression="id" companyUserGroupId="${TENANT}"/>
             ${builtInOnly}
         </entity-facade-xml>""").dummyFks(true).load()
     }

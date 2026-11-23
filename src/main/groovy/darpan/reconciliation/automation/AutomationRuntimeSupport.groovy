@@ -3,7 +3,6 @@ package darpan.reconciliation.automation
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
-import darpan.reconciliation.source.SourceFilterSupport
 import darpan.reconciliation.streak.AutomationStreakSupport
 import groovy.json.JsonOutput
 
@@ -41,43 +40,6 @@ class AutomationRuntimeSupport {
         return sources.collectEntries { source ->
             [(normalize(readField(source, "fileSide"))): source]
         } as Map<String, Object>
-    }
-
-    /**
-     * Configured exclusion rules for one automation source side, ordered by sequenceNum, in GETTER
-     * shape — {@code fieldExpression} reduced from the stored operator-facing JSONPath to the
-     * top-level record key SourceFilterSupport.evaluate tests. The snapshot rows are copied
-     * verbatim from the rule set, so they carry the same board-written expression the interactive
-     * path stores, and skipping this reduction would make every scheduled exclusion a silent no-op
-     * (the interactive equivalent is ReconciliationSavedRunSupport.resolveExtractExcludeFilters).
-     *
-     * [P0#4 step 3] DUAL-CONTEXT: same as loadAutomationSources — the scheduled runner has no active
-     * tenant. Trust anchor is automation.companyUserGroupId, gated at run#AutomationNow for user calls.
-     * DAR-BE-318 (plan 3b-2b, Task 14): the read is pinned to the automation's own tenant by an explicit
-     * companyUserGroupId condition, since the scheduler's context has none to filter by (Review Focus 4). A row
-     * stamped for another tenant is never read, whatever its automationId; a blank tenant throws.
-     */
-    static List<Map<String, Object>> loadAutomationSourceFilters(def ec, String automationId, String fileSide, String companyUserGroupId) {
-        String tenant = normalize(companyUserGroupId)
-        if (!tenant) throw new IllegalArgumentException("Automation ${automationId}'s source filters are read for its own tenant; it names none.")
-        if (!automationId || !fileSide) return []
-        List rows = TenantScopedFinder.findGlobalUnscoped(
-                ec, "darpan.reconciliation.ReconciliationAutomationSourceFilter",
-                "automation runner loads by automationId; pinned to the automation's companyUserGroupId (the scheduler has no active tenant)")
-                .condition("companyUserGroupId", tenant)
-                .condition("automationId", automationId)
-                .condition("fileSide", fileSide)
-                .orderBy("sequenceNum")
-                .useCache(false)
-                .list() ?: []
-        return SourceFilterSupport.toRecordFieldRules(rows.collect { def row ->
-            [
-                    sequenceNum    : row.sequenceNum,
-                    fieldExpression: normalize(row.fieldExpression),
-                    operator       : normalize(row.operator),
-                    filterValues   : normalize(row.filterValues),
-            ] as Map<String, Object>
-        } as List<Map<String, Object>>)
     }
 
     static void updateAutomationExecution(def ec, def execution, Map<String, Object> fields) {

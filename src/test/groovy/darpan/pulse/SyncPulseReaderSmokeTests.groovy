@@ -84,7 +84,7 @@ class SyncPulseReaderSmokeTests {
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${AUTO}" fileSide="FILE_2" companyUserGroupId="${A}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${LEDGER}"
                 safeMetadataJson='{"extractServiceName":"${NS}","parameters":{"pulseQueryId":"PULSE_Q"}}'/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${AUTO}" fileSide="FILE_1" sequenceNum="1"
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="PULSE_SCOPE" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].productStoreId" operator="EXCLUDE_IN" filterValues="TEST_STORE" companyUserGroupId="${A}"/>
             <darpan.reconciliation.SourceSystemConnector systemEnumId="${FILTERED}" extractServiceName="${GQL}"
                 dateFromParameterName="windowStart" dateToParameterName="windowEnd" filterParameterName="sourceFilters" enabled="Y"/>
@@ -112,9 +112,9 @@ class SyncPulseReaderSmokeTests {
             <darpan.reconciliation.ReconciliationAutomationSource automationId="${KEEP_AUTO}" fileSide="FILE_2" companyUserGroupId="${A}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="${ACME}"
                 safeMetadataJson='{"extractServiceName":"${ACME_EXTRACT}"}'/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${KEEP_AUTO}" fileSide="FILE_1" sequenceNum="1"
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].status" operator="EXCLUDE_IN" filterValues="VOID" companyUserGroupId="${A}"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="${KEEP_AUTO}" fileSide="FILE_2" sequenceNum="1"
+            <darpan.rule.RuleSetCompareSourceFilter compareScopeId="PULSE_KEEP_SCOPE" fileSide="FILE_2" sequenceNum="1"
                 fieldExpression="status" operator="EXCLUDE_IN" filterValues="CLOSED" companyUserGroupId="${A}"/>
         </entity-facade-xml>""").load()
         automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation").condition("automationId", AUTO).one().getMap()

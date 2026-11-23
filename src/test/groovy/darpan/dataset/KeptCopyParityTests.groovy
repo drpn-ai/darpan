@@ -582,11 +582,9 @@ class KeptCopyParityTests {
             <darpan.rule.RuleSetCompareSourceFilter compareScopeId="KCP_SCOPE" fileSide="FILE_1" sequenceNum="1"
                 fieldExpression="\$.records[*].madeUpStore" operator="EXCLUDE_IN" filterValues="syn-test" companyUserGroupId="${A}"/>
             <darpan.reconciliation.ReconciliationAutomation automationId="KCP_AUTO" automationName="Parity orders" companyUserGroupId="${A}"
-                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KCP_RS"/>
+                inputModeEnumId="${AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE}" savedRunId="KCP_RS" compareScopeId="KCP_SCOPE"/>
             <darpan.reconciliation.ReconciliationAutomationSource automationId="KCP_AUTO" fileSide="FILE_1" companyUserGroupId="${A}"
                 sourceTypeEnumId="${AutomationExecutionSupport.AUTOMATION_SOURCE_API}" systemEnumId="KC_ISO"/>
-            <darpan.reconciliation.ReconciliationAutomationSourceFilter automationId="KCP_AUTO" fileSide="FILE_1" sequenceNum="1"
-                fieldExpression="\$.records[*].madeUpStore" operator="EXCLUDE_IN" filterValues="syn-test" companyUserGroupId="${A}"/>
             <darpan.reconciliation.ReconciliationAutomationExecution automationExecutionId="KCP_EXEC_S" automationId="KCP_AUTO"
                 companyUserGroupId="${A}" statusEnumId="AUT_STAT_SUCCESS"/>
             <darpan.reconciliation.ReconciliationAutomationExecution automationExecutionId="KCP_EXEC_L" automationId="KCP_AUTO"

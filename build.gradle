@@ -469,8 +469,10 @@ tasks.register('mysqlTest', Test) {
     // failOnNoMatchingTests is what keeps "silently" from being true of the existing one.
     useJUnitPlatform { includeTags 'mysql' }
     include '**/LoginDeadlockRegressionTests.class'
+    include '**/XaDeadlockPoolRegressionTests.class'
     filter {
         includeTestsMatching '*LoginDeadlockRegressionTests'
+        includeTestsMatching '*XaDeadlockPoolRegressionTests'
         failOnNoMatchingTests = true
     }
     // Cap at 1, matching `test` above; this task is the only guard for MySQL-only defects (InnoDB

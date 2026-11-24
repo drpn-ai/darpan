@@ -1,5 +1,6 @@
 package darpan.agent.pipeline
 
+import darpan.audit.AuditPriority
 import darpan.audit.AuditSettingsSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -28,7 +29,7 @@ import static darpan.common.ValueSupport.normalize
 class AuditChangeLevers {
 
     static final List<String> KINDS = ["EXCLUSION_FILTER", "STATEMENT_NARROWING", "EXPECTED_CAUSES", "FIX_TEXT", "CONCLUSION_ROWS",
-                                      "AUDIT_SETTINGS", "ADD_STATEMENT", "ADD_CHECK", "STATEMENT_EDIT"].asImmutable()
+                                      "AUDIT_SETTINGS", "ADD_STATEMENT", "ADD_CHECK", "STATEMENT_EDIT", "REASON_PRIORITY"].asImmutable()
     static final Map<String, List<String>> TARGET_KEYS = [
             EXCLUSION_FILTER   : ["savedRunId", "fileSide"],
             STATEMENT_NARROWING: ["auditId", "checkCode", "statementCode"],
@@ -38,7 +39,8 @@ class AuditChangeLevers {
             AUDIT_SETTINGS     : ["auditId"],
             ADD_STATEMENT      : ["auditId"],
             ADD_CHECK          : ["auditId"],
-            STATEMENT_EDIT     : ["auditId", "statementCode"]].asImmutable()
+            STATEMENT_EDIT     : ["auditId", "statementCode"],
+            REASON_PRIORITY    : ["auditId", "statementCode", "conclusionCode"]].asImmutable()
     static final List<String> SIDES = ["FILE_1", "FILE_2"].asImmutable()
     static final List<String> SIDE_FIELDS = ["systemEnumId", "sourceTypeEnumId", "systemMessageRemoteId", "nsRestletConfigId",
             "sourceConfigId", "sourceConfigType", "fileTypeEnumId", "schemaFileName", "recordRootExpression"].asImmutable()
@@ -79,7 +81,8 @@ class AuditChangeLevers {
             case "AUDIT_SETTINGS":
             case "ADD_STATEMENT":
             case "ADD_CHECK":
-            case "STATEMENT_EDIT": return auditState(ec, kind, t)
+            case "STATEMENT_EDIT":
+            case "REASON_PRIORITY": return auditState(ec, kind, t)
             default: return treeState(ec, kind, t)
         }
     }
@@ -172,14 +175,18 @@ class AuditChangeLevers {
                  active: a.isActive == "Y"] as Map
             }.sort { Map a -> a.id as String }
         } else {
+            Map<String, String> levelCodes = priorityCodes(ec)
             state.statements = ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId)
                     .condition("auditId", audit.auditId).orderBy(["sequenceNum", "statementId"]).useCache(false).list().collect { st ->
                 [id: st.statementCode, text: st.statementText, active: (st.isActive ?: "Y") != "N",
+                 // DAR-BE-348: the statement's own level code; null is unset (it reads P2), which a revert puts back as unset.
+                 priority: st.priorityEnumId ? levelCodes.get(st.priorityEnumId as String) : null,
                  checks: ec.entity.find("darpan.audit.AuditStatementCheck").condition("companyUserGroupId", tenantId)
                          .condition("statementId", st.statementId).useCache(false).count(),
                  findings: ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", tenantId)
                          .condition("statementId", st.statementId).useCache(false).count()] as Map
             }
+            if (kind == "REASON_PRIORITY") state.reason = reasonState(ec, tenantId, audit, target, levelCodes)
             if (kind == "ADD_CHECK") {
                 state.checks = checksOfAudit(ec, tenantId, audit)
                 // DAR-BE-287. A check code is unique per tenant: the codes other audits use, so a new check never collides.
@@ -190,6 +197,35 @@ class AuditChangeLevers {
             }
         }
         return state
+    }
+
+    /** AuditPriority enumId -> level code (P0, P1, P2, KNOWN). */
+    private static Map<String, String> priorityCodes(def ec) {
+        return ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditPriority").useCache(true).list()
+                .collectEntries { [(it.enumId as String): it.enumCode as String] }
+    }
+
+    /**
+     * REASON_PRIORITY (DAR-BE-348): the one reason of the statement: its own level (null = no override row, it takes the
+     * statement's) and, when a level cannot be set on it, why (refusal). The statement not being the audit's reads as no reason.
+     */
+    private static Map reasonState(def ec, String tenantId, Map audit, Map target, Map<String, String> levelCodes) {
+        def statement = ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", tenantId)
+                .condition("auditId", audit.auditId).condition("statementCode", target.statementCode).useCache(false).list().find()
+        String conclusion = target.conclusionCode as String
+        String refusal = null
+        if (statement != null) {
+            def enumRow = ec.entity.find("moqui.basic.Enumeration").condition("enumId", conclusion).useCache(true).one()
+            if (conclusion == "UNEXPLAINED") refusal = "An Unexplained finding takes its statement's level."
+            else if (enumRow?.enumTypeId != "DarpanConclusion") refusal = "${conclusion} is not a reason.".toString()
+            else if (AuditSettingsSupport.reasonClosesEverywhere(ec, tenantId, statement.statementId as String, conclusion))
+                refusal = "${enumRow.description ?: conclusion} closes every finding on ${target.statementCode}'s checks, so it takes no level.".toString()
+        }
+        def row = statement == null ? null : TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditReasonPriority")
+                .condition("companyUserGroupId", tenantId).condition("statementId", statement.statementId)
+                .condition("conclusionEnumId", conclusion).useCache(false).list().find()
+        return [statement: target.statementCode, conclusion: conclusion, priority: row == null ? null : levelCodes.get(row.priorityEnumId as String),
+                refusal: refusal]
     }
 
     /** ADD_CHECK: the audit's checks (linked to one of its statements) by code, each with its run and the findings and runs on it. */
@@ -261,6 +297,7 @@ class AuditChangeLevers {
 
     /** The INVALID statusMessage when the audit already has a statement with this text. */
     static final String NO_CHANGE_STATEMENT_EDIT_MESSAGE = "NO_CHANGE: the statement already has this text and is already on or off as asked; nothing would change."
+    static final String NO_CHANGE_PRIORITY_MESSAGE = "NO_CHANGE: it already has this level; nothing would change."
     static final String DUPLICATE_STATEMENT_TEXT_MESSAGE = "DUPLICATE_STATEMENT: another statement of this audit already has this text."
     static final String NO_CHANGE_STATEMENT_MESSAGE = "NO_CHANGE: the audit already has a statement with this text; nothing would change."
 
@@ -383,11 +420,23 @@ class AuditChangeLevers {
                 if (statement == null) throw new IllegalArgumentException("Statement ${target.statementCode} is not part of audit ${state.audit}.".toString())
                 String text = after.text == null ? statement.text as String : (after.text as String).trim()
                 boolean active = after.active == null ? statement.active as boolean : after.active as boolean
-                if (text == statement.text && active == (statement.active as boolean)) throw new IllegalArgumentException(NO_CHANGE_STATEMENT_EDIT_MESSAGE)
+                // DAR-BE-348: a level (null clears it; unset reads P2, so setting P2 on an unset statement is no change).
+                boolean levelChanged = after.containsKey("priority") &&
+                        ((after.priority ?: AuditPriority.DEFAULT_LEVEL) != (statement.priority ?: AuditPriority.DEFAULT_LEVEL))
+                if (text == statement.text && active == (statement.active as boolean) && !levelChanged)
+                    throw new IllegalArgumentException(NO_CHANGE_STATEMENT_EDIT_MESSAGE)
                 if (all.any { Map st -> st.id != statement.id && (st.text as String)?.trim()?.equalsIgnoreCase(text) })
                     throw new IllegalArgumentException(DUPLICATE_STATEMENT_TEXT_MESSAGE)
                 statement.text = text
                 statement.active = active
+                if (levelChanged) statement.priority = after.priority
+                break
+            case "REASON_PRIORITY":
+                // DAR-BE-348: the reason's own level over its statement's; null deletes it. A reason that cannot take one is refused.
+                Map reason = (Map) state.reason
+                if (after.priority != null && reason.refusal) throw new IllegalArgumentException(reason.refusal as String)
+                if (after.priority == reason.priority) throw new IllegalArgumentException(NO_CHANGE_PRIORITY_MESSAGE)
+                reason.priority = after.priority
                 break
         }
         return state
@@ -446,7 +495,8 @@ class AuditChangeLevers {
                 return [id: checkCode, check: addedCheck == null ? null : pick(addedCheck, ["id", "savedRunId"])]
             case "STATEMENT_EDIT":
                 Map edited = ((List<Map>) state.statements).find { Map st -> st.id == target.statementCode }
-                return [statement: edited == null ? null : pick(edited, ["id", "text", "active"])]
+                return [statement: edited == null ? null : pick(edited, ["id", "text", "active", "priority"])]
+            case "REASON_PRIORITY": return [priority: ((Map) state.reason).priority]
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
                 List<String> codes = ((List<Map>) (after.rows ?: [])).collect { (it.conclusionCode ?: it.code) as String }
@@ -520,6 +570,10 @@ class AuditChangeLevers {
                 if (was == null || now == null) throw new IllegalArgumentException("Statement ${target.statementCode} is no longer part of audit ${state.audit}.".toString())
                 now.text = was.text
                 now.active = was.active
+                if (was.containsKey("priority")) now.priority = was.priority
+                break
+            case "REASON_PRIORITY":
+                ((Map) state.reason).priority = lever.priority
                 break
             default:
                 List<Map> nodes = (List<Map>) state.conclusions
@@ -607,7 +661,18 @@ class AuditChangeLevers {
                         .condition("auditId", audit.auditId).condition("statementCode", target.statementCode).useCache(false).list().find()
                 if (row == null) { ec.message.addError("Statement ${target.statementCode} was not found.".toString()); break }
                 ec.service.sync().name("facade.AuditFacadeServices.save#AuditSettings").parameters([audit: state.audit,
-                        statements: [[id: row.statementId, text: edited.text, active: edited.active]]]).call()
+                        statements: [[id: row.statementId, text: edited.text, active: edited.active, priority: edited.priority]]]).call()
+                break
+            case "REASON_PRIORITY":
+                // The save checks the level and the reason again and writes through set#AuditReasonPriority (null deletes the override).
+                Map reason = (Map) state.reason
+                String reasonTenant = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+                Map reasonAudit = reasonTenant ? AuditSettingsSupport.auditOf(ec, reasonTenant, state.audit as String) : null
+                def statementRow = reasonAudit == null ? null : ec.entity.find("darpan.audit.AuditStatement").condition("companyUserGroupId", reasonTenant)
+                        .condition("auditId", reasonAudit.auditId).condition("statementCode", target.statementCode).useCache(false).list().find()
+                if (statementRow == null) { ec.message.addError("Statement ${target.statementCode} was not found.".toString()); break }
+                ec.service.sync().name("facade.AuditFacadeServices.save#AuditSettings").parameters([audit: state.audit,
+                        reasons: [[statement: statementRow.statementId, conclusion: reason.conclusion, priority: reason.priority]]]).call()
                 break
             default:
                 // Lookups are left out, which the save reads as "keep them".

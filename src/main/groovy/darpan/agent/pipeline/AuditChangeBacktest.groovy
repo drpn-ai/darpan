@@ -93,6 +93,8 @@ class AuditChangeBacktest {
                 // DAR-BE-242: new wording moves nothing; a statement switched on or off counts from its next run, not landed data.
                 case "STATEMENT_EDIT": return statementOnOffChanged(ec, target, merged, current) ? unsupported("NOT_APPLICABLE")
                         : result(true, "DISPLAY_ONLY", null, [], [], 0, [])
+                // DAR-BE-348: a level only ranks findings; it closes and opens none.
+                case "REASON_PRIORITY": return result(true, "DISPLAY_ONLY", null, [], [], 0, [])
                 default: return unsupported("UNKNOWN_KIND")
             }
         } catch (Exception e) {

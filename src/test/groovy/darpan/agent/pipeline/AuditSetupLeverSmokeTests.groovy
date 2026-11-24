@@ -382,7 +382,196 @@ class AuditSetupLeverSmokeTests {
         assertEquals(["check-1", "check-2"], checkCodes())
     }
 
+    // ------------------------------------------------------------------ priorities (DAR-BE-348)
+
+    @Test
+    void "statementEditSetsPriority and revert puts back the exact old level, unset included"() {
+        Map was = statementRow("R1")
+        Map target = [auditId: "month-close", statementCode: "R1"]
+        try {
+            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one().set("priorityEnumId", null).update() }
+            // unset -> P0 (a level alone is a whole proposal), reverted to unset
+            Map p = propose("STATEMENT_EDIT", target, [priority: "P0"])
+            assertEquals("PLANNED", p.status, p.statusMessage as String)
+            assertEquals("DISPLAY_ONLY", p.backtest.reason)
+            assertNull(statementRow("R1").priorityEnumId, "planning writes nothing")
+            applyPlanned(p)
+            assertEquals("AUDP_P0", statementRow("R1").priorityEnumId)
+            applyRevert(p)
+            assertNull(statementRow("R1").priorityEnumId, "unset stays unset, not P2")
+
+            // P1 -> KNOWN, reverted to P1
+            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one().set("priorityEnumId", "AUDP_P1").update() }
+            Map k = propose("STATEMENT_EDIT", target, [priority: "KNOWN"])
+            applyPlanned(k)
+            assertEquals("AUDP_KNOWN", statementRow("R1").priorityEnumId)
+            applyRevert(k)
+            assertEquals("AUDP_P1", statementRow("R1").priorityEnumId)
+
+            // a null clears the level, and the revert gives it back
+            Map c = propose("STATEMENT_EDIT", target, [priority: null])
+            assertEquals("PLANNED", c.status, c.statusMessage as String)
+            applyPlanned(c)
+            assertNull(statementRow("R1").priorityEnumId)
+            applyRevert(c)
+            assertEquals("AUDP_P1", statementRow("R1").priorityEnumId)
+
+            // the same level, or a level that reads the same, is no change; a bad level is off the contract
+            assertEquals("INVALID", propose("STATEMENT_EDIT", target, [priority: "P1"]).status)
+            assertTrue(propose("STATEMENT_EDIT", target, [priority: "URGENT"]).hadError as boolean)
+            assertEquals("AUDP_P1", statementRow("R1").priorityEnumId)
+        } finally {
+            asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", was.statementId).one()
+                    .set("priorityEnumId", was.priorityEnumId).update() }
+        }
+    }
+
+    @Test
+    void "reasonPriorityAppliesAndReverts, with no row or a previous override put back as it was"() {
+        String statementId = "${MINE}_R1".toString()
+        Map target = [auditId: "month-close", statementCode: "R1", conclusionCode: "TAS_C_OPEN"]
+        reasonFixtures()
+        try {
+            // no row -> P1: the revert deletes the row
+            Map p = propose("REASON_PRIORITY", target, [priority: "P1"])
+            assertEquals("PLANNED", p.status, p.statusMessage as String)
+            assertEquals("DISPLAY_ONLY", p.backtest.reason)
+            assertEquals([], reasonLevels(statementId, "TAS_C_OPEN"), "planning writes nothing")
+            applyPlanned(p)
+            assertEquals(["AUDP_P1"], reasonLevels(statementId, "TAS_C_OPEN"))
+            applyRevert(p)
+            assertEquals([], reasonLevels(statementId, "TAS_C_OPEN"), "no row before, no row after")
+
+            // P0 -> KNOWN: the revert restores P0
+            asSystem { upsert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TAS_RP1", companyUserGroupId: MINE,
+                    statementId: statementId, conclusionEnumId: "TAS_C_OPEN", priorityEnumId: "AUDP_P0"]) }
+            Map k = propose("REASON_PRIORITY", target, [priority: "KNOWN"])
+            applyPlanned(k)
+            assertEquals(["AUDP_KNOWN"], reasonLevels(statementId, "TAS_C_OPEN"))
+            applyRevert(k)
+            assertEquals(["AUDP_P0"], reasonLevels(statementId, "TAS_C_OPEN"))
+
+            // null deletes the override, and the revert brings it back
+            Map c = propose("REASON_PRIORITY", target, [priority: null])
+            assertEquals("PLANNED", c.status, c.statusMessage as String)
+            applyPlanned(c)
+            assertEquals([], reasonLevels(statementId, "TAS_C_OPEN"))
+            applyRevert(c)
+            assertEquals(["AUDP_P0"], reasonLevels(statementId, "TAS_C_OPEN"))
+
+            assertEquals("INVALID", propose("REASON_PRIORITY", target, [priority: "P0"]).status, "already this level")
+            assertTrue(propose("REASON_PRIORITY", target, [:]).hadError as boolean, "the level is required, null clears")
+            assertTrue(propose("REASON_PRIORITY", target, [priority: "P3"]).hadError as boolean)
+            asSystem { ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId).deleteAll() }
+            Map none = propose("REASON_PRIORITY", target, [priority: null])
+            assertEquals("INVALID", none.status, "nothing to clear")
+            assertEquals(AuditChangeLevers.NO_CHANGE_PRIORITY_MESSAGE, none.statusMessage)
+        } finally {
+            asSystem {
+                ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId).deleteAll()
+                ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("conclusionEnumId", "in", ["TAS_C_OPEN", "TAS_C_ALL"]).deleteAll()
+            }
+        }
+    }
+
+    @Test
+    void "a reason that closes on every check, Unexplained or a non-reason takes no level"() {
+        String statementId = "${MINE}_R1".toString()
+        reasonFixtures()
+        try {
+            Map all = propose("REASON_PRIORITY", [auditId: "month-close", statementCode: "R1", conclusionCode: "TAS_C_ALL"], [priority: "P0"])
+            assertEquals("INVALID", all.status)
+            assertTrue((all.statusMessage as String).contains("closes every finding on R1's checks, so it takes no level"), all.statusMessage as String)
+            assertEquals("INVALID", propose("REASON_PRIORITY", [auditId: "month-close", statementCode: "R1", conclusionCode: "UNEXPLAINED"],
+                    [priority: "P0"]).status)
+            assertEquals("INVALID", propose("REASON_PRIORITY", [auditId: "month-close", statementCode: "R1", conclusionCode: "AUDP_P0"],
+                    [priority: "P0"]).status, "an enumeration that is no conclusion")
+            assertEquals("INVALID", propose("REASON_PRIORITY", [auditId: "month-close", statementCode: "R9", conclusionCode: "TAS_C_OPEN"],
+                    [priority: "P0"]).status, "a statement the audit does not have")
+            assertEquals([], reasonLevels(statementId, "TAS_C_ALL"))
+        } finally {
+            asSystem { ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("conclusionEnumId", "in", ["TAS_C_OPEN", "TAS_C_ALL"]).deleteAll() }
+        }
+    }
+
+    @Test
+    void "the two priority services refuse another tenant's statement and write nothing"() {
+        String foreign = "${OTHER}_R1".toString()
+        asSystem {
+            upsert("darpan.audit.Audit", [auditId: "TAS_OTHER_AUDIT", companyUserGroupId: OTHER, auditCode: "other-audit",
+                    auditName: "Other audit", periodEnumId: "AUDP_MONTH"])
+            upsert("darpan.audit.AuditStatement", [statementId: foreign, companyUserGroupId: OTHER, auditId: "TAS_OTHER_AUDIT",
+                    statementCode: "R1", categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM", sequenceNum: 1L,
+                    statementText: "other R1", isActive: "Y", priorityEnumId: "AUDP_P1"])
+            upsert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TAS_RP_OTHER", companyUserGroupId: OTHER,
+                    statementId: foreign, conclusionEnumId: "TAS_C_OPEN", priorityEnumId: "AUDP_KNOWN"])
+        }
+        try {
+            Map statement = ec.service.sync().name("facade.AuditFacadeServices.set#AuditStatementPriority")
+                    .parameters([companyUserGroupId: MINE, statementId: foreign, priorityEnumId: "AUDP_P0"]).call() ?: [:]
+            assertTrue(ec.message.hasError(), "a statement of another tenant reads as not found")
+            ec.message.clearAll()
+            ec.service.sync().name("facade.AuditFacadeServices.set#AuditReasonPriority")
+                    .parameters([companyUserGroupId: MINE, statementId: foreign, conclusionEnumId: "TAS_C_OPEN", priorityEnumId: "AUDP_P0"]).call()
+            assertTrue(ec.message.hasError())
+            ec.message.clearAll()
+            ec.service.sync().name("facade.AuditFacadeServices.set#AuditReasonPriority")
+                    .parameters([companyUserGroupId: MINE, statementId: foreign, conclusionEnumId: "TAS_C_OPEN"]).call()
+            assertTrue(ec.message.hasError(), "clearing reaches nothing either")
+            ec.message.clearAll()
+            assertEquals("AUDP_P1", asSystem { ec.entity.find("darpan.audit.AuditStatement").condition("statementId", foreign).useCache(false).one().priorityEnumId })
+            assertEquals(["AUDP_KNOWN"], reasonLevels(foreign, "TAS_C_OPEN"), "the other tenant's override is untouched")
+            assertEquals(1, asSystem { ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", foreign).useCache(false).count() })
+        } finally {
+            asSystem {
+                ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", foreign).deleteAll()
+                ec.entity.find("darpan.audit.AuditStatement").condition("statementId", foreign).deleteAll()
+                ec.entity.find("darpan.audit.Audit").condition("auditId", "TAS_OTHER_AUDIT").deleteAll()
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private void applyPlanned(Map p) {
+        Map plan = call("plan#AuditChange", [proposalId: p.proposalId])
+        assertFalse(plan.hadError as boolean, plan.errorText as String)
+        Map out = call("apply#AuditChange", [proposalId: p.proposalId, planHash: plan.planHash])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals("APPLIED", out.status)
+    }
+
+    private void applyRevert(Map p) {
+        Map r = call("revert#AuditChange", [proposalId: p.proposalId])
+        assertFalse(r.hadError as boolean, r.errorText as String)
+        assertEquals("PLANNED", r.status, r.statusMessage as String)
+        Map back = call("apply#AuditChange", [proposalId: r.newProposalId, planHash: r.planHash])
+        assertFalse(back.hadError as boolean, back.errorText as String)
+        assertEquals("REVERTED", proposal(p.proposalId).status)
+    }
+
+    private List<String> reasonLevels(String statementId, String conclusion) {
+        return asSystem {
+            ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId)
+                    .condition("conclusionEnumId", conclusion).useCache(false).list()*.priorityEnumId
+        } as List<String>
+    }
+
+    /** Two reasons on R1's run: TAS_C_OPEN is expected nowhere (it can take a level), TAS_C_ALL is expected on every check. */
+    private void reasonFixtures() {
+        asSystem {
+            upsert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
+            [TAS_C_OPEN: "Still open", TAS_C_ALL: "Recorded late"].each { String id, String label ->
+                upsert("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
+            }
+            String scopeId = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", runIds[0]).useCache(false).list().first().compareScopeId
+            [[1L, "TAS_C_OPEN", null], [2L, "TAS_C_ALL", "EXPECTED"]].each { List r ->
+                ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", scopeId).condition("sequenceNum", r[0]).deleteAll()
+                upsert("darpan.rule.RuleSetConclusionRule", [compareScopeId: scopeId, sequenceNum: r[0], conclusionEnumId: r[1],
+                        outcome: r[2], companyUserGroupId: MINE])
+            }
+        }
+    }
 
     private Map propose(String kind, Map target, Map after) {
         return call("create#AuditChangeProposal", [conversationId: CONV, kind: kind, target: target, after: after,

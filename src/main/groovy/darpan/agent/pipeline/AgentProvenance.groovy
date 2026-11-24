@@ -125,11 +125,20 @@ class AgentProvenance {
                 break
             case "STATEMENT_EDIT":
                 // DAR-BE-242: new wording, on/off, or both.
-                keys(after, ["text", "active"], "after")
+                keys(after, ["text", "active", "priority"], "after")
                 str(after, "text", false, "after")
                 if (after.get("text") != null) freeText(after, "text", "after")
                 if (after.get("active") != null && !(after.get("active") instanceof Boolean)) throw new IllegalArgumentException("after.active must be true or false")
-                if (after.get("text") == null && after.get("active") == null) throw new IllegalArgumentException("after needs a text or active")
+                // DAR-BE-348: priority is a level (null clears it); the key being there is what sets it.
+                level(after)
+                if (after.get("text") == null && after.get("active") == null && !after.containsKey("priority"))
+                    throw new IllegalArgumentException("after needs a text, active or priority")
+                break
+            case "REASON_PRIORITY":
+                // DAR-BE-348: the reason's own level; null (the key given, no value) deletes it, and it takes the statement's.
+                keys(after, ["priority"], "after")
+                if (!after.containsKey("priority")) throw new IllegalArgumentException("after.priority is required (a level, or null to clear it)")
+                level(after)
                 break
             case "ADD_CHECK":
                 keys(after, ["label", "savedRunId", "statementCode", "diffTypes"], "after")
@@ -178,6 +187,13 @@ class AgentProvenance {
             default:
                 throw new IllegalArgumentException("Unknown proposal kind: ${kind}".toString())
         }
+    }
+
+    /** after.priority, when not null, is a level's code: P0, P1, P2 or KNOWN. */
+    private static void level(Map after) {
+        Object v = after.get("priority")
+        if (v != null && !(v instanceof String && ["P0", "P1", "P2", "KNOWN"].contains(v)))
+            throw new IllegalArgumentException("after.priority must be P0, P1, P2, KNOWN or null")
     }
 
     /** An identifier-bearing string must already be in normalized, trimmed form, so the value checked is the value applied. */

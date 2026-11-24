@@ -619,6 +619,11 @@ class AuditReportAssembler {
      * filters and export read these.
      */
     static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period) {
+        return findingsByOrder(ec, tenantId, auditId, statementCode, period, null)
+    }
+
+    /** DAR-BE-348: with a priority, only the units at that level, filtered after resolution so none is lost to a cap. */
+    static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period, String priority) {
         Map<String, String> codes = enumCodes(ec)
         // DAR-BE-250: every active statement is read, even for one statement's list, to know which orders an earlier
         // step already reports; only the asked statement's counted findings are returned, each with those waiting on it.
@@ -645,7 +650,7 @@ class AuditReportAssembler {
                 unitFinding(unit, today, records, causes, codes, levels) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]] +
                         (unit.waitingUnits ? [waiting: waitingJson(unit, today, records, causes, codes, statementCodeById, levels)] : [:])
             }
-        } as List<Map>
+        }.findAll { !priority || it.priority == priority } as List<Map>
     }
 
     /** An order of one line, in the check's own words with the item named as its line: "line 1 is completed in HotWax
@@ -738,6 +743,7 @@ class AuditReportAssembler {
                 .findAll { (it.isActive ?: "Y") != "N" }
         def cf = ec.entity.conditionFactory
         List conditions = []
+        List<String> priorities = null
         for (Map t in (terms ?: [])) {
             List<String> values = (t.values ?: []) as List<String>
             switch (t.key) {
@@ -748,6 +754,10 @@ class AuditReportAssembler {
                     conditions << cf.makeCondition("stateEnumId", EntityCondition.IN,
                             codes.findAll { k, v -> k.startsWith("AUDFS_") && v in values }*.key ?: ["__NONE__"]); break
                 case "period": conditions << cf.makeCondition("period", EntityCondition.IN, values); break
+                case "priority":
+                    List bad = values.findAll { !(it in AuditPriority.LEVELS) }
+                    if (bad) return [publicError: "priority must be one of ${AuditPriority.LEVELS.join(', ')}, got ${bad.join(', ')}".toString()]
+                    priorities = values as List<String>; break
                 case "firstFound":
                     Date day
                     try { day = Date.valueOf(LocalDate.parse(values[0])) }
@@ -761,9 +771,15 @@ class AuditReportAssembler {
         }
         Map<String, Map> statementById = statements.collectEntries { [(it.statementId): it] }
 
+        // DAR-BE-348: a level is resolved from the finding's statement and reason, so the filter runs on the rows read,
+        // reading on until the page is full: a filtered page holds every finding at that level, not only those in a first read.
+        Map levels = priorityLevels(ec, tenantId, statements)
+        Closure<Boolean> atLevel = { Map row ->
+            !priorities || (unitPriority([row: row, state: row.stateEnumId], levels.statementLevels as Map, levels.overrides as Map).level in priorities)
+        }
         List<Map> rows = []
         if (sort == "FIRST_FOUND") {
-            if (statements) rows = findingRows(ec, tenantId, statements*.statementId, conditions, rev, cursor ? cursor[3..4] : null, size + 1)
+            if (statements) rows = matchingRows(ec, tenantId, statements*.statementId, conditions, rev, cursor ? cursor[3..4] : null, size + 1, priorities != null, atLevel)
         } else {
             List<String> order = statements*.statementId as List<String>
             if (rev) order = order.reverse()
@@ -773,8 +789,8 @@ class AuditReportAssembler {
                 if (from < 0) return [publicError: "after is a cursor for a statement this query no longer reads"]
             }
             for (int i = from; i < order.size() && rows.size() <= size; i++) {
-                rows.addAll(findingRows(ec, tenantId, [order[i]], conditions, rev, cursor && i == from ? cursor[3..4] : null,
-                        size + 1 - rows.size()))
+                rows.addAll(matchingRows(ec, tenantId, [order[i]], conditions, rev, cursor && i == from ? cursor[3..4] : null,
+                        size + 1 - rows.size(), priorities != null, atLevel))
             }
         }
         boolean more = rows.size() > size
@@ -784,7 +800,6 @@ class AuditReportAssembler {
         Map<String, Map> records = recordsFor(ec, tenantId, rows*.findingId as List<String>)
         // DAR-UI-073. The cause in words (the conclusion that explains the finding), so the board can filter by it.
         Map<String, Map> causes = conclusionsOf(ec, rows*.conclusionEnumId as List<String>)
-        Map levels = priorityLevels(ec, tenantId, statements)
         List<Map> edges = rows.collect { Map row ->
             Map st = statementById[row.statementId as String]
             Map brief = briefFinding([row: row, state: row.stateEnumId], today, records[row.findingId as String] ?: [:], codes)
@@ -806,6 +821,21 @@ class AuditReportAssembler {
     private static final Map<String, EntityCondition.ComparisonOperator> COMPARATORS = [
             eq: EntityCondition.EQUALS, gt: EntityCondition.GREATER_THAN, gte: EntityCondition.GREATER_THAN_EQUAL_TO,
             lt: EntityCondition.LESS_THAN, lte: EntityCondition.LESS_THAN_EQUAL_TO].asImmutable()
+
+    /** [want] findings passing [keep], reading on in batches when a filter drops some; one read of [want] when none does. */
+    private static List<Map> matchingRows(def ec, String tenantId, List statementIds, List conditions, boolean rev,
+                                          List keyset, int want, boolean filtered, Closure<Boolean> keep) {
+        int batch = filtered ? 500 : want
+        List<Map> out = []
+        List ks = keyset
+        while (out.size() < want) {
+            List<Map> read = findingRows(ec, tenantId, statementIds, conditions, rev, ks, batch)
+            for (Map row in read) { if (out.size() < want && keep(row)) out << row }
+            if (read.size() < batch) break
+            ks = [isoDate(read.last().firstFoundDate as Date), read.last().findingId]
+        }
+        return out
+    }
 
     /** Findings of these statements, oldest first (newest when reversed), after the keyset [firstFound, findingId]. */
     private static List<Map> findingRows(def ec, String tenantId, List statementIds, List conditions, boolean rev,

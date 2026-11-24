@@ -243,6 +243,72 @@ class AuditFacadeSmokeTests {
                 .toString().contains("TFAC_OTHER"), "nothing of the other tenant")
     }
 
+    // DAR-BE-348. The priority filter runs after the level is resolved and before any cap or page.
+    private void seedPriorityAudit() {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.Audit", [auditId: "${MINE}_PRI".toString(), companyUserGroupId: MINE, auditCode: "prio-audit",
+                    auditName: "Priorities", periodEnumId: "AUDP_MONTH"])
+            [["R41", "AUDP_P0", 41L], ["R42", null, 42L]].each { List st ->
+                insert("darpan.audit.AuditStatement", [statementId: "${MINE}_${st[0]}".toString(), companyUserGroupId: MINE,
+                        auditId: "${MINE}_PRI".toString(), statementCode: st[0], categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM",
+                        sequenceNum: st[2], statementText: "Statement ${st[0]}.".toString(), priorityEnumId: st[1]])
+                insert("darpan.audit.AuditCheck", [checkId: "${MINE}_${st[0]}_C".toString(), companyUserGroupId: MINE,
+                        checkCode: "check-${st[0]}".toString().toLowerCase(), label: "Check ${st[0]}".toString()])
+                insert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_${st[0]}_C".toString(), statementId: "${MINE}_${st[0]}".toString(),
+                        companyUserGroupId: MINE, sequenceNum: 1L])
+            }
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        [["R41", 60], ["R42", 5]].each { List st ->
+            ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: MINE,
+                    checkId: "${MINE}_${st[0]}_C".toString(), reportDate: Date.valueOf("2026-10-08"),
+                    findings: (1..(st[1] as int)).collect { int n -> [statementCode: st[0], recordKey: "${st[0]}-${n}".toString(),
+                            headline: "Order ${st[0]}-${n} is wrong".toString(),
+                            records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "order", recordId: "${st[0]}-${n}".toString()]]] }]).call()
+        }
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+    }
+
+    @Test
+    void findingsByOrderFiltersByPriorityPastTheCap() {
+        seedPriorityAudit()
+        Closure<List<Map>> units = { String level ->
+            Map out = this.call("get#AuditFindingsByOrder", [audit: "prio-audit", period: "2026-10"] + (level == null ? [:] : [priority: level]))
+            assertFalse(out.hadError as boolean, out.errorText as String)
+            out.findings as List<Map>
+        }
+        assertEquals(65, units(null).size(), "blank is no filter")
+        assertEquals(60, units("P0").size(), "more than the 50-row cap, all of them")
+        assertEquals(5, units("P2").size(), "a statement with no level is P2")
+        assertEquals(0, units("P1").size())
+        assertTrue(units("P0").every { it.priority == "P0" })
+
+        // The paged query takes the same filter as a search term, resolving before it pages.
+        Map page = AuditReportAssembler.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
+                [key: "priority", comparator: "eq", values: ["P0"]]], "FIRST_FOUND", false, 50, null)
+        assertEquals(50, (page.page.edges as List).size())
+        assertTrue(page.page.pageInfo.hasNextPage as boolean)
+        assertTrue((page.page.edges as List).every { it.node.priority == "P0" })
+        Map next = AuditReportAssembler.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
+                [key: "priority", comparator: "in", values: ["P0"]]], "FIRST_FOUND", false, 50, page.page.pageInfo.endCursor as String)
+        assertEquals(10, (next.page.edges as List).size())
+        assertFalse(next.page.pageInfo.hasNextPage as boolean)
+        Map low = AuditReportAssembler.findingsPage(ec, MINE, [[key: "audit", comparator: "eq", values: ["prio-audit"]],
+                [key: "priority", comparator: "eq", values: ["P2"]]], "STATEMENT", false, 100, null)
+        assertEquals(5, (low.page.edges as List).size())
+        assertTrue(AuditReportAssembler.findingsPage(ec, MINE, [[key: "priority", comparator: "eq", values: ["URGENT"]]],
+                "FIRST_FOUND", false, 10, null).publicError.toString().contains("priority must be one of"))
+    }
+
+    @Test
+    void unknownPriorityIsAnError() {
+        Map out = call("get#AuditFindingsByOrder", [audit: "month-close", period: "2026-10", priority: "URGENT"])
+        assertTrue(out.hadError as boolean, "an error, not an empty list")
+        assertTrue((out.errorText as String).contains("priority must be one of P0, P1, P2, KNOWN"), out.errorText as String)
+    }
+
     private void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }

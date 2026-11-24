@@ -130,6 +130,8 @@
             <parameter name="period"><description>The report's period, e.g. 2026-10; blank is every period.</description></parameter>
             <parameter name="state"><description>Kept for callers that send it: a finding is only ever open or fixed, and this
                 lists the open ones whatever the value (DAR-BE-206).</description></parameter>
+            <parameter name="priority"><description>DAR-BE-348. Only the findings at this level: P0, P1, P2 or KNOWN; blank is every
+                level. An order is at its most urgent open line's level. Any other value is an error.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -141,8 +143,10 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="auditId" from="tenantId ? darpan.audit.AuditReportGraph.auditIdFor(ec, tenantId, audit) : null"/>
             <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
+            <if condition="priority &amp;&amp; !(priority in darpan.audit.AuditPriority.LEVELS)">
+                <return error="true" message="priority must be one of ${darpan.audit.AuditPriority.LEVELS.join(', ')}, got ${priority}"/></if>
             <set field="findings" from="darpan.audit.AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, statement ?: null,
-                    period ?: null)"/>
+                    period ?: null, priority ?: null)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

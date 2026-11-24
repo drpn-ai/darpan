@@ -11,6 +11,9 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletResponse
+import org.moqui.impl.context.ExecutionContextFactoryImpl
+import org.moqui.util.MNode
 import darpan.facade.common.RpcMethodFence
 import org.moqui.context.ArtifactAuthorizationException
 import org.moqui.context.ExecutionContext
@@ -516,6 +519,34 @@ class CliLoginSmokeTests {
         ec.user.logoutUser()
         assertTrue(ec.user.internalLoginUser(APPROVER_USERNAME))
         assertNull(CliAuthSupport.tenantCallProblem(ec, [userId: APPROVER_ID, createdDate: session.createdDate]))
+    }
+
+    @Test
+    @DisplayName("DAR-UI-141: the CORS preflight lets a browser send X-Darpan-Tenant, in one header that keeps every header the framework allows")
+    void corsPreflightAllowsTheTenantHeader() {
+        Map<String, List<String>> sent = [:]
+        HttpServletResponse response = (HttpServletResponse) Proxy.newProxyInstance(HttpServletResponse.classLoader, [HttpServletResponse] as Class[]) { Object proxy, java.lang.reflect.Method m, Object[] args ->
+            if (m.name == "setHeader") sent[args[0] as String] = [args[1] as String]
+            if (m.name == "addHeader") sent.computeIfAbsent(args[0] as String) { [] } << (args[1] as String)
+            return null
+        }
+        ((ExecutionContextFactoryImpl) ec.factory).getWebappInfo("webroot").addHeaders("cors-preflight", response)
+
+        List<String> values = sent["Access-Control-Allow-Headers"] ?: []
+        assertEquals(1, values.size(), "one Access-Control-Allow-Headers header: ${values}")
+        Set<String> allowed = values[0].split(",")*.trim()*.toLowerCase() as Set<String>
+        // 2026-11-24 prod outage: the web app sent this header and every browser call was blocked because the list lacked it.
+        assertTrue(allowed.contains(TenantAccessSupport.REQUESTED_TENANT_HEADER.toLowerCase()), "browsers may send ${TenantAccessSupport.REQUESTED_TENANT_HEADER}: ${allowed}")
+        // darpan's entry has the framework's type and name, so it REPLACES the framework value (MNode.mergeChildrenByKeys):
+        // it must restate every header the framework allows, or sign-in (login_key, X-CSRF-Token) breaks instead.
+        URL defaultConf = ExecutionContextFactoryImpl.classLoader.getResource("MoquiDefaultConf.xml")
+        MNode webroot = MNode.parse(defaultConf.toString(), defaultConf.openStream()).first("webapp-list").children("webapp")
+                .find { it.attribute("name") == "webroot" }
+        String frameworkList = webroot.children("response-header")
+                .find { it.attribute("type") == "cors-preflight" && it.attribute("name") == "Access-Control-Allow-Headers" }
+                .attribute("value")
+        Set<String> frameworkAllowed = frameworkList.split(",")*.trim()*.toLowerCase() as Set<String>
+        assertTrue(allowed.containsAll(frameworkAllowed), "missing framework headers: ${frameworkAllowed - allowed}")
     }
 
     @Test

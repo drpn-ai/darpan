@@ -64,6 +64,12 @@
             <!-- DAR-BE-261: pinned here so a framework default change cannot lengthen it; matches
                  AuthSessionSupport.IDLE_TIMEOUT_MINUTES. -->
             <session-config timeout="60"/>
+            <!-- DAR-UI-141: browsers may send X-Darpan-Tenant (TenantAccessSupport.REQUESTED_TENANT_HEADER, DAR-CLI-003): each
+                 web tab names its own tenant. Same type and name as the framework's entry, so this REPLACES its value
+                 (MNode.mergeChildrenByKeys): the framework list is restated in full, then the tenant header. A header
+                 missing here is refused by every browser preflight (the 2026-11-24 outage); CliLoginSmokeTests guards both. -->
+            <response-header type="cors-preflight" name="Access-Control-Allow-Headers" add="true"
+                    value="Accept,Accept-Encoding,Content-Type,Content-Encoding,Origin,X-Requested-With,Access-Control-Request-Method,Access-Control-Request-Headers,api_key,login_key,X-HTTP-Method-Override,moquiSessionToken,SessionToken,X-CSRF-Token,Authorization,X-Darpan-Tenant"/>
         </webapp>
     </webapp-list>
     <!-- DAR-BE-261: a web sign-in lasts at most 24 hours from sign-in (the framework default is 144). Its key is issued

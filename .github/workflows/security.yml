@@ -129,6 +129,12 @@ jobs:
           set -euo pipefail
           git clone --depth 1 --branch master https://github.com/moqui/moqui-sftp.git \
             darpan-backend/runtime/component/moqui-sftp
+          # darpan's build.gradle depends on these two projects (DAR-BE-318, DAR-BE-334); without them Gradle cannot
+          # configure darpan and the scan never runs. Same refs as ci.yml's place-components.sh.
+          git clone --depth 1 --branch main https://github.com/drpn-ai/moqui-rules.git \
+            darpan-backend/runtime/component/moqui-rules
+          git clone --depth 1 --branch v0.2.2 https://github.com/drpn-ai/moqui-jexl.git \
+            darpan-backend/runtime/component/moqui-jexl
           mv component-darpan darpan-backend/runtime/component/darpan
 
       - name: Write OWASP dependency-check Gradle init script

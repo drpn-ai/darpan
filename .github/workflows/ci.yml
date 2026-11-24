@@ -139,14 +139,15 @@ jobs:
         working-directory: darpan-backend
         run: ./gradlew --no-daemon --console=plain getRuntime
 
-      - name: Place components (moqui-sftp, moqui-gql, moqui-rules + the 5 Darpan components — darpan under test + 4 integrations)
+      - name: Place components (moqui-sftp, moqui-gql, moqui-rules, moqui-jexl + the 5 Darpan components — darpan under test + 4 integrations)
         run: bash component-darpan/.github/scripts/place-components.sh
 
       # Nothing in the build graph depends on moqui-gql (it compileOnly-depends on darpan), so its jar, which adds the
-      # GqlToolFactory loaded at startup, is built by name, as the production image does.
+      # GqlToolFactory loaded at startup, is built by name, as the production image does; so are the moqui-rules and
+      # moqui-jexl jars, which darpan only compileOnly-depends on and Moqui loads from the component lib at run time.
       - name: Load seed data into the embedded H2 database
         working-directory: darpan-backend
-        run: ./gradlew --no-daemon --console=plain :runtime:component:moqui-gql:jar :runtime:component:moqui-rules:jar load
+        run: ./gradlew --no-daemon --console=plain :runtime:component:moqui-gql:jar :runtime:component:moqui-rules:jar :runtime:component:moqui-jexl:jar load
 
       - name: Run darpan component test suite (shard ${{ matrix.shard }} of 4)
         working-directory: darpan-backend

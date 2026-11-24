@@ -24,4 +24,9 @@ for repo in darpan-hotwax netsuite-darpan shopify-darpan database-darpan moqui-g
   git clone --depth 1 --branch main "https://github.com/drpn-ai/${repo}.git" \
     "darpan-backend/runtime/component/${repo}"
 done
+# moqui-jexl (DAR-BE-334): tenant queries' sandbox, read step and deliveries; darpan's build.gradle depends on the project,
+# so without it Gradle cannot configure darpan at all. Pinned to the tag both darpan-docker-config Dockerfiles clone
+# (MOQUI_JEXL_REF); move all three together.
+git clone --depth 1 --branch v0.2.2 https://github.com/drpn-ai/moqui-jexl.git \
+  darpan-backend/runtime/component/moqui-jexl
 mv component-darpan darpan-backend/runtime/component/darpan

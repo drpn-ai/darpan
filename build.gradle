@@ -101,6 +101,9 @@ dependencies {
     implementation(platform('io.netty:netty-bom:4.2.21.Final')) {
         because 'Netty 4.2.13 (every io.netty module incl. native epoll/kqueue classifiers): ~40 CVEs, highest fix 4.2.17 (critical CVE-2026-75595, CVE-2026-75596 in netty-handler; CVE-2026-59902/59903)'
     }
+    implementation(platform('org.apache.logging.log4j:log4j-bom:2.25.5')) {
+        because 'Spark 4.2.1 pulls log4j-1.2-api and log4j-layout-template-json 2.25.4, which the framework does not declare: CVE-2026-49844 (fixed 2.25.5)'
+    }
     constraints {
         implementation('org.apache.zookeeper:zookeeper:3.9.7') { because 'CVE-2026-59739, CVE-2026-59969, CVE-2026-79993, CVE-2026-84439, CVE-2026-84501 in 3.9.5' }
         implementation('org.apache.zookeeper:zookeeper-jute:3.9.7') { because 'same CVEs as zookeeper 3.9.5' }

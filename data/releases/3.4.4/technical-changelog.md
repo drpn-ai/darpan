@@ -1,8 +1,15 @@
 # Technical Changelog For Darpan 3.4.4
 
-Compare range: `drpn-ai/darpan` `v3.4.3..v3.4.4` (24 commits + the release commit). Curated by item.
+## Versioning decision
 
-## darpan
+Patch (3.4.3 -> 3.4.4): a hotfix on the 3.4 line; the facade contract stays at 5 (fields and parameters added only).
+
+## Source ranges
+
+- `drpn-ai/darpan` `v3.4.3..v3.4.4` (24 commits + 2 release commits); moqui-gql `v1.1.0..v1.1.1`; darpan-agent
+  `v0.5.0..v0.5.1`; database-darpan `v0.4.0..v0.4.1`; darpan-docker-config `v3.4.3..v3.4.4`.
+
+## Backend
 
 - **DAR-BE-351** `8e54d480`: `MissingDiffVerificationSupport.verifyMissingDiffs` takes `auditRun`; only an audit window
   skips an over-share side (`OVER_SHARE`). Any other run looks up every candidate and adds the note "the read left N of
@@ -31,7 +38,7 @@ Compare range: `drpn-ai/darpan` `v3.4.3..v3.4.4` (24 commits + the release commi
 - **DAR-OPS-015** `3b7094bb`, `a8048149`, `a69f5dd1`, `d85d7678`: CI places moqui-jexl; dependency patches (log4j BOM
   2.25.5, Netty, Jetty, ZooKeeper, Tink, XmlSchema, PostgreSQL driver); `.github/owasp-suppressions.xml`.
 
-## Other repos
+### Other repos
 
 - `moqui-gql` `v1.1.0..v1.1.1`: `868477b`, `3f5d299`, `d5bedc9` (audit priority in `DarpanSchema.gql.xml`).
 - `darpan-agent` `v0.5.0..v0.5.1`: `899a146` (`send#AgentTurn` takes the statement the panel is open on).
@@ -39,6 +46,23 @@ Compare range: `drpn-ai/darpan` `v3.4.3..v3.4.4` (24 commits + the release commi
   dropped).
 - `darpan-docker-config` `v3.4.3..v3.4.4`: prod pins for darpan, moqui-gql, darpan-agent, database-darpan.
 
-## Contract
+## UI
+
+None: no darpan-ui release; the app stays at `v4.4.3`. DAR-BE-350's and DAR-BE-348's app halves ship later.
+
+## Data and configuration
+
+`data/upgrade-data.xml`: 53 records (DAR-BE-348's audit vocabulary and priority enums + reason-priority filter;
+DAR-BE-340's 11 ServiceJobs with `expireLockTime` 360; DAR-BE-252's `cause.explain` email block). Loaded on boot.
+
+## Validation and rollout notes
+
 
 `check_contract_compat.py v3.4.3 -> v3.4.4`: compatible, 319 base methods preserved, version 5.
+
+Release tests and pins: see `release-notes.md` › Verification. Rollout: the prod deployer at `--ref v3.4.4`.
+
+## References
+
+- `release-notes.md`, `release-checklist.md`, `docs-impact.md`, `upgrade-data-review.md` in this folder.
+- Backlog: DAR-BE-351, DAR-BE-347, DAR-BE-348, DAR-BE-350, DAR-BE-252, DAR-BE-345, DAR-BE-346, DAR-BE-340, DAR-OPS-015.

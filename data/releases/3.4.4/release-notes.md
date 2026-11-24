@@ -37,7 +37,7 @@ Release date: 2026-11-24
   for checks not yet due. (DAR-BE-347)
 - **Audit priorities.** Statements carry a level (P0, P1, P2 or Known) and a cause may override it; every finding
   carries its level, the report counts findings per level, and findings lists and the export filter by level. The
-  agent can set both. (DAR-BE-348)
+  agent's priority levers are in darpan; its tools gain them in a later darpan-agent release. (DAR-BE-348)
 - **The audit run email invites an explanation.** Under "No cause named yet" it now says "Know why? Explain them to the
   agent", linking to the statement's agent tab. (DAR-BE-252)
 - **Conclusions can test a name prefix.** `STARTS_WITH_ANY` / `NOT_STARTS_WITH_ANY` (case ignored), e.g. an exchange
@@ -67,7 +67,32 @@ Release date: 2026-11-24
 - the `DARPAN_AUDIT_RUN` email block `cause.explain` (DAR-BE-252; email copy is data, so the wording reaches a deployed
   instance only this way).
 
-## Deferred
+## Deferred items
+
+- moqui-gql's `auditReport(date:)` description still says "blank is today"; the behaviour is the last morning due
+  (DAR-BE-347). Fix the description and regenerate the GraphQL reference in the next moqui-gql release.
+- The app (`v4.4.3`) still lists run stages in the pre-DAR-BE-346 order (VERIFY_MISSING before VERIFY_RETURNS), so a
+  live run view may order the stages it has not reached yet differently from how they run, until the next app release.
+- DAR-BE-252's email link opens the Agent tab, but app `v4.4.3` does not send the statement to the agent (darpan-ui
+  `8968758`, next app release).
 
 - The app half of DAR-BE-350 (darpan-ui `984d4d5`, `fb98014`) and DAR-BE-348's UI wait for the next app release.
 - DAR-BE-340's pool fix (a connection stuck in ROLLBACK ONLY after a deadlock) is still Aditi's call.
+
+## Verification
+
+- Release tests on `2f7f9afc` (JDK 21, `--rerun`, read from the JUnit XML): ApiContractGeneratorTests 8/8,
+  FacadeContractSnapshotTests 1/1, AuditCatalogContractTests 3/3, ScheduleJobDefaultsSmokeTests 6/6,
+  ServiceJobLockExpirySeedTests 1/1, TenantOwnedEntityFilterContractTests 5/5, ConclusionEntityContractTests 11/11,
+  AutomationEntityContractTests 8/8, SourceFilterEntityContractTests 4/4, RunFlowchartSchemaContractTests 3/3. The
+  items' own tests ran when they were built. Full suites not run (focused classes only, by standing rule).
+- Contract: `check_contract_compat.py v3.4.3 -> v3.4.4` compatible, 319 methods, version 5.
+- Deploy pins: `verify_release_pins.py --version 3.4.4` passed.
+- Prod: deployer `--ref v3.4.4`; the deploy checks the stack, the service, `/` and the boot's data load.
+
+## Rollback or fallback notes
+
+- Roll back by image: `deploy.sh prod --tag <the 3.4.3 image tag> --yes` (or the deployer with `--tag`). The upgrade
+  data only adds enums, a filter, a lock expiry and an email block; 3.4.3 ignores them, so no data rollback is needed.
+- A regular run's lookups (DAR-BE-351) cost more API calls when a read leaves many rows unconfirmed; the note names the
+  share, so a read that needs fixing shows on the run.

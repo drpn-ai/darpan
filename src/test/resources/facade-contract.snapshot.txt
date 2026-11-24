@@ -325,6 +325,7 @@ SERVICE get AuditFindingsByOrder
   IN:
     audit : String [required]
     period : String
+    priority : String
     state : String
     statement : String
   OUT:

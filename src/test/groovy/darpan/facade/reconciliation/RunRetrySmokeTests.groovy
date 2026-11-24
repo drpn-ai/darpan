@@ -40,6 +40,10 @@ class RunRetrySmokeTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SystemMessageRemoteSeedData.xml")
+        // DAR-BE-318 (Ruling 3b2b-29): side 1 is Spark-kept, so its connector's Keep lines must be loaded, retried or not.
+        // They come from darpan-hotwax's connector seed, which a core test does not load; "[]" is a loaded value.
+        ec.entity.find("darpan.reconciliation.SourceSystemConnector").condition("systemEnumId", "OMS_GQL").disableAuthz().one()
+                .set("keepLinesJson", "[]").update()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         ReconciliationSmokeTestSupport.upsertEntity(ec, "moqui.security.UserGroup", [userGroupId: OTHER_TENANT], [
                 userGroupId: OTHER_TENANT, description: "Another tenant", groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])

@@ -99,12 +99,16 @@ class ConclusionEntityContractTests {
         }
     }
 
-    /** DAR-BE-336: the upgrade pack's evidence rows are the seed's, or an existing DB gets a different card than a fresh one. */
+    /**
+     * DAR-BE-336: the upgrade pack's evidence rows are the seed's, or an existing DB gets a different card than a fresh one.
+     * They shipped in 3.4.0's pack; data/upgrade-data.xml is the CURRENT release's load target and is rebuilt every cut,
+     * so the check reads the archived pack (it failed from the 3.4.1 cut on while reading the current one).
+     */
     @Test
     void upgradePackEvidenceMatchesTheSeed() {
         Map<String, Map<String, String>> seed = connectorRows("data/SourceSystemConnectorSeedData.xml")
         ["OMS_GQL", "OMS_RETURNS_GQL", "SHOPIFY_RETURN_REFS"].each { String id ->
-            Map<String, String> pack = connectorRows("data/upgrade-data.xml").get(id)
+            Map<String, String> pack = connectorRows("data/releases/3.4.0/upgrade-data.xml").get(id)
             assertTrue(pack != null, "${id} missing from the upgrade pack")
             assertTrue(pack.evidenceFieldsJson == seed.get(id).evidenceFieldsJson, "${id}: pack evidence differs from the seed")
         }

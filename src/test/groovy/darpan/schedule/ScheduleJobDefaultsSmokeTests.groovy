@@ -125,7 +125,8 @@ class ScheduleJobDefaultsSmokeTests {
             def doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(f)
             if (doc.documentElement.getAttribute("type").endsWith("fixture")) return
             checked += checkAttributes(f, doc, "moqui.service.job.ServiceJob") { String a ->
-                a in ["jobName", "description", "serviceName", "minIntervalMinutes", "resumePreviewService"] || a.startsWith("default") }
+                // DAR-BE-340: expireLockTime is a shipped value (no Darpan surface edits it), so a seed states it.
+                a in ["jobName", "description", "serviceName", "minIntervalMinutes", "resumePreviewService", "expireLockTime"] || a.startsWith("default") }
             checkAttributes(f, doc, "moqui.service.job.ServiceJobParameter") { String a ->
                 a in ["jobName", "parameterName", "defaultValue"] }
         }

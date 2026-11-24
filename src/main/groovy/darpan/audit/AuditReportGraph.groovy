@@ -4,7 +4,9 @@ import darpan.facade.common.TenantScopedFinder
 
 import java.sql.Date
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.DateTimeParseException
 
 /**
@@ -71,12 +73,56 @@ class AuditReportGraph {
             try { return Date.valueOf(LocalDate.parse(date.trim())) }
             catch (DateTimeParseException ignored) { throw new IllegalArgumentException("date must be YYYY-MM-DD, got ${date}") }
         }
+        return Date.valueOf(LocalDate.now(tenantZone(ec, tenantId)))
+    }
+
+    /**
+     * DAR-BE-347. The morning a report shows: the date asked for, else the last morning that was due. Today has no runs
+     * from the tenant's midnight until the audit's scheduled time, so a blank date shows yesterday until then (or until
+     * a check of this audit already ran today). A retry runs now, so it keeps reportDateFor's today.
+     */
+    static Date morningOnShow(def ec, String tenantId, String auditId, String date, String period) {
+        if (date?.trim()) return reportDateFor(ec, tenantId, date)
+        ZoneId zone = tenantZone(ec, tenantId)
+        ZonedDateTime now = ZonedDateTime.now(zone)
+        LocalDate today = now.toLocalDate()
+        Map audit = auditId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, tenantId, WHY)?.getMap() : null
+        if (audit == null) return Date.valueOf(today)
+        ZoneId scheduleZone = zoneOr(audit.scheduleTimeZone as String, zone)
+        boolean ranToday = auditRanOn(ec, tenantId, auditId, today)
+        boolean yesterdayInPeriod = !period?.trim() || AuditReportAssembler.periodWindow(ec, audit, period.trim(), today.minusDays(1)) != null
+        return Date.valueOf(defaultMorning(now, zone, (audit.scheduleTime as String)?.trim() ?: AuditSettingsSupport.DEFAULT_TIME,
+                scheduleZone, audit.scheduleActive == "Y", ranToday, yesterdayInPeriod))
+    }
+
+    /** DAR-BE-347. Today in the tenant's zone, or yesterday while today's scheduled run is still ahead (pure). */
+    static LocalDate defaultMorning(ZonedDateTime now, ZoneId tenantZone, String scheduleTime, ZoneId scheduleZone,
+                                    boolean scheduled, boolean ranToday, boolean yesterdayInPeriod) {
+        LocalDate today = now.withZoneSameInstant(tenantZone).toLocalDate()
+        if (!scheduled || ranToday || !yesterdayInPeriod) return today
+        // A run reports on its fire date in the schedule's zone, so today's run fires at today + time there.
+        ZonedDateTime due = ZonedDateTime.of(today, LocalTime.parse(scheduleTime), scheduleZone)
+        return now.isBefore(due) ? today.minusDays(1) : today
+    }
+
+    private static boolean auditRanOn(def ec, String tenantId, String auditId, LocalDate day) {
+        List statementIds = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.statementId
+        if (!statementIds) return false
+        List checkIds = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("statementId", "in", statementIds)
+                .list()*.checkId.unique()
+        return checkIds && tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("reportDate", Date.valueOf(day))
+                .condition("checkId", "in", checkIds).count() > 0
+    }
+
+    private static ZoneId tenantZone(def ec, String tenantId) {
         def setting = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.auth.TenantSetting", WHY)
                 .condition("companyUserGroupId", tenantId).useCache(false).one()
-        ZoneId zone
-        try { zone = setting?.timeZone ? ZoneId.of(setting.timeZone as String) : ZoneId.of("UTC") }
-        catch (Exception ignored) { zone = ZoneId.of("UTC") }
-        return Date.valueOf(LocalDate.now(zone))
+        return zoneOr(setting?.timeZone as String, ZoneId.of("UTC"))
+    }
+
+    private static ZoneId zoneOr(String id, ZoneId fallback) {
+        try { return id?.trim() ? ZoneId.of(id.trim()) : fallback }
+        catch (Exception ignored) { return fallback }
     }
 
     static Map report(Map document) {

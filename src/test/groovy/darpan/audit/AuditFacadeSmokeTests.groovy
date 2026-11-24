@@ -132,6 +132,17 @@ class AuditFacadeSmokeTests {
         assertFalse(doc.toString().contains("INV-O1"), "nothing of the other tenant")
     }
 
+    // DAR-BE-347. A blank date reads the last morning that was due (AuditDefaultMorningTests has the cases): today, or
+    // yesterday while today's scheduled run is still ahead, by the wall clock in the tenant's zone.
+    @Test
+    void aBlankDateReadsTodayOrYesterdayInTheTenantsZone() {
+        Map out = call("get#AuditReport", [audit: "month-close"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles"))
+        assertTrue(((Map) out.report).report.date in [today.toString(), today.minusDays(1).toString()],
+                ((Map) out.report).report.date as String)
+    }
+
     @Test
     void anotherTenantsAuditOrFindingReadsAsNotFound() {
         Map audit = call("get#AuditReport", [audit: "other-only"])

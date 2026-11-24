@@ -56,7 +56,7 @@
         <in-parameters>
             <parameter name="companyUserGroupId" required="true"/>
             <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
-            <parameter name="date"><description>The morning, YYYY-MM-DD; blank is today in the tenant's zone.</description></parameter>
+            <parameter name="date"><description>The morning, YYYY-MM-DD; blank is the last morning that was due: yesterday until today's scheduled run, then today (tenant's zone).</description></parameter>
             <parameter name="period"><description>Which period's run, e.g. 2026-10.</description></parameter>
         </in-parameters>
         <out-parameters>
@@ -68,7 +68,7 @@
             <if condition="!auditId"><set field="publicError" value="Audit ${audit} was not found"/><return/></if>
             <script>
                 try {
-                    reportDate = darpan.audit.AuditReportGraph.reportDateFor(ec, companyUserGroupId, date)
+                    reportDate = darpan.audit.AuditReportGraph.morningOnShow(ec, companyUserGroupId, auditId, date, period)
                 } catch (IllegalArgumentException e) {
                     publicError = e.message
                 }

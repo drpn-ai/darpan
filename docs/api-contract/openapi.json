@@ -12937,7 +12937,7 @@
                     },
                     "date": {
                         "type": "string",
-                        "description": "The morning, YYYY-MM-DD; blank is today in the tenant's zone."
+                        "description": "The morning, YYYY-MM-DD; blank is the last morning that was due: yesterday until today's scheduled run, then today (tenant's zone)."
                     },
                     "period": {
                         "type": "string",
@@ -13552,7 +13552,7 @@
                     },
                     "date": {
                         "type": "string",
-                        "description": "The morning, YYYY-MM-DD; blank is today in the tenant's zone."
+                        "description": "The morning, YYYY-MM-DD; blank is the last morning that was due: yesterday until today's scheduled run, then today (tenant's zone)."
                     },
                     "period": {
                         "type": "string",

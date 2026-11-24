@@ -116,6 +116,26 @@ class ConclusionConditionSupportTests {
         assertEquals(["[a, b]"], ConclusionConditionSupport.valuesAt([tags: ["a", "b"]], "tags"))
     }
 
+    /**
+     * DAR-BE-345 (Aditi 2026-11-24, option A): a HotWax exchange order's lines carry no flag, only its name (EXC-#1032413-1),
+     * so R4 tells them apart by prefix. Case is ignored as IN ignores it; a blank starts with nothing, so NOT_ holds on it.
+     */
+    @Test
+    void startsWithAnyMatchesAListedPrefixAndItsOppositeHoldsOnABlank() {
+        Map exc = cond(fieldExpression: "omsOrderName", operator: "STARTS_WITH_ANY", conditionValues: ["EXC-", "REPL-"])
+        Map notExc = cond(fieldExpression: "omsOrderName", operator: "NOT_STARTS_WITH_ANY", conditionValues: ["EXC-", "REPL-"])
+        Map read = ConclusionConditionSupport.check(exc, [presence: "KEPT", record: [omsOrderName: "EXC-#1032413-1"]])
+        assertTrue(read.passed)
+        assertEquals("EXC-#1032413-1", read.value)
+        assertTrue(ConclusionConditionSupport.check(exc, [presence: "KEPT", record: [omsOrderName: "repl-#707865-1"]]).passed, "case is ignored")
+        ["#1041642", "#12947OUT", "XEXC-#1", "", null].each { Object v ->
+            Map side = [presence: "KEPT", record: [omsOrderName: v]]
+            assertFalse(ConclusionConditionSupport.check(exc, side).passed, "${v} is not an exchange")
+            assertTrue(ConclusionConditionSupport.check(notExc, side).passed, "${v} does not start with a listed prefix")
+        }
+        assertFalse(ConclusionConditionSupport.check(notExc, [presence: "KEPT", record: [omsOrderName: "EXC-#1035299-1"]]).passed)
+    }
+
     @Test
     void operatorsAreUnchanged() {
         Map side = [presence: "KEPT", record: [s: "f", e: "", n: "x"]]

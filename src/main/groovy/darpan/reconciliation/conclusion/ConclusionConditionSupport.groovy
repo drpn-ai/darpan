@@ -67,6 +67,9 @@ class ConclusionConditionSupport {
         switch (operator) {
             case "IN": return value != null && wanted.contains(value.toUpperCase())
             case "NOT_IN": return value == null || !wanted.contains(value.toUpperCase())
+            // DAR-BE-345: a name prefix (a HotWax exchange order's lines carry only its name, EXC-...); case ignored as IN.
+            case "STARTS_WITH_ANY": return startsWithAny(value, wanted)
+            case "NOT_STARTS_WITH_ANY": return !startsWithAny(value, wanted)
             case "GT_ZERO": return isPositive(value)
             // DAR-BE-094 R4: more than the condition's one number ("more than $5 unapplied"); a blank or non-number is not.
             case "GT": return isAbove(value, wanted ? wanted[0] : null)
@@ -78,6 +81,12 @@ class ConclusionConditionSupport {
             case "NOT_BLANK": return value as boolean
             default: throw new IllegalArgumentException("Unsupported conclusion operator '${operator}'")
         }
+    }
+
+    private static boolean startsWithAny(String value, List<String> prefixes) {
+        if (!value) return false
+        String upper = value.toUpperCase()
+        return prefixes.any { String p -> p && upper.startsWith(p) }
     }
 
     private static boolean isAbove(String value, String floor) {

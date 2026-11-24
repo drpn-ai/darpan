@@ -22,7 +22,11 @@ class RunConclusionAuthoringSupport {
     static final String RULE = "darpan.rule.RuleSetConclusionRule"
     static final String CONDITION = "darpan.rule.RuleSetConclusionCondition"
     static final List<String> BUCKETS = ["MISSING_FROM_FILE_1", "MISSING_FROM_FILE_2", "RULE", "FINDING"].asImmutable()
-    static final List<String> OPERATORS = ["IN", "NOT_IN", "GT", "LT", "GT_ZERO", "WITHIN_HOURS", "BLANK", "NOT_BLANK"].asImmutable()
+    static final List<String> OPERATORS = ["IN", "NOT_IN", "STARTS_WITH_ANY", "NOT_STARTS_WITH_ANY", "GT", "LT", "GT_ZERO",
+                                           "WITHIN_HOURS", "BLANK", "NOT_BLANK"].asImmutable()
+    /** Operators that read a list of values from the condition (comma-joined in conditionValues, so none may hold a comma). */
+    private static final List<String> LIST_OPERATORS = ["IN", "NOT_IN", "STARTS_WITH_ANY", "NOT_STARTS_WITH_ANY"].asImmutable()
+    private static final List<String> NUMBER_OPERATORS = ["GT", "LT", "WITHIN_HOURS"].asImmutable()
     static final List<String> PRESENCE = ["ANY", "KEPT", "EXCLUDED", "ABSENT"].asImmutable()
     static final List<String> KEY_SCOPES = ["FULL", "FIRST_FIELD"].asImmutable()
     static final List<String> QUANTIFIERS = ["ALL", "ANY"].asImmutable()
@@ -216,14 +220,16 @@ class RunConclusionAuthoringSupport {
             if (field && !operator) { errors << "'${label}': say what '${field}' must be.".toString(); return null }
             if (!field && presence == "ANY") { errors << "'${label}': a condition needs a field or a presence.".toString(); return null }
             List<String> values = ((c.values ?: []) as List).collect { normalize(it) }.findAll { it } as List<String>
-            if (operator in ["IN", "NOT_IN"] && (!values || values.any { it.contains(",") || it.length() > 100 })) {
-                errors << "'${label}': '${field}' ${operator == 'IN' ? 'is' : 'is not'} needs values without commas.".toString(); return null
+            if (operator in LIST_OPERATORS && (!values || values.any { it.contains(",") || it.length() > 100 })) {
+                String says = [IN: "is", NOT_IN: "is not", STARTS_WITH_ANY: "starts with", NOT_STARTS_WITH_ANY: "does not start with"][operator]
+                String what = operator in ["IN", "NOT_IN"] ? "values" : "prefixes"
+                errors << "'${label}': '${field}' ${says} needs ${what} without commas.".toString(); return null
             }
-            if (operator in ["GT", "LT", "WITHIN_HOURS"] && !(values.size() == 1 && values[0] ==~ /-?[0-9]{1,15}(\.[0-9]{1,6})?/)) {
+            if (operator in NUMBER_OPERATORS && !(values.size() == 1 && values[0] ==~ /-?[0-9]{1,15}(\.[0-9]{1,6})?/)) {
                 String says = [GT: "is more than", LT: "is less than", WITHIN_HOURS: "within hours"][operator]
                 errors << "'${label}': '${field}' ${says} needs one number.".toString(); return null
             }
-            if (!(operator in ["IN", "NOT_IN", "GT", "LT", "WITHIN_HOURS"]) && values) { errors << "'${label}': ${operator ?: 'a presence check'} takes no values.".toString(); return null }
+            if (!(operator in LIST_OPERATORS || operator in NUMBER_OPERATORS) && values) { errors << "'${label}': ${operator ?: 'a presence check'} takes no values.".toString(); return null }
             String checkLabel = normalize(c.checkLabel)
             if (!checkLabel) { errors << "'${label}': every condition says what it checks.".toString(); return null }
             out << [subject: subject, presence: presence, keyScope: keyScope, quantifier: quantifier, fieldExpression: field,

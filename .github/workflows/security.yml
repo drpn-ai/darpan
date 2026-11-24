@@ -161,6 +161,10 @@ jobs:
           allprojects {
               apply plugin: org.owasp.dependencycheck.gradle.DependencyCheckPlugin
 
+              // Each project's own .github/owasp-suppressions.xml. The root project here is the framework clone,
+              // so rootProject.projectDir never saw the component's file (DAR-OPS-015).
+              def owaspSuppressions = file('.github/owasp-suppressions.xml')
+
               dependencyCheck {
                   // Fail on High (7.0+) and Critical (9.0+); Medium and below are
                   // reported in the HTML/JSON output but do not fail the build.
@@ -173,10 +177,10 @@ jobs:
                   // Output goes to build/reports/dependency-check, the plugin's default since 13.0.0
                   // (the upload step below reads that path).
 
-                  // Suppress known false-positives via a committed suppressions file
-                  // (check in at .github/owasp-suppressions.xml when needed).
-                  if (new File(rootProject.projectDir, '.github/owasp-suppressions.xml').exists()) {
-                      suppressionFile = rootProject.file('.github/owasp-suppressions.xml').absolutePath
+                  // Suppress reviewed false positives and unfixable shaded copies via the committed
+                  // .github/owasp-suppressions.xml (every entry carries its reason).
+                  if (owaspSuppressions.exists()) {
+                      suppressionFile = owaspSuppressions.absolutePath
                   }
 
                   // Use the cached NVD data directory (populated by the cache action).

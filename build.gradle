@@ -86,15 +86,32 @@ dependencies {
     // moved to Jackson 3 (tools.jackson.*), a second Jackson major that also bumps jackson-annotations. Only
     // darpan.facade.auth.PasskeySupport may reference it.
     implementation 'com.webauthn4j:webauthn4j-core:0.30.3.RELEASE'
-    // Connector/J 9.x per DevOps MySQL 8.0→8.4 server upgrade (9.x is compatible with both).
-    // The upgrade notice named "9.7.2" but Maven Central has no such artifact — 9.7.0 is the
-    // newest 9.x release (the line then jumps to Oracle's 26.x numbering). 9.x has no
-    // com.mysql.jdbc.* legacy aliases — deployments MUST select the mysql8 database conf
-    // (com.mysql.cj.* driver/XA classes), never the legacy mysql entry.
-    runtimeOnly 'com.mysql:mysql-connector-j:9.7.0'
+    // Connector/J: 9.x was the DevOps MySQL 8.0→8.4 server upgrade line (works with both). DAR-OPS-015: 9.7.0 carries
+    // CVE-2026-60586/60623/60624/61082 (9.7.0-9.7.1); Oracle continued the line as 26.x (no 9.7.2 exists). 26.10.0 is a
+    // bug/security continuation of 9.7: same com.mysql.cj.* driver and XA classes, same Java 8 bytecode, no class removed.
+    // Deployments MUST select the mysql8 database conf (com.mysql.cj.* driver/XA classes), never the legacy mysql entry.
+    runtimeOnly 'com.mysql:mysql-connector-j:26.10.0'
     // Chelan runs Postgres (MoquiProductionConf.xml datasource is PGXADataSource); the MySQL
     // connector stays for local/dev compose stacks that still point at MySQL.
-    runtimeOnly 'org.postgresql:postgresql:42.7.7'
+    runtimeOnly('org.postgresql:postgresql:42.7.15') { because 'CVE-2026-42198 (fixed 42.7.11), CVE-2026-54291 (fixed 42.7.12)' }
+
+    // DAR-OPS-015: Spark 4.2.1 (and 4.3.0, same pins) brings these transitively at versions with known CVEs. Raise them
+    // here; Gradle's conflict resolution picks the higher version, so a later Spark that pins newer versions wins on its
+    // own and the entry below becomes a no-op to delete. Nothing in darpan calls these libraries directly.
+    implementation(platform('io.netty:netty-bom:4.2.21.Final')) {
+        because 'Netty 4.2.13 (every io.netty module incl. native epoll/kqueue classifiers): ~40 CVEs, highest fix 4.2.17 (critical CVE-2026-75595, CVE-2026-75596 in netty-handler; CVE-2026-59902/59903)'
+    }
+    constraints {
+        implementation('org.apache.zookeeper:zookeeper:3.9.7') { because 'CVE-2026-59739, CVE-2026-59969, CVE-2026-79993, CVE-2026-84439, CVE-2026-84501 in 3.9.5' }
+        implementation('org.apache.zookeeper:zookeeper-jute:3.9.7') { because 'same CVEs as zookeeper 3.9.5' }
+        implementation('com.google.crypto.tink:tink:1.24.0') { because 'CVE-2026-15432 in 1.20.0' }
+        implementation('org.apache.ws.xmlschema:xmlschema-core:2.3.3') { because 'CVE-2026-102495, CVE-2026-102496, CVE-2026-102497 in 2.3.1' }
+        implementation('org.apache.ivy:ivy:2.6.0') { because 'CVE-2026-26032 in 2.5.3' }
+        // Parquet 1.18.2 also re-shades Jackson 2.22.4 inside parquet-jackson (1.17.0 shaded 2.19.2: CVE-2026-54512..54515).
+        ['parquet-column', 'parquet-common', 'parquet-encoding', 'parquet-format-structures', 'parquet-hadoop', 'parquet-jackson'].each { m ->
+            implementation("org.apache.parquet:${m}:1.18.2") { because 'CVE-2026-73334 in 1.17.0; shaded Jackson 2.19.2 CVE-2026-54512..54515' }
+        }
+    }
 
     // Drools (MACH P1 -> DAR-BE-184: 8.44.0.Final -> 10.2.0; 10.x drops the .Final suffix). Module set for the
     // classic KieFileSystem DRL + MVEL-dialect compilation: drools-engine (runtime; pulls drools-core/compiler at

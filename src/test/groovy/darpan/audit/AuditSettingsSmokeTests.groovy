@@ -628,6 +628,144 @@ class AuditSettingsSmokeTests {
         }
     }
 
+    /**
+     * DAR-BE-348. R1's checks: open-in-netsuite (TSET_RS1) and open-in-netsuite-3 (TSET_RS3). Recorded late is expected on
+     * both, Credited later on the first only, Wrong amount is configured on the first only and expected nowhere; Retired item
+     * is hidden (never a finding, so never a reason). Another tenant holds an override on its own R1.
+     */
+    private void reasonFixtures() {
+        if (row("darpan.audit.AuditCheck", "checkId", "TSET_OPEN3") != null) return
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            if (row("moqui.basic.EnumerationType", "enumTypeId", "DarpanConclusion") == null) {
+                insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
+            }
+            [TSET_C_ALL: "Recorded late", TSET_C_SOME: "Credited later", TSET_C_NONE: "Wrong amount", TSET_C_HIDDEN: "Retired item"]
+                    .each { String id, String label ->
+                insert("moqui.basic.Enumeration", [enumId: id, enumTypeId: "DarpanConclusion", enumCode: id, description: label])
+            }
+            run("TSET_RS3", "EVALUATE", [[side: "FILE_1", system: "NETSUITE_SUITEQL", key: "tranId"]])
+            check("TSET_OPEN3", "open-in-netsuite-3", "TSET_RS3", "R1")
+            [[1L, "TSET_C_ALL", "EXPECTED"], [2L, "TSET_C_SOME", "EXPECTED"], [3L, "TSET_C_NONE", null]].each { List r ->
+                insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "TSET_RS1_SCOPE", sequenceNum: r[0], conclusionEnumId: r[1],
+                        outcome: r[2], companyUserGroupId: MINE])
+            }
+            [[1L, "TSET_C_ALL", "EXPECTED"], [2L, "TSET_C_SOME", null], [3L, "TSET_C_HIDDEN", "HIDE"]].each { List r ->
+                insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "TSET_RS3_SCOPE", sequenceNum: r[0], conclusionEnumId: r[1],
+                        outcome: r[2], companyUserGroupId: MINE])
+            }
+            insert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TSET_RP_OTHER", companyUserGroupId: OTHER,
+                    statementId: "${OTHER}_R1".toString(), conclusionEnumId: "TSET_C_SOME", priorityEnumId: "AUDP_KNOWN"])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    }
+
+    private List<Map> testReasons(Map settings, String code) {
+        return ((settings.statements as List<Map>).find { it.code == code }.reasons as List<Map>)
+                .findAll { (it.conclusion as String).startsWith("TSET_C_") }
+    }
+
+    private List reasonRows(String tenantId, String statementId, String conclusionEnumId) {
+        return ec.entity.find("darpan.audit.AuditReasonPriority").condition("companyUserGroupId", tenantId)
+                .condition("statementId", statementId).condition("conclusionEnumId", conclusionEnumId).disableAuthz().useCache(false).list()
+    }
+
+    @Test
+    @Order(71)
+    void settingsListStatementPriorityAndReasons() {
+        reasonFixtures()
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            row("darpan.audit.AuditStatement", "statementId", "${MINE}_R1".toString()).set("priorityEnumId", "AUDP_P1").update()
+            row("darpan.audit.AuditStatement", "statementId", "${MINE}_R2".toString()).set("priorityEnumId", null).update()
+            reasonRows(MINE, "${MINE}_R1".toString(), "TSET_C_NONE").each { it.delete() }
+            insert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TSET_RP_NONE", companyUserGroupId: MINE,
+                    statementId: "${MINE}_R1".toString(), conclusionEnumId: "TSET_C_NONE", priorityEnumId: "AUDP_P0"])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Map out = facade("get#AuditSettings", [audit: "system-health"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        Map settings = (Map) out.settings
+        assertEquals(["P1", "P2"], settings.statements*.priority, "R2 has no level: it reads P2")
+        assertEquals([[conclusion: "TSET_C_ALL", label: "Recorded late", priority: null, closes: "all", closesOn: 2, checks: 2],
+                      [conclusion: "TSET_C_SOME", label: "Credited later", priority: null, closes: "some", closesOn: 1, checks: 2],
+                      [conclusion: "TSET_C_NONE", label: "Wrong amount", priority: "P0", closes: "none", closesOn: 0, checks: 1]],
+                testReasons(settings, "R1"), "hidden Retired item is no reason; the other tenant's KNOWN on Credited later is not ours")
+        assertEquals([], testReasons(settings, "R2"))
+    }
+
+    @Test
+    @Order(72)
+    void saveSetsAndClearsReasonOverride() {
+        reasonFixtures()
+        String r1 = "${MINE}_R1".toString(), r2 = "${MINE}_R2".toString()
+        Map bad = facade("save#AuditSettings", [audit: "system-health", statements: [[id: r2, priority: "P9"]],
+                reasons: [[statement: r1, conclusion: "TSET_C_SOME", priority: "KNOWN"]]])
+        assertTrue(bad.hadError as boolean)
+        assertTrue((bad.errorText as String).contains("P9 is not a priority"), bad.errorText as String)
+        assertEquals([], reasonRows(MINE, r1, "TSET_C_SOME"), "nothing written when any input is wrong")
+
+        Map set = facade("save#AuditSettings", [audit: "system-health", statements: [[id: r2, priority: "P0"]],
+                reasons: [[statement: r1, conclusion: "TSET_C_SOME", priority: "KNOWN"]]])
+        assertFalse(set.hadError as boolean, set.errorText as String)
+        assertEquals("P0", (set.settings as Map).statements.find { it.id == r2 }.priority)
+        assertEquals("KNOWN", testReasons(set.settings as Map, "R1").find { it.conclusion == "TSET_C_SOME" }.priority)
+        assertEquals("AUDP_P0", row("darpan.audit.AuditStatement", "statementId", r2).priorityEnumId)
+        assertEquals(["AUDP_KNOWN"], reasonRows(MINE, r1, "TSET_C_SOME")*.priorityEnumId)
+
+        Map moved = facade("save#AuditSettings", [audit: "system-health", reasons: [[statement: r1, conclusion: "TSET_C_SOME", priority: "P1"]]])
+        assertFalse(moved.hadError as boolean, moved.errorText as String)
+        assertEquals(["AUDP_P1"], reasonRows(MINE, r1, "TSET_C_SOME")*.priorityEnumId, "one row per reason, its level changed")
+
+        Map cleared = facade("save#AuditSettings", [audit: "system-health", statements: [[id: r2, priority: null]],
+                reasons: [[statement: r1, conclusion: "TSET_C_SOME", priority: null]]])
+        assertFalse(cleared.hadError as boolean, cleared.errorText as String)
+        assertEquals([], reasonRows(MINE, r1, "TSET_C_SOME"), "null deletes the override")
+        assertNull(testReasons(cleared.settings as Map, "R1").find { it.conclusion == "TSET_C_SOME" }.priority)
+        assertNull(row("darpan.audit.AuditStatement", "statementId", r2).priorityEnumId)
+        assertEquals("P2", (cleared.settings as Map).statements.find { it.id == r2 }.priority, "a cleared statement reads P2")
+    }
+
+    @Test
+    @Order(73)
+    void reasonClosingOnEveryCheckCannotTakeALevel() {
+        reasonFixtures()
+        String r1 = "${MINE}_R1".toString()
+        assertTrue(AuditSettingsSupport.reasonClosesEverywhere(ec, MINE, r1, "TSET_C_ALL"))
+        assertFalse(AuditSettingsSupport.reasonClosesEverywhere(ec, MINE, r1, "TSET_C_SOME"), "closes on 1 of 2 checks")
+        assertFalse(AuditSettingsSupport.reasonClosesEverywhere(ec, MINE, r1, "TSET_C_NONE"))
+        assertFalse(AuditSettingsSupport.reasonClosesEverywhere(ec, OTHER, r1, "TSET_C_ALL"), "another tenant does not see our statement")
+
+        Map refused = facade("save#AuditSettings", [audit: "system-health", reasons: [[statement: r1, conclusion: "TSET_C_ALL", priority: "P1"]]])
+        assertTrue(refused.hadError as boolean)
+        assertTrue((refused.errorText as String).contains("Recorded late closes"), refused.errorText as String)
+        assertEquals([], reasonRows(MINE, r1, "TSET_C_ALL"), "no level written")
+
+        Map none = facade("save#AuditSettings", [audit: "system-health", reasons: [[statement: r1, conclusion: "TSET_C_ALL", priority: null]]])
+        assertFalse(none.hadError as boolean, "clearing a level that is not there is fine: ${none.errorText}")
+    }
+
+    @Test
+    @Order(74)
+    void saveIgnoresAnotherTenantsStatement() {
+        reasonFixtures()
+        String theirs = "${OTHER}_R1".toString()
+        Map statement = facade("save#AuditSettings", [audit: "system-health", statements: [[id: theirs, priority: "P0"]]])
+        assertTrue(statement.hadError as boolean)
+        assertNull(row("darpan.audit.AuditStatement", "statementId", theirs).priorityEnumId, "their statement keeps its level")
+
+        Map set = facade("save#AuditSettings", [audit: "system-health", reasons: [[statement: theirs, conclusion: "TSET_C_NONE", priority: "P0"]]])
+        assertTrue(set.hadError as boolean)
+        assertTrue((set.errorText as String).contains("is not part of audit system-health"), set.errorText as String)
+        Map clear = facade("save#AuditSettings", [audit: "system-health", reasons: [[statement: theirs, conclusion: "TSET_C_SOME", priority: null]]])
+        assertTrue(clear.hadError as boolean)
+        assertEquals([], reasonRows(OTHER, theirs, "TSET_C_NONE"))
+        assertEquals([], reasonRows(MINE, theirs, "TSET_C_NONE"))
+        assertEquals(["AUDP_KNOWN"], reasonRows(OTHER, theirs, "TSET_C_SOME")*.priorityEnumId, "their override is not cleared")
+    }
+
     private Map call(String service, Map params) {
         Map out = ec.service.sync().name(service).parameters(params).call() ?: [:]
         Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]

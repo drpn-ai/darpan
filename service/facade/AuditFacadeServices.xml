@@ -225,7 +225,7 @@
     <!-- DAR-UI-063. The audit page's settings gear and play button. Writes need the active tenant's edit access. -->
     <service verb="get" noun="AuditSettings" authz-action="view" allow-remote="true" authenticate="true">
         <description>An audit's settings: its name, its daily schedule (the audit's own, DAR-BE-199: every check runs on
-            it), and each statement with its checks and the run each check reads.</description>
+            it), and each statement with its priority, its checks, the run each check reads, and its reasons.</description>
         <in-parameters><parameter name="audit" required="true"><description>The audit's code.</description></parameter></in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -234,7 +234,11 @@
             <parameter name="settings" type="Map"><description>{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest
                 day play can record today), schedule: {active, time HH:mm,
                 timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,
-                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],
+                checksWithoutRun}, statements: [{id, code, text, active, priority (P0, P1, P2 or KNOWN; a statement with no level
+                reads P2), checks: [{id, label, savedRunId, runName}], reasons (DAR-BE-348: the conclusions its checks' runs can
+                reach, hidden ones left out, and any it holds a level for): [{conclusion (enumId), label, priority (its own level,
+                or null: the statement's), closes (all: expected on every check that reaches it, so it closes every finding and
+                takes no level; some; none), closesOn, checks (how many of the statement's checks reach it)}]}],
                 runEmail: {active, alsoSendTo: [address], members (how many accounts receive it by default: current tenant
                 members and Darpan admins), admins (how many of those are Darpan admins), chatSpaceId or null, canEdit (the caller
                 is a tenant admin; others see it read-only)} (DAR-BE-207:
@@ -420,14 +424,19 @@
     </service>
 
     <service verb="save" noun="AuditSettings" allow-remote="true" authenticate="true">
-        <description>Changes an audit's name, statements (text, on/off) and its daily schedule, which is the audit's own and
+        <description>Changes an audit's name, statements (text, on/off, priority), reasons' priorities and its daily schedule, which is the audit's own and
             is written to the automation of every check it runs (DAR-BE-199). A check whose run has no automation gets one,
             on that schedule, when the schedule is saved. Answers the settings as saved.</description>
         <in-parameters>
             <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
             <parameter name="name"><description>New name; blank keeps it.</description></parameter>
-            <parameter name="statements" type="List"><description>[{id, text, active}], only those that changed.</description>
+            <parameter name="statements" type="List"><description>[{id, text, active, priority}], only those that changed, a field
+                left out keeps its value. priority: P0, P1, P2 or KNOWN; null clears it (reads P2).</description>
                 <parameter name="statement" type="Map"/></parameter>
+            <parameter name="reasons" type="List"><description>DAR-BE-348. [{statement (its id), conclusion (enumId), priority}]: a
+                reason's own level, P0, P1, P2 or KNOWN; null deletes it, and the reason takes the statement's. A reason that
+                closes on every check of its statement takes no level: the save is refused.</description>
+                <parameter name="reason" type="Map"/></parameter>
             <parameter name="schedule" type="Map"><description>{active, time HH:mm, timeZone}; absent keeps it, a field left out
                 keeps its value.</description></parameter>
             <parameter name="runEmail" type="Map"><description>DAR-BE-207. {active (false stops the run email for this audit),
@@ -442,8 +451,8 @@
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="settings" type="Map"><description>{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest
                 day play can record today), schedule: {active, time HH:mm,
-                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,
-                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}</description></parameter>
+                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, priority, checks: [{id, label,
+                savedRunId, runName}], reasons: [{conclusion, label, priority, closes, closesOn, checks}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}</description></parameter>
         </out-parameters>
         <actions>
             <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for audit changes.')"/>
@@ -451,7 +460,7 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
             <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
-                <script>darpan.audit.AuditSettingsSupport.save(ec, tenantId, auditRow, name, statements as List, schedule as Map, runEmail as Map)</script>
+                <script>darpan.audit.AuditSettingsSupport.save(ec, tenantId, auditRow, name, statements as List, schedule as Map, runEmail as Map, reasons as List)</script>
                 <if condition="!ec.message.hasError()">
                     <set field="settings" from="darpan.audit.AuditSettingsSupport.settings(ec, tenantId, darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit))"/>
                 </if>
@@ -459,6 +468,66 @@
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <!-- DAR-BE-348. The two priority writes behind save#AuditSettings (and the agent's levers). Not remote: the caller has
+         checked write access, the level codes and which reasons may take a level (AuditSettingsSupport). Each find names the
+         tenant beside the active-company filter; a statement of another tenant reads as not found and nothing is written. -->
+    <service verb="set" noun="AuditStatementPriority" allow-remote="false" authenticate="true">
+        <description>Sets a statement's level (an AuditPriority enumId); none clears it, and it reads P2.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="statementId" required="true"/>
+            <parameter name="priorityEnumId"/>
+        </in-parameters>
+        <actions>
+            <entity-find entity-name="darpan.audit.AuditStatement" list="statementList" for-update="true">
+                <econdition field-name="companyUserGroupId" from="companyUserGroupId"/>
+                <econdition field-name="statementId" from="statementId"/>
+            </entity-find>
+            <if condition="!statementList"><return error="true" message="Statement ${statementId} was not found."/></if>
+            <set field="statementRow" from="statementList[0]"/>
+            <set field="statementRow.priorityEnumId" from="priorityEnumId ?: null"/>
+            <entity-update value-field="statementRow"/>
+        </actions>
+    </service>
+
+    <service verb="set" noun="AuditReasonPriority" allow-remote="false" authenticate="true">
+        <description>Sets the level of one reason (conclusion) under a statement, overriding the statement's; none deletes the
+            override, and the reason takes the statement's level again.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="statementId" required="true"/>
+            <parameter name="conclusionEnumId" required="true"/>
+            <parameter name="priorityEnumId"/>
+        </in-parameters>
+        <actions>
+            <entity-find entity-name="darpan.audit.AuditStatement" list="statementList">
+                <econdition field-name="companyUserGroupId" from="companyUserGroupId"/>
+                <econdition field-name="statementId" from="statementId"/>
+            </entity-find>
+            <if condition="!statementList"><return error="true" message="Statement ${statementId} was not found."/></if>
+            <entity-find entity-name="darpan.audit.AuditReasonPriority" list="reasonList" for-update="true">
+                <econdition field-name="companyUserGroupId" from="companyUserGroupId"/>
+                <econdition field-name="statementId" from="statementId"/>
+                <econdition field-name="conclusionEnumId" from="conclusionEnumId"/>
+            </entity-find>
+            <if condition="!priorityEnumId">
+                <iterate list="reasonList" entry="reasonRow"><entity-delete value-field="reasonRow"/></iterate>
+                <else-if condition="reasonList">
+                    <set field="reasonRow" from="reasonList[0]"/>
+                    <set field="reasonRow.priorityEnumId" from="priorityEnumId"/>
+                    <entity-update value-field="reasonRow"/>
+                </else-if>
+                <else>
+                    <entity-make-value entity-name="darpan.audit.AuditReasonPriority" value-field="reasonValue"
+                            map="[companyUserGroupId: companyUserGroupId, statementId: statementId,
+                                  conclusionEnumId: conclusionEnumId, priorityEnumId: priorityEnumId]"/>
+                    <entity-sequenced-id-primary value-field="reasonValue"/>
+                    <entity-create value-field="reasonValue"/>
+                </else>
+            </if>
         </actions>
     </service>
 

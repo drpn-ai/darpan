@@ -61,6 +61,8 @@ class AuditSettingsSupport {
         Map<String, String> runNames = runNames(ec, tenantId, checks*.savedRunId.findAll { it }.unique() as List<String>)
         Map schedule = scheduleOf(ec, audit)
         ZoneId zone = ZoneId.of(tenantZone(ec))
+        Map levels = AuditReportAssembler.priorityLevels(ec, tenantId, statements)
+        Map<String, List<Map>> reasons = reasonsOf(ec, tenantId, checksByStatement, (Map<String, Map<String, String>>) levels.overrides)
         return [audit     : [id: audit.auditCode, name: audit.auditName, period: periods[audit.periodEnumId as String]],
                 playableFrom: playableFrom(ec, tenantId, audit, LocalDate.now(zone), zone),
                 // DAR-BE-328: the instant today's peak hours end, only while now is inside them; play notes it.
@@ -74,26 +76,47 @@ class AuditSettingsSupport {
                              checksWithoutRun: checks.count { !it.automationId } as int],
                 statements: statements.collect { Map st ->
                     [id    : st.statementId, code: st.statementCode, text: st.statementText, active: (st.isActive ?: "Y") != "N",
+                     // DAR-BE-348: a statement with no level reads P2.
+                     priority: ((Map) levels.statementLevels)[st.statementId as String] ?: AuditPriority.DEFAULT_LEVEL,
                      checks: checksByStatement[st.statementId as String].collect { Map c ->
                          [id: c.checkCode, label: c.label, savedRunId: c.savedRunId, runName: c.savedRunId ? runNames[c.savedRunId as String] : null]
-                     }]
+                     },
+                     reasons: reasons[st.statementId as String]]
                 },
                 // DAR-BE-207: the update emailed after each run.
                 runEmail  : AuditRunUpdateSupport.runEmailSettings(ec, tenantId, audit.auditId as String)]
     }
 
     /**
-     * Applies what changed. name: blank is ignored. statements: [{id, text, active}], each of this audit. schedule:
+     * Applies what changed. name: blank is ignored. statements: [{id, text, active, priority}], each of this audit. schedule:
      * {active, time HH:mm, timeZone}, written to every automation the audit's checks run through (made first if missing).
      * runEmail (DAR-BE-207): {active, alsoSendTo, chatSpaceId}, any left out unchanged; null changes nothing.
-     * Errors go to ec.message; nothing is written when any input is wrong.
+     * reasons (DAR-BE-348): [{statement (its id), conclusion, priority}]. A priority is a level's code (P0, P1, P2, KNOWN); null
+     * clears a statement's (it reads P2) or deletes a reason's (it takes the statement's). A reason that closes on every check
+     * of its statement takes no level. Errors go to ec.message; nothing is written when any input is wrong.
      */
-    static void save(def ec, String tenantId, Map audit, String name, List<Map> statementChanges, Map schedule, Map runEmail = null) {
+    static void save(def ec, String tenantId, Map audit, String name, List<Map> statementChanges, Map schedule, Map runEmail = null,
+                     List<Map> reasonChanges = null) {
         List<Map> statements = statementsOf(ec, tenantId, audit)
         Set<String> ours = statements*.statementId as Set<String>
+        Map<String, String> levelIds = priorityEnumIds(ec)
         (statementChanges ?: []).each { Map change ->
             if (!ours.contains(change.id as String)) ec.message.addError("Statement ${change.id} is not part of audit ${audit.auditCode}.")
             else if (change.containsKey("text") && !normalize(change.text)) ec.message.addError("Statement ${change.id} needs its text.")
+            else if (normalize(change.priority) && !levelIds[normalize(change.priority)]) ec.message.addError(notALevel(change.priority))
+        }
+        (reasonChanges ?: []).each { Map change ->
+            String statementId = normalize(change.statement), conclusion = normalize(change.conclusion), level = normalize(change.priority)
+            def reason = conclusion ? ec.entity.find("moqui.basic.Enumeration").condition("enumId", conclusion).useCache(true).one() : null
+            if (!ours.contains(statementId)) ec.message.addError("Statement ${change.statement} is not part of audit ${audit.auditCode}.")
+            else if (!conclusion) ec.message.addError("A reason's level needs its conclusion.")
+            else if (level && !levelIds[level]) ec.message.addError(notALevel(level))
+            else if (level && conclusion == "UNEXPLAINED") ec.message.addError("An Unexplained finding takes its statement's level.")
+            else if (level && reason?.enumTypeId != "DarpanConclusion") ec.message.addError("${conclusion} is not a reason.".toString())
+            else if (level && reasonClosesEverywhere(ec, tenantId, statementId, conclusion)) {
+                String code = statements.find { it.statementId == statementId }?.statementCode
+                ec.message.addError("${reason.description ?: conclusion} closes every finding on ${code}'s checks, so it takes no level.".toString())
+            }
         }
         Map current = scheduleOf(ec, audit)
         String time = schedule ? normalize(schedule.time) ?: current.time : null
@@ -124,6 +147,15 @@ class AuditSettingsSupport {
             if (change.containsKey("active")) row.set("isActive", change.active in [true, "true", "Y"] ? "Y" : "N")
             row.update()
         }
+        (statementChanges ?: []).findAll { it.containsKey("priority") }.each { Map change ->
+            ec.service.sync().name("facade.AuditFacadeServices.set#AuditStatementPriority").parameters([companyUserGroupId: tenantId,
+                    statementId: change.id, priorityEnumId: levelIds[normalize(change.priority)]]).call()
+        }
+        (reasonChanges ?: []).each { Map change ->
+            ec.service.sync().name("facade.AuditFacadeServices.set#AuditReasonPriority").parameters([companyUserGroupId: tenantId,
+                    statementId: normalize(change.statement), conclusionEnumId: normalize(change.conclusion),
+                    priorityEnumId: levelIds[normalize(change.priority)]]).call()
+        }
         if (schedule) {
             Map stamp = [scheduleTime: time, scheduleTimeZone: zone, scheduleActive: schedule.active in [true, "true", "Y"] ? "Y" : "N"]
             def row = rows(ec, "darpan.audit.Audit", tenantId).condition("auditId", audit.auditId).list().find()
@@ -133,6 +165,88 @@ class AuditSettingsSupport {
             applySchedule(ec, tenantId, stamped, now)
         }
         if (runEmail != null) AuditRunUpdateSupport.saveRunEmail(ec, tenantId, audit.auditId as String, runEmail)
+    }
+
+    static final String CLOSES_ALL = "all", CLOSES_SOME = "some", CLOSES_NONE = "none"
+
+    /**
+     * DAR-BE-348, builder call 5. True when the reason (a conclusion) is expected on every check of the statement that can
+     * reach it, so every finding it reaches closes and a level would never apply: settings refuses one, and so does the agent.
+     * False for another tenant's statement.
+     */
+    static boolean reasonClosesEverywhere(def ec, String tenantId, String statementId, String conclusionEnumId) {
+        if (!tenantId || !normalize(statementId) || !normalize(conclusionEnumId)) return false
+        List<Map> statements = rows(ec, "darpan.audit.AuditStatement", tenantId).condition("statementId", normalize(statementId)).list()*.getMap()
+        if (!statements) return false
+        Map reason = reasonsOf(ec, tenantId, checksByStatement(ec, tenantId, statements), [:])[normalize(statementId)]
+                .find { it.conclusion == normalize(conclusionEnumId) }
+        return reason?.closes == CLOSES_ALL
+    }
+
+    /**
+     * DAR-BE-348. Each statement's reasons, in its checks' order: the conclusions its checks' runs can reach (the
+     * RuleSetConclusionRule rows of each run's compare scopes). A cause hidden on a run (HIDE) never becomes a finding
+     * there; Unexplained is no reason (its findings carry none and take the statement's level). checks: how many of the
+     * statement's checks reach it; closesOn: on how many it is expected (EXPECTED, which closes the finding); closes: all,
+     * some or none. An override no check reaches any more is listed as well (checks 0), so its level shows and can be cleared.
+     * (AuditStatementCheck.conclusionCodes is retired, DAR-BE-196, and not read.)
+     */
+    private static Map<String, List<Map>> reasonsOf(def ec, String tenantId, Map<String, List<Map>> checksByStatement,
+                                                    Map<String, Map<String, String>> overrides) {
+        List<String> runIds = checksByStatement.values().flatten()*.savedRunId.findAll { it }.collect { it as String }.unique()
+        Map<String, String> runOfScope = runIds ? rows(ec, "darpan.rule.RuleSetCompareScope", tenantId)
+                .condition("ruleSetId", EntityCondition.IN, runIds).list().collectEntries { [(it.compareScopeId as String): it.ruleSetId as String] } : [:]
+        // run -> conclusion -> expected, in rule order. As the run concludes: any HIDE rule hides the cause, any EXPECTED one expects it.
+        Map<String, Map<String, Boolean>> reach = [:]
+        Map<String, Set<String>> hidden = [:]
+        (runOfScope ? rows(ec, "darpan.rule.RuleSetConclusionRule", tenantId)
+                .condition("compareScopeId", EntityCondition.IN, runOfScope.keySet() as List).orderBy("sequenceNum").list() : []).each { rule ->
+            String run = runOfScope[rule.compareScopeId as String], conclusion = normalize(rule.conclusionEnumId)
+            if (!conclusion || conclusion == "UNEXPLAINED") return
+            String outcome = normalize(rule.outcome)
+            if (outcome == "HIDE") hidden.computeIfAbsent(run) { [] as Set }.add(conclusion)
+            Map<String, Boolean> causes = reach.computeIfAbsent(run) { new LinkedHashMap<String, Boolean>() }
+            causes.put(conclusion, (causes[conclusion] ?: false) || outcome == "EXPECTED")
+        }
+        Map<String, String> labels = [:]
+        Closure<String> labelOf = { String id ->
+            labels.computeIfAbsent(id) {
+                def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", id).useCache(true).one()
+                return (e?.description ?: e?.enumCode ?: id) as String
+            }
+        }
+        return checksByStatement.collectEntries { String statementId, List<Map> checks ->
+            Map<String, int[]> counts = new LinkedHashMap<>()   // conclusion -> [checks, closesOn]
+            checks.each { Map check ->
+                String run = check.savedRunId as String
+                (reach[run] ?: [:]).each { String conclusion, Boolean expected ->
+                    if (hidden[run]?.contains(conclusion)) return
+                    int[] c = counts.computeIfAbsent(conclusion) { new int[2] }
+                    c[0]++
+                    if (expected) c[1]++
+                }
+            }
+            Map<String, String> levels = overrides?.get(statementId) ?: [:]
+            List<Map> out = counts.collect { String conclusion, int[] c ->
+                [conclusion: conclusion, label: labelOf(conclusion), priority: levels[conclusion],
+                 closes: c[1] == c[0] ? CLOSES_ALL : c[1] > 0 ? CLOSES_SOME : CLOSES_NONE, closesOn: c[1], checks: c[0]] as Map
+            }
+            levels.keySet().findAll { !counts.containsKey(it) }.each { String conclusion ->
+                out << [conclusion: conclusion, label: labelOf(conclusion), priority: levels[conclusion], closes: CLOSES_NONE,
+                        closesOn: 0, checks: 0]
+            }
+            [(statementId): out]
+        } as Map<String, List<Map>>
+    }
+
+    /** DAR-BE-348. code -> enumId of each level (P0, P1, P2, KNOWN). */
+    private static Map<String, String> priorityEnumIds(def ec) {
+        return ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditPriority").useCache(true).list()
+                .findAll { it.enumCode in AuditPriority.LEVELS }.collectEntries { [(it.enumCode as String): it.enumId as String] }
+    }
+
+    private static String notALevel(Object code) {
+        return "${code} is not a priority: P0, P1, P2 or KNOWN.".toString()
     }
 
     /** DAR-BE-199. The audit's own schedule: {time HH:mm, timeZone, active}, defaults for an audit never scheduled. */

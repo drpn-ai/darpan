@@ -13662,7 +13662,7 @@
                 "required": [
                     "audit"
                 ],
-                "description": "An audit's settings: its name, its daily schedule (the audit's own, DAR-BE-199: every check runs on\n            it), and each statement with its checks and the run each check reads."
+                "description": "An audit's settings: its name, its daily schedule (the audit's own, DAR-BE-199: every check runs on\n            it), and each statement with its priority, its checks, the run each check reads, and its reasons."
             },
             "GetAuditSettingsResult": {
                 "type": "object",
@@ -13684,7 +13684,7 @@
                     },
                     "settings": {
                         "type": "object",
-                        "description": "{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,\n                checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label, savedRunId, runName}]}],\n                runEmail: {active, alsoSendTo: [address], members (how many accounts receive it by default: current tenant\n                members and Darpan admins), admins (how many of those are Darpan admins), chatSpaceId or null, canEdit (the caller\n                is a tenant admin; others see it read-only)} (DAR-BE-207:\n                the update emailed after each run to the members and admins, plus alsoSendTo)}"
+                        "description": "{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed (some check's automation is off the audit's schedule; saving puts it on), automations,\n                checksWithoutRun}, statements: [{id, code, text, active, priority (P0, P1, P2 or KNOWN; a statement with no level\n                reads P2), checks: [{id, label, savedRunId, runName}], reasons (DAR-BE-348: the conclusions its checks' runs can\n                reach, hidden ones left out, and any it holds a level for): [{conclusion (enumId), label, priority (its own level,\n                or null: the statement's), closes (all: expected on every check that reaches it, so it closes every finding and\n                takes no level; some; none), closesOn, checks (how many of the statement's checks reach it)}]}],\n                runEmail: {active, alsoSendTo: [address], members (how many accounts receive it by default: current tenant\n                members and Darpan admins), admins (how many of those are Darpan admins), chatSpaceId or null, canEdit (the caller\n                is a tenant admin; others see it read-only)} (DAR-BE-207:\n                the update emailed after each run to the members and admins, plus alsoSendTo)}"
                     }
                 }
             },
@@ -14212,7 +14212,15 @@
                             "type": "string",
                             "description": "Moqui type Map"
                         },
-                        "description": "[{id, text, active}], only those that changed."
+                        "description": "[{id, text, active, priority}], only those that changed, a field\n                left out keeps its value. priority: P0, P1, P2 or KNOWN; null clears it (reads P2)."
+                    },
+                    "reasons": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "DAR-BE-348. [{statement (its id), conclusion (enumId), priority}]: a\n                reason's own level, P0, P1, P2 or KNOWN; null deletes it, and the reason takes the statement's. A reason that\n                closes on every check of its statement takes no level: the save is refused."
                     },
                     "schedule": {
                         "type": "object",
@@ -14226,7 +14234,7 @@
                 "required": [
                     "audit"
                 ],
-                "description": "Changes an audit's name, statements (text, on/off) and its daily schedule, which is the audit's own and\n            is written to the automation of every check it runs (DAR-BE-199). A check whose run has no automation gets one,\n            on that schedule, when the schedule is saved. Answers the settings as saved."
+                "description": "Changes an audit's name, statements (text, on/off, priority), reasons' priorities and its daily schedule, which is the audit's own and\n            is written to the automation of every check it runs (DAR-BE-199). A check whose run has no automation gets one,\n            on that schedule, when the schedule is saved. Answers the settings as saved."
             },
             "SaveAuditSettingsResult": {
                 "type": "object",
@@ -14248,7 +14256,7 @@
                     },
                     "settings": {
                         "type": "object",
-                        "description": "{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}"
+                        "description": "{audit: {id, name, period}, peakHoursUntil: ISO instant (only while now is inside the tenant's peak hours; DAR-BE-328), playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, priority, checks: [{id, label,\n                savedRunId, runName}], reasons: [{conclusion, label, priority, closes, closesOn, checks}]}], runEmail: {active, alsoSendTo, members, admins, chatSpaceId, canEdit}}"
                     }
                 }
             },

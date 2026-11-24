@@ -12463,6 +12463,10 @@
                         "type": "string",
                         "description": "The finding the panel is open on."
                     },
+                    "statement": {
+                        "type": "string",
+                        "description": "DAR-BE-252. The statement code (e.g. R2) the panel is open on; the turn then carries the statement and a sample of its open Unexplained findings."
+                    },
                     "text": {
                         "type": "string"
                     }

@@ -19,6 +19,7 @@ Rules
 
 R2 · 56 open · 3 new · Every order is billed in NetSuite
   30  No cause named yet
+      Know why? Explain them to the agent: https://app.drpn.ai/audits/month-close?period=2026-11&date=2026-11-10&statement=R2&tab=agent&tenantId=GORJANA
   24  Payment failed
       Ask the customer to pay again.
       M201 #GOR201, M202 #GOR202

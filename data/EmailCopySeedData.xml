@@ -94,6 +94,7 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.all" defaultText="All ${open} in ${file}"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.link" defaultText="open ${rule} in Darpan"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="cause.none" defaultText="No cause named yet"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="cause.explain" defaultText="Know why? Explain them to the agent"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run on this morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="button" defaultText="Open the report in Darpan"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="attachments" defaultText="Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns)."/>

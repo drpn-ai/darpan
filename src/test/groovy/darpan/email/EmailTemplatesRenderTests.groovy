@@ -36,6 +36,10 @@ class EmailTemplatesRenderTests {
     void setup() {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "email-templates-render")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/EmailCopySeedData.xml")
+        // DAR-BE-334: the scheduled query email (QueryResult.xml) seeds its words beside its template, which FKs the
+        // SYSTEM EmailServer that PasswordResetEmailSeedData.xml seeds
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/PasswordResetEmailSeedData.xml",
+                "component://darpan/data/QueryEmailSeedData.xml")
         previews = Path.of("build", "email-previews")
         Files.createDirectories(previews)
     }

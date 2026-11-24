@@ -157,6 +157,27 @@ class AuditRunFactsTests {
         assertFalse(text.replace("https://docs.drpn.ai/", "").contains("http"), text)
     }
 
+    // DAR-BE-252: findings with no cause are still findings; the email invites the reader to explain them to the agent,
+    // on the rule's page with the Agent tab open. Only under a no-cause group, and only when there is an app address.
+    @Test
+    void aNoCauseGroupInvitesTheReaderToExplainItToTheAgent() {
+        Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> null }
+        String agentUrl = "${BASE}/audits/month-close?period=2026-11&date=2026-11-10&statement=R2&tab=agent&tenantId=GORJANA".toString()
+        String invite = COPY.text("cause.explain")
+        assertTrue(invite && invite != "cause.explain", "the words are a seeded copy block")
+
+        String html = AuditRunMessage.emailHtml(facts, [:], BASE, COPY)
+        assertTrue(html.contains("href=\"${agentUrl.replace('&', '&amp;')}\"".toString()), "R2's Unexplained group links its Agent tab")
+        assertTrue(html.contains(">${AuditRunMessage.esc(invite)}</a>".toString()))
+        assertEquals(1, html.count("tab=agent"), "R10 has only named causes: no invitation there")
+
+        String text = AuditRunMessage.emailText(facts, [:], BASE, COPY)
+        assertTrue(text.contains("      ${invite}: ${agentUrl}\n".toString()), text)
+
+        assertFalse(AuditRunMessage.emailHtml(facts, [:], null, COPY).contains(invite), "no app address: no invitation")
+        assertFalse(AuditRunMessage.emailText(facts, [:], null, COPY).contains(invite))
+    }
+
     @Test
     void placeholdersLeaveNoGapsAndAnEmptyFixIsNone() {
         assertEquals("Bill it in NetSuite.", AuditRunFacts.stripPlaceholders("Bill {recordKey} it in NetSuite {x}."))

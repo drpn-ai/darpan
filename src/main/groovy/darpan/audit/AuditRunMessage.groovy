@@ -46,11 +46,12 @@ class AuditRunMessage {
         return copy.text("subtitle", [date: day(facts.date as String, true), span: span(facts.window as Map)])
     }
 
-    /** The audit page for the run, or one rule of it; null when the app's address is not configured. */
-    static String reportUrl(String base, Map facts, String rule = null) {
+    /** The audit page for the run, or one rule of it (tab "agent" opens its Agent tab); null when the app's address is not configured. */
+    static String reportUrl(String base, Map facts, String rule = null, String tab = null) {
         if (!base || !facts.audit?.id || !facts.date) return null
         String url = "${base}/audits/${enc(facts.audit.id as String)}?period=${enc(facts.period as String)}&date=${facts.date}"
         if (rule) url = "${url}&statement=${enc(rule)}"
+        if (tab) url = "${url}&tab=${enc(tab)}"
         // DAR-BE-293: the reader may be working in another tenant, and the app switches only into a tenant the link
         // names (router's tenantId guard), as a run link does; last, so the other parameters keep their places.
         String tenant = facts.tenant?.id as String
@@ -134,13 +135,17 @@ class AuditRunMessage {
         StringBuilder blocks = new StringBuilder()
         rules(facts).findAll { (it.open as int) > 0 }.each { Map r ->
             StringBuilder items = new StringBuilder()
+            // DAR-BE-252: findings with no cause are still findings; the reader is invited to explain them to the agent.
+            String agentUrl = reportUrl(base, facts, r.id as String, "agent")
             groups(facts).findAll { it.rule == r.id }.each { Map g ->
                 String fix = fixLine(g, words)
                 String ids = g.ids ? "<div style=\"${F}font-size:12px;color:${DIM};margin-top:6px;line-height:1.6;\">${esc((g.ids as List).join(', '))}</div>" : ""
                 String fx = fix ? "<div style=\"${F}font-size:12px;line-height:1.55;color:${MUTED};margin-top:2px;\">${esc(fix)}</div>" : ""
+                String ask = agentUrl && !hasCause(g) ? "<div style=\"${F}font-size:12px;line-height:1.55;margin-top:2px;\">" +
+                        "<a href=\"${esc(agentUrl)}\" style=\"${LINK}\">${esc(copy.text('cause.explain'))}</a></div>" : ""
                 items << "<tr><td style=\"${F}padding:10px 12px 10px 0;border-top:1px solid ${LINE_SOFT};font-size:16px;line-height:1.3;color:${INK};width:48px;vertical-align:top;\">${g.count}</td>" <<
                         "<td style=\"${F}padding:10px 0;border-top:1px solid ${LINE_SOFT};vertical-align:top;\">" <<
-                        "<div style=\"font-size:13px;line-height:1.55;color:${INK};\">${esc(cause(g, noCause))}</div>${fx}${ids}</td></tr>"
+                        "<div style=\"font-size:13px;line-height:1.55;color:${INK};\">${esc(cause(g, noCause))}</div>${fx}${ask}${ids}</td></tr>"
             }
             String ruleUrl = reportUrl(base, facts, r.id as String)
             String link = ruleUrl ? " · <a href=\"${esc(ruleUrl)}\" style=\"${LINK}\">${esc(copy.text('rule.link', [rule: r.id]))}</a>" : ""
@@ -192,10 +197,12 @@ ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
         }
         rules(facts).findAll { (it.open as int) > 0 }.each { Map r ->
             lines += ["", "${copy.text('rule.head', [rule: r.id, open: r.open, new: r.newToday])} · ${firstSentence(r.text as String)}".toString()]
+            String agentUrl = reportUrl(base, facts, r.id as String, "agent")
             groups(facts).findAll { it.rule == r.id }.each { Map g ->
                 lines << "  ${g.count}  ${cause(g, noCause)}".toString()
                 String fix = fixLine(g, words)
                 if (fix) lines << "      ${fix}".toString()
+                if (agentUrl && !hasCause(g)) lines << "      ${copy.text('cause.explain')}: ${agentUrl}".toString()
                 if (g.ids) lines << "      ${(g.ids as List).join(', ')}".toString()
             }
             String ruleUrl = reportUrl(base, facts, r.id as String)

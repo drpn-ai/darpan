@@ -356,6 +356,10 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.audit.AuditStatementCheck"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_REASON_PRIORITY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.audit.AuditReasonPriority"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
     <!-- DAR-BE-089 — the findings ledger, filtered from the day its entities were added. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"

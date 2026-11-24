@@ -6,5 +6,18 @@ Records must also live in generic source data files under runtime/component/darp
 Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- No added or modified candidate records were detected between the compared refs. -->
+    <!-- DAR-BE-348: audit priority levels (restated verbatim from AuditSeedData.xml). -->
+    <moqui.basic.EnumerationType enumTypeId="AuditPriority" description="Audit priority"/>
+    <moqui.basic.Enumeration enumId="AUDP_P0" enumTypeId="AuditPriority" enumCode="P0"
+            description="P0: fix now" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDP_P1" enumTypeId="AuditPriority" enumCode="P1"
+            description="P1: fix soon" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDP_P2" enumTypeId="AuditPriority" enumCode="P2"
+            description="P2: fix when convenient" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUDP_KNOWN" enumTypeId="AuditPriority" enumCode="KNOWN"
+            description="Known: understood, tracked" sequenceNum="4"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_REASON_PRIORITY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.audit.AuditReasonPriority"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
 </entity-facade-xml>

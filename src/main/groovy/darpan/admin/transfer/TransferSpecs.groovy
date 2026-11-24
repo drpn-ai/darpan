@@ -153,7 +153,10 @@ class TransferSpecs {
             // DAR-BE-318 (ruling P2-10): the claim names a rules.* Must hold and outcome by id; judge config is not transferable
             // until plan 4, and an id minted here can name another row elsewhere, so the pair never travels.
             [kind: STATEMENT, entityName: "darpan.audit.AuditStatement", pkField: "statementId", naturalKey: "statementCode",
-             refFields: [auditId: AUDIT], dropFields: ["claimRuleSetId", "claimOutcomeId"]],
+             refFields: [auditId: AUDIT], dropFields: ["claimRuleSetId", "claimOutcomeId"], children: [
+                    // DAR-BE-348. A reason's own level, by position under its statement; the conclusion travels as a CONC ref.
+                    [entityName: "darpan.audit.AuditReasonPriority", pkField: "reasonPriorityId", mintPrefix: "ARP_",
+                     parentFields: ["statementId"], orderBy: ["conclusionEnumId"], refFields: [conclusionEnumId: CONC]]]],
             // DAR-BE-188. automationId is no value; it travels as a ref (heldRefs) only in a transfer that carries automations,
             // and only when the bundle holds the automation the check runs under. A version leaves it out, as before.
             // DAR-BE-206. graceDays is retired (a grace is an expected conclusion rule): a bundle or version made before

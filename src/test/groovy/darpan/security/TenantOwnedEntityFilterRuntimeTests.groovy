@@ -87,6 +87,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.audit.AuditStatement"                    : "statementId",
             "darpan.audit.AuditCheck"                        : "checkId",
             "darpan.audit.AuditStatementCheck"               : "statementId",
+            "darpan.audit.AuditReasonPriority"               : "reasonPriorityId",
             "darpan.audit.AuditFinding"                          : "findingId",
             "darpan.audit.AuditFindingRecord"                    : "findingId",
             "darpan.audit.AuditFindingCondition"                     : "findingId",
@@ -109,6 +110,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.audit.AuditStatement",
             "darpan.audit.AuditCheck",
             "darpan.audit.AuditStatementCheck",
+            "darpan.audit.AuditReasonPriority",
             "darpan.audit.AuditFinding",
             "darpan.audit.AuditFindingRecord",
             "darpan.audit.AuditFindingCondition",
@@ -673,6 +675,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.audit.AuditStatement": return "MCS"
             case "darpan.audit.AuditCheck": return "MCCK"
             case "darpan.audit.AuditStatementCheck": return "MCSC"
+            case "darpan.audit.AuditReasonPriority": return "MCRP"
             case "darpan.audit.AuditFinding": return "MCF"
             case "darpan.audit.AuditFindingRecord": return "MCFR"
             case "darpan.audit.AuditFindingCondition": return "MCFC"
@@ -709,6 +712,8 @@ class TenantOwnedEntityFilterRuntimeTests {
                     categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", statementText: "x"]
             case "darpan.audit.AuditCheck": return [checkId: id, checkCode: id, label: "x"]
             case "darpan.audit.AuditStatementCheck": return [statementId: id, checkId: "TOEF_MCCK_${s}".toString()]
+            case "darpan.audit.AuditReasonPriority": return [reasonPriorityId: id, statementId: "TOEF_MCS_${s}".toString(),
+                    conclusionEnumId: "UNEXPLAINED", priorityEnumId: "AUDP_P1"]
             case "darpan.audit.AuditFinding": return [findingId: id, statementId: "TOEF_MCS_${s}".toString(),
                     checkId: "TOEF_MCCK_${s}".toString(), recordKey: id, period: "2026-10", stateEnumId: "AUDFS_OPEN", headline: "x",
                     firstFoundDate: java.sql.Date.valueOf("2026-10-07"), lastSeenDate: java.sql.Date.valueOf("2026-10-08")]

@@ -560,6 +560,32 @@ class AuditSettingsSmokeTests {
         }
     }
 
+    @Test
+    @Order(70)
+    void priorityEnumsAndReasonOverrideLoad() {
+        List<Map> levels = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditPriority").orderBy("sequenceNum")
+                .disableAuthz().useCache(false).list()*.getMap()
+        assertEquals(["AUDP_P0", "AUDP_P1", "AUDP_P2", "AUDP_KNOWN"], levels*.enumId)
+        assertEquals(["P0", "P1", "P2", "KNOWN"], levels*.enumCode)
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("moqui.basic.Enumeration", [enumId: "TSET_PRIO_CONC", enumTypeId: "AuditCategory", enumCode: "TSET_PRIO_CONC",
+                    description: "Priority test cause"])
+            ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "${MINE}_R1".toString()).disableAuthz().one()
+                    .set("priorityEnumId", "AUDP_P1").update()
+            assertEquals("AUDP_P1", row("darpan.audit.AuditStatement", "statementId", "${MINE}_R1".toString()).get("priorityEnumId"))
+            insert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TSET_RP1", companyUserGroupId: MINE,
+                    statementId: "${MINE}_R1".toString(), conclusionEnumId: "TSET_PRIO_CONC", priorityEnumId: "AUDP_KNOWN"])
+            assertThrows(Exception.class, {
+                insert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TSET_RP2", companyUserGroupId: MINE,
+                        statementId: "${MINE}_R1".toString(), conclusionEnumId: "TSET_PRIO_CONC", priorityEnumId: "AUDP_P0"])
+            }, "one override per (tenant, statement, conclusion)")
+            ec.message.clearErrors()
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    }
+
     private Map call(String service, Map params) {
         Map out = ec.service.sync().name(service).parameters(params).call() ?: [:]
         Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]

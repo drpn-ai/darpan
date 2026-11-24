@@ -51,6 +51,7 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.audit.AuditStatement"                    : "DARPAN_SCOPE_AUD_STATEMENT",
             "darpan.audit.AuditCheck"                        : "DARPAN_SCOPE_AUD_CHECK",
             "darpan.audit.AuditStatementCheck"               : "DARPAN_SCOPE_AUD_STATEMENT_CHECK",
+            "darpan.audit.AuditReasonPriority"               : "DARPAN_SCOPE_AUD_REASON_PRIORITY",
     ].asImmutable()
 
     /** DAR-BE-089: the findings ledger. */

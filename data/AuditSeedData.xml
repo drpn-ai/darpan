@@ -20,6 +20,16 @@
     <moqui.basic.Enumeration enumId="AUDSW_DERIVED" enumTypeId="AuditStatementWeight" enumCode="derived"
             description="Derived: awaiting the tenant's confirmation" sequenceNum="2"/>
 
+    <moqui.basic.EnumerationType enumTypeId="AuditPriority" description="Audit priority"/>
+    <moqui.basic.Enumeration enumId="AUDP_P0" enumTypeId="AuditPriority" enumCode="P0"
+            description="P0: fix now" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDP_P1" enumTypeId="AuditPriority" enumCode="P1"
+            description="P1: fix soon" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDP_P2" enumTypeId="AuditPriority" enumCode="P2"
+            description="P2: fix when convenient" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUDP_KNOWN" enumTypeId="AuditPriority" enumCode="KNOWN"
+            description="Known: understood, tracked" sequenceNum="4"/>
+
     <moqui.basic.EnumerationType enumTypeId="AuditFindingState" description="Audit finding state"/>
     <moqui.basic.Enumeration enumId="AUDFS_OPEN" enumTypeId="AuditFindingState" enumCode="open"
             description="Open" sequenceNum="1"/>

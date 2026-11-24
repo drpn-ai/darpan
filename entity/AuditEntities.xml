@@ -99,8 +99,15 @@
         <relationship type="one" title="Category" related="moqui.basic.Enumeration" fk-name="AUDSTMT_CATEGORY">
             <key-map field-name="categoryEnumId" related="enumId"/>
         </relationship>
+        <field name="priorityEnumId" type="id">
+            <description>DAR-BE-348. Enumeration of type AuditPriority (P0, P1, P2, KNOWN): how urgent this statement's findings are.
+                Blank reads as P2. A reason can override it per conclusion (AuditReasonPriority).</description>
+        </field>
         <relationship type="one" title="Weight" related="moqui.basic.Enumeration" fk-name="AUDSTMT_WEIGHT">
             <key-map field-name="weightEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="Priority" related="moqui.basic.Enumeration" fk-name="AUDSTMT_PRIORITY">
+            <key-map field-name="priorityEnumId" related="enumId"/>
         </relationship>
         <index name="AUDSTMT_AUDIT_CODE" unique="true">
             <index-field name="companyUserGroupId"/>
@@ -235,6 +242,38 @@
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
         <index name="AUDSC_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
+    <entity entity-name="AuditReasonPriority" package="darpan.audit" use="configuration">
+        <description>DAR-BE-348. One reason (conclusion) of one statement that is more or less urgent than the statement
+            itself, e.g. a known cause moved to KNOWN. A finding's level is its reason's row here, else the statement's.
+            Stamped with the tenant like its parent, so the filter applies to it directly.</description>
+        <field name="reasonPriorityId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="statementId" type="id" not-null="true"/>
+        <field name="conclusionEnumId" type="id" not-null="true">
+            <description>The reason: an Enumeration of type DarpanConclusion (may be a tenant-minted code).</description>
+        </field>
+        <field name="priorityEnumId" type="id" not-null="true">
+            <description>Enumeration of type AuditPriority.</description>
+        </field>
+        <relationship type="one" related="darpan.audit.AuditStatement" fk-name="AUDRP_STATEMENT">
+            <key-map field-name="statementId"/>
+        </relationship>
+        <relationship type="one" title="Conclusion" related="moqui.basic.Enumeration" fk-name="AUDRP_CONCLUSION">
+            <key-map field-name="conclusionEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="Priority" related="moqui.basic.Enumeration" fk-name="AUDRP_PRIORITY">
+            <key-map field-name="priorityEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDRP_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="AUDRP_TENANT_REASON" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="statementId"/>
+            <index-field name="conclusionEnumId"/>
+        </index>
     </entity>
     <!-- DAR-BE-089. The findings ledger: one row per record that breaks one statement, kept across mornings
          so a finding has a first-found day, a still-open count and a fixed day. Written only by the scheduled

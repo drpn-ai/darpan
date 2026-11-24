@@ -51,7 +51,7 @@ class ConfigTransferSmokeTests {
             // DAR-BE-236, DAR-BE-334: a query's schedules name it, so they go first (their deliveries are wiped by schedule).
             "jexl.script.UserScriptDeployment", "jexl.script.UserScript",
             "darpan.reconciliation.ReconciliationRunResult",
-            "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
+            "darpan.audit.AuditReasonPriority", "darpan.audit.AuditStatementCheck", "darpan.audit.AuditCheck", "darpan.audit.AuditStatement", "darpan.audit.Audit",
             "darpan.reconciliation.ReconciliationAutomationSourceFilter", "darpan.reconciliation.ReconciliationAutomationSource",
             "darpan.reconciliation.ReconciliationAutomation", "darpan.reconciliation.TenantChatSpace",
             "darpan.reconciliation.ReconciliationRun", "darpan.reconciliation.Reconciliation",

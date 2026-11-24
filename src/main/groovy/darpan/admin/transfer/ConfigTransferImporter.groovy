@@ -1113,7 +1113,8 @@ class ConfigTransferImporter {
         ((parentSpec.children ?: []) as List<Map>).each { Map child ->
             List<Map> incoming = (rec.children?.get(shortName(child.entityName as String)) ?: []) as List<Map>
             List existing = parentIsNew ? [] : ConfigTransferExporter.childRows(ec, child, parentRow)
-            boolean keepsIds = child.pkField != null
+            // replaceOnUpdate: a child under a unique index is deleted and made again, never rewritten by position.
+            boolean keepsIds = child.pkField != null && !child.replaceOnUpdate
             if (ctx.sameTenant && keepsIds) {
                 writeChildrenById(ctx, child, parentRow, incoming, existing)
                 return
@@ -1124,7 +1125,7 @@ class ConfigTransferImporter {
                 def value = creating ? ec.entity.makeValue(child.entityName as String) : existing[i]
                 value.setAll(columns(ctx, child, childRec))
                 (child.parentFields as List<String>).each { String f -> value.set(f, parentRow.get(f)) }
-                if (creating && keepsIds) {
+                if (creating && child.pkField != null) {
                     value.set(child.pkField as String, TenantScopedFinder.mintId(ec, child.entityName as String, child.pkField as String,
                             (child.mintPrefix ?: "") as String))
                 }

@@ -156,7 +156,8 @@ class TransferSpecs {
              refFields: [auditId: AUDIT], dropFields: ["claimRuleSetId", "claimOutcomeId"], children: [
                     // DAR-BE-348. A reason's own level, by position under its statement; the conclusion travels as a CONC ref.
                     [entityName: "darpan.audit.AuditReasonPriority", pkField: "reasonPriorityId", mintPrefix: "ARP_",
-                     parentFields: ["statementId"], orderBy: ["conclusionEnumId"], refFields: [conclusionEnumId: CONC]]]],
+                     parentFields: ["statementId"], orderBy: ["conclusionEnumId"], refFields: [conclusionEnumId: CONC],
+                     replaceOnUpdate: true]]],
             // DAR-BE-188. automationId is no value; it travels as a ref (heldRefs) only in a transfer that carries automations,
             // and only when the bundle holds the automation the check runs under. A version leaves it out, as before.
             // DAR-BE-206. graceDays is retired (a grace is an expected conclusion rule): a bundle or version made before

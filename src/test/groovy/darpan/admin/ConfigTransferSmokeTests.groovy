@@ -755,6 +755,37 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
+    void aChangedSetOfReasonPrioritiesReplacesTheTargetsWithoutHittingTheUniqueIndex() {
+        Map bundle = exportSource()
+        Map first = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertNoErrors(first)
+        String statementId = first.result.idMap["STATEMENT:XFER_AUDIT_R4"]
+        ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId).deleteAll()
+        create("moqui.basic.Enumeration", [enumId: "CONC_XFER_PA", enumTypeId: "DarpanConclusion", enumCode: "CONC_XFER_PA", description: "A"])
+        create("moqui.basic.Enumeration", [enumId: "CONC_XFER_PC", enumTypeId: "DarpanConclusion", enumCode: "CONC_XFER_PC", description: "C"])
+        create("darpan.audit.AuditReasonPriority", [reasonPriorityId: "XFER_T_RP_A", companyUserGroupId: DST, statementId: statementId,
+                conclusionEnumId: "CONC_XFER_PA", priorityEnumId: "AUDP_P0"])
+        create("darpan.audit.AuditReasonPriority", [reasonPriorityId: "XFER_T_RP_B", companyUserGroupId: DST, statementId: statementId,
+                conclusionEnumId: "CONC_XFER_SEED", priorityEnumId: "AUDP_P2"])
+        // The bundle's reasons become [CONC_XFER_SEED (KNOWN), CONC_XFER_PC (P1)].
+        Map changed = copy(bundle)
+        Map st = (changed.statements as List<Map>).find { it.ref == "STATEMENT:XFER_AUDIT_R4" }
+        List<Map> reasons = st.children.AuditReasonPriority as List<Map>
+        Map extra = copy(reasons[0])
+        extra.ref = "AuditReasonPriority:XFER_RP_C"
+        extra.refs = [conclusionEnumId: "CONC:CONC_XFER_PC"]
+        (extra.fields as Map).priorityEnumId = "AUDP_P1"
+        reasons << extra
+        Map conc = copy((changed.conclusionCodes as List<Map>)[1])
+        conc.ref = "CONC:CONC_XFER_PC"; conc.enumId = "CONC_XFER_PC"; conc.label = "C"
+        (changed.conclusionCodes as List<Map>) << conc
+        assertNoErrors(applyPlan(DST, changed, [(AUTH_REF): first.result.idMap[AUTH_REF]]))
+        List rows = ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId)
+                .orderBy("conclusionEnumId").disableAuthz().useCache(false).list()
+        assertEquals([["CONC_XFER_PC", "AUDP_P1"], ["CONC_XFER_SEED", "AUDP_KNOWN"]], rows.collect { [it.conclusionEnumId, it.priorityEnumId] })
+    }
+
+    @Test
     void updateWithFewerRulesAndScopes() {
         Map bundle = exportSource()
         Map first = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])

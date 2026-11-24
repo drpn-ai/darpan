@@ -166,8 +166,9 @@ class MissingDiffVerificationSupportTests {
     }
 
     @Test
-    void aSideAboveTheShareGateIsNotLookedUp() {
+    void anAuditSideAboveTheShareGateIsNotLookedUp() {
         // DAR-BE-320 (Aditi): a lookup is a last resort, for the 1-5% of records that need a follow-up.
+        // DAR-BE-351 (Aditi: "The 5% rule is mainly for audits. Since they do large extracts"): audit windows only.
         // 3 of 10 checked records missing is 30%: the read or the pairing is wrong, so nothing is looked up.
         File file = writeDiffDocument([
                 missingRow("1001", FILE1, FILE2),
@@ -180,6 +181,7 @@ class MissingDiffVerificationSupportTests {
                 diffFile         : file,
                 file1Label       : FILE1,
                 file2Label       : FILE2,
+                auditRun         : true,
                 sideCheckedCounts: [(FILE2): 10],
                 sideLookups      : [(FILE2): { List<String> ids -> dispatchCalls++; return [ok: true, foundIds: ids, missingIds: [], errors: []] }],
         ])
@@ -192,6 +194,34 @@ class MissingDiffVerificationSupportTests {
                 "the warning names the share and the gate: ${result.warnings}")
         assertEquals([candidates: 3, checkedAgainst: 10L, maxSharePercent: 5L, lookedUp: 0, found: 0, skipped: "OVER_SHARE"],
                 ((Map) result.sideOutcomes).get(FILE2), "the audit's read report sees why nothing was looked up")
+    }
+
+    @Test
+    void anyOtherRunLooksUpEveryMissingRowEvenAboveTheShareGate() {
+        // DAR-BE-351 (Aditi: "It is important that doubts be cleared if the initial extract can't confirm. Follow-up is
+        // needed"). A daily run's 3 of 10 (30%) are all looked up; the share is said as a note, so a run whose lookups
+        // clear every row stays clean.
+        File file = writeDiffDocument([
+                missingRow("1001", FILE1, FILE2),
+                missingRow("1002", FILE1, FILE2),
+                missingRow("1003", FILE1, FILE2),
+        ])
+        List<String> looked = []
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile         : file,
+                file1Label       : FILE1,
+                file2Label       : FILE2,
+                sideCheckedCounts: [(FILE2): 10],
+                sideLookups      : [(FILE2): { List<String> ids -> looked.addAll(ids); [ok: true, foundIds: ids - ["1003"], missingIds: ["1003"], errors: []] }],
+        ])
+
+        assertEquals(["1001", "1002", "1003"], looked)
+        assertEquals(2, result.removedCount)
+        assertEquals(1, result.confirmedMissingCount)
+        assertEquals([], result.warnings, "followed up, so nothing to warn about")
+        assertTrue((result.auditNote as String).contains("3 of 10") && (result.auditNote as String).contains("5%"),
+                "the read's coverage is still said: ${result.auditNote}")
+        assertEquals(["1003"], ((List) parseDocument(file).differences).collect { it.primaryId })
     }
 
     @Test
@@ -380,6 +410,7 @@ class MissingDiffVerificationSupportTests {
                 file2Label       : FILE2,
                 sideCheckedCounts: [(FILE2): 40, (FILE1): 100],
                 sideMaxShares    : [(FILE1): 2],
+                auditRun         : true,
                 sideLookups      : [
                         (FILE2): { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] },
                         (FILE1): { List<String> ids -> file1Checked.addAll(ids); [ok: true, foundIds: ids, missingIds: [], errors: []] },

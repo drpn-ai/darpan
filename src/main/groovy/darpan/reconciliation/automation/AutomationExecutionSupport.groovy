@@ -822,7 +822,7 @@ class AutomationExecutionSupport {
                             reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
                     // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
                     verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
-                            mintedRunResultId, stepCtx, executionParams, file1Result, file2Result)
+                            mintedRunResultId, stepCtx, executionParams, file1Result, file2Result, window)
                     verifyExchangePairsIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
                             reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
                 }
@@ -1694,7 +1694,8 @@ class AutomationExecutionSupport {
                                                          Map<String, Object> reconcileResult,
                                                          String runResultId, Map stepCtx,
                                                          Map<String, Object> executionParams = null,
-                                                         Map file1Result = null, Map file2Result = null) {
+                                                         Map file1Result = null, Map file2Result = null,
+                                                         Map window = null) {
         // ONE implementation, called identically by runSavedRunDiff.groovy. What is left here is the
         // scheduled path's own vocabulary -- its kill switch, its tenant anchor, its dispatch seam,
         // and the config defaults its extractor resolved -- and nothing about how the pass decides,
@@ -1711,6 +1712,8 @@ class AutomationExecutionSupport {
                 file2Source        : file2Source,
                 file1Label         : normalize(reconcileResult?.file1Label),
                 file2Label         : normalize(reconcileResult?.file2Label),
+                // DAR-BE-351: the share gate is an audit window's alone; every other run looks up every missing row.
+                auditRun           : window?.auditReportDate != null,
                 // DAR-BE-320: each side's extract count (the share gate) and the scope (the lookup's id kind).
                 file1RecordCount   : file1Result?.recordCount instanceof Number ? file1Result.recordCount : null,
                 file2RecordCount   : file2Result?.recordCount instanceof Number ? file2Result.recordCount : null,

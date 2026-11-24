@@ -62,6 +62,8 @@ class MissingDiffVerificationSupport {
      *   sideMaxShares : optional Map side label -> percent gate, default {@link #DEFAULT_MAX_LOOKUP_SHARE}.
      *                  A side over ITS OWN gate contributes nothing and must never disable a sibling
      *                  side that is under its.
+     *   auditRun     : true for an audit's window (DAR-BE-351): only there does the gate skip a side. Any
+     *                  other run looks up every row its read left missing and says the share as a note.
      *
      * returns [performed, rewritten, checkedCount, removedCount, confirmedMissingCount, unresolvedCount,
      *          removedMissingInFile1, removedMissingInFile2, warnings, auditNote]
@@ -126,9 +128,15 @@ class MissingDiffVerificationSupport {
             }
             long maxShare = gate
             if (candidates.size() * 100L > maxShare * checked) {
-                outcome.skipped = "OVER_SHARE"
-                warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} of ${checked} records are reported missing there, above the ${maxShare}% a lookup is for. The read or the pairing needs fixing; nothing was looked up.".toString())
-                return
+                // DAR-BE-351 (Aditi): "The 5% rule is mainly for audits. Since they do large extracts". Any other run
+                // clears its doubts by looking up, and still says the read left too much to look up.
+                if (args.auditRun == true) {
+                    outcome.skipped = "OVER_SHARE"
+                    warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} of ${checked} records are reported missing there, above the ${maxShare}% a lookup is for. The read or the pairing needs fixing; nothing was looked up.".toString())
+                    return
+                }
+                outcome.overShare = true
+                auditSentences.add("${AUDIT_NOTE_PREFIX}the read left ${candidates.size()} of ${checked} records missing in ${side.label}, above the ${maxShare}% a read should leave; all were looked up. The read or the pairing needs fixing.".toString())
             }
             List<String> ids = new ArrayList<>(candidates)
             Map lookupResult

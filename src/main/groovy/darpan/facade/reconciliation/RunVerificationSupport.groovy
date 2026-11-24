@@ -213,7 +213,8 @@ class RunVerificationSupport {
                             diffFile        : diffFile, file1Label: file1Label, file2Label: file2Label,
                             sideLookups      : sideLookups,
                             sideCheckedCounts: sideCheckedCounts,
-                            sideMaxShares    : sideMaxShares])
+                            sideMaxShares    : sideMaxShares,
+                            auditRun         : args?.get("auditRun") == true])
                 }] as Map<String, Object>
     }
 

@@ -164,6 +164,18 @@ class RunPathParityGateTest {
     }
 
     @Test
+    void theLookupShareGateReachesOnlyAnAuditsWindows() {
+        // DAR-BE-351 (Aditi: "The 5% rule is mainly for audits. Since they do large extracts"). The scheduled path says
+        // whether the window is an audit's, the shared pass forwards it, and a manual run never claims to be one.
+        String scheduled = methodBody(codeOf(SCHEDULED_PATH), "verifyMissingDiffsIfEnabled")
+        assertTrue((scheduled =~ /auditRun\s*:\s*window\?\.auditReportDate\s*!=\s*null/).find(),
+                "${SCHEDULED_PATH}: verifyMissingDiffsIfEnabled must pass auditRun from the window's audit date")
+        assertTrue((codeOf("facade/reconciliation/RunVerificationSupport.groovy") =~ /auditRun\s*:\s*args\?\.get\("auditRun"\)\s*==\s*true/).find(),
+                "RunVerificationSupport must forward auditRun to MissingDiffVerificationSupport")
+        assertFalse(codeOf(MANUAL_PATH).contains("auditRun"), "${MANUAL_PATH}: a manual run is never an audit's window")
+    }
+
+    @Test
     void bothRunPathsOwnTheSameNumberOfVerifyStepSites() {
         // Counts every verify stage, not one named code: the passes each own a code now, and a gate
         // pinned to a single name goes hollow the moment another one is added. Equal counts, not a

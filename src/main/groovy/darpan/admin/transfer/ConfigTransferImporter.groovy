@@ -1286,7 +1286,8 @@ class ConfigTransferImporter {
     private static void writeStatement(Map ctx, Map s) {
         String action = ctx.actions[s.ref]
         if (action == "UPDATE") {
-            updateRow(ctx, spec(STATEMENT), s)
+            def row = updateRow(ctx, spec(STATEMENT), s)
+            writeChildren(ctx, spec(STATEMENT), row, s, false)   // DAR-BE-348: its reasons' own priorities
         } else if (action == CREATE) {
             String id = ctx.sameTenant ? newId(ctx, "darpan.audit.AuditStatement", "statementId", s.ref, "")
                     : "${targetId(ctx, s.refs?.auditId)}_${s.fields?.statementCode}".toString()
@@ -1295,7 +1296,8 @@ class ConfigTransferImporter {
                     finder(ctx.ec, "darpan.audit.AuditStatement").condition("statementId", id).useCache(false).one() != null) {
                 id = TenantScopedFinder.mintId(ctx.ec, "darpan.audit.AuditStatement", "statementId")
             }
-            createRow(ctx, spec(STATEMENT), s, id)
+            def row = createRow(ctx, spec(STATEMENT), s, id)
+            writeChildren(ctx, spec(STATEMENT), row, s, true)
         }
     }
 

@@ -181,6 +181,31 @@ class TenantConfigAutoVersionSmokeTests {
         }
     }
 
+    // DAR-BE-348: a reason's own priority is tenant config like its statement.
+    @Test
+    void aReasonPriorityChangeMarksItsTenant() {
+        asSystem {
+            upsert("moqui.basic.Enumeration", [enumId: "TCA_PRIO_CONC", enumTypeId: "AuditCategory", enumCode: "TCA_PRIO_CONC",
+                    description: "Tracker test cause"])
+        }
+        asSystem { ec.entity.find(PENDING).deleteAll() }
+        try {
+            inTransaction {
+                asSystem {
+                    upsert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "TCA_RP1", statementId: R2_ID, companyUserGroupId: MINE,
+                            conclusionEnumId: "TCA_PRIO_CONC", priorityEnumId: "AUDP_KNOWN"])
+                }
+            }
+            assertNotNull(waitForPending(MINE), "a reason's priority marks the statement's tenant")
+        } finally {
+            settle()
+            asSystem {
+                ec.entity.find("darpan.audit.AuditReasonPriority").condition("reasonPriorityId", "TCA_RP1").deleteAll()
+                ec.entity.find(PENDING).deleteAll()
+            }
+        }
+    }
+
     @Test
     void aRowWithoutATenantColumnIsTracedToItsParent() {
         inTransaction {

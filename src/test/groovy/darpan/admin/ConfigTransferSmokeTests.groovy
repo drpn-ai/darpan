@@ -740,6 +740,21 @@ class ConfigTransferSmokeTests {
     }
 
     @Test
+    void aReasonPriorityTravelsWithItsStatement() {
+        Map bundle = exportSource()
+        Map exportedStatement = (bundle.statements as List<Map>).find { it.ref == "STATEMENT:XFER_AUDIT_R4" }
+        List<Map> reasons = exportedStatement.children.AuditReasonPriority as List<Map>
+        assertEquals(["CONC:CONC_XFER_SEED"], reasons*.refs*.conclusionEnumId)
+        assertEquals("AUDP_KNOWN", (reasons[0].fields as Map).priorityEnumId)
+        Map applied = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertNoErrors(applied)
+        String statementId = applied.result.idMap["STATEMENT:XFER_AUDIT_R4"]
+        List rows = ec.entity.find("darpan.audit.AuditReasonPriority").condition("statementId", statementId)
+                .disableAuthz().useCache(false).list()
+        assertEquals([["CONC_XFER_SEED", "AUDP_KNOWN", DST]], rows.collect { [it.conclusionEnumId, it.priorityEnumId, it.companyUserGroupId] })
+    }
+
+    @Test
     void updateWithFewerRulesAndScopes() {
         Map bundle = exportSource()
         Map first = applyPlan(DST, bundle, [(AUTH_REF): "CREATE"])
@@ -1810,6 +1825,8 @@ class ConfigTransferSmokeTests {
         create("darpan.audit.AuditStatement", [statementId: "XFER_AUDIT_R8", companyUserGroupId: SRC, auditId: "XFER_AUDIT",
                 statementCode: "R8", categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_DERIVED", statementText: "Memos close",
                 isActive: "Y", sequenceNum: 2L])
+        create("darpan.audit.AuditReasonPriority", [reasonPriorityId: "XFER_RP1", companyUserGroupId: SRC, statementId: "XFER_AUDIT_R4",
+                conclusionEnumId: "CONC_XFER_SEED", priorityEnumId: "AUDP_KNOWN"])
         create("darpan.audit.AuditCheck", [checkId: "XFER_CHK1", companyUserGroupId: SRC, checkCode: "returns-vs-memos",
                 label: "Returns vs memos", savedRunId: "XFER_RS", otherSideDateField: "trandate",
                 fixWhereEnumId: "NETSUITE", headlineTemplate: "Return {id} has no memo"])

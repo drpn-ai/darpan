@@ -35,9 +35,11 @@ class RunObservabilityCoreTest {
         // the results were settled while they were still being corrected.
         // One code per verification pass, in the order they execute. They shared a single VERIFY
         // code until a run that performed two of them showed two byte-identical timeline rows.
-        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_MISSING))
-        assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_EXCHANGE))
-        assertEquals(8, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_RETURNS))
+        // DAR-BE-346: the free returns grading runs before the paid missing-diff lookup, so the
+        // lookup's share gate counts only rows that grading could not explain.
+        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_RETURNS))
+        assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_MISSING))
+        assertEquals(8, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_EXCHANGE))
         // DAR-UI-044: CONCLUDE reads the VERIFIED findings, so it follows the last verification pass,
         // and precedes WRITE_OUTPUT so the persisted artifact is the concluded one.
         assertEquals(9, RunObservability.stageSequenceOf(RunObservability.STAGE_CONCLUDE))

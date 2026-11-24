@@ -86,9 +86,11 @@ class RunObservability {
             (STAGE_RECHECK)         : 4,
             (STAGE_COMPARE)         : 5,
             (STAGE_VERIFY)          : 6,
-            (STAGE_VERIFY_MISSING)  : 6,
-            (STAGE_VERIFY_EXCHANGE) : 7,
-            (STAGE_VERIFY_RETURNS)  : 8,
+            // DAR-BE-346: the free returns grading before the paid missing-diff lookup, so the lookup's
+            // share gate counts only rows grading could not explain.
+            (STAGE_VERIFY_RETURNS)  : 6,
+            (STAGE_VERIFY_MISSING)  : 7,
+            (STAGE_VERIFY_EXCHANGE) : 8,
             (STAGE_CONCLUDE)        : 9,
             (STAGE_WRITE_OUTPUT)    : 10,
             (STAGE_NOTIFY)          : 11,

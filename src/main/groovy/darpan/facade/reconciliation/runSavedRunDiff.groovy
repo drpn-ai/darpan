@@ -946,15 +946,17 @@ try {
                                             diffFile: { resolveOutputFile(serviceResult) },
                                             sides: [[source: file1Source, label: file1Label], [source: file2Source, label: file2Label]],
                                             file1Label: file1Label, file2Label: file2Label])
+                                    // DAR-BE-346: the free returns grading too, so the lookup's share gate
+                                    // counts only rows it could not explain.
+                                    runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
+                                            (Map) file1Result, (Map) file2Result,
+                                            file1Label, file2Label, savedRun.companyUserGroupId as String)
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label,
                                             savedRun.companyUserGroupId as String, (Map) file1Result, (Map) file2Result,
                                             savedRun.compareScopeId as String)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result, file1Label, file2Label,
                                             savedRun.companyUserGroupId as String)
-                                    runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
-                                            (Map) file1Result, (Map) file2Result,
-                                            file1Label, file2Label, savedRun.companyUserGroupId as String)
                                     // DAR-UI-044: name each VERIFIED finding. No rules on the scope: no step, no change.
                                     Map concluded = RunConclusionStep.runIfConfigured([ec: ec, compareScopeId: savedRun.compareScopeId,
                                             diffFile: resolveOutputFile(serviceResult), file1Source: file1Source, file2Source: file2Source,

@@ -140,6 +140,29 @@ class RunPathParityGateTest {
         }
     }
 
+    /**
+     * DAR-BE-346: the free returns grading (grace, pre-window, cancelled-order refunds) runs before the
+     * paid missing-diff lookup on both paths. The lookup's share gate otherwise counts rows grading
+     * clears a moment later, and a run that ends with 0 missing still warns "above the 5% a lookup is
+     * for" (RAILS EU 2 of 5, 2026-11-24). Call sites, not seams: the manual path defines its passes as
+     * closures above where it calls them.
+     */
+    @Test
+    void freeReturnsGradingRunsBeforeThePaidMissingLookup() {
+        [[MANUAL_PATH, ~/runReturnPresenceVerificationPass\(serviceResult\b/, ~/runVerificationPass\(serviceResult\b/],
+         [SCHEDULED_PATH, ~/verifyReturnPresenceIfEnabled\(ec\b/, ~/verifyMissingDiffsIfEnabled\(ec\b/]].each { List row ->
+            String rel = row[0]
+            String code = codeOf(rel)
+            Matcher grading = ((Pattern) row[1]).matcher(code)
+            Matcher lookup = ((Pattern) row[2]).matcher(code)
+            assertTrue(grading.find(), "${rel}: the returns grading call site was not found; if it moved, update this gate")
+            assertTrue(lookup.find(), "${rel}: the missing-diff lookup call site was not found; if it moved, update this gate")
+            assertTrue(grading.start() < lookup.start(),
+                    "${rel} calls the paid missing-diff lookup before the free returns grading, so its share gate counts rows grading clears")
+            assertFalse(grading.find() || lookup.find(), "${rel}: more than one call site matched; anchor this gate again")
+        }
+    }
+
     @Test
     void bothRunPathsOwnTheSameNumberOfVerifyStepSites() {
         // Counts every verify stage, not one named code: the passes each own a code now, and a gate

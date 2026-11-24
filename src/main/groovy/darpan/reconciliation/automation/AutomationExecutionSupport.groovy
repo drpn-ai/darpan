@@ -814,14 +814,16 @@ class AutomationExecutionSupport {
                                 file1Label: normalize(reconcileResult?.file1Label) ?: "file1",
                                 file2Label: normalize(reconcileResult?.file2Label) ?: "file2"])
                     }
+                    // Verification passes, in the same order the interactive path runs them. The free returns
+                    // grading goes first (DAR-BE-346) so the paid lookup's share gate counts only rows it
+                    // could not explain. The returns and exchange passes are no-ops unless this run's
+                    // connector pair is the one they apply to.
+                    verifyReturnPresenceIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
+                            reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
                     // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
                     verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
                             mintedRunResultId, stepCtx, executionParams, file1Result, file2Result)
-                    // Second and third verification passes, in the same order the interactive path runs
-                    // them. Each is a no-op unless this run's connector pair is the one it applies to.
                     verifyExchangePairsIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
-                            reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
-                    verifyReturnPresenceIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
                             reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
                 }
                 // DAR-UI-044: the same conclude seam the interactive path calls.

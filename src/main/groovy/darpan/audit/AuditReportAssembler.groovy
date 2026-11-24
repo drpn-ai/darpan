@@ -138,6 +138,7 @@ class AuditReportAssembler {
             [(st.statementId as String): sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])] }
         Map<String, Map> split = stepUnits(statements, entriesByStatement, recordsByFinding)
         Set<String> waitingIds = split.values().collectMany { ((it.waiting ?: []) as List<Map>).collectMany { (it.entries as List<Map>)*.row*.findingId } } as Set<String>
+        Map levels = priorityLevels(ec, tenantId, statements)
         statements.each { Map st ->
             List<String> stChecks = checkIdsByStatement[st.statementId as String]
             List<Map> checkJson = stChecks.collect { String checkId ->
@@ -164,7 +165,7 @@ class AuditReportAssembler {
 
             Map stSplit = split[st.statementId as String]
             List<Map> units = stSplit.counted as List<Map>
-            Map counts = countsOf(units, day)
+            Map counts = countsOf(units, day, levels)
             List<Map> listed = units.take(FINDINGS_CAP)
             List<Map> shown = listed + listed.collectMany { ((it.waitingUnits ?: []) as List<Map>) }
             Map<String, Map> causes = conclusionsOf(ec, shown*.entries.flatten()*.row*.conclusionEnumId as List<String>)
@@ -174,13 +175,14 @@ class AuditReportAssembler {
                     step           : st.sequenceNum == null ? null : (st.sequenceNum as Long),
                     text           : st.statementText,
                     weight         : codes[st.weightEnumId as String],
+                    priority       : (levels.statementLevels as Map).get(st.statementId) ?: AuditPriority.DEFAULT_LEVEL,
                     status         : codes[worst],
                     reason         : reason,
                     checks         : checkJson,
                     counts         : counts,
                     findings       : listed.collect { Map unit ->
-                        unitFinding(unit, day, recordsByFinding, causes, codes) +
-                                (unit.waitingUnits ? [waiting: waitingJson(unit, day, recordsByFinding, causes, codes, statementCodeById)] : [:]) },
+                        unitFinding(unit, day, recordsByFinding, causes, codes, levels) +
+                                (unit.waitingUnits ? [waiting: waitingJson(unit, day, recordsByFinding, causes, codes, statementCodeById, levels)] : [:]) },
                     findingsOmitted: units.size() - listed.size(),
                     // DAR-BE-250: this statement's findings on orders an earlier step already reports; listed there.
                     waiting        : (stSplit.waiting as List).size()]
@@ -332,16 +334,67 @@ class AuditReportAssembler {
         return result
     }
 
-    private static Map countsOf(List<Map> entries, LocalDate day) {
+    private static Map countsOf(List<Map> entries, LocalDate day, Map levels) {
+        // DAR-BE-348: every open unit at its level, the 50-row cap aside, so the levels always add up to open.
+        Map<String, Integer> byPriority = AuditPriority.zeroCounts()
+        entries.findAll { it.state == OPEN }.each { Map unit ->
+            String level = unitPriority(unit, levels.statementLevels as Map, levels.overrides as Map).level
+            byPriority[level] = byPriority[level] + 1
+        }
         return [open      : entries.count { it.state == OPEN } as int,
                 newToday  : entries.count { it.state != FIXED && (it.row.firstFoundDate as Date).toLocalDate() == day } as int,
-                fixedToday: entries.count { it.state == FIXED } as int]
+                fixedToday: entries.count { it.state == FIXED } as int,
+                byPriority: byPriority]
     }
 
     private static Map sumCounts(List<Map> counts) {
         Map<String, Integer> sum = [open: 0, newToday: 0, fixedToday: 0]
-        counts.each { Map c -> sum.keySet().each { String k -> sum[k] = sum[k] + (c[k] as int) } }
-        return sum
+        Map<String, Integer> byPriority = AuditPriority.zeroCounts()
+        counts.each { Map c ->
+            sum.keySet().each { String k -> sum[k] = sum[k] + (c[k] as int) }
+            byPriority.keySet().each { String k -> byPriority[k] = byPriority[k] + (((Map) c.byPriority)[k] as int) }
+        }
+        return sum + [byPriority: byPriority]
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // DAR-BE-348. Priority: computed on assembly, never stored on the finding
+    // ---------------------------------------------------------------------------------------------------------
+
+    /**
+     * The tenant's levels, read once: statementLevels (statementId -> its own level's code; absent when unset) and
+     * overrides (statementId -> conclusionEnumId -> code). Only AuditPriority codes: a level that is not one reads as
+     * unset (P2), so it can never rank above P0 or leave a unit out of byPriority.
+     */
+    static Map priorityLevels(def ec, String tenantId, Collection<Map> statements) {
+        Map<String, String> codes = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditPriority").useCache(true).list()
+                .findAll { it.enumCode in AuditPriority.LEVELS }.collectEntries { [(it.enumId): it.enumCode] }
+        Map<String, String> statementLevels = statements.findAll { codes.get(it.priorityEnumId) }
+                .collectEntries { [(it.statementId as String): codes.get(it.priorityEnumId)] }
+        Map<String, Map<String, String>> overrides = [:]
+        tenantRows(ec, "darpan.audit.AuditReasonPriority", tenantId).list().each {
+            String code = codes.get(it.priorityEnumId)
+            if (code) overrides.computeIfAbsent(it.statementId as String) { [:] }.put(it.conclusionEnumId as String, code)
+        }
+        return [statementLevels: statementLevels, overrides: overrides]
+    }
+
+    /**
+     * A unit's [level, source, conclusionEnumId] under its own statement (a waiting unit's is its own, not the unit it
+     * waits under): a lone finding's reason or statement level; an order's most urgent open line (every line when none
+     * is open). A unit may be a bare [row, state].
+     */
+    static Map unitPriority(Map unit, Map<String, String> statementLevels, Map<String, Map<String, String>> overrides) {
+        List<Map> lines = (unit.entries ?: [[row: unit.row, state: unit.state]]) as List<Map>
+        List<Map> open = lines.findAll { it.state == OPEN }
+        String statementId = lines[0].row.statementId as String
+        return AuditPriority.resolve(statementLevels?.get(statementId), overrides?.get(statementId),
+                (open ?: lines).collect { it.row.conclusionEnumId as String })
+    }
+
+    private static Map priorityOf(Map unit, Map levels) {
+        Map p = unitPriority(unit, levels.statementLevels as Map, levels.overrides as Map)
+        return [priority: p.level, prioritySource: p.source]
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -419,12 +472,14 @@ class AuditReportAssembler {
         return out
     }
 
-    /** DAR-BE-250. The findings waiting on a counted one, as it lists them: each with its statement, id, headline and cause. */
+    /** DAR-BE-250. The findings waiting on a counted one, as it lists them: each with its statement, id, headline, cause and
+     *  its own statement's level (DAR-BE-348). */
     private static List<Map> waitingJson(Map unit, LocalDate day, Map<String, Map> recordsByFinding, Map<String, Map> causes,
-                                         Map<String, String> codes, Map<String, String> statementCodeById) {
+                                         Map<String, String> codes, Map<String, String> statementCodeById, Map levels) {
         return ((unit.waitingUnits ?: []) as List<Map>).collect { Map w ->
-            Map f = unitFinding(w, day, recordsByFinding, causes, codes)
-            [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause, item: itemOf(f)]
+            Map f = unitFinding(w, day, recordsByFinding, causes, codes, levels)
+            [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause, item: itemOf(f),
+             priority: f.priority, prioritySource: f.prioritySource]
         }
     }
 
@@ -457,12 +512,12 @@ class AuditReportAssembler {
      * "another line of its order is backordered"); the order says which line holds it up and how many wait on it.
      */
     private static Map unitFinding(Map unit, LocalDate day, Map<String, Map> recordsByFinding, Map<String, Map> causes,
-                                   Map<String, String> codes) {
+                                   Map<String, String> codes, Map levels) {
         Closure<Map> line = { Map e ->
             // get(), not [ ]: most lines have no conclusion, and map[null] dispatches to getProperty(null) and throws.
             Map cause = e.row.conclusionEnumId ? causes.get(e.row.conclusionEnumId as String) : null
             briefFinding(e, day, recordsByFinding[e.row.findingId as String] ?: [:], codes) +
-                    [cause: cause?.label ?: null, held: cause?.heldBy != null]
+                    [cause: cause?.label ?: null, held: cause?.heldBy != null] + priorityOf([entries: [e]], levels)
         }
         // DAR-BE-125: a lone finding keeps its cause in the catalog's words, which the board heads its findings by.
         if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> k != "held" }
@@ -493,7 +548,7 @@ class AuditReportAssembler {
                 stuck     : stuck*.id,
                 lines     : lines,
                 orderLines: orderLines(order, lines, context),
-                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()]
+                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels)
     }
 
     /**
@@ -584,10 +639,11 @@ class AuditReportAssembler {
         Map<String, Map> records = recordsFor(ec, tenantId, entriesByStatement.values().flatten()*.row*.findingId as List<String>)
         Map<String, Map> causes = conclusionsOf(ec, entriesByStatement.values().flatten()*.row*.conclusionEnumId as List<String>)
         Map<String, Map> split = stepUnits(statements, entriesByStatement, records)
+        Map levels = priorityLevels(ec, tenantId, statements)
         return statements.findAll { !statementCode || it.statementCode == statementCode }.collectMany { Map st ->
             (split[st.statementId as String].counted as List<Map>).collect { Map unit ->
-                unitFinding(unit, today, records, causes, codes) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]] +
-                        (unit.waitingUnits ? [waiting: waitingJson(unit, today, records, causes, codes, statementCodeById)] : [:])
+                unitFinding(unit, today, records, causes, codes, levels) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]] +
+                        (unit.waitingUnits ? [waiting: waitingJson(unit, today, records, causes, codes, statementCodeById, levels)] : [:])
             }
         } as List<Map>
     }
@@ -728,6 +784,7 @@ class AuditReportAssembler {
         Map<String, Map> records = recordsFor(ec, tenantId, rows*.findingId as List<String>)
         // DAR-UI-073. The cause in words (the conclusion that explains the finding), so the board can filter by it.
         Map<String, Map> causes = conclusionsOf(ec, rows*.conclusionEnumId as List<String>)
+        Map levels = priorityLevels(ec, tenantId, statements)
         List<Map> edges = rows.collect { Map row ->
             Map st = statementById[row.statementId as String]
             Map brief = briefFinding([row: row, state: row.stateEnumId], today, records[row.findingId as String] ?: [:], codes)
@@ -736,7 +793,8 @@ class AuditReportAssembler {
                         state: brief.state, firstFound: brief.firstFound, lastSeen: isoDate(row.lastSeenDate as Date),
                         ageDays: brief.ageDays, records: brief.records, difference: brief.difference, next: brief.next,
                         // get(), not [ ]: a null key there dispatches to getProperty(null) and throws.
-                        cause: row.conclusionEnumId ? causes.get(row.conclusionEnumId as String)?.label : null]
+                        cause: row.conclusionEnumId ? causes.get(row.conclusionEnumId as String)?.label : null] +
+                    priorityOf([row: row, state: row.stateEnumId], levels)
             [cursor: encodeFindingCursor([sort, rev, row.statementId, isoDate(row.firstFoundDate as Date), row.findingId]), node: node]
         }
         return [page: [edges   : edges,
@@ -835,6 +893,8 @@ class AuditReportAssembler {
         Map expected = f.expectedAmount == null ? null : money(f.expectedAmount as BigDecimal, currency) + [source: f.expectedSource]
         Map actual = f.actualAmount == null ? null : money(f.actualAmount as BigDecimal, currency) + [source: f.actualSource]
         def conclusion = f.conclusionEnumId ? ec.entity.find("moqui.basic.Enumeration").condition("enumId", f.conclusionEnumId).useCache(true).one() : null
+        Map levels = priorityLevels(ec, tenantId, [statement])
+        Map level = unitPriority([row: f, state: state], levels.statementLevels as Map, levels.overrides as Map)
         Map<String, String> fill = templateValues(f, recordRows)
         Map<String, String> recordFields = recordFieldValues(recordRows)
         String fixWhere = check.fixWhereEnumId ? systemKey(check.fixWhereEnumId as String) : (records ? records.keySet().first() as String : null)
@@ -848,6 +908,8 @@ class AuditReportAssembler {
                         period   : f.period,
                         category : [id: category?.enumCode, label: category?.description],
                         statement: [id: statement.statementCode, text: statement.statementText, weight: codes[statement.weightEnumId as String]],
+                        // DAR-BE-348: reason is the overriding conclusion's label when the level is the reason's.
+                        priority : [level: level.level, source: level.source, reason: level.source == "reason" ? conclusion?.description : null],
                         check    : [id: check.checkCode, label: check.label, matchedBy: check.matchedBy ?: null],
                         status   : [
                                 state       : codes[state],

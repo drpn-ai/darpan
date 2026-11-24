@@ -6,7 +6,23 @@ Records must also live in generic source data files under runtime/component/darp
 Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- DAR-BE-348: audit priority levels (restated verbatim from AuditSeedData.xml). -->
+    <!-- DAR-BE-348: the audit vocabulary restated whole from AuditSeedData.xml (it gains AuditPriority). -->
+    <moqui.basic.EnumerationType enumTypeId="AuditCategory" description="Audit statement category"/>
+    <moqui.basic.Enumeration enumId="AUDC_ORDERS" enumTypeId="AuditCategory" enumCode="orders"
+            description="Orders" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDC_REFUNDS_CREDITS" enumTypeId="AuditCategory" enumCode="refundsAndCredits"
+            description="Refunds and credits" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDC_RETURNS" enumTypeId="AuditCategory" enumCode="returns"
+            description="Returns" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUDC_EXCHANGES_WARRANTY" enumTypeId="AuditCategory" enumCode="exchangesAndWarranty"
+            description="Exchanges and warranty" sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType enumTypeId="AuditStatementWeight" description="Audit statement weight"/>
+    <moqui.basic.Enumeration enumId="AUDSW_FIRM" enumTypeId="AuditStatementWeight" enumCode="firm"
+            description="Firm: stated by the tenant" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDSW_DERIVED" enumTypeId="AuditStatementWeight" enumCode="derived"
+            description="Derived: awaiting the tenant's confirmation" sequenceNum="2"/>
+
     <moqui.basic.EnumerationType enumTypeId="AuditPriority" description="Audit priority"/>
     <moqui.basic.Enumeration enumId="AUDP_P0" enumTypeId="AuditPriority" enumCode="P0"
             description="P0: fix now" sequenceNum="1"/>
@@ -16,6 +32,62 @@ Review each record before loading into an environment.
             description="P2: fix when convenient" sequenceNum="3"/>
     <moqui.basic.Enumeration enumId="AUDP_KNOWN" enumTypeId="AuditPriority" enumCode="KNOWN"
             description="Known: understood, tracked" sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType enumTypeId="AuditFindingState" description="Audit finding state"/>
+    <moqui.basic.Enumeration enumId="AUDFS_OPEN" enumTypeId="AuditFindingState" enumCode="open"
+            description="Open" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDFS_FIXED" enumTypeId="AuditFindingState" enumCode="fixed"
+            description="Fixed" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="AuditCheckStatus" description="Audit check status"/>
+    <moqui.basic.Enumeration enumId="AUDCS_RAN" enumTypeId="AuditCheckStatus" enumCode="ran"
+            description="Ran over complete reads" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDCS_PARTIAL" enumTypeId="AuditCheckStatus" enumCode="partial"
+            description="Partial: a read was partial or failed, nothing closed" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDCS_NOT_RUN" enumTypeId="AuditCheckStatus" enumCode="notRun"
+            description="Not run" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="AuditSourceRead" description="Audit source read status"/>
+    <moqui.basic.Enumeration enumId="AUDSR_COMPLETE" enumTypeId="AuditSourceRead" enumCode="complete"
+            description="Complete" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDSR_PARTIAL" enumTypeId="AuditSourceRead" enumCode="partial"
+            description="Partial" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDSR_FAILED" enumTypeId="AuditSourceRead" enumCode="failed"
+            description="Failed" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="AuditFindingEvent" description="Audit finding history event"/>
+    <moqui.basic.Enumeration enumId="AUDFE_FOUND" enumTypeId="AuditFindingEvent" enumCode="found"
+            description="Found" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDFE_STILL_OPEN" enumTypeId="AuditFindingEvent" enumCode="stillOpen"
+            description="Still open" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDFE_FIXED" enumTypeId="AuditFindingEvent" enumCode="fixed"
+            description="Fixed" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUDFE_REOPENED" enumTypeId="AuditFindingEvent" enumCode="reopened"
+            description="Reopened" sequenceNum="4"/>
+
+    <!-- No agent type: the external API has no mutations, so an agent can never cause an event. -->
+    <moqui.basic.EnumerationType enumTypeId="AuditActorType" description="Audit event actor type"/>
+    <moqui.basic.Enumeration enumId="AUDAT_CHECK" enumTypeId="AuditActorType" enumCode="check"
+            description="Scheduled check" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDAT_USER" enumTypeId="AuditActorType" enumCode="user"
+            description="Darpan user" sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType enumTypeId="AuditPeriod" description="Audit reporting period"/>
+    <moqui.basic.Enumeration enumId="AUDP_DAY" enumTypeId="AuditPeriod" enumCode="day"
+            description="Day" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDP_MONTH" enumTypeId="AuditPeriod" enumCode="month"
+            description="Month" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDP_QUARTER" enumTypeId="AuditPeriod" enumCode="quarter"
+            description="Quarter" sequenceNum="3"/>
+    <!-- DAR-BE-102. What a scheduled digest says. -->
+    <moqui.basic.EnumerationType enumTypeId="AuditDigestKind" description="Audit digest kind"/>
+    <moqui.basic.Enumeration enumId="AUDDK_DAILY" enumTypeId="AuditDigestKind" enumCode="daily"
+            description="Daily digest" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDDK_WEEKLY" enumTypeId="AuditDigestKind" enumCode="weekly"
+            description="Weekly summary" sequenceNum="2"/>
+    <!-- DAR-BE-207. Sent once each audit run ends (every automation of the audit idle), not at a send time. -->
+    <moqui.basic.Enumeration enumId="AUDDK_RUN" enumTypeId="AuditDigestKind" enumCode="run"
+            description="After each audit run" sequenceNum="3"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_REASON_PRIORITY"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.audit.AuditReasonPriority"

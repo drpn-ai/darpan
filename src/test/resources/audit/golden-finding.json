@@ -11,6 +11,7 @@
       "text": "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open.",
       "weight": "derived"
     },
+    "priority": { "level": "P2", "source": "statement", "reason": null },
     "check": { "id": "returns-vs-credit-memos", "label": "OMS returns against NetSuite credit memos", "matchedBy": "return id (custbody_hc_return_id)" },
     "status": {
       "state": "open",

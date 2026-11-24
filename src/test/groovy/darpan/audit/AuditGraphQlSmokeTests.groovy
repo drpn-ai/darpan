@@ -146,6 +146,30 @@ class AuditGraphQlSmokeTests {
         assertTrue(doc.health.notCovered instanceof List)
     }
 
+    // DAR-BE-348. No level set anywhere: everything reads P2.
+    @Test
+    void theReportAndAFindingCarryTheirPriority() {
+        Map out = gql(A, """{ auditReport(audit: "month-close", date: "2026-10-08") {
+            summary { byPriority { P0 P1 P2 KNOWN } byCategory { category byPriority { P2 } } }
+            categories { id counts { byPriority { P0 P1 P2 KNOWN } }
+              statements { id priority counts { open byPriority { P0 P1 P2 KNOWN } } findings { id priority prioritySource } } } } }""")
+        assertEquals([], out.errors, "errors")
+        Map r2 = statementR2((Map) out.data)
+        assertEquals("P2", r2.priority)
+        assertEquals([P0: 0, P1: 0, P2: 1, KNOWN: 0], r2.counts.byPriority)
+        assertEquals([[findingA, "P2", "statement"]], (r2.findings as List<Map>).collect { [it.id, it.priority, it.prioritySource] })
+        assertEquals([P0: 0, P1: 0, P2: 1, KNOWN: 0], out.data.auditReport.summary.byPriority)
+        assertEquals([P2: 1], ((List<Map>) out.data.auditReport.summary.byCategory).find { it.category == "orders" }.byPriority)
+
+        Map doc = gql(A, """{ auditFinding(id: "${findingA}") { finding { priority { level source reason } } } }""")
+        assertEquals([], doc.errors, "errors")
+        assertEquals([level: "P2", source: "statement", reason: null], doc.data.auditFinding.finding.priority)
+
+        Map page = gql(A, "{ findings(first: 10) { edges { node { id priority prioritySource } } } }")
+        assertEquals([], page.errors, "errors")
+        assertEquals([["P2", "statement"]] as Set, nodes(page).collect { [it.priority, it.prioritySource] } as Set)
+    }
+
     @Test
     void oneCategoryAndOneStatementReadByIdAndAnUnknownIdIsNull() {
         Map out = gql(A, """{ auditReport(audit: "month-close", date: "2026-10-08") {

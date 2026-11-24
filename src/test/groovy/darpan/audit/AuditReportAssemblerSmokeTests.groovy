@@ -192,11 +192,12 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([[id: "returns-vs-credit-memos", label: "OMS returns against NetSuite credit memos", status: "ran", reason: null,
                        matchedBy: "return id (custbody_hc_return_id)", compared: [OMS: 412, NetSuite: 409],
                        window: [from: "2026-10-01", thru: "2026-10-08"]]], r4.checks)
-        assertEquals([open: 1, newToday: 0, fixedToday: 0], r4.counts)
+        assertEquals(counted(1, 0, 0), r4.counts)
         Map brief = (r4.findings as List)[0]
         assertEquals([id: m258615, headline: "Credit memo is 0.01 less than the refund for return M258615", state: "open",
                       firstFound: "2026-10-07", ageDays: 1, difference: [amount: "-0.01", currency: "USD"],
-                      cause: "Memo short of the refund", next: "darpan findings show ${m258615}".toString()],
+                      cause: "Memo short of the refund", next: "darpan findings show ${m258615}".toString(),
+                      priority: "P2", prioritySource: "statement"],
                 brief.findAll { it.key != "records" })
         assertEquals([Shopify : [order: [[id: "7187000000000", internalId: null, status: null]]],
                       OMS     : ["return": [[id: "M258615", internalId: null, status: "Completed"]]],
@@ -204,11 +205,11 @@ class AuditReportAssemblerSmokeTests {
                 "records by ROOT system and type, every value an array")
 
         Map r2 = doc.categories.orders.statements.R2
-        assertEquals([open: 1, newToday: 1, fixedToday: 0], r2.counts, "open on the morning it is first found")
+        assertEquals(counted(1, 1, 0), r2.counts, "open on the morning it is first found")
         assertEquals(["open", null, [NetSuite: 2210]], [r2.findings[0].state, r2.findings[0].difference, r2.checks[0].compared])
 
         Map r8 = doc.categories.returns.statements.R8
-        assertEquals([open: 0, newToday: 0, fixedToday: 1], r8.counts)
+        assertEquals(counted(0, 0, 1), r8.counts)
         assertEquals([[rx1, "fixed"]], (r8.findings as List).collect { [it.id, it.state] }, "fixed today stays on the list that day")
 
         assertEquals([open: 2, newToday: 1, fixedToday: 1], doc.summary.subMap(["open", "newToday", "fixedToday"]))
@@ -230,7 +231,7 @@ class AuditReportAssemblerSmokeTests {
             assertEquals(["R5", "R12"], doc.health.notCovered, day)
             Map r5 = doc.categories.refundsAndCredits.statements.R5
             assertEquals([status: "notRun", reason: "No check is configured for this statement yet.", checks: [],
-                          counts: [open: 0, newToday: 0, fixedToday: 0], findings: [], findingsOmitted: 0],
+                          counts: counted(0, 0, 0), findings: [], findingsOmitted: 0],
                     r5.subMap(["status", "reason", "checks", "counts", "findings", "findingsOmitted"]), day)
             assertNotNull(doc.categories.exchangesAndWarranty.statements.R12, "R12 present on ${day}")
         }
@@ -240,7 +241,7 @@ class AuditReportAssemblerSmokeTests {
     void aPastMorningReadsEachFindingsStateFromItsHistory() {
         Map doc = report(GORJANA, "2026-10-07")
         Map r4 = doc.categories.refundsAndCredits.statements.R4
-        assertEquals([open: 1, newToday: 1, fixedToday: 0], r4.counts)
+        assertEquals(counted(1, 1, 0), r4.counts)
         Map r8 = doc.categories.returns.statements.R8
         assertEquals([[rx1, "open"]], (r8.findings as List).collect { [it.id, it.state] }, "stored state is fixed; on 10-07 it was open")
         Map r2 = doc.categories.orders.statements.R2
@@ -266,17 +267,17 @@ class AuditReportAssemblerSmokeTests {
 
         Map r4 = doc.categories.refundsAndCredits.statements.R4
         assertEquals(["partial", "The NetSuite read was partial: page ceiling reached."], [r4.status, r4.reason])
-        assertEquals([open: 1, newToday: 0, fixedToday: 0], r4.counts)
+        assertEquals(counted(1, 0, 0), r4.counts)
         assertEquals([OMS: 400, NetSuite: 300], r4.checks[0].compared)
 
         Map r2 = doc.categories.orders.statements.R2
         assertEquals("notRun", r2.status)
         assertNull(r2.checks[0].compared, "compared is null when the check did not run")
-        assertEquals([open: 1, newToday: 0, fixedToday: 0], r2.counts, "counts are kept on a morning the check did not run")
+        assertEquals(counted(1, 0, 0), r2.counts, "counts are kept on a morning the check did not run")
         assertEquals(2, doc.summary.oldestOpen.ageDays)
 
         Map r8 = doc.categories.returns.statements.R8
-        assertEquals([[], [open: 0, newToday: 0, fixedToday: 0]], [r8.findings, r8.counts],
+        assertEquals([[], counted(0, 0, 0)], [r8.findings, r8.counts],
                 "RX-1 was fixed on 10-08, so it is off the 10-09 list")
         assertEquals(0, doc.summary.fixedToday)
     }
@@ -328,7 +329,7 @@ class AuditReportAssemblerSmokeTests {
                 ((order.lines as List<Map>)*.cause).unique())
         // DAR-UI-075: a line by its number, not its "/01" suffix.
         assertEquals("Order M1168785: line 1 backordered in NetSuite, holding 2 more lines", order.headline)
-        assertEquals([open: 2, newToday: 2, fixedToday: 0], r1.counts, "counted by order, not by line")
+        assertEquals(counted(2, 2, 0), r1.counts, "counted by order, not by line")
         assertEquals(["M1167646", [ids[3]], "Order M1167646: line 1 is completed in HotWax and not billed in NetSuite"],
                 [findings[1].id, (findings[1].lines as List<Map>)*.id, findings[1].headline])
         // A finding that only mentions an order (a memo naming its Shopify order) is not about an order line: no order.
@@ -368,8 +369,8 @@ class AuditReportAssemblerSmokeTests {
         Map doc = report(TRUN, "TREP_T_STORY", "2026-10-22")
         Map statements = (Map) doc.categories.orders.statements
         assertEquals([4L * 10, 8L * 10], [statements.S4.step, statements.S8.step]*.toLong())
-        assertEquals([open: 1, newToday: 1, fixedToday: 0], statements.S4.counts, "the order counts at its earliest step")
-        assertEquals([open: 1, newToday: 1, fixedToday: 0], statements.S8.counts, "only M9 counts at step 8")
+        assertEquals(counted(1, 1, 0), statements.S4.counts, "the order counts at its earliest step")
+        assertEquals(counted(1, 1, 0), statements.S8.counts, "only M9 counts at step 8")
         assertEquals([0, 1], [statements.S4.waiting, statements.S8.waiting])
         assertEquals(["M9"], (statements.S8.findings as List<Map>)*.id)
         assertEquals([[statement: "S8", id: "M1210830", cause: null]],
@@ -604,7 +605,7 @@ class AuditReportAssemblerSmokeTests {
 
         Map november = report(GORJANA, MONTH_CLOSE, "2026-11-03", null)
         assertEquals("2026-11", november.report.period)
-        assertEquals([open: 0, newToday: 0, fixedToday: 0], november.categories.refundsAndCredits.statements.R4.counts,
+        assertEquals(counted(0, 0, 0), november.categories.refundsAndCredits.statements.R4.counts,
                 "October's findings are October's report's, not November's")
         assertEquals("The check did not run on the morning of 2026-11-03.", november.categories.refundsAndCredits.statements.R4.checks[0].reason)
 
@@ -897,6 +898,181 @@ class AuditReportAssemblerSmokeTests {
 
     private void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
+    }
+
+    /** Counts with no level set anywhere: every open finding is P2 (DAR-BE-348). */
+    private static Map counted(int open, int newToday, int fixedToday) {
+        return [open: open, newToday: newToday, fixedToday: fixedToday, byPriority: [P0: 0, P1: 0, P2: open, KNOWN: 0]]
+    }
+
+    // ---- priority (DAR-BE-348) -----------------------------------------------------------------------------------
+    // Each test has an audit of its own in tenant TPRI (statement S1, check <name>-check), found on 2026-10-22.
+
+    private static final String PRI = "TPRI"
+    private static final String PRI_B = "TPRI_B"
+    private static final String C1 = "TPRI_C1"
+    private static final String C2 = "TPRI_C2"
+
+    private void priorityTenant(String tenant) {
+        insert("moqui.security.UserGroup", [userGroupId: tenant, description: tenant])
+        insert("moqui.basic.Enumeration", [enumId: C1, enumTypeId: "DarpanConclusion", enumCode: C1, description: "Known carrier delay"])
+        insert("moqui.basic.Enumeration", [enumId: C2, enumTypeId: "DarpanConclusion", enumCode: C2, description: "Short shipped"])
+    }
+
+    /** Audit <tenant>_<name> with statement S1 at this level (null: unset); answers S1's statementId. */
+    private String priorityAudit(String tenant, String name, String priorityEnumId) {
+        priorityTenant(tenant)
+        String auditId = "${tenant}_${name}".toString()
+        audit(tenant, auditId, name, name, "AUDP_MONTH")
+        statement(tenant, auditId, "${auditId}_S1".toString(), "S1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "${name} S1".toString())
+        if (priorityEnumId) insert("darpan.audit.AuditStatement", [statementId: "${auditId}_S1".toString(), priorityEnumId: priorityEnumId])
+        insert("darpan.audit.AuditCheck", [checkId: "${auditId}_C".toString(), companyUserGroupId: tenant, checkCode: "${name}-check".toString(), label: name])
+        link(tenant, "${auditId}_C".toString(), "${auditId}_S1".toString(), 1)
+        return "${auditId}_S1".toString()
+    }
+
+    private List<String> priorityFindings(String tenant, String checkId, List findings) {
+        List ids = ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: tenant, checkId: checkId,
+                reportDate: Date.valueOf("2026-10-22"), checkStamp: at("2026-10-22", "07:00:00"), findings: findings]).call().findingIds as List
+        noErrors()
+        return ids as List<String>
+    }
+
+    private static Map lone(String key, String conclusionEnumId, String statementCode = "S1") {
+        return [statementCode: statementCode, recordKey: key, headline: "Invoice ${key} has no Etail id".toString(), conclusionEnumId: conclusionEnumId,
+                records: [[systemEnumId: "NETSUITE_SUITEQL", recordType: "invoice", recordId: key]]]
+    }
+
+    private void reasonPriority(String tenant, String statementId, String conclusionEnumId, String priorityEnumId) {
+        insert("darpan.audit.AuditReasonPriority", [reasonPriorityId: "${tenant}_${statementId}_${conclusionEnumId}".toString().take(40),
+                companyUserGroupId: tenant, statementId: statementId, conclusionEnumId: conclusionEnumId, priorityEnumId: priorityEnumId])
+    }
+
+    private Map priorityStatement(String tenant, String auditId) {
+        return report(tenant, auditId, "2026-10-22").categories.orders.statements.S1 as Map
+    }
+
+    private static List<List> marks(List<Map> findings) {
+        return findings.collect { [it.id, it.priority, it.prioritySource] }
+    }
+
+    @Test
+    void statementPriorityDefaultsToP2() {
+        Map r4 = report(GORJANA, "2026-10-08").categories.refundsAndCredits.statements.R4 as Map
+        assertEquals("P2", r4.priority)
+        assertEquals([P0: 0, P1: 0, P2: 1, KNOWN: 0], r4.counts.byPriority)
+        assertEquals([[m258615, "P2", "statement"]], marks(r4.findings as List<Map>))
+
+        // A level that is not an AuditPriority enum reads as unset, statement and reason alike: P2, and it still adds up.
+        String st = priorityAudit(PRI, "pri-stray", "AUDC_ORDERS")
+        reasonPriority(PRI, st, C1, "AUDSW_FIRM")
+        priorityFindings(PRI, "${PRI}_pri-stray_C", [lone("PX-1", C1)])
+        Map s1 = priorityStatement(PRI, "${PRI}_pri-stray")
+        assertEquals("P2", s1.priority)
+        assertEquals([P0: 0, P1: 0, P2: 1, KNOWN: 0], s1.counts.byPriority)
+        assertEquals(["P2", "statement"], [s1.findings[0].priority, s1.findings[0].prioritySource])
+    }
+
+    @Test
+    void reasonOverrideMovesItsFindings() {
+        String st = priorityAudit(PRI, "pri-reason", "AUDP_P2")
+        List<String> ids = priorityFindings(PRI, "${PRI}_pri-reason_C", [lone("PR-1", C1), lone("PR-2", C2), lone("PR-3", null)])
+        reasonPriority(PRI, st, C1, "AUDP_KNOWN")
+        Map s1 = priorityStatement(PRI, "${PRI}_pri-reason")
+        assertEquals("P2", s1.priority)
+        assertEquals([[ids[0], "KNOWN", "reason"], [ids[1], "P2", "statement"], [ids[2], "P2", "statement"]] as Set,
+                marks(s1.findings as List<Map>) as Set)
+        assertEquals([P0: 0, P1: 0, P2: 2, KNOWN: 1], s1.counts.byPriority)
+    }
+
+    @Test
+    void orderCountsOnceAtMostUrgentLine() {
+        String st = priorityAudit(PRI, "pri-order", null)
+        reasonPriority(PRI, st, C1, "AUDP_P0")
+        Closure<Map> line = { String item, String cause ->
+            [statementCode: "S1", recordKey: item, headline: "Item ${item} is completed in HotWax and not billed in NetSuite".toString(),
+             conclusionEnumId: cause, records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: item]]]
+        }
+        // The C2 line first: the order is P0 because its C1 line is, not because it is the first line.
+        priorityFindings(PRI, "${PRI}_pri-order_C", [line("MP1/01", C2), line("MP1/02", C1)])
+        Map s1 = priorityStatement(PRI, "${PRI}_pri-order")
+        assertEquals(1, s1.counts.open)
+        assertEquals([P0: 1, P1: 0, P2: 0, KNOWN: 0], s1.counts.byPriority)
+        Map order = (s1.findings as List<Map>)[0]
+        assertEquals(["order", "MP1", "P0", "reason"], [order.kind, order.id, order.priority, order.prioritySource])
+        assertEquals([["P2", "statement"], ["P0", "reason"]], (order.lines as List<Map>).collect { [it.priority, it.prioritySource] })
+    }
+
+    @Test
+    void waitingUnitsKeepOwnLevelUncounted() {
+        priorityTenant(PRI)
+        audit(PRI, "TPRI_W", "pri-wait", "Wait", "AUDP_MONTH")
+        statement(PRI, "TPRI_W", "TPRI_W4", "S4", "AUDC_ORDERS", "AUDSW_FIRM", 40, "Every open line is at a facility that can fulfil it.")
+        statement(PRI, "TPRI_W", "TPRI_W8", "S8", "AUDC_ORDERS", "AUDSW_FIRM", 80, "Every completed line is invoiced.")
+        insert("darpan.audit.AuditStatement", [statementId: "TPRI_W8", priorityEnumId: "AUDP_P0"])
+        ["4", "8"].each { String n ->
+            insert("darpan.audit.AuditCheck", [checkId: "TPRI_WC${n}".toString(), companyUserGroupId: PRI, checkCode: "pri-wait-${n}".toString(), label: n])
+            link(PRI, "TPRI_WC${n}".toString(), "TPRI_W${n}".toString(), 1)
+        }
+        priorityFindings(PRI, "TPRI_WC4", [[statementCode: "S4", recordKey: "SO7371002/01", headline: "Line M1210830/01 is open in NetSuite and not at a facility",
+                records: [[systemEnumId: "NETSUITE_SUITEQL", recordType: "salesOrderLine", recordId: "SO7371002", internalId: "81531855"],
+                          [systemEnumId: "OMS_RETURNS_GQL", recordType: "order", recordId: "EXC-#GOR197136981-1", internalId: "M1210830"]]]])
+        priorityFindings(PRI, "TPRI_WC8", [[statementCode: "S8", recordKey: "M1210830/02", headline: "Item M1210830/02 is completed in HotWax and not billed in NetSuite",
+                records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: "M1210830/02",
+                           recordData: JsonOutput.toJson([omsOrderName: "EXC-#GOR197136981-1"])],
+                          [systemEnumId: "NETSUITE_SUITEQL", recordType: "salesOrderLine", recordId: "SO7371002", internalId: "81531855"]]]])
+
+        Map statements = (Map) report(PRI, "TPRI_W", "2026-10-22").categories.orders.statements
+        Map s4 = statements.S4, s8 = statements.S8
+        Map counted = (s4.findings as List<Map>)[0]
+        assertEquals(["P2", "statement"], [counted.priority, counted.prioritySource], "a P0 finding waiting under it does not raise it")
+        assertEquals([[statement: "S8", priority: "P0", prioritySource: "statement"]],
+                (counted.waiting as List<Map>).collect { it.subMap(["statement", "priority", "prioritySource"]) })
+        assertEquals([P0: 0, P1: 0, P2: 1, KNOWN: 0], s4.counts.byPriority)
+        assertEquals(["P0", 1, [P0: 0, P1: 0, P2: 0, KNOWN: 0]], [s8.priority, s8.waiting, s8.counts.byPriority], "a waiting finding is not counted")
+    }
+
+    @Test
+    void byPrioritySumsToOpen() {
+        String st = priorityAudit(PRI, "pri-sixty", null)
+        reasonPriority(PRI, st, C1, "AUDP_P1")
+        priorityFindings(PRI, "${PRI}_pri-sixty_C", (1..60).collect { int n -> lone("PS-${n}".toString(), n <= 10 ? C1 : null) })
+        Map doc = report(PRI, "${PRI}_pri-sixty", "2026-10-22")
+        Map s1 = doc.categories.orders.statements.S1 as Map
+        assertEquals([60, 50, 10], [s1.counts.open, (s1.findings as List).size(), s1.findingsOmitted], "more than the 50 listed")
+        assertEquals([P0: 0, P1: 10, P2: 50, KNOWN: 0], s1.counts.byPriority, "every finding counted, not the 50 listed")
+        (doc.categories as Map).each { String code, Map cat ->
+            assertEquals(cat.counts.open, (cat.counts.byPriority as Map).values().sum(), code)
+            assertEquals(cat.counts.byPriority, doc.summary.byCategory[code].byPriority, code)
+        }
+        assertEquals([P0: 0, P1: 10, P2: 50, KNOWN: 0], doc.summary.byPriority)
+        assertEquals(doc.summary.open, (doc.summary.byPriority as Map).values().sum())
+    }
+
+    @Test
+    void overrideIsTenantScoped() {
+        String st = priorityAudit(PRI, "pri-tenant", null)
+        List<String> ids = priorityFindings(PRI, "${PRI}_pri-tenant_C", [lone("PT-1", C1)])
+        // Tenant B has the same audit, statement code and conclusion, with an override; and a row of B's naming A's statement.
+        String stB = priorityAudit(PRI_B, "pri-tenant", null)
+        reasonPriority(PRI_B, stB, C1, "AUDP_P0")
+        reasonPriority(PRI_B, st, C1, "AUDP_P0")
+        priorityFindings(PRI_B, "${PRI_B}_pri-tenant_C", [lone("PT-1", C1)])
+
+        Map s1 = priorityStatement(PRI, "${PRI}_pri-tenant")
+        assertEquals([[ids[0], "P2", "statement"]], marks(s1.findings as List<Map>))
+        assertEquals([P0: 0, P1: 0, P2: 1, KNOWN: 0], s1.counts.byPriority)
+        assertEquals([level: "P2", source: "statement", reason: null], finding(PRI, ids[0]).finding.priority)
+        assertEquals([P0: 1, P1: 0, P2: 0, KNOWN: 0], priorityStatement(PRI_B, "${PRI_B}_pri-tenant").counts.byPriority, "B's own override holds in B")
+    }
+
+    @Test
+    void findingDocumentSaysWhereLevelCameFrom() {
+        String st = priorityAudit(PRI, "pri-doc", "AUDP_P1")
+        reasonPriority(PRI, st, C1, "AUDP_KNOWN")
+        List<String> ids = priorityFindings(PRI, "${PRI}_pri-doc_C", [lone("PD-1", C1), lone("PD-2", C2)])
+        assertEquals([level: "KNOWN", source: "reason", reason: "Known carrier delay"], finding(PRI, ids[0]).finding.priority)
+        assertEquals([level: "P1", source: "statement", reason: null], finding(PRI, ids[1]).finding.priority)
     }
 
     /**

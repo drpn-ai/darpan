@@ -25,6 +25,8 @@ class AuditCatalogContractTests {
     static final Map<String, List<String>> CODES = [
             AuditCategory       : ["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"],
             AuditStatementWeight: ["firm", "derived"],
+            // DAR-BE-348: a statement's level and a reason's override, most urgent first.
+            AuditPriority       : ["P0", "P1", "P2", "KNOWN"],
             AuditFindingState   : ["open", "fixed"],
             AuditCheckStatus    : ["ran", "partial", "notRun"],
             AuditSourceRead     : ["complete", "partial", "failed"],

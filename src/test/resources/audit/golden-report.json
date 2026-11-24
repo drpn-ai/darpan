@@ -62,6 +62,7 @@
               "cause": null,
               "priority": "P2",
               "prioritySource": "statement",
+              "priorityReason": null,
               "next": "darpan findings show F-20790"
             }
           ],
@@ -101,6 +102,7 @@
               "cause": null,
               "priority": "P2",
               "prioritySource": "statement",
+              "priorityReason": null,
               "next": "darpan findings show F-20761"
             }
           ],

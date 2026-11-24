@@ -197,7 +197,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([id: m258615, headline: "Credit memo is 0.01 less than the refund for return M258615", state: "open",
                       firstFound: "2026-10-07", ageDays: 1, difference: [amount: "-0.01", currency: "USD"],
                       cause: "Memo short of the refund", next: "darpan findings show ${m258615}".toString(),
-                      priority: "P2", prioritySource: "statement"],
+                      priority: "P2", prioritySource: "statement", priorityReason: null],
                 brief.findAll { it.key != "records" })
         assertEquals([Shopify : [order: [[id: "7187000000000", internalId: null, status: null]]],
                       OMS     : ["return": [[id: "M258615", internalId: null, status: "Completed"]]],
@@ -971,6 +971,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals("P2", s1.priority)
         assertEquals([P0: 0, P1: 0, P2: 1, KNOWN: 0], s1.counts.byPriority)
         assertEquals(["P2", "statement"], [s1.findings[0].priority, s1.findings[0].prioritySource])
+        assertNull(s1.findings[0].priorityReason, "a statement-level unit has no reason")
     }
 
     @Test
@@ -994,13 +995,16 @@ class AuditReportAssemblerSmokeTests {
              conclusionEnumId: cause, records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: item]]]
         }
         // The C2 line first: the order is P0 because its C1 line is, not because it is the first line.
-        priorityFindings(PRI, "${PRI}_pri-order_C", [line("MP1/01", C2), line("MP1/02", C1)])
+        List<String> ids = priorityFindings(PRI, "${PRI}_pri-order_C", [line("MP1/01", C2), line("MP1/02", C1)])
         Map s1 = priorityStatement(PRI, "${PRI}_pri-order")
         assertEquals(1, s1.counts.open)
         assertEquals([P0: 1, P1: 0, P2: 0, KNOWN: 0], s1.counts.byPriority)
         Map order = (s1.findings as List<Map>)[0]
         assertEquals(["order", "MP1", "P0", "reason"], [order.kind, order.id, order.priority, order.prioritySource])
         assertEquals([["P2", "statement"], ["P0", "reason"]], (order.lines as List<Map>).collect { [it.priority, it.prioritySource] })
+        // The unit says which line and which reason put it at P0; a line's own level stays its own.
+        assertEquals([ids[1], "Known carrier delay"], [order.priorityLine, order.priorityReason])
+        assertEquals([null, "Known carrier delay"], (order.lines as List<Map>).collect { it.priorityReason })
     }
 
     @Test

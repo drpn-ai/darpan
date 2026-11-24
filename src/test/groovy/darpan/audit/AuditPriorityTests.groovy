@@ -9,7 +9,7 @@ class AuditPriorityTests {
 
     @Test
     void "no level reads P2"() {
-        assertEquals([level: "P2", source: "statement", conclusionEnumId: null], AuditPriority.resolve(null, [:], [null]))
+        assertEquals([level: "P2", source: "statement", conclusionEnumId: null, index: 0], AuditPriority.resolve(null, [:], [null]))
     }
 
     @Test
@@ -28,7 +28,7 @@ class AuditPriorityTests {
 
     @Test
     void "the most urgent line wins"() {
-        assertEquals([level: "P0", source: "reason", conclusionEnumId: "C1"], AuditPriority.resolve("P2", [C1: "P0"], ["C2", "C1"]))
+        assertEquals([level: "P0", source: "reason", conclusionEnumId: "C1", index: 1], AuditPriority.resolve("P2", [C1: "P0"], ["C2", "C1"]))
     }
 
     @Test

@@ -380,21 +380,28 @@ class AuditReportAssembler {
     }
 
     /**
-     * A unit's [level, source, conclusionEnumId] under its own statement (a waiting unit's is its own, not the unit it
-     * waits under): a lone finding's reason or statement level; an order's most urgent open line (every line when none
-     * is open). A unit may be a bare [row, state].
+     * A unit's [level, source, conclusionEnumId, line] under its own statement (a waiting unit's is its own, not the unit
+     * it waits under): a lone finding's reason or statement level; an order's most urgent open line (every line when none
+     * is open), `line` being that winning entry. A unit may be a bare [row, state].
      */
     static Map unitPriority(Map unit, Map<String, String> statementLevels, Map<String, Map<String, String>> overrides) {
         List<Map> lines = (unit.entries ?: [[row: unit.row, state: unit.state]]) as List<Map>
         List<Map> open = lines.findAll { it.state == OPEN }
+        List<Map> considered = open ?: lines
         String statementId = lines[0].row.statementId as String
-        return AuditPriority.resolve(statementLevels?.get(statementId), overrides?.get(statementId),
-                (open ?: lines).collect { it.row.conclusionEnumId as String })
+        Map p = AuditPriority.resolve(statementLevels?.get(statementId), overrides?.get(statementId),
+                considered.collect { it.row.conclusionEnumId as String })
+        Map winner = considered[p.index as int]
+        return p + [line: winner]
     }
 
-    private static Map priorityOf(Map unit, Map levels) {
+    /** A unit's level fields; `causes` names the winning reason, `priorityLine` is the order's winning line (orders only). */
+    private static Map priorityOf(Map unit, Map levels, Map<String, Map> causes = [:]) {
         Map p = unitPriority(unit, levels.statementLevels as Map, levels.overrides as Map)
-        return [priority: p.level, prioritySource: p.source]
+        Map out = [priority: p.level, prioritySource: p.source,
+                   priorityReason: p.source == "reason" ? causes.get(p.conclusionEnumId as String)?.label : null]
+        if (unit.order) out.priorityLine = (p.line as Map)?.row?.findingId
+        return out
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -479,7 +486,7 @@ class AuditReportAssembler {
         return ((unit.waitingUnits ?: []) as List<Map>).collect { Map w ->
             Map f = unitFinding(w, day, recordsByFinding, causes, codes, levels)
             [statement: statementCodeById[w.statementId as String], id: f.id, headline: f.headline, cause: f.cause, item: itemOf(f),
-             priority: f.priority, prioritySource: f.prioritySource]
+             priority: f.priority, prioritySource: f.prioritySource, priorityReason: f.priorityReason]
         }
     }
 
@@ -517,7 +524,7 @@ class AuditReportAssembler {
             // get(), not [ ]: most lines have no conclusion, and map[null] dispatches to getProperty(null) and throws.
             Map cause = e.row.conclusionEnumId ? causes.get(e.row.conclusionEnumId as String) : null
             briefFinding(e, day, recordsByFinding[e.row.findingId as String] ?: [:], codes) +
-                    [cause: cause?.label ?: null, held: cause?.heldBy != null] + priorityOf([entries: [e]], levels)
+                    [cause: cause?.label ?: null, held: cause?.heldBy != null] + priorityOf([entries: [e]], levels, causes)
         }
         // DAR-BE-125: a lone finding keeps its cause in the catalog's words, which the board heads its findings by.
         if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> k != "held" }
@@ -548,7 +555,7 @@ class AuditReportAssembler {
                 stuck     : stuck*.id,
                 lines     : lines,
                 orderLines: orderLines(order, lines, context),
-                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels)
+                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels, causes)
     }
 
     /**
@@ -809,7 +816,7 @@ class AuditReportAssembler {
                         ageDays: brief.ageDays, records: brief.records, difference: brief.difference, next: brief.next,
                         // get(), not [ ]: a null key there dispatches to getProperty(null) and throws.
                         cause: row.conclusionEnumId ? causes.get(row.conclusionEnumId as String)?.label : null] +
-                    priorityOf([row: row, state: row.stateEnumId], levels)
+                    priorityOf([row: row, state: row.stateEnumId], levels, causes)
             [cursor: encodeFindingCursor([sort, rev, row.statementId, isoDate(row.firstFoundDate as Date), row.findingId]), node: node]
         }
         return [page: [edges   : edges,

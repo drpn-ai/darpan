@@ -416,7 +416,7 @@
                           auditId: auditList[0].auditId, statementCode: statementCode, categoryEnumId: categoryList[0].enumId,
                           weightEnumId: weightList[0].enumId, statementText: statementText, isActive: 'Y', sequenceNum: sequenceNum]"/>
             <entity-create value-field="statementValue"/>
-            <set field="statement" from="[id: statementValue.statementId, code: statementCode, text: statementText, active: true, checks: []]"/>
+            <set field="statement" from="[id: statementValue.statementId, code: statementCode, text: statementText, active: true, checks: [], priority: 'P2', reasons: []]"/>
             <set field="ok" from="true"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="[]"/>

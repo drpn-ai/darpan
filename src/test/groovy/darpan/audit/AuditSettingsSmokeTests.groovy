@@ -226,8 +226,8 @@ class AuditSettingsSmokeTests {
         Map first = facade("add#AuditStatement", [audit: "month-close-2", text: "Every order that is fulfilled is in NetSuite.",
                 category: "orders", weight: "firm"])
         assertFalse(first.hadError as boolean, first.errorText as String)
-        assertEquals([code: "R1", text: "Every order that is fulfilled is in NetSuite.", active: true, checks: []],
-                first.statement.subMap(["code", "text", "active", "checks"]))
+        assertEquals([code: "R1", text: "Every order that is fulfilled is in NetSuite.", active: true, checks: [], priority: "P2", reasons: []],
+                first.statement.subMap(["code", "text", "active", "checks", "priority", "reasons"]))
         Map second = facade("add#AuditStatement", [audit: "month-close-2", text: "Every return reaches NetSuite.", category: "returns"])
         assertEquals("R2", second.statement.code, "the next code")
         def row = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", second.statement.id).disableAuthz().useCache(false).one()

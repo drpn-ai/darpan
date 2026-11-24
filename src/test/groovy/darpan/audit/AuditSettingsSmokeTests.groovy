@@ -1,6 +1,8 @@
 package darpan.audit
 
 import darpan.reconciliation.support.SharedMoqui
+import darpan.peak.PeakReadPolicy
+import darpan.peak.ReadLimits
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.ExtractReplaySupport
@@ -24,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -78,6 +81,7 @@ class AuditSettingsSmokeTests {
 
     @AfterAll
     void cleanup() {
+        PeakReadPolicy.resetForTests()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -243,7 +247,8 @@ class AuditSettingsSmokeTests {
     void progressShowsEachRunInFlightWithItsChecksAndNothingOfAnotherTenant() {
         Map idle = facade("get#AuditProgress", [audit: "system-health"])
         assertFalse(idle.hadError as boolean, idle.errorText as String)
-        assertEquals([checks: 3, activeChecks: 0, active: []], idle.progress, "nothing in flight")
+        assertEquals([checks: 3, activeChecks: 0, active: []], (idle.progress as Map).findAll { it.key != "asOf" }, "nothing in flight")
+        assertNotNull((idle.progress as Map).asOf, "DAR-BE-350: the server time it was asked")
 
         String paid = checkRow("TSET_PAID").automationId
         String open = checkRow("TSET_OPEN").automationId
@@ -269,7 +274,23 @@ class AuditSettingsSmokeTests {
                     startedDate: new java.sql.Timestamp(now - 3 * 60_000L)])
         }
 
-        Map progress = facade("get#AuditProgress", [audit: "system-health"]).progress as Map
+        // DAR-BE-350: the same run's last success keeps each read's raw count; today's read is measured against it.
+        insert("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "TSET_PROG_PREV", companyUserGroupId: MINE,
+                savedRunId: "TSET_RS2", statusEnumId: "AUT_STAT_SUCCESS", startedDate: new java.sql.Timestamp(now - 86_400_000L - 20 * 60_000L),
+                completedDate: new java.sql.Timestamp(now - 86_400_000L)])
+        [[id: "TSET_PROG_P1", stage: "EXTRACT_FILE1", seq: 2L, count: 50000L], [id: "TSET_PROG_P2", stage: "EXTRACT_FILE2", seq: 3L, count: 59000L]].each { Map s ->
+            insert("darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: s.id, reconciliationRunResultId: "TSET_PROG_PREV",
+                    companyUserGroupId: MINE, stageCode: s.stage, stageSequence: s.seq, statusEnumId: "AUT_STAT_SUCCESS", recordCount: s.count])
+        }
+        PeakReadPolicy.resetForTests()
+        PeakReadPolicy.limitsLoader = { def x, String t -> t == MINE ? new ReadLimits(50, true) : ReadLimits.NONE }
+
+        Map progress
+        try {
+            progress = facade("get#AuditProgress", [audit: "system-health"]).progress as Map
+        } finally {
+            PeakReadPolicy.resetForTests()
+        }
         assertEquals(3, progress.checks)
         assertEquals(3, progress.activeChecks, "R2's two checks ride one automation, R1's on the other")
         assertEquals(["running", "queued"], progress.active*.state, "running first")
@@ -286,6 +307,12 @@ class AuditSettingsSmokeTests {
         assertNotEquals(steps[1].system, steps[2].system, "each side names its own system: ${steps}")
         Map queued = progress.active[1] as Map
         assertEquals([["open-in-netsuite"], 2, null], [queued.checks, queued.attempt, queued.health], "a retry waits; no health yet")
+        // DAR-BE-350: when each step last moved (server time), yesterday's raw count for the reads, the peak limits.
+        assertNotNull(progress.asOf)
+        assertEquals([null, 50000L, 59000L], steps.collect { it.expectedRecords as Long }, "extracts only, from the last successful run's raw count")
+        assertTrue(steps.every { it.movedDate != null && (it.movedDate as Timestamp) <= (progress.asOf as Timestamp) }, steps.toString())
+        assertEquals([hotwaxSharePct: 50, netsuiteSerial: true], running.limits)
+        assertNull(queued.limits, "a queued run carries no limits")
 
         assertTrue(facade("get#AuditProgress", [audit: "other-only"]).hadError as boolean, "another tenant's audit is not found")
     }

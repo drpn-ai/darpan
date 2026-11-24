@@ -13374,7 +13374,7 @@
                     },
                     "progress": {
                         "type": "object",
-                        "description": "{checks: configured checks, activeChecks, active: [{run,\n                checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,\n                usualDurationMs (a past successful run over a window as long; absent when none), health: healthy | slow |\n                stuck, healthReason, steps: [{stage, status: running | done | failed, records (so far while running),\n                startedDate, completedDate, system (extract steps: the system that side reads)}] in run order\n                (DAR-BE-173)}]}"
+                        "description": "{checks: configured checks, asOf (server time of this answer), activeChecks, active: [{run,\n                checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,\n                usualDurationMs (a past successful run over a window as long; absent when none), health: healthy | slow |\n                stuck, healthReason, steps: [{stage, status: running | done | failed, records (so far while running),\n                startedDate, completedDate, movedDate (last write: a read's last page), system (extract steps: the system that\n                side reads), expectedRecords (extract steps: the raw count of the same read on the last successful run)}] in run\n                order (DAR-BE-173), limits ({hotwaxSharePct, netsuiteSerial} while a peak period limits the tenant's reads;\n                DAR-BE-350)}]}"
                     }
                 }
             },

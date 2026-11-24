@@ -273,14 +273,18 @@ class AuditSettingsSupport {
                              progressPercent: run?.progressPercent]
                 if (run) {
                     Timestamp started = (run.startedDate ?: execution.startedDate) as Timestamp
-                    def last = RunHealth.lastSuccessfulRun(rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId),
+                    Long usual = RunHealth.usualDurationMs(rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId),
                             tenantId, run.savedRunId as String, run.windowStartDate, run.windowEndDate)
-                    Long usual = RunHealth.durationOf(last)
                     Map health = RunHealth.of(run + [startedDate: started, usualDurationMs: usual], now)
+                    // DAR-BE-350. This automation's own last success is the reads' baseline (another automation on the
+                    // same saved run, or a manual run, reads with other filters).
+                    String previousRunResultId = rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
+                            .condition("automationId", automationId).condition("statusEnumId", AutomationExecutionSupport.STATUS_SUCCEEDED)
+                            .condition("reconciliationRunResultId", EntityCondition.NOT_EQUAL, null)
+                            .orderBy("-completedDate").limit(1).list().find()?.get("reconciliationRunResultId") as String
                     entry += [elapsedMs: started ? now.time - started.time : null, usualDurationMs: usual,
                               health: health.health, healthReason: health.reason,
-                              steps: steps(ec, tenantId, run.reconciliationRunResultId as String, automationId,
-                                      last?.get("reconciliationRunResultId") as String)]
+                              steps: steps(ec, tenantId, run.reconciliationRunResultId as String, automationId, previousRunResultId)]
                     // DAR-BE-350. A peak period's read limits, so a run slowed on purpose says why.
                     ReadLimits limits = PeakReadPolicy.limitsFor(ec, tenantId)
                     if (limits != null && (limits.hotwaxSharePct != null || limits.netsuiteSerial)) {
@@ -468,11 +472,13 @@ class AuditSettingsSupport {
             [(source.fileSide as String): ReconciliationServices.resolveEnumLabel(ec, source.systemEnumId as String, source.systemEnumId as String)]
         }
         Map<String, String> sideOfStage = [(RunObservability.STAGE_EXTRACT_FILE1): "FILE_1", (RunObservability.STAGE_EXTRACT_FILE2): "FILE_2"]
-        // DAR-BE-350. Each read's raw count on the previous successful run (pages read, not records kept): today's estimate.
+        // DAR-BE-350. Each read's page count on the previous success (metricsJson.readCount, kept by endStep; recordCount is
+        // the connector's own count, in other units): today's estimate. A read that never heartbeated has none.
         Map<String, Object> expectedByStage = previousRunResultId ? rows(ec, "darpan.reconciliation.ReconciliationRunStep", tenantId)
                 .condition("reconciliationRunResultId", previousRunResultId)
-                .condition("stageCode", EntityCondition.IN, sideOfStage.keySet() as List).list()
-                .findAll { it.recordCount != null }.collectEntries { [(it.stageCode as String): it.recordCount] } : [:]
+                .condition("stageCode", EntityCondition.IN, sideOfStage.keySet() as List)
+                .condition("statusEnumId", RunObservability.STATUS_SUCCESS).orderBy("startedDate").list()
+                .collectEntries { [(it.stageCode as String): readCountOf(it.metricsJson as String)] }.findAll { it.value != null } : [:]
         return rows(ec, "darpan.reconciliation.ReconciliationRunStep", tenantId)
                 .condition("reconciliationRunResultId", runResultId).orderBy(["stageSequence", "startedDate"]).list().collect { step ->
             String stage = step.stageCode as String
@@ -481,8 +487,8 @@ class AuditSettingsSupport {
                        records      : step.recordCount,
                        startedDate  : step.startedDate,
                        completedDate: step.completedDate,
-                       // DAR-BE-350. A read's page heartbeat updates its row, so this is when its last page landed.
-                       movedDate    : step.lastUpdatedStamp]
+                       // DAR-BE-350. When its last page landed; none for a step that never heartbeats (Shopify bulk).
+                       movedDate    : step.heartbeatDate]
             String side = sideOfStage[stage]
             if (side) out.system = systemBySide[side]
             if (side && expectedByStage[stage] != null) out.expectedRecords = expectedByStage[stage]
@@ -490,7 +496,13 @@ class AuditSettingsSupport {
         }
     }
 
-    private static final Map<String, String> STEP_STATUS = [(RunObservability.STATUS_RUNNING): "running",
+    private static Long readCountOf(String metricsJson) {
+        if (!metricsJson?.contains("readCount")) return null
+        try { return (new groovy.json.JsonSlurper().parseText(metricsJson) as Map)?.readCount as Long }
+        catch (Exception ignored) { return null }
+    }
+
+    private static final Map<String, String> STEP_STATUS =[(RunObservability.STATUS_RUNNING): "running",
             (RunObservability.STATUS_SUCCESS): "done", (RunObservability.STATUS_FAILED): "failed"].asImmutable()
 
     private static List<Map> automationsOf(def ec, String tenantId, List<Map> checks) {

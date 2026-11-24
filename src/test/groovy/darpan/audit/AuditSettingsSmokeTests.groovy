@@ -266,21 +266,34 @@ class AuditSettingsSmokeTests {
                 companyUserGroupId: OTHER, statusEnumId: "AUT_STAT_RUNNING", retryCount: 0L])
         // DAR-BE-173: the run's steps with their counts so far; both sides read at once.
         [[id: "TSET_PROG_S0", stage: "RESOLVE", seq: 1L, status: "AUT_STAT_SUCCESS", count: null, tenant: MINE],
-         [id: "TSET_PROG_S1", stage: "EXTRACT_FILE1", seq: 2L, status: "AUT_STAT_RUNNING", count: 48210L, tenant: MINE],
+         [id: "TSET_PROG_S1", stage: "EXTRACT_FILE1", seq: 2L, status: "AUT_STAT_RUNNING", count: 48210L, tenant: MINE, beat: now - 30_000L],
          [id: "TSET_PROG_S2", stage: "EXTRACT_FILE2", seq: 3L, status: "AUT_STAT_RUNNING", count: 61002L, tenant: MINE],
          [id: "TSET_PROG_S9", stage: "COMPARE", seq: 5L, status: "AUT_STAT_RUNNING", count: null, tenant: OTHER]].each { Map s ->
             insert("darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: s.id, reconciliationRunResultId: "TSET_PROG_RR",
                     companyUserGroupId: s.tenant, stageCode: s.stage, stageSequence: s.seq, statusEnumId: s.status, recordCount: s.count,
-                    startedDate: new java.sql.Timestamp(now - 3 * 60_000L)])
+                    startedDate: new java.sql.Timestamp(now - 3 * 60_000L), heartbeatDate: s.beat ? new java.sql.Timestamp(s.beat as long) : null])
         }
 
-        // DAR-BE-350: the same run's last success keeps each read's raw count; today's read is measured against it.
+        // DAR-BE-350: this automation's last successful execution is the baseline; its reads kept their page counts
+        // (metricsJson.readCount) beside the connector's own (recordCount, here the kept lines).
+        long day = 86_400_000L
         insert("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "TSET_PROG_PREV", companyUserGroupId: MINE,
-                savedRunId: "TSET_RS2", statusEnumId: "AUT_STAT_SUCCESS", startedDate: new java.sql.Timestamp(now - 86_400_000L - 20 * 60_000L),
-                completedDate: new java.sql.Timestamp(now - 86_400_000L)])
-        [[id: "TSET_PROG_P1", stage: "EXTRACT_FILE1", seq: 2L, count: 50000L], [id: "TSET_PROG_P2", stage: "EXTRACT_FILE2", seq: 3L, count: 59000L]].each { Map s ->
-            insert("darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: s.id, reconciliationRunResultId: "TSET_PROG_PREV",
-                    companyUserGroupId: MINE, stageCode: s.stage, stageSequence: s.seq, statusEnumId: "AUT_STAT_SUCCESS", recordCount: s.count])
+                savedRunId: "TSET_RS2", statusEnumId: "AUT_STAT_SUCCESS", startedDate: new java.sql.Timestamp(now - day - 20 * 60_000L),
+                completedDate: new java.sql.Timestamp(now - day)])
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_PROG_XPREV", automationId: paid,
+                companyUserGroupId: MINE, statusEnumId: "AUT_STAT_SUCCESS", reconciliationRunResultId: "TSET_PROG_PREV",
+                startedDate: new java.sql.Timestamp(now - day - 20 * 60_000L), completedDate: new java.sql.Timestamp(now - day), retryCount: 0L])
+        // A newer manual run of the same saved run is not this automation's read, and another tenant's row is never read.
+        insert("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "TSET_PROG_MANUAL", companyUserGroupId: MINE,
+                savedRunId: "TSET_RS2", statusEnumId: "AUT_STAT_SUCCESS", startedDate: new java.sql.Timestamp(now - 80 * 60_000L),
+                completedDate: new java.sql.Timestamp(now - 60 * 60_000L)])
+        [[id: "TSET_PROG_P1", run: "TSET_PROG_PREV", stage: "EXTRACT_FILE1", seq: 2L, kept: 50L, read: 50000L, tenant: MINE],
+         [id: "TSET_PROG_P2", run: "TSET_PROG_PREV", stage: "EXTRACT_FILE2", seq: 3L, kept: 59L, read: 59000L, tenant: MINE],
+         [id: "TSET_PROG_PX", run: "TSET_PROG_PREV", stage: "EXTRACT_FILE1", seq: 2L, kept: 1L, read: 99999L, tenant: OTHER],
+         [id: "TSET_PROG_M1", run: "TSET_PROG_MANUAL", stage: "EXTRACT_FILE1", seq: 2L, kept: 7L, read: 77777L, tenant: MINE]].each { Map s ->
+            insert("darpan.reconciliation.ReconciliationRunStep", [reconciliationRunStepId: s.id, reconciliationRunResultId: s.run,
+                    companyUserGroupId: s.tenant, stageCode: s.stage, stageSequence: s.seq, statusEnumId: "AUT_STAT_SUCCESS",
+                    recordCount: s.kept, metricsJson: groovy.json.JsonOutput.toJson([readCount: s.read])])
         }
         PeakReadPolicy.resetForTests()
         PeakReadPolicy.limitsLoader = { def x, String t -> t == MINE ? new ReadLimits(50, true) : ReadLimits.NONE }
@@ -309,8 +322,10 @@ class AuditSettingsSmokeTests {
         assertEquals([["open-in-netsuite"], 2, null], [queued.checks, queued.attempt, queued.health], "a retry waits; no health yet")
         // DAR-BE-350: when each step last moved (server time), yesterday's raw count for the reads, the peak limits.
         assertNotNull(progress.asOf)
-        assertEquals([null, 50000L, 59000L], steps.collect { it.expectedRecords as Long }, "extracts only, from the last successful run's raw count")
-        assertTrue(steps.every { it.movedDate != null && (it.movedDate as Timestamp) <= (progress.asOf as Timestamp) }, steps.toString())
+        assertEquals([null, 50000L, 59000L], steps.collect { it.expectedRecords as Long },
+                "reads only, the page count of this automation's last success: not its kept count, a manual run's, or another tenant's")
+        assertEquals([null, now - 30_000L, null], steps.collect { (it.movedDate as Timestamp)?.time },
+                "moved = the last page heartbeat; a read that never heartbeats has none")
         assertEquals([hotwaxSharePct: 50, netsuiteSerial: true], running.limits)
         assertNull(queued.limits, "a queued run carries no limits")
 

@@ -265,8 +265,9 @@
                 checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,
                 usualDurationMs (a past successful run over a window as long; absent when none), health: healthy | slow |
                 stuck, healthReason, steps: [{stage, status: running | done | failed, records (so far while running),
-                startedDate, completedDate, movedDate (last write: a read's last page), system (extract steps: the system that
-                side reads), expectedRecords (extract steps: the raw count of the same read on the last successful run)}] in run
+                startedDate, completedDate, movedDate (a read's last page heartbeat; absent for reads that never heartbeat), system (extract steps: the system
+                that side reads), expectedRecords (extract steps: the page count the same read heartbeated on this automation's
+                last successful run, metricsJson.readCount)}] in run
                 order (DAR-BE-173), limits ({hotwaxSharePct, netsuiteSerial} while a peak period limits the tenant's reads;
                 DAR-BE-350)}]}</description></parameter>
         </out-parameters>

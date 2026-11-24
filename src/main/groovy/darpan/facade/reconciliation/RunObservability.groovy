@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import groovy.json.JsonOutput
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -370,6 +371,15 @@ class RunObservability {
         Timestamp now = nowSafe(ec)
         try {
             ec.transaction.runUseOrBegin(30, "Error ending reconciliation step", {
+                // DAR-BE-350. A read's last page count (heartbeats write it through their own copy of the row, so read it
+                // fresh) is kept before recordCount takes the connector's count: the next run's estimate is in pages.
+                if (metrics?.get("metricsJson") == null && step.get("reconciliationRunStepId") != null) {
+                    def fresh = ec.entity.find(RUN_STEP_ENTITY).condition("reconciliationRunStepId", step.get("reconciliationRunStepId"))
+                            .useCache(false).one()
+                    if (fresh?.get("heartbeatDate") != null && fresh.get("recordCount") != null) {
+                        step.set("metricsJson", JsonOutput.toJson([readCount: fresh.get("recordCount")]))
+                    }
+                }
                 step.set("statusEnumId", statusEnumId)
                 step.set("completedDate", now)
                 if (metrics?.get("recordCount") != null) step.set("recordCount", metrics.get("recordCount"))

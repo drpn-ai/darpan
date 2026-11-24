@@ -71,28 +71,16 @@ class RunHealth {
      * explicit companyUserGroupId condition is added here as well).
      */
     static Long usualDurationMs(def find, String tenantId, String savedRunId, Object windowStart = null, Object windowEnd = null) {
-        return durationOf(lastSuccessfulRun(find, tenantId, savedRunId, windowStart, windowEnd))
-    }
-
-    /** A finished run's start to completion; null when either is missing. */
-    static Long durationOf(def run) {
-        Timestamp started = run?.get("startedDate") as Timestamp
-        Timestamp completed = run?.get("completedDate") as Timestamp
-        return (started && completed) ? completed.time - started.time : null
-    }
-
-    /**
-     * The saved run's last successful run over about as long a window (the one usualDurationMs measures); null without
-     * one. DAR-BE-350: its steps keep each read's raw count, today's read's estimate.
-     */
-    static def lastSuccessfulRun(def find, String tenantId, String savedRunId, Object windowStart = null, Object windowEnd = null) {
         if (!savedRunId) return null
         Long span = windowDays(windowStart, windowEnd)
-        return (find.condition("companyUserGroupId", tenantId)
+        def last = (find.condition("companyUserGroupId", tenantId)
                 .condition("savedRunId", savedRunId)
                 .condition("statusEnumId", RunObservability.STATUS_SUCCESS)
                 .orderBy("-completedDate").limit(span == null ? 1 : USUAL_LOOKBACK).useCache(false).list() ?: [])
                 .find { span == null || aboutAsLong(span, windowDays(it.get("windowStartDate"), it.get("windowEndDate"))) }
+        Timestamp started = last?.get("startedDate") as Timestamp
+        Timestamp completed = last?.get("completedDate") as Timestamp
+        return (started && completed) ? completed.time - started.time : null
     }
 
     /** Whole days a window covers (rounded, so a zone change inside it does not split one length into two); null when open. */

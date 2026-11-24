@@ -130,6 +130,35 @@ class RunObservabilityWriteTest {
         assertNull(run.get("progressPercent"))
     }
 
+    // DAR-BE-350: a read's last page count is the next run's estimate, but ending the step overwrites recordCount with
+    // the connector's own count (rows written, units, after filters), so the page count is kept as metricsJson.readCount.
+    @Test
+    void endingAReadThatHeartbeatedKeepsItsPageCount() {
+        def ec = new FakeEc()
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])
+        def step = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_EXTRACT_FILE1)
+        RunObservability.heartbeatStageProgress(ec, runId, RunObservability.STAGE_EXTRACT_FILE1, 8450, null)
+
+        RunObservability.endStep(ec, step, RunObservability.STATUS_SUCCESS, [recordCount: 120])
+
+        assertEquals(120, step.get("recordCount"), "the step's own count is the connector's")
+        assertEquals('{"readCount":8450}', step.get("metricsJson"))
+    }
+
+    @Test
+    void endingAStepThatNeverHeartbeatedOrNamesItsOwnMetricsKeepsNoPageCount() {
+        def ec = new FakeEc()
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])
+        def silent = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_EXTRACT_FILE1)
+        RunObservability.endStep(ec, silent, RunObservability.STATUS_SUCCESS, [recordCount: 120])
+        assertNull(silent.get("metricsJson"), "a read with no page heartbeat (Shopify bulk) has no page count")
+
+        def own = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_EXTRACT_FILE2)
+        RunObservability.heartbeatStageProgress(ec, runId, RunObservability.STAGE_EXTRACT_FILE2, 300, null)
+        RunObservability.endStep(ec, own, RunObservability.STATUS_SUCCESS, [recordCount: 300, metricsJson: '{"skipReason":"x"}'])
+        assertEquals('{"skipReason":"x"}', own.get("metricsJson"), "a step's own metrics win")
+    }
+
     @Test
     void heartbeatStageProgressCountsRecordsWithoutAnExpectedTotal() {
         // The first extract of a run has no denominator to divide by — nothing has finished yet —

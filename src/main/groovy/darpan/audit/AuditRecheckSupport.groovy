@@ -34,14 +34,16 @@ class AuditRecheckSupport {
      * Answers what it read ([keys: side -> count, records: side -> count, failure]), or null when there was nothing to re-check.
      */
     static Map appendOpenFindings(def ec, def automation, List<Map> checks, Map window, List<Map> sides, Closure readByKey,
-                                  Closure onStart = null) {
+                                  Closure onStart = null, Closure readChanged = null) {
         if (!checks || window?.auditRecentReadStartDate == null || !window?.auditPeriod) return null
         List<Map> live = sides.findAll { it.source != null }
         if (!live || live.any { !it.result?.fileLocation } || !live.any { AuditRecentReadSupport.sourceReadsRecentOnly(ec, it.source) }) return null
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
         List<String> ordered = oldestFirstKeys(openFindings(ec, tenantId, checks*.checkId, window.auditPeriod as String))
         Set<String> open = ordered as Set<String>
-        if (!open) return null
+        // DAR-BE-356: with readChanged, the recent-only sides' records that changed since the recent read started are
+        // asked too, so there is something to do even with no open finding.
+        if (!open && readChanged == null) return null
         onStart?.call()
         String scopeId = normalize(readField(automation, "compareScopeId"))
         List<Map> plan
@@ -49,7 +51,8 @@ class AuditRecheckSupport {
             plan = live.collect { Map side ->
                 String fileSide = normalize(readField(side.source, "fileSide"))
                 [side: side, fileSide: fileSide, keyField: firstKeyField(ec, scopeId, fileSide),
-                 file: RunVerificationSupport.resolveLocationFile(ec, side.result.fileLocation as String)]
+                 file: RunVerificationSupport.resolveLocationFile(ec, side.result.fileLocation as String),
+                 recentOnly: AuditRecentReadSupport.sourceReadsRecentOnly(ec, side.source)]
             }
         } catch (Exception e) {
             String reason = "Older findings were not re-checked: ${e.message}".toString()
@@ -57,14 +60,71 @@ class AuditRecheckSupport {
             logger.warn("Audit re-check (${window.auditPeriod}) failed: ${e.message}")
             return [keys: [:], records: [:], failure: reason]
         }
-        Map outcome = readAndAppend(plan, ordered) { Map side, List<String> keys ->
-            Map out = (Map) readByKey.call(side.source, keys)
-            RunVerificationSupport.resolveLocationFile(ec, normalize(out?.fileLocation))
-        }
+        Map changed = readChanged == null ? [keys: []] : readChangedFiles(plan, { Map side ->
+            Map out = (Map) readChanged.call(side.source)
+            out == null ? null : RunVerificationSupport.resolveLocationFile(ec, normalize(out.fileLocation))
+        })
+        List<String> changedKeys = changed.failure ? [] : ((List<String>) changed.keys).findAll { !open.contains(it) }
+        // Nothing to read by key: no side is asked, so a side with no plain key never fails a check that had nothing to do.
+        Map outcome = !(ordered || changedKeys) ? [keys: [:], records: [:], millis: 0L] :
+                readAndAppend(plan, ordered + changedKeys) { Map side, List<String> keys ->
+                    Map out = (Map) readByKey.call(side.source, keys)
+                    RunVerificationSupport.resolveLocationFile(ec, normalize(out?.fileLocation))
+                }
+        // DAR-BE-356: a side's changed records join its extract only once every read by key finished, as readAndAppend's
+        // own records do, so an older order is never judged with one side only.
+        if (!outcome.failure && !changed.failure) appendChangedFiles(plan, (Map<String, Integer>) outcome.records)
+        outcome.changedKeys = changedKeys.size()
+        if (changed.failure && !outcome.failure) outcome.failure = changed.failure
         if (outcome.failure) logger.warn("Audit re-check (${window.auditPeriod}) failed after ${outcome.keys}: ${outcome.failure}")
-        else logger.info("Audit re-check (${window.auditPeriod}): ${open.size()} open finding key(s); read again by key ${outcome.keys}, " +
-                "records added ${outcome.records}, in ${outcome.millis} ms")
+        else logger.info("Audit re-check (${window.auditPeriod}): ${open.size()} open finding key(s), ${changedKeys.size()} changed " +
+                "record key(s); read again by key ${outcome.keys}, records added ${outcome.records}, in ${outcome.millis} ms")
         return outcome
+    }
+
+    /**
+     * DAR-BE-356. For each recent-only side of `plan`, readChanged(side) answers the file of the window's records that
+     * changed since its recent read started (null: the side's extractor cannot say). The keys of those its extract lacks are
+     * answered, so every other side reads them by key as it reads an open finding's: an older order a recent read never held
+     * is compared on both sides, never as missing from the side read by date. The side keeps the file (changedFile) and
+     * counts those keys as held (held), so readAndAppend does not ask it for them again. Nothing is appended here. A side
+     * that fails sets recheckFailure (the check is partial, and says why).
+     */
+    static Map readChangedFiles(List<Map> plan, Closure readChanged) {
+        LinkedHashSet<String> keys = new LinkedHashSet<String>()
+        for (Map p : plan) {
+            if (!p.recentOnly || !p.keyField || p.file == null) continue
+            try {
+                File f = (File) readChanged.call(p.side)
+                if (f == null) continue
+                LinkedHashSet<String> fileKeys = new LinkedHashSet<String>()
+                JsonRecordStream.forEachRecord(f, "records") { Map r -> String v = normalize(r.get(p.keyField)); if (v) fileKeys.add(v) }
+                Set<String> lacking = missingKeys((File) p.file, (String) p.keyField, fileKeys)
+                p.changedFile = f
+                p.held = lacking
+                keys.addAll(fileKeys.findAll { lacking.contains(it) })
+            } catch (Exception e) {
+                String reason = "Records changed since the last read were not re-read: ${e.message}".toString()
+                ((Map) ((Map) p.side).result).recheckFailure = reason
+                return [keys: [], failure: reason]
+            }
+        }
+        return [keys: keys as List<String>]
+    }
+
+    /** DAR-BE-356. Appends each side's changed records (readChangedFiles) its extract lacks, counted on its result and in records. */
+    static void appendChangedFiles(List<Map> plan, Map<String, Integer> records) {
+        plan.findAll { it.changedFile != null }.each { Map p ->
+            Set<String> held = (Set<String>) (p.held ?: [] as Set<String>)
+            Set<String> already = new HashSet<String>()
+            JsonRecordStream.forEachRecord((File) p.changedFile, "records") { Map r ->
+                String v = normalize(r.get(p.keyField)); if (v && !held.contains(v)) already.add(v)
+            }
+            int added = append((File) p.file, (File) p.changedFile, (String) p.keyField, already)
+            Map result = (Map) ((Map) p.side).result
+            result.recordCount = ((result.recordCount ?: 0) as int) + added
+            records[(String) p.fileSide] = (records[(String) p.fileSide] ?: 0) + added
+        }
     }
 
     /**
@@ -83,7 +143,9 @@ class AuditRecheckSupport {
                 failing = p
                 if (!p.keyField || p.file == null) throw new IllegalStateException("its ${p.fileSide} key cannot be read")
                 // A side that already holds a key has today's record for it: only the keys it lacks are asked of it.
-                p.read = batches(ordered, missingKeys((File) p.file, (String) p.keyField, open)).collect { List<String> keys ->
+                // DAR-BE-356: keys the side holds in its changed records (held) are not asked of it either.
+                Set<String> lacking = missingKeys((File) p.file, (String) p.keyField, open) - ((Set<String>) (p.held ?: [] as Set<String>))
+                p.read = batches(ordered, lacking).collect { List<String> keys ->
                     File f = (File) readSide.call(p.side, keys)
                     if (f == null) throw new IllegalStateException("the ${p.fileSide} read by key wrote no file")
                     keysRead[(String) p.fileSide] = (keysRead[(String) p.fileSide] ?: 0) + keys.size()

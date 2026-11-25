@@ -142,4 +142,62 @@ class AuditRecheckSupportTests {
         assertEquals("Older findings were not re-checked: its FILE_1 key cannot be read", plan[0].side.result.recheckFailure)
         assertTrue(outcome.failure as boolean)
     }
+
+    @Test
+    void anOlderOrderThatChangedIsComparedOnBothSidesNeverAsMissingFromNetsuite() {
+        // DAR-BE-356: gorjana M1214814 was placed Nov 3 and completed Nov 8; the recent HotWax read (orderDate, last ~2 days)
+        // never held it, so R1 never compared it. HotWax answers it as changed; NetSuite is read for it by key, as for an open
+        // finding; HotWax is not asked again for what its changed read holds.
+        File oms = extract("oms.json", [[omsOrderId: "M1306138", orderItemSeqId: "01"]])
+        File ns = extract("ns.json", [[orderId: "M1306138", orderLineId: "01"]])
+        List<Map> plan = [[side: [result: [recordCount: 1]], fileSide: "FILE_1", keyField: "omsOrderId", file: oms, recentOnly: true],
+                          [side: [result: [recordCount: 1]], fileSide: "FILE_2", keyField: "orderId", file: ns, recentOnly: false]]
+        File changedFile = extract("oms-changed.json", [[omsOrderId: "M1214814", orderItemSeqId: "02", unitState: "COMPLETED"],
+                                                       [omsOrderId: "M1306138", orderItemSeqId: "01"]])
+        List<String> askedChanged = []
+        Map changed = AuditRecheckSupport.readChangedFiles(plan) { Map side ->
+            askedChanged.add(plan.find { it.side.is(side) }.fileSide as String)
+            changedFile
+        }
+        assertEquals(["FILE_1"], askedChanged, "only the side read by date is asked what changed")
+        assertEquals(["M1214814"], changed.keys, "an order the recent read already holds is not re-read anywhere")
+
+        Map asked = [:]
+        Map outcome = AuditRecheckSupport.readAndAppend(plan, ["M1"] + (List<String>) changed.keys) { Map side, List<String> keys ->
+            String fileSide = plan.find { it.side.is(side) }.fileSide
+            asked[fileSide] = keys
+            fileSide == "FILE_1" ? extract("oms-key.json", [[omsOrderId: "M1"]]) :
+                    extract("ns-key.json", [[orderId: "M1214814", orderLineId: "02", lineState: "OPEN"]])
+        }
+        assertEquals([FILE_1: ["M1"], FILE_2: ["M1", "M1214814"]], asked, "HotWax holds M1214814 in its changed read")
+        assertEquals(["M1306138", "M1"], records(oms)*.omsOrderId, "changed records wait until every read by key finished")
+
+        AuditRecheckSupport.appendChangedFiles(plan, (Map<String, Integer>) outcome.records)
+        assertEquals(["M1306138", "M1", "M1214814"], records(oms)*.omsOrderId, "M1306138 once: the recent read had it")
+        assertEquals(["M1306138", "M1214814"], records(ns)*.orderId)
+        assertEquals(3, plan[0].side.result.recordCount)
+        assertEquals(2, outcome.records.FILE_1)
+    }
+
+    @Test
+    void aChangedReadThatFailsAddsNothingAndSaysWhy() {
+        File oms = extract("oms.json", [[omsOrderId: "M9"]])
+        List<Map> plan = [[side: [result: [:]], fileSide: "FILE_1", keyField: "omsOrderId", file: oms, recentOnly: true]]
+        Map changed = AuditRecheckSupport.readChangedFiles(plan) { Map side -> throw new IllegalStateException("OMS GraphQL changed-orders read failed [THROTTLED]") }
+        assertEquals("Records changed since the last read were not re-read: OMS GraphQL changed-orders read failed [THROTTLED]", changed.failure)
+        assertEquals(changed.failure, plan[0].side.result.recheckFailure, "the check is partial and says why")
+        assertEquals([], changed.keys)
+        assertEquals(["M9"], records(oms)*.omsOrderId)
+    }
+
+    @Test
+    void aSideWhoseExtractorCannotSayWhatChangedIsLeftAsItIs() {
+        File oms = extract("oms.json", [[omsOrderId: "M9"]])
+        List<Map> plan = [[side: [result: [:]], fileSide: "FILE_1", keyField: "omsOrderId", file: oms, recentOnly: true]]
+        Map changed = AuditRecheckSupport.readChangedFiles(plan) { Map side -> null }
+        assertEquals([], changed.keys)
+        assertEquals(null, changed.failure)
+        AuditRecheckSupport.appendChangedFiles(plan, [:])
+        assertEquals(["M9"], records(oms)*.omsOrderId)
+    }
 }

@@ -533,7 +533,8 @@ class AutomationExecutionSupport {
             Map<String, Map<String, Object>> replay = ExtractReplaySupport.replayResults(ec,
                     normalize(readField(automation, "companyUserGroupId")), replayFrom, !evaluateMode)
             extract = { def extractEc, def extractAutomation, def source, Map<String, Object> extractWindow, Map extractParams ->
-                extractParams?.lookupKeys ? sourceExtractor.call(extractEc, extractAutomation, source, extractWindow, extractParams) :
+                // DAR-BE-356: so does a read of what changed since the recent read, which the replayed window file is not.
+                extractParams?.lookupKeys || extractParams?.changedSince != null ? sourceExtractor.call(extractEc, extractAutomation, source, extractWindow, extractParams) :
                         new LinkedHashMap<String, Object>(replay[normalize(readField(source, "fileSide"))])
             }
         }
@@ -701,7 +702,16 @@ class AutomationExecutionSupport {
                             sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
                                     DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-recheck")]
                     return normalizeSourceResult(extract.call(ec, automation, source, recheckWindow, byKey), source)
-                }, { -> openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_RECHECK) })
+                }, { -> openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_RECHECK) }, { def source ->
+                    // DAR-BE-356: the window's orders that changed since the recent read started (an order placed Nov 3 and
+                    // completed Nov 8 is outside every orderDate read after Nov 5), from an extractor that can say so.
+                    String changedService = normalize(extractTarget(ec, source, windowParams)?.serviceName)
+                    if (!declaresParameter(ec, changedService, "changedSince")) return null
+                    Map<String, Object> byChange = new LinkedHashMap<String, Object>(windowParams) + [changedSince: window.auditRecentReadStartDate,
+                            sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
+                                    DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-changed")]
+                    return normalizeSourceResult(extract.call(ec, automation, source, recheckWindow, byChange), source)
+                })
                 if (openStep != null) {
                     // DAR-BE-156: the run page's own row for the re-check. A failed re-check fails its step, not the run: the
                     // recent read is still compared, and the check's reason says the older findings were not re-checked.
@@ -2507,6 +2517,12 @@ class AutomationExecutionSupport {
             if (params?.lookupWithinWindow && ec.service.getServiceDefinition(serviceName)?.inParameterNameList?.contains("lookupWithinWindow")) {
                 serviceParams.lookupWithinWindow = true
             }
+        }
+        // DAR-BE-356: an audit's read of the window's records that changed since its recent read started, sent only to an
+        // extractor that declares it: any other would read the whole window instead.
+        if (params?.changedSince != null) {
+            if (!declaresParameter(ec, serviceName, "changedSince")) throw new IllegalStateException("${serviceName} cannot read changed records")
+            serviceParams.changedSince = params.changedSince
         }
         // DAR-BE-318 plan 3a: the window from the tenant's kept copy when the copy covers it; otherwise the live read below.
         Map served = KeptCopySupport.sliceIfServed(ec, KeptCopySupport.side(connectorForService, serviceParams, [

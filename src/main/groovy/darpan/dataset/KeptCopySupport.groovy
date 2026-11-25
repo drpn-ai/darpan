@@ -196,7 +196,8 @@ class KeptCopySupport {
                 projectionServiceName: projects ? projectionName : null,
                 // Y: the extract writes the excluded-records side file, N: it does not, null: undeclared
                 excludedRecordsSidecar: normalize(connector?.excludedRecordsSidecar)?.toUpperCase() ?: null,
-                byKeys         : p.get("lookupKeys") != null,
+                // DAR-BE-356: a read of what changed since an instant is never the window's copy either.
+                byKeys         : p.get("lookupKeys") != null || p.get("changedSince") != null,
                 outputLocation : normalize(p.outputLocation),
                 fileName       : normalize(p.fileName),
                 outputRunId    : normalize(run?.outputRunId),

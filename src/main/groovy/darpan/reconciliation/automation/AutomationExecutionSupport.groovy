@@ -233,8 +233,12 @@ class AutomationExecutionSupport {
         reconcileRunner = DEFAULT_RECONCILE_RUNNER
     }
 
+    /** DAR-BE-015 test seam: replaces AuditAutomationSupport.recordWindow for a NO_DATA close. Null in production. */
+    static Closure noDataWindowRecorder = null
+
     /** DAR-OPS-026: restores every mutable seam in this class (hooks, peak loaders, admission) to its default. Test-only. */
     static void resetForTests() {
+        noDataWindowRecorder = null
         try {
             resetExecutionHooks()
             peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
@@ -757,15 +761,15 @@ class AutomationExecutionSupport {
                     // only runs after a won notification claim). An orphan there never fires AND pins
                     // its chat space against deletion forever, so purge it here.
                     TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
-                    // A verify or evaluate reads one side by design: its empty side is not a failed read.
+                    // A verify reads one side by design: its empty side is its answer, not a failed read.
                     String sideReason = null
-                    if (!verifying && !evaluateMode) {
+                    if (!verifying) {
                         String label1 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId"))))
                         String label2 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId"))))
-                        sideReason = AutomationExecutionSupport.noDataReason(label1, file1Result?.readCount as Integer, file1Result?.recordCount as Integer,
-                                label2, file2Result?.readCount as Integer, file2Result?.recordCount as Integer)
+                        sideReason = AutomationExecutionSupport.windowNoDataReason(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)
                     }
-                    AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
+                    Closure recorder = AutomationExecutionSupport.noDataWindowRecorder ?: AuditAutomationSupport.&recordWindow
+                    recorder.call(ec, automation, auditChecks, window, file1Source, file2Source,
                             file1Result, file2Result, null, null, automationExecutionId, auditSideConfigIds, sideReason)
                     executionResults << noDataFields + [
                             automationExecutionId: automationExecutionId,
@@ -3327,6 +3331,33 @@ class AutomationExecutionSupport {
         if (kept1 != null && kept1 == 0) return "The ${side1Label} side kept 0 of ${String.format('%,d', r1)} records.".toString()
         if (kept2 != null && kept2 == 0) return "The ${side2Label} side kept 0 of ${String.format('%,d', r2)} records.".toString()
         return null
+    }
+
+    /**
+     * DAR-BE-015. The did-not-run reason of a NO_DATA window. A side's read is what its recent read returned, or the records Keep
+     * was given when more (an audit re-check appends records to a side whose recent read was empty); its kept count is its
+     * recordCount, which the post-Keep path has already set from Keep. An evaluate reads one side by design: only its side 1
+     * can have kept nothing.
+     */
+    static String windowNoDataReason(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
+        Integer read1 = keepGiven(file1Result, reconcileResult, "file1")
+        Integer read2 = keepGiven(file2Result, reconcileResult, "file2")
+        Integer kept1 = file1Result?.recordCount as Integer
+        Integer kept2 = file2Result?.recordCount as Integer
+        if (evaluateMode) {
+            return read1 > 0 && kept1 == 0 ? noDataReason(label1, read1, kept1, label2, 1, null) : null
+        }
+        return noDataReason(label1, read1, kept1, label2, read2, kept2)
+    }
+
+    private static Integer keepGiven(Map result, Map reconcileResult, String sideKey) {
+        int read = (result?.readCount as Integer) ?: 0
+        Object summary = reconcileResult?.keepSummaryBySide instanceof Map ? ((Map) reconcileResult.keepSummaryBySide).get(sideKey) : null
+        if (summary instanceof Map) {
+            int given = (((Map) summary).get("keptCount") as Integer ?: 0) + (((Map) summary).get("setAsideCount") as Integer ?: 0)
+            read = Math.max(read, given)
+        }
+        return read
     }
 
     protected static boolean hasData(Map<String, Object> sourceResult) {

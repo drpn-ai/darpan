@@ -3434,6 +3434,61 @@ class AutomationExecutionSupportTests {
         assertFalse(ec.service.calls.any { it.serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload" })
     }
 
+    // DAR-BE-015: the reason the audit ledger gets when Keep keeps nothing on a side.
+    @Test
+    void aSideWhoseKeepKeptNothingRecordsTheWindowAsDidNotRunWithItsReason() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        List<String> reasons = []
+        AutomationExecutionSupport.noDataWindowRecorder = { Object... args -> reasons << args[12] }
+        try {
+            runAcmeAutomation(ec, [file2: [keptCount: 0, setAsideCount: 29963]], [FILE_1: 10, FILE_2: 29963])
+        } finally {
+            AutomationExecutionSupport.resetForTests()
+        }
+        assertEquals(["The ACME side kept 0 of 29,963 records."], reasons)
+    }
+
+    @Test
+    void anEvaluateWhoseKeepKeptNothingRecordsTheWindowAsDidNotRun() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        ec.entity.add("darpan.rule.RuleSetCompareScope", [compareScopeId: "SCOPE_ORDER", companyUserGroupId: "TENANT_A",
+                scopeMode: "EVALUATE"])
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].removeAll { it.fileSide == "FILE_2" }
+        List<String> reasons = []
+        AutomationExecutionSupport.noDataWindowRecorder = { Object... args -> reasons << args[12] }
+        try {
+            ec.service.responder = { FakeServiceCall call ->
+                if (call.serviceName == ACME_EXTRACT) {
+                    return [dataAvailable: true, fileLocation: "runtime://tmp/FILE_1.json", fileName: "FILE_1.json", recordCount: 40]
+                }
+                if (call.serviceName == "reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope") {
+                    return [diffLocation: "reconciliation-runs/AUTO_API/20260501/result.json", diffFileName: "result.json",
+                            differenceCount: 0, validationErrors: [], processingWarnings: [],
+                            keepSummaryBySide: [file1: [keptCount: 0, setAsideCount: 40]]]
+                }
+                return [:]
+            }
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+        } finally {
+            AutomationExecutionSupport.resetForTests()
+        }
+        assertEquals(["The ACME side kept 0 of 40 records."], reasons)
+    }
+
+    @Test
+    void windowNoDataReasonCountsTheRecordsKeepWasGivenNotOnlyTheRecentRead() {
+        // A re-check appended 4 records to a side whose recent read was empty; Keep kept none of them.
+        Map summary = [keepSummaryBySide: [file1: [keptCount: 0, setAsideCount: 4]]]
+        assertEquals("The A side kept 0 of 4 records.", AutomationExecutionSupport.windowNoDataReason("A", "B",
+                [readCount: 0, recordCount: 0], [readCount: 6, recordCount: 6], summary, false))
+        assertNull(AutomationExecutionSupport.windowNoDataReason("A", "B",
+                [readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0], null, false))
+        assertNull(AutomationExecutionSupport.windowNoDataReason("A", "B",
+                [readCount: 5, recordCount: 5], [readCount: 0, recordCount: 0], null, true), "an evaluate never reports an empty side 2")
+    }
+
     @Test
     void aSideKeepSetAsideEverythingKeepsItsReadCount() {
         FakeEc ec = fakeEc()

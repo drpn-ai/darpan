@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.config.DarpanSettings
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.core.ReconciliationServices
 import org.moqui.entity.EntityCondition
@@ -30,7 +31,8 @@ import java.time.temporal.ChronoUnit
  * condition placed beside a full primary key).
  *
  * Determinism: every age and every state is computed from stored rows and the report date, never from when the
- * request ran. The only clock value is report.generatedAt, which the caller can pin.
+ * request ran. The only clock value is report.generatedAt, which the caller can pin. DAR-BE-361: its tenant day is the
+ * report's today, the one morning whose open findings split into open and acknowledged.
  */
 class AuditReportAssembler {
 
@@ -45,6 +47,8 @@ class AuditReportAssembler {
     static final String PARTIAL = "AUDCS_PARTIAL"
     static final String NOT_RUN = "AUDCS_NOT_RUN"
     static final String READ_COMPLETE = "AUDSR_COMPLETE"
+    /** DAR-BE-361. A person's history event (acknowledged, changed, reopened): never a check's, never a state. */
+    static final String USER_ACTOR = "AUDAT_USER"
 
     /** Worst last: a statement or system takes the worst status among its checks or reads. */
     static final List<String> CHECK_STATUS_ORDER = [RAN, PARTIAL, NOT_RUN].asImmutable()
@@ -138,6 +142,12 @@ class AuditReportAssembler {
             [(st.statementId as String): sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])] }
         Map<String, Map> split = stepUnits(statements, entriesByStatement, recordsByFinding)
         Set<String> waitingIds = split.values().collectMany { ((it.waiting ?: []) as List<Map>).collectMany { (it.entries as List<Map>)*.row*.findingId } } as Set<String>
+        // DAR-BE-361. Today's report only: each open row reads open, acknowledged or reminded. A past morning is as it was.
+        LocalDate today = (generatedStamp ?: new Timestamp(System.currentTimeMillis())).toInstant().atZone(zone).toLocalDate()
+        if (day == today) {
+            markAcknowledgements(ec, tenantId, split.values().collectMany { it.counted as List<Map> } as List<Map>,
+                    ledger.findAll { it.state == OPEN }*.row*.findingId as List<String>, today, zone)
+        }
         Map levels = priorityLevels(ec, tenantId, statements)
         statements.each { Map st ->
             List<String> stChecks = checkIdsByStatement[st.statementId as String]
@@ -224,7 +234,9 @@ class AuditReportAssembler {
                              // DAR-BE-091: the period to date, the report day included; a past period's whole span.
                              window      : [from: (window.from as LocalDate).toString(), thru: (window.thru as LocalDate).toString()],
                              running     : window.running,
-                             generatedAt : isoDateTime(generatedStamp, zone)],
+                             generatedAt : isoDateTime(generatedStamp, zone),
+                             // DAR-BE-361: the remind days a new acknowledgement gets, so the popup's words match the rule.
+                             acknowledgeRemindDays: DarpanSettings.intValue("audit.acknowledge.remindDays")],
                 health    : health,
                 summary   : summary,
                 categories: categoryJson]
@@ -293,7 +305,8 @@ class AuditReportAssembler {
      * Every finding that existed by the end of {@code day}, with its state on that day. Today's state is the stored
      * one; a past day's state comes from the last history event on or before it (contract: "History for a past
      * date"): open after a found, still-open or reopened event, fixed after a fixed one.
-     * Fixed findings are kept only when they became fixed on {@code day}.
+     * Fixed findings are kept only when they became fixed on {@code day}. DAR-BE-361: a person's events (acknowledged,
+     * changed, reopened; actor AUDAT_USER) are not check events and never decide a state.
      */
     private static List<Map> findingsAsOf(def ec, String tenantId, Set<String> statementIds, String period, LocalDate day,
                                           ZoneId zone) {
@@ -314,6 +327,7 @@ class AuditReportAssembler {
         Map<String, List<Map>> eventsByFinding = [:].withDefault { [] }
         rows*.findingId.collate(500).each { List chunk ->
             tenantRows(ec, "darpan.audit.AuditFindingEvent", tenantId).condition("findingId", "in", chunk)
+                    .condition("byTypeEnumId", EntityCondition.NOT_EQUAL, USER_ACTOR)
                     .orderBy(["eventStamp", "eventSeqId"]).list().each { eventsByFinding[it.findingId as String] << it.getMap() }
         }
         List<Map> result = []
@@ -335,20 +349,23 @@ class AuditReportAssembler {
     }
 
     private static Map countsOf(List<Map> entries, LocalDate day, Map levels) {
+        // DAR-BE-361: an acknowledged row is counted apart from open (a reminded one is open); 0 on a past morning.
+        List<Map> open = entries.findAll { it.state == OPEN && !acknowledged(it) }
         // DAR-BE-348: every open unit at its level, the 50-row cap aside, so the levels always add up to open.
         Map<String, Integer> byPriority = AuditPriority.zeroCounts()
-        entries.findAll { it.state == OPEN }.each { Map unit ->
+        open.each { Map unit ->
             String level = unitPriority(unit, levels.statementLevels as Map, levels.overrides as Map).level
             byPriority[level] = byPriority[level] + 1
         }
-        return [open      : entries.count { it.state == OPEN } as int,
-                newToday  : entries.count { it.state != FIXED && (it.row.firstFoundDate as Date).toLocalDate() == day } as int,
-                fixedToday: entries.count { it.state == FIXED } as int,
-                byPriority: byPriority]
+        return [open        : open.size(),
+                acknowledged: entries.count { it.state == OPEN && acknowledged(it) } as int,
+                newToday    : entries.count { it.state != FIXED && (it.row.firstFoundDate as Date).toLocalDate() == day } as int,
+                fixedToday  : entries.count { it.state == FIXED } as int,
+                byPriority  : byPriority]
     }
 
     private static Map sumCounts(List<Map> counts) {
-        Map<String, Integer> sum = [open: 0, newToday: 0, fixedToday: 0]
+        Map<String, Integer> sum = [open: 0, acknowledged: 0, newToday: 0, fixedToday: 0]
         Map<String, Integer> byPriority = AuditPriority.zeroCounts()
         counts.each { Map c ->
             sum.keySet().each { String k -> sum[k] = sum[k] + (c[k] as int) }
@@ -527,7 +544,9 @@ class AuditReportAssembler {
                     [cause: cause?.label ?: null, held: cause?.heldBy != null] + priorityOf([entries: [e]], levels, causes)
         }
         // DAR-BE-125: a lone finding keeps its cause in the catalog's words, which the board heads its findings by.
-        if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> k != "held" }
+        // DAR-BE-361: the row's acknowledgement (null when it reads open, and on a past morning).
+        Map acknowledgement = [acknowledgement: (unit.ack as Map)?.summary]
+        if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> k != "held" } + acknowledgement
         String order = unit.order as String
         List<Map> lines = (unit.entries as List<Map>).collect(line)
         List<Map> context = takeOrderLineRecords(lines)
@@ -555,7 +574,7 @@ class AuditReportAssembler {
                 stuck     : stuck*.id,
                 lines     : lines,
                 orderLines: orderLines(order, lines, context),
-                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels, causes)
+                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()] + priorityOf(unit, levels, causes) + acknowledgement
     }
 
     /**
@@ -631,6 +650,16 @@ class AuditReportAssembler {
 
     /** DAR-BE-348: with a priority, only the units at that level, filtered after resolution so none is lost to a cap. */
     static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period, String priority) {
+        return findingsByOrder(ec, tenantId, auditId, statementCode, period, priority, null)
+    }
+
+    /**
+     * DAR-BE-361: ackState "open" (the default; a reminded row is open) or "acknowledged" picks the rows by today's
+     * acknowledgements, "all" keeps both. Each row carries its acknowledgement (null when it reads open).
+     */
+    static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period, String priority,
+                                     String ackState) {
+        String wanted = ackState ?: "open"
         Map<String, String> codes = enumCodes(ec)
         // Only the asked statement's counted findings are returned, each with those waiting on it.
         Map open = openStepUnits(ec, tenantId, auditId, period)
@@ -639,11 +668,16 @@ class AuditReportAssembler {
         Map<String, Map> records = open.records as Map<String, Map>
         Map<String, Map> split = open.split as Map<String, Map>
         Map<String, String> statementCodeById = statements.collectEntries { [(it.statementId as String): it.statementCode as String] }
-        LocalDate today = LocalDate.now((loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId)
+        ZoneId zone = (loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId
+        LocalDate today = LocalDate.now(zone)
         Map<String, Map> causes = conclusionsOf(ec, entriesByStatement.values().flatten()*.row*.conclusionEnumId as List<String>)
         Map levels = priorityLevels(ec, tenantId, statements)
-        return statements.findAll { !statementCode || it.statementCode == statementCode }.collectMany { Map st ->
-            (split[st.statementId as String].counted as List<Map>).collect { Map unit ->
+        List<Map> asked = statements.findAll { !statementCode || it.statementCode == statementCode }
+        markAcknowledgements(ec, tenantId, asked.collectMany { (split[it.statementId as String].counted as List<Map>) } as List<Map>,
+                entriesByStatement.values().flatten()*.row*.findingId as List<String>, today, zone)
+        return asked.collectMany { Map st ->
+            (split[st.statementId as String].counted as List<Map>)
+                    .findAll { Map unit -> wanted == "all" || (wanted == "acknowledged") == acknowledged(unit) }.collect { Map unit ->
                 unitFinding(unit, today, records, causes, codes, levels) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]] +
                         (unit.waitingUnits ? [waiting: waitingJson(unit, today, records, causes, codes, statementCodeById, levels)] : [:])
             }
@@ -687,15 +721,82 @@ class AuditReportAssembler {
                 f.statementId as String, tenantId, WHY)?.getMap()
         if (f.stateEnumId != OPEN || statement == null) return [findingId]
         Map<String, Map> split = openStepUnits(ec, tenantId, statement.auditId as String, f.period as String).split as Map<String, Map>
-        Closure<List<Map>> rowLines = { Map u ->
-            (u.entries as List<Map>) + ((u.waitingUnits ?: []) as List<Map>).collectMany { it.entries as List<Map> } }
         // The row is a counted unit: the line's own, or the one it waits under (holders carry their waiting units).
         Map row = split.values().collectMany { it.counted as List<Map> }.find { Map u -> rowLines(u).any { it.row.findingId == findingId } }
         // A waiting unit whose order has no open counted unit is listed nowhere else: it covers itself.
         Map unit = row ?: ((split[f.statementId as String]?.waiting ?: []) as List<Map>).find { Map u ->
             (u.entries as List<Map>).any { it.row.findingId == findingId } }
         if (unit == null) return [findingId]
+        return openRowIds(unit)
+    }
+
+    /** DAR-BE-361. A row's lines: its own, then those of the later-step units waiting under it. */
+    private static List<Map> rowLines(Map unit) {
+        return (unit.entries as List<Map>) + ((unit.waitingUnits ?: []) as List<Map>).collectMany { it.entries as List<Map> }
+    }
+
+    /** DAR-BE-361. The findings one Acknowledge of this row covers, and whose acknowledgements its state reads: its open lines. */
+    private static List<String> openRowIds(Map unit) {
         return rowLines(unit).findAll { it.state == OPEN }.collect { it.row.findingId as String }.unique()
+    }
+
+    private static boolean acknowledged(Map unit) {
+        return (unit.ack as Map)?.state == "acknowledged"
+    }
+
+    /**
+     * DAR-BE-361. Marks each open row with its acknowledgement as of today: unit.ack = [state, summary]. The rows and
+     * the last reopen of these findings are read once, for findingIds only (the ledger's open findings), never per row.
+     */
+    private static void markAcknowledgements(def ec, String tenantId, List<Map> units, List<String> findingIds, LocalDate today, ZoneId zone) {
+        Map acks = acknowledgementsOf(ec, tenantId, findingIds)
+        if (!(acks.rows as Map)) return
+        units.findAll { it.state == OPEN }.each { Map unit -> unit.ack = acknowledgementOf(openRowIds(unit), acks, today, zone) }
+    }
+
+    /**
+     * DAR-BE-361. [rows: findingId -> acknowledgement row, reopens: findingId -> its last AUDFE_REOPENED stamp, labels:
+     * userId -> name] for these findings: one read of the rows, and of reopen events and accounts only when there are rows.
+     */
+    private static Map acknowledgementsOf(def ec, String tenantId, Collection<String> findingIds) {
+        Map<String, Map> rows = [:]
+        ((findingIds ?: []) as List<String>).findAll().unique().collate(500).each { List<String> chunk ->
+            tenantRows(ec, "darpan.audit.AuditFindingAcknowledgement", tenantId).condition("findingId", EntityCondition.IN, chunk)
+                    .list().each { rows[it.findingId as String] = it.getMap() }
+        }
+        Map<String, Timestamp> reopens = [:]
+        Map<String, String> labels = [:]
+        if (!rows) return [rows: rows, reopens: reopens, labels: labels]
+        (rows.keySet() as List<String>).collate(500).each { List<String> chunk ->
+            tenantRows(ec, "darpan.audit.AuditFindingEvent", tenantId).condition("findingId", EntityCondition.IN, chunk)
+                    .condition("eventTypeEnumId", "AUDFE_REOPENED").list().each {
+                Timestamp at = it.eventStamp as Timestamp
+                Timestamp seen = reopens[it.findingId as String]
+                if (at != null && (seen == null || at.after(seen))) reopens[it.findingId as String] = at
+            }
+        }
+        List<String> userIds = rows.values()*.acknowledgedByUserId.findAll().unique() as List<String>
+        if (userIds) {
+            TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount", "audit assembler: who acknowledged a finding, by name")
+                    .condition("userId", EntityCondition.IN, userIds).useCache(false).list()
+                    .each { labels[it.userId as String] = (it.userFullName ?: it.username) as String }
+        }
+        return [rows: rows, reopens: reopens, labels: labels]
+    }
+
+    /**
+     * DAR-BE-361. A row's state (AcknowledgementSupport.unitState over its open findings) and its acknowledgement block:
+     * the first covered finding's row, its time in the tenant's zone, reminded when past its remind day. The block is
+     * null when the row reads open (no row, a line broken since, or an acknowledgement a reopen voided), so the row
+     * offers Acknowledge again.
+     */
+    private static Map acknowledgementOf(List<String> memberIds, Map acks, LocalDate today, ZoneId zone) {
+        Map<String, Map> rows = acks.rows as Map<String, Map>
+        String state = AcknowledgementSupport.unitState(memberIds, rows, acks.reopens as Map<String, Timestamp>, today)
+        if (state == "open") return [state: state, summary: null]
+        Map summary = AcknowledgementSupport.summary(rows[memberIds[0]], state, acks.labels as Map<String, String>)
+        summary.at = isoDateTime(summary.at as Timestamp, zone)
+        return [state: state, summary: summary]
     }
 
     /** An order of one line, in the check's own words with the item named as its line: "line 1 is completed in HotWax
@@ -974,7 +1075,10 @@ class AuditReportAssembler {
         Map<String, String> recordFields = recordFieldValues(recordRows)
         String fixWhere = check.fixWhereEnumId ? systemKey(check.fixWhereEnumId as String) : (records ? records.keySet().first() as String : null)
 
-        Timestamp lastChecked = (f.lastCheckedStamp ?: events.with { it ? it.last().eventStamp : null }) as Timestamp
+        // DAR-BE-361: a person's event (an acknowledgement) is not a check looking at the record.
+        Timestamp lastChecked = (f.lastCheckedStamp ?: events.findAll { it.byTypeEnumId != USER_ACTOR }
+                .with { it ? it.last().eventStamp : null }) as Timestamp
+        Map acknowledgement = state == OPEN ? findingAcknowledgement(ec, tenantId, findingId, zone) : null
         return [schema : FINDING_SCHEMA,
                 finding: [
                         id       : f.findingId,
@@ -996,6 +1100,8 @@ class AuditReportAssembler {
                                 closedAt    : state == FIXED ? isoDateTime(f.closedStamp as Timestamp, zone) : null,
                                 closedBy    : state == FIXED ? actor(f.closedByTypeEnumId as String, f.closedById as String,
                                         f.closedStamp as Timestamp, zone, checkCodes, codes) : null],
+                        // DAR-BE-361: its report row's acknowledgement as of today, or null.
+                        acknowledgement: acknowledgement,
                         records  : records,
                         evidence : [
                                 rule      : f.ruleText ?: statement.statementText,
@@ -1024,6 +1130,16 @@ class AuditReportAssembler {
                              by: actor(e.byTypeEnumId as String, e.byId as String, e.eventStamp as Timestamp, zone, checkCodes, codes)]
                         }],
                 access : [mode: "read-only", note: ACCESS_NOTE]]
+    }
+
+    /**
+     * DAR-BE-361. An open finding's row acknowledgement as of today. A finding with no row of its own reads open whatever
+     * its row's other lines hold, so the row is resolved (unitMemberIds) only when it has one.
+     */
+    private static Map findingAcknowledgement(def ec, String tenantId, String findingId, ZoneId zone) {
+        if (TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFindingAcknowledgement", "findingId", findingId, tenantId, WHY) == null) return null
+        List<String> members = unitMemberIds(ec, tenantId, findingId)
+        return acknowledgementOf(members, acknowledgementsOf(ec, tenantId, members), LocalDate.now(zone), zone).summary as Map
     }
 
     private static Map actor(String typeEnumId, String byId, Timestamp stamp, ZoneId zone, Map<String, String> checkCodes,

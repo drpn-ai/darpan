@@ -181,7 +181,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([tenant: [id: GORJANA, name: "Gorjana", timeZone: "America/Los_Angeles"],
                       audit: [id: "month-close", name: "Month close", period: "month"], date: "2026-10-08", period: "2026-10",
                       window: [from: "2026-10-01", thru: "2026-10-08"], running: true,
-                      generatedAt: "2026-10-08T06:12:40-07:00"], doc.report, "month to date, the report day included")
+                      generatedAt: "2026-10-08T06:12:40-07:00", acknowledgeRemindDays: 5], doc.report, "month to date, the report day included")
         assertEquals("Month close audit for Gorjana, 2026-10. Each finding is one record that breaks one of the audit's statements R2 to R12.", doc.about)
         assertEquals(["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"], (doc.categories as Map).keySet() as List)
         assertEquals("Refunds and credits", doc.categories.refundsAndCredits.label)
@@ -197,7 +197,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([id: m258615, headline: "Credit memo is 0.01 less than the refund for return M258615", state: "open",
                       firstFound: "2026-10-07", ageDays: 1, difference: [amount: "-0.01", currency: "USD"],
                       cause: "Memo short of the refund", next: "darpan findings show ${m258615}".toString(),
-                      priority: "P2", prioritySource: "statement", priorityReason: null],
+                      priority: "P2", prioritySource: "statement", priorityReason: null, acknowledgement: null],
                 brief.findAll { it.key != "records" })
         assertEquals([Shopify : [order: [[id: "7187000000000", internalId: null, status: null]]],
                       OMS     : ["return": [[id: "M258615", internalId: null, status: "Completed"]]],
@@ -286,10 +286,10 @@ class AuditReportAssemblerSmokeTests {
     void countsAddUpAtEveryLevel() {
         ["2026-10-07", "2026-10-08", "2026-10-09"].each { String day ->
             Map doc = report(GORJANA, day)
-            List<String> keys = ["open", "newToday", "fixedToday"]
+            List<String> keys = ["open", "acknowledged", "newToday", "fixedToday"]
             (doc.categories as Map).each { String code, Map cat ->
                 (cat.statements as Map).each { String id, Map st ->
-                    assertEquals((st.counts.open + st.counts.fixedToday) as int,
+                    assertEquals((st.counts.open + st.counts.acknowledged + st.counts.fixedToday) as int,
                             ((st.findings as List).size() + (st.findingsOmitted as int)) as int, "${day} ${id} findings vs counts")
                 }
                 keys.each { String k -> assertEquals(cat.counts[k], (cat.statements as Map).values().sum(0) { it.counts[k] }, "${day} ${code}.${k}") }
@@ -902,7 +902,7 @@ class AuditReportAssemblerSmokeTests {
 
     /** Counts with no level set anywhere: every open finding is P2 (DAR-BE-348). */
     private static Map counted(int open, int newToday, int fixedToday) {
-        return [open: open, newToday: newToday, fixedToday: fixedToday, byPriority: [P0: 0, P1: 0, P2: open, KNOWN: 0]]
+        return [open: open, acknowledged: 0, newToday: newToday, fixedToday: fixedToday, byPriority: [P0: 0, P1: 0, P2: open, KNOWN: 0]]
     }
 
     // ---- priority (DAR-BE-348) -----------------------------------------------------------------------------------
@@ -1154,6 +1154,144 @@ class AuditReportAssemblerSmokeTests {
         assertEquals(shopify, document.Shopify.order[0].data)
         assertEquals(line, document.NetSuite.salesOrderLine[0].data)
         assertFalse(report.Shopify.order[0].containsKey("data"))
+    }
+
+    // ---- acknowledgements (DAR-BE-361) ---------------------------------------------------------------------------
+    // Each test has an audit of its own in tenant TACK (statement S1, three lone invoices found on 2026-10-21 at 08:00).
+    // A report's "today" is the tenant day of its generatedAt (the one clock value, pinned here), so report(…, "2026-10-22")
+    // is today's report and the split applies; a report dated earlier is a past morning's.
+
+    private static final String ACK = "TACK"
+    private static final String ACK_USER = "TACK_SAM"
+
+    private List<String> ackAudit(String name) {
+        insert("moqui.security.UserGroup", [userGroupId: ACK, description: "Ack"])
+        insert("darpan.auth.TenantSetting", [companyUserGroupId: ACK, timeZone: "America/Los_Angeles"])
+        insert("moqui.security.UserAccount", [userId: ACK_USER, username: "tack.sam", userFullName: "Sam R."])
+        String auditId = "${ACK}_${name}".toString()
+        audit(ACK, auditId, name, name, "AUDP_MONTH")
+        statement(ACK, auditId, "${auditId}_S1".toString(), "S1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "${name} S1".toString())
+        insert("darpan.audit.AuditCheck", [checkId: "${auditId}_C".toString(), companyUserGroupId: ACK, checkCode: "${name}-check".toString(), label: name])
+        link(ACK, "${auditId}_C".toString(), "${auditId}_S1".toString(), 1)
+        List ids = ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: ACK, checkId: "${auditId}_C".toString(),
+                reportDate: Date.valueOf("2026-10-21"), checkStamp: at("2026-10-21", "08:00:00"),
+                findings: (1..3).collect { lone("AK-${name}-${it}".toString(), null) }]).call().findingIds as List
+        noErrors()
+        return ids as List<String>
+    }
+
+    /** An acknowledgement row as acknowledge#AuditFinding writes it, on a tenant day and time in Los Angeles. */
+    private void acknowledgeRow(String findingId, Timestamp stamp, String remindDate) {
+        insert("darpan.audit.AuditFindingAcknowledgement", [findingId: findingId, companyUserGroupId: ACK, note: "Known: the 3PL is late",
+                acknowledgedByUserId: ACK_USER, acknowledgedStamp: stamp, remindDate: remindDate ? Date.valueOf(remindDate) : null])
+    }
+
+    private void userEvent(String findingId, String seq, String type, Timestamp stamp) {
+        insert("darpan.audit.AuditFindingEvent", [findingId: findingId, eventSeqId: seq, companyUserGroupId: ACK, eventTypeEnumId: type,
+                eventStamp: stamp, eventDate: Date.valueOf(stamp.toInstant().atZone(LA).toLocalDate()), byTypeEnumId: "AUDAT_USER", byId: ACK_USER])
+    }
+
+    /** The report as of reportDay, built on the morning of generatedDay (the report's today). */
+    private Map ackReport(String auditId, String reportDay, String generatedDay) {
+        Map out = ec.service.sync().name("${REPORTS}.assemble#AuditReport").parameters([companyUserGroupId: ACK, auditId: auditId,
+                reportDate: Date.valueOf(reportDay), generatedStamp: at(generatedDay, "11:00:00")]).call()
+        noErrors()
+        return new JsonSlurper().parseText(JsonOutput.toJson(out.document)) as Map
+    }
+
+    @Test
+    void acknowledgedRowLeavesOpenCount() {
+        List<String> ids = ackAudit("ack-count")
+        acknowledgeRow(ids[0], at("2026-10-22", "09:00:00"), "2026-10-27")
+        Map doc = ackReport("${ACK}_ack-count", "2026-10-22", "2026-10-22")
+        Map s1 = doc.categories.orders.statements.S1 as Map
+        assertEquals([open: 2, acknowledged: 1], s1.counts.subMap(["open", "acknowledged"]))
+        assertEquals(2, (s1.counts.byPriority as Map).values().sum(), "byPriority counts the open units only")
+        assertEquals([open: 2, acknowledged: 1], doc.summary.subMap(["open", "acknowledged"]))
+        assertEquals(1, doc.summary.byCategory.orders.acknowledged)
+        assertEquals(5, doc.report.acknowledgeRemindDays, "the setting's value, so the popup's label reads the rule")
+        // Every unit is still listed (the acknowledged pill lists them); only the acknowledged one carries its note.
+        assertEquals(3, (s1.findings as List).size())
+        Map acked = (s1.findings as List<Map>).find { it.id == ids[0] }
+        assertEquals([note: "Known: the 3PL is late", by: [id: ACK_USER, label: "Sam R."], at: "2026-10-22T09:00:00-07:00",
+                      remindOn: "2026-10-27", reminded: false], acked.acknowledgement)
+        assertEquals([null, null], (s1.findings as List<Map>).findAll { it.id != ids[0] }*.acknowledgement)
+    }
+
+    @Test
+    void remindedRowCountsOpenWithItsNote() {
+        List<String> ids = ackAudit("ack-remind")
+        // Acknowledged six days ago with the reminder on (5 days): its remind day was yesterday.
+        acknowledgeRow(ids[0], at("2026-10-16", "09:00:00"), "2026-10-21")
+        Map s1 = ackReport("${ACK}_ack-remind", "2026-10-22", "2026-10-22").categories.orders.statements.S1 as Map
+        assertEquals([open: 3, acknowledged: 0], s1.counts.subMap(["open", "acknowledged"]))
+        Map acked = (s1.findings as List<Map>).find { it.id == ids[0] }
+        assertEquals(["Known: the 3PL is late", true, "2026-10-21"],
+                [acked.acknowledgement?.note, acked.acknowledgement?.reminded, acked.acknowledgement?.remindOn])
+    }
+
+    @Test
+    void pastReportHasNoSplit() {
+        List<String> ids = ackAudit("ack-past")
+        acknowledgeRow(ids[0], at("2026-10-22", "09:00:00"), "2026-10-27")
+        Map doc = ackReport("${ACK}_ack-past", "2026-10-21", "2026-10-22")
+        Map s1 = doc.categories.orders.statements.S1 as Map
+        assertEquals([open: 3, acknowledged: 0], s1.counts.subMap(["open", "acknowledged"]), "yesterday's morning as it was")
+        assertEquals([open: 3, acknowledged: 0], doc.summary.subMap(["open", "acknowledged"]))
+        assertEquals([null, null, null], (s1.findings as List<Map>)*.acknowledgement)
+        assertEquals(5, doc.report.acknowledgeRemindDays)
+    }
+
+    @Test
+    void userEventIsNotLastChecked() {
+        List<String> ids = ackAudit("ack-checked")
+        // A finding stamped before lastCheckedStamp existed: lastChecked falls back to its latest check event.
+        ec.entity.find("darpan.audit.AuditFinding").condition("findingId", ids[0]).one().set("lastCheckedStamp", null).update()
+        acknowledgeRow(ids[0], at("2026-10-21", "10:00:00"), null)
+        userEvent(ids[0], "U01", "AUDFE_ACKNOWLEDGED", at("2026-10-21", "10:00:00"))
+        Map doc = finding(ACK, ids[0])
+        assertEquals("2026-10-21T08:00:00-07:00", doc.finding.status.lastChecked, "the check at 08:00, not the acknowledgement at 10:00")
+        assertEquals(["found", "acknowledged"], (doc.finding.history as List<Map>)*.event, "the acknowledgement stays in history")
+        Map ack = doc.finding.acknowledgement as Map
+        assertEquals(["Known: the 3PL is late", null, false], [ack?.note, ack?.remindOn, ack?.reminded])
+        assertNull(finding(ACK, ids[1]).finding.acknowledgement, "no row, no acknowledgement")
+    }
+
+    @Test
+    void userEventIsNotAPastMorningsState() {
+        List<String> ids = ackAudit("ack-state")
+        String f = ids[0]
+        // Fixed on 10-22 at 06:00; a person reopens its old acknowledgement at 10:00; a check finds it again on 10-23.
+        insert("darpan.audit.AuditFindingEvent", [findingId: f, eventSeqId: "C01", companyUserGroupId: ACK, eventTypeEnumId: "AUDFE_FIXED",
+                eventStamp: at("2026-10-22", "06:00:00"), eventDate: Date.valueOf("2026-10-22"), byTypeEnumId: "AUDAT_CHECK", byId: "${ACK}_ack-state_C".toString()])
+        userEvent(f, "U01", "AUDFE_ACK_REOPENED", at("2026-10-22", "10:00:00"))
+        insert("darpan.audit.AuditFindingEvent", [findingId: f, eventSeqId: "C02", companyUserGroupId: ACK, eventTypeEnumId: "AUDFE_REOPENED",
+                eventStamp: at("2026-10-23", "06:00:00"), eventDate: Date.valueOf("2026-10-23"), byTypeEnumId: "AUDAT_CHECK", byId: "${ACK}_ack-state_C".toString()])
+        Map s1 = ackReport("${ACK}_ack-state", "2026-10-22", "2026-10-23").categories.orders.statements.S1 as Map
+        assertEquals("fixed", (s1.findings as List<Map>).find { it.id == f }?.state, "10-22 ended fixed: the person's event is not a check's")
+        assertEquals(1, s1.counts.fixedToday)
+    }
+
+    @Test
+    void findingsByOrderAcknowledgedFilter() {
+        List<String> ids = ackAudit("ack-list")
+        LocalDate today = LocalDate.now(LA)
+        Timestamp now = new Timestamp(System.currentTimeMillis())
+        acknowledgeRow(ids[0], now, null)
+        // Reminded: acknowledged six days ago, its remind day yesterday. It lists under open, with its note.
+        acknowledgeRow(ids[1], Timestamp.from(now.toInstant().minusSeconds(6 * 86400L)), today.minusDays(1).toString())
+        ec.artifactExecution.disableAuthz()
+        try {
+            String auditId = "${ACK}_ack-list".toString()
+            assertEquals([ids[0]], AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null, null, "acknowledged")*.id)
+            List<Map> open = AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null, null, "open")
+            assertEquals([ids[1], ids[2]], open*.id)
+            assertEquals([true, null], open.collect { it.acknowledgement?.reminded })
+            assertEquals([ids[1], ids[2]], AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null, null, null)*.id, "open by default")
+            assertEquals([ids[1], ids[2]], AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null)*.id)
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
     }
 
     // DAR-BE-254 (Aditi on RAILS #1028236: "it says R4 here.. shouldnt it be the SKU"): what a waiting finding is about.

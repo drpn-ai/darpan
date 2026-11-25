@@ -274,13 +274,15 @@
     <!-- DAR-UI-075. The findings as the report lists them, one per order, past its 50: the board's "more", filters, export. -->
     <service verb="get" noun="AuditFindingsByOrder" authz-action="view" allow-remote="true" authenticate="true">
         <description>Every open finding of one audit and period, one per order (an order's lines under it, the
-            line holding it up named), each with its statement and category. State is as of today.</description>
+            line holding it up named), each with its statement and category and its row's acknowledgement. State and
+            acknowledgements are as of today.</description>
         <in-parameters>
             <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
             <parameter name="statement"><description>The statement's code, e.g. R1; blank is every statement.</description></parameter>
             <parameter name="period"><description>The report's period, e.g. 2026-10; blank is every period.</description></parameter>
-            <parameter name="state"><description>Kept for callers that send it: a finding is only ever open or fixed, and this
-                lists the open ones whatever the value (DAR-BE-206).</description></parameter>
+            <parameter name="state"><description>DAR-BE-361. open: the rows not acknowledged today (a reminded row is open);
+                acknowledged: the rows acknowledged today; blank: every open row. Any other value is an error. A finding
+                itself is only ever open or fixed (DAR-BE-206).</description></parameter>
             <parameter name="priority"><description>DAR-BE-348. Only the findings at this level: P0, P1, P2 or KNOWN; blank is every
                 level. An order is at its most urgent open line's level. Any other value is an error.</description></parameter>
         </in-parameters>
@@ -296,8 +298,11 @@
             <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
             <if condition="priority &amp;&amp; !(priority in darpan.audit.AuditPriority.LEVELS)">
                 <return error="true" message="priority must be one of ${darpan.audit.AuditPriority.LEVELS.join(', ')}, got ${priority}"/></if>
+            <if condition="state?.trim() &amp;&amp; !(state.trim() in ['open', 'acknowledged'])">
+                <return error="true" message="state must be open or acknowledged"/></if>
+            <set field="ackState" from="state?.trim() ?: 'all'"/>
             <set field="findings" from="darpan.audit.AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, statement ?: null,
-                    period ?: null, priority ?: null)"/>
+                    period ?: null, priority ?: null, ackState)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

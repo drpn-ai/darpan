@@ -23,6 +23,7 @@
       "closedAt": null,
       "closedBy": null
     },
+    "acknowledgement": null,
     "records": {
       "Shopify": {
         "order": [ { "id": "7187000000000", "internalId": null, "status": null } ],

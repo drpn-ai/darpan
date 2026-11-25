@@ -13465,7 +13465,7 @@
                     },
                     "state": {
                         "type": "string",
-                        "description": "Kept for callers that send it: a finding is only ever open or fixed, and this\n                lists the open ones whatever the value (DAR-BE-206)."
+                        "description": "DAR-BE-361. open: the rows not acknowledged today (a reminded row is open);\n                acknowledged: the rows acknowledged today; blank: every open row. Any other value is an error. A finding\n                itself is only ever open or fixed (DAR-BE-206)."
                     },
                     "priority": {
                         "type": "string",
@@ -13475,7 +13475,7 @@
                 "required": [
                     "audit"
                 ],
-                "description": "Every open finding of one audit and period, one per order (an order's lines under it, the\n            line holding it up named), each with its statement and category. State is as of today."
+                "description": "Every open finding of one audit and period, one per order (an order's lines under it, the\n            line holding it up named), each with its statement and category and its row's acknowledgement. State and\n            acknowledgements are as of today."
             },
             "GetAuditFindingsByOrderResult": {
                 "type": "object",

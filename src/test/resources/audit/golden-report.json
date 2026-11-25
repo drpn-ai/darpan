@@ -8,7 +8,8 @@
     "window": { "from": "2026-10-01", "thru": "2026-10-08" },
     "running": true,
     "period": "2026-10",
-    "generatedAt": "2026-10-08T06:12:40-07:00"
+    "generatedAt": "2026-10-08T06:12:40-07:00",
+    "acknowledgeRemindDays": 5
   },
   "health": {
     "complete": true,
@@ -21,20 +22,20 @@
     "notCovered": ["R5", "R10", "R17"]
   },
   "summary": {
-    "open": 11, "newToday": 4, "fixedToday": 2,
+    "open": 11, "acknowledged": 0, "newToday": 4, "fixedToday": 2,
     "byPriority": { "P0": 0, "P1": 0, "P2": 11, "KNOWN": 0 },
     "oldestOpen": { "id": "F-20544", "statement": "R11", "firstFound": "2026-10-02", "ageDays": 6 },
     "byCategory": {
-      "orders": { "open": 5, "newToday": 2, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 5, "KNOWN": 0 } },
-      "refundsAndCredits": { "open": 4, "newToday": 1, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 4, "KNOWN": 0 } },
-      "returns": { "open": 2, "newToday": 1, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 2, "KNOWN": 0 } },
-      "exchangesAndWarranty": { "open": 0, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 0, "KNOWN": 0 } }
+      "orders": { "open": 5, "acknowledged": 0, "newToday": 2, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 5, "KNOWN": 0 } },
+      "refundsAndCredits": { "open": 4, "acknowledged": 0, "newToday": 1, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 4, "KNOWN": 0 } },
+      "returns": { "open": 2, "acknowledged": 0, "newToday": 1, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 2, "KNOWN": 0 } },
+      "exchangesAndWarranty": { "open": 0, "acknowledged": 0, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 0, "KNOWN": 0 } }
     }
   },
   "categories": {
     "orders": {
       "label": "Orders",
-      "counts": { "open": 5, "newToday": 2, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 5, "KNOWN": 0 } },
+      "counts": { "open": 5, "acknowledged": 0, "newToday": 2, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 5, "KNOWN": 0 } },
       "statements": {
         "R2": {
           "id": "R2",
@@ -47,7 +48,7 @@
           "checks": [
             { "id": "invoices-without-etail-id", "label": "NetSuite invoices and memos with no Etail id", "status": "ran", "reason": null, "matchedBy": null, "compared": { "NetSuite": 2210 }, "window": { "from": "2026-10-01", "thru": "2026-10-08" } }
           ],
-          "counts": { "open": 1, "newToday": 1, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 1, "KNOWN": 0 } },
+          "counts": { "open": 1, "acknowledged": 0, "newToday": 1, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 1, "KNOWN": 0 } },
           "findings": [
             {
               "id": "F-20790",
@@ -63,6 +64,7 @@
               "priority": "P2",
               "prioritySource": "statement",
               "priorityReason": null,
+              "acknowledgement": null,
               "next": "darpan findings show F-20790"
             }
           ],
@@ -73,7 +75,7 @@
     },
     "refundsAndCredits": {
       "label": "Refunds and credits",
-      "counts": { "open": 4, "newToday": 1, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 4, "KNOWN": 0 } },
+      "counts": { "open": 4, "acknowledged": 0, "newToday": 1, "fixedToday": 1, "byPriority": { "P0": 0, "P1": 0, "P2": 4, "KNOWN": 0 } },
       "statements": {
         "R4": {
           "id": "R4",
@@ -86,7 +88,7 @@
           "checks": [
             { "id": "returns-vs-credit-memos", "label": "OMS returns against NetSuite credit memos", "status": "ran", "reason": null, "matchedBy": "return id (custbody_hc_return_id)", "compared": { "OMS": 412, "NetSuite": 409 }, "window": { "from": "2026-10-01", "thru": "2026-10-08" } }
           ],
-          "counts": { "open": 1, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 1, "KNOWN": 0 } },
+          "counts": { "open": 1, "acknowledged": 0, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 1, "KNOWN": 0 } },
           "findings": [
             {
               "id": "F-20761",
@@ -103,6 +105,7 @@
               "priority": "P2",
               "prioritySource": "statement",
               "priorityReason": null,
+              "acknowledgement": null,
               "next": "darpan findings show F-20761"
             }
           ],
@@ -118,7 +121,7 @@
           "status": "notRun",
           "reason": "No check is configured for this statement yet.",
           "checks": [],
-          "counts": { "open": 0, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 0, "KNOWN": 0 } },
+          "counts": { "open": 0, "acknowledged": 0, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 0, "KNOWN": 0 } },
           "findings": [],
           "findingsOmitted": 0,
           "waiting": 0
@@ -127,12 +130,12 @@
     },
     "returns": {
       "label": "Returns",
-      "counts": { "open": 2, "newToday": 1, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 2, "KNOWN": 0 } },
+      "counts": { "open": 2, "acknowledged": 0, "newToday": 1, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 2, "KNOWN": 0 } },
       "statements": {}
     },
     "exchangesAndWarranty": {
       "label": "Exchanges and warranty",
-      "counts": { "open": 0, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 0, "KNOWN": 0 } },
+      "counts": { "open": 0, "acknowledged": 0, "newToday": 0, "fixedToday": 0, "byPriority": { "P0": 0, "P1": 0, "P2": 0, "KNOWN": 0 } },
       "statements": {}
     }
   }

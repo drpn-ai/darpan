@@ -220,8 +220,11 @@ class AuditFacadeSmokeTests {
         assertEquals([["R7", "orders"], ["R7", "orders"]], units.collect { [it.statement, it.category] })
         assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10"]).findings as List<Map>)*.id,
                 "the whole audit: every statement's units")
-        // DAR-BE-206: a finding is only open or fixed. A caller still sending state (the board's old "pending") gets the open ones.
-        assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "pending"]).findings as List<Map>)*.id)
+        // DAR-BE-361: state picks the open or the acknowledged rows (nothing is acknowledged here); blank is every row.
+        assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "open"]).findings as List<Map>)*.id)
+        assertEquals([], call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "acknowledged"]).findings)
+        Map pending = call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "pending"])
+        assertTrue((pending.errorText as String).contains("state must be open or acknowledged"), pending.errorText as String)
         Map other = call("get#AuditFindingsByOrder", [audit: "other-only", period: "2026-10"])
         assertTrue((other.errorText as String).contains("Audit other-only was not found"), other.errorText as String)
     }

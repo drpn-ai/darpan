@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Candidate release-scoped upgrade data for Darpan 3.4.7.
-Generated from backend compare range: v3.4.6..HEAD
+Candidate release-scoped upgrade data for Darpan 3.4.8.
+Generated from backend compare range: v3.4.7..HEAD
 Records must also live in generic source data files under runtime/component/darpan/data/.
 Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- Added records from data/OpsNoticeSeedData.xml -->
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.runfailed" defaultText="${name} did not finish. Darpan has been alerted and is working on a fix."/>
+    <!-- Modified records from data/SourceSystemConnectorSeedData.xml -->
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY" extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_AUTH" configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig" remoteId="SHOPIFY_REMOTE" endpointLabel="Orders" sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json" remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql" systemAliases="SHOPIFY,DAR_SYS_SHOPIFY" preserveWindowInstants="Y" lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds" exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState" exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep" healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection" filterParameterName="sourceFilters" evidenceFieldsJson='{"system":"Shopify","state":"displayFulfillmentStatus","stateLabels":{"FULFILLED":"Fulfilled","UNFULFILLED":"Unfulfilled","PARTIALLY_FULFILLED":"Partially fulfilled","RESTOCKED":"Restocked","ON_HOLD":"On hold","IN_PROGRESS":"In progress","SCHEDULED":"Scheduled","PENDING_FULFILLMENT":"Pending fulfillment","OPEN":"Open"},"facts":["name","displayFinancialStatus","sourceName"]}' extractOptionsJson='[{"name":"withLineItems","label":"Order lines","type":"boolean"}]' enabled="Y"/>
 </entity-facade-xml>

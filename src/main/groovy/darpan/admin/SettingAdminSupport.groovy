@@ -1,6 +1,7 @@
 package darpan.admin
 
 import darpan.audit.AuditDigestSupport
+import darpan.audit.AuditRunUpdateSupport
 import darpan.config.DarpanSettings
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.transform.CompileDynamic
@@ -35,10 +36,12 @@ class SettingAdminSupport {
     }
 
     static final String ERRORS_EMAIL_KEY = 'errors.email.to'
+    /** Settings whose value is an address list, validated the same way. */
+    static final Set<String> EMAIL_LIST_KEYS = [ERRORS_EMAIL_KEY, AuditRunUpdateSupport.UNEXPLAINED_TO] as Set<String>
 
-    /** The error email's addresses: every comma- or semicolon-separated entry is an address (AuditDigestSupport.emailsOf); never echoes the value. */
+    /** An address-list setting's addresses: every comma- or semicolon-separated entry is an address (AuditDigestSupport.emailsOf); never echoes the value. */
     private static String emailListProblem(String settingKey, String text) {
-        if (settingKey != ERRORS_EMAIL_KEY || !text) return null
+        if (!(settingKey in EMAIL_LIST_KEYS) || !text) return null
         List<String> entries = text.split(/[,;]/)*.trim().findAll { it }
         if (entries && AuditDigestSupport.emailsOf(text).size() == entries.unique().size()) return null
         return "${settingKey} must be one or more email addresses, comma-separated.".toString()

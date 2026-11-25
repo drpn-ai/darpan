@@ -3,6 +3,7 @@ package darpan.ops
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import org.apache.logging.log4j.Level
+import org.apache.logging.log4j.ThreadContext
 import org.apache.logging.log4j.core.LogEvent
 import org.apache.logging.log4j.util.ReadOnlyStringMap
 import org.moqui.context.LogEventSubscriber
@@ -24,8 +25,8 @@ import java.util.regex.Pattern
  * darpan.ops.ErrorLogEntry rows for the daily error email.
  *
  * {@link #process} runs on the thread log4j delivers on (AsyncLog in both configs): it never throws, never logs (a line it wrote
- * would come straight back) and never waits beyond one map bin. Lines the flushing thread logs during a flush are ignored, so a
- * failing flush cannot feed itself.
+ * would come straight back) and never waits beyond one map bin. Lines logged during a flush carry FLUSH_MDC_KEY and are ignored,
+ * so a failing flush cannot feed itself.
  */
 @CompileStatic
 class ErrorLogCapture implements LogEventSubscriber {
@@ -48,6 +49,13 @@ class ErrorLogCapture implements LogEventSubscriber {
     /** Masking reads at most this much of a message: an ERROR can carry a megabyte of SQL. */
     private static final int MASK_MAX_CHARS = 1000
     static final String TENANT_MDC_KEY = "darpan.tenant"
+    /**
+     * Set in the log4j thread context while a flush runs. log4j copies the context onto each event on the logging thread (before
+     * AsyncLog hands it over), so a line the flush itself causes (an entity, transaction or service error) carries it and is not kept.
+     */
+    static final String FLUSH_MDC_KEY = "darpan.errorLogFlush"
+    /** The thread-context tenant of a request with no tenant (DarpanMdcSupport); kept as no tenant. */
+    private static final String NO_TENANT = "anonymous"
 
     private static final Pattern QUOTED_ID = Pattern.compile("'[^'\\s]{1,120}'|\"[^\"\\s]{1,120}\"|`[^`\\s]{1,120}`")
     private static final Pattern UUID_LIKE = Pattern.compile("(?i)\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b")
@@ -55,27 +63,14 @@ class ErrorLogCapture implements LogEventSubscriber {
     private static final Pattern DIGITS = Pattern.compile("\\d+")
     private static final Pattern SPACES = Pattern.compile("\\s+")
 
-    /** Seam: the store service flush calls. FLUSH_SERVICE in production. */
-    static volatile String flushService = FLUSH_SERVICE
-    /**
-     * The last flush: its thread and time span. A line that thread logged inside the span (an entity, transaction or service
-     * error of the flush itself) is not kept. Matched on the event's own thread id and time, not the delivering thread: the
-     * log4j configs hand MoquiSubscribers its events from the AsyncLog thread, later.
-     */
-    private static volatile FlushWindow lastFlush = null
+    /** Seam: replaces the store call, called with (ec, rows) on the flushing thread. Null in production (FLUSH_SERVICE). */
+    static Closure storeHook = null
 
     private final ConcurrentHashMap<String, Agg> buffer = new ConcurrentHashMap<String, Agg>()
 
     static void resetForTests() {
         INSTANCE.buffer.clear()
-        lastFlush = null
-        flushService = FLUSH_SERVICE
-    }
-
-    private static final class FlushWindow {
-        final long threadId, from, to
-        FlushWindow(long threadId, long from, long to) { this.threadId = threadId; this.from = from; this.to = to }
-        boolean covers(long threadId, long at) { return threadId == this.threadId && at >= from && at <= to }
+        storeHook = null
     }
 
     /** One fingerprint's aggregate. Mutated only inside the map's compute for its key. */
@@ -92,12 +87,12 @@ class ErrorLogCapture implements LogEventSubscriber {
             if (level == null || !level.isMoreSpecificThan(Level.ERROR)) return
             long when = event.getTimeMillis()
             if (when <= 0L) when = System.currentTimeMillis()
-            FlushWindow flushing = lastFlush
-            if (flushing != null && flushing.covers(event.getThreadId(), when)) return
+            ReadOnlyStringMap context = event.getContextData()
+            if (context != null && context.getValue(FLUSH_MDC_KEY) != null) return
             String loggerName = event.getLoggerName() ?: ""
             String message = event.getMessage()?.getFormattedMessage() ?: ""
             Throwable thrown = event.getThrown()
-            String tenantId = tenantOf(event.getContextData())
+            String tenantId = tenantOf(context)
 
             String fp = fingerprint(loggerName, message)
             if (!buffer.containsKey(fp) && buffer.size() >= MAX_FINGERPRINTS) fp = OVERFLOW
@@ -141,7 +136,10 @@ class ErrorLogCapture implements LogEventSubscriber {
     void restore(List<Map> entries) {
         for (Map e : entries) {
             if (e?.fingerprint == null) continue
-            final Agg back = new Agg(fingerprint: e.fingerprint as String, loggerName: e.loggerName as String, sampleMessage: e.sampleMessage as String,
+            // the cap holds here too: a store that keeps failing must not let the buffer grow by a window's worth each time
+            String key = e.fingerprint as String
+            if (!buffer.containsKey(key) && buffer.size() >= MAX_FINGERPRINTS) key = OVERFLOW
+            final Agg back = new Agg(fingerprint: key, loggerName: e.loggerName as String, sampleMessage: e.sampleMessage as String,
                     sampleStack: e.sampleStack as String, tenantId: e.tenantId as String, count: (e.count ?: 0L) as long,
                     firstSeen: ((Timestamp) e.firstSeen)?.time ?: 0L, lastSeen: ((Timestamp) e.lastSeen)?.time ?: 0L)
             buffer.merge(back.fingerprint, back, { Agg cur, Agg restored ->
@@ -160,7 +158,7 @@ class ErrorLogCapture implements LogEventSubscriber {
     /**
      * Drains the aggregates and adds them into darpan.ops.ErrorLogEntry, one row per fingerprint per UTC day (the day of the
      * aggregate's last line). Runs in its own transaction, never the caller's; when the store fails the aggregates go back for the
-     * next flush and the caller is left without errors. Lines logged on this thread meanwhile are not kept.
+     * next flush. The caller's messages and errors come back exactly as they were. Lines logged during the flush are not kept.
      */
     @CompileDynamic
     static void flush(def ec) {
@@ -171,34 +169,31 @@ class ErrorLogCapture implements LogEventSubscriber {
         }
         boolean stored = false
         String failure = null
-        long threadId = Thread.currentThread().threadId()
-        long from = System.currentTimeMillis()
-        lastFlush = new FlushWindow(threadId, from, Long.MAX_VALUE)
+        String priorFlag = ThreadContext.get(FLUSH_MDC_KEY)
+        ThreadContext.put(FLUSH_MDC_KEY, "true")
+        // the caller's messages and errors come back exactly as they were; the store's own are discarded (clearErrors would turn
+        // them into danger messages). addPublic puts one MessageInfo in both lists, so the general snapshot holds the public ones.
+        List infos = new ArrayList(ec.message.messageInfos)
+        List publics = new ArrayList(ec.message.publicMessageInfos)
+        ec.message.pushErrors()
         try {
-            ec.message.pushErrors()
-            try {
-                ec.service.sync().name(flushService).requireNewTransaction(true).parameters([entries: rows]).call()
-                stored = !ec.message.hasError()
-                if (!stored) failure = (ec.message.getErrors() ?: []).take(1).join("").take(200)
-            } catch (Throwable t) {
-                failure = t.getClass().name
-            } finally {
-                ec.message.clearErrors()
-                ec.message.popErrors()
-            }
+            if (storeHook != null) storeHook.call(ec, rows)
+            else ec.service.sync().name(FLUSH_SERVICE).requireNewTransaction(true).parameters([entries: rows]).call()
+            stored = !ec.message.hasError()
+            if (!stored) failure = "${ec.message.getErrors().size()} store error(s)"
+        } catch (Throwable t) {
+            failure = t.getClass().name
         } finally {
-            lastFlush = new FlushWindow(threadId, from, System.currentTimeMillis())
+            ec.message.clearAll()
+            infos.each { mi ->
+                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
+                else ec.message.addMessage(mi.message, mi.type)
+            }
+            ec.message.popErrors()
+            if (priorFlag != null) ThreadContext.put(FLUSH_MDC_KEY, priorFlag) else ThreadContext.remove(FLUSH_MDC_KEY)
             if (!stored) INSTANCE.restore(entries)
         }
         if (!stored) logger.warn("Error log flush kept {} fingerprints for the next try: {}", entries.size(), failure)
-    }
-
-    /** Runs the closure as a flush would: lines this thread logs meanwhile are not kept. For tests. */
-    static <T> T whileFlushing(Closure<T> body) {
-        long threadId = Thread.currentThread().threadId()
-        long from = System.currentTimeMillis()
-        lastFlush = new FlushWindow(threadId, from, Long.MAX_VALUE)
-        try { return body.call() } finally { lastFlush = new FlushWindow(threadId, from, System.currentTimeMillis()) }
     }
 
     /**
@@ -221,7 +216,8 @@ class ErrorLogCapture implements LogEventSubscriber {
     private static String tenantOf(ReadOnlyStringMap context) {
         if (context == null || context.isEmpty()) return null
         Object v = context.getValue(TENANT_MDC_KEY)
-        return v != null ? cap(v.toString(), 40) : null
+        if (v == null || NO_TENANT == v.toString()) return null
+        return cap(v.toString(), 40)
     }
 
     private static String cap(String s, int max) { return s == null || s.length() <= max ? s : s.substring(0, max) }

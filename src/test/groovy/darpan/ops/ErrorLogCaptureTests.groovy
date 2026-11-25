@@ -31,6 +31,7 @@ class ErrorLogCaptureTests {
         Level level = (over.level ?: Level.ERROR) as Level
         SortedArrayStringMap context = new SortedArrayStringMap()
         if (over.tenant) context.putValue("darpan.tenant", over.tenant)
+        if (over.flushing) context.putValue(ErrorLogCapture.FLUSH_MDC_KEY, "true")
         return Log4jLogEvent.newBuilder()
                 .setLoggerName((over.logger ?: "darpan.Some") as String)
                 .setLevel(level)
@@ -38,7 +39,6 @@ class ErrorLogCaptureTests {
                 .setThrown(over.thrown as Throwable)
                 .setContextData(context)
                 .setTimeMillis((over.time ?: System.currentTimeMillis()) as long)
-                .setThreadId((over.threadId ?: Thread.currentThread().threadId()) as long)
                 .build()
     }
 
@@ -140,19 +140,30 @@ class ErrorLogCaptureTests {
     }
 
     @Test
-    void linesTheFlushingThreadLogsDuringAFlushAreIgnoredEvenWhenDeliveredLater() {
-        long me = Thread.currentThread().threadId()
-        List<LogEvent> during = []
-        ErrorLogCapture.whileFlushing {
-            during << event(message: "flush own line")
-            during << event(message: "another thread's line", threadId: me + 1)
-        }
-        Thread.sleep(2)
-        LogEvent after = event(message: "after the flush")
-        // log4j's AsyncLog thread delivers them after the flush has ended
-        Thread deliverer = Thread.start { (during + after).each { capture.process(it) } }
-        deliverer.join()
-        assertEquals(["another thread's line", "after the flush"] as Set, capture.drain().collect { it.sampleMessage } as Set)
+    void linesLoggedDuringAFlushAreIgnored() {
+        // log4j copies the thread context onto the event on the logging thread, before AsyncLog delivers it
+        capture.process(event(message: "flush own line", flushing: true))
+        capture.process(event(message: "Run 7 failed"))
+        assertEquals(["Run 7 failed"], capture.drain().collect { it.sampleMessage })
+    }
+
+    @Test
+    void anAnonymousTenantIsNoTenant() {
+        capture.process(event(tenant: "anonymous"))
+        assertNull(capture.drain()[0].tenantId)
+    }
+
+    @Test
+    void restoreKeepsTheCapAndConservesTheCount() {
+        (0..<500).each { int i -> capture.process(event(logger: "darpan.Old" + ((char) (97 + i % 26)), message: "Old ${'q' * (i.intdiv(26))} kind")) }
+        List<Map> drained = capture.drain()
+        assertEquals(500, drained.size())
+        (0..<500).each { int i -> capture.process(event(logger: "darpan.New" + ((char) (97 + i % 26)), message: "New ${'q' * (i.intdiv(26))} kind")) }
+        capture.restore(drained)
+        List<Map> rows = capture.drain()
+        assertTrue(rows.size() <= ErrorLogCapture.MAX_FINGERPRINTS + 1, "${rows.size()} keys")
+        assertEquals(1000L, rows.sum { it.count as long })
+        assertEquals(500L, rows.find { it.fingerprint == ErrorLogCapture.OVERFLOW }?.count)
     }
 
     @Test

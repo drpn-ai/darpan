@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
+import org.moqui.context.NotificationMessage.NotificationType
 import org.moqui.entity.EntityValue
 import org.slf4j.LoggerFactory
 
@@ -23,6 +24,7 @@ import java.time.Instant
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-BE-015 (spec E). Moqui wiring only: the tool factory registers the subscriber, and flush writes ErrorLogEntry rows. */
@@ -122,15 +124,40 @@ class ErrorLogFlushTests {
     }
 
     @Test
-    void aFailedFlushPutsTheAggregatesBackAndLeavesNoErrors() {
+    void aFailedFlushPutsTheAggregatesBackAndKeepsNoLineItLogged() {
         error("darpan.F4", "Run 1 failed", "2026-11-22T08:00:00Z")
-        ErrorLogCapture.flushService = "ops.OpsServices.no#SuchService"
+        // the store logs an ERROR on the flushing thread (as a failing insert or transaction would) and fails
+        ErrorLogCapture.storeHook = { def ctx, List rows ->
+            LoggerFactory.getLogger("darpan.ops.ErrorLogStoreProbe").error("Store 99 broke")
+            throw new IllegalStateException("database down")
+        }
         ErrorLogCapture.flush(ec)
         assertFalse(ec.message.hasError())
-        ErrorLogCapture.flushService = ErrorLogCapture.FLUSH_SERVICE
-        List<Map> kept = ErrorLogCapture.INSTANCE.drain().findAll { it.fingerprint == "darpan.F4 Run # failed" }
-        assertEquals(1, kept.size())
-        assertEquals(1L, kept[0].count)
-        assertEquals(null, row("darpan.F4 Run # failed", "2026-11-22"))
+        // AsyncLog delivers in order: once a later line is held, the store's line has been seen (and must have been dropped)
+        String sentinel = "darpan.ops.ErrorLogStoreProbe Sentinel # after"
+        LoggerFactory.getLogger("darpan.ops.ErrorLogStoreProbe").error("Sentinel 1 after")
+        for (int i = 0; i < 200 && !ErrorLogCapture.INSTANCE.holds(sentinel); i++) Thread.sleep(10)
+        List<Map> kept = ErrorLogCapture.INSTANCE.drain()
+        assertEquals(["darpan.F4 Run # failed", sentinel] as Set, kept.collect { it.fingerprint } as Set)
+        assertEquals(1L, kept.find { it.fingerprint == "darpan.F4 Run # failed" }.count)
+        assertNull(row("darpan.F4 Run # failed", "2026-11-22"))
+    }
+
+    @Test
+    void theCallersMessagesComeBackExactlyAsBefore() {
+        ec.message.addMessage("caller note", NotificationType.info)
+        ec.message.addPublic("caller public", NotificationType.success)
+        ec.message.addError("caller error")
+        error("darpan.F5", "Run 1 failed", "2026-11-21T08:00:00Z")
+        ErrorLogCapture.storeHook = { def ctx, List rows ->
+            ctx.message.addMessage("store chatter")
+            ctx.message.addPublic("store public", NotificationType.warning)
+            ctx.message.addError("SQL insert into ERROR_LOG_ENTRY failed")
+        }
+        ErrorLogCapture.flush(ec)
+        assertEquals(["caller note", "caller public"], ec.message.messageInfos.collect { it.message })
+        assertEquals(["caller public"], ec.message.publicMessageInfos.collect { it.message })
+        assertEquals(["caller error"], ec.message.errors)
+        assertEquals(1, ErrorLogCapture.INSTANCE.drain().count { it.fingerprint == "darpan.F5 Run # failed" })
     }
 }

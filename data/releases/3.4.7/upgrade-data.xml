@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Candidate release-scoped upgrade data for Darpan 3.4.7.
+Generated from backend compare range: v3.4.6..HEAD
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Review each record before loading into an environment.
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Added records from data/OpsNoticeSeedData.xml -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.runfailed" defaultText="${name} did not finish. Darpan has been alerted and is working on a fix."/>
+</entity-facade-xml>

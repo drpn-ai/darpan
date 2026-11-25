@@ -715,6 +715,8 @@
         <field name="reconciliationRunResultId" type="id"/>
         <field name="file1RecordCount" type="number-integer"/>
         <field name="file2RecordCount" type="number-integer"/>
+        <field name="file1ReadCount" type="number-integer"/>
+        <field name="file2ReadCount" type="number-integer"/>
         <field name="differenceCount" type="number-integer"/>
         <field name="onlyInFile1Count" type="number-integer"/>
         <field name="onlyInFile2Count" type="number-integer"/>

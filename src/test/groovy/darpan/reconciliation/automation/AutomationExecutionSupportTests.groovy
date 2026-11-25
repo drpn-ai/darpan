@@ -3422,6 +3422,34 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void aSideKeepSetAsideEverythingKeepsItsReadCount() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+
+        runAcmeAutomation(ec, [file2: [keptCount: 0, setAsideCount: 3]], [FILE_1: 10, FILE_2: 3])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, execution.statusEnumId)
+        assertEquals(3, execution.file2ReadCount)
+        assertEquals(0, execution.file2RecordCount)
+        assertEquals(10, execution.file1ReadCount)
+    }
+
+    @Test
+    void aSideWithoutKeepReadsAndRecordsTheSameCount() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+
+        runAcmeAutomation(ec, null, [FILE_1: 4, FILE_2: 4])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(4, execution.file1ReadCount)
+        assertEquals(4, execution.file1RecordCount)
+        assertEquals(4, execution.file2ReadCount)
+        assertEquals(4, execution.file2RecordCount)
+    }
+
+    @Test
     void aSideThatTakesNoKeepReadsNoFilterRows() {
         // NONE placement (no filter parameter on the connector: uploads, databases): nothing to filter, nothing read.
         FakeEc ec = fakeEc()
@@ -3485,11 +3513,11 @@ class AutomationExecutionSupportTests {
     }
 
     /** AUTO_API run once on ACME; the compare answers keepSummaryBySide. [result, reconcile (the compare call)]. */
-    private static Map runAcmeAutomation(FakeEc ec, Map keepSummaryBySide) {
+    private static Map runAcmeAutomation(FakeEc ec, Map keepSummaryBySide, Map readCounts = [FILE_1: 10, FILE_2: 9]) {
         ec.service.responder = { FakeServiceCall call ->
             if (call.serviceName == ACME_EXTRACT) {
                 return [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(),
-                        fileName     : "${call.params.fileSide}.json".toString(), recordCount: call.params.fileSide == "FILE_1" ? 10 : 9]
+                        fileName     : "${call.params.fileSide}.json".toString(), recordCount: readCounts[call.params.fileSide]]
             }
             if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
                 return [diffLocation    : "reconciliation-runs/AUTO_API/20260501/result.json", diffFileName: "result.json",

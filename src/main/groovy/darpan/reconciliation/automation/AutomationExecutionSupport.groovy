@@ -3194,6 +3194,8 @@ class AutomationExecutionSupport {
         result.fileTypeEnumId = normalize(result.fileTypeEnumId) ?: normalize(readField(source, "fileTypeEnumId"))
         result.schemaFileName = normalize(result.schemaFileName) ?: normalize(readField(source, "schemaFileName"))
         result.recordCount = normalizeInt(result.recordCount)
+        // DAR-BE-015: what the read returned, kept apart because Keep later overwrites recordCount with the kept count.
+        result.readCount = result.recordCount
         return result
     }
 
@@ -3313,6 +3315,8 @@ class AutomationExecutionSupport {
                 file2DataManagerPath: normalize(file2Result?.dataManagerPath),
                 file1RecordCount : normalizeInt(file1Result.recordCount),
                 file2RecordCount : normalizeInt(file2Result?.recordCount),
+                file1ReadCount   : normalizeInt(file1Result.readCount),
+                file2ReadCount   : normalizeInt(file2Result?.readCount),
                 differenceCount  : normalizeInt(reconcileResult.differenceCount),
                 onlyInFile1Count : normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count),
                 onlyInFile2Count : normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count),

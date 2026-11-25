@@ -71,11 +71,15 @@ class AuditDigestSupport {
         lines.add("")
 
         if (weekly) {
+            // DAR-BE-361: today's acknowledged rows left the open count; each side counts open + acknowledged, so a
+            // week of acknowledging reads as no change.
             Map before = (weekAgo?.summary ?: [:]) as Map
-            lines.add(copy.text("open.weekly", [open: count(summary.open), before: count(before.open)]))
+            lines.add(copy.text("open.weekly", [open: count(summary.open) + count(summary.acknowledged),
+                                                before: count(before.open) + count(before.acknowledged)]))
         } else {
             lines.add(copy.text("open.daily", [open: count(summary.open), new: count(summary.newToday), fixed: count(summary.fixedToday)]))
         }
+        if (count(summary.acknowledged) > 0) lines.add(copy.text("acknowledged", [count: count(summary.acknowledged)]))
         ((report?.categories ?: [:]) as Map).each { String id, Object raw ->
             Map category = raw as Map
             Map counts = (category.counts ?: [:]) as Map

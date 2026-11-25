@@ -420,6 +420,35 @@ class AuditRunUpdateSmokeTests {
         }
     }
 
+    // DAR-BE-361: the Unexplained CSV keeps an acknowledged finding, marked "yes" with its note; the tenant's own per-rule
+    // CSVs and groups leave it out, and the run email says "1 acknowledged" once.
+    @Test
+    void unexplainedCsvCarriesAcknowledgement() {
+        DarpanSettings.resetForTests()
+        DarpanSettings.rowLoader = { -> [(AuditRunUpdateSupport.UNEXPLAINED_TO): [settingValue: "review@drpn.example"]] as Map<String, Map> }
+        def finding = ec.entity.find("darpan.audit.AuditFinding").condition("companyUserGroupId", GORJANA)
+                .condition("headline", "Order 1 is not billed").one()
+        insert("darpan.audit.AuditFindingAcknowledgement", [findingId: finding.findingId, companyUserGroupId: GORJANA,
+                note: "Known: the 3PL is late", acknowledgedStamp: new Timestamp(System.currentTimeMillis()),
+                remindDate: Date.valueOf(today.plusDays(5))])
+        try {
+            send(AUTO)
+            Map own = mails.find { it.to == "review@drpn.example" }
+            List<String> rows = ((own.attachments as List<Map>)[0].contentText as String).split("\r\n") as List<String>
+            assertEquals(4, rows.size(), "the acknowledged finding stays in the Unexplained CSV")
+            assertTrue(rows[0].endsWith(",acknowledged,acknowledgement note"), rows[0])
+            assertEquals(1, rows.count { it.endsWith(",yes,Known: the 3PL is late") }, rows.toString())
+            assertEquals(2, rows.count { it.endsWith(",,") }, "the others have neither")
+            Map tenantMail = mails.find { it.to != "review@drpn.example" }
+            Map r2 = (tenantMail.attachments as List<Map>).find { it.fileName.contains("-R2.csv") }
+            assertEquals(3, (r2.contentText as String).split("\r\n").length, "R2's own CSV: header and the two not acknowledged")
+            assertTrue((tenantMail.body.runText as String).contains("1 acknowledged"), tenantMail.body.runText as String)
+        } finally {
+            ec.entity.find("darpan.audit.AuditFindingAcknowledgement").condition("findingId", finding.findingId).deleteAll()
+            DarpanSettings.resetForTests()
+        }
+    }
+
     @Test
     void aDigestAddressThatIsNotOneIsLeftOut() {
         assertEquals(["close@gorjana.example", "ap@gorjana.example"],

@@ -66,6 +66,21 @@ class AuditRunMessageTests {
 
     // DAR-BE-358 (Aditi 2026-11-25: "emails are expected to have personality... not dry"). Darpan's own Unexplained note
     // wears every Darpan email's shape: frame, what happened with a wink, the fact, what next, the sign-off, the guides.
+    // DAR-BE-361: one "N acknowledged" line, in the email's html and text, only when some are.
+    @Test
+    void acknowledgedLineOnlyWhenSome() {
+        Map f = facts()
+        f.totals = f.totals + [acknowledged: 3]
+        String text = AuditRunMessage.emailText(f, [:], null, COPY)
+        assertTrue(text.contains("3 acknowledged"), text)
+        assertEquals(1, times(text, "3 acknowledged"))
+        assertTrue(AuditRunMessage.emailHtml(f, [:], null, COPY).contains("3 acknowledged"))
+        f.totals = f.totals + [acknowledged: 0]
+        assertFalse(AuditRunMessage.emailText(f, [:], null, COPY).contains("acknowledged"))
+        assertFalse(AuditRunMessage.emailHtml(f, [:], null, COPY).contains("acknowledged"))
+        assertFalse(AuditRunMessage.emailText(facts(), [:], null, COPY).contains("acknowledged"), "no key, no line")
+    }
+
     @Test
     void theUnexplainedNoteHasTheEmailShapeInHtmlAndText() {
         Map email = AuditRunMessage.unexplainedEmail(facts(), 4, COPY)

@@ -157,6 +157,12 @@ class AuditRunMessage {
                         sections: [[widgets: widgets]]]]]]
     }
 
+    /** DAR-BE-361: "3 acknowledged" when the team set some findings aside today; null when none. */
+    static String acknowledgedLine(Map facts, EmailCopyReader copy) {
+        int n = (totals(facts).acknowledged ?: 0) as int
+        return n > 0 ? copy.text("acknowledged", [count: n]) : null
+    }
+
     /** The email body: header, Open/New/Fixed tiles, act on first, the rules, one section per rule with open findings. */
     static String emailHtml(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
@@ -212,7 +218,7 @@ class AuditRunMessage {
 <div style="${F}font-size:13px;color:${MUTED};margin-top:4px;">${esc(subtitle(facts, copy))}</div>
 ${headline}${warn}
 <table role="presentation" cellpadding="0" cellspacing="8" style="width:100%;margin:18px -8px 0;border-collapse:separate;"><tr>
-${tile(copy.text("tile.open"), t.open, true)}${tile(copy.text("tile.new"), t.newToday, false)}${tile(copy.text("tile.fixed"), t.fixedToday, false)}</tr></table>
+${tile(copy.text("tile.open"), t.open, true)}${tile(copy.text("tile.new"), t.newToday, false)}${tile(copy.text("tile.fixed"), t.fixedToday, false)}</tr></table>${acknowledgedLine(facts, copy) ? "<p style=\"${F}font-size:12px;color:${MUTED};margin:0;line-height:1.6;\">${esc(acknowledgedLine(facts, copy))}</p>" : ""}
 ${actSection}
 ${EmailFrame.eyebrow(copy.text("rules.heading").toUpperCase(Locale.ROOT), 28)}
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-top:8px;border-collapse:collapse;">${rows}</table>
@@ -231,6 +237,8 @@ ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
         String notRun = notRunNotice(facts, copy)
         if (notRun) lines += ["", notRun]
         lines += ["", "${copy.text('tile.open')} ${t.open} · ${copy.text('tile.new')} ${t.newToday} · ${copy.text('tile.fixed')} ${t.fixedToday}".toString()]
+        String acknowledged = acknowledgedLine(facts, copy)
+        if (acknowledged) lines << acknowledged
         List<Map> act = actOnFirst(facts)
         if (act) {
             lines += ["", copy.text("act.heading")]

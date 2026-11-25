@@ -40,7 +40,7 @@ class AuditRunFactsTests {
         assertEquals(["RX-1 #GOR900"], groups[4].ids)
 
         assertEquals("Bill order in NetSuite.", failed.fixText, "unfilled placeholders are cut with their spacing")
-        assertEquals([open: 57, newToday: 3, fixedToday: 1], facts.totals)
+        assertEquals([open: 57, acknowledged: 0, newToday: 3, fixedToday: 1], facts.totals)
         assertEquals(["R2", "R9", "R10"], (facts.rules as List<Map>)*.id, "rules by number")
         assertEquals(["shopify-vs-netsuite"], (facts.rules as List<Map>).find { it.id == "R9" }.checksNotRun)
         assertEquals([1, 1, 1], (facts.rules as List<Map>)*.checksTotal, "every rule carries how many checks it has")

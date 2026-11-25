@@ -66,7 +66,9 @@ class AuditRunFacts {
                 period: head.period,
                 date  : head.date,
                 window: head.window,
-                totals: [open: count(summary.open), newToday: count(summary.newToday), fixedToday: count(summary.fixedToday)],
+                // DAR-BE-361: open leaves out the rows the team acknowledged today; they are counted apart, 0 on a past morning.
+                totals: [open: count(summary.open), acknowledged: count(summary.acknowledged), newToday: count(summary.newToday),
+                         fixedToday: count(summary.fixedToday)],
                 rules : rules,
                 groups: groups]
     }
@@ -99,19 +101,31 @@ class AuditRunFacts {
         return rows
     }
 
-    static final List<String> UNEXPLAINED_HEADER = (["Tenant", "Audit"] + CSV_HEADER).asImmutable()
+    static final List<String> UNEXPLAINED_HEADER = (["Tenant", "Audit"] + CSV_HEADER + ["acknowledged", "acknowledgement note"]).asImmutable()
 
     /** A finding no cause explains: no cause at all, or the tree's own "Unexplained". */
     static boolean unexplained(String cause) { return !cause || cause == "Unexplained" }
 
     /**
      * DAR-BE-358. Every open finding no cause explains, across all rules, for Darpan's own review: {count, csv}, csv in
-     * UNEXPLAINED_HEADER's columns; null when there is none, so nothing is sent.
+     * UNEXPLAINED_HEADER's columns; null when there is none, so nothing is sent. DAR-BE-361: an acknowledged row stays
+     * (the review wants it) with "yes" and the note; a reminded row reads open, so both stay blank.
      */
     static Map unexplainedCsv(List<Map> units, String tenantId, String auditId, Closure<String> fixOf) {
-        List<List<String>> rows = findingRows(units, fixOf).findAll { unexplained(it[1]) }
-                .collect { [tenantId, auditId] + it }
+        List<List<String>> rows = []
+        (units ?: []).each { Map unit ->
+            Map ack = acknowledgedBy(unit)
+            findingRows([unit], fixOf).findAll { unexplained(it[1]) }.each { List<String> row ->
+                rows << ([tenantId, auditId] + row + [ack ? "yes" : "", ack ? (ack.note ?: "") as String : ""])
+            }
+        }
         return rows ? [count: rows.size(), csv: csv([UNEXPLAINED_HEADER] + rows)] : null
+    }
+
+    /** The unit's acknowledgement while it holds (a reminded row is open again); null otherwise. */
+    private static Map acknowledgedBy(Map unit) {
+        Map ack = unit?.acknowledgement as Map
+        return ack != null && !ack.reminded ? ack : null
     }
 
     /** RFC 4180: CRLF lines; a field with a comma, quote or line break quoted, its quotes doubled. */

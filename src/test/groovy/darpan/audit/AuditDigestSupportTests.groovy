@@ -65,6 +65,20 @@ class AuditDigestSupportTests {
         assertFalse(text.contains("New today"), "today's movement is the daily digest's")
     }
 
+    // DAR-BE-361: today's acknowledgements leave the open count, so the week-over-week compares open + acknowledged on both
+    // sides; the acknowledged count has its own line, and a morning with none has no such line.
+    @Test
+    void weekOverWeekIncludesAcknowledged() {
+        Map doc = report()
+        doc.summary = doc.summary + [open: 8, acknowledged: 2]
+        Map before = [summary: [open: 10, acknowledged: 0]]
+        List<String> lines = AuditDigestSupport.render(doc, AuditDigestSupport.WEEKLY, false, before, null, COPY, RUN_COPY).readLines()
+        assertEquals("Open 10 (10 a week ago)", lines[2], "8 open + 2 acknowledged against 10: no change")
+        assertEquals("2 acknowledged, parked until their reminder day.", lines[3])
+        String quiet = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, false, null, null, COPY, RUN_COPY)
+        assertFalse(quiet.contains("acknowledged"), quiet)
+    }
+
     @Test
     void aFullListNamesEveryOpenFinding() {
         String text = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, true, null, null, COPY, RUN_COPY)

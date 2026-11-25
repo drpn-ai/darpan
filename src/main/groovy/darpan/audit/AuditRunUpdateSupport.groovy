@@ -158,7 +158,10 @@ class AuditRunUpdateSupport {
         }
         Map report = out?.document as Map
         if (report == null) return null
-        List<Map> units = AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, null, report.report?.period as String)
+        String reportPeriod = report.report?.period as String
+        // DAR-BE-361: the groups and per-rule CSVs list the findings still open; the Unexplained CSV keeps the acknowledged too.
+        List<Map> units = AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, null, reportPeriod, null, "open")
+        List<Map> everyUnit = AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, null, reportPeriod)
         Map facts = AuditRunFacts.build(report, units) { String rule, String cause, String findingId -> fixTextOf(ec, tenantId, findingId) }
         Map words = words(ec, tenantId, facts)
         // DAR-BE-320: after the words, so the writer's fact sheet stays the findings only.
@@ -172,7 +175,7 @@ class AuditRunUpdateSupport {
             group ? AuditRunMessage.fixLine(group, words) : null
         }
         EmailCopyReader copy = new EmailCopyReader(ec, AuditRunMessage.TEMPLATE)
-        Map unexplained = AuditRunFacts.unexplainedCsv(units, tenantId, auditId) { String rule, String cause ->
+        Map unexplained = AuditRunFacts.unexplainedCsv(everyUnit, tenantId, auditId) { String rule, String cause ->
             Map group = groupsByKey["${rule}|${cause ?: ''}".toString()]
             group ? AuditRunMessage.fixLine(group, words) : null
         }

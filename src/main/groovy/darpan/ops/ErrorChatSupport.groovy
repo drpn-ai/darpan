@@ -19,10 +19,18 @@ class ErrorChatSupport {
     static final String WEBHOOK_SETTING = "errors.chat.webhookUrl"
     static final int ERROR_MAX_CHARS = 300
 
+    /** The RunErrorNotice slot (triggerType) of an automation's one client "did not run" line a day; never part of a streak. */
+    static final String CLIENT_LINE_SLOT = "client"
+
     /** Seam: replaces the outgoing post, called with (webhookUrl, payload) and returning the delivery map. Null in production. */
     static Closure postHook = null
+    /** Seam: replaces the claim service call, called with the slot params and returning [isNew, priorDays]. Null in production. */
+    static Closure claimHook = null
 
-    static void resetForTests() { postHook = null }
+    static void resetForTests() {
+        postHook = null
+        claimHook = null
+    }
 
     static boolean postErrorCard(def ec, Map event) {
         String webhookUrl = null
@@ -30,8 +38,7 @@ class ErrorChatSupport {
             webhookUrl = DarpanSettings.stringValue(WEBHOOK_SETTING)
             if (!webhookUrl) return false
 
-            Timestamp when = (event.scheduledDate ?: event.completedDate ?: new Timestamp(System.currentTimeMillis())) as Timestamp
-            LocalDate day = RunErrorKinds.runDay(when, event.zoneId as String)
+            LocalDate day = dayOf(event)
             String subjectKey = event.checkId ? "${event.auditId ?: ''}:${event.checkId}".toString() : (event.automationId as String)
             String triggerType = event.scheduled ? "scheduled" : ((event.trigger ?: "manual") as String)
             // The claim runs in its own transaction and behind a fresh message scope: a failure there never rolls back the run's
@@ -54,11 +61,35 @@ class ErrorChatSupport {
     }
 
     /**
+     * DAR-BE-015. Claims an automation's one client "did not run" line for its run day: the (tenantId, automationId, day) slot
+     * CLIENT_LINE_SLOT, apart from the card's. True only for the call that won it, so an hourly failure, a second failed window
+     * or a requeue the same day tells the client once. Independent of errors.chat.webhookUrl. Never throws: false when the
+     * claim cannot be made (the client is then not told twice).
+     */
+    static boolean claimClientLine(def ec, Map event) {
+        try {
+            Map claim = claimSlot(ec, [tenantId: event.tenantId, subjectKey: event.automationId, runDay: SqlDate.valueOf(dayOf(event)),
+                    triggerType: CLIENT_LINE_SLOT, errorKind: event.kind, executionId: event.executionId], null)
+            return claim?.isNew == true
+        } catch (Throwable t) {
+            logger.warn("Client line claim for {} failed: {}", event?.tenantId, t.getClass().name)
+            return false
+        }
+    }
+
+    /** The run's day: its scheduled date (else completed date, else now) in the automation's own zone. */
+    private static LocalDate dayOf(Map event) {
+        Timestamp when = (event.scheduledDate ?: event.completedDate ?: new Timestamp(System.currentTimeMillis())) as Timestamp
+        return RunErrorKinds.runDay(when, event.zoneId as String)
+    }
+
+    /**
      * The claim call, isolated from the caller: its own transaction (requireNewTransaction, so a rollback-only caller cannot stop
      * it), and its errors and messages are discarded, not merged into the caller's (clearErrors would turn them into danger
      * messages a UI-started run could show). The caller's messages, public messages and errors come back exactly as they were.
      */
     private static Map claimSlot(def ec, Map params, String webhookUrl) {
+        if (claimHook != null) return (Map) claimHook.call(params)
         List infos = new ArrayList(ec.message.messageInfos)
         List publics = new ArrayList(ec.message.publicMessageInfos)
         ec.message.pushErrors()

@@ -228,12 +228,16 @@ class TenantNotificationSupport {
     }
 
     /**
-     * DAR-BE-015. Sends one plain line (a run that did not run) to the run's client destinations: the automation's own chat
-     * space and every notify-me subscriber's, as notifyRunCompleted resolves them. The run-result row is claimed first, so a
-     * run is told once, and its subscriptions go once the claim is won. Never the run's payload, counts or error.
+     * DAR-BE-015. Sends one plain line (a run that did not run) to the run's client destinations: every notify-me subscriber's
+     * space, plus automationChatSpaceId when the caller passes one (null leaves the automation's space out), resolved as
+     * notifyRunCompleted resolves them. The run-result row is claimed first, so a run is told once, and its subscriptions go
+     * once the claim is won. Never the run's payload, counts or error.
      */
     static Map<String, Object> notifyRunLine(def ec, String tenantId, String automationChatSpaceId, String resultId, String text) {
-        if (!tenantId) return [ok: true, attempted: false, skippedReason: "NO_TENANT"]
+        if (!tenantId) {
+            purgeSubscriptionsForUnnotifiedRun(ec, resultId)
+            return [ok: true, attempted: false, skippedReason: "NO_TENANT"]
+        }
         if (!text?.trim()) {
             // No words to send (the copy could not be read): nothing will notify this run, so its subscriptions still go.
             logger.warn("Run line for tenant {} result {} has no text; nothing sent", tenantId, resultId)

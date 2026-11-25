@@ -41,7 +41,7 @@ class EmailAdminServicesSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "email-admin-services")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ["PasswordResetEmailSeedData.xml", "TwoFactorSeedData.xml", "TenantWelcomeEmailSeedData.xml",
-         "AuditDigestEmailSeedData.xml", "EmailCopySeedData.xml"].each {
+         "AuditDigestEmailSeedData.xml", "EmailCopySeedData.xml", "OpsNoticeSeedData.xml"].each {
             ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/${it}")
         }
     }
@@ -75,10 +75,10 @@ class EmailAdminServicesSmokeTests {
     // ---------------------------------------------------------------- reads
 
     @Test
-    void theListIsTheTwelveEmailsAndTheShowCarriesBlocksWithVariables() {
+    void theListIsTheThirteenEmailsAndTheShowCarriesBlocksWithVariables() {
         List<Map> templates = ok(svc("get#EmailTemplates", [:])).result.templates
-        assertEquals(12, templates.size())
-        assertEquals(12, templates*.emailTemplateId.toSet().size())
+        assertEquals(13, templates.size())
+        assertEquals(13, templates*.emailTemplateId.toSet().size())
         assertEquals([0], templates*.editedBlockCount.unique())
         Map changed = templates.find { it.emailTemplateId == CHANGED }
         assertEquals("Your Darpan password was changed", changed.subject)
@@ -412,7 +412,23 @@ class EmailAdminServicesSmokeTests {
         EmailCopy.seedSubjects(ec).each { String id, String subject ->
             assertNull(EmailCopy.subjectProblem(ec, id, subject), id)
         }
-        assertEquals(12, EmailCopy.seedSubjects(ec).size())
+        assertEquals(13, EmailCopy.seedSubjects(ec).size())
+    }
+
+    /** DAR-BE-015: the run error notice (a chat line, not an email) is shown, edited and used like any other copy. */
+    @Test
+    void theRunErrorNoticeLineIsShownEditedAndUsedByTheNextLine() {
+        Map shown = ok(svc("get#EmailTemplate", [emailTemplateId: "DARPAN_ERROR_NOTICE"])).result
+        Map block = (shown.blocks as List<Map>).find { it.blockId == "client.notrun" }
+        assertEquals('${name} did not run this morning. Darpan has been alerted and is working on a fix.', block.defaultText)
+        assertEquals(["name"], block.variables)
+
+        ok(svc("update#EmailTemplate", [emailTemplateId: "DARPAN_ERROR_NOTICE",
+                blocks: ["client.notrun": '${name} did not run today. Darpan is on it.']]))
+        assertEquals("R1 did not run today. Darpan is on it.",
+                new darpan.email.EmailCopyReader(ec, "DARPAN_ERROR_NOTICE").text("client.notrun", [name: "R1"]))
+        assertTrue(svc("update#EmailTemplate", [emailTemplateId: "DARPAN_ERROR_NOTICE",
+                blocks: ["client.notrun": '${rules} did not run.']]).errors.any { it.contains("Unknown variable") }, "only its own variable")
     }
 
     // ---------------------------------------------------------------- access

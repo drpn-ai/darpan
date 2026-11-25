@@ -38,8 +38,9 @@ class EmailTemplatesRenderTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/EmailCopySeedData.xml")
         // DAR-BE-334: the scheduled query email (QueryResult.xml) seeds its words beside its template, which FKs the
         // SYSTEM EmailServer that PasswordResetEmailSeedData.xml seeds
+        // DAR-BE-015: the run error notice (ErrorNotice.xml, a chat line the admin editor previews) seeds its own words
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/PasswordResetEmailSeedData.xml",
-                "component://darpan/data/QueryEmailSeedData.xml")
+                "component://darpan/data/QueryEmailSeedData.xml", "component://darpan/data/OpsNoticeSeedData.xml")
         previews = Path.of("build", "email-previews")
         Files.createDirectories(previews)
     }

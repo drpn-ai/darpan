@@ -34,6 +34,11 @@ class EmailSamples {
                             runWords: AuditEmailSamples.runWords(), runBase: AuditEmailSamples.BASE],
     ].asImmutable()
 
+    /** DAR-BE-015: chat lines kept as copy (never sent as email); the admin editor previews them through their screen. */
+    static final Map<String, Map> CHAT = [
+            ErrorNotice: [name: "Daily Order Reconciliation"],
+    ].asImmutable()
+
     /** screen -> branch name -> how the base sample changes. The first branch of a screen is its default. */
     static final Map<String, Map<String, Closure<Map>>> BRANCHES = [
             RecoveryEmailSet: [new: { Map b -> b + [isOldAddress: false] }, old: { Map b -> b + [isOldAddress: true] }],
@@ -42,7 +47,7 @@ class EmailSamples {
     ].asImmutable()
 
     static Map base(String screen) {
-        Map found = SECURITY.get(screen) ?: OTHER.get(screen)
+        Map found = SECURITY.get(screen) ?: OTHER.get(screen) ?: CHAT.get(screen)
         return found == null ? null : new LinkedHashMap(found)
     }
 

@@ -924,8 +924,13 @@ class AutomationExecutionSupport {
                         file1Result, file2Result, reconcileResult,
                         ruleExecutionFailed ? new IllegalStateException("A rule failed to build or evaluate.") : null, automationExecutionId,
                         auditSideConfigIds)
+                // DAR-BE-015: a rule that failed to build or evaluate is a run error: the rule's error goes to Darpan's card,
+                // a client destination gets only the neutral line, never the run's payload (it carries the raw rule error).
+                if (ruleExecutionFailed) {
+                    notifyRunError(ec, automation, executionMap(execution) + successFields, mintedRunResultId,
+                            ruleFailureReason(reconcileResult) ?: "A rule failed to build or evaluate.")
                 // DAR-BE-123: a verify answers the person who asked, on the finding; the run's space is not told.
-                if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
+                } else if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
                         reconciliationRunResultId: reconciliationRunResultId,
                         runName                  : normalize(readField(automation, "automationName")),
                         savedRunId               : normalize(readField(automation, "savedRunId")),
@@ -3682,10 +3687,13 @@ class AutomationExecutionSupport {
     /**
      * DAR-BE-015. The one path for a run error (FAILED, DEAD_LETTER, ONE_SIDE_EMPTY, KEPT_NOTHING; see RunErrorKinds): the card
      * goes to Darpan's own error space, one per audit check this automation runs or one for a non-audit automation. A client
-     * destination never gets the error: a scheduled non-audit run sends its chat space and notify-me subscribers only the
-     * neutral line (copy block DARPAN_ERROR_NOTICE / client.notrun); an audit's client line is its run update; a manual run or
-     * a play sends none (the person who started it sees the outcome in the app). Called for the terminal outcome only, never
-     * for an attempt that will be retried. Never throws: the run's own outcome must reach the caller unchanged.
+     * destination never gets the error, only the neutral line (copy block DARPAN_ERROR_NOTICE / client.notrun):
+     * - notify-me subscribers get it on any run (scheduled, manual, play, audit): they asked to be told;
+     * - the automation's own chat space gets it only for a scheduled non-audit run, once per automation per run day
+     *   (ErrorChatSupport.claimClientLine), so an hourly failure or a second failed window does not repeat it;
+     * - an audit's client line is its run update, so an audit automation's chat space gets none.
+     * Called for the terminal outcome only, never for an attempt that will be retried. Never throws: the run's own outcome
+     * must reach the caller unchanged, and its subscriptions never outlive it.
      *
      * @param execution the execution row as it closed (statusEnumId, noDataKind, counts, retryCount, triggerType, dates)
      */
@@ -3699,7 +3707,7 @@ class AutomationExecutionSupport {
             try {
                 subjects = AuditAutomationSupport.errorSubjects(ec, automation)
             } catch (Throwable lookupError) {
-                // Unknown whether this is an audit's automation: Darpan still gets a card, the client is not guessed at.
+                // Unknown whether this is an audit's automation: Darpan still gets a card and subscribers the line; the automation's space is not guessed at.
                 logger.warn("Run error for automation {}: its audit checks could not be read ({})",
                         readField(automation, "automationId"), lookupError.getClass().name)
             }
@@ -3712,16 +3720,24 @@ class AutomationExecutionSupport {
                     logger.warn("Run error card for automation {} failed: {}", event.automationId, postError.getClass().name)
                 }
             }
-            if (subjects != null && subjects.isEmpty() && trigger == TRIGGER_SCHEDULED) {
-                String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
-                        new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(ERROR_NOTICE_NOT_RUN, [name: event.automationName])
-                TenantNotificationSupport.notifyRunLine(ec, tenantId, normalize(readField(automation, "chatSpaceId")), runResultId, line)
-            } else {
-                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
-            }
+            String chatSpaceId = normalize(readField(automation, "chatSpaceId"))
+            boolean toChatSpace = chatSpaceId && subjects != null && subjects.isEmpty() && trigger == TRIGGER_SCHEDULED &&
+                    ErrorChatSupport.claimClientLine(ec, event)
+            String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
+                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(ERROR_NOTICE_NOT_RUN, [name: event.automationName])
+            TenantNotificationSupport.notifyRunLine(ec, tenantId, toChatSpace ? chatSpaceId : null, runResultId, line)
         } catch (Throwable notifyError) {
             logger.warn("Run error notification failed (best-effort): {}", notifyError.getClass().name)
+            try {
+                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
+            } catch (Throwable ignored) { }
         }
+    }
+
+    /** DAR-BE-015: what a rule failure says for Darpan's card: the first rule error, else the first warning; null when neither. */
+    static String ruleFailureReason(Map result) {
+        String ruleError = ((result?.ruleErrors ?: []) as List).collect { normalize(it) }.find { it }
+        return ruleError ?: ((result?.processingWarnings ?: []) as List).collect { normalize(it) }.find { it }
     }
 
     /** DAR-BE-015: what started a run, from execute#Automation's input. A blank runTrigger is a scheduled run unless the input says a person asked. */

@@ -295,7 +295,9 @@ class SftpAutomationSupport {
             // together they give this path the SAME notification incidence as the API-range runner:
             // a run that produced output alerts (with or without an artifact path, exactly like the API
             // success path), a terminal failure alerts FAILED, and NO_DATA stays silent.
-            if (outputProduced && reconciliationRunResultId) {
+            // DAR-BE-015: a run whose rules failed (output produced, status FAILED) is a run error like any other
+            // FAILED: it goes down the notifyRunError branch, never with the run's payload (it carries the raw rule error).
+            if (outputProduced && reconciliationRunResultId && statusEnumId != AUTOMATION_STATUS_FAILED) {
                 try {
                     TenantNotificationSupport.notifyRunCompleted(ec, [
                             reconciliationRunResultId: reconciliationRunResultId,
@@ -329,7 +331,8 @@ class SftpAutomationSupport {
                 // DAR-BE-015: notifyRunError is the API path's own run error path: the card goes to Darpan's
                 // error space, a client destination gets only the neutral line, and it purges.
                 AutomationExecutionSupport.notifyRunError(ec, automation,
-                        AutomationExecutionSupport.executionMap(execution) + updateFields, reconciliationRunResultId, failureReason)
+                        AutomationExecutionSupport.executionMap(execution) + updateFields, reconciliationRunResultId,
+                        ruleExecutionFailed ? (AutomationExecutionSupport.ruleFailureReason(pollResult) ?: failureReason) : failureReason)
             } else {
                 // NO_DATA only, and it stays silent — that is the API path's behaviour too, so parity
                 // means matching it rather than alerting on everything. Nothing will ever claim this row,

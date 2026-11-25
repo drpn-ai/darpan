@@ -115,26 +115,23 @@ class AutomationFailureNotificationTests {
     }
 
     /**
-     * The standard payload prints a Details block ("Missing from …: 0" for each side). For a run
-     * that died before producing any result, those zeros read as a clean sync — worse than silence.
-     * A no-output failure must not report counts it never computed, so it takes the service's
-     * noOutput branch instead of the verdict renderer.
+     * DAR-BE-015: the tenant's chat space is told once per automation per run day, through the real claim service
+     * (ops.OpsServices.record#RunErrorNotice, slot "client"), even with Darpan's error webhook unset (blank here): an
+     * hourly automation failing all morning must not post "did not run this morning" every hour.
      */
     @Test
-    void failureNotificationDoesNotReadLikeACleanRun() {
+    void anHourlySecondFailureTheSameDaySendsNoSecondLine() {
         failReconcileWith(new IllegalArgumentException("extract stage exploded"))
 
-        AutomationExecutionSupport.executeAutomation(ec, [
-                automationId     : AUTOMATION_ID,
-                scheduledFireTime: Timestamp.valueOf("2026-06-06 10:00:00"),
-        ])
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: AUTOMATION_ID, scheduledFireTime: Timestamp.valueOf("2026-06-06 10:00:00")])
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: AUTOMATION_ID, scheduledFireTime: Timestamp.valueOf("2026-06-06 11:00:00")])
 
-        assertEquals(1, deliveries.size())
-        String text = deliveries[0].payload.text as String
-        assertFalse(text.contains("Differences:"),
-                "A run that produced no result must not report a difference count. Got: ${text}")
-        assertFalse(text.contains("run completed"),
-                "A run that never completed must not say it completed. Got: ${text}")
+        assertEquals(1, deliveries.size(), "the second failure that day sends no second line")
+        assertEquals(NOT_RUN_LINE, deliveries[0].payload.text)
+        assertFalse((deliveries[0].payload.text as String).contains("exploded"), "no error text reaches the tenant")
+        assertEquals(1, ec.entity.find("darpan.ops.RunErrorNotice").condition([tenantId: TENANT, subjectKey: AUTOMATION_ID,
+                triggerType: "client"]).condition("runDay", java.sql.Date.valueOf("2026-06-06")).disableAuthz().useCache(false).count(),
+                "one client slot claimed for the day")
     }
 
     /** The failed run must also be visible in run history, not just in the chat space. */

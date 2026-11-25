@@ -147,11 +147,13 @@ class SftpAutomationSupportTests {
     }
 
     @Test
-    void sftpFailureWithRunResultNotifies() {
+    void aRulesFailedSftpRunPostsACardAndTellsTheClientOnlyTheNeutralLine() {
         // Task 7: a poll that produced data but whose rule execution failed still mints a run-result row
         // (status FAILED, since outputProduced only depends on dataAvailable/serviceReportedError) — the
         // guard (reconciliationRunResultId present && statusEnumId != NO_DATA) must still notify once,
         // unlike the true NO_DATA / unminted-row case in sftpFileAutomationRecordsNoDataWithoutDateWindowConfig.
+        // DAR-BE-015: a rules-failed run is a run error: the rule's error goes to Darpan's card, the client space gets only
+        // the neutral line, and the run's payload (which carries the raw rule error) is never built.
         FakeEc ec = fakeEc()
         seedSftpAutomation(ec)
         ec.entity.add("moqui.security.UserGroup", [
@@ -175,6 +177,7 @@ class SftpAutomationSupportTests {
                 dataAvailable       : true,
                 ruleExecutionFailed : true,
                 statusMessage       : "Ruleset did not fully evaluate",
+                ruleErrors          : ["Rule 'price-matches' failed: NullPointerException"],
                 file1Source         : "sftp://source-a:22/incoming/shopify",
                 file2Source         : "sftp://source-b:22/incoming/netsuite",
                 file1SelectedName   : "shopify.csv",
@@ -188,8 +191,9 @@ class SftpAutomationSupportTests {
                 onlyInFile1Count    : 0,
                 onlyInFile2Count    : 0,
                 validationErrors    : [],
-                processingWarnings  : [],
+                processingWarnings  : ["Rule stage stopped: Rule 'price-matches' failed: NullPointerException"],
         ]
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
@@ -201,6 +205,8 @@ class SftpAutomationSupportTests {
             result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
+            AutomationExecutionSupport.resetForTests()
+            darpan.ops.ErrorChatSupport.resetForTests()
         }
 
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, result.statusEnumId)
@@ -210,6 +216,11 @@ class SftpAutomationSupportTests {
         assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
         assertEquals(1, deliveries.size())
         assertEquals(webhookUrl, deliveries[0].webhookUrl)
+        assertEquals([text: "SFTP Automation did not run this morning. Darpan has been alerted and is working on a fix."], deliveries[0].payload)
+        assertFalse(deliveries.toString().contains("NullPointerException"), "no rule error text reaches a client")
+        assertEquals(["FAILED"], cards*.kind)
+        assertEquals("Rule 'price-matches' failed: NullPointerException", cards[0].errorFirstLine)
+        assertFalse(ec.service.calls.any { it.serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload" })
     }
 
     @Test
@@ -461,6 +472,7 @@ class SftpAutomationSupportTests {
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
             AutomationExecutionSupport.resetForTests()
+            darpan.ops.ErrorChatSupport.resetForTests()
         }
 
         List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
@@ -591,6 +603,7 @@ class SftpAutomationSupportTests {
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
             AutomationExecutionSupport.resetForTests()
+            darpan.ops.ErrorChatSupport.resetForTests()
         }
 
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, result.statusEnumId)
@@ -1031,6 +1044,7 @@ class SftpAutomationSupportTests {
         List<Map> cards = Collections.synchronizedList([] as List<Map>)
         AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
         AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> AutomationExecutionSupportTests.opsNoticeSeedCopy() }
+        AutomationExecutionSupportTests.installInMemoryClaims(Collections.synchronizedList([] as List<Map>))
         return cards
     }
 

@@ -202,6 +202,25 @@ class AuditAcknowledgeSmokeTests {
         assertTrue((out.errorText as String).contains("Add a note"), out.errorText as String)
         assertEquals([], acks([f]))
         assertEquals([], events([f], "AUDFE_ACKNOWLEDGED"))
+        Map tooLong = call("acknowledge#AuditFinding", [findingId: f, note: "x" * 4001])
+        assertTrue((tooLong.errorText as String).contains("Keep the note under 4,000 characters"), tooLong.errorText as String)
+        assertEquals([], acks([f]))
+    }
+
+    /** text-medium is VARCHAR(255) on MySQL and H2: a note the facade accepts must fit the column (text-long). */
+    @Test
+    void aLongNoteSaves() {
+        String f = ids.R1["M107/01"]
+        String note = ("Known: the 3PL is late. " * 200).substring(0, 3999)
+        Map out = call("acknowledge#AuditFinding", [findingId: f, note: note])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals([note.trim()], acks([f])*.note)
+        Map changed = call("update#AuditFindingAcknowledgement", [findingId: f, note: note.reverse(), remind: true])
+        assertFalse(changed.hadError as boolean, changed.errorText as String)
+        assertEquals([note.reverse().trim()], acks([f])*.note)
+        Map tooLong = call("update#AuditFindingAcknowledgement", [findingId: f, note: "x" * 4001, remind: true])
+        assertTrue((tooLong.errorText as String).contains("Keep the note under 4,000 characters"), tooLong.errorText as String)
+        assertFalse(call("delete#AuditFindingAcknowledgement", [findingId: f]).hadError as boolean)
     }
 
     @Test

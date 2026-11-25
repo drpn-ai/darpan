@@ -12756,7 +12756,7 @@
                     },
                     "note": {
                         "type": "string",
-                        "description": "Why the problem is known; required."
+                        "description": "Why the problem is known; required, at most 4,000 characters."
                     },
                     "remind": {
                         "type": "boolean",
@@ -14767,7 +14767,7 @@
                     },
                     "note": {
                         "type": "string",
-                        "description": "The new note; required."
+                        "description": "The new note; required, at most 4,000 characters."
                     },
                     "remind": {
                         "type": "boolean"

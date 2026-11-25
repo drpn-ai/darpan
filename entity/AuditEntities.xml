@@ -496,7 +496,8 @@
             the finding reopens past its remind date.</description>
         <field name="findingId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"/>
-        <field name="note" type="text-medium" not-null="true"/>
+        <!-- text-long: text-medium is VARCHAR(255) on MySQL and H2; the facade allows a note of up to 4,000 characters. -->
+        <field name="note" type="text-long" not-null="true"/>
         <field name="acknowledgedByUserId" type="id"/>
         <field name="acknowledgedStamp" type="date-time" not-null="true"/>
         <field name="remindDate" type="date"/>
@@ -522,10 +523,11 @@
         <field name="conclusionCode" type="id"/>
         <field name="recordKey" type="text-medium"/>
         <field name="headline" type="text-intermediate"/>
-        <field name="note" type="text-medium" not-null="true"/>
+        <!-- text-long (note, answer): text-medium is VARCHAR(255) on MySQL and H2; the facade allows a note of up to 4,000 characters. -->
+        <field name="note" type="text-long" not-null="true"/>
         <field name="sentByUserId" type="id" not-null="true"/>
         <field name="sentStamp" type="date-time" not-null="true"/>
-        <field name="answer" type="text-medium"/>
+        <field name="answer" type="text-long"/>
         <field name="answeredByUserId" type="id"/>
         <field name="answeredStamp" type="date-time"/>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDFB_COMPANY_GRP">

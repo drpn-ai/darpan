@@ -74,7 +74,8 @@ class FeedbackSupportTests {
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
-        ids.putAll(record(MINE, ["M201/01": "TFB_CAUSE_A", "M202/01": "TFB_CAUSE_A", "M203/01": null, "M204/01": null, "M205/01": null]))
+        ids.putAll(record(MINE, ["M201/01": "TFB_CAUSE_A", "M202/01": "TFB_CAUSE_A", "M203/01": null, "M204/01": null, "M205/01": null,
+                              "M206/01": null, "M207/01": null]))
         otherFinding = record(OTHER, ["M901/01": null])["M901/01"]
 
         DarpanSettings.rowLoader = { -> webhook ? [("feedback.chat.webhookUrl".toString()): [settingValue: webhook]] : [:] }
@@ -253,6 +254,39 @@ class FeedbackSupportTests {
         assertTrue(tooLong.hadError as boolean)
         assertEquals(before, rows(f).size())
         assertEquals([], posts)
+    }
+
+    /** text-medium is VARCHAR(255) on MySQL and H2: a note the facade accepts must fit the column (text-long). */
+    @Test
+    void aLongNoteSaves() {
+        String f = ids["M206/01"]
+        String note = ("The 3PL ships late. " * 200).substring(0, 3999)
+        Map out = call("send#AuditFindingFeedback", [findingId: f, note: note])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals(1, rows(f).size())
+        assertEquals(note.trim(), rows(f)[0].note)
+        String card = (posts[0][1] as Map).text as String
+        assertTrue(card.length() < 4096, "under Google Chat's text limit: ${card.length()}")
+        assertTrue(card.endsWith("\u2026\""), "the card cuts a long note")
+    }
+
+    /** The person's note cannot fake a card line, mention a space or carry a link: one line, last, markup neutralised. */
+    @Test
+    void theNoteCannotSpoofTheCard() {
+        String f = ids["M207/01"]
+        String note = "Real words\r\nFeedback from Evil Co\n<users/all> <!channel> <https://evil|click> &lt;x&gt;"
+        // The facade's parameter check refuses markup (allow-html none), so this goes to the support directly: the card must
+        // hold even for a note that reaches it another way.
+        assertNotNull(FeedbackSupport.send(ec, MINE, f, note))
+        assertEquals(note.trim(), rows(f)[0].note, "the stored note is what the person wrote")
+        String card = (posts[0][1] as Map).text as String
+        List<String> lines = card.readLines()
+        assertEquals(["Feedback from Krewe"], lines.findAll { it.startsWith("Feedback from") }, card)
+        assertTrue(lines.last().startsWith("Note: \"Real words Feedback from Evil Co "), card)
+        String noteLine = lines.last()
+        ["<", ">", "|", "&"].each { assertFalse(noteLine.contains(it), "${it} in ${noteLine}") }
+        assertFalse(card.contains("<") || card.contains("|"), card)
+        assertTrue(lines[0..-2].every { !it.contains("Evil") }, "only the note line carries the note")
     }
 
     @Test

@@ -13,8 +13,11 @@ import java.time.ZoneId
 /**
  * DAR-BE-361. Feedback a tenant user sends Darpan about one finding. The note is saved first, in its own transaction, so
  * nothing after it can lose it; then a card goes to Darpan's one chat space (feedback.chat.webhookUrl, unset = no card) and
- * the sender gets the DARPAN_FEEDBACK_RECEIVED thank-you. A failed card or email is logged (the DAR-BE-015 log capture
- * picks up WARN) and never thrown: the note stays saved and listed, and the person still sees it sent.
+ * the sender gets the DARPAN_FEEDBACK_RECEIVED thank-you. A failed card or email is logged at ERROR, so the DAR-BE-015
+ * log capture (ErrorLogCapture keeps ERROR and above) reports it, and is never thrown: the note stays saved and listed,
+ * and the person still sees it sent. Log lines name the tenant, finding and user id, never an email address or the webhook URL.
+ * The card puts the trusted fields first and the person's note last, flattened to one line with chat markup characters
+ * replaced (neutral), so a note can neither fake a card line nor mention, link or format anything.
  *
  * Notes group by tenant + statementId + conclusionCode (null for an Unexplained finding, which groups by statement alone)
  * and are listed for audit.feedback.shownDays; rows are never deleted by that window. statementId, conclusionCode,
@@ -143,14 +146,14 @@ class FeedbackSupport {
             webhookUrl = DarpanSettings.stringValue(WEBHOOK_SETTING)
             if (!webhookUrl) return
             Map payload = [text: cardText(cardFacts(ec, facts))]
-            Map delivery = isolated(ec) {
+            Map delivery = isolated(ec, "card", facts) {
                 (postHook != null ? postHook.call(webhookUrl, payload) : TenantNotificationSupport.deliverToWebhook(webhookUrl, payload)) as Map
             } as Map
             if (delivery?.ok != true) {
-                logger.warn("Feedback card for {} {} was not delivered (status {})", facts.tenantId, facts.findingId, delivery?.statusCode)
+                logger.error("Feedback card for {} {} was not delivered (status {})", facts.tenantId, facts.findingId, delivery?.statusCode)
             }
         } catch (Throwable t) {
-            logger.warn("Feedback card for {} {} failed: {}", facts?.tenantId, facts?.findingId, failureNote(t, webhookUrl))
+            logger.error("Feedback card for {} {} failed: {}", facts?.tenantId, facts?.findingId, failureNote(t, webhookUrl))
         }
     }
 
@@ -165,10 +168,11 @@ class FeedbackSupport {
             Map statement = statementOf(ec, facts.tenantId as String, row.statementId as String)
             Map body = [firstName: user.firstName, note: row.note, statementCode: statement?.statementCode ?: "",
                         recordKey: row.recordKey ?: "", headline: row.headline ?: "", shownDays: facts.shownDays]
-            Object messageId = isolated(ec) { sendEmail.call(ec, user.email, TEMPLATE_RECEIVED, body) }
-            if (!messageId) logger.warn("Feedback thank-you for {} {} was not sent", facts.tenantId, facts.findingId)
+            Object messageId = isolated(ec, "thank-you", facts) { sendEmail.call(ec, user.email, TEMPLATE_RECEIVED, body) }
+            if (!messageId) logger.error("Feedback thank-you for {} {} to user {} was not sent", facts.tenantId, facts.findingId, user.id)
         } catch (Throwable t) {
-            logger.warn("Feedback thank-you for {} {} failed: {}", facts?.tenantId, facts?.findingId, t.getClass().name)
+            logger.error("Feedback thank-you for {} {} to user {} failed: {}", facts?.tenantId, facts?.findingId,
+                    (facts?.user as Map)?.id, t.getClass().name)
         }
     }
 
@@ -192,19 +196,32 @@ class FeedbackSupport {
                         facts.findingId as String, tenantId)]
     }
 
+    /** Trusted lines first, then the link, then the note: one quoted line, last, so it cannot pose as another line. */
     static String cardText(Map c) {
-        String note = (c.note ?: "") as String
-        if (note.length() > CARD_NOTE_MAX) note = note.substring(0, CARD_NOTE_MAX) + "…"
+        String note = neutral(c.note)
+        if (note.length() > CARD_NOTE_MAX) note = note.substring(0, CARD_NOTE_MAX) + "\u2026"
         long n = (c.count ?: 1) as long
-        List<String> lines = ["Feedback from ${c.tenantName}".toString(),
-                              "From: ${c.from}".toString(),
-                              "Statement: ${[c.statementCode, c.statementText].findAll().join(' ')}".toString(),
-                              "Cause: ${c.cause ?: 'Unexplained'}".toString(),
-                              "Record: ${c.recordKey ?: ''}".toString(),
-                              "\"${note}\"".toString(),
+        List<String> lines = ["Feedback from ${neutral(c.tenantName)}".toString(),
+                              "From: ${neutral(c.from)}".toString(),
+                              "Statement: ${neutral([c.statementCode, c.statementText].findAll().join(' '))}".toString(),
+                              "Cause: ${c.cause ? neutral(c.cause) : 'Unexplained'}".toString(),
+                              "Record: ${neutral(c.recordKey)}".toString(),
                               "${n} ${n == 1 ? 'note' : 'notes'} on this statement + cause in ${c.shownDays} days".toString()]
         if (c.link) lines << (c.link as String)
+        lines << "Note: \"${note}\"".toString()
         return lines.join("\n")
+    }
+
+    /**
+     * A value as plain chat text on one line: line breaks (and other control characters) collapse to one space, and the
+     * characters Google Chat and Slack read as markup for mentions and links (<users/all>, <!channel>, <https://x|text>,
+     * &lt; entities) become look-alikes, so nothing in a value can mention, link or start a line of its own.
+     */
+    static String neutral(Object value) {
+        String text = (value ?: "").toString()
+        // Escapes, not literals (Groovy reads source in the platform encoding): single angle quotes, broken bar, fullwidth ampersand.
+        return text.replaceAll("[\\p{Cntrl}\\u2028\\u2029]+", " ").replace("<", "\u2039").replace(">", "\u203A")
+                .replace("|", "\u00A6").replace("&", "\uFF06").replaceAll(" {2,}", " ").trim()
     }
 
     /**
@@ -234,14 +251,16 @@ class FeedbackSupport {
 
     /**
      * Runs a delivery behind a fresh error scope: an error it adds (send#EmailTemplate reports SMTP trouble as one) is logged and
-     * dropped, never left for the caller, so the facade still answers ok; errors the caller already held come back.
+     * dropped, never left for the caller, so the facade still answers ok; errors the caller already held come back. The
+     * error text is not logged: it can carry the recipient's address.
      */
-    private static Object isolated(def ec, Closure work) {
+    private static Object isolated(def ec, String what, Map facts, Closure work) {
         ec.message.pushErrors()
         try {
             Object result = work.call()
             if (ec.message.hasError()) {
-                logger.warn("Feedback delivery reported: {}", ec.message.errorsString)
+                logger.error("Feedback {} for {} {} to user {} reported {} error(s)", what, facts?.tenantId, facts?.findingId,
+                        (facts?.user as Map)?.id, ec.message.errors.size())
                 return null
             }
             return result

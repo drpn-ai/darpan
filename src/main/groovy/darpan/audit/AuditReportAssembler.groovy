@@ -658,12 +658,13 @@ class AuditReportAssembler {
     }
 
     /**
-     * DAR-BE-361: ackState "open" (the default; a reminded row is open) or "acknowledged" picks the rows by today's
-     * acknowledgements, "all" keeps both. Each row carries its acknowledgement (null when it reads open).
+     * DAR-BE-361: ackState "open" (a reminded row is open) or "acknowledged" picks the rows by today's acknowledgements;
+     * blank or "all" keeps every open row, as before acknowledgements (the run update's groups and CSVs read it so).
+     * Each row carries its acknowledgement (null when it reads open).
      */
     static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period, String priority,
                                      String ackState) {
-        String wanted = ackState ?: "open"
+        String wanted = ackState?.trim() ?: "all"
         Map<String, String> codes = enumCodes(ec)
         // Only the asked statement's counted findings are returned, each with those waiting on it.
         Map open = openStepUnits(ec, tenantId, auditId, period)

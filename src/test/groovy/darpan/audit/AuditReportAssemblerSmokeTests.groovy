@@ -1324,8 +1324,14 @@ class AuditReportAssemblerSmokeTests {
             List<Map> open = AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null, null, "open")
             assertEquals([ids[1], ids[2]], open*.id)
             assertEquals([true, null], open.collect { it.acknowledgement?.reminded })
-            assertEquals([ids[1], ids[2]], AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null, null, null)*.id, "open by default")
-            assertEquals([ids[1], ids[2]], AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null)*.id)
+            // Blank, null or "all" keeps every open row, the acknowledged one too: callers from before acknowledgements
+            // (the run update, its CSVs) lose nothing.
+            [null, "", "all"].each { String state ->
+                List<Map> every = AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null, null, state)
+                assertEquals(ids, every*.id, "ackState ${state}".toString())
+                assertEquals("Known: the 3PL is late", every.find { it.id == ids[0] }.acknowledgement?.note)
+            }
+            assertEquals(ids, AuditReportAssembler.findingsByOrder(ec, ACK, auditId, null, null)*.id, "the 5-argument overload keeps every row")
         } finally {
             ec.artifactExecution.enableAuthz()
         }

@@ -155,6 +155,8 @@ class CliMethodAllowlist {
             "admin.AgentAccessAdminServices.update#AgentAccessGrant",
             "admin.AgentTicketAdminServices.list#AllBrainChangeTickets",
             "admin.AgentTicketAdminServices.update#BrainChangeTicket",
+            "admin.FeedbackAdminServices.get#FeedbackList",
+            "admin.FeedbackAdminServices.reply#Feedback",
             // DAR-BE-307: the agent's prompts, role models, prices, texts and per-tenant caps are edited by a super admin in the admin app.
             "admin.AgentConfigAdminServices.get#AgentConfig",
             "admin.AgentConfigAdminServices.get#AgentPrompt",

@@ -1,5 +1,6 @@
 package darpan.audit
 
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.support.SharedMoqui
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -309,6 +310,30 @@ class AuditAutomationSmokeTests {
         assertNull(AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime, [auditFullRead: true])[0].auditRecentReadStartDate)
         assertNull(AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime, [auditVerifyKeys: ["V1"]])[0].auditRecentReadStartDate,
                 "a verify reads its keys, not recent days")
+    }
+
+    // DAR-BE-015: Dolls Kill R1 hid for 19 days because a window with one side empty recorded as ran and closed every finding.
+    @Test
+    void aOneSideEmptyWindowRecordsTheCheckNotRunAndClosesNothing() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-25", ["N1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("n1", [row("MISSING_IN_FILE_2", "N1", "missing in NetSuite")])], null)
+        assertEquals("AUDFS_OPEN", finding("N1").stateEnumId)
+
+        String reason = AutomationExecutionSupport.noDataReason("OMS", 5, 5, "NetSuite", 0, 0)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-26", [], []), omsSource, nsSource,
+                [recordCount: 5, readCount: 5], [recordCount: 0, readCount: 0], null, null, null, null, reason)
+        Map run = checkRun("2026-09-26")
+        assertEquals(["AUDCS_NOT_RUN", "The NetSuite side read no records."], [run.statusEnumId, run.reason])
+        assertEquals("AUDFS_OPEN", finding("N1").stateEnumId, "a window that read nothing on one side closes nothing")
+    }
+
+    @Test
+    void aQuietDayStillRecordsRan() {
+        String reason = AutomationExecutionSupport.noDataReason("OMS", 0, 0, "NetSuite", 0, 0)
+        assertNull(reason)
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-09-27", [], []), omsSource, nsSource,
+                [recordCount: 0, readCount: 0], [recordCount: 0, readCount: 0], null, null, null, null, reason)
+        assertEquals("AUDCS_RAN", checkRun("2026-09-27").statusEnumId)
     }
 
     @Test

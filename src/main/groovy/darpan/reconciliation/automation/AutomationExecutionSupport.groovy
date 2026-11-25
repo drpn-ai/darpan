@@ -5,6 +5,7 @@ import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.audit.AuditAutomationSupport
 import darpan.config.DarpanSettings
 import darpan.audit.AuditRecheckSupport
+import darpan.audit.AuditReportAssembler
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
 import darpan.dataset.KeptCopySupport
@@ -756,8 +757,16 @@ class AutomationExecutionSupport {
                     // only runs after a won notification claim). An orphan there never fires AND pins
                     // its chat space against deletion forever, so purge it here.
                     TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
+                    // A verify or evaluate reads one side by design: its empty side is not a failed read.
+                    String sideReason = null
+                    if (!verifying && !evaluateMode) {
+                        String label1 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId"))))
+                        String label2 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId"))))
+                        sideReason = AutomationExecutionSupport.noDataReason(label1, file1Result?.readCount as Integer, file1Result?.recordCount as Integer,
+                                label2, file2Result?.readCount as Integer, file2Result?.recordCount as Integer)
+                    }
                     AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
-                            file1Result, file2Result, null, null, automationExecutionId, auditSideConfigIds)
+                            file1Result, file2Result, null, null, automationExecutionId, auditSideConfigIds, sideReason)
                     executionResults << noDataFields + [
                             automationExecutionId: automationExecutionId,
                             childWindowStartDate : window.childWindowStartDate,
@@ -3303,6 +3312,21 @@ class AutomationExecutionSupport {
         reconcileResult.diffLocation = output.diffLocation
         reconcileResult.diffFileName = output.diffFileName
         return reconcileResult
+    }
+
+    /**
+     * DAR-BE-015. Why a NO_DATA window did not really run, or null when it is a quiet day (both sides read nothing). One side
+     * read nothing while the other read records: that side is empty. A side read records and Keep kept none: it kept nothing.
+     */
+    static String noDataReason(String side1Label, Integer read1, Integer kept1, String side2Label, Integer read2, Integer kept2) {
+        int r1 = read1 ?: 0
+        int r2 = read2 ?: 0
+        if (r1 == 0 && r2 == 0) return null
+        if (r1 == 0) return "The ${side1Label} side read no records.".toString()
+        if (r2 == 0) return "The ${side2Label} side read no records.".toString()
+        if (kept1 != null && kept1 == 0) return "The ${side1Label} side kept 0 of ${String.format('%,d', r1)} records.".toString()
+        if (kept2 != null && kept2 == 0) return "The ${side2Label} side kept 0 of ${String.format('%,d', r2)} records.".toString()
+        return null
     }
 
     protected static boolean hasData(Map<String, Object> sourceResult) {

@@ -35,6 +35,19 @@ class AutomationExecutionSupportTests {
 
     private static final Timestamp NOW = timestamp("2026-05-01T10:00:00Z")
 
+    // DAR-BE-015
+    @Test
+    void noDataReasonNamesTheSideThatReadNothingOrKeptNothing() {
+        assertEquals("The NetSuite side kept 0 of 29,963 records.",
+                AutomationExecutionSupport.noDataReason("HotWax", 6982, 5525, "NetSuite", 29963, 0))
+        assertEquals("The NetSuite side read no records.",
+                AutomationExecutionSupport.noDataReason("HotWax", 2298, 2298, "NetSuite", 0, 0))
+        assertEquals("The HotWax side read no records.",
+                AutomationExecutionSupport.noDataReason("HotWax", 0, 0, "NetSuite", 7, 7))
+        assertNull(AutomationExecutionSupport.noDataReason("HotWax", 0, 0, "NetSuite", 0, 0))
+        assertNull(AutomationExecutionSupport.noDataReason("HotWax", null, null, "NetSuite", null, null))
+    }
+
     @Test
     void previousDayWindowUsesAutomationTimezone() {
         Map automation = [

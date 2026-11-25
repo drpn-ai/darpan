@@ -224,12 +224,13 @@ class AuditAutomationSupport {
     /**
      * After one window: health, findings, closings for every check the automation runs. A side with no result was
      * not read: the side that threw failed, a side never reached failed for that reason. Reads that completed but
-     * whose compare failed make the check notRun, so nothing closes.
+     * whose compare failed make the check notRun, so nothing closes. noDataReason (DAR-BE-015) does the same for a
+     * NO_DATA window where one side read nothing or Keep kept nothing.
      */
     static void recordWindow(def ec, def automation, List<Map> checks, Map<String, Object> window,
                              def file1Source, def file2Source, Map file1Result, Map file2Result,
                              Map reconcileResult, Throwable failure, String automationExecutionId = null,
-                             Map<String, String> sideConfigIds = null) {
+                             Map<String, String> sideConfigIds = null, String noDataReason = null) {
         if (!checks || !window?.auditPeriod) return
         List<String> priorErrors = ec.message.hasError() ? new ArrayList<String>(ec.message.errors) : []
         ec.message.clearErrors()
@@ -240,6 +241,8 @@ class AuditAutomationSupport {
                     [sideConfigIds: sideConfigIds, reconcileResult: reconcileResult])
             String notRunReason = failure != null && file1Result != null && file2Result != null ?
                     truncate("The compare failed: ${sanitizeErrorMessage(failure)}".toString(), REASON_MAX) : null
+            // DAR-BE-015: a window that ended NO_DATA with a side empty or kept nothing did not run; it closes nothing.
+            if (notRunReason == null && noDataReason) notRunReason = truncate(noDataReason, REASON_MAX)
             File diff = reconcileResult && failure == null ? AutomationExecutionSupport.resolveDiffFile(ec, reconcileResult) : null
             // DAR-BE-142: a Set, deduped once. List.unique() compares every key with every key kept so far: gorjana's
             // Shopify vs HotWax window (189k keys, two checks) held a worker thread for minutes after the run succeeded.

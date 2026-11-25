@@ -3,6 +3,7 @@ package darpan.audit
 import darpan.facade.common.TenantScopedFinder
 
 import java.sql.Date
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -83,8 +84,13 @@ class AuditReportGraph {
      */
     static Date morningOnShow(def ec, String tenantId, String auditId, String date, String period) {
         if (date?.trim()) return reportDateFor(ec, tenantId, date)
+        return latestMorning(ec, tenantId, auditId, period, Instant.now())
+    }
+
+    /** DAR-BE-361. The morning a blank date shows as of {@code at}: the latest morning's report (morningOnShow's rule). */
+    static Date latestMorning(def ec, String tenantId, String auditId, String period, Instant at) {
         ZoneId zone = tenantZone(ec, tenantId)
-        ZonedDateTime now = ZonedDateTime.now(zone)
+        ZonedDateTime now = at.atZone(zone)
         LocalDate today = now.toLocalDate()
         Map audit = auditId ? TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, tenantId, WHY)?.getMap() : null
         if (audit == null) return Date.valueOf(today)

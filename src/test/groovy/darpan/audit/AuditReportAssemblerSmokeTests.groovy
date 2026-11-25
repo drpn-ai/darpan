@@ -1158,18 +1158,20 @@ class AuditReportAssemblerSmokeTests {
 
     // ---- acknowledgements (DAR-BE-361) ---------------------------------------------------------------------------
     // Each test has an audit of its own in tenant TACK (statement S1, three lone invoices found on 2026-10-21 at 08:00).
-    // A report's "today" is the tenant day of its generatedAt (the one clock value, pinned here), so report(…, "2026-10-22")
-    // is today's report and the split applies; a report dated earlier is a past morning's.
+    // A report's now is its generatedAt (the one clock value, pinned here): its tenant day is today for remind days, and it
+    // picks the latest morning (the one a blank date shows). That morning's report and later split; older ones do not.
+    // Unscheduled audits' latest morning is today; a scheduled one (09:00 LA, no run recorded) shows yesterday until 09:00.
 
     private static final String ACK = "TACK"
     private static final String ACK_USER = "TACK_SAM"
 
-    private List<String> ackAudit(String name) {
+    private List<String> ackAudit(String name, boolean scheduled = false) {
         insert("moqui.security.UserGroup", [userGroupId: ACK, description: "Ack"])
         insert("darpan.auth.TenantSetting", [companyUserGroupId: ACK, timeZone: "America/Los_Angeles"])
         insert("moqui.security.UserAccount", [userId: ACK_USER, username: "tack.sam", userFullName: "Sam R."])
         String auditId = "${ACK}_${name}".toString()
         audit(ACK, auditId, name, name, "AUDP_MONTH")
+        if (scheduled) insert("darpan.audit.Audit", [auditId: auditId, scheduleActive: "Y", scheduleTime: "09:00", scheduleTimeZone: "America/Los_Angeles"])
         statement(ACK, auditId, "${auditId}_S1".toString(), "S1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "${name} S1".toString())
         insert("darpan.audit.AuditCheck", [checkId: "${auditId}_C".toString(), companyUserGroupId: ACK, checkCode: "${name}-check".toString(), label: name])
         link(ACK, "${auditId}_C".toString(), "${auditId}_S1".toString(), 1)
@@ -1191,10 +1193,10 @@ class AuditReportAssemblerSmokeTests {
                 eventStamp: stamp, eventDate: Date.valueOf(stamp.toInstant().atZone(LA).toLocalDate()), byTypeEnumId: "AUDAT_USER", byId: ACK_USER])
     }
 
-    /** The report as of reportDay, built on the morning of generatedDay (the report's today). */
-    private Map ackReport(String auditId, String reportDay, String generatedDay) {
+    /** The report as of reportDay, built at generatedTime (default 11:00) on generatedDay: the report's now. */
+    private Map ackReport(String auditId, String reportDay, String generatedDay, String generatedTime = "11:00:00") {
         Map out = ec.service.sync().name("${REPORTS}.assemble#AuditReport").parameters([companyUserGroupId: ACK, auditId: auditId,
-                reportDate: Date.valueOf(reportDay), generatedStamp: at(generatedDay, "11:00:00")]).call()
+                reportDate: Date.valueOf(reportDay), generatedStamp: at(generatedDay, generatedTime)]).call()
         noErrors()
         return new JsonSlurper().parseText(JsonOutput.toJson(out.document)) as Map
     }
@@ -1240,6 +1242,41 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([open: 3, acknowledged: 0], doc.summary.subMap(["open", "acknowledged"]))
         assertEquals([null, null, null], (s1.findings as List<Map>)*.acknowledgement)
         assertEquals(5, doc.report.acknowledgeRemindDays)
+    }
+
+    // (a) Before today's 09:00 run the page opens on yesterday's report: an acknowledgement made this morning shows on it.
+    @Test
+    void acknowledgedBeforeTodaysRunSplitsTheLatestMorning() {
+        List<String> ids = ackAudit("ack-early", true)
+        acknowledgeRow(ids[0], at("2026-10-22", "06:30:00"), "2026-10-27")
+        Map doc = ackReport("${ACK}_ack-early", "2026-10-21", "2026-10-22", "07:00:00")
+        Map s1 = doc.categories.orders.statements.S1 as Map
+        assertEquals([open: 2, acknowledged: 1], s1.counts.subMap(["open", "acknowledged"]), "yesterday is the latest morning until the run")
+        assertEquals([open: 2, acknowledged: 1], doc.summary.subMap(["open", "acknowledged"]))
+        assertEquals([false], (s1.findings as List<Map>).findAll { it.acknowledgement }*.acknowledgement*.reminded)
+    }
+
+    // (b) Once today's run is due, yesterday's report is an older morning's: as it was.
+    @Test
+    void olderMorningHasNoSplit() {
+        List<String> ids = ackAudit("ack-older", true)
+        acknowledgeRow(ids[0], at("2026-10-22", "06:30:00"), "2026-10-27")
+        Map s1 = ackReport("${ACK}_ack-older", "2026-10-21", "2026-10-22", "10:00:00").categories.orders.statements.S1 as Map
+        assertEquals([open: 3, acknowledged: 0], s1.counts.subMap(["open", "acknowledged"]))
+        assertEquals([null, null, null], (s1.findings as List<Map>)*.acknowledgement)
+    }
+
+    // (c) On yesterday's report (the latest morning), remind days run to the real today, not to the report's date.
+    @Test
+    void reminderReadsTheRealToday() {
+        List<String> ids = ackAudit("ack-real", true)
+        acknowledgeRow(ids[0], at("2026-10-16", "09:00:00"), "2026-10-21")   // six days ago, remind day yesterday
+        acknowledgeRow(ids[1], at("2026-10-17", "09:00:00"), "2026-10-22")   // remind day today: reminded, though not by 10-21
+        Map s1 = ackReport("${ACK}_ack-real", "2026-10-21", "2026-10-22", "07:00:00").categories.orders.statements.S1 as Map
+        assertEquals([open: 3, acknowledged: 0], s1.counts.subMap(["open", "acknowledged"]))
+        Map<String, Map> byId = (s1.findings as List<Map>).collectEntries { [(it.id): it] }
+        assertEquals([true, true, null], [byId[ids[0]].acknowledgement?.reminded, byId[ids[1]].acknowledgement?.reminded,
+                                          byId[ids[2]].acknowledgement])
     }
 
     @Test

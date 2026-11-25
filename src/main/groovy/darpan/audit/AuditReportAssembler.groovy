@@ -31,8 +31,9 @@ import java.time.temporal.ChronoUnit
  * condition placed beside a full primary key).
  *
  * Determinism: every age and every state is computed from stored rows and the report date, never from when the
- * request ran. The only clock value is report.generatedAt, which the caller can pin. DAR-BE-361: its tenant day is the
- * report's today, the one morning whose open findings split into open and acknowledged.
+ * request ran. The only clock value is report.generatedAt, which the caller can pin. DAR-BE-361: it is also the report's
+ * now: its tenant day is today for remind days, and it picks the latest morning, whose open findings split into open
+ * and acknowledged.
  */
 class AuditReportAssembler {
 
@@ -142,9 +143,12 @@ class AuditReportAssembler {
             [(st.statementId as String): sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])] }
         Map<String, Map> split = stepUnits(statements, entriesByStatement, recordsByFinding)
         Set<String> waitingIds = split.values().collectMany { ((it.waiting ?: []) as List<Map>).collectMany { (it.entries as List<Map>)*.row*.findingId } } as Set<String>
-        // DAR-BE-361. Today's report only: each open row reads open, acknowledged or reminded. A past morning is as it was.
-        LocalDate today = (generatedStamp ?: new Timestamp(System.currentTimeMillis())).toInstant().atZone(zone).toLocalDate()
-        if (day == today) {
+        // DAR-BE-361. Current state on the current report: the latest morning's report (the one a blank date shows, which
+        // is yesterday's until today's run) splits each open row into open, acknowledged or reminded, with remind days
+        // read against the tenant's real today. An older morning is as it was.
+        Instant now = (generatedStamp ?: new Timestamp(System.currentTimeMillis())).toInstant()
+        LocalDate today = now.atZone(zone).toLocalDate()
+        if (!day.isBefore(AuditReportGraph.latestMorning(ec, tenantId, auditId, period, now).toLocalDate())) {
             markAcknowledgements(ec, tenantId, split.values().collectMany { it.counted as List<Map> } as List<Map>,
                     ledger.findAll { it.state == OPEN }*.row*.findingId as List<String>, today, zone)
         }

@@ -70,8 +70,11 @@ class ErrorChatSupport {
             logger.warn("Error card claim failed: {}", failureNote(t, webhookUrl))
         } finally {
             ec.message.clearAll()
-            infos.each { ec.message.addMessage(it.message, it.type) }
-            publics.each { ec.message.addPublic(it.message, it.type) }
+            // addPublic puts one MessageInfo in both lists, so the snapshot of the general list already holds the public ones
+            infos.each { mi ->
+                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
+                else ec.message.addMessage(mi.message, mi.type)
+            }
             ec.message.popErrors()
         }
         return claim

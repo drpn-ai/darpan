@@ -45,7 +45,7 @@ class ErrorChatSupportTests {
     @AfterEach
     void clear() {
         posted.clear()
-        ec.message.clearErrors()
+        ec.message.clearAll()
         ErrorChatSupport.resetForTests()
         DarpanSettings.resetForTests()
     }
@@ -170,10 +170,21 @@ class ErrorChatSupportTests {
     @Test
     void aMissingScheduledDateFallsBackToTheCompletedDate() {
         Map e = event()
+        Timestamp nov20 = Timestamp.from(Instant.parse("2026-11-20T20:00:00Z"))
         assertTrue(ErrorChatSupport.postErrorCard(ec, e))
-        // same LA day as the scheduled date: the same slot, so nothing more is posted
-        assertFalse(ErrorChatSupport.postErrorCard(ec, e + [scheduledDate: null, completedDate: Timestamp.from(Instant.parse("2026-11-25T20:00:00Z"))]))
+        // no scheduled date: the completed date's day (Nov 20), a different slot from Nov 25
+        assertTrue(ErrorChatSupport.postErrorCard(ec, e + [scheduledDate: null, completedDate: nov20]))
+        // a scheduled date on that same LA day is the slot just taken
+        assertFalse(ErrorChatSupport.postErrorCard(ec, e + [scheduledDate: Timestamp.from(Instant.parse("2026-11-20T15:00:00Z"))]))
         assertTrue(ErrorChatSupport.postErrorCard(ec, event([scheduledDate: null, completedDate: null])), "neither date: today, no NPE")
+    }
+
+    @Test
+    void theCallersPublicMessageIsNotDuplicatedByTheClaim() {
+        ec.message.addPublic("hello", "info")
+        assertTrue(ErrorChatSupport.postErrorCard(ec, event()))
+        assertEquals(1, ec.message.messageInfos.size())
+        assertEquals(1, ec.message.publicMessageInfos.size())
     }
 
     @Test

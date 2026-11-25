@@ -471,6 +471,17 @@ then
     insertLogical( new PartialPaymentGivenBack( $o, $taken ) );
 end
 
+// Dolls Kill DK5150917, DK5163676, DK5167477 (2026-11-25): HotWax zeroes grandTotal once Shopify refunds the gift card, so
+// the HotWax total no longer shows the sale was only partly paid; the Shopify order's original total still does.
+rule "Less than the Shopify order's total was taken"
+    @reads("PaymentsGivenBack, ShopifyOrder") @produces("PartialPaymentGivenBack")
+when
+    PaymentsGivenBack( $o : order, $taken : taken )
+    ShopifyOrder( order == $o, total != null, total > $taken )
+then
+    insertLogical( new PartialPaymentGivenBack( $o, $taken ) );
+end
+
 // ---- causes: each about one subject, written once
 
 // ---- DAR-BE-204 pieces: a Shopify order's HotWax order (each needs the ShopifyOrder, so HotWax-keyed checks are untouched)
@@ -490,6 +501,18 @@ rule "A Shopify order's payment failed and was never made"
 when
     OrderNotInNetsuite( $o : order )
     $s : ShopifyOrder( order == $o, financialStatus == "EXPIRED" )
+then
+    insertLogical( new PaymentNeverMade( $o, $s ) );
+end
+
+// Dolls Kill DK5170816 (2026-11-25, Aditi: "insufficient payment ... never go to netsuite"): the card authorization was
+// voided, so nothing was captured; HotWax holds the payment cancelled. A settled HotWax payment means money was taken.
+rule "A Shopify order's authorization was voided and nothing was taken"
+    @reads("OrderNotInNetsuite, ShopifyOrder, Payment") @produces("PaymentNeverMade")
+when
+    OrderNotInNetsuite( $o : order )
+    $s : ShopifyOrder( order == $o, financialStatus == "VOIDED" )
+    not Payment( order == $o, state == "SETTLED" )
 then
     insertLogical( new PaymentNeverMade( $o, $s ) );
 end

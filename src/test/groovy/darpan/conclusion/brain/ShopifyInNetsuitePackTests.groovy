@@ -105,6 +105,49 @@ class ShopifyInNetsuitePackTests {
     }
 
     @Test
+    void aGiftCardSwipeGivenBackIsPartialEvenWhenHotwaxZeroedTheTotal() {
+        // Read on prod 2026-11-25: POS sales part-paid by gift card, the swipe refunded seconds later; Shopify keeps the
+        // original total, HotWax's grandTotal reads 0. Control DK5157580: a card sale of the full total refunded in full
+        // (a subscription), which did reach NetSuite, so a full refund alone is no cause.
+        Map fired = fire([
+                shopify("7489075118337", "DK5150917", "REFUNDED", 212.11, 0),
+                shopify("7505494900993", "DK5163676", "REFUNDED", 11.03, 0),
+                shopify("7510445392129", "DK5167477", "REFUNDED", 32.74, 0),
+                shopify("7499000000001", "DK5157580", "REFUNDED", 29.00, 0),
+        ], [
+                "7489075118337": hc("296168", "DK5150917", 0, "ORDER_COMPLETED", "POS_COMPLETED",
+                        [["EXT_GIFT_CARD", "PAYMENT_SETTLED", 193.02], ["EXT_GIFT_CARD", "PAYMENT_REFUNDED", 193.02]]),
+                "7505494900993": hc("316949", "DK5163676", 0, "ORDER_COMPLETED", "POS_COMPLETED",
+                        [["EXT_GIFT_CARD", "PAYMENT_SETTLED", 6.74], ["EXT_GIFT_CARD", "PAYMENT_REFUNDED", 6.74]]),
+                "7510445392129": hc("327022", "DK5167477", 0, "ORDER_COMPLETED", "POS_COMPLETED",
+                        [["EXT_GIFT_CARD", "PAYMENT_SETTLED", 14.67], ["EXT_GIFT_CARD", "PAYMENT_REFUNDED", 14.67]]),
+                "7499000000001": hc("o-ctl", "DK5157580", 0, "ORDER_COMPLETED", "STANDARD",
+                        [["EXT_SHOP_PAYMENTS", "PAYMENT_SETTLED", 29.00], ["EXT_SHOP_PAYMENTS", "PAYMENT_REFUNDED", 29.00]]),
+        ])
+        assertEquals([
+                "7489075118337": "CONC_PARTIAL_PAYMENT_GIVEN_BACK",
+                "7505494900993": "CONC_PARTIAL_PAYMENT_GIVEN_BACK",
+                "7510445392129": "CONC_PARTIAL_PAYMENT_GIVEN_BACK",
+        ], codes(fired))
+    }
+
+    @Test
+    void aVoidedAuthorizationWithNothingTakenWasNeverPaid() {
+        // DK5170816 as read on prod 2026-11-25: Shopify AUTHORIZATION then VOID, on hold; HotWax approved, payment cancelled.
+        // Control: a voided Shopify order whose HotWax payment settled took money, so it is not "never paid".
+        Map fired = fire([
+                shopify("7513927614721", "DK5170816", "VOIDED", 126.00, 126.00),
+                shopify("2", "DK2", "VOIDED", 50, 50),
+        ], [
+                "7513927614721": hc("333421", "DK5170816", 126, "ORDER_APPROVED", "STANDARD",
+                        [["EXT_SHOP_PAYMENTS", "PAYMENT_CANCELLED", 123.67]]),
+                "2": hc("o2", "DK2", 50, "ORDER_APPROVED", "STANDARD", [["EXT_SHOP_PAYMENTS", "PAYMENT_SETTLED", 50]]),
+        ])
+        assertEquals("PAY_EXPIRED", codes(fired)["7513927614721"])
+        assertTrue(codes(fired)["2"] != "PAY_EXPIRED", "money was taken")
+    }
+
+    @Test
     void aShopifyOrderHotwaxDoesNotHaveIsNotInHotwax() {
         assertEquals(["9999": "NOT_IN_HC"], codes(fire([shopify("9999", "DK9999999", "PAID", 10, 10)], ["9999": null])))
     }

@@ -11,8 +11,8 @@
             emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${digestSubject}"
             fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
             bodyScreenLocation="component://darpan/screen/email/ErrorDigest.xml"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="intro" defaultText="${checks} checks and ${logErrors} log errors since the last email. Each one is below, with what it said."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="none" defaultText="Nothing went wrong since the last email: every run ran, every check is on time and the log is clean."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="intro" defaultText="Since the last email, ${checks} checks stumbled and the log complained ${logErrors} times. Each one is below, in its own words."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="none" defaultText="Quiet day. Every run ran, every check is on time and the log has nothing to say."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="runs.title" defaultText="Run errors"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="runs.none" defaultText="No run errors."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="run.streak" defaultText="${days} days in a row"/>

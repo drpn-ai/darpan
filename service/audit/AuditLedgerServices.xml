@@ -498,6 +498,26 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-361. A person's own history row (acknowledged, acknowledgement changed or reopened). The finding's state
+         never comes from these: they are not check events. -->
+    <service verb="create" noun="UserFindingEvent" authenticate="false" allow-remote="false">
+        <description>Appends one history row, by the signed-in user.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="findingId" required="true"/>
+            <parameter name="eventTypeEnumId" required="true"/>
+            <parameter name="eventStamp" type="Timestamp" required="true"/>
+            <parameter name="eventDate" type="Date" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-make-value value-field="event" entity-name="darpan.audit.AuditFindingEvent"
+                    map="[findingId:findingId, companyUserGroupId:companyUserGroupId, eventTypeEnumId:eventTypeEnumId,
+                          eventStamp:eventStamp, eventDate:eventDate, byTypeEnumId:'AUDAT_USER', byId:ec.user.userId]"/>
+            <entity-sequenced-id-secondary value-field="event"/>
+            <entity-create value-field="event"/>
+        </actions>
+    </service>
+
     <!-- DAR-BE-199: registered migration AUDIT_SCHEDULE_OWNED (data/MigrationRegistrySeedData.xml). -->
     <service verb="migrate" noun="AuditScheduleOwned" authenticate="false" allow-remote="false">
         <description>One-time: every audit that has automations and no schedule of its own is stamped with one

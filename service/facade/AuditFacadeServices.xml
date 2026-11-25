@@ -120,6 +120,156 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
+    <!-- DAR-BE-361. Acknowledge one report row: a note that says the problem is known, so the row leaves Open until its
+         remind day. A row is an order's open lines under one statement plus the later steps waiting under it
+         (AuditReportAssembler.unitMemberIds); each covered finding gets its own row and its own history event. Any member
+         who can see the report may acknowledge, change or reopen; the finding's state stays open or fixed. -->
+    <service verb="acknowledge" noun="AuditFinding" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Acknowledges the report row holding one open finding: every open line of its order under its statement
+            and the later-step lines waiting under it get the note and one remind day (today in the tenant's zone plus the
+            audit.acknowledge.remindDays setting; none when remind is off). Replaces an earlier acknowledgement of those
+            findings. A fixed finding cannot be acknowledged.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>Any finding of the row, e.g. F-20761.</description></parameter>
+            <parameter name="note"><description>Why the problem is known; required.</description></parameter>
+            <parameter name="remind" type="Boolean" default="true"><description>Bring the row back to Open after the remind
+                days if it is still open.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="acknowledgement" type="Map"><description>{note, by: {id, label}, at, remindOn, reminded}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
+                <return error="true" message="Finding ${findingId} was not found"/></if>
+            <set field="noteText" from="note?.trim()"/>
+            <if condition="!noteText"><return error="true" message="Add a note"/></if>
+            <entity-find entity-name="darpan.audit.AuditFinding" list="findingList">
+                <econdition field-name="findingId"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!findingList || findingList[0].stateEnumId != 'AUDFS_OPEN'">
+                <return error="true" message="Only an open finding can be acknowledged"/></if>
+
+            <set field="memberIds" from="darpan.audit.AuditReportAssembler.unitMemberIds(ec, tenantId, findingId)"/>
+            <set field="today" from="darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, null)"/>
+            <set field="remindDay" from="darpan.audit.AcknowledgementSupport.remindDate(today.toLocalDate(),
+                    darpan.config.DarpanSettings.intValue('audit.acknowledge.remindDays'), remind as boolean)"/>
+            <set field="nowStamp" from="ec.user.nowTimestamp"/>
+            <entity-delete-by-condition entity-name="darpan.audit.AuditFindingAcknowledgement">
+                <econdition field-name="findingId" operator="in" from="memberIds"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-delete-by-condition>
+            <iterate list="memberIds" entry="memberId">
+                <entity-make-value value-field="ack" entity-name="darpan.audit.AuditFindingAcknowledgement"
+                        map="[findingId:memberId, companyUserGroupId:tenantId, note:noteText, acknowledgedByUserId:ec.user.userId,
+                              acknowledgedStamp:nowStamp, remindDate:remindDay ? java.sql.Date.valueOf(remindDay) : null]"/>
+                <entity-create value-field="ack"/>
+                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
+                        in-map="[companyUserGroupId:tenantId, findingId:memberId, eventTypeEnumId:'AUDFE_ACKNOWLEDGED',
+                                 eventStamp:nowStamp, eventDate:today]"/>
+            </iterate>
+            <set field="acknowledgement" from="darpan.audit.AcknowledgementSupport.summary([note:noteText,
+                    acknowledgedByUserId:ec.user.userId, acknowledgedStamp:nowStamp, remindDate:remindDay], 'acknowledged',
+                    [(ec.user.userId): ec.user.userAccount?.userFullName ?: ec.user.username])"/>
+            <set field="acknowledgement.at" from="darpan.audit.AuditReportAssembler.isoDateTime(acknowledgement.at,
+                    darpan.audit.AuditDigestSupport.tenantZone(ec, tenantId))"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+    <service verb="update" noun="AuditFindingAcknowledgement" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Changes the acknowledgement of the report row holding one finding: the note on every covered finding,
+            and the remind day. Remind off clears it; remind on keeps a remind day not yet reached and starts a fresh one
+            (today plus the remind days) when it was off or has passed.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>Any finding of the row, e.g. F-20761.</description></parameter>
+            <parameter name="note"><description>The new note; required.</description></parameter>
+            <parameter name="remind" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="acknowledgement" type="Map"><description>{note, by: {id, label}, at, remindOn, reminded}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
+                <return error="true" message="Finding ${findingId} was not found"/></if>
+            <set field="noteText" from="note?.trim()"/>
+            <if condition="!noteText"><return error="true" message="Add a note"/></if>
+            <set field="memberIds" from="darpan.audit.AuditReportAssembler.unitMemberIds(ec, tenantId, findingId)"/>
+            <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList" for-update="true">
+                <econdition field-name="findingId" operator="in" from="memberIds"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <if condition="!ackList"><return error="true" message="Finding ${findingId} is not acknowledged"/></if>
+
+            <set field="today" from="darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, null)"/>
+            <set field="freshDay" from="darpan.audit.AcknowledgementSupport.remindDate(today.toLocalDate(),
+                    darpan.config.DarpanSettings.intValue('audit.acknowledge.remindDays'), true)"/>
+            <set field="nowStamp" from="ec.user.nowTimestamp"/>
+            <iterate list="ackList" entry="ack">
+                <set field="lapsed" from="ack.remindDate == null || !today.before(ack.remindDate)"/>
+                <set field="ack.note" from="noteText"/>
+                <set field="ack.remindDate" from="!remind ? null : (lapsed ? java.sql.Date.valueOf(freshDay) : ack.remindDate)"/>
+                <set field="ack.lastChangedByUserId" from="ec.user.userId"/>
+                <set field="ack.lastChangedStamp" from="nowStamp"/>
+                <entity-update value-field="ack"/>
+                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
+                        in-map="[companyUserGroupId:tenantId, findingId:ack.findingId, eventTypeEnumId:'AUDFE_ACK_CHANGED',
+                                 eventStamp:nowStamp, eventDate:today]"/>
+            </iterate>
+            <set field="shown" from="ackList.find { it.findingId == findingId } ?: ackList[0]"/>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="byAccount">
+                <field-map field-name="userId" from="shown.acknowledgedByUserId"/></entity-find-one>
+            <set field="acknowledgement" from="darpan.audit.AcknowledgementSupport.summary(shown, 'acknowledged',
+                    [(shown.acknowledgedByUserId): byAccount?.userFullName ?: byAccount?.username])"/>
+            <set field="acknowledgement.at" from="darpan.audit.AuditReportAssembler.isoDateTime(acknowledgement.at,
+                    darpan.audit.AuditDigestSupport.tenantZone(ec, tenantId))"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="AuditFindingAcknowledgement" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Reopens the report row holding one finding: removes the acknowledgement of every covered finding, each
+            with a history event. Nothing to remove is not an error.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>Any finding of the row, e.g. F-20761.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
+                <return error="true" message="Finding ${findingId} was not found"/></if>
+            <set field="memberIds" from="darpan.audit.AuditReportAssembler.unitMemberIds(ec, tenantId, findingId)"/>
+            <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList" for-update="true">
+                <econdition field-name="findingId" operator="in" from="memberIds"/>
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+            </entity-find>
+            <set field="today" from="darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, null)"/>
+            <set field="nowStamp" from="ec.user.nowTimestamp"/>
+            <iterate list="ackList" entry="ack">
+                <entity-delete value-field="ack"/>
+                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
+                        in-map="[companyUserGroupId:tenantId, findingId:ack.findingId, eventTypeEnumId:'AUDFE_ACK_REOPENED',
+                                 eventStamp:nowStamp, eventDate:today]"/>
+            </iterate>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
     <!-- DAR-UI-075. The findings as the report lists them, one per order, past its 50: the board's "more", filters, export. -->
     <service verb="get" noun="AuditFindingsByOrder" authz-action="view" allow-remote="true" authenticate="true">
         <description>Every open finding of one audit and period, one per order (an order's lines under it, the

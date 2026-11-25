@@ -339,10 +339,16 @@
                                         "$ref": "#/components/schemas/GetAppContentRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/AcknowledgeAuditFindingRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/AddAuditStatementRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/CreateAuditRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DeleteAuditFindingAcknowledgementRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAuditCheckExtractsRequest"
@@ -382,6 +388,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveAuditSettingsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateAuditFindingAcknowledgementRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/VerifyAuditFindingRequest"
@@ -1089,8 +1098,10 @@
                                         "facade.AgentTurnFacadeServices.send#AgentQueryTurn": "#/components/schemas/SendAgentQueryTurnRequest",
                                         "facade.AgentTurnFacadeServices.send#AgentTurn": "#/components/schemas/SendAgentTurnRequest",
                                         "facade.AppContentFacadeServices.get#AppContent": "#/components/schemas/GetAppContentRequest",
+                                        "facade.AuditFacadeServices.acknowledge#AuditFinding": "#/components/schemas/AcknowledgeAuditFindingRequest",
                                         "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
                                         "facade.AuditFacadeServices.create#Audit": "#/components/schemas/CreateAuditRequest",
+                                        "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement": "#/components/schemas/DeleteAuditFindingAcknowledgementRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckExtracts": "#/components/schemas/GetAuditCheckExtractsRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckOptions": "#/components/schemas/GetAuditCheckOptionsRequest",
                                         "facade.AuditFacadeServices.get#AuditFinding": "#/components/schemas/GetAuditFindingRequest",
@@ -1104,6 +1115,7 @@
                                         "facade.AuditFacadeServices.run#Audit": "#/components/schemas/RunAuditRequest",
                                         "facade.AuditFacadeServices.save#AuditCheck": "#/components/schemas/SaveAuditCheckRequest",
                                         "facade.AuditFacadeServices.save#AuditSettings": "#/components/schemas/SaveAuditSettingsRequest",
+                                        "facade.AuditFacadeServices.update#AuditFindingAcknowledgement": "#/components/schemas/UpdateAuditFindingAcknowledgementRequest",
                                         "facade.AuditFacadeServices.verify#AuditFinding": "#/components/schemas/VerifyAuditFindingRequest",
                                         "facade.AuthFacadeServices.begin#PasskeyFirstSignIn": "#/components/schemas/BeginPasskeyFirstSignInRequest",
                                         "facade.AuthFacadeServices.begin#PasskeyProof": "#/components/schemas/BeginPasskeyProofRequest",
@@ -1635,10 +1647,16 @@
                                             "$ref": "#/components/schemas/GetAppContentResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/AcknowledgeAuditFindingResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/AddAuditStatementResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/CreateAuditResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeleteAuditFindingAcknowledgementResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditCheckExtractsResponse"
@@ -1678,6 +1696,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveAuditSettingsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateAuditFindingAcknowledgementResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/VerifyAuditFindingResponse"
@@ -12712,6 +12733,111 @@
                     "result"
                 ]
             },
+            "AcknowledgeAuditFindingParams": {
+                "type": "object",
+                "properties": {
+                    "findingId": {
+                        "type": "string",
+                        "description": "Any finding of the row, e.g. F-20761."
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Why the problem is known; required."
+                    },
+                    "remind": {
+                        "type": "boolean",
+                        "description": "Bring the row back to Open after the remind\n                days if it is still open."
+                    }
+                },
+                "required": [
+                    "findingId"
+                ],
+                "description": "Acknowledges the report row holding one open finding: every open line of its order under its statement\n            and the later-step lines waiting under it get the note and one remind day (today in the tenant's zone plus the\n            audit.acknowledge.remindDays setting; none when remind is off). Replaces an earlier acknowledgement of those\n            findings. A fixed finding cannot be acknowledged."
+            },
+            "AcknowledgeAuditFindingResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "acknowledgement": {
+                        "type": "object",
+                        "description": "{note, by: {id, label}, at, remindOn, reminded}"
+                    }
+                }
+            },
+            "AcknowledgeAuditFindingRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.acknowledge#AuditFinding",
+                "x-darpan-method": "facade.AuditFacadeServices.acknowledge#AuditFinding",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.acknowledge#AuditFinding"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/AcknowledgeAuditFindingParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "AcknowledgeAuditFindingResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.acknowledge#AuditFinding. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/AcknowledgeAuditFindingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "AddAuditStatementParams": {
                 "type": "object",
                 "properties": {
@@ -12917,6 +13043,99 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/CreateAuditResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DeleteAuditFindingAcknowledgementParams": {
+                "type": "object",
+                "properties": {
+                    "findingId": {
+                        "type": "string",
+                        "description": "Any finding of the row, e.g. F-20761."
+                    }
+                },
+                "required": [
+                    "findingId"
+                ],
+                "description": "Reopens the report row holding one finding: removes the acknowledgement of every covered finding, each\n            with a history event. Nothing to remove is not an error."
+            },
+            "DeleteAuditFindingAcknowledgementResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DeleteAuditFindingAcknowledgementRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.delete#AuditFindingAcknowledgement",
+                "x-darpan-method": "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteAuditFindingAcknowledgementParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteAuditFindingAcknowledgementResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.delete#AuditFindingAcknowledgement. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteAuditFindingAcknowledgementResult"
                     }
                 },
                 "required": [
@@ -14313,6 +14532,110 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveAuditSettingsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateAuditFindingAcknowledgementParams": {
+                "type": "object",
+                "properties": {
+                    "findingId": {
+                        "type": "string",
+                        "description": "Any finding of the row, e.g. F-20761."
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "The new note; required."
+                    },
+                    "remind": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "findingId"
+                ],
+                "description": "Changes the acknowledgement of the report row holding one finding: the note on every covered finding,\n            and the remind day. Remind off clears it; remind on keeps a remind day not yet reached and starts a fresh one\n            (today plus the remind days) when it was off or has passed."
+            },
+            "UpdateAuditFindingAcknowledgementResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "acknowledgement": {
+                        "type": "object",
+                        "description": "{note, by: {id, label}, at, remindOn, reminded}"
+                    }
+                }
+            },
+            "UpdateAuditFindingAcknowledgementRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.update#AuditFindingAcknowledgement",
+                "x-darpan-method": "facade.AuditFacadeServices.update#AuditFindingAcknowledgement",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.update#AuditFindingAcknowledgement"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateAuditFindingAcknowledgementParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateAuditFindingAcknowledgementResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.update#AuditFindingAcknowledgement. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateAuditFindingAcknowledgementResult"
                     }
                 },
                 "required": [
@@ -41542,8 +41865,10 @@
         "facade.AgentTurnFacadeServices.send#AgentQueryTurn": "SendAgentQueryTurn",
         "facade.AgentTurnFacadeServices.send#AgentTurn": "SendAgentTurn",
         "facade.AppContentFacadeServices.get#AppContent": "GetAppContent",
+        "facade.AuditFacadeServices.acknowledge#AuditFinding": "AcknowledgeAuditFinding",
         "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
         "facade.AuditFacadeServices.create#Audit": "CreateAudit",
+        "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement": "DeleteAuditFindingAcknowledgement",
         "facade.AuditFacadeServices.get#AuditCheckExtracts": "GetAuditCheckExtracts",
         "facade.AuditFacadeServices.get#AuditCheckOptions": "GetAuditCheckOptions",
         "facade.AuditFacadeServices.get#AuditFinding": "GetAuditFinding",
@@ -41557,6 +41882,7 @@
         "facade.AuditFacadeServices.run#Audit": "RunAudit",
         "facade.AuditFacadeServices.save#AuditCheck": "SaveAuditCheck",
         "facade.AuditFacadeServices.save#AuditSettings": "SaveAuditSettings",
+        "facade.AuditFacadeServices.update#AuditFindingAcknowledgement": "UpdateAuditFindingAcknowledgement",
         "facade.AuditFacadeServices.verify#AuditFinding": "VerifyAuditFinding",
         "facade.AuthFacadeServices.begin#PasskeyFirstSignIn": "BeginPasskeyFirstSignIn",
         "facade.AuthFacadeServices.begin#PasskeyProof": "BeginPasskeyProof",

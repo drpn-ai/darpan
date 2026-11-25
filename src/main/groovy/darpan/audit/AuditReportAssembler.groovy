@@ -632,25 +632,15 @@ class AuditReportAssembler {
     /** DAR-BE-348: with a priority, only the units at that level, filtered after resolution so none is lost to a cap. */
     static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period, String priority) {
         Map<String, String> codes = enumCodes(ec)
-        // DAR-BE-250: every active statement is read, even for one statement's list, to know which orders an earlier
-        // step already reports; only the asked statement's counted findings are returned, each with those waiting on it.
-        List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.getMap()
-                .findAll { (it.isActive ?: "Y") != "N" }
-                .sort(false) { Map a, Map b ->
-                    ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
-                            (a.statementCode as String) <=> (b.statementCode as String)
-                }
+        // Only the asked statement's counted findings are returned, each with those waiting on it.
+        Map open = openStepUnits(ec, tenantId, auditId, period)
+        List<Map> statements = open.statements as List<Map>
+        Map<String, List<Map>> entriesByStatement = open.entriesByStatement as Map<String, List<Map>>
+        Map<String, Map> records = open.records as Map<String, Map>
+        Map<String, Map> split = open.split as Map<String, Map>
         Map<String, String> statementCodeById = statements.collectEntries { [(it.statementId as String): it.statementCode as String] }
         LocalDate today = LocalDate.now((loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId)
-        Map<String, List<Map>> entriesByStatement = statements.collectEntries { Map st ->
-            def find = tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("statementId", st.statementId)
-                    .condition("stateEnumId", OPEN)
-            if (period) find.condition("period", period)
-            [(st.statementId as String): sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })]
-        }
-        Map<String, Map> records = recordsFor(ec, tenantId, entriesByStatement.values().flatten()*.row*.findingId as List<String>)
         Map<String, Map> causes = conclusionsOf(ec, entriesByStatement.values().flatten()*.row*.conclusionEnumId as List<String>)
-        Map<String, Map> split = stepUnits(statements, entriesByStatement, records)
         Map levels = priorityLevels(ec, tenantId, statements)
         return statements.findAll { !statementCode || it.statementCode == statementCode }.collectMany { Map st ->
             (split[st.statementId as String].counted as List<Map>).collect { Map unit ->
@@ -658,6 +648,49 @@ class AuditReportAssembler {
                         (unit.waitingUnits ? [waiting: waitingJson(unit, today, records, causes, codes, statementCodeById, levels)] : [:])
             }
         }.findAll { !priority || it.priority == priority } as List<Map>
+    }
+
+    /**
+     * Today's open findings of one audit (one period, or every one when blank) as the report groups them: [statements
+     * (active, in story order), entriesByStatement, records, split (stepUnits)]. DAR-BE-250: every active statement is
+     * read, even for one statement's list, to know which orders an earlier step already reports.
+     */
+    private static Map openStepUnits(def ec, String tenantId, String auditId, String period) {
+        List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.getMap()
+                .findAll { (it.isActive ?: "Y") != "N" }
+                .sort(false) { Map a, Map b ->
+                    ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
+                            (a.statementCode as String) <=> (b.statementCode as String)
+                }
+        Map<String, List<Map>> entriesByStatement = statements.collectEntries { Map st ->
+            def find = tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("statementId", st.statementId)
+                    .condition("stateEnumId", OPEN)
+            if (period) find.condition("period", period)
+            [(st.statementId as String): sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })]
+        }
+        Map<String, Map> records = recordsFor(ec, tenantId, entriesByStatement.values().flatten()*.row*.findingId as List<String>)
+        return [statements: statements, entriesByStatement: entriesByStatement, records: records,
+                split: stepUnits(statements, entriesByStatement, records)]
+    }
+
+    /**
+     * DAR-BE-361. The findings one Acknowledge covers (the report row holding findingId): today's open lines of its order
+     * unit under its own statement, plus the open lines of the later-step units waiting under that unit. A finding that is
+     * not an order line, or is not open today, covers itself alone. Empty when the tenant does not own the finding.
+     */
+    static List<String> unitMemberIds(def ec, String tenantId, String findingId) {
+        Map f = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY)?.getMap()
+        if (f == null) return []
+        Map statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId",
+                f.statementId as String, tenantId, WHY)?.getMap()
+        if (f.stateEnumId != OPEN || statement == null) return [findingId]
+        Map open = openStepUnits(ec, tenantId, statement.auditId as String, f.period as String)
+        Map split = (open.split as Map<String, Map>)[f.statementId as String]
+        List<Map> units = split == null ? [] : ((split.counted as List<Map>) + (split.waiting as List<Map>))
+        Map unit = units.find { Map u -> (u.entries as List<Map>).any { it.row.findingId == findingId } }
+        if (unit == null) return [findingId]
+        List<Map> lines = (unit.entries as List<Map>) + ((unit.waitingUnits ?: []) as List<Map>).collectMany { it.entries as List<Map> }
+        return lines.findAll { it.state == OPEN }.collect { it.row.findingId as String }.unique()
     }
 
     /** An order of one line, in the check's own words with the item named as its line: "line 1 is completed in HotWax

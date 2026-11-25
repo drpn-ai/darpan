@@ -285,10 +285,14 @@ class CliMethodAllowlist {
             "admin.UserAdminServices.reset#TwoFactor", // DAR-BE-264
             "admin.UserAdminServices.update#UserAccount",
 
+            // DAR-BE-361: acknowledge / change / reopen a report row write acknowledgement rows; the app only.
+            "facade.AuditFacadeServices.acknowledge#AuditFinding",
             "facade.AuditFacadeServices.add#AuditStatement",
             "facade.AuditFacadeServices.create#Audit",
+            "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement",
             "facade.AuditFacadeServices.save#AuditCheck",
             "facade.AuditFacadeServices.save#AuditSettings",
+            "facade.AuditFacadeServices.update#AuditFindingAcknowledgement",
 
             "facade.AuthFacadeServices.change#ExpiredPassword",
             "facade.AuthFacadeServices.change#OwnPassword",

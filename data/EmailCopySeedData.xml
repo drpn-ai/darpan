@@ -86,7 +86,7 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.open" defaultText="Open"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.new" defaultText="New"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="tile.fixed" defaultText="Fixed"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="acknowledged" defaultText="${count} acknowledged. Your team has these in hand, and they come back on their reminder day."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="acknowledged" defaultText="${count} acknowledged. Your team has these in hand until they are fixed, or until the reminder day if one was set."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="act.heading" defaultText="Act on first"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rules.heading" defaultText="Rules"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.open" defaultText="${open} open"/>
@@ -116,7 +116,7 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="week" defaultText="week to ${day}"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="open.daily" defaultText="Open ${open} · New today ${new} · Fixed today ${fixed}"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="open.weekly" defaultText="Open ${open} (${before} a week ago)"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="acknowledged" defaultText="${count} acknowledged, parked until their reminder day."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="acknowledged" defaultText="${count} acknowledged, parked until fixed or until the reminder day if one was set."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="category" defaultText="${label}: open ${open}"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="none" defaultText="Nothing open."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="report" defaultText="Report:"/>

@@ -74,7 +74,7 @@ class AuditDigestSupportTests {
         Map before = [summary: [open: 10, acknowledged: 0]]
         List<String> lines = AuditDigestSupport.render(doc, AuditDigestSupport.WEEKLY, false, before, null, COPY, RUN_COPY).readLines()
         assertEquals("Open 10 (10 a week ago)", lines[2], "8 open + 2 acknowledged against 10: no change")
-        assertEquals("2 acknowledged, parked until their reminder day.", lines[3])
+        assertEquals("2 acknowledged, parked until fixed or until the reminder day if one was set.", lines[3])
         String quiet = AuditDigestSupport.render(report(), AuditDigestSupport.DAILY, false, null, null, COPY, RUN_COPY)
         assertFalse(quiet.contains("acknowledged"), quiet)
     }

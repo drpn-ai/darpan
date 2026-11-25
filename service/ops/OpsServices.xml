@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-015. Store for the Darpan-only error card. Internal: called by darpan.ops.ErrorChatSupport. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="record" noun="RunErrorNotice" authenticate="anonymous-all" allow-remote="false">
+        <description>Claims the (tenantId, subjectKey, runDay) card slot. isNew is false when the day already has a card (nothing
+            is written). Otherwise the row is created and priorDays lists the subject's earlier card days within 60 days, newest
+            first, so the caller can count a streak.</description>
+        <in-parameters>
+            <parameter name="tenantId" required="true"/>
+            <parameter name="subjectKey" required="true"/>
+            <parameter name="runDay" type="Date" required="true"/>
+            <parameter name="errorKind"/>
+            <parameter name="executionId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="isNew" type="Boolean"/>
+            <parameter name="priorDays" type="List"><parameter name="priorDay" type="Date"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="isNew" from="false"/>
+            <set field="priorDays" from="[]"/>
+            <entity-find-one entity-name="darpan.ops.RunErrorNotice" value-field="existing" cache="false">
+                <field-map field-name="tenantId"/><field-map field-name="subjectKey"/><field-map field-name="runDay"/>
+            </entity-find-one>
+            <if condition="existing == null">
+                <set field="earliest" from="java.sql.Date.valueOf(runDay.toLocalDate().minusDays(60))"/>
+                <entity-find entity-name="darpan.ops.RunErrorNotice" list="earlier">
+                    <econdition field-name="tenantId"/><econdition field-name="subjectKey"/>
+                    <econdition field-name="runDay" operator="less" from="runDay"/>
+                    <econdition field-name="runDay" operator="greater-equals" from="earliest"/>
+                    <order-by field-name="-runDay"/>
+                </entity-find>
+                <set field="priorDays" from="earlier.collect { it.runDay }"/>
+                <entity-make-value entity-name="darpan.ops.RunErrorNotice" value-field="notice"/>
+                <set field="notice.tenantId" from="tenantId"/>
+                <set field="notice.subjectKey" from="subjectKey"/>
+                <set field="notice.runDay" from="runDay"/>
+                <set field="notice.errorKind" from="errorKind"/>
+                <set field="notice.executionId" from="executionId"/>
+                <set field="notice.postedDate" from="ec.user.nowTimestamp"/>
+                <entity-create value-field="notice"/>
+                <set field="isNew" from="true"/>
+            </if>
+        </actions>
+    </service>
+</services>

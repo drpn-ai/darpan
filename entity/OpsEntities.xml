@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- DAR-BE-015. Instance-wide operations records for Darpan's own staff. No companyUserGroupId and no
+         DARPAN_ACTIVE_COMPANY_SCOPE filter: tenantId is a plain value, and the only reader/writer is
+         darpan.ops.ErrorChatSupport (through ops.OpsServices.record#RunErrorNotice). -->
+
+    <entity entity-name="RunErrorNotice" package="darpan.ops" use="transactional" cache="never">
+        <description>One Darpan error card posted for a check (or an automation with no check) on a run day. The row is the
+            day's dedupe key and the streak's memory: a second failure the same day posts nothing.</description>
+        <field name="tenantId" type="id" is-pk="true"/>
+        <field name="subjectKey" type="id-long" is-pk="true"><description>The check id, or the automation id when the run has no check.</description></field>
+        <field name="runDay" type="date" is-pk="true"><description>The scheduled date in the automation's own zone.</description></field>
+        <field name="errorKind" type="text-short"/>
+        <field name="executionId" type="id"/>
+        <field name="postedDate" type="date-time"/>
+    </entity>
+</entities>

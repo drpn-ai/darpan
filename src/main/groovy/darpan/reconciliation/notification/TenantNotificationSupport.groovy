@@ -732,6 +732,17 @@ class TenantNotificationSupport {
         return slack ? deliverSlack(destinationRef, shaped) : deliverGoogleChat(destinationRef, shaped)
     }
 
+    /**
+     * DAR-BE-015. Posts one payload to a webhook that belongs to no tenant (Darpan's own error space). The provider is read from
+     * the URL host: hooks.slack.com is Slack, anything else Google Chat. The caller validated the URL when it was saved.
+     */
+    static Map<String, Object> deliverToWebhook(String webhookUrl, Map<String, Object> payload) {
+        String host = null
+        try { host = new URI(webhookUrl?.trim()).host?.toLowerCase() } catch (Exception ignored) { }
+        String provider = host == SLACK_WEBHOOK_HOST ? PROVIDER_SLACK : PROVIDER_GOOGLE
+        return deliverToDestination([webhookUrl: webhookUrl.trim(), chatProviderEnumId: provider] as Map<String, Object>, payload)
+    }
+
     protected static Map<String, Object> deliverGoogleChat(String webhookUrl, Map<String, Object> payload) {
         if (deliveryHook != null) return (deliveryHook.call(webhookUrl, payload) ?: [:]) as Map<String, Object>
 

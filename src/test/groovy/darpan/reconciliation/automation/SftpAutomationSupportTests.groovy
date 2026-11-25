@@ -447,6 +447,7 @@ class SftpAutomationSupportTests {
         seedSftpAutomation(ec)
         String webhookUrl = seedNotifyChatSpace(ec)
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"][0]["sourceTypeEnumId"] = "AUT_SRC_API"
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
@@ -459,6 +460,7 @@ class SftpAutomationSupportTests {
             }
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
+            AutomationExecutionSupport.resetForTests()
         }
 
         List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
@@ -473,9 +475,10 @@ class SftpAutomationSupportTests {
         assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
         assertEquals(1, deliveries.size(), "a terminal SFTP failure must alert exactly once, like the API path")
         assertEquals(webhookUrl, deliveries[0].webhookUrl)
-        String text = deliveries[0].payload.text as String
-        assertTrue(text.contains("Status: FAILED"), "the delivered payload must be the FAILURE payload")
-        assertTrue(text.contains("AUT_SRC_SFTP"), "the alert must carry the reason the run died")
+        // DAR-BE-015: the client space gets only the neutral line; the reason the run died is on Darpan's card.
+        assertEquals("SFTP Automation did not run this morning. Darpan has been alerted and is working on a fix.", deliveries[0].payload.text)
+        assertEquals(["FAILED"], cards*.kind)
+        assertTrue((cards[0].errorFirstLine as String).contains("AUT_SRC_SFTP"), "the card must carry the reason the run died")
         assertNotNull(runResult.notifiedDate, "the alert must claim the CAS on the one row this run owns")
     }
 
@@ -575,6 +578,7 @@ class SftpAutomationSupportTests {
             subscribeMidRun(ec, "USER_A", "CS_ME")
             ec.message.addError("SFTP poll service failed")
         }
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: webhookUrl, payload: payload]
@@ -586,6 +590,7 @@ class SftpAutomationSupportTests {
             result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
+            AutomationExecutionSupport.resetForTests()
         }
 
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, result.statusEnumId)
@@ -595,7 +600,9 @@ class SftpAutomationSupportTests {
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, runResults[0].statusEnumId)
         assertEquals(1, deliveries.size(), "a no-output SFTP failure must alert, like the API path")
         assertEquals(subscriberWebhookUrl, deliveries[0].webhookUrl)
-        assertTrue((deliveries[0].payload.text as String).contains("Status: FAILED"))
+        // DAR-BE-015: the subscriber gets the neutral line, the failure goes to Darpan's card.
+        assertEquals([text: "SFTP Automation did not run this morning. Darpan has been alerted and is working on a fix."], deliveries[0].payload)
+        assertEquals(["FAILED"], cards*.kind)
         assertNotNull(runResults[0].notifiedDate)
         assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
                 "the alert's won claim is what purges the subscription — never a purge ahead of it")
@@ -1017,6 +1024,14 @@ class SftpAutomationSupportTests {
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"]
                 .find { it.automationId == "AUTO_SFTP" }.put("chatSpaceId", "CS_OPS")
         return webhookUrl
+    }
+
+    /** DAR-BE-015: captures the Darpan error cards and reads the client's neutral line from the shipped seed (no Moqui here). */
+    private static List<Map> captureErrorCards() {
+        List<Map> cards = Collections.synchronizedList([] as List<Map>)
+        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> AutomationExecutionSupportTests.opsNoticeSeedCopy() }
+        return cards
     }
 
     private static FakeEc fakeEc() {

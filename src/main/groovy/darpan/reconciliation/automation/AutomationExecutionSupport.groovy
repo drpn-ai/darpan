@@ -9,6 +9,9 @@ import darpan.audit.AuditReportAssembler
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
 import darpan.dataset.KeptCopySupport
+import darpan.email.EmailCopyReader
+import darpan.ops.ErrorChatSupport
+import darpan.ops.RunErrorKinds
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.SharedConfigAccessSupport
@@ -202,6 +205,14 @@ class AutomationExecutionSupport {
     static final String FILE_SIDE_1 = "FILE_1"
     static final String FILE_SIDE_2 = "FILE_2"
 
+    /** DAR-BE-015: what started a run (ReconciliationAutomationExecution.triggerType). */
+    static final String TRIGGER_SCHEDULED = "scheduled"
+    static final String TRIGGER_MANUAL = "manual"
+    static final String TRIGGER_PLAY = "play"
+    /** DAR-BE-015: the client's neutral line when a run errors (data/OpsNoticeSeedData.xml, editable in production). */
+    static final String ERROR_NOTICE_TEMPLATE = "DARPAN_ERROR_NOTICE"
+    static final String ERROR_NOTICE_NOT_RUN = "client.notrun"
+
     private static final Set<String> REUSABLE_EXECUTION_STATUSES = [STATUS_PENDING] as Set
 
     private static final Closure DEFAULT_SOURCE_EXTRACTOR = { def ec, def automation, def source, Map<String, Object> window,
@@ -235,10 +246,16 @@ class AutomationExecutionSupport {
 
     /** DAR-BE-015 test seam: replaces AuditAutomationSupport.recordWindow for a NO_DATA close. Null in production. */
     static Closure noDataWindowRecorder = null
+    /** DAR-BE-015 test seam: replaces ErrorChatSupport.postErrorCard, called with (ec, event). Null in production. */
+    static Closure errorCardPoster = null
+    /** DAR-BE-015 test seam: the EmailCopyReader for the client's neutral line, called with (ec). Null in production. */
+    static Closure errorNoticeCopy = null
 
     /** DAR-OPS-026: restores every mutable seam in this class (hooks, peak loaders, admission) to its default. Test-only. */
     static void resetForTests() {
         noDataWindowRecorder = null
+        errorCardPoster = null
+        errorNoticeCopy = null
         try {
             resetExecutionHooks()
             peakWindowsLoader = DEFAULT_PEAK_WINDOWS_LOADER
@@ -307,7 +324,7 @@ class AutomationExecutionSupport {
         List<Map<String, Object>> windows = resolveWindows(automation, input + [scheduledFireTime: scheduledFireTime])
         List<Map<String, Object>> executionResults = []
         windows.eachWithIndex { Map<String, Object> window, int index ->
-            Map<String, Object> executionState = findOrCreateExecution(ec, automation, scheduledFireTime, window, index + 1)
+            Map<String, Object> executionState = findOrCreateExecution(ec, automation, scheduledFireTime, window, index + 1, runTriggerOf(input))
             def execution = executionState.execution
             String automationExecutionId = normalize(readField(execution, "automationExecutionId"))
             if (executionState.duplicate == true) {
@@ -546,7 +563,7 @@ class AutomationExecutionSupport {
 
         List<Map<String, Object>> executionResults = []
         windows.eachWithIndex { Map<String, Object> window, int index ->
-            Map<String, Object> executionState = findOrCreateExecution(ec, automation, scheduledFireTime, window, index + 1)
+            Map<String, Object> executionState = findOrCreateExecution(ec, automation, scheduledFireTime, window, index + 1, runTriggerOf(input))
             def execution = executionState.execution
             String automationExecutionId = normalize(readField(execution, "automationExecutionId"))
 
@@ -583,10 +600,6 @@ class AutomationExecutionSupport {
             // essentially the whole execution; it stays null only when the best-effort mint itself failed,
             // in which case the terminal paths fall back to creating the row exactly as they used to.
             String mintedRunResultId = null
-            // Task 2b: kept SEPARATE from mintedRunResultId. Before 2b "a run-result row exists" and
-            // "this run produced output" were the same fact, and notifyAutomationFailure's payload shape
-            // keys off the latter. Early minting breaks that equivalence, so track output explicitly.
-            boolean runOutputPersisted = false
             // The row this attempt replaces, if any: a retry re-drives the SAME execution row, and
             // nothing ever clears its run-result id, so on attempt N+1 this still names attempt N's row.
             String supersededRunResultId = normalize(readField(execution, "reconciliationRunResultId"))
@@ -762,13 +775,19 @@ class AutomationExecutionSupport {
                     // Task 2b terminal guarantee: a window with no data still minted a row at RUNNING, so
                     // it has to be closed here or it sits ACTIVE forever (and the stuck-run reaper would
                     // eventually flip it to FAILED and alert on a run that simply had nothing to compare).
-                    // NO_DATA still does not notify — that contract is unchanged.
                     completeAutomationRunResult(ec, automation, mintedRunResultId, STATUS_NO_DATA, completedTimestamp, [:])
-                    // ...and because it does not notify, nothing else will ever clean up a "notify me"
-                    // subscription taken against this row while it was RUNNING (purgeRunSubscriptions
-                    // only runs after a won notification claim). An orphan there never fires AND pins
-                    // its chat space against deletion forever, so purge it here.
-                    TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
+                    // DAR-BE-015: a side that read nothing (or kept nothing) while the other read is a check that did
+                    // not run: Darpan gets the card, a client destination the neutral line (notifyRunError purges).
+                    // A quiet day (both sides 0) or a verify still does not notify, and because it does not, nothing
+                    // else will ever clean up a "notify me" subscription taken against this row while it was RUNNING
+                    // (purgeRunSubscriptions only runs after a won notification claim). An orphan there never fires
+                    // AND pins its chat space against deletion forever, so purge it here.
+                    Map<String, Object> closedExecution = executionMap(execution) + noDataFields
+                    if (RunErrorKinds.of(closedExecution) != null) {
+                        AutomationExecutionSupport.notifyRunError(ec, automation, closedExecution, mintedRunResultId, sideReason)
+                    } else {
+                        TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
+                    }
                     Closure recorder = AutomationExecutionSupport.noDataWindowRecorder ?: AuditAutomationSupport.&recordWindow
                     recorder.call(ec, automation, auditChecks, window, file1Source, file2Source,
                             file1Result, file2Result, null, null, automationExecutionId, auditSideConfigIds, sideReason)
@@ -861,9 +880,6 @@ class AutomationExecutionSupport {
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [:])
                 openStep = null
                 mintedRunResultId = reconciliationRunResultId ?: mintedRunResultId
-                // Output is what was persisted, not what exists: a blank resultDataManagerPath now still
-                // resolves to the pre-minted row (it must end terminal), but nothing was written.
-                runOutputPersisted = normalize(resultDataManagerPath) != null
 
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 // Audit 2026-06-11 #4: a rule build/eval failure does not throw, so an automation run
@@ -992,12 +1008,12 @@ class AutomationExecutionSupport {
                 // only when that mint failed — it stays the create-a-row-to-notify-on fallback, and can
                 // no longer produce a second row for a run that already has one.)
                 if (failureFields.statusEnumId == STATUS_FAILED) {
-                    // notifyRunCompleted purges this run's subscriptions itself once its claim is won,
-                    // so nothing may delete them ahead of this call — that would drop the subscriber
-                    // destinations the alert is about to resolve.
-                    notifyAutomationFailure(ec, automation,
+                    // DAR-BE-015: the error goes to Darpan's error space; a client destination gets only the neutral
+                    // line (notifyRunError). It purges this run's subscriptions itself, so nothing may delete them
+                    // ahead of this call — that would drop the subscriber destinations it is about to resolve.
+                    notifyRunError(ec, automation, executionMap(execution) + failureFields,
                             mintedRunResultId ?: persistFailureRunResult(ec, automation, t, completedTimestamp),
-                            runOutputPersisted, sanitizeErrorMessage(t))
+                            sanitizeErrorMessage(t))
                 }
                 // A requeued attempt deliberately does NOT purge its subscriptions here. The chain is
                 // not over: either the re-drive carries them onto its own row (see the mint above), or
@@ -1065,10 +1081,8 @@ class AutomationExecutionSupport {
      * later). Same shape as the SFTP failure close.</p>
      *
      * <p><b>Notification decision:</b> a cancelled run does NOT notify, and purges its subscriptions
-     * instead. Two reasons. The only alert shape reachable from here is
-     * {@code notifyAutomationFailure}, which renders "Status: FAILED" — precisely what a cancel must not
-     * report — and adding a CANCELLED alert shape would be a new notification contract, not this fix.
-     * And the person who pressed Cancel already knows. The subscriptions cannot simply be left, though:
+     * instead. A cancel is not a run error (DAR-BE-015: no card, no "did not run" line), and the person
+     * who pressed Cancel already knows. The subscriptions cannot simply be left, though:
      * a cancel is terminal and never requeues, so unlike a transient failure there is no successor
      * attempt to carry them to — this is genuinely the end of the chain, and an orphan can never fire
      * AND pins its chat space against deletion forever. Same reasoning, and the same helper, as the
@@ -1168,6 +1182,7 @@ class AutomationExecutionSupport {
                     automationId     : automationId,
                     scheduledFireTime: scheduledFireTime,
                     nowTimestamp     : now,
+                    runTrigger       : TRIGGER_SCHEDULED,
             ]
             ["outputLocation", "sparkMaster", "sparkAppName"].each { key ->
                 if (input[key] != null) executeParams[key] = input[key]
@@ -1511,17 +1526,20 @@ class AutomationExecutionSupport {
                 ])
                 // Dead-lettering means the automation has given up entirely — the one outcome an
                 // operator most needs told about, and previously the quietest. Best-effort, and never
-                // allowed to stop the rest of the retry sweep.
+                // allowed to stop the rest of the retry sweep. DAR-BE-015: the card (with the last error)
+                // goes to Darpan's error space; a client destination gets only the neutral line.
                 try {
                     def deadLetterAutomation = loadAutomation(ec, automationId)
+                    String lastError = normalize(readField(row, "errorMessage"))
                     String failureReason = "Automation gave up after ${maxRetry} retries. " +
-                            "Last error: ${normalize(readField(row, "errorMessage")) ?: "unknown"}"
+                            "Last error: ${lastError ?: "unknown"}"
                     String runResultId = normalize(readField(row, "reconciliationRunResultId")) ?:
                             persistFailureRunResult(ec, deadLetterAutomation,
                                     new IllegalStateException(failureReason), stamp)
-                    notifyAutomationFailure(ec, deadLetterAutomation, runResultId, false, failureReason)
+                    notifyRunError(ec, deadLetterAutomation, executionMap(row) + [statusEnumId: STATUS_DEAD_LETTER],
+                            runResultId, lastError ?: failureReason)
                 } catch (Throwable deadLetterNotifyError) {
-                    logger.warn("Dead-letter notification failed (best-effort): ${deadLetterNotifyError.message}")
+                    logger.warn("Dead-letter notification failed (best-effort): ${deadLetterNotifyError.getClass().name}")
                 }
                 results << [automationExecutionId: execId, automationId: automationId, statusEnumId: STATUS_DEAD_LETTER]
                 return
@@ -1563,6 +1581,8 @@ class AutomationExecutionSupport {
                     automationId     : automationId,
                     scheduledFireTime: scheduledDate,
                     nowTimestamp     : now,
+                    // DAR-BE-015: the re-drive is the same run, started the way the first attempt was.
+                    runTrigger       : triggerOf(row),
             ]
             ["outputLocation", "sparkMaster", "sparkAppName"].each { String key -> if (input[key] != null) executeParams[key] = input[key] }
             Map<String, Object> executeResult = submitExecuteAutomationService(ec, executeParams, tenantId)
@@ -2324,7 +2344,7 @@ class AutomationExecutionSupport {
     }
 
     protected static Map<String, Object> findOrCreateExecution(def ec, def automation, Timestamp scheduledFireTime,
-            Map<String, Object> window, int sequenceNum) {
+            Map<String, Object> window, int sequenceNum, String triggerType = null) {
         String automationId = normalize(readField(automation, "automationId"))
         Timestamp childStart = toTimestamp(window.childWindowStartDate)
         Timestamp childEnd = toTimestamp(window.childWindowEndDate)
@@ -2355,6 +2375,8 @@ class AutomationExecutionSupport {
             execution.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
             execution.set("statusEnumId", STATUS_PENDING)
             execution.set("scheduledDate", scheduledFireTime)
+            // DAR-BE-015: kept across retries (a re-drive reuses this row), so a dead letter knows what started it.
+            execution.set("triggerType", triggerType ?: TRIGGER_SCHEDULED)
             execution.set("childWindowSequenceNum", sequenceNum)
             execution.set("windowStartDate", toTimestamp(window.windowStartDate))
             execution.set("windowEndDate", toTimestamp(window.windowEndDate))
@@ -3658,32 +3680,151 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * Best-effort terminal-failure notification. Never allowed to throw — the run's own failure is the
-     * thing that matters and must reach the caller unchanged.
+     * DAR-BE-015. The one path for a run error (FAILED, DEAD_LETTER, ONE_SIDE_EMPTY, KEPT_NOTHING; see RunErrorKinds): the card
+     * goes to Darpan's own error space, one per audit check this automation runs or one for a non-audit automation. A client
+     * destination never gets the error: a scheduled non-audit run sends its chat space and notify-me subscribers only the
+     * neutral line (copy block DARPAN_ERROR_NOTICE / client.notrun); an audit's client line is its run update; a manual run or
+     * a play sends none (the person who started it sees the outcome in the app). Called for the terminal outcome only, never
+     * for an attempt that will be retried. Never throws: the run's own outcome must reach the caller unchanged.
      *
-     * @param outputProduced true when the run got far enough to persist a real result; drives the
-     *        payload away from reporting difference counts it never computed.
+     * @param execution the execution row as it closed (statusEnumId, noDataKind, counts, retryCount, triggerType, dates)
      */
-    protected static void notifyAutomationFailure(def ec, def automation, String runResultId,
-            boolean outputProduced, String reason) {
-        if (!runResultId) return
+    static void notifyRunError(def ec, def automation, Map execution, String runResultId, String reason) {
         try {
-            TenantNotificationSupport.notifyRunCompleted(ec, [
-                    reconciliationRunResultId: runResultId,
-                    runName                  : normalize(readField(automation, "automationName")),
-                    savedRunId               : normalize(readField(automation, "savedRunId")),
-                    reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
-                    companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
-                    chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
-                    statusEnumId             : STATUS_FAILED,
-                    noOutputProduced         : !outputProduced,
-                    // A run that produced output keeps the original shape (reason as a warning line).
-                    // A no-output run has no warnings to report, so the reason IS the message.
-                    terminationReason        : outputProduced ? null : reason,
-                    processingWarnings       : outputProduced && reason ? [reason] : [],
-            ])
+            String kind = RunErrorKinds.of(execution)
+            if (kind == null) return
+            String tenantId = normalize(readField(automation, "companyUserGroupId"))
+            String trigger = triggerOf(execution)
+            List<Map> subjects = null
+            try {
+                subjects = AuditAutomationSupport.errorSubjects(ec, automation)
+            } catch (Throwable lookupError) {
+                // Unknown whether this is an audit's automation: Darpan still gets a card, the client is not guessed at.
+                logger.warn("Run error for automation {}: its audit checks could not be read ({})",
+                        readField(automation, "automationId"), lookupError.getClass().name)
+            }
+            Map<String, Object> event = runErrorEvent(ec, automation, execution, kind, reason, runResultId, trigger)
+            Closure poster = errorCardPoster ?: { def postEc, Map postEvent -> ErrorChatSupport.postErrorCard(postEc, postEvent) }
+            (subjects ?: [[:]]).each { Map subject ->
+                try {
+                    poster.call(ec, event + subject)
+                } catch (Throwable postError) {
+                    logger.warn("Run error card for automation {} failed: {}", event.automationId, postError.getClass().name)
+                }
+            }
+            if (subjects != null && subjects.isEmpty() && trigger == TRIGGER_SCHEDULED) {
+                String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
+                        new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(ERROR_NOTICE_NOT_RUN, [name: event.automationName])
+                TenantNotificationSupport.notifyRunLine(ec, tenantId, normalize(readField(automation, "chatSpaceId")), runResultId, line)
+            } else {
+                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
+            }
         } catch (Throwable notifyError) {
-            logger.warn("Automation failure notification failed (best-effort): ${notifyError.message}")
+            logger.warn("Run error notification failed (best-effort): {}", notifyError.getClass().name)
+        }
+    }
+
+    /** DAR-BE-015: what started a run, from execute#Automation's input. A blank runTrigger is a scheduled run unless the input says a person asked. */
+    static String runTriggerOf(Map input) {
+        String given = normalize(input?.runTrigger)
+        if (given in [TRIGGER_SCHEDULED, TRIGGER_MANUAL, TRIGGER_PLAY]) return given
+        if (normalize(input?.replayFromExecutionId) || input?.auditVerifyKeys) return TRIGGER_MANUAL
+        if (input?.auditWindowFromDate != null) return TRIGGER_PLAY
+        return TRIGGER_SCHEDULED
+    }
+
+    /** DAR-BE-015: what started an execution row; a row from before triggerType existed was scheduled. */
+    static String triggerOf(Object execution) {
+        return normalize(readField(execution, "triggerType")) ?: TRIGGER_SCHEDULED
+    }
+
+    /** An execution row (entity value or map) as a plain map, so a closing write's fields can be laid over it. */
+    protected static Map<String, Object> executionMap(def execution) {
+        return execution instanceof Map ? new LinkedHashMap<String, Object>((Map) execution) : [:]
+    }
+
+    /** The card's facts (ErrorChatSupport.postErrorCard reads these); an audit check's names are laid over it per check. */
+    protected static Map<String, Object> runErrorEvent(def ec, def automation, Map execution, String kind, String reason,
+            String runResultId, String trigger) {
+        String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        String automationName = normalize(readField(automation, "automationName")) ?: normalize(readField(automation, "automationId"))
+        int tries = (normalizeInt(execution.retryCount) ?: 0) + 1
+        Map<String, Map<String, Object>> counts = runErrorCounts(ec, automation, execution)
+        return [
+                tenantId      : tenantId,
+                tenantName    : tenantName(ec, tenantId),
+                automationId  : normalize(readField(automation, "automationId")),
+                automationName: automationName,
+                kind          : kind,
+                attempts      : tries > 1 ? tries : null,
+                errorFirstLine: reason ?: normalize(execution.errorMessage),
+                readCounts    : counts.read,
+                keptCounts    : counts.kept,
+                runUrl        : runErrorUrl(ec, automation, execution, runResultId),
+                scheduled     : trigger == TRIGGER_SCHEDULED,
+                trigger       : trigger,
+                scheduledDate : toTimestamp(execution.scheduledDate),
+                completedDate : toTimestamp(execution.completedDate),
+                zoneId        : normalize(readField(automation, "windowTimeZone")),
+                executionId   : normalize(execution.automationExecutionId),
+        ] as Map<String, Object>
+    }
+
+    /**
+     * Each side's records read (the recent read) and kept, labelled by its system; two sides on one system are told apart by
+     * number. A side that recorded only what it extracted (a run that failed before Keep) shows that as its read. Null when no
+     * side recorded a count.
+     */
+    protected static Map<String, Map<String, Object>> runErrorCounts(def ec, def automation, Map execution) {
+        Map<String, Object> sources = [:]
+        try { sources = loadAutomationSources(ec, normalize(readField(automation, "automationId"))) ?: [:] } catch (Throwable ignored) { }
+        List<String> labels = [FILE_SIDE_1, FILE_SIDE_2].collect { String side ->
+            String system = AuditAutomationSupport.rootSystem(normalize(readField(sources[side], "systemEnumId")))
+            system ? AuditReportAssembler.systemKey(system) : (side == FILE_SIDE_1 ? "Side 1" : "Side 2")
+        }
+        if (labels[0] == labels[1]) labels = [labels[0] + " 1", labels[1] + " 2"]
+        Map<String, Object> read = [:]
+        Map<String, Object> kept = [:]
+        ["file1", "file2"].eachWithIndex { String prefix, int i ->
+            Integer readCount = normalizeInt(execution[prefix + "ReadCount"])
+            Integer recordCount = normalizeInt(execution[prefix + "RecordCount"])
+            if (readCount != null) {
+                read[labels[i]] = readCount
+                if (recordCount != null) kept[labels[i]] = recordCount
+            } else if (recordCount != null) {
+                read[labels[i]] = recordCount
+            }
+        }
+        return [read: read ?: null, kept: kept ?: null]
+    }
+
+    /** The run's result page when it wrote one, else its progress page (which also shows a failed run's stages). */
+    protected static String runErrorUrl(def ec, def automation, Map execution, String runResultId) {
+        try {
+            String savedRunId = normalize(readField(automation, "savedRunId"))
+            String resultUrl = TenantNotificationSupport.buildRunResultUrl(ec, [savedRunId: savedRunId,
+                    resultDataManagerPath: execution.resultDataManagerPath, runName: readField(automation, "automationName"),
+                    companyUserGroupId: readField(automation, "companyUserGroupId")])
+            if (resultUrl) return resultUrl
+            String base = TenantNotificationSupport.resolveAppBaseUrl(ec)
+            if (!base || !savedRunId || !runResultId) return null
+            String tenantId = normalize(readField(automation, "companyUserGroupId"))
+            return "${base}/reconciliation/run-live/${URLEncoder.encode(savedRunId, "UTF-8").replace("+", "%20")}/" +
+                    "${URLEncoder.encode(runResultId, "UTF-8")}${tenantId ? "?tenantId=" + URLEncoder.encode(tenantId, "UTF-8") : ""}"
+        } catch (Throwable ignored) {
+            return null
+        }
+    }
+
+    private static String tenantName(def ec, String tenantId) {
+        if (!tenantId) return null
+        try {
+            def group = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup",
+                    "DAR-BE-015 run error card: the tenant's display name for Darpan's own error space").condition("userGroupId", tenantId)
+                    .useCache(true).one()
+            return normalize(readField(group, "description")) ?: tenantId
+        } catch (Throwable ignored) {
+            return tenantId
         }
     }
 

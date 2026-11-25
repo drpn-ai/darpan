@@ -208,6 +208,10 @@
                 <description>DAR-BE-122. Read every source for the whole window, not just the days since the checks' last
                     complete read.</description>
             </parameter>
+            <parameter name="runTrigger">
+                <description>DAR-BE-015. What started this run: scheduled, manual or play. Blank: play when auditWindowFromDate is
+                    given, manual for a verify or a retry from the last read, else scheduled. Stored on the execution row.</description>
+            </parameter>
             <parameter name="replayFromExecutionId">
                 <description>DAR-BE-142. Replay this failed execution's extracts instead of reading (retry from the last
                     extract); one window only.</description>

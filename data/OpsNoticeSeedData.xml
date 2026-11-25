@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<entity-facade-xml type="darpan-seed">
+    <!-- DAR-BE-015 — what a client destination is told when a run errors: one neutral line, never the error. The detail
+         goes to Darpan's own error space and daily email. Built in Groovy (AutomationExecutionSupport.notifyRunError)
+         and read through EmailCopyReader; editable in production like any email copy (copyText), no deploy. Not an
+         email, so there is no EmailTemplate row (EmailCopyBlock's link to it is one-nofk). Loaded on an existing
+         database through data/upgrade-data.xml. -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.notrun"
+            defaultText="${name} did not run this morning. Darpan has been alerted and is working on a fix."/>
+</entity-facade-xml>

@@ -36,6 +36,9 @@ import darpan.reconciliation.support.SharedMoqui
  * </ul>
  *
  * <p>A failure that is going to be retried is NOT terminal and must stay quiet.</p>
+ *
+ * <p>DAR-BE-015: what reaches the tenant is one neutral line ("... did not run this morning. Darpan has been alerted and is
+ * working on a fix."), never the error; the detail goes to Darpan's own error space (errors.chat.webhookUrl, blank here).</p>
  */
 @SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -45,6 +48,8 @@ class AutomationFailureNotificationTests {
     private static final String TENANT = "KREWE"
     private static final String CHAT_SPACE_ID = "CS_FAIL_NOTIFY"
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
+    private static final String NOT_RUN_LINE =
+            "Failure Notification did not run this morning. Darpan has been alerted and is working on a fix."
 
     private ExecutionContext ec
     private List<Map<String, Object>> deliveries
@@ -105,9 +110,8 @@ class AutomationFailureNotificationTests {
         assertEquals(1, result.failedCount, "Result: ${result}")
         assertEquals(1, deliveries.size(),
                 "A terminal automation failure must notify the tenant even when no output was produced")
-        String text = deliveries[0].payload.text as String
-        assertTrue(text.toUpperCase().contains("FAIL"),
-                "Notification must read as a failure. Got: ${text}")
+        assertEquals(NOT_RUN_LINE, deliveries[0].payload.text,
+                "The tenant is told the run did not run, from the shipped copy, and nothing of the error")
     }
 
     /**
@@ -160,8 +164,8 @@ class AutomationFailureNotificationTests {
 
         assertEquals(1, deliveries.size(),
                 "Dead-lettering an automation execution must notify the tenant")
-        String text = deliveries[0].payload.text as String
-        assertTrue(text.toUpperCase().contains("FAIL"), "Got: ${text}")
+        assertEquals(NOT_RUN_LINE, deliveries[0].payload.text)
+        assertFalse((deliveries[0].payload.text as String).contains("timed out"), "no error text reaches the tenant")
     }
 
     // -----------------------------------------------------------------------

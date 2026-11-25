@@ -3593,7 +3593,8 @@
                         hasHeader: hasHeader,
                         outputLocation: outputLocationValue,
                         sparkMaster: sparkMasterValue,
-                        sparkAppName: sparkAppNameValue
+                        sparkAppName: sparkAppNameValue,
+                        runTrigger: 'manual'
                 ].findAll { it.value != null }"/>
                 <service-call name="reconciliation.ReconciliationAutomationServices.execute#Automation"
                         disable-authz="true"

@@ -65,6 +65,32 @@ class AuditAutomationSupport {
         return checks.findAll { (it.checkId as String) in tested }
     }
 
+    /**
+     * DAR-BE-015. What a Darpan error card names for each check this automation runs, in checkCode order: [auditId, auditName,
+     * statementId (the codes of the statements it tests, e.g. "R1, R2"), checkId (its checkCode)]. Empty when it feeds no audit.
+     */
+    static List<Map> errorSubjects(def ec, def automation) {
+        List<Map> checks = checksFor(ec, automation)
+        if (!checks) return []
+        String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        List<Map> links = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId)
+                .condition("checkId", EntityCondition.IN, checks*.checkId).list()*.getMap()
+        List statementIds = links*.statementId.unique()
+        Map<String, Map> statements = !statementIds ? [:] : tenantRows(ec, "darpan.audit.AuditStatement", tenantId)
+                .condition("statementId", EntityCondition.IN, statementIds).list()*.getMap()
+                .collectEntries { Map s -> [(s.statementId as String): s] }
+        List auditIds = statements.values()*.auditId.unique()
+        Map<String, Map> audits = !auditIds ? [:] : tenantRows(ec, "darpan.audit.Audit", tenantId)
+                .condition("auditId", EntityCondition.IN, auditIds).list()*.getMap()
+                .collectEntries { Map a -> [(a.auditId as String): a] }
+        return checks.sort(false) { it.checkCode as String }.collect { Map check ->
+            List<Map> tested = links.findAll { it.checkId == check.checkId }.collect { statements[it.statementId as String] }.findAll()
+            Map audit = audits[tested ? tested[0].auditId as String : null]
+            [auditId    : audit?.auditId, auditName: audit?.auditName,
+             statementId: (tested*.statementCode as List<String>).sort().join(", "), checkId: check.checkCode] as Map
+        }
+    }
+
     /** The one audit these checks report to. An automation runs one audit's checks; anything else is a config error. */
     static Map auditFor(def ec, String tenantId, List<Map> checks) {
         List<String> statementIds = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId)

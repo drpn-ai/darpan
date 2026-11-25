@@ -673,6 +673,7 @@ class AutomationExecutionSupportTests {
             }
             return [:]
         }
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
@@ -697,9 +698,12 @@ class AutomationExecutionSupportTests {
             // Exactly one alert, claimed on that one row: two rows would mean two claimable anchors.
             assertEquals(1, deliveries.size())
             assertNotNull(runResult.notifiedDate)
-            assertTrue((deliveries[0].payload.text as String).contains("Status: FAILED"))
+            // DAR-BE-015: the client space gets the neutral line, the failure detail goes to Darpan's card.
+            assertEquals("API Automation" + NOT_RUN_SUFFIX, deliveries[0].payload.text)
+            assertEquals(1, cards.size())
+            assertTrue((cards[0].errorFirstLine as String).contains("was not found"))
         } finally {
-            TenantNotificationSupport.resetDeliveryHook()
+            resetRunErrorSeams()
         }
     }
 
@@ -769,9 +773,12 @@ class AutomationExecutionSupportTests {
     @Test
     void aNoDataRunPurgesTheNotifyMeSubscriptionItCanNowCollect() {
         // Review finding 1. Minting at RUNNING made automation runs subscribable for the first time
-        // (subscribe#RunNotification only accepts PENDING/RUNNING), and NO_DATA is a terminal path that
-        // never notifies — so nothing would ever clean up the subscription. An orphan can never fire
+        // (subscribe#RunNotification only accepts PENDING/RUNNING), and NO_DATA was a terminal path that
+        // never notified — so nothing would ever clean up the subscription. An orphan can never fire
         // AND counts forever as chat-space usage, which permanently blocks deleting that space.
+        // DAR-BE-015: one side read 10 and the other 0, so this window did not run (ONE_SIDE_EMPTY): the
+        // subscriber is told so in the neutral line, once, and the subscription goes with that claim. The
+        // quiet day (both sides 0), which still never notifies, purges too: aQuietDayPostsNothing.
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
         ec.entity.add("darpan.reconciliation.TenantChatSpace", [
@@ -795,6 +802,7 @@ class AutomationExecutionSupportTests {
             }
             throw new IllegalStateException("Reconcile should not run for no-data windows")
         }
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
@@ -807,13 +815,14 @@ class AutomationExecutionSupportTests {
             assertEquals(1, result.noDataCount)
             FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
             assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, runResult.statusEnumId)
-            // NO_DATA stays silent — purging must not be achieved by sending a notification.
-            assertTrue(deliveries.isEmpty())
-            assertNull(runResult.notifiedDate)
+            assertEquals(["ONE_SIDE_EMPTY"], cards*.kind)
+            assertEquals(1, deliveries.size())
+            assertEquals([text: "API Automation" + NOT_RUN_SUFFIX], deliveries[0].payload)
+            assertNotNull(runResult.notifiedDate, "the line claims the run, so it is told once")
             assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
                     "a terminal run that never notifies must still purge its own subscriptions")
         } finally {
-            TenantNotificationSupport.resetDeliveryHook()
+            resetRunErrorSeams()
         }
     }
 
@@ -908,6 +917,7 @@ class AutomationExecutionSupportTests {
             // Empty reconcile result every time: the transient path, so every attempt requeues.
             return [:]
         }
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
@@ -944,11 +954,13 @@ class AutomationExecutionSupportTests {
             assertEquals(AutomationExecutionSupport.STATUS_DEAD_LETTER, execution.statusEnumId)
             assertEquals(1, deliveries.size(), "the subscriber must be told the automation gave up")
             assertEquals(meWebhookUrl, deliveries[0].webhookUrl)
-            assertTrue((deliveries[0].payload.text as String).contains("Automation gave up after 1 retries"))
+            // DAR-BE-015: the subscriber is told it did not run, in the neutral line; the give-up is Darpan's card.
+            assertEquals("API Automation" + NOT_RUN_SUFFIX, deliveries[0].payload.text)
+            assertEquals(["DEAD_LETTER"], cards*.kind)
             assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
                     "the chain is over, so the subscription must not outlive it")
         } finally {
-            TenantNotificationSupport.resetDeliveryHook()
+            resetRunErrorSeams()
         }
     }
 
@@ -1064,6 +1076,7 @@ class AutomationExecutionSupportTests {
             }
             return [:]
         }
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
@@ -1077,6 +1090,7 @@ class AutomationExecutionSupportTests {
             String firstRunResultId = execution.reconciliationRunResultId
             assertNotNull(firstRunResultId)
             assertEquals(1, deliveries.size())
+            assertEquals("API Automation" + NOT_RUN_SUFFIX, deliveries[0].payload.text, "DAR-BE-015: attempt 1's client line is the neutral one")
             FakeValue firstRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
             assertNotNull(firstRunResult.notifiedDate, "attempt 1's FAILED alert claims that row's notifiedDate")
 
@@ -1104,7 +1118,7 @@ class AutomationExecutionSupportTests {
             assertEquals(2, deliveries.size(), "the re-drive's completion alert must not be swallowed as ALREADY_NOTIFIED")
             assertTrue((deliveries[1].payload.text as String).startsWith("API Automation"))
         } finally {
-            TenantNotificationSupport.resetDeliveryHook()
+            resetRunErrorSeams()
         }
     }
 
@@ -1627,6 +1641,7 @@ class AutomationExecutionSupportTests {
                 throw new IllegalArgumentException("execution status write failed")
             }
         }
+        List<Map> cards = captureErrorCards()
         List<Map<String, Object>> deliveries = []
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
@@ -1645,11 +1660,13 @@ class AutomationExecutionSupportTests {
             assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
             assertEquals(1, deliveries.size())
             assertEquals(webhookUrl, deliveries[0].webhookUrl)
-            String text = deliveries[0].payload.text as String
-            assertTrue(text.contains("Status: FAILED"))
-            assertTrue(text.contains("execution status write failed"))
+            // DAR-BE-015: the client space gets only the neutral line; the error is on Darpan's card.
+            assertEquals("API Automation" + NOT_RUN_SUFFIX, deliveries[0].payload.text)
+            assertEquals(1, cards.size())
+            assertEquals("FAILED", cards[0].kind)
+            assertTrue((cards[0].errorFirstLine as String).contains("execution status write failed"))
         } finally {
-            TenantNotificationSupport.resetDeliveryHook()
+            resetRunErrorSeams()
         }
     }
 
@@ -3856,6 +3873,262 @@ class AutomationExecutionSupportTests {
                 "expected the extract step to carry its record count")
     }
 
+    // --- DAR-BE-015 Task 5: run errors go to Darpan; the client gets one neutral line ---------------
+
+    private static final String NOT_RUN_SUFFIX = " did not run this morning. Darpan has been alerted and is working on a fix."
+    private static final String OPS_WEBHOOK = "https://chat.googleapis.com/v1/spaces/OPS_SPACE/messages?key=test-key&token=test-token"
+    private static final String ME_WEBHOOK = "https://chat.googleapis.com/v1/spaces/ME_SPACE/messages?key=test-key&token=test-token"
+
+    @Test
+    void aDeadLetterPostsToTheErrorSpaceNotTheClientSpace() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        FakeValue automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+        automation.put("automationName", "Daily Order Reconciliation")
+        automation.put("chatSpaceId", "CS_OPS")
+        addChatSpace(ec, "CS_OPS", OPS_WEBHOOK)
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
+                automationExecutionId: "EXEC_DL", automationId: "AUTO_API", companyUserGroupId: "TENANT_A",
+                statusEnumId         : AutomationExecutionSupport.STATUS_PENDING, scheduledDate: timestamp("2026-05-01T09:00:00Z"),
+                retryCount           : 3, maxRetryCount: 3, nextRetryDate: timestamp("2026-05-01T09:30:00Z"),
+                errorMessage         : "OMS GraphQL said: Cannot query field orderTypeId", triggerType: "scheduled"])
+        List<Map> cards = captureErrorCards()
+        List<Map> deliveries = captureDeliveries()
+        try {
+            AutomationExecutionSupport.reprocessDueRetries(ec, NOW, 100, [:])
+
+            assertEquals(1, cards.size(), "one card for the dead letter")
+            assertEquals("DEAD_LETTER", cards[0].kind)
+            assertEquals("Daily Order Reconciliation", cards[0].automationName)
+            assertEquals("AUTO_API", cards[0].automationId)
+            assertEquals("Tenant A", cards[0].tenantName)
+            assertEquals(4, cards[0].attempts, "the first try and three retries")
+            assertEquals("OMS GraphQL said: Cannot query field orderTypeId", cards[0].errorFirstLine)
+            assertEquals(true, cards[0].scheduled)
+            assertEquals("scheduled", cards[0].trigger)
+            assertEquals("EXEC_DL", cards[0].executionId)
+            assertEquals(1, deliveries.size(), "the client space gets one line")
+            assertEquals(OPS_WEBHOOK, deliveries[0].webhookUrl)
+            assertEquals("Daily Order Reconciliation" + NOT_RUN_SUFFIX, deliveries[0].payload.text)
+            assertFalse(deliveries.toString().contains("orderTypeId"), "no error text reaches the client")
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void aFailedAuditCheckSendsNoClientChatLine() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        FakeValue automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
+        automation.put("chatSpaceId", "CS_OPS")
+        addChatSpace(ec, "CS_OPS", OPS_WEBHOOK)
+        addChatSpace(ec, "CS_ME", ME_WEBHOOK)
+        seedMonthCloseChecks(ec)
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "RR_AUDIT",
+                companyUserGroupId: "TENANT_A", statusEnumId: AutomationExecutionSupport.STATUS_FAILED])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [reconciliationRunResultId: "RR_AUDIT",
+                userId: "USER_A", chatSpaceId: "CS_ME"])
+        List<Map> cards = captureErrorCards()
+        List<Map> deliveries = captureDeliveries()
+        try {
+            AutomationExecutionSupport.notifyRunError(ec, automation, [automationExecutionId: "EXEC_AUD",
+                    statusEnumId: AutomationExecutionSupport.STATUS_FAILED, scheduledDate: NOW, triggerType: "scheduled",
+                    file1ReadCount: 6982, file1RecordCount: 6982], "RR_AUDIT", "Compare scope SCOPE_ORDER was not found")
+
+            assertEquals(2, cards.size(), "one card per check this automation runs")
+            assertEquals(["completed-not-billed", "shipped-not-billed"], cards*.checkId)
+            assertEquals(["AUD_MC", "AUD_MC"], cards*.auditId)
+            assertEquals(["Month close", "Month close"], cards*.auditName)
+            assertEquals(["R1", "R1, R2"], cards*.statementId)
+            assertEquals(["FAILED", "FAILED"], cards*.kind)
+            assertTrue(deliveries.isEmpty(), "an audit's client line is its run update, never a chat line here")
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                    "nothing will notify this run, so its subscriptions go")
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void aKeptNothingWindowPostsACard() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        List<Map> cards = captureErrorCards()
+        captureDeliveries()
+        try {
+            runAcmeAutomation(ec, [file2: [keptCount: 0, setAsideCount: 29963]], [FILE_1: 10, FILE_2: 29963])
+
+            assertEquals(1, cards.size())
+            assertEquals("KEPT_NOTHING", cards[0].kind)
+            assertEquals("The ACME side kept 0 of 29,963 records.", cards[0].errorFirstLine)
+            assertEquals(["ACME 1": 10, "ACME 2": 29963], cards[0].readCounts, "both sides named apart when they are the same system")
+            assertEquals(["ACME 1": 10, "ACME 2": 0], cards[0].keptCounts)
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void aQuietDayPostsNothing() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
+        addChatSpace(ec, "CS_OPS", OPS_WEBHOOK)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                subscribeMidRun(ec, "USER_A", "CS_OPS")
+                return [dataAvailable: false, fileName: "${call.params.fileSide}.json".toString(), recordCount: 0]
+            }
+            throw new IllegalStateException("Reconcile should not run for no-data windows")
+        }
+        List<Map> cards = captureErrorCards()
+        List<Map> deliveries = captureDeliveries()
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            assertEquals(1, result.noDataCount)
+            assertTrue(cards.isEmpty(), "both sides read 0: a quiet day, not an error")
+            assertTrue(deliveries.isEmpty())
+            assertNull(ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0].notifiedDate)
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                    "a terminal run that never notifies still purges its own subscriptions")
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void aNotifyMeSubscriberGetsOnlyTheNeutralLine() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        addChatSpace(ec, "CS_ME", ME_WEBHOOK)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                subscribeMidRun(ec, "USER_A", "CS_ME")
+                return [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName: "${call.params.fileSide}.json".toString(), recordCount: 5]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                throw new IllegalStateException("Compare scope SCOPE_ORDER was not found")
+            }
+            return [:]
+        }
+        List<Map> cards = captureErrorCards()
+        List<Map> deliveries = captureDeliveries()
+        try {
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            assertEquals(1, cards.size())
+            assertEquals("FAILED", cards[0].kind)
+            assertTrue((cards[0].errorFirstLine as String).contains("was not found"), "the detail goes to Darpan")
+            assertEquals(1, deliveries.size())
+            assertEquals(ME_WEBHOOK, deliveries[0].webhookUrl)
+            assertEquals([text: "API Automation" + NOT_RUN_SUFFIX], deliveries[0].payload, "the neutral line and nothing else")
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty())
+            assertNotNull(ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0].notifiedDate, "the run notified once")
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void aManualRunPostsItsCardButSendsNoClientLine() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
+        addChatSpace(ec, "CS_OPS", OPS_WEBHOOK)
+        addChatSpace(ec, "CS_ME", ME_WEBHOOK)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                subscribeMidRun(ec, "USER_A", "CS_ME")
+                return [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName: "${call.params.fileSide}.json".toString(), recordCount: 5]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                throw new IllegalStateException("Compare scope SCOPE_ORDER was not found")
+            }
+            return [:]
+        }
+        List<Map> cards = captureErrorCards()
+        List<Map> deliveries = captureDeliveries()
+        try {
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW, runTrigger: "manual"])
+
+            assertEquals(1, cards.size(), "a hand run's error is still Darpan's to know")
+            assertEquals("manual", cards[0].trigger)
+            assertEquals(false, cards[0].scheduled)
+            assertTrue(deliveries.isEmpty(), "the person who started it sees the outcome in the app")
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty())
+            assertEquals("manual", ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0].triggerType)
+        } finally {
+            resetRunErrorSeams()
+        }
+    }
+
+    @Test
+    void whatStartedARunIsReadFromItsInput() {
+        assertEquals("scheduled", AutomationExecutionSupport.runTriggerOf([:]))
+        assertEquals("scheduled", AutomationExecutionSupport.runTriggerOf([runTrigger: "scheduled"]))
+        assertEquals("manual", AutomationExecutionSupport.runTriggerOf([runTrigger: "manual"]))
+        assertEquals("play", AutomationExecutionSupport.runTriggerOf([auditWindowFromDate: java.sql.Date.valueOf("2026-11-01")]))
+        assertEquals("manual", AutomationExecutionSupport.runTriggerOf([auditVerifyKeys: ["#1001"]]), "a verify is asked for by a person")
+        assertEquals("manual", AutomationExecutionSupport.runTriggerOf([replayFromExecutionId: "E1",
+                auditWindowFromDate: java.sql.Date.valueOf("2026-11-01")]), "a retry from the last read is a person's, not a play")
+        assertEquals("scheduled", AutomationExecutionSupport.triggerOf([triggerType: null]), "a row from before DAR-BE-015 reads as scheduled")
+        assertEquals("play", AutomationExecutionSupport.triggerOf([triggerType: "play"]))
+    }
+
+    private static List<Map> captureErrorCards() {
+        List<Map> cards = Collections.synchronizedList([] as List<Map>)
+        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> opsNoticeSeedCopy() }
+        return cards
+    }
+
+    private static List<Map> captureDeliveries() {
+        List<Map> deliveries = Collections.synchronizedList([] as List<Map>)
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+        return deliveries
+    }
+
+    private static void resetRunErrorSeams() {
+        AutomationExecutionSupport.resetForTests()
+        TenantNotificationSupport.resetDeliveryHook()
+    }
+
+    /** The shipped neutral-line words, straight from data/OpsNoticeSeedData.xml (no Moqui here). */
+    static darpan.email.EmailCopyReader opsNoticeSeedCopy() {
+        Map<String, String> seed = [:]
+        new groovy.xml.XmlSlurper().parse(new File("data/OpsNoticeSeedData.xml")).children().each { node ->
+            if (node.name() == "darpan.email.EmailCopyBlock") seed.put(node.@emailTemplateId.text() + "/" + node.@blockId.text(), node.@defaultText.text())
+        }
+        return darpan.email.EmailCopyReader.ofDefaults("DARPAN_ERROR_NOTICE", seed)
+    }
+
+    private static void addChatSpace(FakeEc ec, String chatSpaceId, String webhookUrl) {
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [chatSpaceId: chatSpaceId, companyUserGroupId: "TENANT_A",
+                spaceName: chatSpaceId, googleChatWebhookUrl: webhookUrl, isActive: "Y"])
+    }
+
+    /** Month close: R1 tested by completed-not-billed and shipped-not-billed, R2 by shipped-not-billed; both run by AUTO_API. */
+    private static void seedMonthCloseChecks(FakeEc ec) {
+        ec.entity.add("darpan.audit.Audit", [auditId: "AUD_MC", companyUserGroupId: "TENANT_A", auditCode: "month-close", auditName: "Month close"])
+        ec.entity.add("darpan.audit.AuditStatement", [statementId: "ST_R1", companyUserGroupId: "TENANT_A", auditId: "AUD_MC", statementCode: "R1"])
+        ec.entity.add("darpan.audit.AuditStatement", [statementId: "ST_R2", companyUserGroupId: "TENANT_A", auditId: "AUD_MC", statementCode: "R2"])
+        ec.entity.add("darpan.audit.AuditCheck", [checkId: "CHK_CNB", companyUserGroupId: "TENANT_A", checkCode: "completed-not-billed",
+                label: "Completed not billed", automationId: "AUTO_API"])
+        ec.entity.add("darpan.audit.AuditCheck", [checkId: "CHK_SNB", companyUserGroupId: "TENANT_A", checkCode: "shipped-not-billed",
+                label: "Shipped not billed", automationId: "AUTO_API"])
+        ec.entity.add("darpan.audit.AuditStatementCheck", [statementId: "ST_R1", checkId: "CHK_CNB", companyUserGroupId: "TENANT_A"])
+        ec.entity.add("darpan.audit.AuditStatementCheck", [statementId: "ST_R1", checkId: "CHK_SNB", companyUserGroupId: "TENANT_A"])
+        ec.entity.add("darpan.audit.AuditStatementCheck", [statementId: "ST_R2", checkId: "CHK_SNB", companyUserGroupId: "TENANT_A"])
+    }
+
+
     private static FakeEc fakeEc() {
         FakeEc ec = new FakeEc(
                 entity: new FakeEntityFacade(),
@@ -4137,6 +4410,7 @@ class AutomationExecutionSupportTests {
         FakeEntityFacade entity
         String entityName
         Map<String, Object> conditions = [:]
+        Map<String, Set> inConditions = [:]
         Integer maxRows
         // Task 6 exclusion filters, fix round 1: orderBy is honoured, not a no-op — see list() below.
         // Deliberately null until orderBy() is called: a test proving ordering matters must fail when the
@@ -4146,6 +4420,13 @@ class AutomationExecutionSupportTests {
 
         FakeFind condition(String fieldName, Object value) {
             conditions[fieldName] = value
+            return this
+        }
+
+        /** DAR-BE-015: Moqui's (field, EntityCondition.IN, values) — the audit lookups read checks and statements by id list. */
+        FakeFind condition(String fieldName, Object operator, Object values) {
+            if (operator != org.moqui.entity.EntityCondition.IN) throw new UnsupportedOperationException("FakeFind supports only IN")
+            inConditions[fieldName] = (values as Collection).collect { it } as Set
             return this
         }
 
@@ -4186,7 +4467,7 @@ class AutomationExecutionSupportTests {
                     // missing/absent key on the row map already reads as null via Groovy Map.get(), so
                     // the same equality check below is IS-NULL-compatible with no special-casing.
                     value[fieldName] == expected
-                }
+                } && inConditions.every { fieldName, Set allowed -> allowed.contains(value[fieldName]) }
             }
             if (orderByField) {
                 matchedRows = matchedRows.sort(false) { FakeValue row -> row[orderByField] as Comparable }
@@ -4225,6 +4506,8 @@ class AutomationExecutionSupportTests {
             put(fieldName, value)
             return this
         }
+
+        Map<String, Object> getMap() { return new LinkedHashMap<String, Object>(this) }
 
         FakeValue setSequencedIdPrimary() {
             if (entityName == "darpan.reconciliation.ReconciliationAutomationExecution") {

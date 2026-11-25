@@ -326,10 +326,10 @@ class SftpAutomationSupport {
                 // no run-result row meant notifyRunCompleted had no anchor and returned NO_RESULT_ID.
                 // Now the row exists, and leaving it silent would mean this task made "Notify me"
                 // reachable for SFTP runs and then deleted the subscriber without telling them anything.
-                // notifyAutomationFailure is the API path's own helper, so the payload shape
-                // (noOutputProduced / terminationReason) is identical, and it purges via its won claim.
-                AutomationExecutionSupport.notifyAutomationFailure(ec, automation,
-                        reconciliationRunResultId, false, failureReason)
+                // DAR-BE-015: notifyRunError is the API path's own run error path: the card goes to Darpan's
+                // error space, a client destination gets only the neutral line, and it purges.
+                AutomationExecutionSupport.notifyRunError(ec, automation,
+                        AutomationExecutionSupport.executionMap(execution) + updateFields, reconciliationRunResultId, failureReason)
             } else {
                 // NO_DATA only, and it stays silent — that is the API path's behaviour too, so parity
                 // means matching it rather than alerting on everything. Nothing will ever claim this row,
@@ -386,10 +386,12 @@ class SftpAutomationSupport {
                 // Task 2d fix round 1 (plan-owner decision): and it alerts, like the API path's terminal
                 // failure. The `?:` fallback mirrors AutomationExecutionSupport.groovy:402-403 — when the
                 // mint itself failed there is no anchor, so one is created purely so the failure is
-                // notifiable at all. notifyAutomationFailure is best-effort internally and cannot mask t.
-                AutomationExecutionSupport.notifyAutomationFailure(ec, automation,
+                // notifiable at all. notifyRunError (DAR-BE-015) is best-effort internally and cannot mask t.
+                AutomationExecutionSupport.notifyRunError(ec, automation,
+                        AutomationExecutionSupport.executionMap(execution) + [statusEnumId: AUTOMATION_STATUS_FAILED,
+                                completedDate: completedTimestamp, errorMessage: truncate(sanitizeErrorMessage(t), 3900)],
                         mintedRunResultId ?: AutomationExecutionSupport.persistFailureRunResult(ec, automation, t, completedTimestamp),
-                        false, sanitizeErrorMessage(t))
+                        sanitizeErrorMessage(t))
             } catch (Throwable ignored) {
             }
             throw t
@@ -688,6 +690,8 @@ class SftpAutomationSupport {
                 execution.set("reconciliationRunResultId", normalize(reconciliationRunResultId))
             }
             execution.set("scheduledDate", input.scheduledDate ?: createdTimestamp)
+            // DAR-BE-015: what started it, as the API path records it (a scheduled run tells the client it did not run).
+            execution.set("triggerType", AutomationExecutionSupport.runTriggerOf(input))
             execution.set("startedDate", createdTimestamp)
             execution.set("createdDate", createdTimestamp)
             execution.set("lastUpdatedDate", createdTimestamp)

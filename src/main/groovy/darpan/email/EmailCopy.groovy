@@ -51,8 +51,8 @@ class EmailCopy {
         return draft != null && draft.containsKey(key) ? draft.get(key) : stored
     }
 
-    /** Templates whose blocks are each built by code with only their own variables (AuditRunMessage, AuditDigestSupport). */
-    static final Set<String> OWN_VARIABLE_TEMPLATES = ["DARPAN_AUDIT_RUN", "DARPAN_AUDIT_DIGEST"] as Set<String>
+    /** Templates whose blocks are each built by code with only their own variables (AuditRunMessage, AuditDigestSupport, the run error notice). */
+    static final Set<String> OWN_VARIABLE_TEMPLATES = ["DARPAN_AUDIT_RUN", "DARPAN_AUDIT_DIGEST", "DARPAN_ERROR_NOTICE"] as Set<String>
     /** Prefix of the blocks that code turns into an email subject (DARPAN_2FA_REMINDER subject.before, DARPAN_AUDIT_RUN subject.run). */
     static final String SUBJECT_BLOCK_PREFIX = "subject."
 
@@ -347,8 +347,8 @@ class EmailCopy {
 
     /**
      * The block's released words: its row's defaultText, or, while the row is not loaded yet (a deploy before the seed
-     * or upgrade data load, a test database), the same words straight from data/EmailCopySeedData.xml, so an email never
-     * goes out empty. Null (logged) only for a block the seed does not have either.
+     * or upgrade data load, a test database), the same words straight from the seed files (COPY_SEED_FILES), so an email
+     * never goes out empty. Null (logged) only for a block the seed does not have either.
      */
     private static String defaultOf(def ec, def row, String emailTemplateId, String blockId) {
         String fromRow = row?.getString("defaultText")
@@ -361,23 +361,31 @@ class EmailCopy {
 
     private static volatile Map<String, String> seedDefaultsCache
 
+    /** The seed files that hold EmailCopyBlock rows. DAR-BE-015: the run error notice ships its own (OpsNoticeSeedData). */
+    private static final List<String> COPY_SEED_FILES = ["EmailCopySeedData", "OpsNoticeSeedData"]
+
     private static Map<String, String> seedDefaults(def ec) {
         Map<String, String> cached = seedDefaultsCache
         if (cached != null) return cached
         Map<String, String> found = new HashMap<>()
-        try {
-            ec.resource.getLocationReference("component://darpan/data/EmailCopySeedData.xml").openStream().withCloseable { InputStream is ->
-                def root = new XmlSlurper().parse(is)
-                root.children().each { node ->
-                    if (node.name() == "darpan.email.EmailCopyBlock") {
-                        found.put(node.@emailTemplateId.text() + "/" + node.@blockId.text(), node.@defaultText.text())
+        boolean allParsed = true
+        COPY_SEED_FILES.each { String file ->
+            try {
+                ec.resource.getLocationReference("component://darpan/data/${file}.xml".toString()).openStream().withCloseable { InputStream is ->
+                    def root = new XmlSlurper().parse(is)
+                    root.children().each { node ->
+                        if (node.name() == "darpan.email.EmailCopyBlock") {
+                            found.put(node.@emailTemplateId.text() + "/" + node.@blockId.text(), node.@defaultText.text())
+                        }
                     }
                 }
+            } catch (Throwable t) {
+                allParsed = false
+                logOnce("*", file, "could not read data/${file}.xml: ${t.message}")
             }
-        } catch (Throwable t) {
-            logOnce("*", "*", "could not read data/EmailCopySeedData.xml: ${t.message}")
         }
-        seedDefaultsCache = found
+        // A failed read is not kept (as seedSubjects): one context that cannot resolve component:// must not empty the defaults for the JVM.
+        if (allParsed) seedDefaultsCache = found
         return found
     }
 
@@ -410,7 +418,7 @@ class EmailCopy {
                 }
             } catch (Throwable t) {
                 allParsed = false
-                logOnce("*", "*", "could not read data/${file}.xml: ${t.message}")
+                logOnce("*", file, "could not read data/${file}.xml: ${t.message}")
             }
         }
         if (allParsed) seedSubjectsCache = found

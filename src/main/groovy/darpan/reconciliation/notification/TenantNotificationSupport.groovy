@@ -228,6 +228,41 @@ class TenantNotificationSupport {
     }
 
     /**
+     * DAR-BE-015. Sends one plain line (a run that did not run) to the run's client destinations: the automation's own chat
+     * space and every notify-me subscriber's, as notifyRunCompleted resolves them. The run-result row is claimed first, so a
+     * run is told once, and its subscriptions go once the claim is won. Never the run's payload, counts or error.
+     */
+    static Map<String, Object> notifyRunLine(def ec, String tenantId, String automationChatSpaceId, String resultId, String text) {
+        if (!tenantId) return [ok: true, attempted: false, skippedReason: "NO_TENANT"]
+        if (!text?.trim()) {
+            // No words to send (the copy could not be read): nothing will notify this run, so its subscriptions still go.
+            logger.warn("Run line for tenant {} result {} has no text; nothing sent", tenantId, resultId)
+            purgeSubscriptionsForUnnotifiedRun(ec, resultId)
+            return [ok: true, attempted: false, skippedReason: "NO_TEXT"]
+        }
+        Map<String, Object> resolution = resolveDestinationChatSpaces(ec, tenantId, automationChatSpaceId, resultId)
+        if (resultId && !claimNotification(ec, resultId)) return [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
+        purgeRunSubscriptions((List) resolution.subscriptionRows, resultId)
+        int deliveredCount = 0
+        int failedCount = 0
+        for (Map<String, Object> destination : (List<Map<String, Object>>) resolution.destinations) {
+            try {
+                Map<String, Object> delivery = deliverToDestination(destination, [text: text.trim()] as Map<String, Object>)
+                if (delivery?.ok == true) {
+                    deliveredCount++
+                } else {
+                    failedCount++
+                    logger.warn("Run line returned status {} for tenant {} result {} space {}", delivery?.statusCode, tenantId, resultId, destination.spaceName)
+                }
+            } catch (Throwable t) {
+                failedCount++
+                logger.warn("Run line failed for tenant {} result {} space {}: {}", tenantId, resultId, destination.spaceName, t.getClass().name)
+            }
+        }
+        return [ok: failedCount == 0, attempted: deliveredCount + failedCount > 0, deliveredCount: deliveredCount, failedCount: failedCount]
+    }
+
+    /**
      * DAR-BE-108. Posts one message to one of the tenant's chat spaces, outside any run (a side quest every automation
      * earned together goes to the tenant's streaks space). Null when the space cannot deliver.
      */

@@ -3194,8 +3194,11 @@ class AutomationExecutionSupport {
         result.fileTypeEnumId = normalize(result.fileTypeEnumId) ?: normalize(readField(source, "fileTypeEnumId"))
         result.schemaFileName = normalize(result.schemaFileName) ?: normalize(readField(source, "schemaFileName"))
         result.recordCount = normalizeInt(result.recordCount)
-        // DAR-BE-015: what the read returned, kept apart because Keep later overwrites recordCount with the kept count.
-        result.readCount = result.recordCount
+        // DAR-BE-015: the records the recent read returned, kept apart because Keep later overwrites recordCount with the
+        // kept count. 0 (never null) for a side with no data or no reported count, so "read nothing" is distinct from
+        // "unknown". An audit re-check (AuditRecheckSupport) may later add appended open-finding records to recordCount,
+        // so recordCount can exceed readCount.
+        result.readCount = (result.dataAvailable == true && result.recordCount != null) ? result.recordCount : 0
         return result
     }
 

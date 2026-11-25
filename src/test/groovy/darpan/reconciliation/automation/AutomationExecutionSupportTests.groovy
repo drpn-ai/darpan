@@ -3450,6 +3450,25 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void aPreKeepEmptySideThatOmitsRecordCountKeepsAReadCountOfZero() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName != ACME_EXTRACT) return [:]
+            call.params.fileSide == "FILE_1" ?
+                    [dataAvailable: true, fileLocation: "runtime://tmp/FILE_1.json".toString(), fileName: "FILE_1.json", recordCount: 10] :
+                    [dataAvailable: false]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, execution.statusEnumId)
+        assertEquals(10, execution.file1ReadCount)
+        assertEquals(0, execution.file2ReadCount)
+    }
+
+    @Test
     void aSideThatTakesNoKeepReadsNoFilterRows() {
         // NONE placement (no filter parameter on the connector: uploads, databases): nothing to filter, nothing read.
         FakeEc ec = fakeEc()

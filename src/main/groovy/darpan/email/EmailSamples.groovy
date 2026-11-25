@@ -55,7 +55,8 @@ class EmailSamples {
                              kind: "NO_AUTOMATION", lastSuccessDate: null]],
                 logErrors: [[fingerprint: "darpan.reconciliation.X Extract # failed", loggerName: "darpan.reconciliation.X", count: 37,
                              sampleMessage: "Extract 4711 failed", sampleStack: "java.lang.IllegalStateException: Extract 4711 failed\n\tat darpan.reconciliation.X.run(X.groovy:12)",
-                             firstSeen: at("2026-11-25T01:00:00Z"), lastSeen: at("2026-11-25T02:00:00Z"), tenantId: "MALBON"]]]
+                             firstSeen: at("2026-11-25T01:00:00Z"), lastSeen: at("2026-11-25T02:00:00Z"), tenantId: "MALBON",
+                             logDay: java.sql.Date.valueOf("2026-11-25")]]]
     }
 
     /** DAR-BE-015: chat lines kept as copy (never sent as email); the admin editor previews them through their screen. */

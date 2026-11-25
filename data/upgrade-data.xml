@@ -2373,7 +2373,7 @@ Review each record before loading into an environment.
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="watchdog.emptystreak" defaultText="Its last ${days} scheduled runs read nothing on either side."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="logs.title" defaultText="Log errors"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="logs.none" defaultText="No log errors."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="log.seen" defaultText="${count} times, first ${first}, last ${last}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="log.seen" defaultText="${count} times on ${day} (UTC) so far, first ${first}, last ${last}."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="log.stack" defaultText="Stack"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="footer" defaultText="Instance ${instance}. Covers ${since} to ${now}. Generated ${generatedAt}."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="chat.sent" defaultText="Darpan errors today: ${checks} checks, ${logErrors} log errors. Email sent to ${addresses}."/>

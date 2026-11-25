@@ -195,7 +195,9 @@ class ErrorDigestMessage {
     }
 
     private static String seenLine(Map body, Map l, EmailCopyReader copy) {
-        String line = copy.text("log.seen", [count: l.count ?: 0, first: EmailFrame.when(l.firstSeen as Timestamp, UTC),
+        // The row's count is its UTC day's count as of now (a day's row grows until the day ends), hence its day and "so far".
+        String day = l.logDay?.toString() ?: (l.lastSeen ? (l.lastSeen as Timestamp).toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() : "")
+        String line = copy.text("log.seen", [count: l.count ?: 0, day: day, first: EmailFrame.when(l.firstSeen as Timestamp, UTC),
                                               last: EmailFrame.when(l.lastSeen as Timestamp, UTC)])
         return l.tenantId ? "${line} ${tenantLabel(body, l.tenantId)}".toString() : line
     }

@@ -206,8 +206,9 @@ class ErrorDigestServicesSmokeTests {
         LocalDate today = LocalDate.now(ZoneOffset.UTC)
         insert("darpan.ops.ErrorLogEntry", [fingerprint: "EDG old", logDay: SqlDate.valueOf(today.minusDays(31)), count: 1])
         insert("darpan.ops.ErrorLogEntry", [fingerprint: "EDG kept", logDay: SqlDate.valueOf(today.minusDays(30)), count: 1])
-        ec.service.sync().name(FLUSH).call()
+        Map out = ec.service.sync().name(FLUSH).call()
         assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertTrue((out.purged as int) >= 1, "the job says how many rows it purged: ${out}")
         assertNull(ec.entity.find("darpan.ops.ErrorLogEntry").condition("fingerprint", "EDG old").disableAuthz().one())
         assertNotNull(ec.entity.find("darpan.ops.ErrorLogEntry").condition("fingerprint", "EDG kept").disableAuthz().one())
     }

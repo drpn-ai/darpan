@@ -45,16 +45,8 @@ class ErrorDigestSupport {
     private static final Closure DEFAULT_LOAD = { def ec, Timestamp since, Timestamp now, int watchdogHours, int emptyStreakDays ->
         readInput(ec, since, now, watchdogHours, emptyStreakDays)
     }
-    private static final Closure DEFAULT_SEND_EMAIL = { def ec, String to, Map bodyParameters ->
-        AutomationExecutionSupport.dispatchInternalService(ec, "org.moqui.impl.EmailServices.send#EmailTemplate",
-                [emailTemplateId: TEMPLATE, toAddresses: to, bodyParameters: bodyParameters])
-        if (ec.message.hasError()) {
-            logger.warn("Daily error email refused: {}", ec.message.errorsString)
-            ec.message.clearErrors()
-            return false
-        }
-        return true
-    }
+    /** The real send: true only when the mail server took it (sendEmailTemplate set a messageId). */
+    static final Closure DEFAULT_SEND_EMAIL = { def ec, String to, Map bodyParameters -> sendThroughTemplate(ec, to, bodyParameters) }
     private static final Closure DEFAULT_POST_CHAT = { String url, Map payload -> TenantNotificationSupport.deliverToWebhook(url, payload) }
     private static final Closure DEFAULT_COPY = { def ec -> new EmailCopyReader(ec, TEMPLATE) }
 
@@ -121,8 +113,10 @@ class ErrorDigestSupport {
                         tenantNames    : input.tenantNames ?: [:], automationNames: input.automationNames ?: [:],
                         emptyStreakDays: emptyStreakDays]
             if (addresses) {
-                emailed = sendEmail.call(ec, addresses.join(", "), [digestSubject: subject, digestBody: body]) == true
-                if (!emailed) warn(warnings, "the daily error email to ${addresses.size()} address(es) could not be sent")
+                Object sent = sendEmail.call(ec, addresses.join(", "), [digestSubject: subject, digestBody: body])
+                emailed = sent == true
+                if (!emailed) warn(warnings, "the daily error email to ${addresses.size()} address(es) could not be sent" +
+                        (sent instanceof String ? ": ${sent}" : ""))
             } else {
                 warn(warnings, "${EMAIL_SETTING} is blank: the daily error email was not sent")
             }
@@ -182,17 +176,72 @@ class ErrorDigestSupport {
         isolated(ec, "ops.OpsServices.finish#ErrorDigestDay", [digestDay: SqlDate.valueOf(day)] + fields)
     }
 
-    /** The call in its own transaction; a failure (another node's claim on the key) is null and leaves no error behind. */
+    /** The call in its own transaction; a failure (another node's claim on the key) is null and leaves no error or message behind. */
     private static Map isolated(def ec, String service, Map params) {
+        return withOwnMessages(ec) {
+            try {
+                Map out = ec.service.sync().name(service).requireNewTransaction(true).parameters(params).call() as Map
+                return ec.message.hasError() ? null : out
+            } catch (Throwable t) {
+                logger.warn("Daily error email: {} failed ({})", service, t.getClass().name)
+                return null
+            }
+        }
+    }
+
+    /**
+     * send#EmailTemplate, judged by what it returns. It never fails as an error: a mail server that refuses or cannot be
+     * reached becomes a message "Error sending email: ...", an EmailServer with no smtpHost and To addresses all outside the
+     * allowed domains return quietly. Only a messageId (set once the server took the message) is a send. Returns true, or why
+     * not (a String, also logged). The caller's messages, public messages and errors come back exactly as they were.
+     */
+    static Object sendThroughTemplate(def ec, String to, Map bodyParameters) {
+        String why = withOwnMessages(ec) {
+            int before = ec.message.messageInfos.size()
+            try {
+                Map out = AutomationExecutionSupport.dispatchInternalService(ec, "org.moqui.impl.EmailServices.send#EmailTemplate",
+                        [emailTemplateId: TEMPLATE, toAddresses: to, bodyParameters: bodyParameters])
+                if (ec.message.hasError()) return ec.message.errorsString as String
+                if (out?.messageId) return null
+                List added = ec.message.messageInfos.drop(before)
+                String said = added.collect { it.message as String }.find { it?.trim() }
+                if (said) return said
+                return noSmtpHost(ec) ? "the email server of ${TEMPLATE} has no SMTP host" : "the mail server returned no message id"
+            } catch (Throwable t) {
+                return t.getClass().name
+            }
+        }
+        if (why == null) return true
+        logger.warn("Daily error email not sent: {}", why)
+        return why
+    }
+
+    private static boolean noSmtpHost(def ec) {
+        try {
+            def template = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.email.EmailTemplate", WHY)
+                    .condition("emailTemplateId", TEMPLATE).useCache(false).one()
+            def server = template?.emailServerId ? TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.email.EmailServer", WHY)
+                    .condition("emailServerId", template.emailServerId).useCache(false).one() : null
+            return server != null && !server.smtpHost
+        } catch (Throwable ignored) {
+            return false
+        }
+    }
+
+    /** Runs body behind a fresh message scope; afterwards the caller's messages, public messages and errors are exactly as before. */
+    private static <T> T withOwnMessages(def ec, Closure<T> body) {
+        List infos = new ArrayList(ec.message.messageInfos)
+        List publics = new ArrayList(ec.message.publicMessageInfos)
         ec.message.pushErrors()
         try {
-            Map out = ec.service.sync().name(service).requireNewTransaction(true).parameters(params).call() as Map
-            return ec.message.hasError() ? null : out
-        } catch (Throwable t) {
-            logger.warn("Daily error email: {} failed ({})", service, t.getClass().name)
-            return null
+            return body.call()
         } finally {
-            if (ec.message.hasError()) ec.message.clearErrors()
+            ec.message.clearAll()
+            // addPublic puts one MessageInfo in both lists, so the snapshot of the general list already holds the public ones
+            infos.each { mi ->
+                if (publics.any { it.is(mi) }) ec.message.addPublic(mi.message, mi.type)
+                else ec.message.addMessage(mi.message, mi.type)
+            }
             ec.message.popErrors()
         }
     }

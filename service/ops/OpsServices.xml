@@ -86,9 +86,7 @@
         <out-parameters><parameter name="purged" type="Integer"/></out-parameters>
         <actions>
             <set field="oldest" from="java.sql.Date.valueOf(nowStamp.toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate().minusDays(30))"/>
-            <entity-delete-by-condition entity-name="darpan.ops.ErrorLogEntry">
-                <econdition field-name="logDay" operator="less" from="oldest"/>
-            </entity-delete-by-condition>
+            <set field="purged" from="(ec.entity.find('darpan.ops.ErrorLogEntry').condition('logDay', org.moqui.entity.EntityCondition.LESS_THAN, oldest).deleteAll() ?: 0) as Integer"/>
         </actions>
     </service>
 

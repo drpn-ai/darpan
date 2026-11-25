@@ -26,9 +26,11 @@
     <service verb="flush" noun="ErrorLog" authenticate="false" allow-remote="false" transaction="ignore">
         <description>Stores the ERROR log lines captured in memory since the last flush (darpan.ops.ErrorLogCapture.flush, its own
             transaction, never throws), then deletes the stored rows more than 30 days old.</description>
+        <out-parameters><parameter name="purged" type="Integer"><description>Rows deleted as more than 30 days old.</description></parameter></out-parameters>
         <actions>
             <script>darpan.ops.ErrorLogCapture.flush(ec)</script>
-            <service-call name="ops.OpsServices.purge#ErrorLogEntries"/>
+            <service-call name="ops.OpsServices.purge#ErrorLogEntries" out-map="purgeOut"/>
+            <set field="purged" from="purgeOut?.purged"/>
         </actions>
     </service>
 </services>

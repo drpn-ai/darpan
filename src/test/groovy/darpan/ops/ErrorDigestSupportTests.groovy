@@ -212,4 +212,84 @@ class ErrorDigestSupportTests {
         assertTrue(text.contains("Keep runs on the extract's records array <and this side's key paths do not read it>"), text)
         assertTrue(text.contains("NO_AUTOMATION") && text.contains("returns-vs-memos"), text)
     }
+
+    /** A log row's count is its UTC day's whole count (one row per fingerprint per day), so each says which day and "so far". */
+    @Test
+    void aLogRowNamesItsUtcDayAndSaysSoFar() {
+        input.logRows = [[fingerprint: "darpan.x Boom #", count: 5, logDay: java.sql.Date.valueOf("2026-11-24"),
+                          firstSeen: ts("2026-11-24T01:00:00Z"), lastSeen: ts("2026-11-24T23:00:00Z")],
+                         [fingerprint: "darpan.x Boom #", count: 2, logDay: java.sql.Date.valueOf("2026-11-25"),
+                          firstSeen: ts("2026-11-25T01:00:00Z"), lastSeen: ts("2026-11-25T02:00:00Z")]]
+        ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+        Map body = mails[0].body.digestBody as Map
+        assertEquals(2, (body.logErrors as List).size(), "a fingerprint on two UTC days stays two rows")
+        String text = ErrorDigestMessage.emailText(body, shippedCopy())
+        assertTrue(text.contains("5 times on 2026-11-24 (UTC) so far") && text.contains("2 times on 2026-11-25 (UTC) so far"), text)
+    }
+
+    // ---------------------------------------------------------------- the real send's outcome (DEFAULT_SEND_EMAIL)
+
+    /** Moqui's MessageFacade, as far as the send and its message scope use it. */
+    static class StubMessages {
+        List<Map> infos = [], publics = [], errors = []
+        List<List<Map>> saved = []
+        List<Map> getMessageInfos() { infos }
+        List<Map> getPublicMessageInfos() { publics }
+        void addMessage(String m, Object type = "info") { infos << [message: m, type: type] }
+        void addPublic(String m, Object type = "info") { Map mi = [message: m, type: type]; infos << mi; publics << mi }
+        void addError(String m) { errors << [message: m] }
+        boolean hasError() { !errors.isEmpty() }
+        String getErrorsString() { errors*.message.join("\n") }
+        void clearErrors() { errors.each { infos << [message: it.message, type: "danger"] }; errors.clear() }
+        void clearAll() { errors.clear(); infos.clear(); publics.clear() }
+        void pushErrors() { saved.add(0, new ArrayList(errors)); errors.clear() }
+        void popErrors() { if (saved) errors.addAll(saved.remove(0)) }
+    }
+
+    /** An ec whose send#EmailTemplate call does what `onSend` does to the messages and returns its result. */
+    private static Map stubEc(Closure<Map> onSend) {
+        StubMessages messages = new StubMessages()
+        messages.addPublic("Saved the run", "info")
+        Map call = [:]
+        call.name = { String n -> call }
+        call.parameters = { Map p -> call.params = p; call }
+        call.call = { -> onSend.call(messages) }
+        return [message: messages, service: [sync: { -> call }], entity: null, call: call]
+    }
+
+    @Test
+    void aMailServerFailureIsNotSentAndChatSaysSo() {
+        ErrorDigestSupport.sendEmail = ErrorDigestSupport.DEFAULT_SEND_EMAIL
+        Map ec = stubEc { StubMessages m -> m.addMessage("Error sending email: javax.mail.MessagingException: Could not connect"); [:] }
+        Map out = ErrorDigestSupport.sendIfDue(ec, AT_THE_HOUR)
+
+        assertEquals([sent: false, reason: "DELIVERY_FAILED"], out.subMap(["sent", "reason"]))
+        assertNull(claims[LocalDate.parse("2026-11-25")].sentDate, "the next digest covers this day again")
+        assertEquals("Darpan errors today: 0 checks, 0 log errors. The email to ops@drpn.test, oncall@drpn.test could not be sent.", posts[0].text)
+        assertTrue((out.warnings as List).any { it.contains("Error sending email") }, "the warning says why: ${out.warnings}")
+        assertEquals([[message: "Saved the run", type: "info"]], ec.message.infos, "the caller's messages come back unchanged")
+        assertEquals(ec.message.infos, ec.message.publics)
+        assertFalse(ec.message.hasError())
+        assertEquals("DARPAN_ERROR_DIGEST", ec.call.params.emailTemplateId)
+    }
+
+    @Test
+    void aSendWithNoMessageIdIsNotSent() {
+        // no SMTP host, or every address filtered by the allowed domains: Moqui returns quietly, with no message id
+        ErrorDigestSupport.sendEmail = ErrorDigestSupport.DEFAULT_SEND_EMAIL
+        Map ec = stubEc { StubMessages m -> [:] }
+        Map out = ErrorDigestSupport.sendIfDue(ec, AT_THE_HOUR)
+        assertEquals([sent: false, reason: "DELIVERY_FAILED"], out.subMap(["sent", "reason"]))
+        assertTrue(posts[0].text.contains("could not be sent"), posts[0].text)
+    }
+
+    @Test
+    void aSendWithAMessageIdIsSent() {
+        ErrorDigestSupport.sendEmail = ErrorDigestSupport.DEFAULT_SEND_EMAIL
+        Map ec = stubEc { StubMessages m -> [messageId: "<abc@mail.drpn.test>"] }
+        Map out = ErrorDigestSupport.sendIfDue(ec, AT_THE_HOUR)
+        assertTrue(out.sent as boolean, "${out}")
+        assertTrue(posts[0].text.contains("Email sent to"), posts[0].text)
+        assertEquals([[message: "Saved the run", type: "info"]], ec.message.infos)
+    }
 }

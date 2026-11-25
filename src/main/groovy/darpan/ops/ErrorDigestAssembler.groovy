@@ -123,16 +123,17 @@ class ErrorDigestAssembler {
     }
 
     private static List<Map> buildLogErrors(List<Map> rows) {
-        // Same fingerprint on several days merges; OVERFLOW rows stay as their own line.
+        // One line per fingerprint, tenant and UTC day: a row's count is its day's whole count (ErrorLogEntry, one row per
+        // fingerprint per day), so a day seen by two emails says which day it is rather than adding into another.
         Map<String, Map> byKey = new LinkedHashMap<String, Map>()
         rows.each { Map r ->
-            String key = "${r.fingerprint}|${r.tenantId ?: ''}".toString()
+            String key = "${r.fingerprint}|${r.tenantId ?: ''}|${r.logDay ?: ''}".toString()
             Map m = byKey.get(key)
             long n = (r.count ?: 0) as long
             if (m == null) {
                 byKey.put(key, [fingerprint: r.fingerprint, loggerName: r.loggerName, sampleMessage: r.sampleMessage,
                                 sampleStack: r.sampleStack, count: n, firstSeen: r.firstSeen, lastSeen: r.lastSeen,
-                                tenantId: r.tenantId])
+                                tenantId: r.tenantId, logDay: r.logDay])
             } else {
                 m.count = (m.count as long) + n
                 if (r.firstSeen && (m.firstSeen == null || (r.firstSeen as Timestamp).before(m.firstSeen as Timestamp))) m.firstSeen = r.firstSeen

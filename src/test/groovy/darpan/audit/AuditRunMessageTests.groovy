@@ -25,33 +25,53 @@ class AuditRunMessageTests {
                          [id: "R3", text: "Every return is credited.", open: 0, newToday: 0, fixedToday: 0, checksNotRun: [], checksTotal: 2]]]
     }
 
+    private static final String ALERTED = "Darpan has been alerted and is working on a fix."
+    private static final String NOTICE = "R1, R2 did not run this morning. ${ALERTED}"
+    private static final String ROW_NOT_RUN = "Did not run this morning."
+    private static final String ROW_PARTLY = "1 of 5 checks did not run this morning."
+
+    private static int times(String text, String part) { return text.split(java.util.regex.Pattern.quote(part), -1).length - 1 }
+
     @Test
-    void aRuleWhoseOnlyCheckDidNotRunShowsTheNeutralLineNotZero() {
+    void aRuleWhoseOnlyCheckDidNotRunShowsTheShortRowAndTheNoticeNamesItNotZero() {
         String text = AuditRunMessage.emailText(facts(), [:], null, COPY)
-        assertTrue(text.contains("  R1  Every order is billed: ${NOT_RUN}"), text)
+        assertTrue(text.contains("  R1  Every order is billed: ${ROW_NOT_RUN}\n"), text)
         assertFalse(text.contains("R1  Every order is billed: clean"))
+        assertTrue(text.contains(NOTICE), "the notice names whole and partly ran rules")
         assertTrue(text.contains("  R3  Every return is credited: clean"), "a rule that ran shows counts as before")
     }
 
     @Test
     void aRuleWithOneOfFiveChecksNotRunShowsPartlyAndItsCounts() {
         String line = AuditRunMessage.emailText(facts(), [:], null, COPY).readLines().find { it.startsWith("  R2  ") }
-        assertTrue(line.contains(PARTLY), line)
-        assertTrue(line.contains("3 open"), line)
+        assertTrue(line.contains(ROW_PARTLY) && line.contains("3 open"), line)
     }
 
     @Test
-    void theEmailHtmlSaysTheSame() {
+    void aNotRunRuleKeepsItsOpenCount() {
+        Map f = facts()
+        f.rules[0] = f.rules[0] + [open: 3]
+        String line = AuditRunMessage.emailText(f, [:], null, COPY).readLines().find { it.startsWith("  R1  ") }
+        assertTrue(line.endsWith("${ROW_NOT_RUN} · 3 open"), line)
+        assertTrue(AuditRunMessage.emailHtml(f, [:], null, COPY).contains("${ROW_NOT_RUN} · 3 open"))
+    }
+
+    @Test
+    void checksNotRunWithoutATotalCountsAsWhollyNotRun() {
+        Map f = facts()
+        f.rules[1] = [id: "R2", text: "Every order ships.", open: 0, newToday: 0, fixedToday: 0, checksNotRun: ["c2"]]
+        String line = AuditRunMessage.emailText(f, [:], null, COPY).readLines().find { it.startsWith("  R2  ") }
+        assertTrue(line.endsWith(ROW_NOT_RUN), line)
+    }
+
+    @Test
+    void theAlertedSentenceIsInTheNoticeOnceInEmailHtmlTextAndCard() {
+        assertEquals(1, times(AuditRunMessage.emailText(facts(), [:], null, COPY), ALERTED))
         String html = AuditRunMessage.emailHtml(facts(), [:], null, COPY)
-        assertTrue(html.contains(NOT_RUN), "neutral line")
-        assertTrue(html.contains(PARTLY) && html.contains("3 open"), "partly and counts")
-        assertFalse(html.contains("R1 did not run on"), "old wording gone")
-    }
-
-    @Test
-    void theChatCardSaysTheSame() {
+        assertEquals(1, times(html, ALERTED))
+        assertTrue(html.contains(NOTICE) && html.contains(ROW_NOT_RUN) && html.contains(ROW_PARTLY) && html.contains("3 open"))
         String card = AuditRunMessage.card(facts(), [:], null, COPY).toString()
-        assertTrue(card.contains("R1 did not run this morning. Darpan has been alerted"), card)
-        assertTrue(card.contains(PARTLY), card)
+        assertEquals(1, times(card, ALERTED))
+        assertTrue(card.contains(NOTICE), card)
     }
 }

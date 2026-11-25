@@ -87,31 +87,24 @@ class AuditRunMessage {
         return [line, calls, flags].findAll().join(" ") ?: null
     }
 
-    /** Rules none of whose checks ran (DAR-BE-015). */
+    /** Rules with any check that did not run, whole or partly (DAR-BE-015): the one top notice names them all. */
     static List<String> rulesNotRun(Map facts) {
-        return rules(facts).findAll { wholeNotRun(it) }*.id as List<String>
+        return rules(facts).findAll { it.checksNotRun }*.id as List<String>
     }
 
-    /** Rules with some checks run and some not (DAR-BE-015). */
-    static List<Map> rulesPartlyRan(Map facts) {
-        return rules(facts).findAll { it.checksNotRun && !wholeNotRun(it) }
-    }
-
+    /** No checksTotal means every check is counted as not run. */
     private static boolean wholeNotRun(Map rule) {
         int notRun = ((rule.checksNotRun ?: []) as List).size()
         return notRun > 0 && notRun >= ((rule.checksTotal ?: 0) as int)
     }
 
-    private static String partlyLine(Map rule, EmailCopyReader copy) {
-        return copy.text("rule.partly", [rule: rule.id, notRun: ((rule.checksNotRun ?: []) as List).size(), total: rule.checksTotal])
-    }
-
-    /** What a rule's row says: the neutral line, the partly line and its counts, or the counts. */
+    /** What a rule's row says: "Did not run this morning." (and its open count), the partly line and its counts, or the counts. */
     private static String ruleStatus(Map rule, EmailCopyReader copy) {
         int open = rule.open as int
         String counts = open ? copy.text("rule.open", [open: open]) : copy.text("rule.clean")
-        if (wholeNotRun(rule)) return copy.text("rule.notrun", [rule: rule.id])
-        return rule.checksNotRun ? "${partlyLine(rule, copy)} ${counts}".toString() : counts
+        if (wholeNotRun(rule)) return open ? "${copy.text('rule.notrun')} · ${counts}".toString() : copy.text("rule.notrun")
+        if (!rule.checksNotRun) return counts
+        return "${copy.text('rule.partly', [notRun: ((rule.checksNotRun ?: []) as List).size(), total: rule.checksTotal])} ${counts}".toString()
     }
 
     /** Google Chat cardsV2: the counts, the writer's headline, what did not run, and the report's link. Nothing else. */
@@ -125,10 +118,6 @@ class AuditRunMessage {
         List<String> notRun = rulesNotRun(facts)
         if (notRun) widgets << [decoratedText: [text     : "<font color=\"${AMBER}\">${esc(copy.text('notrun', [rules: notRun.join(', ')]))}</font>".toString(),
                                                 wrapText : true, startIcon: [materialIcon: [name: "warning"]]]]
-        rulesPartlyRan(facts).each { Map r ->
-            widgets << [decoratedText: [text: "<font color=\"${AMBER}\">${esc(partlyLine(r, copy))}</font>".toString(),
-                                        wrapText: true, startIcon: [materialIcon: [name: "warning"]]]]
-        }
         String reads = readsLine(facts, copy)
         if (reads) widgets << [decoratedText: [text: esc(reads), wrapText: true, startIcon: [materialIcon: [name: "sync"]]]]
         String url = reportUrl(base, facts)

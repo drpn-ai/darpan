@@ -96,8 +96,8 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="cause.none" defaultText="No cause named yet"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="cause.explain" defaultText="Know why? Explain them to the agent"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run this morning. Darpan has been alerted and is working on a fix."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.notrun" defaultText="${rule} did not run this morning. Darpan has been alerted and is working on a fix."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.partly" defaultText="${rule} partly ran this morning: ${notRun} of ${total} checks did not run. Darpan has been alerted and is working on a fix."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.notrun" defaultText="Did not run this morning."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.partly" defaultText="${notRun} of ${total} checks did not run this morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="button" defaultText="Open the report in Darpan"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="attachments" defaultText="Each attachment has one row per open finding: its ids in HotWax, NetSuite and Shopify, when it was first found, and the fix. Ids are HotWax order ids (return ids for returns)."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="reads" defaultText="This morning Darpan read your systems ${reads} times over ${connections} connections."/>

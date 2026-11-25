@@ -122,7 +122,8 @@
     </service>
     <!-- DAR-BE-361. Acknowledge one report row: a note that says the problem is known, so the row leaves Open until its
          remind day. A row is an order's open lines under one statement plus the later steps waiting under it
-         (AuditReportAssembler.unitMemberIds); each covered finding gets its own row and its own history event. Any member
+         (AuditReportAssembler.unitMemberIds); any finding of the row, a waiting line included, names the whole row. Each
+         covered finding gets its own row and its own history event. Any member
          who can see the report may acknowledge, change or reopen; the finding's state stays open or fixed. -->
     <service verb="acknowledge" noun="AuditFinding" authz-action="view" allow-remote="true" authenticate="true">
         <description>Acknowledges the report row holding one open finding: every open line of its order under its statement

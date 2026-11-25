@@ -674,9 +674,11 @@ class AuditReportAssembler {
     }
 
     /**
-     * DAR-BE-361. The findings one Acknowledge covers (the report row holding findingId): today's open lines of its order
-     * unit under its own statement, plus the open lines of the later-step units waiting under that unit. A finding that is
-     * not an order line, or is not open today, covers itself alone. Empty when the tenant does not own the finding.
+     * DAR-BE-361. The findings one Acknowledge covers (the report row holding findingId): the counted order unit that row
+     * is, its open lines plus the open lines of the later-step units waiting under it. Any finding of the row resolves to
+     * the same set: a waiting line resolves to the row it is listed under. A waiting unit with no row to wait under, or a
+     * finding that is not an order line, covers its own unit; one not open today covers itself alone. Empty when the
+     * tenant does not own the finding.
      */
     static List<String> unitMemberIds(def ec, String tenantId, String findingId) {
         Map f = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY)?.getMap()
@@ -684,13 +686,16 @@ class AuditReportAssembler {
         Map statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId",
                 f.statementId as String, tenantId, WHY)?.getMap()
         if (f.stateEnumId != OPEN || statement == null) return [findingId]
-        Map open = openStepUnits(ec, tenantId, statement.auditId as String, f.period as String)
-        Map split = (open.split as Map<String, Map>)[f.statementId as String]
-        List<Map> units = split == null ? [] : ((split.counted as List<Map>) + (split.waiting as List<Map>))
-        Map unit = units.find { Map u -> (u.entries as List<Map>).any { it.row.findingId == findingId } }
+        Map<String, Map> split = openStepUnits(ec, tenantId, statement.auditId as String, f.period as String).split as Map<String, Map>
+        Closure<List<Map>> rowLines = { Map u ->
+            (u.entries as List<Map>) + ((u.waitingUnits ?: []) as List<Map>).collectMany { it.entries as List<Map> } }
+        // The row is a counted unit: the line's own, or the one it waits under (holders carry their waiting units).
+        Map row = split.values().collectMany { it.counted as List<Map> }.find { Map u -> rowLines(u).any { it.row.findingId == findingId } }
+        // A waiting unit whose order has no open counted unit is listed nowhere else: it covers itself.
+        Map unit = row ?: ((split[f.statementId as String]?.waiting ?: []) as List<Map>).find { Map u ->
+            (u.entries as List<Map>).any { it.row.findingId == findingId } }
         if (unit == null) return [findingId]
-        List<Map> lines = (unit.entries as List<Map>) + ((unit.waitingUnits ?: []) as List<Map>).collectMany { it.entries as List<Map> }
-        return lines.findAll { it.state == OPEN }.collect { it.row.findingId as String }.unique()
+        return rowLines(unit).findAll { it.state == OPEN }.collect { it.row.findingId as String }.unique()
     }
 
     /** An order of one line, in the check's own words with the item named as its line: "line 1 is completed in HotWax

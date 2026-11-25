@@ -161,12 +161,25 @@ class AuditAcknowledgeSmokeTests {
         assertFalse(summary.reminded as boolean)
         assertTrue((summary.at as String) ==~ /\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[-+]\d\d:\d\d/, summary.at as String)
 
-        // Acknowledging again from the waiting line replaces its own unit's row, not a second one.
-        Map again = call("acknowledge#AuditFinding", [findingId: ids.R2["M101/01"], note: "Second word", remind: false])
+        // Any finding of the row is the row: the R2 line waiting under it resolves to the same three findings.
+        row.each { assertEquals(row.toSet(), AuditReportAssembler.unitMemberIds(ec, MINE, it).toSet(), it) }
+        String waitingLine = ids.R2["M101/01"]
+        Map again = call("acknowledge#AuditFinding", [findingId: waitingLine, note: "Second word", remind: false])
         assertFalse(again.hadError as boolean, again.errorText as String)
-        assertEquals(1, acks([ids.R2["M101/01"]]).size())
-        assertEquals("Second word", acks([ids.R2["M101/01"]])[0].note)
-        assertNull(acks([ids.R2["M101/01"]])[0].remindDate)
+        assertEquals(3, acks(row).size(), "replaced, not added")
+        assertEquals(["Second word"], acks(row)*.note.unique(), "one note on the whole row")
+        assertEquals([null], acks(row)*.remindDate.unique(), "one remind date on the whole row")
+
+        Map changed = call("update#AuditFindingAcknowledgement", [findingId: waitingLine, note: "Third word", remind: true])
+        assertFalse(changed.hadError as boolean, changed.errorText as String)
+        assertEquals(["Third word"], acks(row)*.note.unique())
+        assertEquals([Date.valueOf(today().plusDays(5))], acks(row)*.remindDate.unique(), "remind on starts from today, every line")
+        assertEquals(row.toSet(), events(row, "AUDFE_ACK_CHANGED")*.findingId.toSet())
+
+        Map reopened = call("delete#AuditFindingAcknowledgement", [findingId: waitingLine])
+        assertFalse(reopened.hadError as boolean, reopened.errorText as String)
+        assertEquals([], acks(row), "the whole row reopens")
+        assertEquals(row.toSet(), events(row, "AUDFE_ACK_REOPENED")*.findingId.toSet())
     }
 
     @Test

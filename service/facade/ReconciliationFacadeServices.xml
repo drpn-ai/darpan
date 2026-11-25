@@ -768,6 +768,11 @@
             <parameter name="file2RecordRootExpression"/>
             <parameter name="file2PrimaryIdExpression"/>
             <parameter name="file2PrimaryIdExpressions" type="List"/>
+            <parameter name="file1ExtractOptions" type="Map"><description>DAR-UI-148. This side's extract options, only the names
+                its connector declares (SourceSystemConnector.extractOptionsJson), e.g. {"withLineItems": true}. Omit to leave the
+                stored options unchanged; send an empty map to clear them.</description></parameter>
+            <parameter name="file2ExtractOptions" type="Map"><description>DAR-UI-148. As file1ExtractOptions, for the second
+                side.</description></parameter>
             <parameter name="rules" type="List">
                 <parameter name="ruleId"/>
                 <parameter name="sequenceNum" type="Integer"/>
@@ -1146,6 +1151,15 @@
                 </if>
             </if>
 
+            <!-- DAR-UI-148: a side's extract options, validated against its connector before anything is written; absent
+                 leaves the stored options as they are. -->
+            <if condition="file1ExtractOptions != null">
+                <set field="file1ExtractParametersJsonValue" from="darpan.reconciliation.automation.SourceExtractOptionsSupport.validatedJsonOrError(ec, file1SystemEnumIdValue, file1ExtractOptions, 'File 1')"/>
+            </if>
+            <if condition="file2ExtractOptions != null">
+                <set field="file2ExtractParametersJsonValue" from="darpan.reconciliation.automation.SourceExtractOptionsSupport.validatedJsonOrError(ec, file2SystemEnumIdValue, file2ExtractOptions, 'File 2')"/>
+            </if>
+
             <!-- Cross-side count guard (ET1): mirrors create#RuleSetRun's guard. -->
             <if condition="!ec.message.hasError()">
                 <set field="file1KeyFieldCount" from="file1PrimaryIdExpressionsValue.isEmpty() ? (file1PrimaryIdExpressionValue ? 1 : 0) : file1PrimaryIdExpressionsValue.size()"/>
@@ -1176,6 +1190,9 @@
                 <set field="ignoreFile1Schema" from="file1Source.set('schemaFileName', file1UsesConnectorSource ? null : file1SchemaFileNameValue)"/>
                 <set field="ignoreFile1Root" from="file1Source.set('recordRootExpression', file1UsesConnectorSource ? null : file1RecordRootExpressionValue)"/>
                 <set field="ignoreFile1PrimaryId" from="file1Source.set('primaryIdExpression', resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile1PrimaryIdExpressionsValue.isEmpty() ? resolvedFile1PrimaryIdExpressionValue : resolvedFile1PrimaryIdExpressionsValue[0]))"/>
+                <if condition="file1ExtractOptions != null">
+                    <set field="ignoreFile1Options" from="file1Source.set('extractParametersJson', file1ExtractParametersJsonValue)"/>
+                </if>
                 <set field="ignoreFile1UpdatedDate" from="file1Source.set('lastUpdatedDate', nowTs)"/>
                 <set field="ignoreFile1Update" from="file1Source.update()"/>
 
@@ -1245,6 +1262,9 @@
                     <set field="ignoreFile2Schema" from="file2Source.set('schemaFileName', file2UsesConnectorSource ? null : file2SchemaFileNameValue)"/>
                     <set field="ignoreFile2Root" from="file2Source.set('recordRootExpression', file2UsesConnectorSource ? null : file2RecordRootExpressionValue)"/>
                     <set field="ignoreFile2PrimaryId" from="file2Source.set('primaryIdExpression', resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]))"/>
+                    <if condition="file2ExtractOptions != null">
+                        <set field="ignoreFile2Options" from="file2Source.set('extractParametersJson', file2ExtractParametersJsonValue)"/>
+                    </if>
                     <set field="ignoreFile2UpdatedDate" from="file2Source.set('lastUpdatedDate', nowTs)"/>
                     <set field="ignoreFile2Update" from="file2Source.update()"/>
 

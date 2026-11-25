@@ -34370,6 +34370,14 @@
                             
                         }
                     },
+                    "file1ExtractOptions": {
+                        "type": "object",
+                        "description": "DAR-UI-148. This side's extract options, only the names\n                its connector declares (SourceSystemConnector.extractOptionsJson), e.g. {\"withLineItems\": true}. Omit to leave the\n                stored options unchanged; send an empty map to clear them."
+                    },
+                    "file2ExtractOptions": {
+                        "type": "object",
+                        "description": "DAR-UI-148. As file1ExtractOptions, for the second\n                side."
+                    },
                     "rules": {
                         "type": "array",
                         "items": {

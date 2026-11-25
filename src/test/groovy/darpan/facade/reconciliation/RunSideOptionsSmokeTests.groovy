@@ -92,6 +92,41 @@ class RunSideOptionsSmokeTests {
         assertEquals("FINDING", side2.duplicateKeyHandling)
     }
 
+    /**
+     * DAR-UI-148: an existing run's options change through save#RuleSetRun. Omitted, the stored ones stay (every rules and
+     * conclusions save sends none); sent, they replace them; an empty map clears them; a name the connector does not
+     * declare is refused before anything is written.
+     */
+    @Test
+    void saveKeepsTheOptionsWhenOmittedAndReplacesThemWhenSent() {
+        Map created = create([file1ExtractOptions: [onlyCancelledReturns: true]])
+        assertFalse(created.hadError as boolean, created.errorText as String)
+        String runId = created.savedRun.savedRunId as String
+        Closure<Map> save = { Map extra ->
+            ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun").parameters([savedRunId: runId,
+                    runName: "Side options saved", file1SystemEnumId: "OMS_RETURNS_GQL", file1FileTypeEnumId: "DftCsv",
+                    file1PrimaryIdExpression: "returnId", file2SystemEnumId: "SHOPIFY", file2FileTypeEnumId: "DftCsv",
+                    file2PrimaryIdExpression: "returnId"] + extra).call()
+            Map out = [hadError: ec.message.hasError(), errorText: ec.message.errorsString]
+            ec.message.clearErrors()
+            return out
+        }
+
+        assertFalse(save([:]).hadError as boolean)
+        assertEquals('{"onlyCancelledReturns":true}', source(created, "FILE_1").extractParametersJson, "omitted: kept")
+
+        assertFalse(save([file1ExtractOptions: [includeReturnsWithoutShopifyRef: true]]).hadError as boolean)
+        assertEquals('{"includeReturnsWithoutShopifyRef":true}', source(created, "FILE_1").extractParametersJson, "sent: replaced")
+        assertNull(source(created, "FILE_2").extractParametersJson, "the other side untouched")
+
+        Map refused = save([file1ExtractOptions: [withLineItems: true]])
+        assertTrue(refused.hadError as boolean, "an option the returns connector does not declare")
+        assertEquals('{"includeReturnsWithoutShopifyRef":true}', source(created, "FILE_1").extractParametersJson, "nothing written")
+
+        assertFalse(save([file1ExtractOptions: [:]]).hadError as boolean)
+        assertNull(source(created, "FILE_1").extractParametersJson, "an empty map clears them")
+    }
+
     @Test
     void refusesAnOptionTheSidesConnectorDoesNotTake() {
         Map wrongSide = create([file2ExtractOptions: [onlyCancelledReturns: true]])

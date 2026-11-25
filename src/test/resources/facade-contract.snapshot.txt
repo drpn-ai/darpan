@@ -3538,6 +3538,7 @@ SERVICE save RuleSetRun
     description : String
     file1ExcludeFilters : List
     file1ExcludeFilters.excludeFilter : Map
+    file1ExtractOptions : Map
     file1FileTypeEnumId : String
     file1NsRestletConfigId : String
     file1PrimaryIdExpression : String
@@ -3551,6 +3552,7 @@ SERVICE save RuleSetRun
     file1SystemMessageRemoteId : String
     file2ExcludeFilters : List
     file2ExcludeFilters.excludeFilter : Map
+    file2ExtractOptions : Map
     file2FileTypeEnumId : String
     file2NsRestletConfigId : String
     file2PrimaryIdExpression : String

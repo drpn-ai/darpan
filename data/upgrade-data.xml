@@ -1,14 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Candidate release-scoped upgrade data for Darpan 3.4.8.
-Generated from backend compare range: v3.4.7..HEAD
+Candidate release-scoped upgrade data for Darpan 3.4.9.
+Generated from backend compare range: v3.4.8..HEAD
 Records must also live in generic source data files under runtime/component/darpan/data/.
 Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- Modified records from data/SourceSystemConnectorSeedData.xml -->
-    <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY" extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_AUTH" configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig" remoteId="SHOPIFY_REMOTE" endpointLabel="Orders" sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json" remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql" systemAliases="SHOPIFY,DAR_SYS_SHOPIFY" preserveWindowInstants="Y" lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds" exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState" exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep" healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection" filterParameterName="sourceFilters" evidenceFieldsJson='{"system":"Shopify","state":"displayFulfillmentStatus","stateLabels":{"FULFILLED":"Fulfilled","UNFULFILLED":"Unfulfilled","PARTIALLY_FULFILLED":"Partially fulfilled","RESTOCKED":"Restocked","ON_HOLD":"On hold","IN_PROGRESS":"In progress","SCHEDULED":"Scheduled","PENDING_FULFILLMENT":"Pending fulfillment","OPEN":"Open"},"facts":["name","displayFinancialStatus","sourceName"]}' extractOptionsJson='[{"name":"withLineItems","label":"Order lines","type":"boolean"}]' enabled="Y"/>
-    <!-- DAR-BE-361: the audit vocabulary restated whole from AuditSeedData.xml (AuditFindingEvent gains acknowledged, acknowledgementChanged, acknowledgementReopened). -->
+    <!-- Audit vocabulary from data/AuditSeedData.xml, restated whole (AuditCatalogContractTests): adds AUDFE_ACKNOWLEDGED, AUDFE_ACK_CHANGED, AUDFE_ACK_REOPENED -->
     <moqui.basic.EnumerationType enumTypeId="AuditCategory" description="Audit statement category"/>
     <moqui.basic.Enumeration enumId="AUDC_ORDERS" enumTypeId="AuditCategory" enumCode="orders"
             description="Orders" sequenceNum="1"/>
@@ -66,7 +64,6 @@ Review each record before loading into an environment.
             description="Acknowledgement changed" sequenceNum="6"/>
     <moqui.basic.Enumeration enumId="AUDFE_ACK_REOPENED" enumTypeId="AuditFindingEvent" enumCode="acknowledgementReopened"
             description="Acknowledgement reopened" sequenceNum="7"/>
-    <!-- No agent type: the external API has no mutations, so an agent can never cause an event. -->
     <moqui.basic.EnumerationType enumTypeId="AuditActorType" description="Audit event actor type"/>
     <moqui.basic.Enumeration enumId="AUDAT_CHECK" enumTypeId="AuditActorType" enumCode="check"
             description="Scheduled check" sequenceNum="1"/>
@@ -79,54 +76,34 @@ Review each record before loading into an environment.
             description="Month" sequenceNum="2"/>
     <moqui.basic.Enumeration enumId="AUDP_QUARTER" enumTypeId="AuditPeriod" enumCode="quarter"
             description="Quarter" sequenceNum="3"/>
-    <!-- DAR-BE-102. What a scheduled digest says. -->
     <moqui.basic.EnumerationType enumTypeId="AuditDigestKind" description="Audit digest kind"/>
     <moqui.basic.Enumeration enumId="AUDDK_DAILY" enumTypeId="AuditDigestKind" enumCode="daily"
             description="Daily digest" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="AUDDK_WEEKLY" enumTypeId="AuditDigestKind" enumCode="weekly"
             description="Weekly summary" sequenceNum="2"/>
-    <!-- DAR-BE-207. Sent once each audit run ends (every automation of the audit idle), not at a send time. -->
     <moqui.basic.Enumeration enumId="AUDDK_RUN" enumTypeId="AuditDigestKind" enumCode="run"
             description="After each audit run" sequenceNum="3"/>
-    <!-- DAR-BE-102. Audit digests: each is due once a day at its own time in its tenant's zone; a 15-minute scan
-         sends it within a quarter hour of that time. -->
-    <moqui.service.job.ServiceJob jobName="send_AuditDigests_15m" expireLockTime="360"
-            description="Send the audit run digests that are due."
-            serviceName="audit.AuditDigestServices.send#DueAuditDigests"
-            defaultCronExpression="0 0/15 * * * ?" defaultPaused="N" minIntervalMinutes="5"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING_ACK"
-            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.audit.AuditFindingAcknowledgement"
-            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING_FEEDBACK"
-            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.audit.AuditFindingFeedback"
-            filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
-    <!-- DAR-BE-361 — feedback on an audit finding (restated verbatim from FeedbackEmailSeedData.xml and EmailCopySeedData.xml):
-         the thank-you and the answer templates, after the SYSTEM EmailServer above, then their copy blocks (defaultText only). -->
-    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_RECEIVED" description="Darpan feedback received"
-            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan got your note on ${statementCode}"
-            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
-            bodyScreenLocation="component://darpan/screen/email/FeedbackReceived.xml"/>
-    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_ANSWER" description="Darpan feedback answer"
-            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan answered your note on ${statementCode}"
-            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
-            bodyScreenLocation="component://darpan/screen/email/FeedbackAnswer.xml"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="greeting" defaultText="Hi ${firstName},"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="body" defaultText="Your note on ${statementCode} reached Darpan. Thanks for saying what the records couldn't."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="quote" defaultText="“${note}”"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="about" defaultText="On the finding: ${headline}"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="next" defaultText="A person at Darpan reads it and replies by email. Your team sees the note beside the finding for ${shownDays} days, so nobody has to ask twice."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="note" defaultText="More to add? Send another note from the same finding."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="greeting" defaultText="Hi ${firstName},"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="body" defaultText="Darpan has an answer to your note on ${statementCode}. Worth the wait, hopefully."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="quote" defaultText="You wrote: “${note}”"/>
+    <!-- Added records from data/FeedbackEmailSeedData.xml -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_ANSWER" description="Darpan feedback answer" emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan answered your note on ${statementCode}" fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan" bodyScreenLocation="component://darpan/screen/email/FeedbackAnswer.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_RECEIVED" description="Darpan feedback received" emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan got your note on ${statementCode}" fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan" bodyScreenLocation="component://darpan/screen/email/FeedbackReceived.xml"/>
+    <!-- Added records from data/EmailCopySeedData.xml -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="acknowledged" defaultText="${count} acknowledged, parked until fixed or until the reminder day if one was set."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="acknowledged" defaultText="${count} acknowledged. Your team has these in hand until they are fixed, or until the reminder day if one was set."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="answer.intro" defaultText="Darpan's answer:"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="body" defaultText="Darpan has an answer to your note on ${statementCode}. Worth the wait, hopefully."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="next" defaultText="The answer lives in your inbox, not in the app. Forward it if your team was asking the same thing."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="note" defaultText="Still not right? Send a new note from the finding in Darpan."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page"/>
-    <!-- DAR-BE-361 — the audit run update and digest say how many rows are acknowledged (restated verbatim from EmailCopySeedData.xml). -->
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="acknowledged" defaultText="${count} acknowledged. Your team has these in hand until they are fixed, or until the reminder day if one was set."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="acknowledged" defaultText="${count} acknowledged, parked until fixed or until the reminder day if one was set."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="quote" defaultText="You wrote: “${note}”"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="about" defaultText="On the finding: ${headline}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="body" defaultText="Your note on ${statementCode} reached Darpan. Thanks for saying what the records couldn't."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="next" defaultText="A person at Darpan reads it and replies by email. Your team sees the note beside the finding for ${shownDays} days, so nobody has to ask twice."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="note" defaultText="More to add? Send another note from the same finding."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="quote" defaultText="“${note}”"/>
+    <!-- Added records from data/SecuritySeedData.xml -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING_ACK" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.audit.AuditFindingAcknowledgement" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING_FEEDBACK" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.audit.AuditFindingFeedback" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
 </entity-facade-xml>

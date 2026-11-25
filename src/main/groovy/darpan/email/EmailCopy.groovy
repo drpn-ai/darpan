@@ -51,8 +51,8 @@ class EmailCopy {
         return draft != null && draft.containsKey(key) ? draft.get(key) : stored
     }
 
-    /** Templates whose blocks are each built by code with only their own variables (AuditRunMessage, AuditDigestSupport, the run error notice). */
-    static final Set<String> OWN_VARIABLE_TEMPLATES = ["DARPAN_AUDIT_RUN", "DARPAN_AUDIT_DIGEST", "DARPAN_ERROR_NOTICE"] as Set<String>
+    /** Templates whose blocks are each built by code with only their own variables (AuditRunMessage, AuditDigestSupport, the run error notice, the daily error email). */
+    static final Set<String> OWN_VARIABLE_TEMPLATES = ["DARPAN_AUDIT_RUN", "DARPAN_AUDIT_DIGEST", "DARPAN_ERROR_NOTICE", "DARPAN_ERROR_DIGEST"] as Set<String>
     /** Prefix of the blocks that code turns into an email subject (DARPAN_2FA_REMINDER subject.before, DARPAN_AUDIT_RUN subject.run). */
     static final String SUBJECT_BLOCK_PREFIX = "subject."
 
@@ -361,8 +361,8 @@ class EmailCopy {
 
     private static volatile Map<String, String> seedDefaultsCache
 
-    /** The seed files that hold EmailCopyBlock rows. DAR-BE-015: the run error notice ships its own (OpsNoticeSeedData). */
-    private static final List<String> COPY_SEED_FILES = ["EmailCopySeedData", "OpsNoticeSeedData"]
+    /** The seed files that hold EmailCopyBlock rows. DAR-BE-015: the run error notice (OpsNoticeSeedData) and the daily error email (OpsSeedData) ship their own. */
+    private static final List<String> COPY_SEED_FILES = ["EmailCopySeedData", "OpsNoticeSeedData", "OpsSeedData"]
 
     private static Map<String, String> seedDefaults(def ec) {
         Map<String, String> cached = seedDefaultsCache
@@ -390,7 +390,7 @@ class EmailCopy {
     }
 
     private static final List<String> SUBJECT_SEED_FILES = ["PasswordResetEmailSeedData", "TwoFactorSeedData",
-            "TenantWelcomeEmailSeedData", "AuditDigestEmailSeedData", "OpsNoticeSeedData"]
+            "TenantWelcomeEmailSeedData", "AuditDigestEmailSeedData", "OpsNoticeSeedData", "OpsSeedData"]
     private static volatile Map<String, String> seedSubjectsCache
 
     /** Test-only: drops the seed caches and the log-once memory so the next call re-reads. Idempotent, never throws. */

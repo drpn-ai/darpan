@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-015 (spec E, F). The two jobs behind Darpan's own error reporting: the hourly check that sends the daily error
+     email once at errors.digest.hourUtc, and the 5-minute flush of the captured ERROR log lines. ServiceJobs only
+     (data/OpsSeedData.xml); never remote. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="send" noun="DueErrorDigest" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>When the UTC hour of nowStamp is errors.digest.hourUtc and today's email is not claimed yet: claims the day,
+            reads run errors, the watchdog and the log rows across every tenant (read-only), emails the digest to
+            errors.email.to (every day, "none" included) and posts a one-line summary to errors.chat.webhookUrl.
+            darpan.ops.ErrorDigestSupport.sendIfDue.</description>
+        <in-parameters>
+            <parameter name="nowStamp" type="Timestamp" default="ec.user.nowTimestamp">
+                <description>The moment to judge "due" at; pinned by tests, now otherwise.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcome" type="Map"><description>sent, reason (null, NOT_THE_HOUR, ALREADY_SENT, NO_DESTINATION,
+                DELIVERY_FAILED), subject and warnings when it ran.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="outcome" from="darpan.ops.ErrorDigestSupport.sendIfDue(ec, nowStamp)"/>
+        </actions>
+    </service>
+
+    <service verb="flush" noun="ErrorLog" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Stores the ERROR log lines captured in memory since the last flush (darpan.ops.ErrorLogCapture.flush, its own
+            transaction, never throws), then deletes the stored rows more than 30 days old.</description>
+        <actions>
+            <script>darpan.ops.ErrorLogCapture.flush(ec)</script>
+            <service-call name="ops.OpsServices.purge#ErrorLogEntries"/>
+        </actions>
+    </service>
+</services>

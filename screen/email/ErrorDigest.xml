@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-015 (spec F) the daily Darpan error email, to Darpan's own staff only: run errors, the watchdog, log errors, then the
+     footer, built by darpan.ops.ErrorDigestMessage from the digest the send passes (digestBody), every value escaped there.
+     Its words are DARPAN_ERROR_DIGEST copy blocks. send#EmailTemplate renders this screen twice: html for the body, text for
+     the plain-text alternative; the admin preview passes the sample from EmailSamples, so a draft's words show. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <actions>
+        <set field="digestCopy" from="new darpan.email.EmailCopyReader(ec, 'DARPAN_ERROR_DIGEST')"/>
+        <set field="digestHtml" from="darpan.ops.ErrorDigestMessage.emailHtml(digestBody ?: [:], digestCopy)"/>
+        <set field="digestText" from="darpan.ops.ErrorDigestMessage.emailText(digestBody ?: [:], digestCopy)"/>
+    </actions>
+    <widgets>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${digestHtml}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${digestText}]]></text>
+        </render-mode>
+    </widgets>
+</screen>

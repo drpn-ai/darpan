@@ -2,8 +2,8 @@
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <!-- DAR-BE-015. Instance-wide operations records for Darpan's own staff. No companyUserGroupId and no
-         DARPAN_ACTIVE_COMPANY_SCOPE filter: tenantId is a plain value, and the only reader/writer is
-         darpan.ops.ErrorChatSupport (through ops.OpsServices.record#RunErrorNotice). -->
+         DARPAN_ACTIVE_COMPANY_SCOPE filter: tenantId is a plain value. Written through ops.OpsServices only; read by
+         darpan.ops.ErrorChatSupport and the daily error email (darpan.ops.ErrorDigestSupport). -->
 
     <entity entity-name="RunErrorNotice" package="darpan.ops" use="transactional" cache="never">
         <description>One Darpan error card posted for a check (or an automation with no check) on a run day. The row is the
@@ -30,5 +30,16 @@
         <field name="firstSeen" type="date-time"/>
         <field name="lastSeen" type="date-time"/>
         <field name="tenantId" type="id"/>
+    </entity>
+    <entity entity-name="ErrorDigestSend" package="darpan.ops" use="transactional" cache="never">
+        <description>The daily Darpan error email (darpan.ops.ErrorDigestSupport): one row per UTC day, created before anything is
+            read or sent (the claim), so two nodes or two job threads send it once. The next email covers everything since the
+            latest row's sentDate.</description>
+        <field name="digestDay" type="date" is-pk="true"><description>The UTC day of the send.</description></field>
+        <field name="claimedDate" type="date-time"><description>When the day was claimed.</description></field>
+        <field name="sentDate" type="date-time"><description>The end of the window the email covered (the claim's moment). Cleared when
+            no email went out (no address, or the send failed), so the next email covers this day again.</description></field>
+        <field name="checksCount" type="number-integer"/>
+        <field name="logErrorsCount" type="number-integer"/>
     </entity>
 </entities>

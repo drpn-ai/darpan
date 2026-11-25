@@ -2343,4 +2343,53 @@ Review each record before loading into an environment.
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].isExchangeOrder"
             label="Exchange order" fieldType="string" sequenceNum="14"
             description="DAR-BE-318: Y when the order carries an EXCHANGE item association, else N. Written by the orders extract on every window read whatever it keeps; the built-in Keep line (keepLinesJson) sets the Y orders aside unless the side keeps exchange orders (keepExchangeOrders). Conclusion lookups write no flag."/>
+    <!-- DAR-BE-015 — run error delivery (restated verbatim from OpsNoticeSeedData.xml, OpsSeedData.xml and EmailCopySeedData.xml).
+         FK order: the SYSTEM EmailServer by id alone, then the templates, then their copy blocks. A copy block ships its
+         defaultText only, so a production edit (copyText) survives. The two ServiceJobs state defaults only.
+         Entities (darpan.ops.RunErrorNotice, ErrorLogEntry, ErrorDigestSend, the new execution fields) come by add-missing. -->
+    <moqui.basic.email.EmailServer emailServerId="SYSTEM"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_ERROR_NOTICE" description="Darpan run did not run (chat line, not an email)"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan run notice"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/ErrorNotice.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_ERROR_DIGEST" description="Darpan daily error email (Darpan staff only)"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${digestSubject}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/ErrorDigest.xml"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.notrun"
+            defaultText="${name} did not run this morning. Darpan has been alerted and is working on a fix."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="intro" defaultText="${checks} checks and ${logErrors} log errors since the last email. Each one is below, with what it said."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="none" defaultText="Nothing went wrong since the last email: every run ran, every check is on time and the log is clean."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="runs.title" defaultText="Run errors"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="runs.none" defaultText="No run errors."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="run.streak" defaultText="${days} days in a row"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="run.counts" defaultText="Read ${read}. Kept ${kept}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="run.files" defaultText="Files: ${files}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="watchdog.title" defaultText="Watchdog"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="watchdog.none" defaultText="Every check ran in time."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="watchdog.stale" defaultText="No successful scheduled run since ${last}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="watchdog.never" defaultText="No successful scheduled run yet."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="watchdog.noautomation" defaultText="Its statement is on, but the check has no automation to run it."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="watchdog.emptystreak" defaultText="Its last ${days} scheduled runs read nothing on either side."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="logs.title" defaultText="Log errors"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="logs.none" defaultText="No log errors."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="log.seen" defaultText="${count} times, first ${first}, last ${last}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="log.stack" defaultText="Stack"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="footer" defaultText="Instance ${instance}. Covers ${since} to ${now}. Generated ${generatedAt}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="chat.sent" defaultText="Darpan errors today: ${checks} checks, ${logErrors} log errors. Email sent to ${addresses}."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="chat.noemail" defaultText="Darpan errors today: ${checks} checks, ${logErrors} log errors. No email was sent: no address is set."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="chat.failed" defaultText="Darpan errors today: ${checks} checks, ${logErrors} log errors. The email to ${addresses} could not be sent."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="guides" defaultText="Automations and alerts|troubleshooting/automations-and-alerts&#10;Audits|troubleshooting/audits"/>
+    <!-- DAR-BE-015: the audit run update says a check did not run, and that Darpan is on it (notrun reworded; rule.notrun, rule.partly new). -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run this morning. Darpan has been alerted and is working on a fix."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.notrun" defaultText="Did not run this morning."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.partly" defaultText="${notRun} of ${total} checks did not run this morning."/>
+    <moqui.service.job.ServiceJob jobName="send_ErrorDigest_hourly" expireLockTime="50"
+            description="Send the daily Darpan error email at errors.digest.hourUtc, once a day, even when there is nothing to report."
+            serviceName="ops.ErrorDigestServices.send#DueErrorDigest"
+            defaultCronExpression="0 5 * * * ?" defaultPaused="N" minIntervalMinutes="30"/>
+    <moqui.service.job.ServiceJob jobName="flush_ErrorLog_5m" expireLockTime="10"
+            description="Store the ERROR log lines captured in memory and delete stored lines more than 30 days old."
+            serviceName="ops.ErrorDigestServices.flush#ErrorLog"
+            defaultCronExpression="0 0/5 * * * ?" defaultPaused="N" minIntervalMinutes="1"/>
 </entity-facade-xml>

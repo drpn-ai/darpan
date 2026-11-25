@@ -38,9 +38,11 @@ class EmailTemplatesRenderTests {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/EmailCopySeedData.xml")
         // DAR-BE-334: the scheduled query email (QueryResult.xml) seeds its words beside its template, which FKs the
         // SYSTEM EmailServer that PasswordResetEmailSeedData.xml seeds
-        // DAR-BE-015: the run error notice (ErrorNotice.xml, a chat line the admin editor previews) seeds its own words
+        // DAR-BE-015: the run error notice (ErrorNotice.xml, a chat line the admin editor previews) seeds its own words, and so
+        // does the daily Darpan error email (ErrorDigest.xml, OpsSeedData.xml)
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/PasswordResetEmailSeedData.xml",
-                "component://darpan/data/QueryEmailSeedData.xml", "component://darpan/data/OpsNoticeSeedData.xml")
+                "component://darpan/data/QueryEmailSeedData.xml", "component://darpan/data/OpsNoticeSeedData.xml",
+                "component://darpan/data/OpsSeedData.xml")
         previews = Path.of("build", "email-previews")
         Files.createDirectories(previews)
     }
@@ -288,7 +290,8 @@ class EmailTemplatesRenderTests {
     @Test
     void everyBlockTheAuditBuildersReadIsSeeded() {
         [["src/main/groovy/darpan/audit/AuditRunMessage.groovy", "DARPAN_AUDIT_RUN"],
-         ["src/main/groovy/darpan/audit/AuditDigestSupport.groovy", "DARPAN_AUDIT_DIGEST"]].each { List f ->
+         ["src/main/groovy/darpan/audit/AuditDigestSupport.groovy", "DARPAN_AUDIT_DIGEST"],
+         ["src/main/groovy/darpan/ops/ErrorDigestMessage.groovy", "DARPAN_ERROR_DIGEST"]].each { List f ->
             String x = new File(f[0] as String).text
             Set<String> blocks = (x =~ /copy\.text\(\s*['"]([a-z.]+)['"]/).collect { it[1] as String }.toSet()
             assertTrue(blocks.size() >= 10, "${f[0]}: the scan found the reads (${blocks})")

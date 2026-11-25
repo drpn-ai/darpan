@@ -32,7 +32,31 @@ class EmailSamples {
                             digestSubject: "Month close · 2026-10 · Thu 22 Oct"],
             AuditRun     : [runSubject: "Gorjana Month close, 1–10 November: 57 open findings", runFacts: AuditEmailSamples.runFacts(),
                             runWords: AuditEmailSamples.runWords(), runBase: AuditEmailSamples.BASE],
+            // DAR-BE-015: the daily Darpan error email (Darpan staff only), built by the screen from the digest a send passes.
+            ErrorDigest  : [digestSubject: "[app.drpn.ai] Darpan errors 2026-11-25: 2 checks, 37 log errors", digestBody: errorDigest()],
     ].asImmutable()
+
+    private static java.sql.Timestamp at(String instant) { java.sql.Timestamp.from(java.time.Instant.parse(instant)) }
+
+    /** A day with one dead-lettered check, one check with no automation and one log error (made-up tenant and values). */
+    static Map errorDigest() {
+        return [instance : "app.drpn.ai", since: at("2026-11-24T12:05:00Z"), now: at("2026-11-25T12:05:00Z"),
+                generatedAt: at("2026-11-25T12:05:09Z"), emptyStreakDays: 7,
+                counts   : [checks: 2, logErrors: 37],
+                tenantNames: [MALBON: "Malbon"], automationNames: [:],
+                runErrors: [[tenant: "MALBON", auditName: "Month close", statement: "R1", check: "completed-not-billed", automationId: "A1",
+                             kind: "DEAD_LETTER", triggerType: "scheduled", daysInARow: 2,
+                             errorText: "Keep runs on the extract's records array, and this side's key paths do not read it.",
+                             readCounts: [file1: 6982, file2: 29963], keptCounts: [file1: 5525, file2: 0],
+                             files: ["oms-order-lines.json", "netsuite-invoices.json"],
+                             runUrl: "https://app.drpn.ai/reconciliation/run-live/SR1/RR1?tenantId=MALBON",
+                             completedDate: at("2026-11-25T09:20:00Z")]],
+                watchdog : [[tenant: "MALBON", auditName: "Month close", statement: "R4", check: "returns-vs-credit-memos",
+                             kind: "NO_AUTOMATION", lastSuccessDate: null]],
+                logErrors: [[fingerprint: "darpan.reconciliation.X Extract # failed", loggerName: "darpan.reconciliation.X", count: 37,
+                             sampleMessage: "Extract 4711 failed", sampleStack: "java.lang.IllegalStateException: Extract 4711 failed\n\tat darpan.reconciliation.X.run(X.groovy:12)",
+                             firstSeen: at("2026-11-25T01:00:00Z"), lastSeen: at("2026-11-25T02:00:00Z"), tenantId: "MALBON"]]]
+    }
 
     /** DAR-BE-015: chat lines kept as copy (never sent as email); the admin editor previews them through their screen. */
     static final Map<String, Map> CHAT = [

@@ -41,7 +41,7 @@ class EmailAdminServicesSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "email-admin-services")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ["PasswordResetEmailSeedData.xml", "TwoFactorSeedData.xml", "TenantWelcomeEmailSeedData.xml",
-         "AuditDigestEmailSeedData.xml", "EmailCopySeedData.xml", "OpsNoticeSeedData.xml"].each {
+         "AuditDigestEmailSeedData.xml", "EmailCopySeedData.xml", "OpsNoticeSeedData.xml", "OpsSeedData.xml"].each {
             ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/${it}")
         }
     }
@@ -75,10 +75,10 @@ class EmailAdminServicesSmokeTests {
     // ---------------------------------------------------------------- reads
 
     @Test
-    void theListIsTheThirteenEmailsAndTheShowCarriesBlocksWithVariables() {
+    void theListIsTheFourteenEmailsAndTheShowCarriesBlocksWithVariables() {
         List<Map> templates = ok(svc("get#EmailTemplates", [:])).result.templates
-        assertEquals(13, templates.size())
-        assertEquals(13, templates*.emailTemplateId.toSet().size())
+        assertEquals(14, templates.size())
+        assertEquals(14, templates*.emailTemplateId.toSet().size())
         assertEquals([0], templates*.editedBlockCount.unique())
         Map changed = templates.find { it.emailTemplateId == CHANGED }
         assertEquals("Your Darpan password was changed", changed.subject)
@@ -308,7 +308,7 @@ class EmailAdminServicesSmokeTests {
         Map out = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: ["act.heading": "Do these first"]])).result
         assertTrue((out.html as String).contains("DO THESE FIRST") && (out.text as String).contains("Do these first"), out.text)
         assertFalse((out.html as String).contains("ACT ON FIRST"))
-        assertTrue((out.html as String).contains("Gorjana · Month close") && (out.html as String).contains("did not run on this morning"))
+        assertTrue((out.html as String).contains("Gorjana · Month close") && (out.html as String).contains("did not run this morning"))
         Map dig = ok(svc("preview#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_DIGEST", blocks: ["list.oldest": "Stuck longest"]])).result
         assertTrue((dig.text as String).contains("Stuck longest") && !(dig.text as String).contains("Oldest open"), dig.text)
         assertTrue((svc("update#EmailTemplate", [emailTemplateId: "DARPAN_AUDIT_RUN", blocks: [button: "Open https://evil.example"]])
@@ -412,7 +412,7 @@ class EmailAdminServicesSmokeTests {
         EmailCopy.seedSubjects(ec).each { String id, String subject ->
             assertNull(EmailCopy.subjectProblem(ec, id, subject), id)
         }
-        assertEquals(13, EmailCopy.seedSubjects(ec).size())
+        assertEquals(14, EmailCopy.seedSubjects(ec).size())
     }
 
     /** DAR-BE-015: the run error notice (a chat line, not an email) is shown, edited and used like any other copy. */

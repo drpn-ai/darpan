@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-015. Store for the Darpan-only error card. Internal: called by darpan.ops.ErrorChatSupport. -->
+<!-- DAR-BE-015. Store for the Darpan-only error card, the error log and the daily error email. Internal: called by
+     darpan.ops.ErrorChatSupport, darpan.ops.ErrorLogCapture and darpan.ops.ErrorDigestSupport. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
@@ -74,6 +75,77 @@
                     </else>
                 </if>
             </iterate>
+        </actions>
+    </service>
+    <service verb="purge" noun="ErrorLogEntries" authenticate="anonymous-all" allow-remote="false">
+        <description>Deletes the ErrorLogEntry rows whose logDay is more than 30 days before today (UTC). Internal: called by
+            ops.ErrorDigestServices.flush#ErrorLog.</description>
+        <in-parameters>
+            <parameter name="nowStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="purged" type="Integer"/></out-parameters>
+        <actions>
+            <set field="oldest" from="java.sql.Date.valueOf(nowStamp.toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate().minusDays(30))"/>
+            <entity-delete-by-condition entity-name="darpan.ops.ErrorLogEntry">
+                <econdition field-name="logDay" operator="less" from="oldest"/>
+            </entity-delete-by-condition>
+        </actions>
+    </service>
+
+    <service verb="claim" noun="ErrorDigestDay" authenticate="anonymous-all" allow-remote="false" transaction="force-new">
+        <description>Claims the daily error email's UTC day before anything is read or sent. isNew is false when the day already
+            has a row (nothing is written). Otherwise the row is created with sentDate = nowStamp, and previousSentDate is the
+            latest earlier day's sentDate (null when none), where the new email's window starts. Two callers at once: the
+            second create fails on the key and that caller sends nothing.</description>
+        <in-parameters>
+            <parameter name="digestDay" type="Date" required="true"/>
+            <parameter name="nowStamp" type="Timestamp" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="isNew" type="Boolean"/>
+            <parameter name="previousSentDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="isNew" from="false"/>
+            <entity-find-one entity-name="darpan.ops.ErrorDigestSend" value-field="existing" cache="false">
+                <field-map field-name="digestDay"/>
+            </entity-find-one>
+            <if condition="existing == null">
+                <entity-find entity-name="darpan.ops.ErrorDigestSend" list="earlier" limit="1">
+                    <econdition field-name="digestDay" operator="less" from="digestDay"/>
+                    <econdition field-name="sentDate" operator="is-not-null"/>
+                    <order-by field-name="-sentDate"/>
+                </entity-find>
+                <set field="previousSentDate" from="earlier ? earlier[0].sentDate : null"/>
+                <entity-make-value entity-name="darpan.ops.ErrorDigestSend" value-field="send"/>
+                <set field="send.digestDay" from="digestDay"/>
+                <set field="send.claimedDate" from="ec.user.nowTimestamp"/>
+                <set field="send.sentDate" from="nowStamp"/>
+                <entity-create value-field="send"/>
+                <set field="isNew" from="true"/>
+            </if>
+        </actions>
+    </service>
+
+    <service verb="finish" noun="ErrorDigestDay" authenticate="anonymous-all" allow-remote="false" transaction="force-new">
+        <description>Records what the claimed day's email held. delivered false (no address, or the send failed) clears
+            sentDate, so the next email covers this day again.</description>
+        <in-parameters>
+            <parameter name="digestDay" type="Date" required="true"/>
+            <parameter name="delivered" type="Boolean" required="true"/>
+            <parameter name="checksCount" type="Integer"/>
+            <parameter name="logErrorsCount" type="Integer"/>
+        </in-parameters>
+        <actions>
+            <entity-find-one entity-name="darpan.ops.ErrorDigestSend" value-field="send" cache="false" for-update="true">
+                <field-map field-name="digestDay"/>
+            </entity-find-one>
+            <if condition="send != null">
+                <set field="send.checksCount" from="checksCount"/>
+                <set field="send.logErrorsCount" from="logErrorsCount"/>
+                <if condition="!delivered"><set field="send.sentDate" from="null"/></if>
+                <entity-update value-field="send"/>
+            </if>
         </actions>
     </service>
 </services>

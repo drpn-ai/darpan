@@ -441,7 +441,7 @@ class EmailTemplatesRenderTests {
             setCopy("DARPAN_AUDIT_RUN", "rule.clean", 'clean ${open}')
             assertEquals("clean", EmailCopy.text(ec, "DARPAN_AUDIT_RUN", "rule.clean", [:]))
             assertEquals("clean", new EmailCopyReader(ec, "DARPAN_AUDIT_RUN").text("rule.clean"))
-            assertTrue(render("AuditRun", AUDIT_RUN.AuditRunFull, "html").contains(">clean</td>"))
+            assertTrue(render("AuditRun", AUDIT_RUN.AuditRunClean, "html").contains(">clean</td>"))
             // a screen block the sender names a variable for but does not pass (no `smile` for the smile block itself)
             setCopy("DARPAN_PASSWORD_CHANGED", "smile", '${smile}')
             assertTrue(render("PasswordChanged", SECURITY.PasswordChanged, "html").contains("New password, who dis?"))

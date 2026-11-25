@@ -14,7 +14,7 @@ class AuditRunFacts {
 
     /**
      * {tenant {id, name}, audit {id, name}, period, date, window {from, thru}, totals {open, newToday, fixedToday},
-     * rules [{id, text, open, newToday, fixedToday, checksNotRun}], groups [{rule, cause, count, fixText, ids}]}.
+     * rules [{id, text, open, newToday, fixedToday, checksNotRun, checksTotal}], groups [{rule, cause, count, fixText, ids}]}.
      * A group is one rule and one cause; its count is the distinct orders and returns it holds. fixTextOf(rule, cause,
      * findingId) is asked once per group, with one finding of it, for the cause's fix; any {placeholder} it leaves is cut.
      */
@@ -32,7 +32,8 @@ class AuditRunFacts {
              open        : count(counts.open),
              newToday    : count(counts.newToday),
              fixedToday  : count(counts.fixedToday),
-             checksNotRun: ((st.checks ?: []) as List<Map>).findAll { it.status == "notRun" }*.id]
+             checksNotRun: ((st.checks ?: []) as List<Map>).findAll { it.status == "notRun" }*.id,
+             checksTotal : ((st.checks ?: []) as List).size()]
         }.sort(false) { Map a, Map b -> stepOrder(stepOf, a.id as String, b.id as String) }
 
         Map<String, Map> byKey = new LinkedHashMap<>()

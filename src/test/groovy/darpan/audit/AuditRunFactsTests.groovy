@@ -43,6 +43,7 @@ class AuditRunFactsTests {
         assertEquals([open: 57, newToday: 3, fixedToday: 1], facts.totals)
         assertEquals(["R2", "R9", "R10"], (facts.rules as List<Map>)*.id, "rules by number")
         assertEquals(["shopify-vs-netsuite"], (facts.rules as List<Map>).find { it.id == "R9" }.checksNotRun)
+        assertEquals([1, 1, 1], (facts.rules as List<Map>)*.checksTotal, "every rule carries how many checks it has")
     }
 
     // DAR-BE-250: statements follow the order's story, so the update lists rules and groups by each statement's step.
@@ -96,7 +97,7 @@ class AuditRunFactsTests {
         List<Map> widgets = sections[0].widgets as List<Map>
         assertEquals(3, widgets.size(), "findings line, what did not run, the button: no headline without a writer")
         assertTrue((widgets[0].decoratedText.text as String).contains(">57 open</font>  ·  3 new  ·  "))
-        assertTrue((widgets[1].decoratedText.text as String).contains("R9 did not run"))
+        assertTrue((widgets[1].decoratedText.text as String).contains("R9 did not run this morning. Darpan has been alerted and is working on a fix."))
         List buttons = widgets[2].buttonList.buttons as List
         assertEquals(1, buttons.size())
         assertEquals("Open the report", buttons[0].text)
@@ -144,7 +145,7 @@ class AuditRunFactsTests {
         List<String> hues = (html =~ /#[0-9a-fA-F]{6}\b/).collect { it as String }.findAll { String c -> c[1..2] != c[3..4] || c[3..4] != c[5..6] }
         assertTrue(hues.isEmpty(), "the email wears the app's monochrome light theme, greys only: ${hues.unique()}".toString())
         assertTrue(html.contains("'IBM Plex Mono'"), "the app's typeface")
-        assertTrue(html.contains("R9 did not run on this morning."))
+        assertTrue(html.contains("R9 did not run this morning. Darpan has been alerted and is working on a fix."))
 
         String written = AuditRunMessage.emailHtml(facts, [headline: "Mostly payments.", fixes: [("R10|" + RMA): "Credit each return."]], BASE, COPY)
         assertTrue(written.contains(">Credit each return.</div>"), "the writer's sentence wins")

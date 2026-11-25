@@ -87,8 +87,31 @@ class AuditRunMessage {
         return [line, calls, flags].findAll().join(" ") ?: null
     }
 
+    /** Rules none of whose checks ran (DAR-BE-015). */
     static List<String> rulesNotRun(Map facts) {
-        return rules(facts).findAll { it.checksNotRun }*.id as List<String>
+        return rules(facts).findAll { wholeNotRun(it) }*.id as List<String>
+    }
+
+    /** Rules with some checks run and some not (DAR-BE-015). */
+    static List<Map> rulesPartlyRan(Map facts) {
+        return rules(facts).findAll { it.checksNotRun && !wholeNotRun(it) }
+    }
+
+    private static boolean wholeNotRun(Map rule) {
+        int notRun = ((rule.checksNotRun ?: []) as List).size()
+        return notRun > 0 && notRun >= ((rule.checksTotal ?: 0) as int)
+    }
+
+    private static String partlyLine(Map rule, EmailCopyReader copy) {
+        return copy.text("rule.partly", [rule: rule.id, notRun: ((rule.checksNotRun ?: []) as List).size(), total: rule.checksTotal])
+    }
+
+    /** What a rule's row says: the neutral line, the partly line and its counts, or the counts. */
+    private static String ruleStatus(Map rule, EmailCopyReader copy) {
+        int open = rule.open as int
+        String counts = open ? copy.text("rule.open", [open: open]) : copy.text("rule.clean")
+        if (wholeNotRun(rule)) return copy.text("rule.notrun", [rule: rule.id])
+        return rule.checksNotRun ? "${partlyLine(rule, copy)} ${counts}".toString() : counts
     }
 
     /** Google Chat cardsV2: the counts, the writer's headline, what did not run, and the report's link. Nothing else. */
@@ -100,8 +123,12 @@ class AuditRunMessage {
                                               startIcon: [materialIcon: [name: "fact_check"]]]]]
         if (words?.headline) widgets << [textParagraph: [text: esc(words.headline as String)]]
         List<String> notRun = rulesNotRun(facts)
-        if (notRun) widgets << [decoratedText: [text     : "<font color=\"${AMBER}\">${esc(notRun.join(', '))} did not run</font>".toString(),
+        if (notRun) widgets << [decoratedText: [text     : "<font color=\"${AMBER}\">${esc(copy.text('notrun', [rules: notRun.join(', ')]))}</font>".toString(),
                                                 wrapText : true, startIcon: [materialIcon: [name: "warning"]]]]
+        rulesPartlyRan(facts).each { Map r ->
+            widgets << [decoratedText: [text: "<font color=\"${AMBER}\">${esc(partlyLine(r, copy))}</font>".toString(),
+                                        wrapText: true, startIcon: [materialIcon: [name: "warning"]]]]
+        }
         String reads = readsLine(facts, copy)
         if (reads) widgets << [decoratedText: [text: esc(reads), wrapText: true, startIcon: [materialIcon: [name: "sync"]]]]
         String url = reportUrl(base, facts)
@@ -123,8 +150,8 @@ class AuditRunMessage {
             String cell = "${F}padding:9px 0;border-top:1px solid ${LINE_SOFT};vertical-align:top;"
             rows << "<tr><td style=\"${cell}font-size:12px;color:${MUTED};width:44px;\">${esc(r.id)}</td>" <<
                     "<td style=\"${cell}padding-right:12px;font-size:13px;line-height:1.55;color:${open ? INK : DIM};\">${esc(firstSentence(r.text as String))}</td>" <<
-                    "<td style=\"${cell}font-size:13px;text-align:right;white-space:nowrap;color:${open ? INK : DIM};\">" <<
-                    "${esc(open ? copy.text('rule.open', [open: open]) : copy.text('rule.clean'))}</td></tr>"
+                    "<td style=\"${cell}font-size:13px;text-align:right;${r.checksNotRun ? 'max-width:260px;' : 'white-space:nowrap;'}color:${open ? INK : DIM};\">" <<
+                    "${esc(ruleStatus(r, copy))}</td></tr>"
         }
         StringBuilder act = new StringBuilder()
         actOnFirst(facts).each { Map g ->
@@ -193,7 +220,7 @@ ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
         }
         lines += ["", copy.text("rules.heading")]
         rules(facts).each { Map r ->
-            lines << "  ${r.id}  ${firstSentence(r.text as String)}: ${(r.open as int) ? copy.text('rule.open', [open: r.open]) : copy.text('rule.clean')}".toString()
+            lines << "  ${r.id}  ${firstSentence(r.text as String)}: ${ruleStatus(r, copy)}".toString()
         }
         rules(facts).findAll { (it.open as int) > 0 }.each { Map r ->
             lines += ["", "${copy.text('rule.head', [rule: r.id, open: r.open, new: r.newToday])} · ${firstSentence(r.text as String)}".toString()]

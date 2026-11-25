@@ -3,7 +3,7 @@ Run of 10 Nov 2026 · 1–10 November
 
 Mostly payments this morning.
 
-R9 did not run on this morning.
+R9 did not run this morning. Darpan has been alerted and is working on a fix.
 
 Open 57 · New 3 · Fixed 1
 
@@ -14,7 +14,7 @@ Act on first
 
 Rules
   R2  Every order is billed in NetSuite: 56 open
-  R9  Every Shopify order is in NetSuite: clean
+  R9  Every Shopify order is in NetSuite: R9 did not run this morning. Darpan has been alerted and is working on a fix.
   R10  Every return is credited: 1 open
 
 R2 · 56 open · 3 new · Every order is billed in NetSuite

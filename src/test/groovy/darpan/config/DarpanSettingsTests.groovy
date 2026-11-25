@@ -48,11 +48,50 @@ class DarpanSettingsTests {
 
     @Test void everyCatalogEntryParsesAndItsDefaultIsValid() {
         Map<String, SettingDefinition> cat = DarpanSettings.catalog()
-        assertEquals(35, cat.size(), "darpan catalog keys (DAR-BE-306 added the seven retention and purge keys, DAR-BE-320 the five audit-read keys, DAR-BE-318 the three dataset back-off keys, DAR-BE-325 the temporary-password keep days, DAR-BE-328 the sync pulse sample retention days; the agent keys live in darpan-agent): ${cat.keySet()}")
+        assertEquals(40, cat.size(), "darpan catalog keys (DAR-BE-015 added the five errors.* keys, DAR-BE-306 added the seven retention and purge keys, DAR-BE-320 the five audit-read keys, DAR-BE-318 the three dataset back-off keys, DAR-BE-325 the temporary-password keep days, DAR-BE-328 the sync pulse sample retention days; the agent keys live in darpan-agent): ${cat.keySet()}")
         cat.each { String k, SettingDefinition d ->
             assertNull(DarpanSettings.problem(k, d.defaultValue), "default of ${k}")
-            assertTrue(d.unit in ['minutes', 'days', 'percent', 'count', 'runs', 'usd', 'factor', 'switch'], "unit of ${k}: ${d.unit}")
+            assertTrue(d.unit in ['minutes', 'days', 'percent', 'count', 'runs', 'usd', 'factor', 'switch', 'hours', 'text'], "unit of ${k}: ${d.unit}")
         }
+    }
+
+    static final String ERR_TO = 'errors.email.to'
+    static final String ERR_HOOK = 'errors.chat.webhookUrl'
+
+    @Test void aStringSettingReadsItsTrimmedValue() {
+        rows([(ERR_TO): '  ops@drpn.ai,aditi@drpn.ai '])
+        assertEquals('ops@drpn.ai,aditi@drpn.ai', DarpanSettings.stringValue(ERR_TO))
+    }
+
+    @Test void anUnsetStringSettingIsNull() {
+        assertNull(DarpanSettings.stringValue(ERR_HOOK))
+    }
+
+    @Test void aStringSettingOver2000CharsIsInvalid() {
+        rows([(ERR_TO): 'a' * 2001])
+        assertNull(DarpanSettings.stringValue(ERR_TO))
+    }
+
+    @Test void aSecretSettingIsListedMasked() {
+        String url = 'https://chat.googleapis.com/v1/spaces/AAA/messages?key=k&token=abcdef123456'
+        assertEquals('\u2026123456', DarpanSettings.masked(ERR_HOOK, url))
+        assertNull(DarpanSettings.masked(ERR_HOOK, null))
+        assertEquals('ops@drpn.ai', DarpanSettings.masked(ERR_TO, 'ops@drpn.ai'))
+        rows([(ERR_HOOK): url])
+        Map d = DarpanSettings.describe(ERR_HOOK)
+        assertEquals('\u2026123456', d.rowValue)
+        assertEquals('\u2026123456', d.effectiveValue)
+        assertEquals(true, d.secret)
+        assertEquals(url, DarpanSettings.stringValue(ERR_HOOK))
+    }
+
+    @Test void theErrorKeysHaveTheirDefaults() {
+        assertEquals(12, DarpanSettings.intValue('errors.digest.hourUtc'))
+        assertEquals(30, DarpanSettings.intValue('errors.watchdog.hours'))
+        assertEquals(7, DarpanSettings.intValue('errors.emptyStreak.days'))
+        rows(['errors.digest.hourUtc': '24'])
+        assertEquals(12, DarpanSettings.intValue('errors.digest.hourUtc'))
+        assertNull(DarpanSettings.parse(DarpanSettings.catalog().get('errors.digest.hourUtc'), '24'))
     }
 
     @Test void noRowAndNoPropertyGivesTheDefault() {

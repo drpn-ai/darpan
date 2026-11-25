@@ -26,10 +26,12 @@ class DarpanSettings {
 
     static final String ENTITY = 'darpan.config.DarpanSetting'
     static final String CATALOG_RESOURCE = 'darpan/settings-catalog.json'
+    /** Longest STRING value (after trimming). */
+    static final int STRING_MAX = 2000
     static final long REFRESH_MILLIS = 30_000L
     // The middle dot is written as an escape: Groovy reads source in the platform encoding, the catalog JSON is UTF-8.
     private static final List<String> AREA_ORDER = ['Runs', 'Run health', 'Audit reads', 'Datasets', 'Two-factor', 'Accounts', 'Agent \u00B7 Router', 'Agent \u00B7 Investigator', 'Agent \u00B7 Author',
-                                                                'Agent \u00B7 Writers', 'Agent \u00B7 Gateway', 'Retention']
+                                                                'Agent \u00B7 Writers', 'Agent \u00B7 Gateway', 'Retention', 'Errors']
     private static final String WHY = 'instance settings: tenant-neutral tunables'
 
     /** Seam: row map by key ([settingValue, note, lastChangedByUserId, lastChangedDate]); null means no rows. */
@@ -64,6 +66,15 @@ class DarpanSettings {
     static Integer optionalIntValue(String key) {
         if (!definition(key).optional) throw new IllegalArgumentException("Setting ${key} always has a value; read it with intValue".toString())
         return (Integer) read(key, 'INT')
+    }
+    /** A STRING setting: trimmed; null when unset or blank. */
+    static String stringValue(String key) { return (String) read(key, 'STRING') }
+    /** The value as the admin app shows it: a secret key keeps only an ellipsis and its last 6 characters. */
+    static String masked(String key, String value) {
+        if (value == null) return null
+        SettingDefinition d = catalog().get(key)
+        if (d == null || !d.secret) return value
+        return '\u2026' + (value.length() <= 6 ? value : value.substring(value.length() - 6))
     }
     static boolean booleanValue(String key) { return (boolean) read(key, 'BOOLEAN') }
     static BigDecimal decimalValue(String key) { return (BigDecimal) read(key, 'DECIMAL') }
@@ -157,18 +168,18 @@ class DarpanSettings {
                         min: m.min == null ? null : new BigDecimal(m.min.toString()),
                         max: m.max == null ? null : new BigDecimal(m.max.toString()),
                         maxItems: m.maxItems == null ? null : ((Number) m.maxItems).intValue(),
-                        lessThan: m.lessThan, optional: m.optional == true, managedBy: m.managedBy)
+                        lessThan: m.lessThan, optional: m.optional == true, managedBy: m.managedBy, secret: m.secret == true)
             } catch (Exception e) {
                 warnOnce('entry|' + source + '|' + m.key, "Skipping malformed setting {} in {}: {}", m.key, source, e.toString())
                 continue
             }
-            if (!d.key || !(d.type in ['INT', 'BOOLEAN', 'DECIMAL', 'INT_LIST'])) {
+            if (!d.key || !(d.type in ['INT', 'BOOLEAN', 'DECIMAL', 'INT_LIST', 'STRING'])) {
                 warnOnce('entry|' + source + '|' + m.key, "Skipping malformed setting {} in {}", m.key, source)
             } else if (out.containsKey(d.key)) {
                 warnOnce('entry|' + source + '|' + d.key, "Setting {} twice in {}; keeping the first", d.key, source)
             } else if (d.optional && d.defaultValue == null) {
-                if (d.type != 'INT') {
-                    warnOnce('entry|' + source + '|' + d.key, "Skipping setting {} in {}: only an INT setting may be optional", d.key, source)
+                if (!(d.type in ['INT', 'STRING'])) {
+                    warnOnce('entry|' + source + '|' + d.key, "Skipping setting {} in {}: only an INT or STRING setting may be optional", d.key, source)
                 } else {
                     out.put(d.key, d)
                 }
@@ -218,6 +229,8 @@ class DarpanSettings {
                     if (t.equalsIgnoreCase('true')) return Boolean.TRUE
                     if (t.equalsIgnoreCase('false')) return Boolean.FALSE
                     return null
+                case 'STRING':
+                    return t.length() <= STRING_MAX ? t : null
                 case 'INT_LIST':
                     List<Integer> list = []
                     for (String part : t.split(',', -1)) {
@@ -256,7 +269,7 @@ class DarpanSettings {
         if (text == null) return null
         Object v = parse(sd, text)
         if (v == null) {
-            String shown = text.length() > 200 ? text.substring(0, 200) + '...' : text
+            String shown = sd.secret ? masked(sd.key, text) : (text.length() > 200 ? text.substring(0, 200) + '...' : text)
             warnOnce(sd.key + '|' + origin + '|' + shown, "Setting {}: ignoring {} value '{}' (not a valid {} in range); using the next source", sd.key, origin, shown, sd.type)
         }
         return v
@@ -340,14 +353,25 @@ class DarpanSettings {
 
     // ------------------------------------------------------------------ describe and validate
 
+    /** The setting as the admin app lists it; a secret key's values are masked. */
     static Map describe(String key) {
+        Map m = describeUnmasked(key)
+        SettingDefinition d = definition(key)
+        if (d.secret) {
+            for (String f : ['propertyValue', 'rowValue', 'effectiveValue', 'defaultValue']) m.put(f, masked(key, (String) m.get(f)))
+        }
+        return m
+    }
+
+    /** As describe, with every value in full: for code that must parse or use it, never for a listing or an audit row. */
+    static Map describeUnmasked(String key) {
         SettingDefinition d = definition(key)
         Map r = resolve(d)
         Map row = rows().get(key)
         return [
                 key: d.key, type: d.type, area: d.area, unit: d.unit, description: d.description,
                 defaultValue: d.defaultValue, min: d.min, max: d.max, maxItems: d.maxItems, lessThan: d.lessThan,
-                optional: d.optional, managedBy: d.managedBy,
+                optional: d.optional, managedBy: d.managedBy, secret: d.secret == true,
                 propertyValue: System.getProperty(key), rowValue: row?.settingValue?.toString(),
                 effectiveValue: render(r.value), source: r.source,
                 note: row?.note, lastChangedByUserId: row?.lastChangedByUserId, lastChangedDate: row?.lastChangedDate]
@@ -403,6 +427,7 @@ class DarpanSettings {
             case 'INT_LIST':
                 return "a comma-separated list of ${d.maxItems != null ? "1 to ${d.maxItems}" : 'some'} different whole numbers, each ${d.min} to ${d.max}".toString()
             case 'DECIMAL': return "a number from ${d.min} to ${d.max}".toString()
+            case 'STRING': return "text of at most ${STRING_MAX} characters".toString()
             default: return "a whole number from ${d.min} to ${d.max}".toString()
         }
     }

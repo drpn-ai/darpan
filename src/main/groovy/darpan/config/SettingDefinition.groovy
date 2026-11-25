@@ -9,10 +9,10 @@ import groovy.transform.Immutable
 @Immutable
 class SettingDefinition {
     String key
-    /** INT, BOOLEAN, DECIMAL or INT_LIST. */
+    /** INT, BOOLEAN, DECIMAL, INT_LIST or STRING. */
     String type
     String area
-    /** minutes, days, percent, count, runs, usd, factor, switch, ms, tokens or chars. */
+    /** minutes, hours, days, percent, count, runs, usd, factor, switch, text, ms, tokens or chars. */
     String unit
     String description
     String defaultValue
@@ -28,4 +28,6 @@ class SettingDefinition {
      * key and points there, because that service carries a guard the generic editor cannot (a fresh preview).
      */
     String managedBy
+    /** True for a STRING that is a credential (a webhook URL): listed and shown masked, never in full. */
+    Boolean secret
 }

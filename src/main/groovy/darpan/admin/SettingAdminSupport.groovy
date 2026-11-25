@@ -1,6 +1,7 @@
 package darpan.admin
 
 import darpan.config.DarpanSettings
+import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.transform.CompileDynamic
 
 /**
@@ -20,6 +21,17 @@ class SettingAdminSupport {
     }
 
     static final int NOTE_MAX = 255
+    static final String ERRORS_CHAT_WEBHOOK_KEY = 'errors.chat.webhookUrl'
+
+    /** The errors chat space is a Google Chat or Slack incoming webhook (host-pinned, as a tenant's is); null when text is fine or blank. */
+    private static String webhookProblem(String settingKey, String text) {
+        if (settingKey != ERRORS_CHAT_WEBHOOK_KEY || !text) return null
+        String google = TenantNotificationSupport.validateGoogleChatWebhookUrl(text)
+        if (google == null) return null
+        String slack = TenantNotificationSupport.validateSlackWebhookUrl(text)
+        if (slack == null) return null
+        return "${settingKey} must be a Google Chat (chat.googleapis.com) or Slack (hooks.slack.com) webhook URL.".toString()
+    }
 
     static Map update(def ec, String settingKey, String value, String note) {
         String refused = managedRefusal(settingKey)
@@ -27,6 +39,8 @@ class SettingAdminSupport {
         String text = value?.trim()
         String problem = DarpanSettings.problem(settingKey, text)
         if (problem != null) return [error: problem]
+        String hookProblem = webhookProblem(settingKey, text)
+        if (hookProblem != null) return [error: hookProblem]
         String cleanNote = note?.trim() ?: null
         if (cleanNote != null && cleanNote.length() > NOTE_MAX) {
             return [error: "The note is ${cleanNote.length()} characters; the most is ${NOTE_MAX}.".toString()]
@@ -46,7 +60,7 @@ class SettingAdminSupport {
      */
     static void save(def ec, String settingKey, String text, String cleanNote, String serviceName) {
         String before = DarpanSettings.describe(settingKey).effectiveValue
-        String audit = "${settingKey}: ${before} -> ${text}${cleanNote ? " (${cleanNote})" : ""}".toString()
+        String audit = "${settingKey}: ${before} -> ${DarpanSettings.masked(settingKey, text)}${cleanNote ? " (${cleanNote})" : ""}".toString()
         ec.transaction.runRequireNew(null, "Could not save setting ${settingKey}", {
             ec.service.sync().name("store#" + ENTITY).parameters([settingKey: settingKey, settingValue: text, note: cleanNote,
                     lastChangedByUserId: ec.user.userId, lastChangedDate: ec.user.nowTimestamp]).requireNewTransaction(false).call()
@@ -63,19 +77,19 @@ class SettingAdminSupport {
     static String remove(def ec, String settingKey, String serviceName) {
         def row = ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).one()
         if (row == null) return DarpanSettings.describe(settingKey).effectiveValue
-        Map d = DarpanSettings.describe(settingKey)
+        Map d = DarpanSettings.describeUnmasked(settingKey)
         def sd = DarpanSettings.catalog().get(settingKey)
         String prop = d.propertyValue
         boolean byProperty = prop != null && DarpanSettings.parse(sd, prop) != null
         String after = byProperty ? prop : d.defaultValue
-        String audit = "${settingKey}: ${d.effectiveValue} -> ${byProperty ? "property" : "default"} ${after}".toString()
+        String audit = "${settingKey}: ${DarpanSettings.masked(settingKey, d.effectiveValue)} -> ${byProperty ? "property" : "default"} ${DarpanSettings.masked(settingKey, after)}".toString()
         ec.transaction.runRequireNew(null, "Could not reset setting ${settingKey}", {
             ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).forUpdate(true).one()?.delete()
             record(ec, serviceName, settingKey, audit)
         })
         DarpanSettings.expire()
         DarpanSettings.expireAfterCommit(ec)
-        return after
+        return DarpanSettings.masked(settingKey, after)
     }
 
     private static void record(def ec, String serviceName, String settingKey, String audit) {
@@ -98,7 +112,7 @@ class SettingAdminSupport {
         if (refused != null) return [error: refused]
         def row = ec.entity.find(ENTITY).condition("settingKey", settingKey).useCache(false).one()
         if (row != null) {
-            Map d = DarpanSettings.describe(settingKey)
+            Map d = DarpanSettings.describeUnmasked(settingKey)
             // What is in force once the row is gone: a valid JVM property, else the default.
             String prop = d.propertyValue
             boolean byProperty = prop != null && DarpanSettings.parse(sd, prop) != null

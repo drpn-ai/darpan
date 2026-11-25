@@ -135,6 +135,12 @@
                                         "$ref": "#/components/schemas/UpdateEmailTemplateRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetFeedbackListRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ReplyFeedbackRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetKnowledgeEntryRequest"
                                     },
                                     {
@@ -1036,6 +1042,8 @@
                                         "admin.EmailAdminServices.preview#EmailTemplate": "#/components/schemas/PreviewEmailTemplateRequest",
                                         "admin.EmailAdminServices.reset#EmailTemplate": "#/components/schemas/ResetEmailTemplateRequest",
                                         "admin.EmailAdminServices.update#EmailTemplate": "#/components/schemas/UpdateEmailTemplateRequest",
+                                        "admin.FeedbackAdminServices.get#FeedbackList": "#/components/schemas/GetFeedbackListRequest",
+                                        "admin.FeedbackAdminServices.reply#Feedback": "#/components/schemas/ReplyFeedbackRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "#/components/schemas/GetKnowledgeEntryRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "#/components/schemas/GetKnowledgeForReviewRequest",
                                         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "#/components/schemas/GetKnowledgeIdentifiersRequest",
@@ -1449,6 +1457,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateEmailTemplateResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetFeedbackListResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ReplyFeedbackResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetKnowledgeEntryResponse"
@@ -5795,6 +5809,176 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateEmailTemplateResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetFeedbackListParams": {
+                "type": "object",
+                "properties": {
+                    "unansweredOnly": {
+                        "type": "boolean"
+                    },
+                    "limit": {
+                        "type": "integer"
+                    }
+                },
+                "description": "Feedback across tenants, unanswered first then newest: [feedbackId, tenant: [id, name], statement, cause, record,\n            note, sentBy, sentAt, ageDays, answer, answeredAt]. unansweredOnly (default true) leaves out the answered ones."
+            },
+            "GetFeedbackListResult": {
+                "type": "object",
+                "properties": {
+                    "feedback": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                }
+            },
+            "GetFeedbackListRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.FeedbackAdminServices.get#FeedbackList",
+                "x-darpan-method": "admin.FeedbackAdminServices.get#FeedbackList",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.FeedbackAdminServices.get#FeedbackList"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetFeedbackListParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetFeedbackListResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.FeedbackAdminServices.get#FeedbackList. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetFeedbackListResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ReplyFeedbackParams": {
+                "type": "object",
+                "properties": {
+                    "feedbackId": {
+                        "type": "string"
+                    },
+                    "answer": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "feedbackId",
+                    "answer"
+                ],
+                "description": "Answers one piece of feedback by email to its sender (their note quoted, then the answer) and saves the answer. A\n            second reply overwrites the answer and sends again. Refuses a blank answer and an unknown id; if the mail is not sent,\n            nothing is saved."
+            },
+            "ReplyFeedbackResult": {
+                "type": "object",
+                "properties": {
+                    "feedbackId": {
+                        "type": "string"
+                    },
+                    "answeredAt": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ReplyFeedbackRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.FeedbackAdminServices.reply#Feedback",
+                "x-darpan-method": "admin.FeedbackAdminServices.reply#Feedback",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.FeedbackAdminServices.reply#Feedback"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ReplyFeedbackParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ReplyFeedbackResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.FeedbackAdminServices.reply#Feedback. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ReplyFeedbackResult"
                     }
                 },
                 "required": [
@@ -42016,6 +42200,8 @@
         "admin.EmailAdminServices.preview#EmailTemplate": "PreviewEmailTemplate",
         "admin.EmailAdminServices.reset#EmailTemplate": "ResetEmailTemplate",
         "admin.EmailAdminServices.update#EmailTemplate": "UpdateEmailTemplate",
+        "admin.FeedbackAdminServices.get#FeedbackList": "GetFeedbackList",
+        "admin.FeedbackAdminServices.reply#Feedback": "ReplyFeedback",
         "admin.KnowledgeAdminServices.get#KnowledgeEntry": "GetKnowledgeEntry",
         "admin.KnowledgeAdminServices.get#KnowledgeForReview": "GetKnowledgeForReview",
         "admin.KnowledgeAdminServices.get#KnowledgeIdentifiers": "GetKnowledgeIdentifiers",

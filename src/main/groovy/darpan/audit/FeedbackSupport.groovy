@@ -176,6 +176,32 @@ class FeedbackSupport {
         }
     }
 
+    /**
+     * Darpan's answer to one note, by email to its sender (DARPAN_FEEDBACK_ANSWER: their note quoted, then the answer). The
+     * messageId, or null when it was not sent (no address on the sender, or the mail failed; logged at ERROR with the user id,
+     * never the address). The caller saves the answer only on a messageId, so a failed send leaves nothing to retry around.
+     */
+    static Object sendAnswer(def ec, def feedback, String answer) {
+        Map facts = [tenantId: feedback.companyUserGroupId, findingId: feedback.findingId, user: [id: feedback.sentByUserId]]
+        try {
+            Map user = userInfo(ec, feedback.sentByUserId as String)
+            if (!user.email) {
+                logger.error("Feedback answer {} for {}: the sender {} has no email address", feedback.feedbackId, feedback.companyUserGroupId, user.id)
+                return null
+            }
+            Map statement = statementOf(ec, feedback.companyUserGroupId as String, feedback.statementId as String)
+            Map body = [firstName: user.firstName, note: feedback.note, statementCode: statement?.statementCode ?: "",
+                        recordKey: feedback.recordKey ?: "", headline: feedback.headline ?: "", answer: answer]
+            Object messageId = isolated(ec, "answer", facts) { sendEmail.call(ec, user.email, TEMPLATE_ANSWER, body) }
+            if (!messageId) logger.error("Feedback answer {} for {} to user {} was not sent", feedback.feedbackId, feedback.companyUserGroupId, user.id)
+            return messageId
+        } catch (Throwable t) {
+            logger.error("Feedback answer {} for {} to user {} failed: {}", feedback.feedbackId, feedback.companyUserGroupId,
+                    feedback.sentByUserId, t.getClass().name)
+            return null
+        }
+    }
+
     /** What the card names, read after the save: tenant, statement, cause label, audit code, the app's link. */
     private static Map cardFacts(def ec, Map facts) {
         String tenantId = facts.tenantId as String

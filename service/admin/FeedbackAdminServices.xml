@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-361. Darpan staff (super admins) read the feedback tenant users sent about findings, across tenants, and answer one by
+  email (the answer is never shown in the app). admin.* and therefore inside the DARPAN_ADMIN_API fence (the pattern admin\..*
+  already covers this file), which carries no tenant filter, so these reads need no disableAuthz; each service checks super
+  admin again first. The reply is an admin mutation and writes darpan.admin.AdminAuditLog in the same transaction.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="FeedbackList" allow-remote="true" authenticate="true" authz-action="view">
+        <description>Feedback across tenants, unanswered first then newest: [feedbackId, tenant: [id, name], statement, cause, record,
+            note, sentBy, sentAt, ageDays, answer, answeredAt]. unansweredOnly (default true) leaves out the answered ones.</description>
+        <in-parameters>
+            <parameter name="unansweredOnly" type="Boolean" default="true"/>
+            <parameter name="limit" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters><parameter name="feedback" type="List"/></out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find entity-name="darpan.audit.AuditFindingFeedback" list="rows">
+                <econdition field-name="answeredStamp" operator="is-null" ignore="!unansweredOnly"/>
+                <order-by field-name="-sentStamp"/>
+                <order-by field-name="-feedbackId"/>
+            </entity-find>
+            <script><![CDATA[
+                // Unanswered first, newest first within each (the find is already newest first; the sort is stable).
+                List ordered = rows.sort(false) { a, b -> (a.answeredStamp != null ? 1 : 0) <=> (b.answeredStamp != null ? 1 : 0) }
+                int max = Math.max(1, (limit ?: 50) as int)
+                if (ordered.size() > max) ordered = ordered.subList(0, max)
+                long now = ec.user.nowTimestamp.time
+                Map tenantNames = [:]
+                Map userNames = [:]
+                Map statementCodes = [:]
+                ordered.each { r ->
+                    String t = r.companyUserGroupId
+                    if (!tenantNames.containsKey(t)) {
+                        def g = ec.entity.find("moqui.security.UserGroup").condition("userGroupId", t).useCache(false).one()
+                        tenantNames[t] = g?.description ?: t
+                    }
+                    String u = r.sentByUserId
+                    if (!userNames.containsKey(u)) {
+                        def a = ec.entity.find("moqui.security.UserAccount").condition("userId", u).useCache(false).one()
+                        userNames[u] = a?.userFullName ?: a?.username ?: u
+                    }
+                    String sid = r.statementId
+                    if (!statementCodes.containsKey(sid)) {
+                        def s = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", sid).useCache(false).one()
+                        statementCodes[sid] = s?.statementCode ?: sid
+                    }
+                }
+                feedback = ordered.collect { r ->
+                    [feedbackId: r.feedbackId, tenant: [id: r.companyUserGroupId, name: tenantNames[r.companyUserGroupId]],
+                     statement: statementCodes[r.statementId], cause: r.conclusionCode, record: r.recordKey, note: r.note,
+                     sentBy: userNames[r.sentByUserId], sentAt: ((java.sql.Timestamp) r.sentStamp).toInstant().toString(),
+                     ageDays: Math.max(0L, (now - ((java.sql.Timestamp) r.sentStamp).time).intdiv(86400000L)),
+                     answer: r.answer, answeredAt: r.answeredStamp != null ? ((java.sql.Timestamp) r.answeredStamp).toInstant().toString() : null]
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="reply" noun="Feedback" allow-remote="true" authenticate="true">
+        <description>Answers one piece of feedback by email to its sender (their note quoted, then the answer) and saves the answer. A
+            second reply overwrites the answer and sends again. Refuses a blank answer and an unknown id; if the mail is not sent,
+            nothing is saved.</description>
+        <in-parameters>
+            <parameter name="feedbackId" required="true"/>
+            <parameter name="answer" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="feedbackId"/>
+            <parameter name="answeredAt"/>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="text" from="answer?.trim()"/>
+            <if condition="!text"><return error="true" message="An answer is needed."/></if>
+            <entity-find-one entity-name="darpan.audit.AuditFindingFeedback" value-field="feedback">
+                <field-map field-name="feedbackId"/></entity-find-one>
+            <if condition="feedback == null"><return error="true" message="Feedback ${feedbackId} was not found."/></if>
+            <set field="messageId" from="darpan.audit.FeedbackSupport.sendAnswer(ec, feedback, text)"/>
+            <if condition="!messageId"><return error="true" message="The answer to ${feedbackId} was not emailed, so it was not saved."/></if>
+            <set field="answeredStamp" from="ec.user.nowTimestamp"/>
+            <service-call name="update#darpan.audit.AuditFindingFeedback" in-map="[feedbackId: feedbackId, answer: text,
+                    answeredByUserId: ec.user.userId, answeredStamp: answeredStamp]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.FeedbackAdminServices.reply#Feedback', targetType: 'AuditFindingFeedback',
+                    targetId: feedbackId, detailText: 'Answered feedback ' + feedbackId + ' of ' + feedback.companyUserGroupId + ' by email.',
+                    auditTimestamp: answeredStamp]"/>
+            <set field="answeredAt" from="answeredStamp.toInstant().toString()"/>
+        </actions>
+    </service>
+</services>

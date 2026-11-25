@@ -35,6 +35,8 @@ admin.EmailAdminServices.get#EmailTemplates
 admin.EmailAdminServices.preview#EmailTemplate
 admin.EmailAdminServices.reset#EmailTemplate
 admin.EmailAdminServices.update#EmailTemplate
+admin.FeedbackAdminServices.get#FeedbackList
+admin.FeedbackAdminServices.reply#Feedback
 admin.KnowledgeAdminServices.get#KnowledgeEntry
 admin.KnowledgeAdminServices.get#KnowledgeForReview
 admin.KnowledgeAdminServices.get#KnowledgeIdentifiers

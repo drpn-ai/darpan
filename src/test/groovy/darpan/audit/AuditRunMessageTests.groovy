@@ -26,7 +26,7 @@ class AuditRunMessageTests {
     }
 
     private static final String ALERTED = "Darpan has been alerted and is working on a fix."
-    private static final String NOTICE = "R1, R2 did not run this morning. ${ALERTED}"
+    private static final String NOTICE = "R1 did not run this morning. R2 partly ran this morning. ${ALERTED}"
     private static final String ROW_NOT_RUN = "Did not run this morning."
     private static final String ROW_PARTLY = "1 of 5 checks did not run this morning."
 
@@ -37,7 +37,7 @@ class AuditRunMessageTests {
         String text = AuditRunMessage.emailText(facts(), [:], null, COPY)
         assertTrue(text.contains("  R1  Every order is billed: ${ROW_NOT_RUN}\n"), text)
         assertFalse(text.contains("R1  Every order is billed: clean"))
-        assertTrue(text.contains(NOTICE), "the notice names whole and partly ran rules")
+        assertTrue(text.contains(NOTICE), "the notice names wholly not-run rules, then partly ran ones, then the alerted sentence once: ${text}")
         assertTrue(text.contains("  R3  Every return is credited: clean"), "a rule that ran shows counts as before")
     }
 
@@ -82,6 +82,26 @@ class AuditRunMessageTests {
         assertTrue(text.startsWith(intro), text)
         [body, next, "— Darpan", "docs.drpn.ai/guides/audits"].each { assertTrue(text.contains(it), it) }
         assertEquals("t-a-2026-11-10-unexplained.csv", email.fileName)
+    }
+
+    @Test
+    void aPartlyRanRuleIsNeverSaidNotToHaveRun() {
+        Map f = facts()
+        f.rules[0] = f.rules[0] + [checksNotRun: []]
+        String text = AuditRunMessage.emailText(f, [:], null, COPY)
+        assertTrue(text.contains("R2 partly ran this morning. ${ALERTED}"), text)
+        assertFalse(text.contains("did not run this morning. Darpan"), "no rule wholly not run, so no 'did not run' notice: ${text}")
+        assertEquals(1, times(AuditRunMessage.card(f, [:], null, COPY).toString(), ALERTED))
+    }
+
+    @Test
+    void onlyWhollyNotRunRulesGetTheDidNotRunNotice() {
+        Map f = facts()
+        f.rules[1] = f.rules[1] + [checksNotRun: []]
+        String html = AuditRunMessage.emailHtml(f, [:], null, COPY)
+        assertTrue(html.contains("R1 did not run this morning. ${ALERTED}"), html)
+        assertFalse(html.contains("partly ran"), html)
+        assertEquals(1, times(html, ALERTED))
     }
 
     @Test

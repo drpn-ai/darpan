@@ -105,9 +105,20 @@ class AuditRunMessage {
         return [line, calls, flags].findAll().join(" ") ?: null
     }
 
-    /** Rules with any check that did not run, whole or partly (DAR-BE-015): the one top notice names them all. */
-    static List<String> rulesNotRun(Map facts) {
-        return rules(facts).findAll { it.checksNotRun }*.id as List<String>
+    /**
+     * The one top notice (DAR-BE-015), null when every check ran: the rules wholly not run ("R1 did not run this morning."), the
+     * rules partly run ("R2 partly ran this morning."), then the alerted sentence once. Three copy blocks: notrun, partly.notice, alerted.
+     */
+    static String notRunNotice(Map facts, EmailCopyReader copy) {
+        List<Map> touched = rules(facts).findAll { it.checksNotRun }
+        if (!touched) return null
+        List<String> whole = touched.findAll { wholeNotRun(it) }*.id as List<String>
+        List<String> partly = touched.findAll { !wholeNotRun(it) }*.id as List<String>
+        List<String> parts = []
+        if (whole) parts << copy.text("notrun", [rules: whole.join(", ")])
+        if (partly) parts << copy.text("partly.notice", [rules: partly.join(", ")])
+        parts << copy.text("alerted")
+        return parts.findAll { it?.trim() }*.trim().join(" ")
     }
 
     /** No checksTotal means every check is counted as not run. */
@@ -133,8 +144,8 @@ class AuditRunMessage {
                                               wrapText : true, topLabel: "Findings",
                                               startIcon: [materialIcon: [name: "fact_check"]]]]]
         if (words?.headline) widgets << [textParagraph: [text: esc(words.headline as String)]]
-        List<String> notRun = rulesNotRun(facts)
-        if (notRun) widgets << [decoratedText: [text     : "<font color=\"${AMBER}\">${esc(copy.text('notrun', [rules: notRun.join(', ')]))}</font>".toString(),
+        String notRun = notRunNotice(facts, copy)
+        if (notRun) widgets << [decoratedText: [text     : "<font color=\"${AMBER}\">${esc(notRun)}</font>".toString(),
                                                 wrapText : true, startIcon: [materialIcon: [name: "warning"]]]]
         String reads = readsLine(facts, copy)
         if (reads) widgets << [decoratedText: [text: esc(reads), wrapText: true, startIcon: [materialIcon: [name: "sync"]]]]
@@ -190,9 +201,9 @@ class AuditRunMessage {
                     "<div style=\"${F}font-size:12px;color:${MUTED};margin-top:10px;padding-top:10px;border-top:1px dashed ${LINE};\">${esc(copy.text('rule.all', [open: r.open, file: csvName(facts, r.id as String)]))}${link}</div></div>"
         }
         String headline = words?.headline ? "<p style=\"${F}font-size:14px;line-height:1.6;color:${SOFT};margin:18px 0 0;\">${esc(words.headline as String)}</p>" : ""
-        List<String> notRun = rulesNotRun(facts)
+        String notRun = notRunNotice(facts, copy)
         String warn = notRun ? "<p style=\"${F}font-size:13px;line-height:1.5;color:${INK};margin:14px 0 0;padding:10px 12px;border:1px solid ${INK};border-radius:8px;\">" +
-                "${esc(copy.text('notrun', [rules: notRun.join(', ')]))}</p>" : ""
+                "${esc(notRun)}</p>" : ""
         String actSection = act ? EmailFrame.eyebrow(copy.text("act.heading").toUpperCase(Locale.ROOT), 28) +
                 "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;margin-top:8px;border-collapse:collapse;\">${act}</table>" : ""
         String button = url ? "<div style=\"margin-top:28px;\"><a href=\"${esc(url)}\" style=\"${F}display:inline-block;background:${ACCENT};color:#ffffff;" +
@@ -217,8 +228,8 @@ ${EmailCopy.guidesHtml(copy.guides())}${EmailFrame.close()}""".toString()
         String noCause = copy.text("cause.none")
         List<String> lines = [title(facts), subtitle(facts, copy)]
         if (words?.headline) lines += ["", words.headline as String]
-        List<String> notRun = rulesNotRun(facts)
-        if (notRun) lines += ["", copy.text("notrun", [rules: notRun.join(', ')])]
+        String notRun = notRunNotice(facts, copy)
+        if (notRun) lines += ["", notRun]
         lines += ["", "${copy.text('tile.open')} ${t.open} · ${copy.text('tile.new')} ${t.newToday} · ${copy.text('tile.fixed')} ${t.fixedToday}".toString()]
         List<Map> act = actOnFirst(facts)
         if (act) {

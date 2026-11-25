@@ -157,6 +157,20 @@ class SettingAdminServicesSmokeTests {
     }
 
     @Test
+    void theErrorsEmailTakesAnAddressListAndRefusesAnythingElseWithoutEchoingIt() {
+        String key = "errors.email.to"
+        ["ops@drpn", "ops@drpn.test, not-an-address", "ops@drpn.test;;bad@", "ops at drpn.test"].each { String v ->
+            Map out = svc("update#Setting", [settingKey: key, value: v])
+            assertTrue(out.hasError, "'${v}' must be refused")
+            assertTrue(out.errors.any { it.contains(key) }, "${out.errors}")
+            assertFalse(out.errors.any { it.contains(v) || it.contains("not-an-address") || it.contains("bad@") }, "the refusal must not echo the value: ${out.errors}")
+        }
+        assertEquals(0, ec.entity.find("darpan.config.DarpanSetting").disableAuthz().useCache(false).count())
+        Map saved = ok(svc("update#Setting", [settingKey: key, value: "ops@drpn.test; oncall@drpn.test"])).result.setting
+        assertEquals("ops@drpn.test; oncall@drpn.test", saved.effectiveValue)
+    }
+
+    @Test
     void aRefusedValueSavesNothingAndSaysWhy() {
         ["0", "abc", "", "33"].each { String v ->
             Map out = svc("update#Setting", [settingKey: MAX, value: v])

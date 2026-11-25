@@ -23,7 +23,7 @@ import java.time.ZonedDateTime
  * covers everything since the last email that went out (capped at 30 days back): run errors, the watchdog and the ERROR log
  * lines, read across every tenant (TenantScopedFinder.findGlobalUnscoped, read-only: this is Darpan's own report, never a
  * tenant's) and assembled by ErrorDigestAssembler. It goes to errors.email.to, and a one-line summary to
- * errors.chat.webhookUrl. A blank destination is skipped with one warning.
+ * errors.chat.webhookUrl. A blank destination is skipped with one warning each.
  */
 class ErrorDigestSupport {
     private static final Logger logger = LoggerFactory.getLogger(ErrorDigestSupport)
@@ -133,6 +133,8 @@ class ErrorDigestSupport {
             } catch (Throwable t) {
                 warn(warnings, "the daily error summary failed: ${ErrorChatSupport.failureNote(t, webhookUrl)}")
             }
+        } else {
+            warn(warnings, "${WEBHOOK_SETTING} is blank: the daily error summary was not posted")
         }
 
         try {
@@ -201,8 +203,9 @@ class ErrorDigestSupport {
             try {
                 Map out = AutomationExecutionSupport.dispatchInternalService(ec, "org.moqui.impl.EmailServices.send#EmailTemplate",
                         [emailTemplateId: TEMPLATE, toAddresses: to, bodyParameters: bodyParameters])
-                if (ec.message.hasError()) return ec.message.errorsString as String
+                // a message id means the server took it; an error after that (recording the EmailMessage row) is not a failed send
                 if (out?.messageId) return null
+                if (ec.message.hasError()) return ec.message.errorsString as String
                 List added = ec.message.messageInfos.drop(before)
                 String said = added.collect { it.message as String }.find { it?.trim() }
                 if (said) return said

@@ -16,6 +16,7 @@ import org.moqui.service.ServiceCallSync
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -123,6 +124,82 @@ class StuckRunReaperNotifyTests {
         assertEquals(1, result.reapedRunResultCount)
         Map<String, Object> row = store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0]
         assertEquals(StuckRunReaper.STATUS_FAILED, row.statusEnumId)
+    }
+
+    @Test
+    void aReapedExecutionEndsNowAndPostsOneFailedCardWhileItsSubscriberGetsOnlyTheNeutralLine() {
+        // DAR-BE-015 final review: a reaped execution was FAILED with no completedDate, so the daily error email (it reads
+        // executions by completedDate) and the card never saw it. Now it ends now, posts Darpan's card, and the run's
+        // subscriber is told once, the neutral line only (the run-result sweep after it finds the run already told).
+        FakeStore store = new FakeStore()
+        Timestamp stale = new Timestamp(System.currentTimeMillis() - (200 * 60_000L))
+        store.add("darpan.reconciliation.ReconciliationAutomation", [
+                automationId      : "AUTO_1",
+                automationName    : "Daily Orders",
+                companyUserGroupId: "TENANT_A",
+                savedRunId        : "RS_ORDER",
+        ])
+        store.add(DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION, [
+                automationExecutionId    : "EXEC_1",
+                automationId             : "AUTO_1",
+                companyUserGroupId       : "TENANT_A",
+                statusEnumId             : StuckRunReaper.STATUS_RUNNING,
+                triggerType              : "scheduled",
+                scheduledDate            : stale,
+                reconciliationRunResultId: "RUN_1",
+                lastUpdatedStamp         : stale,
+        ])
+        store.add(DarpanEntityConstants.RECONCILIATION_RUN_RESULT, [
+                reconciliationRunResultId: "RUN_1",
+                companyUserGroupId       : "TENANT_A",
+                savedRunId               : "RS_ORDER",
+                resultDataManagerPath    : "reconciliation-runs/RS_ORDER/result.json",
+                statusEnumId             : StuckRunReaper.STATUS_RUNNING,
+                lastUpdatedStamp         : stale,
+        ])
+        store.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/AAA/messages?key=test-key&token=test-token",
+                isActive            : "Y",
+        ])
+        store.add(DarpanEntityConstants.RUN_NOTIFY_SUBSCRIPTION, [
+                reconciliationRunResultId: "RUN_1",
+                chatSpaceId              : "CS_OPS",
+        ])
+
+        ExecutionContext ec = fakeEc(store)
+        List<Map> cards = []
+        AutomationExecutionSupport.errorCardPoster = { def ignoredEc, Map event -> cards << event; return true }
+        AutomationExecutionSupport.errorNoticeCopy = { def ignoredEc -> AutomationExecutionSupportTests.opsNoticeSeedCopy() }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: webhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map<String, Object> result
+        try {
+            result = StuckRunReaper.sweep(ec)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+            AutomationExecutionSupport.resetForTests()
+        }
+
+        assertEquals(1, result.reapedExecutionCount)
+        Map<String, Object> row = store.rows[DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION][0]
+        assertEquals(StuckRunReaper.STATUS_FAILED, row.statusEnumId)
+        assertEquals(store.userNow, row.completedDate, "a reaped run ends now, so the daily error email lists it")
+        assertEquals(store.userNow, row.lastUpdatedDate)
+        assertEquals(StuckRunReaper.REAPED_REASON, row.errorMessage, "the daily email shows why")
+        assertEquals(1, cards.size(), "one card for Darpan: ${cards}")
+        assertEquals("FAILED", cards[0].kind)
+        assertEquals(StuckRunReaper.REAPED_REASON, cards[0].errorFirstLine)
+        assertEquals("AUTO_1", cards[0].automationId)
+        assertEquals(1, deliveries.size(), "the subscriber is told once: ${deliveries}")
+        assertEquals("Daily Orders did not run this morning. Darpan has been alerted and is working on a fix.", deliveries[0].payload.text)
+        assertFalse(deliveries.toString().contains("watchdog"), "no error text reaches a client")
     }
 
     // ---- Fake EC construction --------------------------------------------------------------------

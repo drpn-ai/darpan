@@ -4153,6 +4153,8 @@ class AutomationExecutionSupportTests {
             assertEquals(1, cards.size())
             assertEquals("FAILED", cards[0].kind)
             assertEquals(ruleError, cards[0].errorFirstLine, "the rule's error goes to Darpan")
+            assertEquals(ruleError, ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].last().errorMessage,
+                    "the execution row carries the rule's error, so the daily email shows it")
             assertEquals([OPS_WEBHOOK, ME_WEBHOOK] as Set, deliveries*.webhookUrl as Set)
             assertEquals([[text: "API Automation" + NOT_RUN_SUFFIX]] * 2, deliveries*.payload)
             assertFalse(deliveries.toString().contains("NullPointerException"), "no rule error text reaches a client")

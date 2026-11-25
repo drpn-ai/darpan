@@ -917,6 +917,9 @@ class AutomationExecutionSupport {
                         ]),
                         lastUpdatedDate           : completedTimestamp,
                 ]
+                // DAR-BE-015: the rule's error is the row's error, so the daily error email shows why the run FAILED.
+                String ruleError = ruleExecutionFailed ? (ruleFailureReason(reconcileResult) ?: "A rule failed to build or evaluate.") : null
+                if (ruleError) successFields.errorMessage = truncate(ruleError, 3900)
                 updateAutomationExecution(ec, execution, successFields)
                 // DAR-BE-092: health, findings, closings, before anyone is told the run finished. A rule failure
                 // makes the check notRun, so nothing closes on a compare that did not fully evaluate.
@@ -927,8 +930,7 @@ class AutomationExecutionSupport {
                 // DAR-BE-015: a rule that failed to build or evaluate is a run error: the rule's error goes to Darpan's card,
                 // a client destination gets only the neutral line, never the run's payload (it carries the raw rule error).
                 if (ruleExecutionFailed) {
-                    notifyRunError(ec, automation, executionMap(execution) + successFields, mintedRunResultId,
-                            ruleFailureReason(reconcileResult) ?: "A rule failed to build or evaluate.")
+                    notifyRunError(ec, automation, executionMap(execution) + successFields, mintedRunResultId, ruleError)
                 // DAR-BE-123: a verify answers the person who asked, on the finding; the run's space is not told.
                 } else if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
                         reconciliationRunResultId: reconciliationRunResultId,

@@ -142,6 +142,20 @@ class ErrorDigestSupportTests {
     }
 
     @Test
+    void aBlankWebhookStillSendsTheEmailAndWarnsOnce() {
+        settings.remove("errors.chat.webhookUrl")
+        DarpanSettings.expire()
+        Map out = ErrorDigestSupport.sendIfDue(null, AT_THE_HOUR)
+
+        assertTrue(out.sent as boolean, "${out}")
+        assertEquals(1, mails.size())
+        assertTrue(posts.isEmpty())
+        List warnings = out.warnings as List
+        assertEquals(1, warnings.size(), "one warning: ${warnings}")
+        assertTrue(warnings[0].toString().contains("errors.chat.webhookUrl"), "${warnings}")
+    }
+
+    @Test
     void noDestinationAtAllClaimsNothing() {
         settings = [:]
         DarpanSettings.expire()
@@ -281,6 +295,18 @@ class ErrorDigestSupportTests {
         Map out = ErrorDigestSupport.sendIfDue(ec, AT_THE_HOUR)
         assertEquals([sent: false, reason: "DELIVERY_FAILED"], out.subMap(["sent", "reason"]))
         assertTrue(posts[0].text.contains("could not be sent"), posts[0].text)
+    }
+
+    @Test
+    void aMessageIdIsASendEvenWhenAnErrorFollowsIt() {
+        // the server took the message (messageId set), then recording the EmailMessage row failed: that is still a send
+        ErrorDigestSupport.sendEmail = ErrorDigestSupport.DEFAULT_SEND_EMAIL
+        Map ec = stubEc { StubMessages m -> m.addError("Could not update EmailMessage EM_1"); [messageId: "<abc@mail.drpn.test>"] }
+        Map out = ErrorDigestSupport.sendIfDue(ec, AT_THE_HOUR)
+        assertTrue(out.sent as boolean, "${out}")
+        assertNull(out.reason)
+        assertTrue(posts[0].text.contains("Email sent to"), posts[0].text)
+        assertFalse(ec.message.hasError(), "the send's own error does not leak to the caller")
     }
 
     @Test

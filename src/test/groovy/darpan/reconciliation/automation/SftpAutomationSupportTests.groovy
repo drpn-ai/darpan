@@ -213,6 +213,8 @@ class SftpAutomationSupportTests {
         assertEquals("RUN_RESULT_1", result.reconciliationRunResultId)
         FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, execution.statusEnumId)
+        assertEquals("Rule 'price-matches' failed: NullPointerException", execution.errorMessage,
+                "the execution row carries the rule's error, so the daily email shows it")
         assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
         assertEquals(1, deliveries.size())
         assertEquals(webhookUrl, deliveries[0].webhookUrl)

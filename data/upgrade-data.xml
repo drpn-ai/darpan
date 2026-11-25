@@ -2380,8 +2380,10 @@ Review each record before loading into an environment.
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="chat.noemail" defaultText="Darpan errors today: ${checks} checks, ${logErrors} log errors. No email was sent: no address is set."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="chat.failed" defaultText="Darpan errors today: ${checks} checks, ${logErrors} log errors. The email to ${addresses} could not be sent."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_DIGEST" blockId="guides" defaultText="Automations and alerts|troubleshooting/automations-and-alerts&#10;Audits|troubleshooting/audits"/>
-    <!-- DAR-BE-015: the audit run update says a check did not run, and that Darpan is on it (notrun reworded; rule.notrun, rule.partly new). -->
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run this morning. Darpan has been alerted and is working on a fix."/>
+    <!-- DAR-BE-015: the audit run update says a check did not run or partly ran, and once that Darpan is on it (notrun reworded; partly.notice, alerted, rule.notrun, rule.partly new). -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run this morning."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="partly.notice" defaultText="${rules} partly ran this morning."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="alerted" defaultText="Darpan has been alerted and is working on a fix."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.notrun" defaultText="Did not run this morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.partly" defaultText="${notRun} of ${total} checks did not run this morning."/>
     <moqui.service.job.ServiceJob jobName="send_ErrorDigest_hourly" expireLockTime="50"

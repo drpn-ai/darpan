@@ -35,6 +35,8 @@ class StuckRunReaper {
     static final String STATUS_PENDING = "AUT_STAT_PENDING"
     static final String STATUS_RUNNING = "AUT_STAT_RUNNING"
     static final String STATUS_FAILED  = "AUT_STAT_FAILED"
+    /** DAR-BE-015: the error Darpan's card and the daily email show for a run the reaper stopped. */
+    static final String REAPED_REASON = "The run stalled and was stopped by the stuck-run watchdog."
 
     /** The threshold is the reaperStaleMinutes setting (DAR-BE-304), read at each sweep; RunHealth shows the same one. */
     static Map<String, Object> sweep(ExecutionContext ec) {
@@ -42,8 +44,10 @@ class StuckRunReaper {
 
         Timestamp cutoff = new Timestamp(System.currentTimeMillis() - (staleMinutes * 60_000L))
 
-        int runResultsReaped = sweepEntity(ec, "darpan.reconciliation.ReconciliationRunResult", cutoff, staleMinutes)
-        int executionsReaped = sweepEntity(ec, "darpan.reconciliation.ReconciliationAutomationExecution", cutoff, staleMinutes)
+        // DAR-BE-015: executions first. A reaped automation run is a run error (notifyRunError): its client destinations get the
+        // neutral line, which claims the run's result row, so the run-result sweep below then tells its subscribers nothing more.
+        int executionsReaped = sweepEntity(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION, cutoff, staleMinutes)
+        int runResultsReaped = sweepEntity(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT, cutoff, staleMinutes)
 
         logger.info("StuckRunReaper completed: runResults={} executions={} cutoff={}",
                 runResultsReaped, executionsReaped, cutoff)
@@ -68,9 +72,17 @@ class StuckRunReaper {
             List<EntityValue> stale = finder.list()
 
             if (stale == null) return 0
+            boolean executions = DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION == entityName
             for (EntityValue row : stale) {
                 try {
                     row.set("statusEnumId", STATUS_FAILED)
+                    if (executions) {
+                        // DAR-BE-015: a reaped run ended now, so the daily error email (it reads executions by completedDate) lists it.
+                        Timestamp reapedAt = ec.getUser().getNowTimestamp()
+                        row.set("completedDate", reapedAt)
+                        row.set("lastUpdatedDate", reapedAt)
+                        if (!row.get("errorMessage")?.toString()?.trim()) row.set("errorMessage", REAPED_REASON)
+                    }
                     // Append (or set) a statusMessage if the entity carries one.
                     try {
                         Object existing = row.get("statusMessage")
@@ -83,8 +95,9 @@ class StuckRunReaper {
                     }
                     row.update()
                     updated++
-                    // DAR-BE-107: a reaper-killed slot breaks the streak (decision 6, 2026-10-22).
-                    if (DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION == entityName) {
+                    if (executions) {
+                        notifyReapedExecution(ec, row)
+                        // DAR-BE-107: a reaper-killed slot breaks the streak (decision 6, 2026-10-22).
                         AutomationStreakSupport.recordSlots(ec, row.get("automationId"))
                     }
                     // Task 7: the reaper has no automation/interactive-run context to carry a chatSpaceId,
@@ -113,5 +126,29 @@ class StuckRunReaper {
             logger.warn("StuckRunReaper ${entityName} sweep failed: ${t.message}")
         }
         return updated
+    }
+
+    /**
+     * DAR-BE-015: a reaped execution is a FAILED run error like any other. notifyRunError posts Darpan's card (with this reason),
+     * gives a client destination only the neutral line and purges the run's subscriptions. Never throws: the sweep goes on.
+     */
+    private static void notifyReapedExecution(ExecutionContext ec, EntityValue row) {
+        try {
+            Object automationId = row.get("automationId")
+            if (automationId == null) return
+            EntityFind finder = (EntityFind) TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationAutomation",
+                    "system-cron cross-tenant sweep; StuckRunReaper reads the automation of a run it reaped to report its error")
+            EntityValue automation = finder.condition("automationId", automationId).one()
+            if (automation == null) {
+                logger.warn("StuckRunReaper: automation {} of reaped execution {} not found; no error card", automationId, row.get("automationExecutionId"))
+                return
+            }
+            Map<String, Object> execution = new LinkedHashMap<String, Object>()
+            for (Map.Entry<String, Object> field : ((Map<String, Object>) row).entrySet()) execution.put(field.key, field.value)
+            Object runResultId = row.get("reconciliationRunResultId")
+            AutomationExecutionSupport.notifyRunError(ec, automation, execution, runResultId != null ? runResultId.toString() : null, REAPED_REASON)
+        } catch (Throwable t) {
+            logger.warn("StuckRunReaper run error notification failed (best-effort): {}", t.getClass().name)
+        }
     }
 }

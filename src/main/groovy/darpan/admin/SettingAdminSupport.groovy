@@ -1,5 +1,6 @@
 package darpan.admin
 
+import darpan.audit.AuditDigestSupport
 import darpan.config.DarpanSettings
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.transform.CompileDynamic
@@ -33,6 +34,16 @@ class SettingAdminSupport {
         return "${settingKey} must be a Google Chat (chat.googleapis.com) or Slack (hooks.slack.com) webhook URL.".toString()
     }
 
+    static final String ERRORS_EMAIL_KEY = 'errors.email.to'
+
+    /** The error email's addresses: every comma- or semicolon-separated entry is an address (AuditDigestSupport.emailsOf); never echoes the value. */
+    private static String emailListProblem(String settingKey, String text) {
+        if (settingKey != ERRORS_EMAIL_KEY || !text) return null
+        List<String> entries = text.split(/[,;]/)*.trim().findAll { it }
+        if (entries && AuditDigestSupport.emailsOf(text).size() == entries.unique().size()) return null
+        return "${settingKey} must be one or more email addresses, comma-separated.".toString()
+    }
+
     static Map update(def ec, String settingKey, String value, String note) {
         String refused = managedRefusal(settingKey)
         if (refused != null) return [error: refused]
@@ -41,6 +52,8 @@ class SettingAdminSupport {
         if (problem != null) return [error: problem]
         String hookProblem = webhookProblem(settingKey, text)
         if (hookProblem != null) return [error: hookProblem]
+        String emailProblem = emailListProblem(settingKey, text)
+        if (emailProblem != null) return [error: emailProblem]
         String cleanNote = note?.trim() ?: null
         if (cleanNote != null && cleanNote.length() > NOTE_MAX) {
             return [error: "The note is ${cleanNote.length()} characters; the most is ${NOTE_MAX}.".toString()]

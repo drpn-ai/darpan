@@ -100,7 +100,9 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="unexplained.intro" defaultText="The ${date} run of ${tenantName} ${auditName} left ${count} findings with no cause. Unsolved, for now."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="unexplained.body" defaultText="Each one is a row in the attached CSV."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="unexplained.next" defaultText="Give one a conclusion and the next run files its lookalikes under it. One less mystery every morning."/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run this morning. Darpan has been alerted and is working on a fix."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run this morning."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="partly.notice" defaultText="${rules} partly ran this morning."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="alerted" defaultText="Darpan has been alerted and is working on a fix."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.notrun" defaultText="Did not run this morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.partly" defaultText="${notRun} of ${total} checks did not run this morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="button" defaultText="Open the report in Darpan"/>

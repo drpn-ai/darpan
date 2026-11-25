@@ -223,6 +223,8 @@ class SftpAutomationSupport {
             String resultDataManagerPath = outputProduced ?
                     normalizeDataManagerPath(ec, pollResult.diffLocation ?: pollResult.diffFileName) : null
             String failureReason = normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
+            // DAR-BE-015: a run whose rules failed is told (to Darpan, and in the row the daily error email reads) by the rule's error.
+            String errorReason = ruleExecutionFailed ? (AutomationExecutionSupport.ruleFailureReason(pollResult) ?: failureReason) : failureReason
             Timestamp completedTimestamp = nowTimestamp(ec)
             String reconciliationRunResultId = mintedRunResultId
             if (outputProduced) {
@@ -280,7 +282,7 @@ class SftpAutomationSupport {
                     lastUpdatedDate           : completedTimestamp,
             ]
             if (statusEnumId == AUTOMATION_STATUS_FAILED) {
-                updateFields.errorMessage = failureReason
+                updateFields.errorMessage = truncate(errorReason, 3900)
             }
             updateAutomationExecution(ec, execution, updateFields)
             // Task 7: notify on every terminal state that produced a run result (including a failed
@@ -331,8 +333,7 @@ class SftpAutomationSupport {
                 // DAR-BE-015: notifyRunError is the API path's own run error path: the card goes to Darpan's
                 // error space, a client destination gets only the neutral line, and it purges.
                 AutomationExecutionSupport.notifyRunError(ec, automation,
-                        AutomationExecutionSupport.executionMap(execution) + updateFields, reconciliationRunResultId,
-                        ruleExecutionFailed ? (AutomationExecutionSupport.ruleFailureReason(pollResult) ?: failureReason) : failureReason)
+                        AutomationExecutionSupport.executionMap(execution) + updateFields, reconciliationRunResultId, errorReason)
             } else {
                 // NO_DATA only, and it stays silent — that is the API path's behaviour too, so parity
                 // means matching it rather than alerting on everything. Nothing will ever claim this row,

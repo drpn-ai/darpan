@@ -94,6 +94,12 @@ class DarpanSettingsTests {
         assertTrue(DarpanSettings.problem(ERR_TO, bad).contains(bad), 'a non-secret value is still shown')
     }
 
+    @Test void theErrorKeysSayWhatTheyDo() {
+        assertTrue(DarpanSettings.catalog().get('errors.watchdog.hours').description.contains('no successful scheduled run'),
+                'the watchdog is about a success, for audit checks')
+        assertTrue(DarpanSettings.catalog().get(ERR_TO).description.contains('daily error email'))
+    }
+
     @Test void theErrorKeysHaveTheirDefaults() {
         assertEquals(12, DarpanSettings.intValue('errors.digest.hourUtc'))
         assertEquals(30, DarpanSettings.intValue('errors.watchdog.hours'))

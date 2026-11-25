@@ -75,6 +75,8 @@ class ErrorDigestServicesSmokeTests {
 
     @AfterAll
     void cleanup() {
+        darpan.reconciliation.automation.AutomationExecutionSupport.resetForTests()
+        darpan.reconciliation.notification.TenantNotificationSupport.resetDeliveryHook()
         ErrorDigestSupport.resetForTests()
         DarpanSettings.resetForTests()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
@@ -199,6 +201,50 @@ class ErrorDigestServicesSmokeTests {
                 watchdog.collect { [it.check, it.kind] } as Set, "${watchdog}")
         Map stale = watchdog.find { it.check == "never-ran-old" }
         assertEquals(ts(now.minus(Duration.ofDays(5))), stale.lastSuccessDate, "never ran: last success is floored at the automation's creation")
+    }
+
+    @Test
+    void aRunTheReaperStoppedPostsOneCardAndIsReadIntoTheNextEmail() {
+        // DAR-BE-015 final review: the stuck-run reaper set FAILED with no completedDate, so the email never read the run.
+        // a plain automation (no audit check), so no watchdog row outlives this test into another test's email
+        String automationId = "EDG_AUTO_REAPED_${++seq}".toString()
+        insert("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId, automationName: "Edge reaped",
+                companyUserGroupId: TENANT, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "EDG_SR_REAPED", isActive: "Y",
+                windowTimeZone: "America/Los_Angeles", createdDate: ts(Instant.now().minus(Duration.ofDays(3)))])
+        Timestamp stuckSince = ts(Instant.now().minus(Duration.ofHours(6)))
+        String executionId = "EDG_EX_REAPED_${++seq}".toString()
+        ec.artifactExecution.disableAuthz()
+        try {
+            // create (not createOrUpdate) keeps the given lastUpdatedStamp, so the row is stale to the reaper
+            ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationExecution").setAll([automationExecutionId: executionId,
+                    automationId: automationId, companyUserGroupId: TENANT, statusEnumId: "AUT_STAT_RUNNING", triggerType: "scheduled",
+                    scheduledDate: stuckSince, startedDate: stuckSince, lastUpdatedStamp: stuckSince]).create()
+        } finally { ec.artifactExecution.enableAuthz() }
+        List<Map> cards = []
+        darpan.reconciliation.automation.AutomationExecutionSupport.errorCardPoster = { def postEc, Map event -> cards << event; return true }
+        darpan.reconciliation.notification.TenantNotificationSupport.setDeliveryHook { String url, Map payload -> [ok: true, statusCode: 200] }
+        Timestamp before = ts(Instant.now().minus(Duration.ofMinutes(1)))
+        try {
+            darpan.reconciliation.automation.StuckRunReaper.sweep(ec)
+        } finally {
+            darpan.reconciliation.automation.AutomationExecutionSupport.resetForTests()
+            darpan.reconciliation.notification.TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        def reaped = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+                .condition("automationExecutionId", executionId).disableAuthz().useCache(false).one()
+        assertEquals("AUT_STAT_FAILED", reaped.statusEnumId)
+        assertNotNull(reaped.completedDate, "a reaped run ends when it is reaped")
+        List<Map> mineCards = cards.findAll { it.automationId == automationId }
+        assertEquals(["FAILED"], mineCards*.kind, "one card: ${cards}")
+        assertEquals(darpan.reconciliation.automation.StuckRunReaper.REAPED_REASON, mineCards[0].errorFirstLine)
+
+        Timestamp now = ts(Instant.now().plus(Duration.ofMinutes(1)))
+        Map input = ErrorDigestSupport.readInput(ec, before, now, 30, 7)
+        Map row = (input.executions as List<Map>).find { it.automationExecutionId == executionId }
+        assertNotNull(row, "the next email reads the reaped run")
+        assertEquals(RunErrorKinds.FAILED, RunErrorKinds.of(row))
+        assertEquals(darpan.reconciliation.automation.StuckRunReaper.REAPED_REASON, row.errorMessage)
     }
 
     @Test

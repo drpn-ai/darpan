@@ -32,6 +32,8 @@ class CliMethodAllowlist {
             "facade.AuditFacadeServices.get#AuditCheckExtracts",
             "facade.AuditFacadeServices.get#AuditCheckOptions",
             "facade.AuditFacadeServices.get#AuditFinding",
+            // DAR-BE-361: the team's recent notes to Darpan on a finding's statement and cause; writes nothing, no credential.
+            "facade.AuditFacadeServices.get#AuditFindingFeedback",
             "facade.AuditFacadeServices.get#AuditFindingsByOrder",
             "facade.AuditFacadeServices.get#AuditProgress",
             "facade.AuditFacadeServices.get#AuditReadReport",
@@ -292,6 +294,8 @@ class CliMethodAllowlist {
             "facade.AuditFacadeServices.delete#AuditFindingAcknowledgement",
             "facade.AuditFacadeServices.save#AuditCheck",
             "facade.AuditFacadeServices.save#AuditSettings",
+            // DAR-BE-361: feedback saves a note, posts to Darpan's chat space and emails the sender; the app only.
+            "facade.AuditFacadeServices.send#AuditFindingFeedback",
             "facade.AuditFacadeServices.update#AuditFindingAcknowledgement",
 
             "facade.AuthFacadeServices.change#ExpiredPassword",

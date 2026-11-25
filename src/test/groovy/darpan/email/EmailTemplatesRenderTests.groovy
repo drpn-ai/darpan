@@ -591,6 +591,41 @@ class EmailTemplatesRenderTests {
         }
     }
 
+    /** DAR-BE-361: the thank-you quotes the person's note and says Darpan replies by email; the answer quotes the note and
+     *  carries the answer. Both parts, every block the html shows in the text part, in order; the note is a value (encoded). */
+    @Test
+    void theFeedbackEmailsQuoteTheNoteAndReplyByEmail() {
+        String received = render("FeedbackReceived", OTHER.FeedbackReceived, "html")
+        String receivedText = render("FeedbackReceived", OTHER.FeedbackReceived, "text")
+        String answer = render("FeedbackAnswer", OTHER.FeedbackAnswer, "html")
+        String answerText = render("FeedbackAnswer", OTHER.FeedbackAnswer, "text")
+        Files.writeString(previews.resolve("FeedbackReceived.html"), received)
+        Files.writeString(previews.resolve("FeedbackAnswer.html"), answer)
+        String note = OTHER.FeedbackReceived.note as String
+        [received, answer].each { String html ->
+            assertTrue(html.contains("DARPAN · FEEDBACK"), html)
+            assertTrue(html.contains("“" + note.replace("'", "&#39;") + "”"), "the note, quoted\n${html}")
+        }
+        [receivedText, answerText].each { assertTrue(it.contains("“" + note + "”"), it) }
+        assertTrue(receivedText.contains("replies by email"), receivedText)
+        assertTrue(answerText.contains(OTHER.FeedbackAnswer.answer as String), answerText)
+        Map sneaky = OTHER.FeedbackReceived + [note: '<b>bold</b> ${firstName}']
+        String encoded = render("FeedbackReceived", sneaky, "html")
+        assertFalse(encoded.contains("<b>bold</b>"), "a note is text, never markup")
+        assertTrue(encoded.contains('${firstName}'), "a note is never expanded")
+        [["FeedbackReceived", OTHER.FeedbackReceived], ["FeedbackAnswer", OTHER.FeedbackAnswer]].each { List v ->
+            String html = render(v[0] as String, v[1] as Map, "html"), text = render(v[0] as String, v[1] as Map, "text")
+            List<String> blocks = (html =~ /(?s)<span class="text-inline">(.*?)<\/span>/).collect { List m -> unescape(m[1] as String).trim() }.findAll { it }
+            assertTrue(blocks.size() >= 5, "${v[0]}: the scan found the html's blocks")
+            int at = 0
+            blocks.each { String block ->
+                int found = text.indexOf(block, at)
+                assertTrue(found >= 0, "${v[0]}: the text part lost a block, in order: [${block}]\n${text}")
+                at = found + block.length()
+            }
+        }
+    }
+
     private String render(String screen, Map params, String mode) {
         ec.context.push()
         try {

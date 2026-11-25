@@ -110,6 +110,7 @@ facade.AuditFacadeServices.delete#AuditFindingAcknowledgement
 facade.AuditFacadeServices.get#AuditCheckExtracts
 facade.AuditFacadeServices.get#AuditCheckOptions
 facade.AuditFacadeServices.get#AuditFinding
+facade.AuditFacadeServices.get#AuditFindingFeedback
 facade.AuditFacadeServices.get#AuditFindingsByOrder
 facade.AuditFacadeServices.get#AuditProgress
 facade.AuditFacadeServices.get#AuditReadReport
@@ -120,6 +121,7 @@ facade.AuditFacadeServices.retry#AuditCheck
 facade.AuditFacadeServices.run#Audit
 facade.AuditFacadeServices.save#AuditCheck
 facade.AuditFacadeServices.save#AuditSettings
+facade.AuditFacadeServices.send#AuditFindingFeedback
 facade.AuditFacadeServices.update#AuditFindingAcknowledgement
 facade.AuditFacadeServices.verify#AuditFinding
 facade.AuthFacadeServices.begin#PasskeyFirstSignIn

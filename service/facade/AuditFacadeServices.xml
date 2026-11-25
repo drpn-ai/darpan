@@ -271,6 +271,62 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
+    <!-- DAR-BE-361. Feedback to Darpan on one finding: the note is saved first (its own transaction), then a card goes to
+         Darpan's chat space and the sender is thanked by email (darpan.audit.FeedbackSupport); a failed card or email never
+         loses the note. Darpan answers by email only. The list is the team's notes on the same statement and cause (an
+         Unexplained finding: the statement alone) within audit.feedback.shownDays. Any member who can see the finding may send. -->
+    <service verb="send" noun="AuditFindingFeedback" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Sends Darpan a note about one finding: saves it with a snapshot of the finding's statement, cause, record
+            and headline, posts it to Darpan's feedback chat space when one is set, and emails the sender a thank-you. Darpan
+            replies by email.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>The finding's id, e.g. F-20761.</description></parameter>
+            <parameter name="note"><description>The note to Darpan; required, at most 4,000 characters.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="feedback" type="Map"><description>{feedbackId, note, sentAt, by: {id, label}}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
+                <return error="true" message="Finding ${findingId} was not found"/></if>
+            <set field="noteText" from="note?.trim()"/>
+            <if condition="!noteText"><return error="true" message="Add a note"/></if>
+            <if condition="noteText.length() &gt; 4000"><return error="true" message="Keep the note under 4,000 characters"/></if>
+            <set field="feedback" from="darpan.audit.FeedbackSupport.send(ec, tenantId, findingId, noteText)"/>
+            <if condition="!feedback"><return error="true" message="Finding ${findingId} was not found"/></if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="AuditFindingFeedback" authz-action="view" allow-remote="true" authenticate="true">
+        <description>The notes this tenant sent Darpan on the finding's statement and cause (an Unexplained finding: its
+            statement) within the shown days, newest first. Older notes are kept, just not listed.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>The finding's id, e.g. F-20761.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="notes" type="List"><description>[{feedbackId, note, sentAt, by: {id, label}, record}]</description></parameter>
+            <parameter name="shownDays" type="Integer"><description>The audit.feedback.shownDays setting.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
+                <return error="true" message="Finding ${findingId} was not found"/></if>
+            <set field="shownDays" from="darpan.config.DarpanSettings.intValue('audit.feedback.shownDays')"/>
+            <set field="notes" from="darpan.audit.FeedbackSupport.recentForFinding(ec, tenantId, findingId, shownDays)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
     <!-- DAR-UI-075. The findings as the report lists them, one per order, past its 50: the board's "more", filters, export. -->
     <service verb="get" noun="AuditFindingsByOrder" authz-action="view" allow-remote="true" authenticate="true">
         <description>Every open finding of one audit and period, one per order (an order's lines under it, the

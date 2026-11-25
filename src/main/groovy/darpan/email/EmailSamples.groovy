@@ -23,6 +23,10 @@ class EmailSamples {
                                     subjectLine: "Set up two-factor before 2 December 2026"],
     ].asImmutable()
 
+    private static final Map FEEDBACK = [firstName: "Riya", note: "These are Store Pickup orders. They never ship, so they never bill.",
+            statementCode: "R1", recordKey: "#GOR1042", headline: "Order #GOR1042 is completed in Shopify and not billed in NetSuite",
+            shownDays: 14].asImmutable()
+
     static final Map<String, Map> OTHER = [
             TenantWelcome: [firstName: "Riya", tenantLabel: "Malbon", rolePhrase: "as an Editor", username: "riya.k",
                             appBaseUrl: "https://app.drpn.ai"],
@@ -34,6 +38,9 @@ class EmailSamples {
                             runWords: AuditEmailSamples.runWords(), runBase: AuditEmailSamples.BASE],
             // DAR-BE-015: the daily Darpan error email (Darpan staff only), built by the screen from the digest a send passes.
             ErrorDigest  : [digestSubject: "[app.drpn.ai] Darpan errors 2026-11-25: 2 checks, 37 log errors", digestBody: errorDigest()],
+            // DAR-BE-361: the thank-you for a note on a finding, and Darpan's answer to it (the answer adds answer).
+            FeedbackReceived: FEEDBACK,
+            FeedbackAnswer  : FEEDBACK - [shownDays: 14] + [answer: "Right you are. Store Pickup orders now count as past Fulfillment, so tomorrow's run leaves them out."],
     ].asImmutable()
 
     private static java.sql.Timestamp at(String instant) { java.sql.Timestamp.from(java.time.Instant.parse(instant)) }

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<entity-facade-xml type="darpan-seed">
+    <!-- DAR-BE-361 — feedback on an audit finding. DARPAN_FEEDBACK_RECEIVED thanks the person who sent a note (FeedbackSupport,
+         after the note is saved); DARPAN_FEEDBACK_ANSWER carries Darpan's answer (the admin reply; never shown in the app).
+         From support@drpn.ai like the other Darpan mail (PasswordResetEmailSeedData.xml seeds the SYSTEM EmailServer row this
+         FKs, and loads first). The subject is expanded with the body parameters (firstName, note, statementCode, recordKey,
+         headline, shownDays; the answer adds answer). Words: EmailCopyBlock rows in EmailCopySeedData.xml. -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_RECEIVED" description="Darpan feedback received"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan got your note on ${statementCode}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/FeedbackReceived.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_ANSWER" description="Darpan feedback answer"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan answered your note on ${statementCode}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/FeedbackAnswer.xml"/>
+</entity-facade-xml>

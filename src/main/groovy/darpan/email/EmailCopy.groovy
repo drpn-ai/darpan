@@ -390,7 +390,7 @@ class EmailCopy {
     }
 
     private static final List<String> SUBJECT_SEED_FILES = ["PasswordResetEmailSeedData", "TwoFactorSeedData",
-            "TenantWelcomeEmailSeedData", "AuditDigestEmailSeedData", "OpsNoticeSeedData", "OpsSeedData"]
+            "TenantWelcomeEmailSeedData", "AuditDigestEmailSeedData", "OpsNoticeSeedData", "OpsSeedData", "FeedbackEmailSeedData"]
     private static volatile Map<String, String> seedSubjectsCache
 
     /** Test-only: drops the seed caches and the log-once memory so the next call re-reads. Idempotent, never throws. */

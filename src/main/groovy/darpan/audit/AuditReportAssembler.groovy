@@ -1107,6 +1107,10 @@ class AuditReportAssembler {
                                         f.closedStamp as Timestamp, zone, checkCodes, codes) : null],
                         // DAR-BE-361: its report row's acknowledgement as of today, or null.
                         acknowledgement: acknowledgement,
+                        // DAR-BE-361: the team's notes to Darpan on this statement and cause in the shown days (the bubble's count).
+                        feedback : [recentCount: FeedbackSupport.recentCount(ec, tenantId, f.statementId as String,
+                                FeedbackSupport.conclusionCode(ec, f.conclusionEnumId as String),
+                                DarpanSettings.intValue(FeedbackSupport.SHOWN_DAYS_SETTING))],
                         records  : records,
                         evidence : [
                                 rule      : f.ruleText ?: statement.statementText,

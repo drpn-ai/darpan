@@ -102,4 +102,28 @@ Review each record before loading into an environment.
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.audit.AuditFindingFeedback"
             filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <!-- DAR-BE-361 — feedback on an audit finding (restated verbatim from FeedbackEmailSeedData.xml and EmailCopySeedData.xml):
+         the thank-you and the answer templates, after the SYSTEM EmailServer above, then their copy blocks (defaultText only). -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_RECEIVED" description="Darpan feedback received"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan got your note on ${statementCode}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/FeedbackReceived.xml"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_FEEDBACK_ANSWER" description="Darpan feedback answer"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="Darpan answered your note on ${statementCode}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/FeedbackAnswer.xml"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="body" defaultText="Your note on ${statementCode} reached Darpan. Thanks for saying what the records couldn't."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="quote" defaultText="“${note}”"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="about" defaultText="On the finding: ${headline}"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="next" defaultText="A person at Darpan reads it and replies by email. Your team sees the note beside the finding for ${shownDays} days, so nobody has to ask twice."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="note" defaultText="More to add? Send another note from the same finding."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_RECEIVED" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="greeting" defaultText="Hi ${firstName},"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="body" defaultText="Darpan has an answer to your note on ${statementCode}. Worth the wait, hopefully."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="quote" defaultText="You wrote: “${note}”"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="answer.intro" defaultText="Darpan's answer:"/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="next" defaultText="The answer lives in your inbox, not in the app. Forward it if your team was asking the same thing."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="note" defaultText="Still not right? Send a new note from the finding in Darpan."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page"/>
 </entity-facade-xml>

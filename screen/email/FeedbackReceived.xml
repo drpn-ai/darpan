@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-361 the thank-you for feedback on a finding, sent to the person who sent it (FeedbackSupport, after the note is
+     saved). It quotes their note and says Darpan replies by email: support never answers in the app. The note is a value the
+     person wrote, so it only ever reaches a label (encoded) through the quote block's ${note}, never the frame's raw html.
+     Words are DARPAN_FEEDBACK_RECEIVED copy blocks (data/EmailCopySeedData.xml); the darpan-email skill holds the rules. No bold.
+     The only link is the user guide's. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <macro-template type="text" location="component://darpan/template/email/EmailText.ftl"/>
+    <actions>
+        <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · FEEDBACK')"/>
+        <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
+        <set field="copyVars" from="[firstName: firstName, note: note, statementCode: statementCode, recordKey: recordKey,
+                headline: headline, shownDays: shownDays]"/>
+        <set field="copyGreeting" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;greeting&quot;, copyVars)"/>
+        <set field="copyBody" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;body&quot;, copyVars)"/>
+        <set field="copyQuote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;quote&quot;, copyVars)"/>
+        <set field="copyAbout" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;about&quot;, copyVars)"/>
+        <set field="copyNext" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;next&quot;, copyVars)"/>
+        <set field="copyNote" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;, &quot;note&quot;, copyVars)"/>
+        <set field="guideLinks" from="darpan.email.EmailCopy.guides(ec, &quot;DARPAN_FEEDBACK_RECEIVED&quot;)"/>
+        <set field="guidesHtml" from="darpan.email.EmailCopy.guidesHtml(guideLinks)"/>
+        <set field="guidesText" from="darpan.email.EmailCopy.guidesText(guideLinks)"/>
+        <set field="emailText" from="darpan.email.EmailFrame.textOf([copyGreeting, copyBody, copyQuote, copyAbout, copyNext, copyNote, '— Darpan'])"/>
+    </actions>
+    <widgets>
+        <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
+        <container style="dp-p"><label text="${copyGreeting}"/></container>
+        <container style="dp-p"><label text="${copyBody}"/></container>
+        <container style="dp-p"><label text="${copyQuote}"/></container>
+        <container style="dp-p"><label text="${copyAbout}"/></container>
+        <container style="dp-p"><label text="${copyNext}"/></container>
+        <container style="dp-note"><label text="${copyNote}"/></container>
+        <container style="dp-sign"><label text="— Darpan"/></container>
+        <render-mode>
+            <text type="html" no-boundary-comment="true"><![CDATA[${guidesHtml}${frameClose}]]></text>
+            <text type="text" no-boundary-comment="true"><![CDATA[${emailText}${guidesText}]]></text>
+        </render-mode>
+    </widgets>
+</screen>

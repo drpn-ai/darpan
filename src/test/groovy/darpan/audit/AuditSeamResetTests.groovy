@@ -24,6 +24,22 @@ class AuditSeamResetTests {
     }
 
     @Test
+    void feedbackSeamsAreRestored() {
+        Closure email = FeedbackSupport.sendEmail
+        try {
+            FeedbackSupport.sendEmail = { def ec, String to, String templateId, Map body -> null }
+            FeedbackSupport.postHook = { String url, Map payload -> [ok: true] }
+            FeedbackSupport.resetForTests()
+            assertSame(email, FeedbackSupport.sendEmail)
+            assertSame(null, FeedbackSupport.postHook)
+            FeedbackSupport.resetForTests()
+            assertSame(email, FeedbackSupport.sendEmail)
+        } finally {
+            FeedbackSupport.resetForTests()
+        }
+    }
+
+    @Test
     void runUpdateSeamsAreRestored() {
         Closure email = AuditRunUpdateSupport.sendEmail
         Closure dispatch = AuditRunUpdateSupport.dispatch

@@ -41,7 +41,8 @@ class EmailAdminServicesSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(ReconciliationSmokeTestSupport.resolveBackendRoot(), "email-admin-services")
         ec.entity.makeDataLoader().location("component://darpan/data/SecuritySeedData.xml").dummyFks(true).load()
         ["PasswordResetEmailSeedData.xml", "TwoFactorSeedData.xml", "TenantWelcomeEmailSeedData.xml",
-         "AuditDigestEmailSeedData.xml", "EmailCopySeedData.xml", "OpsNoticeSeedData.xml", "OpsSeedData.xml"].each {
+         "AuditDigestEmailSeedData.xml", "EmailCopySeedData.xml", "OpsNoticeSeedData.xml", "OpsSeedData.xml",
+         "FeedbackEmailSeedData.xml"].each {
             ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/${it}")
         }
     }
@@ -75,10 +76,10 @@ class EmailAdminServicesSmokeTests {
     // ---------------------------------------------------------------- reads
 
     @Test
-    void theListIsTheFourteenEmailsAndTheShowCarriesBlocksWithVariables() {
+    void theListIsTheSixteenEmailsAndTheShowCarriesBlocksWithVariables() {
         List<Map> templates = ok(svc("get#EmailTemplates", [:])).result.templates
-        assertEquals(14, templates.size())
-        assertEquals(14, templates*.emailTemplateId.toSet().size())
+        assertEquals(16, templates.size())
+        assertEquals(16, templates*.emailTemplateId.toSet().size())
         assertEquals([0], templates*.editedBlockCount.unique())
         Map changed = templates.find { it.emailTemplateId == CHANGED }
         assertEquals("Your Darpan password was changed", changed.subject)
@@ -412,7 +413,7 @@ class EmailAdminServicesSmokeTests {
         EmailCopy.seedSubjects(ec).each { String id, String subject ->
             assertNull(EmailCopy.subjectProblem(ec, id, subject), id)
         }
-        assertEquals(14, EmailCopy.seedSubjects(ec).size())
+        assertEquals(16, EmailCopy.seedSubjects(ec).size())
     }
 
     /** DAR-BE-015: the run error notice (a chat line, not an email) is shown, edited and used like any other copy. */

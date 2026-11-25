@@ -1,6 +1,7 @@
 package reconciliation.observability
 
 import darpan.facade.reconciliation.RunObservability
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -42,6 +43,7 @@ class RunObservabilityPipelineIntegrationTest {
 
     @AfterAll
     void teardown() {
+        AutomationExecutionSupport.resetForTests()
         if (ec != null) ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -170,6 +172,36 @@ class RunObservabilityPipelineIntegrationTest {
         }
         assertTrue(stageCodes.contains(RunObservability.STAGE_RESOLVE), "expected a RESOLVE step, got ${stageCodes}")
         assertTrue(stageCodes.contains(RunObservability.STAGE_COMPARE), "expected a COMPARE step, got ${stageCodes}")
+    }
+
+    @Test
+    void aCleanInteractiveRunPostsNoErrorCard() {
+        // DAR-BE-362: the error path is for failures only; a clean interactive run (a real compare) posts Darpan no card.
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#CsvRun")
+                .parameters([runName: "BE362 clean run", file1SystemEnumId: "OMS", file2SystemEnumId: "SHOPIFY",
+                        file1CompareColumn: "order_id", file2CompareColumn: "order_id"])
+                .disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map> cards = []
+        AutomationExecutionSupport.errorCardPoster = { def postEc, Map event -> cards << event; true }
+        Map<String, Object> runResult
+        try {
+            runResult = ec.service.sync()
+                    .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                    .parameters([savedRunId: createResult.savedRun.savedRunId, file1Name: "orders-1.csv",
+                            file1Text: "order_id\nA100\nA200\n", file2Name: "orders-2.csv", file2Text: "order_id\nA200\nA300\n",
+                            hasHeader: true])
+                    .disableAuthz().call()
+        } finally {
+            AutomationExecutionSupport.errorCardPoster = null
+        }
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(0, cards.size(), "a clean run posts no error card")
+        def run = ec.entity.find(RunObservability.RUN_RESULT_ENTITY)
+                .condition("reconciliationRunResultId", runResult.runResult.reconciliationRunResultId)
+                .disableAuthz().useCache(false).one()
+        assertTrue(run.statusEnumId in [RunObservability.STATUS_SUCCESS, RunObservability.STATUS_NO_DATA], "was ${run.statusEnumId}")
     }
 
     @Test

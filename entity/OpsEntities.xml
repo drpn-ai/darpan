@@ -9,7 +9,7 @@
         <description>One Darpan error card posted for a check (or an automation with no check) on a run day. The row is the
             day's dedupe key and the streak's memory: a second failure the same day posts nothing.</description>
         <field name="tenantId" type="id" is-pk="true"/>
-        <field name="subjectKey" type="id-long" is-pk="true"><description>The check id, or the automation id when the run has no check.</description></field>
+        <field name="subjectKey" type="id-long" is-pk="true"><description>"auditId:checkId" for an audit check, the automation id when the run has no check, or "savedRun:savedRunId" for an interactive saved run (DAR-BE-362).</description></field>
         <field name="runDay" type="date" is-pk="true"><description>The scheduled date in the automation's own zone.</description></field>
         <field name="triggerType" type="id" is-pk="true"><description>"scheduled", or "manual"/"play": a hand-started run has its own slot and never counts toward a streak. "client": the automation's one client "did not run" line that day (no card).</description></field>
         <field name="errorKind" type="text-short"/>

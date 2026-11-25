@@ -169,6 +169,30 @@ def obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObs
 String obsStage = RunObservability.STAGE_RESOLVE
 boolean obsRuleExecutionFailed = false
 boolean obsNoData = false
+// DAR-BE-362: the saved run's name as soon as the run resolves, so a run that fails before a runResult exists is still named
+// on Darpan's card and in its subscribers' line. Read again only when the run failed before resolving.
+String runNameValue = null
+def savedRunNoticeName = { ->
+    String name = normalize(runResult?.runName) ?: runNameValue
+    if (name) return name
+    try {
+        return normalize(ReconciliationSavedRunSupport.findSavedRunById(ec, savedRunIdValue)?.runName)
+    } catch (Throwable nameReadError) {
+        logger.warn("run#SavedRunDiff could not read the saved run's name for its error notice: ${nameReadError.getClass().name}")
+        return null
+    }
+}
+// DAR-BE-362: the one error path of a failed run: Darpan's card gets the error, notify-me subscribers the neutral line, and the
+// run is claimed so nothing notifies it twice. Never throws, so it never masks the run's own failure.
+def notifySavedRunFailure = { String reason ->
+    AutomationExecutionSupport.notifySavedRunError(ec, [
+            reconciliationRunResultId: obsRunId,
+            companyUserGroupId       : normalize(runResult?.companyUserGroupId) ?: normalize(obsCtx?.companyUserGroupId),
+            runName                  : savedRunNoticeName(),
+            savedRunId               : normalize(runResult?.savedRunId) ?: savedRunIdValue,
+            resultDataManagerPath    : normalize(runResult?.resultDataManagerPath),
+    ], reason)
+}
 
 def enumLabel = { String enumId ->
     return FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, enumId) ?: [enumId: enumId])
@@ -571,6 +595,7 @@ try {
     if (!ec.message.hasError() && mapping != null) {
         TenantAccessSupport.requireTenantRecordAccess(ec, mapping, "Saved run '${savedRunIdValue}' was not found.")
     }
+    if (!ec.message.hasError() && mapping != null) runNameValue = normalize(mapping.mappingName)
 
     if (!ec.message.hasError() && mapping != null) {
         requireUploadInput("file1", inputFile1Name, file1TextValue)
@@ -633,6 +658,7 @@ try {
 
     if (!ec.message.hasError() && mapping == null) {
         Map<String, Object> resolvedRuleSetRun = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunIdValue)
+        if (!resolvedRuleSetRun.error) runNameValue = normalize(((Map) resolvedRuleSetRun.savedRun)?.runName)
         if (resolvedRuleSetRun.error) {
             ec.message.addError(resolvedRuleSetRun.error as String)
         } else if (resolvedRuleSetRun.savedRun == null) {
@@ -1133,13 +1159,30 @@ try {
         }
     }
 
+    // The run row's own status: a nested reconcile service may have recorded FAILED (rules did not fully evaluate).
+    def readObsRowStatus = { ->
+        if (!obsRunId) return null
+        try {
+            return normalize(TenantScopedFinder.findOneOwnedByTenant(ec,
+                    DarpanEntityConstants.RECONCILIATION_RUN_RESULT, "reconciliationRunResultId", obsRunId,
+                    TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                    "terminal status of the run this call began — owner re-checked on the row")?.statusEnumId)
+        } catch (Throwable statusReadError) {
+            logger.warn("run#SavedRunDiff terminal status read failed (best-effort): ${statusReadError.message ?: statusReadError}")
+            return null
+        }
+    }
+
     if (!ec.message.hasError() && runResult?.reconciliationRunResultId) {
         // Observability: NOTIFY is best-effort and must never fail the run — a notification
         // failure is contained here (step FAILED + warn) and the run still ends SUCCESS/NO_DATA.
         obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_NOTIFY) : null
         obsStage = RunObservability.STAGE_NOTIFY
         try {
-            TenantNotificationSupport.notifyRunCompleted(ec, (Map<String, Object>) runResult)
+            // DAR-BE-362: a run whose rules did not fully evaluate takes the error path (card for Darpan, neutral line for
+            // subscribers), never the completion message with its raw warnings.
+            boolean rulesFailed = obsRuleExecutionFailed || RunObservability.STATUS_FAILED == readObsRowStatus()
+            AutomationExecutionSupport.notifySavedRunCompleted(ec, (Map<String, Object>) runResult, rulesFailed)
             RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
         } catch (Throwable notifyError) {
             RunObservability.endStep(ec, obsStep, RunObservability.STATUS_FAILED,
@@ -1163,23 +1206,9 @@ try {
             // The success-path notify above never runs on this branch (ec.message has errors). DAR-BE-362: the error goes to
             // Darpan's own error card only; notify-me subscribers get the neutral line, claimed once (notifiedDate), and the
             // run's subscriptions go with the claim. Best-effort inside: never masks the real run failure.
-            AutomationExecutionSupport.notifySavedRunError(ec, [
-                    reconciliationRunResultId: obsRunId,
-                    companyUserGroupId       : normalize(runResult?.companyUserGroupId) ?: normalize(obsCtx?.companyUserGroupId),
-                    runName                  : normalize(runResult?.runName),
-                    savedRunId               : normalize(runResult?.savedRunId) ?: savedRunIdValue,
-                    resultDataManagerPath    : normalize(runResult?.resultDataManagerPath),
-            ], ec.message.errors ? ec.message.errors.join("; ") : "reconciliation run failed")
+            notifySavedRunFailure(ec.message.errors ? ec.message.errors.join("; ") : "reconciliation run failed")
         } else {
-            String obsRowStatus = null
-            try {
-                obsRowStatus = normalize(TenantScopedFinder.findOneOwnedByTenant(ec,
-                        DarpanEntityConstants.RECONCILIATION_RUN_RESULT, "reconciliationRunResultId", obsRunId,
-                        TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                        "terminal status of the run this call began — owner re-checked on the row")?.statusEnumId)
-            } catch (Throwable statusReadError) {
-                logger.warn("run#SavedRunDiff terminal status read failed (best-effort): ${statusReadError.message ?: statusReadError}")
-            }
+            String obsRowStatus = readObsRowStatus()
             if (obsRuleExecutionFailed || RunObservability.STATUS_FAILED == obsRowStatus) {
                 // A nested reconcile service recorded FAILED (rule execution did not fully evaluate)
                 // while the facade still returns its normal envelope — preserve that FAILED terminal.
@@ -1203,6 +1232,8 @@ try {
             RunObservability.cancelRun(ec, obsRunId, obsStep, obsStage)
         } else {
             RunObservability.failRun(ec, obsRunId, obsStep, obsStage, obsError.message ?: obsError.toString())
+            // DAR-BE-362: a thrown failure (Spark, an extractor, a bug) is told like any other: card, neutral line, claim.
+            notifySavedRunFailure(obsError.message ?: obsError.getClass().name)
         }
     }
     obsTerminalWritten = true

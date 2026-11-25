@@ -3702,10 +3702,9 @@ class AutomationExecutionSupport {
      * @param execution the execution row as it closed (statusEnumId, noDataKind, counts, retryCount, triggerType, dates)
      */
     static void notifyRunError(def ec, def automation, Map execution, String runResultId, String reason) {
-        try {
+        deliverRunError(ec, runResultId, ERROR_NOTICE_NOT_RUN) { ->
             String kind = RunErrorKinds.of(execution)
-            if (kind == null) return
-            String tenantId = normalize(readField(automation, "companyUserGroupId"))
+            if (kind == null) return null
             String trigger = triggerOf(execution)
             List<Map> subjects = null
             try {
@@ -3716,25 +3715,11 @@ class AutomationExecutionSupport {
                         readField(automation, "automationId"), lookupError.getClass().name)
             }
             Map<String, Object> event = runErrorEvent(ec, automation, execution, kind, reason, runResultId, trigger)
-            Closure poster = errorCardPoster ?: { def postEc, Map postEvent -> ErrorChatSupport.postErrorCard(postEc, postEvent) }
-            (subjects ?: [[:]]).each { Map subject ->
-                try {
-                    poster.call(ec, event + subject)
-                } catch (Throwable postError) {
-                    logger.warn("Run error card for automation {} failed: {}", event.automationId, postError.getClass().name)
-                }
-            }
             String chatSpaceId = normalize(readField(automation, "chatSpaceId"))
             boolean toChatSpace = chatSpaceId && subjects != null && subjects.isEmpty() && trigger == TRIGGER_SCHEDULED &&
                     ErrorChatSupport.claimClientLine(ec, event)
-            String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
-                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(ERROR_NOTICE_NOT_RUN, [name: event.automationName])
-            TenantNotificationSupport.notifyRunLine(ec, tenantId, toChatSpace ? chatSpaceId : null, runResultId, line)
-        } catch (Throwable notifyError) {
-            logger.warn("Run error notification failed (best-effort): {}", notifyError.getClass().name)
-            try {
-                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
-            } catch (Throwable ignored) { }
+            return [tenantId   : normalize(readField(automation, "companyUserGroupId")), name: event.automationName,
+                    chatSpaceId: toChatSpace ? chatSpaceId : null, cards: (subjects ?: [[:]]).collect { Map subject -> event + subject }]
         }
     }
 
@@ -3749,7 +3734,7 @@ class AutomationExecutionSupport {
      */
     static void notifySavedRunError(def ec, Map run, String reason) {
         String runResultId = normalize(run?.reconciliationRunResultId)
-        try {
+        deliverRunError(ec, runResultId, ERROR_NOTICE_RUN_FAILED) { ->
             String tenantId = normalize(run.companyUserGroupId)
             String savedRunId = normalize(run.savedRunId)
             String name = normalize(run.runName) ?: savedRunId
@@ -3765,17 +3750,50 @@ class AutomationExecutionSupport {
                     scheduled     : false,
                     trigger       : TRIGGER_MANUAL,
                     completedDate : ec.user.nowTimestamp,
+                    // the card's day is the tenant's day (an interactive run has no automation zone)
+                    zoneId        : TenantNotificationSupport.resolveTenantZone(ec, tenantId)?.id,
             ] as Map<String, Object>
-            try {
-                (errorCardPoster ?: { def postEc, Map postEvent -> ErrorChatSupport.postErrorCard(postEc, postEvent) }).call(ec, event)
-            } catch (Throwable postError) {
-                logger.warn("Run error card for saved run {} failed: {}", savedRunId, postError.getClass().name)
+            return [tenantId: tenantId, name: name, chatSpaceId: null, cards: [event]]
+        }
+    }
+
+    /**
+     * DAR-BE-362. A saved run's terminal notify (run#SavedRunDiff): a run whose rules did not fully evaluate (rulesFailed, or
+     * the run result says AUT_STAT_FAILED) goes the error path, notifySavedRunError with ruleFailureReason as the card's
+     * reason, so its subscribers never get the rule error or warnings; any other run gets the usual completion message.
+     */
+    static void notifySavedRunCompleted(def ec, Map<String, Object> runResult, boolean rulesFailed) {
+        if (rulesFailed || RunObservability.STATUS_FAILED == normalize(runResult?.statusEnumId)) {
+            notifySavedRunError(ec, runResult, ruleFailureReason(runResult) ?: "rule execution failed")
+        } else {
+            TenantNotificationSupport.notifyRunCompleted(ec, runResult)
+        }
+    }
+
+    /**
+     * DAR-BE-015/362. The one tail of every run error. build returns what to send (null: nothing, the run had no error):
+     * tenantId, name (the client line's ${name}), chatSpaceId (the automation's space, or null for subscribers only) and cards
+     * (each posted to Darpan's error space; a failed post is logged and never stops the rest). Then the neutral line (copy
+     * block blockId of DARPAN_ERROR_NOTICE) goes through notifyRunLine, which claims the run result and purges its
+     * subscriptions. Never throws; when anything fails the run's subscriptions still go, so none outlives the run.
+     */
+    private static void deliverRunError(def ec, String runResultId, String blockId, Closure<Map> build) {
+        try {
+            Map plan = build.call()
+            if (plan == null) return
+            Closure poster = errorCardPoster ?: { def postEc, Map postEvent -> ErrorChatSupport.postErrorCard(postEc, postEvent) }
+            ((plan.cards ?: []) as List<Map>).each { Map card ->
+                try {
+                    poster.call(ec, card)
+                } catch (Throwable postError) {
+                    logger.warn("Run error card for {} failed: {}", card.automationId ?: card.subjectKey, postError.getClass().name)
+                }
             }
             String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
-                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(ERROR_NOTICE_RUN_FAILED, [name: name])
-            TenantNotificationSupport.notifyRunLine(ec, tenantId, null, runResultId, line)
+                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(blockId, [name: plan.name])
+            TenantNotificationSupport.notifyRunLine(ec, plan.tenantId as String, plan.chatSpaceId as String, runResultId, line)
         } catch (Throwable notifyError) {
-            logger.warn("Saved run error notification failed (best-effort): {}", notifyError.getClass().name)
+            logger.warn("Run error notification failed (best-effort): {}", notifyError.getClass().name)
             try {
                 TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
             } catch (Throwable ignored) { }

@@ -12,7 +12,9 @@ import java.time.LocalDate
 /**
  * DAR-BE-015. The Darpan-only error card: one chat post per check per day to the webhook in the setting
  * errors.chat.webhookUrl. Never reaches a client destination and never fails a run: any problem is logged and reported as
- * not posted. The day's RunErrorNotice row is the dedupe key and the memory of the streak.
+ * not posted. The day's RunErrorNotice row is the dedupe key and the memory of the streak. Its subject is the audit check
+ * ("<auditId>:<checkId>"), else the automation id, else the event's own subjectKey: an interactive saved run (DAR-BE-362) is
+ * "savedRun:<savedRunId>", so it never shares a slot with an automation whose id happens to match.
  */
 class ErrorChatSupport {
     private static final Logger logger = LoggerFactory.getLogger(ErrorChatSupport)

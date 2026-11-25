@@ -206,7 +206,8 @@ class RetentionSupport {
                         { find -> find.condition("lastSeenDate", EntityCondition.LESS_THAN, new Date(cutoff.time)) },
                         [[entity: "darpan.audit.AuditFindingRecord", fk: "findingId", tenantStamped: true],
                          [entity: "darpan.audit.AuditFindingCondition", fk: "findingId", tenantStamped: true],
-                         [entity: "darpan.audit.AuditFindingEvent", fk: "findingId", tenantStamped: true]], [])
+                         [entity: "darpan.audit.AuditFindingEvent", fk: "findingId", tenantStamped: true],
+                         [entity: "darpan.audit.AuditFindingAcknowledgement", fk: "findingId", tenantStamped: true]], [])
             case RUN_RESULT:
                 return sweepParents(ec, tenantId, dryRun, batch, "darpan.reconciliation.ReconciliationRunResult", "reconciliationRunResultId",
                         { find -> find.condition("createdDate", EntityCondition.LESS_THAN, cutoff)

@@ -61,6 +61,12 @@
             description="Fixed" sequenceNum="3"/>
     <moqui.basic.Enumeration enumId="AUDFE_REOPENED" enumTypeId="AuditFindingEvent" enumCode="reopened"
             description="Reopened" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="AUDFE_ACKNOWLEDGED" enumTypeId="AuditFindingEvent" enumCode="acknowledged"
+            description="Acknowledged" sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="AUDFE_ACK_CHANGED" enumTypeId="AuditFindingEvent" enumCode="acknowledgementChanged"
+            description="Acknowledgement changed" sequenceNum="6"/>
+    <moqui.basic.Enumeration enumId="AUDFE_ACK_REOPENED" enumTypeId="AuditFindingEvent" enumCode="acknowledgementReopened"
+            description="Acknowledgement reopened" sequenceNum="7"/>
 
     <!-- No agent type: the external API has no mutations, so an agent can never cause an event. -->
     <moqui.basic.EnumerationType enumTypeId="AuditActorType" description="Audit event actor type"/>

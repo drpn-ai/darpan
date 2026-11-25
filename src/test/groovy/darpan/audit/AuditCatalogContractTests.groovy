@@ -30,7 +30,7 @@ class AuditCatalogContractTests {
             AuditFindingState   : ["open", "fixed"],
             AuditCheckStatus    : ["ran", "partial", "notRun"],
             AuditSourceRead     : ["complete", "partial", "failed"],
-            AuditFindingEvent   : ["found", "stillOpen", "fixed", "reopened"],
+            AuditFindingEvent   : ["found", "stillOpen", "fixed", "reopened", "acknowledged", "acknowledgementChanged", "acknowledgementReopened"],
             AuditActorType      : ["check", "user"],
             AuditPeriod         : ["day", "month", "quarter"],
             // DAR-BE-102: not in the JSON (the digest is rendered from it), but it rides the same seed and upgrade pack.

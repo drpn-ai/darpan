@@ -34,7 +34,8 @@ class RetentionSmokeTests {
     private static final Timestamp RECENT = new Timestamp(System.currentTimeMillis() - DAY)
 
     private static final List<String> WIPE = ["darpan.audit.AuditFindingRecord", "darpan.audit.AuditFindingCondition",
-            "darpan.audit.AuditFindingEvent", "darpan.audit.AuditFinding", "darpan.reconciliation.ReconciliationRunStep",
+            "darpan.audit.AuditFindingEvent", "darpan.audit.AuditFindingAcknowledgement", "darpan.audit.AuditFindingFeedback",
+            "darpan.audit.AuditFinding", "darpan.reconciliation.ReconciliationRunStep",
             "darpan.reconciliation.ReconciliationAutomationExecution", "darpan.reconciliation.ReconciliationRunResult",
             "darpan.agent.AgentMessage", "darpan.agent.AgentTurn", "darpan.agent.AgentConversation", "darpan.agent.AgentQueryLog",
             "darpan.pulse.SyncPulsePresentKey", "darpan.pulse.SyncPulseSample", "darpan.pulse.SyncPulseOrder", "darpan.pulse.SyncPair"]
@@ -169,7 +170,8 @@ class RetentionSmokeTests {
         Map findings = table(out, RetentionSupport.AUDIT_FINDING)
         assertEquals([RetentionSupport.DRY_RUN, 30, 2L], [findings.status, findings.periodDays, findings.rows])
         assertEquals([(A): 1L, (B): 1L], findings.byTenant)
-        assertEquals(["darpan.audit.AuditFindingRecord": 2L, "darpan.audit.AuditFindingCondition": 2L, "darpan.audit.AuditFindingEvent": 2L],
+        assertEquals(["darpan.audit.AuditFindingRecord": 2L, "darpan.audit.AuditFindingCondition": 2L, "darpan.audit.AuditFindingEvent": 2L,
+                 "darpan.audit.AuditFindingAcknowledgement": 0L],
                 findings.dependentRows)
         Map runs = table(out, RetentionSupport.RUN_RESULT)
         assertEquals(2L, runs.rows, "the old finished run per tenant; the old run still RUNNING is not counted")
@@ -181,6 +183,23 @@ class RetentionSmokeTests {
         Map one = run("dryRun#Retention", [tenantUserGroupId: A, periodDays: [AUDIT_FINDING: 30]])
         assertEquals([(A): 1L], table(one, RetentionSupport.AUDIT_FINDING).byTenant, "one tenant asked, one tenant counted")
         assertEquals(RetentionSupport.KEEP_FOREVER, table(one, RetentionSupport.RUN_RESULT).status, "an override names only its tables")
+    }
+
+    @Test
+    void auditFindingSweepDeletesAcknowledgements() {
+        // DAR-BE-361: an acknowledgement follows its finding; feedback is a message to Darpan and outlives it.
+        setSetting("darpan.retention.auditFinding.days", "30")
+        asSystem {
+            upsert("darpan.audit.AuditFindingAcknowledgement", [findingId: "${A}_F_OLD".toString(), companyUserGroupId: A, note: "known",
+                    acknowledgedStamp: RECENT])
+            upsert("darpan.audit.AuditFindingAcknowledgement", [findingId: "${A}_F_NEW".toString(), companyUserGroupId: A, note: "known",
+                    acknowledgedStamp: RECENT])
+            upsert("darpan.audit.AuditFindingFeedback", [feedbackId: "FB-RET-1", companyUserGroupId: A, findingId: "${A}_F_OLD".toString(),
+                    statementId: "${A}_R1".toString(), note: "wrong", sentByUserId: "u1", sentStamp: RECENT])
+        }
+        run("run#Retention", [tenantUserGroupId: A])
+        assertEquals(["${A}_F_NEW".toString()], ids("darpan.audit.AuditFindingAcknowledgement", "findingId"), "the old finding's acknowledgement went with it")
+        assertEquals(["${A}_F_OLD".toString()], ids("darpan.audit.AuditFindingFeedback", "findingId"), "feedback survives its finding")
     }
 
     @Test

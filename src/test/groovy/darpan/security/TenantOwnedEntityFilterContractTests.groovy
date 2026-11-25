@@ -60,6 +60,8 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.audit.AuditFindingRecord"                    : "DARPAN_SCOPE_AUD_FINDING_RECORD",
             "darpan.audit.AuditFindingCondition"                     : "DARPAN_SCOPE_AUD_FINDING_CHECK",
             "darpan.audit.AuditFindingEvent"                     : "DARPAN_SCOPE_AUD_FINDING_EVENT",
+            "darpan.audit.AuditFindingAcknowledgement"           : "DARPAN_SCOPE_AUD_FINDING_ACK",
+            "darpan.audit.AuditFindingFeedback"                  : "DARPAN_SCOPE_AUD_FINDING_FEEDBACK",
     ].asImmutable()
 
     /** DAR-BE-103: the audit a statement belongs to. */

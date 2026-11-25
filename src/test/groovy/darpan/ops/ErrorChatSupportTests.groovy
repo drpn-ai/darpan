@@ -199,6 +199,19 @@ class ErrorChatSupportTests {
     }
 
     @Test
+    void aSavedRunCardDedupesOnItsOwnSubjectNotAnAutomationOfTheSameId() {
+        // DAR-BE-362: an interactive saved run has no check and no automation; it names its own slot, so a saved run and an
+        // automation that happen to share an id never swallow each other's card.
+        Map run = event([checkId: null, auditId: null, automationId: null, subjectKey: "savedRun:AUTO1", automationName: "Nightly orders",
+                scheduled: false, trigger: "manual", kind: "FAILED", attempts: null])
+        assertTrue(ErrorChatSupport.postErrorCard(ec, run))
+        assertFalse(ErrorChatSupport.postErrorCard(ec, run), "a second failure of the same saved run that day posts nothing")
+        assertTrue(ErrorChatSupport.postErrorCard(ec, run + [checkId: null, automationId: "AUTO1", subjectKey: null]))
+        assertEquals(2, posted.size())
+        assertTrue(posted[0].text.startsWith("Dolls Kill · Nightly orders\nFAILED · manual"), posted[0].text)
+    }
+
+    @Test
     void sameCheckIdInTwoAuditsIsTwoCards() {
         Map e = event()
         assertTrue(ErrorChatSupport.postErrorCard(ec, e))

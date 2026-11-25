@@ -39,7 +39,9 @@ class ErrorChatSupport {
             if (!webhookUrl) return false
 
             LocalDate day = dayOf(event)
-            String subjectKey = event.checkId ? "${event.auditId ?: ''}:${event.checkId}".toString() : (event.automationId as String)
+            // subjectKey: a run with neither check nor automation names its own slot (DAR-BE-362: an interactive saved run).
+            String subjectKey = event.checkId ? "${event.auditId ?: ''}:${event.checkId}".toString() :
+                    ((event.automationId ?: event.subjectKey) as String)
             String triggerType = event.scheduled ? "scheduled" : ((event.trigger ?: "manual") as String)
             // The claim runs in its own transaction and behind a fresh message scope: a failure there never rolls back the run's
             // status and never leaves an error in the caller's messages, and an error the caller already holds never blocks it.

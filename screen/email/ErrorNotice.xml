@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- DAR-BE-015 the run error notice: the one line a client's chat space or a notify-me subscriber gets when a run did not run
-     (AutomationExecutionSupport.notifyRunError posts it as chat text; it is never sent as an email). This screen exists so the
+     (client.notrun, a scheduled run) or did not finish (client.runfailed, DAR-BE-362: an interactive saved run)
+     (AutomationExecutionSupport.notifyRunError / notifySavedRunError post it as chat text; it is never sent as an email). This screen exists so the
      admin email editor can show, preview and edit the line like any other copy; the preview shows the line as it posts. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
@@ -9,11 +10,13 @@
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · CHAT LINE')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>
         <set field="copyNotRun" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_ERROR_NOTICE&quot;, &quot;client.notrun&quot;, [name: name])"/>
-        <set field="emailText" from="darpan.email.EmailFrame.textOf([copyNotRun])"/>
+        <set field="copyRunFailed" from="darpan.email.EmailCopy.text(ec, &quot;DARPAN_ERROR_NOTICE&quot;, &quot;client.runfailed&quot;, [name: name])"/>
+        <set field="emailText" from="darpan.email.EmailFrame.textOf([copyNotRun, copyRunFailed])"/>
     </actions>
     <widgets>
         <render-mode><text type="html" no-boundary-comment="true"><![CDATA[${frameOpen}]]></text></render-mode>
         <container style="dp-p"><label text="${copyNotRun}"/></container>
+        <container style="dp-p"><label text="${copyRunFailed}"/></container>
         <render-mode>
             <text type="html" no-boundary-comment="true"><![CDATA[${frameClose}]]></text>
             <text type="text" no-boundary-comment="true"><![CDATA[${emailText}]]></text>

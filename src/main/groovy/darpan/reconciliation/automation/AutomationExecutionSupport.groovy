@@ -212,6 +212,8 @@ class AutomationExecutionSupport {
     /** DAR-BE-015: the client's neutral line when a run errors (data/OpsNoticeSeedData.xml, editable in production). */
     static final String ERROR_NOTICE_TEMPLATE = "DARPAN_ERROR_NOTICE"
     static final String ERROR_NOTICE_NOT_RUN = "client.notrun"
+    /** DAR-BE-362: the neutral line for a failed interactive saved run (not a morning run, so not client.notrun). */
+    static final String ERROR_NOTICE_RUN_FAILED = "client.runfailed"
 
     private static final Set<String> REUSABLE_EXECUTION_STATUSES = [STATUS_PENDING] as Set
 
@@ -3730,6 +3732,50 @@ class AutomationExecutionSupport {
             TenantNotificationSupport.notifyRunLine(ec, tenantId, toChatSpace ? chatSpaceId : null, runResultId, line)
         } catch (Throwable notifyError) {
             logger.warn("Run error notification failed (best-effort): {}", notifyError.getClass().name)
+            try {
+                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
+            } catch (Throwable ignored) { }
+        }
+    }
+
+    /**
+     * DAR-BE-362. The error path of a failed interactive saved run (run#SavedRunDiff, not an automation): Darpan's error space
+     * gets one card (kind FAILED, trigger manual, the saved run's name, deduped per day on "savedRun:<savedRunId>" so it never
+     * shares a slot with an automation of the same id); notify-me subscribers get only the neutral line (DARPAN_ERROR_NOTICE /
+     * client.runfailed), never the error. The run result is claimed and its subscriptions purged as notifyRunLine does, so it
+     * is told once. Never throws: the run's own outcome must reach the caller unchanged.
+     *
+     * @param run reconciliationRunResultId, companyUserGroupId, savedRunId, runName (blank falls back to savedRunId), resultDataManagerPath
+     */
+    static void notifySavedRunError(def ec, Map run, String reason) {
+        String runResultId = normalize(run?.reconciliationRunResultId)
+        try {
+            String tenantId = normalize(run.companyUserGroupId)
+            String savedRunId = normalize(run.savedRunId)
+            String name = normalize(run.runName) ?: savedRunId
+            Map<String, Object> event = [
+                    tenantId      : tenantId,
+                    tenantName    : tenantName(ec, tenantId),
+                    subjectKey    : savedRunId ? "savedRun:${savedRunId}".toString() : runResultId,
+                    automationName: name,
+                    kind          : RunErrorKinds.FAILED,
+                    errorFirstLine: reason,
+                    runUrl        : runErrorUrl(ec, [savedRunId: savedRunId, automationName: name, companyUserGroupId: tenantId],
+                            [resultDataManagerPath: run.resultDataManagerPath], runResultId),
+                    scheduled     : false,
+                    trigger       : TRIGGER_MANUAL,
+                    completedDate : ec.user.nowTimestamp,
+            ] as Map<String, Object>
+            try {
+                (errorCardPoster ?: { def postEc, Map postEvent -> ErrorChatSupport.postErrorCard(postEc, postEvent) }).call(ec, event)
+            } catch (Throwable postError) {
+                logger.warn("Run error card for saved run {} failed: {}", savedRunId, postError.getClass().name)
+            }
+            String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
+                    new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(ERROR_NOTICE_RUN_FAILED, [name: name])
+            TenantNotificationSupport.notifyRunLine(ec, tenantId, null, runResultId, line)
+        } catch (Throwable notifyError) {
+            logger.warn("Saved run error notification failed (best-effort): {}", notifyError.getClass().name)
             try {
                 TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
             } catch (Throwable ignored) { }

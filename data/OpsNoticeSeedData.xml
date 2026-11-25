@@ -14,4 +14,7 @@
             bodyScreenLocation="component://darpan/screen/email/ErrorNotice.xml"/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.notrun"
             defaultText="${name} did not run this morning. Darpan has been alerted and is working on a fix."/>
+    <!-- DAR-BE-362: a failed interactive saved run (someone pressed Run, not a morning run): its notify-me subscribers get this. -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_ERROR_NOTICE" blockId="client.runfailed"
+            defaultText="${name} did not finish. Darpan has been alerted and is working on a fix."/>
 </entity-facade-xml>

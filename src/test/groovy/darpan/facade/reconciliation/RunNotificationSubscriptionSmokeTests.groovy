@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import darpan.reconciliation.support.SharedMoqui
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -34,10 +36,15 @@ class RunNotificationSubscriptionSmokeTests {
         // ReconciliationRunResult.statusEnumId FKs to moqui.basic.Enumeration; pull the seeded
         // AutomationStatus enums (same convention as AutomationFacadeSmokeTests).
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
+        // DAR-BE-362: the run-failed line is read from its copy block; create#CsvRun needs the system and file-type enums.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/OpsNoticeSeedData.xml")
+        ReconciliationSmokeTestSupport.seedBaseCompareRuleSet(ec)
     }
 
     @AfterAll
     void cleanup() {
+        AutomationExecutionSupport.resetForTests()
+        TenantNotificationSupport.resetDeliveryHook()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -243,6 +250,126 @@ class RunNotificationSubscriptionSmokeTests {
                 [reconciliationRunResultId: runId])
         assertTrue(statusAfterNotify.ok as boolean)
         assertFalse(statusAfterNotify.mySubscription as boolean)
+    }
+
+    @Test
+    void failedInteractiveRunPostsOneCardToDarpanAndNoErrorToClients() {
+        // DAR-BE-362, end to end through the facade: a saved run that fails after its run row exists (here: the saved run
+        // is missing) posts Darpan one FAILED card carrying the error, and no client destination ever gets the error text.
+        List<Map> cards = []
+        List<Map> deliveries = []
+        AutomationExecutionSupport.errorCardPoster = { def postEc, Map event -> cards << event; true }
+        TenantNotificationSupport.setDeliveryHook { String url, Map payload -> deliveries << payload; [ok: true, statusCode: 200] }
+        Map<String, Object> runResult
+        try {
+            runResult = callFacade("facade.ReconciliationFacadeServices.run#SavedRunDiff", [
+                    savedRunId: "BE362_MISSING_RUN",
+                    file1Name : "orders-1.csv",
+                    file1Text : "order_id\nA100\n",
+                    file2Name : "orders-2.csv",
+                    file2Text : "order_id\nA200\n",
+                    hasHeader : true,
+            ])
+        } finally {
+            AutomationExecutionSupport.errorCardPoster = null
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+        assertEquals(false, runResult.ok)
+        String rawError = ((runResult.errors ?: []) as List).find { it }?.toString()
+        ec.message.clearErrors()
+        assertNotNull(rawError, "the run must report its error to the person who ran it")
+
+        assertEquals(1, cards.size(), "one card for Darpan")
+        Map card = cards[0]
+        assertEquals("FAILED", card.kind)
+        assertEquals("manual", card.trigger)
+        assertEquals(false, card.scheduled)
+        assertEquals(TENANT_ID, card.tenantId)
+        assertTrue(card.errorFirstLine.toString().contains(rawError), "the card carries the error: ${card.errorFirstLine}")
+        assertEquals("savedRun:BE362_MISSING_RUN", card.subjectKey)
+        assertTrue(deliveries.every { !it.toString().contains(rawError) }, "no client destination sees the error: ${deliveries}")
+
+        def run = ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("savedRunId", "BE362_MISSING_RUN")
+                .disableAuthz().useCache(false).one()
+        assertEquals("AUT_STAT_FAILED", run.statusEnumId)
+        assertNotNull(run.notifiedDate, "the failed run is claimed, so nothing notifies it twice")
+    }
+
+    @Test
+    void failedInteractiveRunTellsSubscribersOnlyTheNeutralLine() {
+        // DAR-BE-362: a notify-me subscriber of a failed interactive run gets the neutral line from the copy block and never
+        // the raw error; Darpan's card gets the error's first line. The run is claimed and its subscription purged, so a
+        // later notify for the same run sends nothing.
+        String runId = seedRun("AUT_STAT_RUNNING")
+        seedDefaultChatSpace("Failed run space")
+        assertTrue(callFacade("facade.ReconciliationFacadeServices.subscribe#RunNotification",
+                [reconciliationRunResultId: runId]).ok as boolean)
+        setRunStatus(runId, "AUT_STAT_FAILED")
+        String rawError = "OMS_GQL extract failed: HTTP 401 from oms.example.com (token expired)\n\tat darpan.Extractor.read(Extractor.groovy:12)"
+
+        List<Map> cards = []
+        List<Map> deliveries = []
+        AutomationExecutionSupport.errorCardPoster = { def postEc, Map event -> cards << event; true }
+        TenantNotificationSupport.setDeliveryHook { String url, Map payload -> deliveries << payload; [ok: true, statusCode: 200] }
+        try {
+            AutomationExecutionSupport.notifySavedRunError(ec, [reconciliationRunResultId: runId, companyUserGroupId: TENANT_ID,
+                    runName: "Nightly orders", savedRunId: "BE362_SR"], rawError)
+            Map again = TenantNotificationSupport.notifyRunCompleted(ec, [reconciliationRunResultId: runId,
+                    companyUserGroupId: TENANT_ID, statusEnumId: "AUT_STAT_FAILED", processingWarnings: [rawError]])
+            assertEquals("ALREADY_NOTIFIED", again.skippedReason, "no second notification for the same run")
+        } finally {
+            AutomationExecutionSupport.errorCardPoster = null
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertEquals(1, deliveries.size(), "the subscriber is told once: ${deliveries}")
+        assertEquals([text: "Nightly orders did not finish. Darpan has been alerted and is working on a fix."], deliveries[0])
+        ["401", "OMS", "oms.example.com", "token", "Extractor"].each { String leak ->
+            assertFalse(deliveries[0].text.toString().contains(leak), "the client line leaks '${leak}'")
+        }
+        assertEquals(0L, countSubscriptions(runId), "the subscription goes with the claim")
+
+        assertEquals(1, cards.size())
+        Map card = cards[0]
+        assertEquals("FAILED", card.kind)
+        assertEquals("manual", card.trigger)
+        assertEquals("Nightly orders", card.automationName)
+        assertEquals("savedRun:BE362_SR", card.subjectKey)
+        String cardText = darpan.ops.ErrorChatSupport.cardText(card, 1)
+        assertTrue(cardText.contains("OMS_GQL extract failed: HTTP 401 from oms.example.com (token expired)"), cardText)
+        assertFalse(cardText.contains("Extractor.groovy"), "first line only: ${cardText}")
+        assertTrue(cardText.contains("FAILED · manual"), cardText)
+    }
+
+    @Test
+    void successfulInteractiveRunPostsNoErrorCard() {
+        // DAR-BE-362: the success path is unchanged; a clean interactive run posts no card.
+        def created = callFacade("facade.ReconciliationFacadeServices.create#CsvRun", [
+                runName: "BE362 clean run", file1SystemEnumId: "OMS", file2SystemEnumId: "SHOPIFY",
+                file1CompareColumn: "order_id", file2CompareColumn: "order_id"])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map> cards = []
+        AutomationExecutionSupport.errorCardPoster = { def postEc, Map event -> cards << event; true }
+        Map<String, Object> runResult
+        try {
+            runResult = callFacade("facade.ReconciliationFacadeServices.run#SavedRunDiff", [
+                    savedRunId: created.savedRun.savedRunId,
+                    file1Name : "orders-1.csv",
+                    file1Text : "order_id\nA100\nA200\n",
+                    file2Name : "orders-2.csv",
+                    file2Text : "order_id\nA200\nA300\n",
+                    hasHeader : true,
+            ])
+        } finally {
+            AutomationExecutionSupport.errorCardPoster = null
+        }
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue(runResult.ok as boolean)
+        assertEquals(0, cards.size(), "a clean run posts no error card")
+        def run = ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("reconciliationRunResultId", runResult.runResult.reconciliationRunResultId)
+                .disableAuthz().useCache(false).one()
+        assertTrue(run.statusEnumId in ["AUT_STAT_SUCCESS", "AUT_STAT_NO_DATA"], "was ${run.statusEnumId}")
     }
 
     private String seedRun(String statusEnumId) {

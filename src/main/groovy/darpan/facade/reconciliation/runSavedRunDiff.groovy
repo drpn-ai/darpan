@@ -11,6 +11,7 @@ import darpan.facade.reconciliation.RunExtractSupport
 import darpan.facade.reconciliation.RunRetrySupport
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.facade.reconciliation.RunObservability
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.core.RuleSetCompareScopeAdapter
@@ -1159,22 +1160,16 @@ try {
         } else if (ec.message.hasError()) {
             RunObservability.failRun(ec, obsRunId, obsStep, obsStage,
                     ec.message.errors ? ec.message.errors.join("; ") : "reconciliation run failed")
-            // Task 7: the success-path notify above never runs on this branch (ec.message has errors), so
-            // notify FAILED here — best-effort, mutually exclusive with the success notify via the
-            // notifiedDate CAS guard, and never allowed to mask the real run failure.
-            try {
-                TenantNotificationSupport.notifyRunCompleted(ec, [
-                        reconciliationRunResultId: obsRunId,
-                        companyUserGroupId       : normalize(runResult?.companyUserGroupId) ?: normalize(obsCtx?.companyUserGroupId),
-                        runName                  : normalize(runResult?.runName) ?: normalize(runResult?.savedRunId),
-                        savedRunId               : normalize(runResult?.savedRunId),
-                        resultDataManagerPath    : normalize(runResult?.resultDataManagerPath),
-                        statusEnumId             : "AUT_STAT_FAILED",
-                        processingWarnings       : ec.message.errors ? [ec.message.errors.join("; ")] : [],
-                ])
-            } catch (Throwable notifyError) {
-                logger.warn("run#SavedRunDiff failure notification failed (best-effort): ${notifyError.message ?: notifyError}")
-            }
+            // The success-path notify above never runs on this branch (ec.message has errors). DAR-BE-362: the error goes to
+            // Darpan's own error card only; notify-me subscribers get the neutral line, claimed once (notifiedDate), and the
+            // run's subscriptions go with the claim. Best-effort inside: never masks the real run failure.
+            AutomationExecutionSupport.notifySavedRunError(ec, [
+                    reconciliationRunResultId: obsRunId,
+                    companyUserGroupId       : normalize(runResult?.companyUserGroupId) ?: normalize(obsCtx?.companyUserGroupId),
+                    runName                  : normalize(runResult?.runName),
+                    savedRunId               : normalize(runResult?.savedRunId) ?: savedRunIdValue,
+                    resultDataManagerPath    : normalize(runResult?.resultDataManagerPath),
+            ], ec.message.errors ? ec.message.errors.join("; ") : "reconciliation run failed")
         } else {
             String obsRowStatus = null
             try {

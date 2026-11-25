@@ -1124,9 +1124,9 @@ class AuditReportAssembler {
      * (an order's grandTotal in HotWax, totalPrice in Shopify, else the orderGrandTotal an item or return carries) and a
      * return's own (returnTotal), a NetSuite order's customer
      * deposits (status without NetSuite's "Customer Deposit : "), and a Shopify order's status (financial and
-     * fulfillment) when its read gave no status, else the record's own (statusId); its order's date and a return's own, as
-     * the tenant's calendar day (zone); its customer, an item's SKU and its location (HotWax facilityId and its name,
-     * NetSuite lineLocation). DAR-UI-081: a return held behind
+     * fulfillment) when its read gave no status, else the record's own (statusId); its order's date and a return's own (a
+     * Shopify return's closedAt when it has no other, DAR-BE-359), as the tenant's calendar day (zone); its customer, an
+     * item's SKU and its location (HotWax facilityId and its name, NetSuite lineLocation). DAR-UI-081: a return held behind
      * another (R8 "Exchange held by open return") names the return holding it (heldBy) and its exchange order, with
      * whether that order reached NetSuite. Codes read as words (ORDER_COMPLETED -> Completed); data keeps them.
      */
@@ -1156,7 +1156,7 @@ class AuditReportAssembler {
                 shipMethod : text("shipmentMethodTypeId") ?: shipMethods(data.get("shipGroups")),
                 fulfillments: (data.get("fulfillments") instanceof List ? ((List) data.get("fulfillments")).collect { it?.toString() }.findAll() : []) ?: null,
                 orderDate  : dayOf(text("omsOrderDate") ?: text("orderDate") ?: (recordType == "order" ? text("createdAt") : null), zone),
-                returnDate : recordType == "return" ? dayOf(text("returnDate") ?: text("entryDate"), zone) : null,
+                returnDate : recordType == "return" ? dayOf(text("returnDate") ?: text("entryDate") ?: text("closedAt"), zone) : null,
                 heldBy     : heldBy ? [id: heldBy, status: statusWords(text("openReturnOnOrderStatus"))] : null,
                 exchange   : exchange ? [id: exchange, netsuiteId: text("exchangeOrderNetsuiteId")] : null,
                 channel    : text("returnChannelEnumId"),

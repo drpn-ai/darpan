@@ -6,7 +6,7 @@
     <actions>
         <!-- A send passes the finished text (chat gets the same one). The admin preview passes the report instead, so the
              draft's words show: the text is built here, through the same blocks. -->
-        <set field="digestText" from="ec.context.get('digestText') ?: darpan.audit.AuditDigestSupport.render(digestReport, digestKind ?: 'AUDDK_DAILY', digestFullList == true, ec.context.get('digestWeekAgo'), ec.context.get('digestReportUrl'), new darpan.email.EmailCopyReader(ec, 'DARPAN_AUDIT_DIGEST'))"/>
+        <set field="digestText" from="ec.context.get('digestText') ?: darpan.audit.AuditDigestSupport.render(digestReport, digestKind ?: 'AUDDK_DAILY', digestFullList == true, ec.context.get('digestWeekAgo'), ec.context.get('digestReportUrl'), new darpan.email.EmailCopyReader(ec, 'DARPAN_AUDIT_DIGEST'), new darpan.email.EmailCopyReader(ec, 'DARPAN_AUDIT_RUN'))"/>
         <set field="digestHtml" from="darpan.email.EmailFrame.esc(digestText)"/>
         <set field="frameOpen" from="darpan.email.EmailFrame.open('DARPAN · AUDIT DIGEST')"/>
         <set field="frameClose" from="darpan.email.EmailFrame.close()"/>

@@ -165,6 +165,7 @@ class EmailTemplatesRenderTests {
     private static Map<String, List> digestVariants() {
         Map incomplete = AuditEmailSamples.digestReport()
         incomplete.health = [complete: false, summary: "Not complete: check invoices-without-etail-id did not run."]
+        incomplete.categories.orders.statements.R2.checks = [[id: "invoices-without-etail-id", status: "notRun"]]
         Map none = AuditEmailSamples.digestReport()
         none.summary = [open: 0, newToday: 0, fixedToday: 2]
         none.categories = [orders: [label: "Orders", counts: [open: 0], statements: [:]]]
@@ -183,7 +184,7 @@ class EmailTemplatesRenderTests {
 
     private String digest(List v) {
         return AuditDigestSupport.render(v[0] as Map, v[1] as String, v[2] as boolean, v[3] as Map, v[4] as String,
-                new EmailCopyReader(ec, "DARPAN_AUDIT_DIGEST"))
+                new EmailCopyReader(ec, "DARPAN_AUDIT_DIGEST"), new EmailCopyReader(ec, "DARPAN_AUDIT_RUN"))
     }
 
     @Test

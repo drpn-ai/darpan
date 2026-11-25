@@ -54,7 +54,7 @@ class AuditDigestSupport {
      * DAR-BE-303: the fixed words are DARPAN_AUDIT_DIGEST copy blocks read through copy; the counts, finding rows and the
      * report link stay here. Chat and email get the same text, so both read the same blocks.
      */
-    static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl, EmailCopyReader copy) {
+    static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl, EmailCopyReader copy, EmailCopyReader runCopy) {
         Map head = (report?.report ?: [:]) as Map
         Map health = (report?.health ?: [:]) as Map
         Map summary = (report?.summary ?: [:]) as Map
@@ -64,9 +64,10 @@ class AuditDigestSupport {
         String day = dayLabel(head.date as String)
         lines.add([head.audit instanceof Map ? (head.audit as Map).name : null, head.period,
                    weekly ? copy.text("week", [day: day]) : day].findAll { it }.join(" · "))
-        // The report says why a morning is not complete (a check that did not run, a partial read); the digest
-        // repeats it, so a quiet count is never mistaken for a clean one.
-        if (health.complete != true && health.summary) lines.add(health.summary as String)
+        // DAR-BE-363: a morning with a check that did not run carries the run update's neutral notice (DARPAN_AUDIT_RUN
+        // blocks, read through runCopy), built from the same rule facts; never health.summary, which names systems and causes.
+        String notice = AuditRunMessage.notRunNotice(AuditRunFacts.build(report, [], null), runCopy)
+        if (notice) lines.add(notice)
         lines.add("")
 
         if (weekly) {
@@ -206,7 +207,7 @@ class AuditDigestSupport {
         if (report == null) return [sent: false, reason: "NO_REPORT"]
         Map weekAgo = weekly ? assemble(ec, tenantId, digest.auditId as String, today.minusDays(7)) : null
         String text = render(report, digest.kindEnumId as String, digest.fullList == "Y", weekAgo, reportUrl(ec, report),
-                new EmailCopyReader(ec, EMAIL_TEMPLATE))
+                new EmailCopyReader(ec, EMAIL_TEMPLATE), new EmailCopyReader(ec, AuditRunMessage.TEMPLATE))
         boolean delivered = false
         if (destination != null) {
             Map delivery = TenantNotificationSupport.deliverToDestination(destination, [text: text])

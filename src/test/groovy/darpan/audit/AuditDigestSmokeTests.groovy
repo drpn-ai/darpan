@@ -126,7 +126,7 @@ class AuditDigestSmokeTests {
         digest("TDG_DAILY", SPACE, "AUDDK_DAILY", "07:00")
         send("2026-10-22", "07:01")
         assertEquals(1, posts.size())
-        assertEquals("Not complete: check invoices-without-etail-id did not run.", posts[0].text.readLines()[1])
+        assertEquals("R2 did not run this morning. Darpan has been alerted and is working on a fix.", posts[0].text.readLines()[1])
     }
 
     @Test

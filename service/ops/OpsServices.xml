@@ -48,4 +48,32 @@
             </if>
         </actions>
     </service>
+
+    <service verb="add" noun="ErrorLogEntries" authenticate="anonymous-all" allow-remote="false" transaction="force-new">
+        <description>Adds flushed ERROR log aggregates into their (fingerprint, logDay) rows: count added, first and last seen
+            widened, the row's first sample kept. Internal: called by darpan.ops.ErrorLogCapture.flush, always in its own transaction.</description>
+        <in-parameters>
+            <parameter name="entries" type="List" required="true"><parameter name="entry" type="Map"/></parameter>
+        </in-parameters>
+        <actions>
+            <iterate list="entries" entry="entry">
+                <entity-find-one entity-name="darpan.ops.ErrorLogEntry" value-field="row" cache="false" for-update="true">
+                    <field-map field-name="fingerprint" from="entry.fingerprint"/><field-map field-name="logDay" from="entry.logDay"/>
+                </entity-find-one>
+                <if condition="row == null">
+                    <entity-make-value entity-name="darpan.ops.ErrorLogEntry" value-field="row" map="entry"/>
+                    <entity-create value-field="row"/>
+                    <else>
+                        <set field="row.count" from="(row.count ?: 0) + (entry.count ?: 0)"/>
+                        <if condition="entry.firstSeen != null &amp;&amp; (row.firstSeen == null || entry.firstSeen &lt; row.firstSeen)">
+                            <set field="row.firstSeen" from="entry.firstSeen"/></if>
+                        <if condition="entry.lastSeen != null &amp;&amp; (row.lastSeen == null || entry.lastSeen &gt; row.lastSeen)">
+                            <set field="row.lastSeen" from="entry.lastSeen"/></if>
+                        <if condition="!row.tenantId &amp;&amp; entry.tenantId"><set field="row.tenantId" from="entry.tenantId"/></if>
+                        <entity-update value-field="row"/>
+                    </else>
+                </if>
+            </iterate>
+        </actions>
+    </service>
 </services>

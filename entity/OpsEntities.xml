@@ -16,4 +16,19 @@
         <field name="executionId" type="id"/>
         <field name="postedDate" type="date-time"/>
     </entity>
+
+    <entity entity-name="ErrorLogEntry" package="darpan.ops" use="transactional" cache="never">
+        <description>ERROR log lines of the whole instance, one row per fingerprint per UTC day, counts added by each flush
+            (darpan.ops.ErrorLogCapture.flush, every 5 minutes). Read by the daily error email. Instance-wide: tenantId is the
+            thread's tenant when the line was first seen, a plain value.</description>
+        <field name="fingerprint" type="id-long" is-pk="true"><description>Logger plus the message with numbers and ids masked; "OVERFLOW" for lines past the 500-fingerprint cap of one flush window.</description></field>
+        <field name="logDay" type="date" is-pk="true"><description>UTC day of the aggregate's last line.</description></field>
+        <field name="loggerName" type="text-medium"/>
+        <field name="sampleMessage" type="text-medium"><description>The first line's message, up to 255 characters.</description></field>
+        <field name="sampleStack" type="text-long"><description>The first line's stack and causes, up to 4000 characters.</description></field>
+        <field name="count" type="number-integer"/>
+        <field name="firstSeen" type="date-time"/>
+        <field name="lastSeen" type="date-time"/>
+        <field name="tenantId" type="id"/>
+    </entity>
 </entities>

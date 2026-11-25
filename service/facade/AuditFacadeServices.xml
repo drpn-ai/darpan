@@ -120,6 +120,75 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
+    <!-- DAR-BE-369. "Re-check all": Resolve for every open finding of a statement, or of the whole audit, with one run per
+         automation (AuditFindingsVerifySupport). Aditi 2026-11-25: "maybe we can do a button that refreshes findings?" -->
+    <service verb="verify" noun="AuditFindings" allow-remote="true" authenticate="true">
+        <description>Re-checks every open finding of one statement, or of the whole audit, in one period now: one run per
+            automation reads all their records by key in each system, and the ledger closes each finding whose problem is
+            gone or refreshes it with today's cause. Submitted to the background; get#AuditRecheckProgress counts the
+            findings checked since checkedSince. Writes no check run, so the checks' health and next read are unchanged.
+            Findings whose check has no automation yet are skipped (counted in skipped).</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
+            <parameter name="period" required="true"><description>The report's period, e.g. 2026-11.</description></parameter>
+            <parameter name="statement"><description>The statement's code, e.g. R10; blank re-checks every statement.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="findings" type="Integer"><description>Open findings being re-checked.</description></parameter>
+            <parameter name="runs" type="Integer"><description>Runs started (one per automation, more past 1000 orders).</description></parameter>
+            <parameter name="skipped" type="Integer"><description>Open findings whose check has no automation yet.</description></parameter>
+            <parameter name="checkedSince" type="Timestamp"><description>Pass to get#AuditRecheckProgress as since.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for audits.')"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="verifyResult" from="darpan.audit.AuditFindingsVerifySupport.verify(ec, tenantId, auditRow, statement, period)"/>
+            <if condition="verifyResult.error"><return error="true" message="${verifyResult.error}"/></if>
+            <set field="findings" from="verifyResult.findings"/>
+            <set field="runs" from="verifyResult.runs"/>
+            <set field="skipped" from="verifyResult.skipped"/>
+            <set field="checkedSince" from="verifyResult.checkedSince"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="AuditRecheckProgress" authz-action="view" allow-remote="true" authenticate="true">
+        <description>How far a verify#AuditFindings has come: of the audit's findings in the period (one statement or all),
+            how many were checked since `since`, and how many of those are now closed. A finding whose read did not finish
+            is never counted, so the caller stops waiting after its own limit.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
+            <parameter name="period" required="true"><description>The report's period, e.g. 2026-11.</description></parameter>
+            <parameter name="statement"><description>The statement's code; blank is every statement.</description></parameter>
+            <parameter name="since" type="Timestamp" required="true"><description>verify#AuditFindings' checkedSince.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="checked" type="Integer"><description>Findings checked since `since`.</description></parameter>
+            <parameter name="closed" type="Integer"><description>Of those, the ones now closed.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="progressResult" from="darpan.audit.AuditFindingsVerifySupport.progress(ec, tenantId, auditRow, statement, period, since)"/>
+            <if condition="progressResult.error"><return error="true" message="${progressResult.error}"/></if>
+            <set field="checked" from="progressResult.checked"/>
+            <set field="closed" from="progressResult.closed"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
     <!-- DAR-BE-361. Acknowledge one report row: a note that says the problem is known, so the row leaves Open until its
          remind day. A row is an order's open lines under one statement plus the later steps waiting under it
          (AuditReportAssembler.unitMemberIds); any finding of the row, a waiting line included, names the whole row. Each

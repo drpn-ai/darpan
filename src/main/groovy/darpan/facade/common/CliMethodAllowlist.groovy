@@ -299,6 +299,10 @@ class CliMethodAllowlist {
             // DAR-BE-361: feedback saves a note, posts to Darpan's chat space and emails the sender; the app only.
             "facade.AuditFacadeServices.send#AuditFindingFeedback",
             "facade.AuditFacadeServices.update#AuditFindingAcknowledgement",
+            // DAR-BE-369: "Re-check all" reads every system for a whole statement or audit at once; the app's button only, until
+            // a CLI command is wanted (one finding's re-check, verify#AuditFinding, stays allowed).
+            "facade.AuditFacadeServices.get#AuditRecheckProgress",
+            "facade.AuditFacadeServices.verify#AuditFindings",
 
             "facade.AuthFacadeServices.change#ExpiredPassword",
             "facade.AuthFacadeServices.change#OwnPassword",

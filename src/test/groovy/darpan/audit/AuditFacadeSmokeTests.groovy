@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
+import org.moqui.entity.EntityCondition
 
 import java.nio.file.Path
 import java.sql.Date
@@ -310,6 +311,99 @@ class AuditFacadeSmokeTests {
         Map out = call("get#AuditFindingsByOrder", [audit: "month-close", period: "2026-10", priority: "URGENT"])
         assertTrue(out.hadError as boolean, "an error, not an empty list")
         assertTrue((out.errorText as String).contains("priority must be one of P0, P1, P2, KNOWN"), out.errorText as String)
+    }
+
+    // DAR-BE-369. "Re-check all" re-checks the open findings of the asked statement and period only, one run per
+    // automation with all their keys; a check with no automation is skipped and counted; progress counts what moved.
+    @Test
+    void reCheckAllSendsOneRunPerAutomationWithTheOpenKeysOfItsStatementAndPeriod() {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.Audit", [auditId: "${MINE}_RCA".toString(), companyUserGroupId: MINE, auditCode: "recheck-all",
+                    auditName: "Re-check all", periodEnumId: "AUDP_MONTH"])
+            ["R1", "R2", "R3"].eachWithIndex { String code, int i ->
+                insert("darpan.audit.AuditStatement", [statementId: "${MINE}_RCA_${code}".toString(), companyUserGroupId: MINE,
+                        auditId: "${MINE}_RCA".toString(), statementCode: code, categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM",
+                        sequenceNum: (long) i, statementText: "Statement ${code}".toString()])
+            }
+            insert("darpan.audit.AuditCheck", [checkId: "${MINE}_RCA_RUN".toString(), companyUserGroupId: MINE, checkCode: "rca-run",
+                    label: "Has an automation", automationId: "${MINE}_AUTO".toString()])
+            insert("darpan.audit.AuditCheck", [checkId: "${MINE}_RCA_NEW".toString(), companyUserGroupId: MINE, checkCode: "rca-new",
+                    label: "No automation yet"])
+            // R1: two open on the automation's check (one order, two lines), one fixed, one open in another period; one open
+            // on the check with no automation. R2: one open, which an R1-only re-check leaves alone.
+            String s1 = "${MINE}_RCA_R1", s2 = "${MINE}_RCA_R2", run = "${MINE}_RCA_RUN", fresh = "${MINE}_RCA_NEW"
+            finding("F-RCA1", s1, run, "500\u001F01", "2026-11", "AUDFS_OPEN")
+            finding("F-RCA2", s1, run, "500\u001F02", "2026-11", "AUDFS_OPEN")
+            finding("F-RCA3", s1, run, "501", "2026-11", "AUDFS_FIXED")
+            finding("F-RCA4", s1, run, "502", "2026-10", "AUDFS_OPEN")
+            finding("F-RCA5", s1, fresh, "503", "2026-11", "AUDFS_OPEN")
+            finding("F-RCA6", s2, run, "504", "2026-11", "AUDFS_OPEN")
+            finding("F-RCA7", "${MINE}_RCA_R3".toString(), fresh, "505", "2026-11", "AUDFS_OPEN")
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        try {
+            reCheckAll()
+        } finally {
+            // Its own rows go, so the audits list and the audit-wide reads of the other tests stay as they are.
+            disabled {
+                ec.entity.find("darpan.audit.AuditFinding").condition("findingId", EntityCondition.LIKE, "F-RCA%").deleteAll()
+                ec.entity.find("darpan.audit.AuditCheck").condition("checkId", EntityCondition.LIKE, "${MINE}_RCA_%".toString()).deleteAll()
+                ec.entity.find("darpan.audit.AuditStatement").condition("statementId", EntityCondition.LIKE, "${MINE}_RCA_%".toString()).deleteAll()
+                ec.entity.find("darpan.audit.Audit").condition("auditId", "${MINE}_RCA".toString()).deleteAll()
+            }
+        }
+    }
+
+    private void reCheckAll() {
+        Map audit = AuditSettingsSupport.auditOf(ec, MINE, "recheck-all")
+
+        List<Map> sent = []
+        Map out = AuditFindingsVerifySupport.verify(ec, MINE, audit, "R1", "2026-11") { Map p -> sent << p; [submitted: true] }
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals([["${MINE}_AUTO".toString(), ["500\u001F01", "500\u001F02"]]], sent.collect { [it.automationId, it.auditVerifyKeys] })
+        assertEquals([2, 1, 1], [out.findings, out.runs, out.skipped])
+
+        sent.clear()
+        AuditFindingsVerifySupport.verify(ec, MINE, audit, null, "2026-11") { Map p -> sent << p; [submitted: true] }
+        assertEquals([["500\u001F01", "500\u001F02", "504"]], sent*.auditVerifyKeys, "blank statement: the whole audit, one run")
+
+        Map unknown = call("verify#AuditFindings", [audit: "recheck-all", period: "2026-11", statement: "R9"])
+        assertTrue((unknown.errorText as String).contains("Statement R9 is not part of audit recheck-all"), unknown.errorText as String)
+        Map other = call("verify#AuditFindings", [audit: "other-only", period: "2026-11"])
+        assertTrue((other.errorText as String).contains("Audit other-only was not found"), other.errorText as String)
+        // Through the facade (R3: its only open finding's check has no automation yet) nothing starts, and that is no error.
+        Map none = call("verify#AuditFindings", [audit: "recheck-all", period: "2026-11", statement: "R3"])
+        assertFalse(none.hadError as boolean, none.errorText as String)
+        assertEquals([0, 0, 1], [none.findings, none.runs, none.skipped])
+
+        // Progress: F-RCA1 checked and closed, F-RCA2 checked still open, the rest checked before `since`.
+        java.sql.Timestamp since = new java.sql.Timestamp(System.currentTimeMillis())
+        disabled {
+            stamp("F-RCA1", new java.sql.Timestamp(since.time + 1000), "AUDFS_FIXED")
+            stamp("F-RCA2", new java.sql.Timestamp(since.time + 1000), "AUDFS_OPEN")
+            stamp("F-RCA6", new java.sql.Timestamp(since.time - 60000), "AUDFS_OPEN")
+        }
+        Map progress = call("get#AuditRecheckProgress", [audit: "recheck-all", period: "2026-11", statement: "R1", since: since])
+        assertFalse(progress.hadError as boolean, progress.errorText as String)
+        assertEquals([2, 1], [progress.checked, progress.closed])
+    }
+
+    private void finding(String id, String statementId, String checkId, String key, String period, String state) {
+        insert("darpan.audit.AuditFinding", [findingId: id, companyUserGroupId: MINE, statementId: statementId, checkId: checkId,
+                recordKey: key, period: period, stateEnumId: state, headline: "Finding ${id}".toString(),
+                firstFoundDate: Date.valueOf("2026-11-01"), lastSeenDate: Date.valueOf("2026-11-01")])
+    }
+
+    private void stamp(String findingId, java.sql.Timestamp checked, String state) {
+        ec.entity.find("darpan.audit.AuditFinding").condition("findingId", findingId).one()
+                .set("lastCheckedStamp", checked).set("stateEnumId", state).update()
+    }
+
+    private void disabled(Closure body) {
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try { body() } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
     }
 
     private void insert(String entityName, Map<String, Object> fields) {

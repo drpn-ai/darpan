@@ -378,6 +378,9 @@
                                         "$ref": "#/components/schemas/GetAuditReadReportRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAuditRecheckProgressRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetAuditReportRequest"
                                     },
                                     {
@@ -406,6 +409,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/VerifyAuditFindingRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/VerifyAuditFindingsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/BeginPasskeyFirstSignInRequest"
@@ -1123,6 +1129,7 @@
                                         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "#/components/schemas/GetAuditFindingsByOrderRequest",
                                         "facade.AuditFacadeServices.get#AuditProgress": "#/components/schemas/GetAuditProgressRequest",
                                         "facade.AuditFacadeServices.get#AuditReadReport": "#/components/schemas/GetAuditReadReportRequest",
+                                        "facade.AuditFacadeServices.get#AuditRecheckProgress": "#/components/schemas/GetAuditRecheckProgressRequest",
                                         "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
                                         "facade.AuditFacadeServices.get#AuditSettings": "#/components/schemas/GetAuditSettingsRequest",
                                         "facade.AuditFacadeServices.get#Audits": "#/components/schemas/GetAuditsRequest",
@@ -1133,6 +1140,7 @@
                                         "facade.AuditFacadeServices.send#AuditFindingFeedback": "#/components/schemas/SendAuditFindingFeedbackRequest",
                                         "facade.AuditFacadeServices.update#AuditFindingAcknowledgement": "#/components/schemas/UpdateAuditFindingAcknowledgementRequest",
                                         "facade.AuditFacadeServices.verify#AuditFinding": "#/components/schemas/VerifyAuditFindingRequest",
+                                        "facade.AuditFacadeServices.verify#AuditFindings": "#/components/schemas/VerifyAuditFindingsRequest",
                                         "facade.AuthFacadeServices.begin#PasskeyFirstSignIn": "#/components/schemas/BeginPasskeyFirstSignInRequest",
                                         "facade.AuthFacadeServices.begin#PasskeyProof": "#/components/schemas/BeginPasskeyProofRequest",
                                         "facade.AuthFacadeServices.begin#PasskeyRegistration": "#/components/schemas/BeginPasskeyRegistrationRequest",
@@ -1702,6 +1710,9 @@
                                             "$ref": "#/components/schemas/GetAuditReadReportResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetAuditRecheckProgressResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetAuditReportResponse"
                                         },
                                         {
@@ -1730,6 +1741,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/VerifyAuditFindingResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/VerifyAuditFindingsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/BeginPasskeyFirstSignInResponse"
@@ -14068,6 +14082,128 @@
                     "result"
                 ]
             },
+            "GetAuditRecheckProgressParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code."
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "The report's period, e.g. 2026-11."
+                    },
+                    "statement": {
+                        "type": "string",
+                        "description": "The statement's code; blank is every statement."
+                    },
+                    "since": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. verify#AuditFindings' checkedSince."
+                    }
+                },
+                "required": [
+                    "audit",
+                    "period",
+                    "since"
+                ],
+                "description": "How far a verify#AuditFindings has come: of the audit's findings in the period (one statement or all),\n            how many were checked since `since`, and how many of those are now closed. A finding whose read did not finish\n            is never counted, so the caller stops waiting after its own limit."
+            },
+            "GetAuditRecheckProgressResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "checked": {
+                        "type": "integer",
+                        "description": "Findings checked since `since`."
+                    },
+                    "closed": {
+                        "type": "integer",
+                        "description": "Of those, the ones now closed."
+                    }
+                }
+            },
+            "GetAuditRecheckProgressRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditRecheckProgress",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditRecheckProgress",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditRecheckProgress"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditRecheckProgressParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditRecheckProgressResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditRecheckProgress. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditRecheckProgressResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetAuditReportParams": {
                 "type": "object",
                 "properties": {
@@ -15135,6 +15271,131 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/VerifyAuditFindingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "VerifyAuditFindingsParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code."
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "The report's period, e.g. 2026-11."
+                    },
+                    "statement": {
+                        "type": "string",
+                        "description": "The statement's code, e.g. R10; blank re-checks every statement."
+                    }
+                },
+                "required": [
+                    "audit",
+                    "period"
+                ],
+                "description": "Re-checks every open finding of one statement, or of the whole audit, in one period now: one run per\n            automation reads all their records by key in each system, and the ledger closes each finding whose problem is\n            gone or refreshes it with today's cause. Submitted to the background; get#AuditRecheckProgress counts the\n            findings checked since checkedSince. Writes no check run, so the checks' health and next read are unchanged.\n            Findings whose check has no automation yet are skipped (counted in skipped)."
+            },
+            "VerifyAuditFindingsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "findings": {
+                        "type": "integer",
+                        "description": "Open findings being re-checked."
+                    },
+                    "runs": {
+                        "type": "integer",
+                        "description": "Runs started (one per automation, more past 1000 orders)."
+                    },
+                    "skipped": {
+                        "type": "integer",
+                        "description": "Open findings whose check has no automation yet."
+                    },
+                    "checkedSince": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds. Pass to get#AuditRecheckProgress as since."
+                    }
+                }
+            },
+            "VerifyAuditFindingsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.verify#AuditFindings",
+                "x-darpan-method": "facade.AuditFacadeServices.verify#AuditFindings",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.verify#AuditFindings"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/VerifyAuditFindingsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "VerifyAuditFindingsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.verify#AuditFindings. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/VerifyAuditFindingsResult"
                     }
                 },
                 "required": [
@@ -42281,6 +42542,7 @@
         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "GetAuditFindingsByOrder",
         "facade.AuditFacadeServices.get#AuditProgress": "GetAuditProgress",
         "facade.AuditFacadeServices.get#AuditReadReport": "GetAuditReadReport",
+        "facade.AuditFacadeServices.get#AuditRecheckProgress": "GetAuditRecheckProgress",
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
         "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",
         "facade.AuditFacadeServices.get#Audits": "GetAudits",
@@ -42291,6 +42553,7 @@
         "facade.AuditFacadeServices.send#AuditFindingFeedback": "SendAuditFindingFeedback",
         "facade.AuditFacadeServices.update#AuditFindingAcknowledgement": "UpdateAuditFindingAcknowledgement",
         "facade.AuditFacadeServices.verify#AuditFinding": "VerifyAuditFinding",
+        "facade.AuditFacadeServices.verify#AuditFindings": "VerifyAuditFindings",
         "facade.AuthFacadeServices.begin#PasskeyFirstSignIn": "BeginPasskeyFirstSignIn",
         "facade.AuthFacadeServices.begin#PasskeyProof": "BeginPasskeyProof",
         "facade.AuthFacadeServices.begin#PasskeyRegistration": "BeginPasskeyRegistration",

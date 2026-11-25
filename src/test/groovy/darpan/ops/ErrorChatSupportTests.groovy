@@ -45,6 +45,7 @@ class ErrorChatSupportTests {
     @AfterEach
     void clear() {
         posted.clear()
+        ec.message.clearErrors()
         ErrorChatSupport.resetForTests()
         DarpanSettings.resetForTests()
     }
@@ -54,7 +55,7 @@ class ErrorChatSupportTests {
 
     private Map event(Map over = [:]) {
         return [tenantId: "OPS_T${++seq}".toString(), tenantName: "Dolls Kill", auditName: "Month close", statementId: "R1",
-                checkId: "completed-not-billed", automationId: "AUTO1", automationName: "R1 nightly", kind: "DEAD_LETTER", attempts: 3,
+                auditId: "AUD1", checkId: "completed-not-billed", automationId: "AUTO1", automationName: "R1 nightly", kind: "DEAD_LETTER", attempts: 3,
                 errorFirstLine: "Connection reset", readCounts: ["HotWax": 6982, "NetSuite": 29963],
                 keptCounts: ["HotWax": 5525, "NetSuite": 0], runUrl: "https://app.test/run/1", scheduled: true, trigger: "scheduled",
                 scheduledDate: Timestamp.from(Instant.parse("2026-11-25T15:00:00Z")), zoneId: "America/Los_Angeles"] + over
@@ -84,8 +85,8 @@ class ErrorChatSupportTests {
     void aStreakSaysTheDayCount() {
         Map e = event()
         [LocalDate.of(2026, 11, 24), LocalDate.of(2026, 11, 23)].each { LocalDate d ->
-            ec.entity.makeValue("darpan.ops.RunErrorNotice").setAll([tenantId: e.tenantId, subjectKey: e.checkId,
-                    runDay: SqlDate.valueOf(d), errorKind: "FAILED"]).create()
+            ec.entity.makeValue("darpan.ops.RunErrorNotice").setAll([tenantId: e.tenantId, subjectKey: "AUD1:${e.checkId}".toString(),
+                    runDay: SqlDate.valueOf(d), triggerType: "scheduled", errorKind: "FAILED"]).create()
         }
         assertTrue(ErrorChatSupport.postErrorCard(ec, e))
         assertTrue(posted[0].text.contains("3rd day in a row"), posted[0].text)
@@ -119,5 +120,61 @@ class ErrorChatSupportTests {
     void aManualRunSaysManual() {
         assertTrue(ErrorChatSupport.postErrorCard(ec, event([scheduled: false, trigger: "manual", kind: "FAILED", attempts: null])))
         assertTrue(posted[0].text.contains("FAILED · manual"), posted[0].text)
+    }
+
+    @Test
+    void aManualCardDoesNotTakeTheScheduledSlot() {
+        Map e = event()
+        assertTrue(ErrorChatSupport.postErrorCard(ec, e + [scheduled: false, trigger: "manual"]))
+        assertTrue(ErrorChatSupport.postErrorCard(ec, e))
+        assertEquals(2, posted.size())
+    }
+
+    @Test
+    void aManualDayDoesNotMakeAStreak() {
+        Map e = event()
+        ec.entity.makeValue("darpan.ops.RunErrorNotice").setAll([tenantId: e.tenantId, subjectKey: "AUD1:${e.checkId}".toString(),
+                runDay: SqlDate.valueOf(LocalDate.of(2026, 11, 24)), triggerType: "manual", errorKind: "FAILED"]).create()
+        assertTrue(ErrorChatSupport.postErrorCard(ec, e))
+        assertFalse(posted[0].text.contains("day in a row"), posted[0].text)
+    }
+
+    @Test
+    void anErrorAlreadyInTheCallersMessagesDoesNotBlockTheCard() {
+        ec.message.addError("the run already failed")
+        assertTrue(ErrorChatSupport.postErrorCard(ec, event()))
+        assertTrue(ec.message.hasError(), "the caller's own error is still there")
+        assertEquals(1, ec.message.errors.size())
+    }
+
+    @Test
+    void aClaimThatFailsLeavesNoErrorAndDoesNotThrow() {
+        assertFalse(ErrorChatSupport.postErrorCard(ec, event([tenantId: null])))
+        assertFalse(ec.message.hasError())
+        assertTrue(posted.isEmpty())
+    }
+
+    @Test
+    void aMalformedWebhookNeverShowsItsTokenAndNeverFailsTheRun() {
+        webhook = "https://chat.googleapis.com/v1/spaces/X/messages?key=k&token=SECRETTOKEN and a space"
+        DarpanSettings.expire()
+        ErrorChatSupport.postHook = null
+        assertFalse(ErrorChatSupport.postErrorCard(ec, event()))
+        String note = ErrorChatSupport.failureNote(new IllegalArgumentException("Illegal character in query at index 9: " + webhook), webhook)
+        assertFalse(note.contains("SECRETTOKEN"), note)
+        assertFalse(note.contains("Illegal character"), note)
+    }
+
+    @Test
+    void aMissingScheduledDateFallsBackToTheCompletedDate() {
+        assertTrue(ErrorChatSupport.postErrorCard(ec, event([scheduledDate: null, completedDate: Timestamp.from(Instant.parse("2026-11-25T15:00:00Z"))])))
+        assertTrue(ErrorChatSupport.postErrorCard(ec, event([scheduledDate: null, completedDate: null])))
+    }
+
+    @Test
+    void sameCheckIdInTwoAuditsIsTwoCards() {
+        Map e = event()
+        assertTrue(ErrorChatSupport.postErrorCard(ec, e))
+        assertTrue(ErrorChatSupport.postErrorCard(ec, e + [auditId: "AUD2"]))
     }
 }

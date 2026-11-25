@@ -737,10 +737,14 @@ class TenantNotificationSupport {
      * the URL host: hooks.slack.com is Slack, anything else Google Chat. The caller validated the URL when it was saved.
      */
     static Map<String, Object> deliverToWebhook(String webhookUrl, Map<String, Object> payload) {
+        return deliverToDestination([webhookUrl: webhookUrl.trim(), chatProviderEnumId: providerForWebhookUrl(webhookUrl)] as Map<String, Object>, payload)
+    }
+
+    /** The chat provider a bare webhook URL belongs to, from its host: hooks.slack.com is Slack, anything else Google Chat. */
+    static String providerForWebhookUrl(String webhookUrl) {
         String host = null
         try { host = new URI(webhookUrl?.trim()).host?.toLowerCase() } catch (Exception ignored) { }
-        String provider = host == SLACK_WEBHOOK_HOST ? PROVIDER_SLACK : PROVIDER_GOOGLE
-        return deliverToDestination([webhookUrl: webhookUrl.trim(), chatProviderEnumId: provider] as Map<String, Object>, payload)
+        return host == SLACK_WEBHOOK_HOST ? PROVIDER_SLACK : PROVIDER_GOOGLE
     }
 
     protected static Map<String, Object> deliverGoogleChat(String webhookUrl, Map<String, Object> payload) {

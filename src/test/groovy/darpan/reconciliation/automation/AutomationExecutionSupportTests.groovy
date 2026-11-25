@@ -3477,6 +3477,20 @@ class AutomationExecutionSupportTests {
         assertEquals(["The ACME side kept 0 of 40 records."], reasons)
     }
 
+    // DAR-BE-015: the kind persisted as noDataKind comes from the same derivation as the reason.
+    @Test
+    void windowNoDataFindingCarriesTheKindWithTheReason() {
+        Map summary = [keepSummaryBySide: [file1: [keptCount: 0, setAsideCount: 4]]]
+        Map kept = AutomationExecutionSupport.windowNoDataFinding("A", "B", [readCount: 0, recordCount: 0], [readCount: 6, recordCount: 6], summary, false)
+        assertEquals("KEPT_NOTHING", kept.kind)
+        assertEquals("The A side kept 0 of 4 records.", kept.reason)
+        Map empty = AutomationExecutionSupport.windowNoDataFinding("A", "B", [readCount: 5, recordCount: 5], [readCount: 0, recordCount: 0], null, false)
+        assertEquals("ONE_SIDE_EMPTY", empty.kind)
+        Map evaluate = AutomationExecutionSupport.windowNoDataFinding("A", "B", [readCount: 5, recordCount: 0], null, null, true)
+        assertEquals("KEPT_NOTHING", evaluate.kind, "an evaluate whose side 1 kept 0 is kept-nothing, not one-side-empty")
+        assertNull(AutomationExecutionSupport.windowNoDataFinding("A", "B", [readCount: 0, recordCount: 0], [readCount: 0, recordCount: 0], null, false))
+    }
+
     @Test
     void windowNoDataReasonCountsTheRecordsKeepWasGivenNotOnlyTheRecentRead() {
         // A re-check appended 4 records to a side whose recent read was empty; Keep kept none of them.

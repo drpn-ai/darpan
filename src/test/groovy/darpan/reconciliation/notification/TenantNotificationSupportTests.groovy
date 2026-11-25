@@ -195,4 +195,12 @@ class TenantNotificationSupportTests {
         assertEquals(404, notFound.statusCode)
         assertEquals("no_service", notFound.providerMessage)
     }
+
+    // DAR-BE-015
+    @Test
+    void aBareWebhookUrlPicksItsProviderFromTheHost() {
+        assertEquals(TenantNotificationSupport.PROVIDER_SLACK, TenantNotificationSupport.providerForWebhookUrl("https://hooks.slack.com/services/T/B/x"))
+        assertEquals(TenantNotificationSupport.PROVIDER_GOOGLE, TenantNotificationSupport.providerForWebhookUrl("https://chat.googleapis.com/v1/spaces/A/messages?key=k"))
+        assertEquals(TenantNotificationSupport.PROVIDER_GOOGLE, TenantNotificationSupport.providerForWebhookUrl("not a url"))
+    }
 }

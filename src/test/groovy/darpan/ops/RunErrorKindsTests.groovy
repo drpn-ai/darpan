@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNull
 
 class RunErrorKindsTests {
-    private static Map ex(String status, Integer r1 = null, Integer r2 = null, Integer k1 = null, Integer k2 = null) {
-        return [statusEnumId: status, file1ReadCount: r1, file2ReadCount: r2, file1RecordCount: k1, file2RecordCount: k2]
+    private static Map ex(String status, String noDataKind = null) {
+        return [statusEnumId: status, noDataKind: noDataKind, file1ReadCount: 0, file2ReadCount: 5]
     }
 
     @Test
@@ -21,34 +21,23 @@ class RunErrorKindsTests {
     }
 
     @Test
-    void aSideThatKeptNothingAfterReadingRecordsIsKeptNothing() {
-        assertEquals("KEPT_NOTHING", RunErrorKinds.of(ex("AUT_STAT_NO_DATA", 6982, 29963, 5525, 0)))
+    void aNoDataRowIsTheKindTheRunPersisted() {
+        assertEquals("KEPT_NOTHING", RunErrorKinds.of(ex("AUT_STAT_NO_DATA", "KEPT_NOTHING")))
+        assertEquals("ONE_SIDE_EMPTY", RunErrorKinds.of(ex("AUT_STAT_NO_DATA", "ONE_SIDE_EMPTY")))
     }
 
     @Test
-    void aSideThatReadNothingWhileTheOtherReadRecordsIsOneSideEmpty() {
-        assertEquals("ONE_SIDE_EMPTY", RunErrorKinds.of(ex("AUT_STAT_NO_DATA", 2298, 0, 2298, 0)))
-        assertEquals("ONE_SIDE_EMPTY", RunErrorKinds.of(ex("AUT_STAT_NO_DATA", 2298, 0)))
-        assertEquals("ONE_SIDE_EMPTY", RunErrorKinds.of(ex("AUT_STAT_NO_DATA", 0, 5)))
-    }
-
-    @Test
-    void bothSidesEmptyIsNotAnError() {
-        assertNull(RunErrorKinds.of(ex("AUT_STAT_NO_DATA", 0, 0, 0, 0)))
+    void aNoDataRowWithNoKindIsNotAnError() {
+        // a quiet day or a verify (one side read 0 by design) persists no kind, whatever its counts say
         assertNull(RunErrorKinds.of(ex("AUT_STAT_NO_DATA")))
-    }
-
-    @Test
-    void anAuditRecheckThatAppendedRecordsIsNotOneSideEmpty() {
-        // the recent read was empty but the kept count carries the appended records: read falls back to the larger
-        assertNull(RunErrorKinds.of(ex("AUT_STAT_NO_DATA", 0, 5, 3, 4)))
+        assertNull(RunErrorKinds.of(ex("AUT_STAT_NO_DATA", "SOMETHING_ELSE")))
     }
 
     @Test
     void otherStatusesAreNotErrors() {
-        assertNull(RunErrorKinds.of(ex("AUT_STAT_CANCELLED", 0, 5, 0, 0)))
-        assertNull(RunErrorKinds.of(ex("AUT_STAT_SKIP_DUP", 0, 5, 0, 0)))
-        assertNull(RunErrorKinds.of(ex("AUT_STAT_SUCCESS", 0, 5, 0, 0)))
+        assertNull(RunErrorKinds.of(ex("AUT_STAT_CANCELLED", "KEPT_NOTHING")))
+        assertNull(RunErrorKinds.of(ex("AUT_STAT_SKIP_DUP", "KEPT_NOTHING")))
+        assertNull(RunErrorKinds.of(ex("AUT_STAT_SUCCESS", "KEPT_NOTHING")))
         assertNull(RunErrorKinds.of([file1ReadCount: 0, file2ReadCount: 5]))
         assertNull(RunErrorKinds.of(null))
     }

@@ -3,14 +3,15 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="record" noun="RunErrorNotice" authenticate="anonymous-all" allow-remote="false">
+    <service verb="record" noun="RunErrorNotice" authenticate="anonymous-all" allow-remote="false" transaction="force-new">
         <description>Claims the (tenantId, subjectKey, runDay) card slot. isNew is false when the day already has a card (nothing
-            is written). Otherwise the row is created and priorDays lists the subject's earlier card days within 60 days, newest
+            is written). Otherwise the row is created and priorDays lists the subject's earlier scheduled card days within 60 days, newest
             first, so the caller can count a streak.</description>
         <in-parameters>
             <parameter name="tenantId" required="true"/>
             <parameter name="subjectKey" required="true"/>
             <parameter name="runDay" type="Date" required="true"/>
+            <parameter name="triggerType" required="true"/>
             <parameter name="errorKind"/>
             <parameter name="executionId"/>
         </in-parameters>
@@ -22,12 +23,13 @@
             <set field="isNew" from="false"/>
             <set field="priorDays" from="[]"/>
             <entity-find-one entity-name="darpan.ops.RunErrorNotice" value-field="existing" cache="false">
-                <field-map field-name="tenantId"/><field-map field-name="subjectKey"/><field-map field-name="runDay"/>
+                <field-map field-name="tenantId"/><field-map field-name="subjectKey"/><field-map field-name="runDay"/><field-map field-name="triggerType"/>
             </entity-find-one>
             <if condition="existing == null">
                 <set field="earliest" from="java.sql.Date.valueOf(runDay.toLocalDate().minusDays(60))"/>
                 <entity-find entity-name="darpan.ops.RunErrorNotice" list="earlier">
                     <econdition field-name="tenantId"/><econdition field-name="subjectKey"/>
+                    <econdition field-name="triggerType" value="scheduled"/>
                     <econdition field-name="runDay" operator="less" from="runDay"/>
                     <econdition field-name="runDay" operator="greater-equals" from="earliest"/>
                     <order-by field-name="-runDay"/>
@@ -37,6 +39,7 @@
                 <set field="notice.tenantId" from="tenantId"/>
                 <set field="notice.subjectKey" from="subjectKey"/>
                 <set field="notice.runDay" from="runDay"/>
+                <set field="notice.triggerType" from="triggerType"/>
                 <set field="notice.errorKind" from="errorKind"/>
                 <set field="notice.executionId" from="executionId"/>
                 <set field="notice.postedDate" from="ec.user.nowTimestamp"/>

@@ -25,28 +25,50 @@ class ErrorChatSupport {
     static void resetForTests() { postHook = null }
 
     static boolean postErrorCard(def ec, Map event) {
+        String webhookUrl = null
         try {
-            String webhookUrl = DarpanSettings.stringValue(WEBHOOK_SETTING)
+            webhookUrl = DarpanSettings.stringValue(WEBHOOK_SETTING)
             if (!webhookUrl) return false
 
-            LocalDate day = RunErrorKinds.runDay(event.scheduledDate as Timestamp, event.zoneId as String)
-            String subjectKey = ((event.checkId ?: event.automationId) as String)
-            Map claim = ec.service.sync().name("ops.OpsServices.record#RunErrorNotice").parameters([
-                    tenantId: event.tenantId, subjectKey: subjectKey, runDay: SqlDate.valueOf(day),
-                    errorKind: event.kind, executionId: event.executionId]).call()
-            if (ec.message.hasError() || claim == null || !claim.isNew) return false
+            Timestamp when = (event.scheduledDate ?: event.completedDate ?: new Timestamp(System.currentTimeMillis())) as Timestamp
+            LocalDate day = RunErrorKinds.runDay(when, event.zoneId as String)
+            String subjectKey = event.checkId ? "${event.auditId ?: ''}:${event.checkId}".toString() : (event.automationId as String)
+            String triggerType = event.scheduled ? "scheduled" : ((event.trigger ?: "manual") as String)
+            // The claim runs in its own transaction and behind a fresh message scope: a failure there never rolls back the run's
+            // status and never leaves an error in the caller's messages, and an error the caller already holds never blocks it.
+            Map claim = null
+            ec.message.pushErrors()
+            try {
+                claim = ec.service.sync().name("ops.OpsServices.record#RunErrorNotice").parameters([
+                        tenantId: event.tenantId, subjectKey: subjectKey, runDay: SqlDate.valueOf(day), triggerType: triggerType,
+                        errorKind: event.kind, executionId: event.executionId]).call()
+                if (ec.message.hasError()) claim = null
+            } catch (Throwable t) {
+                logger.warn("Error card claim failed: {}", failureNote(t, webhookUrl))
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+            if (claim == null || !claim.isNew) return false
 
             int streak = event.scheduled ? streakDays(day, (claim.priorDays ?: []) as List) : 1
             Map payload = [text: cardText(event, streak)]
             Map delivery = (postHook != null ? postHook.call(webhookUrl, payload) :
                     TenantNotificationSupport.deliverToWebhook(webhookUrl, payload)) as Map
             boolean ok = delivery?.ok == true
-            if (!ok) logger.warn("Error card for {} {} was not delivered: {}", event.tenantId, subjectKey, delivery)
+            if (!ok) logger.warn("Error card for {} {} was not delivered (status {})", event.tenantId, subjectKey, delivery?.statusCode)
             return ok
         } catch (Throwable t) {
-            logger.warn("Error card for {} failed: {}", event?.tenantId, t.toString())
+            logger.warn("Error card for {} failed: {}", event?.tenantId, failureNote(t, webhookUrl))
             return false
         }
+    }
+
+    /** The exception class and the webhook's host: never the exception message (it can carry the URL's key and token) nor the URL. */
+    static String failureNote(Throwable t, String webhookUrl) {
+        String host = null
+        try { host = new URI(webhookUrl?.trim()).host } catch (Exception ignored) { }
+        return "${t.getClass().name} (webhook host ${host ?: 'unreadable'})".toString()
     }
 
     /** This day plus the consecutive earlier days that also had a card. priorDays is newest first. */

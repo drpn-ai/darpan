@@ -736,9 +736,19 @@ class AutomationExecutionSupport {
                 // DAR-BE-318 (plan 3b-2b, Task 14): also how a window closes when a side's Keep, run in Spark at the compare,
                 // kept nothing: today that side's read filtered every record away and reported no data.
                 Closure closeAsNoData = { ->
+                    // A verify reads one side by design: its empty side is its answer, not a failed read.
+                    Map<String, String> finding = null
+                    if (!verifying) {
+                        String label1 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId"))))
+                        String label2 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId"))))
+                        finding = AutomationExecutionSupport.windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)
+                    }
+                    String sideReason = finding?.reason
                     Timestamp completedTimestamp = nowTimestamp(ec)
                     Map<String, Object> noDataFields = executionUpdateFields(file1Result, file2Result, [:]) + [
                             statusEnumId    : STATUS_NO_DATA,
+                            noDataKind      : finding?.kind,
+                            errorMessage    : sideReason,
                             completedDate   : completedTimestamp,
                             safeMetadataJson: safeMetadataJson([
                                     mode              : "API_DATE_RANGE",
@@ -761,13 +771,6 @@ class AutomationExecutionSupport {
                     // only runs after a won notification claim). An orphan there never fires AND pins
                     // its chat space against deletion forever, so purge it here.
                     TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
-                    // A verify reads one side by design: its empty side is its answer, not a failed read.
-                    String sideReason = null
-                    if (!verifying) {
-                        String label1 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId"))))
-                        String label2 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId"))))
-                        sideReason = AutomationExecutionSupport.windowNoDataReason(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)
-                    }
                     Closure recorder = AutomationExecutionSupport.noDataWindowRecorder ?: AuditAutomationSupport.&recordWindow
                     recorder.call(ec, automation, auditChecks, window, file1Source, file2Source,
                             file1Result, file2Result, null, null, automationExecutionId, auditSideConfigIds, sideReason)
@@ -3323,13 +3326,18 @@ class AutomationExecutionSupport {
      * read nothing while the other read records: that side is empty. A side read records and Keep kept none: it kept nothing.
      */
     static String noDataReason(String side1Label, Integer read1, Integer kept1, String side2Label, Integer read2, Integer kept2) {
+        return noDataFinding(side1Label, read1, kept1, side2Label, read2, kept2)?.reason
+    }
+
+    /** DAR-BE-015. The did-not-run finding of a NO_DATA window: [kind: ONE_SIDE_EMPTY | KEPT_NOTHING, reason], or null for a quiet day. */
+    static Map<String, String> noDataFinding(String side1Label, Integer read1, Integer kept1, String side2Label, Integer read2, Integer kept2) {
         int r1 = read1 ?: 0
         int r2 = read2 ?: 0
         if (r1 == 0 && r2 == 0) return null
-        if (r1 == 0) return "The ${side1Label} side read no records.".toString()
-        if (r2 == 0) return "The ${side2Label} side read no records.".toString()
-        if (kept1 != null && kept1 == 0) return "The ${side1Label} side kept 0 of ${String.format('%,d', r1)} records.".toString()
-        if (kept2 != null && kept2 == 0) return "The ${side2Label} side kept 0 of ${String.format('%,d', r2)} records.".toString()
+        if (r1 == 0) return [kind: "ONE_SIDE_EMPTY", reason: "The ${side1Label} side read no records.".toString()]
+        if (r2 == 0) return [kind: "ONE_SIDE_EMPTY", reason: "The ${side2Label} side read no records.".toString()]
+        if (kept1 != null && kept1 == 0) return [kind: "KEPT_NOTHING", reason: "The ${side1Label} side kept 0 of ${String.format('%,d', r1)} records.".toString()]
+        if (kept2 != null && kept2 == 0) return [kind: "KEPT_NOTHING", reason: "The ${side2Label} side kept 0 of ${String.format('%,d', r2)} records.".toString()]
         return null
     }
 
@@ -3340,14 +3348,19 @@ class AutomationExecutionSupport {
      * can have kept nothing.
      */
     static String windowNoDataReason(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
+        return windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)?.reason
+    }
+
+    /** The kind and reason together, from the one derivation (persisted as the execution's noDataKind and errorMessage). */
+    static Map<String, String> windowNoDataFinding(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
         Integer read1 = keepGiven(file1Result, reconcileResult, "file1")
         Integer read2 = keepGiven(file2Result, reconcileResult, "file2")
         Integer kept1 = file1Result?.recordCount as Integer
         Integer kept2 = file2Result?.recordCount as Integer
         if (evaluateMode) {
-            return read1 > 0 && kept1 == 0 ? noDataReason(label1, read1, kept1, label2, 1, null) : null
+            return read1 > 0 && kept1 == 0 ? noDataFinding(label1, read1, kept1, label2, 1, null) : null
         }
-        return noDataReason(label1, read1, kept1, label2, read2, kept2)
+        return noDataFinding(label1, read1, kept1, label2, read2, kept2)
     }
 
     private static Integer keepGiven(Map result, Map reconcileResult, String sideKey) {

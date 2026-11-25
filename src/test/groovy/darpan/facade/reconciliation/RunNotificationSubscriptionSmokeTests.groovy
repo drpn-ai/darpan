@@ -311,6 +311,7 @@ class RunNotificationSubscriptionSmokeTests {
         assertEquals([[text: "BE362 thrown run did not finish. Darpan has been alerted and is working on a fix."]], outcome.deliveries)
         assertFalse(outcome.deliveries.toString().contains("xxxxxxxxxx"), "the subscriber never sees the error")
         assertEquals("AUT_STAT_FAILED", outcome.run.statusEnumId)
+        assertNotNull(outcome.run.notifiedDate, "the thrown run is claimed, so nothing notifies it twice")
         assertEquals(0L, countSubscriptions(outcome.run.reconciliationRunResultId as String))
     }
 
@@ -341,6 +342,33 @@ class RunNotificationSubscriptionSmokeTests {
         assertEquals("FAILED", cards[0].kind)
         assertEquals(rawWarning, cards[0].errorFirstLine)
         assertEquals(0L, countSubscriptions(runId))
+    }
+
+    @Test
+    void aRunWhoseRulesFailedAfterACancelIsNotToldAsAFailure() {
+        // DAR-BE-362 re-review: the last cancel checkpoint is before the rule stage, so a cancel can land while the rules fail;
+        // the run then ends CANCELLED. Like the automation path, a cancelled run posts no card and tells no one (the person who
+        // pressed Cancel knows), and its subscriptions still go.
+        String runId = seedRun("AUT_STAT_RUNNING")
+        seedDefaultChatSpace("Cancelled run space")
+        assertTrue(callFacade("facade.ReconciliationFacadeServices.subscribe#RunNotification",
+                [reconciliationRunResultId: runId]).ok as boolean)
+        ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("reconciliationRunResultId", runId)
+                .disableAuthz().one().set("cancelRequestedDate", ec.user.nowTimestamp).update()
+        List<Map> cards = []
+        List<Map> deliveries = []
+        AutomationExecutionSupport.errorCardPoster = { def postEc, Map event -> cards << event; true }
+        TenantNotificationSupport.setDeliveryHook { String url, Map payload -> deliveries << payload; [ok: true, statusCode: 200] }
+        try {
+            AutomationExecutionSupport.notifySavedRunCompleted(ec, [reconciliationRunResultId: runId, companyUserGroupId: TENANT_ID,
+                    savedRunId: "BE362_CANCEL", runName: "Cancelled run", processingWarnings: ["RuleSet RS_1 rule stage failed"]], true)
+        } finally {
+            AutomationExecutionSupport.errorCardPoster = null
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+        assertEquals(0, cards.size(), "no card for a cancelled run")
+        assertEquals(0, deliveries.size(), "no subscriber line for a cancelled run: ${deliveries}")
+        assertEquals(0L, countSubscriptions(runId), "its subscriptions still go")
     }
 
     @Test

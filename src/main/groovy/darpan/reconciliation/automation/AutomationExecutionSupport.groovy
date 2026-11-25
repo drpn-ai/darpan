@@ -3761,9 +3761,17 @@ class AutomationExecutionSupport {
      * DAR-BE-362. A saved run's terminal notify (run#SavedRunDiff): a run whose rules did not fully evaluate (rulesFailed, or
      * the run result says AUT_STAT_FAILED) goes the error path, notifySavedRunError with ruleFailureReason as the card's
      * reason, so its subscribers never get the rule error or warnings; any other run gets the usual completion message.
+     * A failed run whose cancel was requested meanwhile (the last cancel checkpoint is before the rule stage) ends CANCELLED:
+     * like a cancelled automation (the guard in executeAutomation's rule-failure branch, cancelledExecutionResult) it posts no
+     * card and tells no one, and its subscriptions go.
      */
     static void notifySavedRunCompleted(def ec, Map<String, Object> runResult, boolean rulesFailed) {
         if (rulesFailed || RunObservability.STATUS_FAILED == normalize(runResult?.statusEnumId)) {
+            String runResultId = normalize(runResult?.reconciliationRunResultId)
+            if (RunObservability.isCancelRequested(ec, runResultId)) {
+                TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
+                return
+            }
             notifySavedRunError(ec, runResult, ruleFailureReason(runResult) ?: "rule execution failed")
         } else {
             TenantNotificationSupport.notifyRunCompleted(ec, runResult)

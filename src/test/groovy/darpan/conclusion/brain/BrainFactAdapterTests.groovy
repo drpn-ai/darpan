@@ -1,6 +1,7 @@
 package darpan.conclusion.brain
 
 import darpan.conclusion.brain.fact.Answered
+import darpan.conclusion.brain.fact.Conclusion
 import darpan.conclusion.brain.fact.Finding
 import darpan.conclusion.brain.fact.Order
 import darpan.conclusion.brain.fact.Payment
@@ -131,8 +132,54 @@ class BrainFactAdapterTests {
         // DAR-BE-192: and its order's date, for the in-flight grace (R1 omsOrderDate, R7 orderDate).
         assertEquals(["omsOrderId", "orderGrandTotal", "productId", "sku", "orderName", "omsOrderName", "omsOrderDate"], BrainFactAdapter.recordFieldsFor("ORDER_LINE", "FILE_1"))
         assertEquals(["orderId", "orderName", "grandTotal", "statusId", "orderDate"], BrainFactAdapter.recordFieldsFor("ORDER", "FILE_1"))
+        // DAR-BE-354: a Shopify order keeps its createdAt, for the in-flight grace.
+        assertTrue(BrainFactAdapter.recordFieldsFor("SHOPIFY_ORDER", "FILE_1").contains("createdAt"))
         assertEquals([], BrainFactAdapter.recordFieldsFor("RETURN", "FILE_2"))
         assertEquals([], BrainFactAdapter.recordFieldsFor(null, "FILE_1"))
+    }
+
+    /** Dolls Kill R7 2026-11-25 (DK5051629 as probed 2026-11-10): approved and paid in HotWax, no NetSuite sales order. */
+    private static Map shopify(Object createdAt) {
+        return [key: "7431815364865", bucket: "MISSING_FROM_FILE_2", sides: [
+                FILE_1: [presence: "KEPT", record: [id: "7431815364865", name: "DK5051629", displayFinancialStatus: "PAID",
+                        hasPaymentTransaction: "Y", createdAt: createdAt,
+                        totalPriceSet: [shopMoney: [amount: 176.43]], currentTotalPriceSet: [shopMoney: [amount: 176.43]]]],
+                FILE_2: [presence: "ABSENT", firstFieldPresence: "ABSENT"]]]
+    }
+
+    private static final Map HOTWAX_HAS_IT = [omsOrderByShopifyId: ["7431815364865": [orderId: "161384", orderName: "DK5051629",
+            grandTotal: 176.43, statusId: "ORDER_APPROVED", identifications: [], shipGroups: [[shipmentMethodTypeId: "STANDARD"]],
+            paymentPreferences: [[paymentMethodTypeId: "EXT_SHOP_PAYMENTS", statusId: "PAYMENT_SETTLED", maxAmount: 149.37],
+                                 [paymentMethodTypeId: "EXT_SHOP_OTHR_GTWAY", statusId: "PAYMENT_SETTLED", maxAmount: 27.06]],
+            paymentPreferenceSlotsFull: false]]]
+
+    /** 2026-11-25 12:00 UTC. */
+    private static final long READ_AT = 1795608000000L
+
+    private static List shopifyFacts(Object createdAt, Long readAt = READ_AT) {
+        return BrainFactAdapter.facts("shopifyOrder", shopify(createdAt), [:], [:], [:], HOTWAX_HAS_IT, readAt)
+    }
+
+    /** DAR-BE-354: a Shopify order is aged from its Shopify createdAt to the read, as R1 and R7 orders are from theirs. */
+    @Test
+    void aShopifyOrderIsAgedFromItsCreatedAt() {
+        assertEquals(new BigDecimal("2.00"), of(shopifyFacts("2026-11-25T10:00:00Z"), Order)[0].ageHours)
+        assertEquals(new BigDecimal("0.18"), of(shopifyFacts("2026-11-25T03:49:00-08:00"), Order)[0].ageHours, "11 minutes, offset kept")
+        assertNull(of(shopifyFacts(null), Order)[0].ageHours, "no createdAt: no age")
+        assertNull(of(shopifyFacts("yesterday"), Order)[0].ageHours, "a createdAt that is no date: no age")
+        assertNull(of(shopifyFacts("2026-11-25T10:00:00Z", null), Order)[0].ageHours, "no read time: no age")
+    }
+
+    /** DAR-BE-354: 281 of 283 R7 'held in HotWax' findings were under 24 h old and gone by the next check. */
+    @Test
+    void aYoungShopifyOrderIsOnItsWayAndAnOldOneIsHeld() {
+        Closure<List<String>> codes = { Object createdAt ->
+            ((List<Conclusion>) BrainEngine.forPacks(["oms-netsuite"]).fire(shopifyFacts(createdAt) as List<Object>).conclusions)
+                    .collect { it.cause.code }
+        }
+        assertEquals(["NS_IN_FLIGHT"], codes("2026-11-25T10:00:00Z"))
+        assertEquals(["HELD_IN_HC"], codes("2026-11-23T10:00:00Z"))
+        assertEquals(["HELD_IN_HC"], codes(null))
     }
 
 }

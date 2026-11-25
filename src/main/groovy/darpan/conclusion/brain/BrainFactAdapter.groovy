@@ -51,8 +51,9 @@ class BrainFactAdapter {
             case "ORDER": return ["orderId", "orderName", "grandTotal", "statusId", "orderDate"]
             case "RETURN": return ["returnId", "orderId", "orderNetsuiteId", "orderGrandTotal"]
             // DAR-BE-204: a Shopify order (the Shopify orders read keeps its amounts as {shopMoney: {amount}}).
+            // createdAt (DAR-BE-354): when Shopify took the order, for the in-flight grace.
             case "SHOPIFY_ORDER": return ["id", "name", "displayFinancialStatus", "sourceName", "totalPriceSet",
-                                          "currentTotalPriceSet", "subtotalPriceSet", "hasPaymentTransaction"]
+                                          "currentTotalPriceSet", "subtotalPriceSet", "hasPaymentTransaction", "createdAt"]
             default: return []
         }
     }
@@ -137,6 +138,8 @@ class BrainFactAdapter {
                         s.order = hcOrderId ? orderFor(hcOrderId, hc.grandTotal, netsuiteOrderIdOf(hc.identifications),
                                 normalize(hc.orderName), normalize(hc.statusId)) : null
                         if (s.order != null) {
+                            // DAR-BE-354: aged from when Shopify took it, the start of its way to NetSuite.
+                            setAge(s.order, record.createdAt, readAtMillis)
                             if (s.order.shipMethod == null) s.order.shipMethod = firstShipMethod(hc.shipGroups)
                             if (addPayments) addAnswer(facts, s.order, [(hcOrderId): hc])
                         }
@@ -273,7 +276,7 @@ class BrainFactAdapter {
         try { return new BigDecimal(value.toString().trim()) } catch (NumberFormatException ignored) { return null }
     }
 
-    /** DAR-BE-192 (2026-11-21): the order's age at the read, once (a second finding about the order keeps the first). */
+    /** DAR-BE-192 (2026-11-21): the order's age at the read (DAR-BE-354: a Shopify order's from its createdAt), once (a second finding about the order keeps the first). */
     private static void setAge(Order order, Object orderDate, Long readAtMillis) {
         if (order == null || order.ageHours != null || readAtMillis == null) return
         Long at = epochMillis(orderDate)

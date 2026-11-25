@@ -2544,6 +2544,10 @@ class AutomationExecutionSupport {
                 serviceParams.put(KeepPlanSupport.KEEP_FIELDS_PARAMETER, new ArrayList<String>(keepFields))
             }
         }
+        // DAR-BE-368: plus the fields the source's own parameters ask for (HotWax orderItems, so an audit finding shows the
+        // order's lines), kept beside the rules' fields, not overwritten by them. Only a service that declares readFields
+        // reads them (extractReadFields): Moqui drops the parameter for any other.
+        readFields = withAskedReadFields(serviceParams.get(ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER), readFields)
         if (readFields) serviceParams.put(ReconciliationSavedRunSupport.READ_FIELDS_PARAMETER, readFields)
         // DAR-BE-119: a read by key (an audit re-checking its older open findings), sent only to an extractor that
         // declares it: any other would ignore the keys and read the whole window.
@@ -2798,6 +2802,15 @@ class AutomationExecutionSupport {
         String windowFieldName = normalize(connector?.get("windowFieldName"))
         if (windowFieldName) serviceParams.windowFieldName = windowFieldName
         return serviceParams
+    }
+
+    /**
+     * DAR-BE-368. The read fields a source's own parameters ask for (asked) first, then the rules' (readFields), each once.
+     * No rules' fields (null: the service does not declare readFields, or the side has no scope) leaves asked as it is.
+     */
+    static List<String> withAskedReadFields(Object asked, List<String> readFields) {
+        if (!(asked instanceof Collection) || readFields == null) return readFields
+        return (((Collection) asked).collect { normalize(it) }.findAll { it } + readFields).unique() as List<String>
     }
 
     static Map<String, Object> resolveSourceExtractorConfigDefaults(def ec, def automation, Collection sources) {

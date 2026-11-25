@@ -1165,7 +1165,8 @@ class AuditReportAssembler {
                 // Aditi: "order and return totals are missing": an order's own total, else the one its item or return carries.
                 orderTotal : amount(text("grandTotal") ?: text("totalPrice") ?: text("orderGrandTotal")),
                 returnTotal: recordType == "return" ? amount(text("returnTotal")) : null,
-                deposits   : deposits ?: null] + (recordType == AuditAutomationSupport.ORDER_LINE ? orderLineFacts(data, text, amount) : [:])
+                deposits   : deposits ?: null,
+                lines      : orderLines(data)] + (recordType == AuditAutomationSupport.ORDER_LINE ? orderLineFacts(data, text, amount) : [:])
     }
 
     /**
@@ -1243,6 +1244,43 @@ class AuditReportAssembler {
     }
 
     /** ORDER_COMPLETED, RETURN_REQUESTED, ITEM_COMPLETED -> "Completed", "Requested"; null stays null. */
+    /**
+     * DAR-BE-368 (Aditi: "include the line item details, expecially the SKU", "show both shopify and HW"). An order's lines
+     * as its read gave them, each {id, sku, name, quantity, status}: a Shopify order's lineItems (the read asked
+     * withLineItems), id its line id; a HotWax order's orderItems (the read asked orderItems), id the Shopify line id HotWax
+     * keeps as the item's externalId, so one line pairs across the two. Null when the read gave none.
+     */
+    static List<Map> orderLines(Map data) {
+        if (data?.get("lineItems") instanceof List) {
+            return ((List) data.get("lineItems")).findAll { it instanceof Map }.collect { Map l ->
+                [id: l.id?.toString(), sku: l.sku ?: null, name: l.name ?: null, quantity: l.quantity,
+                 status: shopifyLineStatus(l.unfulfilledQuantity, l.currentQuantity != null ? l.currentQuantity : l.quantity)]
+            }
+        }
+        if (data?.get("orderItems") instanceof List) {
+            return ((List) data.get("orderItems")).findAll { it instanceof Map }.collect { Map i ->
+                [id: (i.externalId ?: i.orderItemSeqId)?.toString(), sku: i.sku ?: null, name: null, quantity: i.quantity,
+                 status: statusWords(i.statusId as String)]
+            }
+        }
+        return null
+    }
+
+    /** A Shopify line's state from its quantities: Removed (none left), Fulfilled, Unfulfilled, or "1 of 2 unfulfilled". */
+    private static String shopifyLineStatus(Object unfulfilled, Object current) {
+        BigDecimal u = decimalOrNull(unfulfilled)
+        BigDecimal q = decimalOrNull(current)
+        if (u == null || q == null) return null
+        if (q.signum() == 0) return "Removed"
+        if (u.signum() == 0) return "Fulfilled"
+        if (u >= q) return "Unfulfilled"
+        return "${u.stripTrailingZeros().toPlainString()} of ${q.stripTrailingZeros().toPlainString()} unfulfilled".toString()
+    }
+
+    private static BigDecimal decimalOrNull(Object value) {
+        try { return value == null ? null : new BigDecimal(value.toString()) } catch (NumberFormatException ignored) { return null }
+    }
+
     private static String statusWords(String code) {
         return code ? words(code.replaceFirst(/^(ORDER|RETURN|ITEM)_/, '')) : null
     }

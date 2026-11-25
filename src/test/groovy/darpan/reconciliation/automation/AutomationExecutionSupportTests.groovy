@@ -35,6 +35,16 @@ class AutomationExecutionSupportTests {
 
     private static final Timestamp NOW = timestamp("2026-05-01T10:00:00Z")
 
+    // DAR-BE-368: a source's own readFields (orderItems, for a finding's lines) ride beside the rules', never overwritten.
+    @Test
+    void theSourcesOwnReadFieldsRideBesideTheRulesFields() {
+        assertEquals(["orderItems", "isCompleted"], AutomationExecutionSupport.withAskedReadFields([" orderItems ", ""], ["isCompleted"]))
+        assertEquals(["orderItems", "isCompleted"], AutomationExecutionSupport.withAskedReadFields(["orderItems", "isCompleted"], ["isCompleted"]))
+        assertEquals(["isCompleted"], AutomationExecutionSupport.withAskedReadFields(null, ["isCompleted"]))
+        assertEquals(["isCompleted"], AutomationExecutionSupport.withAskedReadFields("orderItems", ["isCompleted"]), "not a list: ignored")
+        assertNull(AutomationExecutionSupport.withAskedReadFields(["orderItems"], null), "the service does not read readFields")
+    }
+
     // DAR-BE-015
     @Test
     void noDataReasonNamesTheSideThatReadNothingOrKeptNothing() {

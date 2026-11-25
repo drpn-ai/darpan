@@ -97,7 +97,9 @@
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="cause.explain" defaultText="Know why? Explain them to the agent"/>
     <!-- DAR-BE-358: Darpan's own Unexplained CSV after each run (setting audit.unexplained.email.to), never a client's. -->
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="subject.unexplained" defaultText="${tenantName} ${auditName}: ${count} Unexplained findings"/>
-    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="unexplained.intro" defaultText="${count} open findings in ${tenantName} ${auditName} have no cause yet after the run of ${date}. Each is a row in the attached CSV."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="unexplained.intro" defaultText="The ${date} run of ${tenantName} ${auditName} left ${count} findings with no cause. Unsolved, for now."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="unexplained.body" defaultText="Each one is a row in the attached CSV."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="unexplained.next" defaultText="Give one a conclusion and the next run files its lookalikes under it. One less mystery every morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="notrun" defaultText="${rules} did not run this morning. Darpan has been alerted and is working on a fix."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.notrun" defaultText="Did not run this morning."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="rule.partly" defaultText="${notRun} of ${total} checks did not run this morning."/>

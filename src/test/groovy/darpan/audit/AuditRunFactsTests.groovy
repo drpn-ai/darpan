@@ -99,7 +99,7 @@ class AuditRunFactsTests {
         Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> null }
         Map mail = AuditRunMessage.unexplainedEmail(facts, 30, COPY)
         assertEquals("Gorjana Month close: 30 Unexplained findings", mail.subject)
-        assertTrue((mail.text as String).startsWith("30 open findings in Gorjana Month close have no cause yet after the run of 10 Nov 2026."), mail.text as String)
+        assertTrue((mail.text as String).startsWith("The 10 Nov 2026 run of Gorjana Month close left 30 findings with no cause."), mail.text as String)
         assertEquals("gorjana-month-close-2026-11-10-unexplained.csv", mail.fileName)
     }
 

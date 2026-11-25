@@ -65,14 +65,19 @@ class AuditRunMessage {
 
     /**
      * DAR-BE-358. Darpan's own note after a run with Unexplained findings: {subject, html, text, fileName}; the CSV is
-     * attached by the caller. Words are copy blocks subject.unexplained and unexplained.intro (editable in production).
+     * attached by the caller. Every Darpan email's shape (darpan-email skill): what happened, the fact, what next, the
+     * sign-off and the run email's guides. Words are copy blocks subject.unexplained and unexplained.* (editable in production).
      */
     static Map unexplainedEmail(Map facts, int count, EmailCopyReader copy) {
         Map vars = [tenantName: facts.tenant?.name, auditName: facts.audit?.name, count: count, date: day(facts.date as String, true)]
-        String line = copy.text("unexplained.intro", vars)
-        return [subject : copy.text("subject.unexplained", vars),
-                html    : "<p style=\"${F}font-size:14px;line-height:1.55;color:${INK};margin:0;\">${esc(line)}</p>".toString(),
-                text    : line,
+        List<String> lines = ["unexplained.intro", "unexplained.body", "unexplained.next"].collect { copy.text(it, vars) }
+        String subject = copy.text("subject.unexplained", vars)
+        StringBuilder html = new StringBuilder(EmailFrame.open("DARPAN · AUDIT", subject))
+        lines.each { html << "<div class=\"dp-p\">${esc(it)}</div>" }
+        html << "<div class=\"dp-sign\">— Darpan</div>" << EmailCopy.guidesHtml(copy.guides()) << EmailFrame.close()
+        return [subject : subject,
+                html    : html.toString(),
+                text    : EmailFrame.textOf(lines + ["— Darpan"]) + EmailCopy.guidesText(copy.guides()),
                 fileName: "${(facts.tenant?.id as String)?.toLowerCase()}-${facts.audit?.id}-${facts.date}-unexplained.csv".toString()]
     }
 

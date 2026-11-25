@@ -64,6 +64,26 @@ class AuditRunMessageTests {
         assertTrue(line.endsWith(ROW_NOT_RUN), line)
     }
 
+    // DAR-BE-358 (Aditi 2026-11-25: "emails are expected to have personality... not dry"). Darpan's own Unexplained note
+    // wears every Darpan email's shape: frame, what happened with a wink, the fact, what next, the sign-off, the guides.
+    @Test
+    void theUnexplainedNoteHasTheEmailShapeInHtmlAndText() {
+        Map email = AuditRunMessage.unexplainedEmail(facts(), 4, COPY)
+        assertEquals("Tenant Audit: 4 Unexplained findings", email.subject, "the subject stays plain")
+        String intro = "The 10 Nov 2026 run of Tenant Audit left 4 findings with no cause. Unsolved, for now."
+        String body = "Each one is a row in the attached CSV."
+        String next = "Give one a conclusion and the next run files its lookalikes under it. One less mystery every morning."
+        String html = email.html as String
+        assertTrue(html.contains("DARPAN · AUDIT"), "the frame's eyebrow")
+        [intro, body, next].each { assertEquals(1, times(html, it), it) }
+        assertTrue(html.indexOf(intro) < html.indexOf(body) && html.indexOf(body) < html.indexOf(next), "intro, fact, then what next")
+        assertTrue(html.contains("— Darpan") && html.contains("guides/audits#resolve-a-finding"), "signed, with the guides")
+        String text = email.text as String
+        assertTrue(text.startsWith(intro), text)
+        [body, next, "— Darpan", "docs.drpn.ai/guides/audits"].each { assertTrue(text.contains(it), it) }
+        assertEquals("t-a-2026-11-10-unexplained.csv", email.fileName)
+    }
+
     @Test
     void theAlertedSentenceIsInTheNoticeOnceInEmailHtmlTextAndCard() {
         assertEquals(1, times(AuditRunMessage.emailText(facts(), [:], null, COPY), ALERTED))

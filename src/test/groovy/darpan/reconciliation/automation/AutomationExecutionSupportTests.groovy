@@ -3492,6 +3492,25 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void aVerifyCloseRecordsNoFindingEvenWhenOneSideReadNothing() {
+        Map side5 = [readCount: 5, recordCount: 5]
+        Map side0 = [readCount: 0, recordCount: 0]
+        assertNull(AutomationExecutionSupport.closeFinding(true, "A", "B", side5, side0, null, false))
+        assertEquals("ONE_SIDE_EMPTY", AutomationExecutionSupport.closeFinding(false, "A", "B", side5, side0, null, false).kind)
+    }
+
+    @Test
+    void aSparkKeepThatKeptNothingPersistsItsKindAndReasonOnTheExecutionRow() {
+        FakeEc ec = fakeEc()
+        seedAcmeSides(ec)
+        addAutomationFilter(ec, "TENANT_A", "FILE_1", 1, "status", "INCLUDE_IN", "OPEN")
+        runAcmeAutomation(ec, [file1: [keptCount: 0, setAsideCount: 10]])
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals("KEPT_NOTHING", execution.noDataKind)
+        assertEquals("The ACME side kept 0 of 10 records.", execution.errorMessage)
+    }
+
+    @Test
     void windowNoDataReasonCountsTheRecordsKeepWasGivenNotOnlyTheRecentRead() {
         // A re-check appended 4 records to a side whose recent read was empty; Keep kept none of them.
         Map summary = [keepSummaryBySide: [file1: [keptCount: 0, setAsideCount: 4]]]

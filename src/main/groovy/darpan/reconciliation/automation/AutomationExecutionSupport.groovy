@@ -737,12 +737,10 @@ class AutomationExecutionSupport {
                 // kept nothing: today that side's read filtered every record away and reported no data.
                 Closure closeAsNoData = { ->
                     // A verify reads one side by design: its empty side is its answer, not a failed read.
-                    Map<String, String> finding = null
-                    if (!verifying) {
-                        String label1 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId"))))
-                        String label2 = AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId"))))
-                        finding = AutomationExecutionSupport.windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)
-                    }
+                    Map<String, String> finding = AutomationExecutionSupport.closeFinding(verifying,
+                            AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file1Source, "systemEnumId")))),
+                            AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(normalize(readField(file2Source, "systemEnumId")))),
+                            file1Result, file2Result, reconcileResult, evaluateMode)
                     String sideReason = finding?.reason
                     Timestamp completedTimestamp = nowTimestamp(ec)
                     Map<String, Object> noDataFields = executionUpdateFields(file1Result, file2Result, [:]) + [
@@ -3349,6 +3347,12 @@ class AutomationExecutionSupport {
      */
     static String windowNoDataReason(String label1, String label2, Map file1Result, Map file2Result, Map reconcileResult, boolean evaluateMode) {
         return windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)?.reason
+    }
+
+    /** DAR-BE-015. The finding a NO_DATA close persists: none for a verify, which reads one side by design (its empty side is its answer). */
+    static Map<String, String> closeFinding(Object verifying, String label1, String label2, Map file1Result, Map file2Result,
+                                            Map reconcileResult, boolean evaluateMode) {
+        return verifying ? null : windowNoDataFinding(label1, label2, file1Result, file2Result, reconcileResult, evaluateMode)
     }
 
     /** The kind and reason together, from the one derivation (persisted as the execution's noDataKind and errorMessage). */

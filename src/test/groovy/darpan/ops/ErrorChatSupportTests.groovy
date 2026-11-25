@@ -149,8 +149,10 @@ class ErrorChatSupportTests {
 
     @Test
     void aClaimThatFailsLeavesNoErrorAndDoesNotThrow() {
+        int infosBefore = ec.message.messageInfos.size()
         assertFalse(ErrorChatSupport.postErrorCard(ec, event([tenantId: null])))
         assertFalse(ec.message.hasError())
+        assertEquals(infosBefore, ec.message.messageInfos.size(), "the claim's errors do not turn into danger messages")
         assertTrue(posted.isEmpty())
     }
 
@@ -167,8 +169,22 @@ class ErrorChatSupportTests {
 
     @Test
     void aMissingScheduledDateFallsBackToTheCompletedDate() {
-        assertTrue(ErrorChatSupport.postErrorCard(ec, event([scheduledDate: null, completedDate: Timestamp.from(Instant.parse("2026-11-25T15:00:00Z"))])))
-        assertTrue(ErrorChatSupport.postErrorCard(ec, event([scheduledDate: null, completedDate: null])))
+        Map e = event()
+        assertTrue(ErrorChatSupport.postErrorCard(ec, e))
+        // same LA day as the scheduled date: the same slot, so nothing more is posted
+        assertFalse(ErrorChatSupport.postErrorCard(ec, e + [scheduledDate: null, completedDate: Timestamp.from(Instant.parse("2026-11-25T20:00:00Z"))]))
+        assertTrue(ErrorChatSupport.postErrorCard(ec, event([scheduledDate: null, completedDate: null])), "neither date: today, no NPE")
+    }
+
+    @Test
+    void aRollbackOnlyCallerTransactionDoesNotStopTheCard() {
+        boolean began = ec.transaction.begin(null)
+        try {
+            ec.transaction.setRollbackOnly("test", null)
+            assertTrue(ErrorChatSupport.postErrorCard(ec, event()))
+        } finally {
+            ec.transaction.rollback(began, "test", null)
+        }
     }
 
     @Test

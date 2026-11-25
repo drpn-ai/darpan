@@ -48,7 +48,7 @@ class DarpanSettingsTests {
 
     @Test void everyCatalogEntryParsesAndItsDefaultIsValid() {
         Map<String, SettingDefinition> cat = DarpanSettings.catalog()
-        assertEquals(41, cat.size(), "darpan catalog keys (DAR-BE-015 added the five errors.* keys, DAR-BE-358 the Unexplained CSV address, DAR-BE-306 added the seven retention and purge keys, DAR-BE-320 the five audit-read keys, DAR-BE-318 the three dataset back-off keys, DAR-BE-325 the temporary-password keep days, DAR-BE-328 the sync pulse sample retention days; the agent keys live in darpan-agent): ${cat.keySet()}")
+        assertEquals(44, cat.size(), "darpan catalog keys (DAR-BE-015 added the five errors.* keys, DAR-BE-358 the Unexplained CSV address, DAR-BE-306 added the seven retention and purge keys, DAR-BE-320 the five audit-read keys, DAR-BE-318 the three dataset back-off keys, DAR-BE-325 the temporary-password keep days, DAR-BE-328 the sync pulse sample retention days, DAR-BE-361 the acknowledge reminder days, feedback shown days and feedback chat webhook; the agent keys live in darpan-agent): ${cat.keySet()}")
         cat.each { String k, SettingDefinition d ->
             assertNull(DarpanSettings.problem(k, d.defaultValue), "default of ${k}")
             assertTrue(d.unit in ['minutes', 'days', 'percent', 'count', 'runs', 'usd', 'factor', 'switch', 'hours', 'text'], "unit of ${k}: ${d.unit}")

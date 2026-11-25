@@ -20,13 +20,13 @@ Release date: 2026-11-25
 | `drpn-ai/darpan` | `v3.4.6` | `v3.4.7` |
 | `drpn-ai/darpan-hotwax` | `v1.3.2` | `v1.3.3` (DAR-BE-368 orderItems) |
 | `drpn-ai/shopify-darpan` | `v0.11.1` | `v0.11.2` (DAR-BE-368 withLineItems) |
-| `drpn-ai/darpan-ui` | `v4.4.8` | `v4.4.9` (DAR-BE-368 Lines block) |
+| `drpn-ai/darpan-ui` | `v4.4.8` | `v4.4.10` (DAR-BE-368 Lines block; `v4.4.9` tagged, never deployed) |
 | `drpn-ai/darpan-docker-config` | `v3.4.6` | `v3.4.7` (DARPAN_REF, DARPAN_HOTWAX_REF, SHOPIFY_DARPAN_REF move) |
 | darpan-cli, darpan-agent, moqui-gql, database-darpan, netsuite-darpan, moqui-rules, moqui-jexl | unchanged | unchanged |
 
 ## User-visible changes
 
-- **An order finding lists its lines** (DAR-BE-368, darpan-hotwax `v1.3.3`, shopify-darpan `v0.11.2`, app `v4.4.9`).
+- **An order finding lists its lines** (DAR-BE-368, darpan-hotwax `v1.3.3`, shopify-darpan `v0.11.2`, app `v4.4.10`).
   Under Order, each line shows its SKU, quantity and each system's word for it ("Shopify Unfulfilled · HotWax
   Completed"); a Shopify line and the HotWax item that keeps its id are one row. A check turns it on per side, as data:
   the Shopify orders source's `withLineItems: true` and the HotWax orders source's `readFields: ["orderItems"]`. Off

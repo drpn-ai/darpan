@@ -7,7 +7,7 @@
 ## Source ranges
 
 - darpan `v3.4.6..v3.4.7`, darpan-hotwax `v1.3.2..v1.3.3`, shopify-darpan `v0.11.1..v0.11.2`, darpan-ui
-  `v4.4.8..v4.4.9`, darpan-docker-config `v3.4.6..v3.4.7`.
+  `v4.4.8..v4.4.10`, darpan-docker-config `v3.4.6..v3.4.7`.
 
 ## Backend
 
@@ -45,11 +45,14 @@
 
 ## UI
 
-### drpn-ai/darpan-ui `v4.4.8..v4.4.9`
+### drpn-ai/darpan-ui `v4.4.8..v4.4.10`
 
 - `2f361d9` DAR-BE-368: `AuditRecord.lines`, `orderLineRows` (a Shopify line and its HotWax item as one row), a Lines
   block under Order on order findings.
-- Release commit: app version 4.4.9.
+- Release commit: app version 4.4.9 (`2de93e8`, tagged, never deployed).
+- `1f32672` DAR-BE-368: the lines share one grid, so every row's SKU, statuses and quantity line up (found in the
+  browser look on prod before the app deploy).
+- Release commit: app version 4.4.10 (`2ec2444`), the app deployed with 3.4.7.
 
 ### drpn-ai/darpan-docker-config `v3.4.6..v3.4.7`
 
@@ -63,7 +66,7 @@
 ## Validation and rollout notes
 
 - Focused tests and gates: `release-checklist.md`. Rollout: docker-config `v3.4.7` prod image via `deploy.sh`, then the
-  app from a detached `v4.4.9` worktree.
+  app from a detached `v4.4.10` worktree.
 
 ## References
 

@@ -32,12 +32,24 @@
 
 ## Verification
 
-- Backend, Gradle in an isolated clone, `--rerun`, fresh JUnit XML, none zero-byte (counts in the DAR-BE-368 backlog
-  note of the cut).
-- UI (`v4.4.9` = `2f361d9` + version): auditReport.spec + AuditReportPage.spec, `vue-tsc --build --force`, eslint.
+- Backend, Gradle in an isolated APFS clone at `origin/main` + the release edits, `--rerun`, fresh JUnit XML, none
+  zero-byte, 0 failures: darpan 22 classes / 383 tests (ApiContractGeneratorTests 8, FacadeContractSnapshotTests 1,
+  AutomationEntityContractTests 8, ConclusionEntityContractTests 11, SourceFilterEntityContractTests 4,
+  RunFlowchartSchemaContractTests 3, TenantOwnedEntityFilterContractTests 5, ScheduleJobDefaultsSmokeTests 6,
+  AuditCatalogContractTests 3, EmailTemplatesRenderTests 27, AuditReportAssemblerSmokeTests 35,
+  PaymentStatusRecordFactsTests 8, OrderLinesRecordFactsTests 3, OrderLinesTests 4, AutomationExecutionSupportTests 131,
+  RunNotificationSubscriptionSmokeTests 13, ErrorChatSupportTests 17, AuditDigestSupportTests 8, AuditDigestSmokeTests 9,
+  SettingAdminServicesSmokeTests 12, RunObservabilityPipelineIntegrationTest 5, SavedRunsFacadeSmokeTests 62);
+  darpan-hotwax 4 / 73 (OmsGqlOrderPageSourceTests 33, OmsGqlQueriesTests 24, KeptFieldsProjectionTieTests 6,
+  OmsKeptFieldsProjectionTests 10); shopify-darpan 3 / 55 (ShopifyExtractScriptCharacterizationTests 27,
+  ShopifySourceCatalogAndQueryBuilderTests 25, ShopifyOrderLinesNestingTests 3).
+- UI (`v4.4.10` = `2f361d9` + the one-grid fix `1f32672` + version; `v4.4.9` was tagged before the browser look and never deployed): auditReport.spec + AuditReportPage.spec, `vue-tsc --build --force`, eslint.
 - Not run: the full suites (workspace rule: focused tests only).
 - `openapi.json` version set to 3.4.7 by hand; ApiContractGeneratorTests confirms it.
-- `verify_release_pins.py`: after the docker-config pin move, before its tag.
+- `verify_release_pins.py --version 3.4.7`: exit 0 (run against the release files: the shared darpan checkout held another
+  session's unpushed commits at 3.4.5); docker-config `v3.4.7` ok.
+- Browser look before the app deploy: the Lines block placed on prod RAILS F-130316 with the live styles; rows did not
+  line up across a long SKU, fixed in `1f32672` (one grid), re-looked, then app `v4.4.10` deployed.
 
 ## Approval
 

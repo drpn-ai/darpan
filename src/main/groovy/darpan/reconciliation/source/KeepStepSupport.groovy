@@ -50,6 +50,17 @@ class KeepStepSupport {
     }
 
     /**
+     * DAR-BE-355: the key paths of a side Keep runs on, read as the plan gate reads them (KeepPlanSupport.keyedOnRecords): a
+     * key through no array ("orderId", root blank) is a field of each record of the records array. A key already through an
+     * array is left as it is.
+     */
+    static List<Map> keysOnRecords(List<Map> pathInfos) {
+        return pathInfos.collect { Map info ->
+            info.needsExplode ? info : [needsExplode: true, arrayPath: "records", fieldPath: info.path] as Map
+        }
+    }
+
+    /**
      * The Keep text columns the records file carries for these rules (KeepRules.injections). Rules that name no field (every
      * line judged on the driver, a constant) still need each record's row, which the records file writes only beside an
      * injection, so they get one row-only column that no rule reads.

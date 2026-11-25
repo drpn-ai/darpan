@@ -395,6 +395,7 @@ class ReconciliationServices {
             // saved schema does not resolve the id/rule paths, degrade transparently to inference so the
             // optimization can never fail a run. Default (no property) keeps the inference behaviour.
             List<Map> pathInfos = idSpecs.collect { Map spec -> CompareIdExpressionSupport.convertJsonPathToSpark(normalize((String) spec.idExpr)) }
+            if (keep) pathInfos = KeepStepSupport.keysOnRecords(pathInfos)
             List<String> idNormalizers = idSpecs.collect { (String) it.idNormalizer }
             List<String> fieldExpressions = idSpecs.collect { (String) it.idExpr }
             StructType readSchema = (schemaFile && SparkReadSchemaSupport.savedReadSchemaEnabled()) ?

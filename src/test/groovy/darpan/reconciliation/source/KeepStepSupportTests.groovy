@@ -394,6 +394,21 @@ class KeepStepSupportTests {
         assertFalse(sidecarOf(file).exists())
     }
 
+    /**
+     * DAR-BE-355: a bare key with no record root ("id", the shape the plan gate KeepPlanSupport.keyedOnRecords lets keep in
+     * Spark) is read off each record of the records array, as "$.records[*].id" is. Dolls Kill R1 dead-lettered on 2026-11-23
+     * and 24 because the gate passed this side and the ingest then read "id" off the document and failed the compare.
+     */
+    @Test
+    void aBareKeyIsReadOffEachRecordAsTheGateReadsIt() {
+        File file = extract(sixRecords())
+        Map out = ingest(file, sideKeep(rules()), [[idExpr: 'id', idNormalizer: null]])
+
+        assertEquals(["1", "6"], ids(out.idDf))
+        assertEquals(["2", "3", "4", "5"], ids(out.asideIdDf))
+        assertEquals(2, KeepArtifacts.readSummary(file).keptCount)
+    }
+
     @Test
     void keepWithoutTheRecordsArrayFailsNamingTheSide() {
         File file = extract(sixRecords())

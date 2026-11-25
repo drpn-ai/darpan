@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.common.DarpanEntityConstants
+import darpan.config.DarpanSettings
 import darpan.email.EmailCopyReader
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -38,6 +39,8 @@ class AuditRunUpdateSupport {
     /** Optional (darpan-agent, DAR-BE-320): turns a play's read flags into staff tickets. Core never imports it. */
     static final String READ_REVIEW_SERVICE = "agent.AgentWriterServices.review#AuditReads"
     static final String EMAIL_TEMPLATE = "DARPAN_AUDIT_RUN"
+    /** DAR-BE-358: Darpan's own address(es) for the Unexplained CSV after each run; unset sends none. */
+    static final String UNEXPLAINED_TO = "audit.unexplained.email.to"
 
     /** Every run-update email goes through here, so tests record sends instead of making them. */
     private static final Closure DEFAULT_SEND_EMAIL = { def ec, String toAddresses, Map bodyParameters, List<Map> attachments ->
@@ -77,7 +80,7 @@ class AuditRunUpdateSupport {
             }
             if (!auditId) return
             List<Map> digests = runDigests(ec, tenantId, auditId)
-            if (digests && !digests.any { active(it) }) return
+            if (digests && !digests.any { active(it) } && !unexplainedTo()) return
             dispatch.call(ec, [companyUserGroupId  : tenantId, auditId: auditId, reportDate: result?.auditReportDate,
                                period              : result?.auditPeriod, finishedAutomationId: automationId])
         } catch (Throwable t) {
@@ -87,14 +90,17 @@ class AuditRunUpdateSupport {
 
     /**
      * Sends the run update for each active run digest of the audit (a default one made when it has none), once the audit
-     * is idle; nothing when every run digest is inactive. reportDate and period name the
+     * is idle; nothing when every run digest is inactive, except Darpan's Unexplained CSV (DAR-BE-358, sent once per run
+     * when its setting holds an address and the run has an Unexplained finding). reportDate and period name the
      * run (a play's last window); blank, they are read off the audit's latest check run. Answers per digest: auditDigestId,
      * sent, and the reason when not sent (RUN_NOT_DONE, ALREADY_SENT, NO_DESTINATION, NO_REPORT, DELIVERY_FAILED, FAILED).
      */
     static List<Map> send(def ec, String tenantId, String auditId, Date reportDate, String period, String finishedAutomationId,
                           Timestamp now) {
         List<Map> all = runDigests(ec, tenantId, auditId)
-        if (all && !all.any { active(it) }) return []
+        // DAR-BE-358: a run whose update is off still sends Darpan its Unexplained CSV when the address is set.
+        List<String> unexplainedTo = unexplainedTo()
+        if (all && !all.any { active(it) } && !unexplainedTo) return []
         Map audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, tenantId, WHY)?.getMap()
         if (audit == null) return []
         if (!idle(ec, tenantId, audit, finishedAutomationId, now)) {
@@ -114,7 +120,11 @@ class AuditRunUpdateSupport {
             if (claim(ec, digest, tenantId, stamp)) claimed << digest
             else outcomes << [auditDigestId: digest.auditDigestId, sent: false, reason: "ALREADY_SENT"]
         }
-        if (!claimed) return outcomes
+        // The Unexplained CSV goes once per run: with the claim of the audit's first run digest, active or not.
+        Map anchor = all ? all[0] : digests.find()
+        boolean anchorClaimed = anchor != null && unexplainedTo && (claimed.any { it.auditDigestId == anchor.auditDigestId } ||
+                (!active(anchor) && claim(ec, anchor, tenantId, stamp)))
+        if (!claimed && !anchorClaimed) return outcomes
 
         Map built = null
         try {
@@ -132,6 +142,7 @@ class AuditRunUpdateSupport {
                 outcomes << [auditDigestId: digest.auditDigestId, sent: false, reason: "FAILED"]
             }
         }
+        if (anchorClaimed && built != null) sendUnexplained(ec, tenantId, auditId, built, unexplainedTo)
         reviewReads(ec, tenantId, auditId, built?.readReport as Map)
         return outcomes
     }
@@ -161,7 +172,13 @@ class AuditRunUpdateSupport {
             group ? AuditRunMessage.fixLine(group, words) : null
         }
         EmailCopyReader copy = new EmailCopyReader(ec, AuditRunMessage.TEMPLATE)
+        Map unexplained = AuditRunFacts.unexplainedCsv(units, tenantId, auditId) { String rule, String cause ->
+            Map group = groupsByKey["${rule}|${cause ?: ''}".toString()]
+            group ? AuditRunMessage.fixLine(group, words) : null
+        }
         return [facts      : facts,
+                unexplained: unexplained ? AuditRunMessage.unexplainedEmail(facts, unexplained.count as int, copy) +
+                        [csv: unexplained.csv] : null,
                 words      : words,
                 readReport : readReport,
                 subject    : AuditRunMessage.subject(facts, copy),
@@ -194,6 +211,36 @@ class AuditRunUpdateSupport {
             ec.message.clearErrors()
             logger.warn("Audit run update: the writer failed: {}", t.message)
             return [:]
+        }
+    }
+
+    /** DAR-BE-358: the Unexplained CSV address(es) from the setting, valid ones only; empty when unset or unreadable. */
+    static List<String> unexplainedTo() {
+        try {
+            return AuditDigestSupport.emailsOf(DarpanSettings.stringValue(UNEXPLAINED_TO))*.toLowerCase().unique()
+        } catch (Throwable t) {
+            logger.warn("Audit run update: setting {} not read: {}", UNEXPLAINED_TO, t.message)
+            return []
+        }
+    }
+
+    /**
+     * DAR-BE-358. Darpan's own email after a run: every open finding no cause explains, as one CSV across all rules. Sent
+     * only when there is one; never to the tenant (the address is a Darpan setting). Never throws.
+     */
+    static void sendUnexplained(def ec, String tenantId, String auditId, Map built, List<String> to) {
+        Map mail = built.unexplained as Map
+        if (!mail || !to) return
+        try {
+            sendEmail.call(ec, to.join(","), [runSubject: mail.subject, runHtml: mail.html, runText: mail.text],
+                    [[fileName: mail.fileName, contentType: "text/csv; charset=UTF-8", contentText: mail.csv]])
+            if (ec.message.hasError()) {
+                logger.warn("Audit run update: Unexplained CSV for audit {} of tenant {} refused: {}", auditId, tenantId, ec.message.errorsString)
+                ec.message.clearErrors()
+            }
+        } catch (Throwable t) {
+            ec.message.clearErrors()
+            logger.warn("Audit run update: Unexplained CSV for audit {} of tenant {} failed: {}", auditId, tenantId, t.message)
         }
     }
 

@@ -84,6 +84,25 @@ class AuditRunFactsTests {
         assertEquals(1 + 30 + 24 + 2, csvs.R2.split("\r\n").length, "the mixed order's two lines are two rows")
     }
 
+    // DAR-BE-358: Darpan's own CSV of every finding no cause explains, across rules; a line with a cause of its own is
+    // explained even when its order has none (M300), and a run with nothing Unexplained sends nothing.
+    @Test
+    void theUnexplainedCsvHoldsOnlyFindingsNoCauseExplainsAndNothingWhenThereAreNone() {
+        Map out = AuditRunFacts.unexplainedCsv(units(), "GORJANA", "month-close") { String rule, String cause -> null }
+        assertEquals(30, out.count)
+        List<String> rows = (out.csv as String).split("\r\n") as List<String>
+        assertEquals(AuditRunFacts.UNEXPLAINED_HEADER.join(","), rows[0])
+        assertEquals(31, rows.size(), "header and the 30 Unexplained orders; M300's lines and R10's returns have causes")
+        assertTrue(rows[1].startsWith("GORJANA,month-close,R2,Unexplained,F-11,M101,"), rows[1])
+        assertEquals(null, AuditRunFacts.unexplainedCsv(units().findAll { it.cause != "Unexplained" }, "GORJANA", "month-close", null))
+
+        Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> null }
+        Map mail = AuditRunMessage.unexplainedEmail(facts, 30, COPY)
+        assertEquals("Gorjana Month close: 30 Unexplained findings", mail.subject)
+        assertTrue((mail.text as String).startsWith("30 open findings in Gorjana Month close have no cause yet after the run of 10 Nov 2026."), mail.text as String)
+        assertEquals("gorjana-month-close-2026-11-10-unexplained.csv", mail.fileName)
+    }
+
     @Test
     void theCardIsASummaryAndOneLinkNothingElse() {
         Map facts = AuditRunFacts.build(report(), units()) { String rule, String cause, String id -> null }

@@ -63,6 +63,19 @@ class AuditRunMessage {
         return "${(facts.tenant?.id as String)?.toLowerCase()}-${facts.audit?.id}-${facts.period}-${rule}.csv".toString()
     }
 
+    /**
+     * DAR-BE-358. Darpan's own note after a run with Unexplained findings: {subject, html, text, fileName}; the CSV is
+     * attached by the caller. Words are copy blocks subject.unexplained and unexplained.intro (editable in production).
+     */
+    static Map unexplainedEmail(Map facts, int count, EmailCopyReader copy) {
+        Map vars = [tenantName: facts.tenant?.name, auditName: facts.audit?.name, count: count, date: day(facts.date as String, true)]
+        String line = copy.text("unexplained.intro", vars)
+        return [subject : copy.text("subject.unexplained", vars),
+                html    : "<p style=\"${F}font-size:14px;line-height:1.55;color:${INK};margin:0;\">${esc(line)}</p>".toString(),
+                text    : line,
+                fileName: "${(facts.tenant?.id as String)?.toLowerCase()}-${facts.audit?.id}-${facts.date}-unexplained.csv".toString()]
+    }
+
     /** The fix line a group shows: the writer's sentence for it when there is one, else the cause's own fix. */
     static String fixLine(Map group, Map words) {
         Map fixes = (words?.fixes ?: [:]) as Map

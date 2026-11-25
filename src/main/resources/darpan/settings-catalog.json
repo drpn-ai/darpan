@@ -39,6 +39,7 @@
     {"key": "errors.chat.webhookUrl", "type": "STRING", "area": "Errors", "unit": "text", "description": "Darpan-only chat space webhook (Google Chat or Slack) that receives run error cards. Unset posts no cards.", "defaultValue": null, "optional": true, "secret": true},
     {"key": "errors.digest.hourUtc", "type": "INT", "area": "Errors", "unit": "hours", "description": "Hour of the day (UTC) the daily error digest is sent.", "defaultValue": "12", "min": 0, "max": 23},
     {"key": "errors.watchdog.hours", "type": "INT", "area": "Errors", "unit": "hours", "description": "An automation with no scheduled run for this long is reported as stale in the digest.", "defaultValue": "30", "min": 1, "max": 720},
+    {"key": "audit.unexplained.email.to", "type": "STRING", "area": "Errors", "unit": "text", "description": "Darpan only: after every audit run with Unexplained findings, a CSV of them is emailed here (one or more addresses, comma-separated). Unset sends none.", "defaultValue": null, "optional": true},
     {"key": "errors.emptyStreak.days", "type": "INT", "area": "Errors", "unit": "days", "description": "Consecutive scheduled runs that read nothing before the digest reports an empty streak.", "defaultValue": "7", "min": 2, "max": 90}
   ]
 }

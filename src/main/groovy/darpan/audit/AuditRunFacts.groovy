@@ -77,6 +77,13 @@ class AuditRunFacts {
      */
     static Map<String, String> csvByRule(List<Map> units, Closure<String> fixOf) {
         Map<String, List<List<String>>> rows = new LinkedHashMap<>()
+        findingRows(units, fixOf).each { List<String> row -> rows.computeIfAbsent(row[0]) { [] } << row }
+        return rows.collectEntries { String rule, List<List<String>> body -> [(rule): csv([CSV_HEADER] + body)] }
+    }
+
+    /** One row per open finding (each line of an order is its own finding), in CSV_HEADER's columns. */
+    static List<List<String>> findingRows(List<Map> units, Closure<String> fixOf) {
+        List<List<String>> rows = []
         (units ?: []).each { Map unit ->
             String rule = unit.statement as String
             Map ids = idsOf(unit)
@@ -84,12 +91,27 @@ class AuditRunFacts {
             lines.each { Map line ->
                 String cause = (line.cause ?: unit.cause) as String
                 String fix = fixOf?.call(rule, cause) ?: (unit.cause && unit.cause != cause ? fixOf?.call(rule, unit.cause as String) : null)
-                rows.computeIfAbsent(rule) { [] } << [rule, cause, line.id, ids.hotwaxId, ids.orderName, ids.netsuiteId,
-                                                      ids.shopifyId, line.firstFound ?: unit.firstFound,
-                                                      (line.ageDays != null ? line.ageDays : unit.ageDays)?.toString(), fix].collect { it?.toString() }
+                rows << [rule, cause, line.id, ids.hotwaxId, ids.orderName, ids.netsuiteId,
+                         ids.shopifyId, line.firstFound ?: unit.firstFound,
+                         (line.ageDays != null ? line.ageDays : unit.ageDays)?.toString(), fix].collect { it?.toString() }
             }
         }
-        return rows.collectEntries { String rule, List<List<String>> body -> [(rule): csv([CSV_HEADER] + body)] }
+        return rows
+    }
+
+    static final List<String> UNEXPLAINED_HEADER = (["Tenant", "Audit"] + CSV_HEADER).asImmutable()
+
+    /** A finding no cause explains: no cause at all, or the tree's own "Unexplained". */
+    static boolean unexplained(String cause) { return !cause || cause == "Unexplained" }
+
+    /**
+     * DAR-BE-358. Every open finding no cause explains, across all rules, for Darpan's own review: {count, csv}, csv in
+     * UNEXPLAINED_HEADER's columns; null when there is none, so nothing is sent.
+     */
+    static Map unexplainedCsv(List<Map> units, String tenantId, String auditId, Closure<String> fixOf) {
+        List<List<String>> rows = findingRows(units, fixOf).findAll { unexplained(it[1]) }
+                .collect { [tenantId, auditId] + it }
+        return rows ? [count: rows.size(), csv: csv([UNEXPLAINED_HEADER] + rows)] : null
     }
 
     /** RFC 4180: CRLF lines; a field with a comma, quote or line break quoted, its quotes doubled. */

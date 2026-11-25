@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.reconciliation.support.SharedMoqui
+import darpan.config.DarpanSettings
 import darpan.peak.PeakWindow
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.RunAdmission
@@ -142,6 +143,7 @@ class AuditRunUpdateSmokeTests {
         AuditRunUpdateSupport.sendEmail = realSendEmail
         AuditRunUpdateSupport.dispatch = realDispatch
         AutomationExecutionSupport.setRunAdmission(null)
+        DarpanSettings.resetForTests()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -383,6 +385,39 @@ class AuditRunUpdateSmokeTests {
         assertEquals([], send(AUTO), "off for this audit")
         assertEquals(1, mails.size())
         assertEquals(1L, ec.entity.find("darpan.audit.AuditDigest").count(), "no default digest made beside it")
+    }
+
+    // DAR-BE-358: with Darpan's address set, the run also sends it one CSV of every Unexplained finding (R2's three; R8's
+    // two have a cause), apart from the tenant's email; an audit whose update is off still sends it; never twice a run.
+    @Test
+    void darpanGetsOneUnexplainedCsvPerRunEvenWhenTheRunUpdateIsOff() {
+        DarpanSettings.resetForTests()
+        DarpanSettings.rowLoader = { -> [(AuditRunUpdateSupport.UNEXPLAINED_TO): [settingValue: "Review@drpn.example, nope"]] as Map<String, Map> }
+        try {
+            assertEquals([[auditDigestId: "TRU_RUN", sent: true, reason: null]], send(AUTO))
+            assertEquals(2, mails.size(), "the tenant's run email and Darpan's own")
+            Map own = mails.find { it.to == "review@drpn.example" }
+            assertTrue(own != null, "to the setting's valid address only: ${mails*.to}")
+            assertFalse((mails.find { it != own }.to as String).contains("review@"), "never added to the tenant's email")
+            assertEquals("Gorjana Month close: 3 Unexplained findings", own.body.runSubject)
+            List<Map> files = own.attachments as List<Map>
+            assertEquals(["gorjana-month-close-${today}-unexplained.csv".toString()], files*.fileName)
+            List<String> rows = (files[0].contentText as String).split("\r\n") as List<String>
+            assertEquals(4, rows.size(), "header and R2's three findings")
+            assertTrue(rows[1].startsWith("${GORJANA},${AUDIT},R2,".toString()), rows[1])
+            assertEquals("ALREADY_SENT", send(AUTO)[0].reason)
+            assertEquals(2, mails.size(), "not again for the same run")
+
+            ec.entity.find("darpan.audit.AuditDigest").condition("auditDigestId", "TRU_RUN").updateAll([isActive: "N"])
+            execution("AUT_STAT_SUCCESS", [completedDate: new Timestamp(System.currentTimeMillis() + 5000)])
+            assertEquals([], send(AUTO), "the tenant's update is off")
+            assertEquals(3, mails.size())
+            assertEquals("review@drpn.example", mails[2].to, "Darpan's CSV still goes")
+            assertEquals([], send(AUTO))
+            assertEquals(3, mails.size(), "once per run")
+        } finally {
+            DarpanSettings.resetForTests()
+        }
     }
 
     @Test

@@ -10,6 +10,7 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.conclusion.RunConclusionSupport
 import org.moqui.entity.EntityCondition
 
 import java.sql.Date
@@ -185,7 +186,8 @@ class AuditSettingsSupport {
 
     /**
      * DAR-BE-348. Each statement's reasons, in its checks' order: the conclusions its checks' runs can reach (the
-     * RuleSetConclusionRule rows of each run's compare scopes). A cause hidden on a run (HIDE) never becomes a finding
+     * RuleSetConclusionRule rows of each run's compare scopes), DAR-BE-353 only those the rows its link reports can reach, so
+     * statements sharing one run do not each list the whole tree (reasonsFrom). A cause hidden on a run (HIDE) never becomes a finding
      * there; Unexplained is no reason (its findings carry none and take the statement's level). checks: how many of the
      * statement's checks reach it; closesOn: on how many it is expected (EXPECTED, which closes the finding); closes: all,
      * some or none. An override no check reaches any more is listed as well (checks 0), so its level shows and can be cleared.
@@ -196,17 +198,10 @@ class AuditSettingsSupport {
         List<String> runIds = checksByStatement.values().flatten()*.savedRunId.findAll { it }.collect { it as String }.unique()
         Map<String, String> runOfScope = runIds ? rows(ec, "darpan.rule.RuleSetCompareScope", tenantId)
                 .condition("ruleSetId", EntityCondition.IN, runIds).list().collectEntries { [(it.compareScopeId as String): it.ruleSetId as String] } : [:]
-        // run -> conclusion -> expected, in rule order. As the run concludes: any HIDE rule hides the cause, any EXPECTED one expects it.
-        Map<String, Map<String, Boolean>> reach = [:]
-        Map<String, Set<String>> hidden = [:]
+        Map<String, List<Map>> rulesByRun = [:]
         (runOfScope ? rows(ec, "darpan.rule.RuleSetConclusionRule", tenantId)
                 .condition("compareScopeId", EntityCondition.IN, runOfScope.keySet() as List).orderBy("sequenceNum").list() : []).each { rule ->
-            String run = runOfScope[rule.compareScopeId as String], conclusion = normalize(rule.conclusionEnumId)
-            if (!conclusion || conclusion == "UNEXPLAINED") return
-            String outcome = normalize(rule.outcome)
-            if (outcome == "HIDE") hidden.computeIfAbsent(run) { [] as Set }.add(conclusion)
-            Map<String, Boolean> causes = reach.computeIfAbsent(run) { new LinkedHashMap<String, Boolean>() }
-            causes.put(conclusion, (causes[conclusion] ?: false) || outcome == "EXPECTED")
+            rulesByRun.computeIfAbsent(runOfScope[rule.compareScopeId as String]) { [] } << rule.getMap()
         }
         Map<String, String> labels = [:]
         Closure<String> labelOf = { String id ->
@@ -215,12 +210,32 @@ class AuditSettingsSupport {
                 return (e?.description ?: e?.enumCode ?: id) as String
             }
         }
+        return reasonsFrom(checksByStatement, rulesByRun, overrides, labelOf)
+    }
+
+    /**
+     * DAR-BE-353. reasonsOf without the reads: checksByStatement's checks carry savedRunId and their link's linkDiffTypes;
+     * rulesByRun holds each run's RuleSetConclusionRule rows (all its compare scopes) in sequence order. A check reaches the
+     * nodes its link's rows can conclude in (reaches); hidden and expected are read on those nodes alone, as the run concludes
+     * that check's rows: any HIDE node hides the cause, any EXPECTED one expects it. A link's ruleIds do not narrow: a cause
+     * tree node names a bucket, not the rule that raised the row, so every rule check of a run reaches all its RULE causes.
+     */
+    static Map<String, List<Map>> reasonsFrom(Map<String, List<Map>> checksByStatement, Map<String, List<Map>> rulesByRun,
+                                              Map<String, Map<String, String>> overrides, Closure<String> labelOf) {
+        Map<String, List<Map>> nodesByRun = rulesByRun.collectEntries { String run, List<Map> rules -> [(run): AuditSettingsSupport.nodesOf(rules)] }
         return checksByStatement.collectEntries { String statementId, List<Map> checks ->
             Map<String, int[]> counts = new LinkedHashMap<>()   // conclusion -> [checks, closesOn]
             checks.each { Map check ->
-                String run = check.savedRunId as String
-                (reach[run] ?: [:]).each { String conclusion, Boolean expected ->
-                    if (hidden[run]?.contains(conclusion)) return
+                Map<String, Boolean> causes = new LinkedHashMap<>()   // conclusion -> expected, in rule order
+                Set<String> hidden = [] as Set
+                (nodesByRun[check.savedRunId as String] ?: []).each { Map node ->
+                    // Qualified: a bare static call from a closure nested in a closure fails with "argument type mismatch".
+                    if (!AuditSettingsSupport.reaches(check.linkDiffTypes as String, node.bucket as String)) return
+                    if (node.outcome == "HIDE") hidden.add(node.conclusion as String)
+                    causes.put(node.conclusion as String, (causes[node.conclusion as String] ?: false) || node.outcome == "EXPECTED")
+                }
+                causes.each { String conclusion, Boolean expected ->
+                    if (hidden.contains(conclusion)) return
                     int[] c = counts.computeIfAbsent(conclusion) { new int[2] }
                     c[0]++
                     if (expected) c[1]++
@@ -237,6 +252,41 @@ class AuditSettingsSupport {
             }
             [(statementId): out]
         } as Map<String, List<Map>>
+    }
+
+    /** NO_BUCKET: a node whose path names two buckets, which no row can match (ConclusionTreeSupport.matches reads each). */
+    private static final String NO_BUCKET = "-"
+
+    /**
+     * DAR-BE-353. A run's cause nodes: [conclusion, outcome, bucket], the bucket the one its path names (its own, else its
+     * nearest ancestor's; blank: any row; NO_BUCKET when the path names two). Unexplained and blank conclusions are dropped.
+     */
+    private static List<Map> nodesOf(List<Map> rules) {
+        Map<Integer, Map> bySeq = rules.findAll { it.sequenceNum != null }.collectEntries { [((it.sequenceNum as int)): it] }
+        return rules.findResults { Map rule ->
+            String conclusion = normalize(rule.conclusionEnumId)
+            if (!conclusion || conclusion == "UNEXPLAINED") return null
+            Set<String> buckets = [] as Set
+            Set<Integer> seen = [] as Set
+            for (Map n = rule; n != null && seen.add(n.sequenceNum as Integer);
+                 n = normalize(n.parentSequenceNum) ? bySeq[n.parentSequenceNum as int] : null) {
+                if (normalize(n.appliesToBucket)) buckets.add(normalize(n.appliesToBucket))
+            }
+            return [conclusion: conclusion, outcome: normalize(rule.outcome),
+                    bucket: buckets.size() > 1 ? NO_BUCKET : buckets ? buckets.first() : null]
+        } as List<Map>
+    }
+
+    /**
+     * DAR-BE-353. Whether a statement link's rows can conclude in a node's bucket. A link that names no row type reports every
+     * row; a single-sided run's rows all conclude in FINDING (RunConclusionSupport), whatever their type; a two-sided run's row
+     * type maps to its bucket exactly as the run concludes it (RunConclusionSupport.bucketOf).
+     */
+    static boolean reaches(String linkDiffTypes, String bucket) {
+        if (bucket == NO_BUCKET) return false
+        List<String> types = (linkDiffTypes ?: "").split(",")*.trim().findAll { it }
+        if (!bucket || !types || bucket == "FINDING") return true
+        return types.any { String type -> RunConclusionSupport.bucketOf([diffType: type], null, null) == bucket }
     }
 
     /** DAR-BE-348. code -> enumId of each level (P0, P1, P2, KNOWN). */
@@ -562,7 +612,11 @@ class AuditSettingsSupport {
                 .condition("statementId", EntityCondition.IN, statements*.statementId).orderBy(["sequenceNum", "checkId"]).list()*.getMap()
         Map<String, Map> checks = links ? rows(ec, "darpan.audit.AuditCheck", tenantId)
                 .condition("checkId", EntityCondition.IN, links*.checkId.unique()).list().collectEntries { [(it.checkId): it.getMap()] } : [:]
-        links.each { Map l -> if (checks[l.checkId as String]) out[l.statementId as String] << checks[l.checkId as String] }
+        // DAR-BE-353: each check as linked to that statement, with the link's row types and rules (findingsFrom's narrowing).
+        links.each { Map l ->
+            Map check = checks[l.checkId as String]
+            if (check) out[l.statementId as String] << (check + [linkDiffTypes: l.diffTypes, linkRuleIds: l.ruleIds])
+        }
         return out
     }
 

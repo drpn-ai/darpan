@@ -351,7 +351,11 @@ class RunConclusionSupport {
         return added ? [ids: ids, sideRecords: sideRecords] : [:]
     }
 
-    private static String bucketOf(Map row, String file1Label, String file2Label) {
+    /**
+     * The bucket a two-sided run's diff row concludes in (a single-sided run's rows are all FINDING). DAR-BE-353: audit
+     * settings map a statement link's diffTypes through it, so a statement lists only the causes its rows can reach.
+     */
+    static String bucketOf(Map row, String file1Label, String file2Label) {
         // DAR-BE-063: duplicate-key rows are their own bucket, named for the side that repeats the key.
         String type = DiffDetailClassifier.resolveDiffType(row)?.toUpperCase()
         if (type?.startsWith("DUPLICATE_IN_FILE_")) return type

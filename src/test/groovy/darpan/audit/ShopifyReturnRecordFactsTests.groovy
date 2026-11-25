@@ -30,7 +30,8 @@ class ShopifyReturnRecordFactsTests {
     void theWidenedReadGivesStatusTotalAndOrderDay() {
         Map facts = AuditReportAssembler.recordFacts(STORED + [orderDate: "2026-10-29T17:05:00Z", displayFinancialStatus: "REFUNDED",
                 displayFulfillmentStatus: "FULFILLED", totalPrice: "182.3", currencyCode: "CAD", totalRefunded: "182.3"], "return", LA)
-        assertEquals("Refunded · Fulfilled", facts.status)
+        // DAR-BE-360: the financial status is the record's payment status, no longer folded into its status.
+        assertEquals(["Fulfilled", "Refunded"], [facts.status, facts.paymentStatus])
         assertEquals([amount: "182.30", currency: "CAD"], facts.orderTotal)
         assertEquals(["2026-10-29", "2026-11-02"], [facts.orderDate, facts.returnDate])
     }

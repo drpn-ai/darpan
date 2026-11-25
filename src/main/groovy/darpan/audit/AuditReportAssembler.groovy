@@ -1123,8 +1123,8 @@ class AuditReportAssembler {
      * omsOrderName and omsOrderStatusId, a return's orderName), a return's channel and AfterShip warranty, its order's total
      * (an order's grandTotal in HotWax, totalPrice in Shopify, else the orderGrandTotal an item or return carries) and a
      * return's own (returnTotal), a NetSuite order's customer
-     * deposits (status without NetSuite's "Customer Deposit : "), and a Shopify order's status (financial and
-     * fulfillment) when its read gave no status, else the record's own (statusId); its order's date and a return's own (a
+     * deposits (status without NetSuite's "Customer Deposit : "), and a Shopify order's fulfillment status when its read
+     * gave one, else the record's own (statusId), with its payment status apart (paymentStatus, DAR-BE-360); its order's date and a return's own (a
      * Shopify return's closedAt when it has no other, DAR-BE-359), as the tenant's calendar day (zone); its customer, an
      * item's SKU and its location (HotWax facilityId and its name, NetSuite lineLocation). DAR-UI-081: a return held behind
      * another (R8 "Exchange held by open return") names the return holding it (heldBy) and its exchange order, with
@@ -1138,12 +1138,13 @@ class AuditReportAssembler {
             try { number = value ? new BigDecimal(value) : null } catch (NumberFormatException ignored) { }
             number != null ? money(number, text("currencyUomId") ?: text("currencyCode")) : null
         }
-        String shopifyStatus = [text("displayFinancialStatus"), text("displayFulfillmentStatus")].findAll().collect { words(it) }.join(" · ")
+        String fulfilled = text("displayFulfillmentStatus")
         List<Map> deposits = ((data.get("deposits") instanceof List ? data.get("deposits") : []) as List).findAll { it instanceof Map }
                 .collect { Map d -> [id: d.tranId, amount: d.amount, status: d.status?.toString()?.replaceFirst(/^.* : /, '')] }
         String heldBy = text("openReturnOnOrderId")
         String exchange = text("exchangeOrderName") ?: text("exchangeOrderId")
-        return [status     : shopifyStatus ?: statusWords(text("statusId")),
+        return [status     : fulfilled ? words(fulfilled) : statusWords(text("statusId")),
+                paymentStatus: paymentStatus(data, text, deposits),
                 orderName  : text("omsOrderName") ?: (recordType == "return" ? text("orderName") : recordType == "order" ? text("name") : null),
                 orderStatus: statusWords(text("omsOrderStatusId")),
                 customer   : text("customerName") ?: personName(data.get("billToCustomer")),
@@ -1165,6 +1166,27 @@ class AuditReportAssembler {
                 orderTotal : amount(text("grandTotal") ?: text("totalPrice") ?: text("orderGrandTotal")),
                 returnTotal: recordType == "return" ? amount(text("returnTotal")) : null,
                 deposits   : deposits ?: null] + (recordType == AuditAutomationSupport.ORDER_LINE ? orderLineFacts(data, text, amount) : [:])
+    }
+
+    /**
+     * DAR-BE-360 (Aditi 2026-11-25: "add payment status to all orders and refunds", in each system's own words), from what
+     * the record's read gave, never a lookup: Shopify's financial status; a HotWax order's payment preferences, each status
+     * once ("Settled, Refunded"), "No payment" when it has none; a HotWax return's credit (read when the run asks it,
+     * DAR-BE-192), "Refunded" above zero; a NetSuite order's or line's customer deposits, each status once. Else none.
+     */
+    private static String paymentStatus(Map data, Closure<String> text, List<Map> deposits) {
+        if (text("displayFinancialStatus")) return words(text("displayFinancialStatus"))
+        Object opps = data.get("paymentPreferences")
+        if (opps instanceof List && opps) {
+            String said = ((List) opps).findAll { it instanceof Map && it.statusId }
+                    .collect { words(((Map) it).statusId.toString().replaceFirst(/^PAYMENT_/, '')) }.unique().join(", ")
+            if (said) return said
+        }
+        if (text("hasPaymentPreference") == "N") return "No payment"
+        if (text("returnCredit")) {
+            try { return new BigDecimal(text("returnCredit")) > 0 ? "Refunded" : "Not refunded" } catch (NumberFormatException ignored) { }
+        }
+        return deposits.collect { it.status }.findAll().unique().join(", ") ?: null
     }
 
     /**

@@ -1103,9 +1103,11 @@ class AuditReportAssemblerSmokeTests {
         assertEquals([id: "M263376", internalId: null, status: null, orderName: "#GOR195470263", channel: "AFTSHIP_RTN_CHANNEL",
                       warrantyId: "6URJ7WK3", orderTotal: [amount: "236.00", currency: "USD"], returnTotal: [amount: "118.00", currency: "USD"]],
                 report.OMS['return'][0])
-        assertEquals([id: "SO7330484", internalId: null, status: "Pending Billing", deposits: [[id: "CD1", amount: "118", status: "Deposited"]]],
+        assertEquals([id: "SO7330484", internalId: null, status: "Pending Billing", deposits: [[id: "CD1", amount: "118", status: "Deposited"]],
+                      paymentStatus: "Deposited"],
                 report.NetSuite.salesOrderLine[0])
-        assertEquals([id: "18954083434627", internalId: null, status: "Partially refunded · Fulfilled", orderTotal: [amount: "236.00", currency: "USD"]],
+        assertEquals([id: "18954083434627", internalId: null, status: "Fulfilled", orderTotal: [amount: "236.00", currency: "USD"],
+                      paymentStatus: "Partially refunded"],
                 report.Shopify.order[0])
         assertEquals([id: "RMA1", internalId: null, status: null], report.NetSuite.rma[0])
 
@@ -1138,8 +1140,9 @@ class AuditReportAssemblerSmokeTests {
         // system's own fields (R20 pairs a Shopify order with a HotWax order).
         Map shopifyOrder = AuditReportAssembler.recordFacts([name: "#GOR197395673", createdAt: "2026-10-24T17:02:11Z", totalPrice: "118.00",
                 currencyCode: "USD", sourceName: "pos", displayFinancialStatus: "PAID", displayFulfillmentStatus: "UNFULFILLED"], "order", la)
-        assertEquals(["#GOR197395673", "2026-10-24", "POS", [amount: "118.00", currency: "USD"], "Paid · Unfulfilled"],
-                [shopifyOrder.orderName, shopifyOrder.orderDate, shopifyOrder.salesChannel, shopifyOrder.orderTotal, shopifyOrder.status])
+        assertEquals(["#GOR197395673", "2026-10-24", "POS", [amount: "118.00", currency: "USD"], "Unfulfilled", "Paid"],
+                [shopifyOrder.orderName, shopifyOrder.orderDate, shopifyOrder.salesChannel, shopifyOrder.orderTotal, shopifyOrder.status,
+                 shopifyOrder.paymentStatus])
         Map hotwaxOrder = AuditReportAssembler.recordFacts([orderName: "#GOR197395673", statusId: "ORDER_COMPLETED", grandTotal: 118,
                 currencyUomId: "USD", billToCustomer: [firstName: "Ada", lastName: "Lovelace"],
                 shipGroups: [[shipGroupSeqId: "00001", shipmentMethodTypeId: "STANDARD"], [shipGroupSeqId: "00002", shipmentMethodTypeId: "STANDARD"]]], "order", la)

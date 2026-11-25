@@ -400,7 +400,7 @@ class DarpanSettings {
         if (d == null) return "Unknown setting: ${key}".toString()
         if (d.optional && (text == null || text.trim().isEmpty())) return null
         Object v = parse(d, text)
-        if (v == null) return "${key}: '${text}' is not ${expectation(d)}".toString()
+        if (v == null) return "${key}: '${masked(key, text)}' is not ${expectation(d)}".toString()
         if (d.lessThan != null) {
             Object other = effectiveOf(d.lessThan)
             if (other != null && !(((Number) v) < ((Number) other))) {

@@ -118,6 +118,44 @@ class SettingAdminServicesSmokeTests {
         assertTrue(svc("reset#Setting", [settingKey: "darpan.nope"]).errors.any { it.contains("No setting") })
     }
 
+    private static final String HOOK = "errors.chat.webhookUrl"
+    private static final String GOOGLE_URL = "https://chat.googleapis.com/v1/spaces/AAA/messages?key=k&token=abcdef123456"
+    private static final String SLACK_URL = "https://hooks.slack.com/services/T0000/B0000/secretsecret"
+
+    @Test
+    void theErrorsWebhookAcceptsGoogleChatAndSlackAndNeverShowsOrAuditsTheWholeUrl() {
+        Map out = ok(svc("update#Setting", [settingKey: HOOK, value: GOOGLE_URL])).result.setting
+        assertEquals("\u2026123456", out.rowValue)
+        assertEquals("\u2026123456", out.effectiveValue)
+        assertEquals(GOOGLE_URL, DarpanSettings.stringValue(HOOK), "stored and read in full")
+        assertEquals("\u2026123456", ok(svc("get#Setting", [settingKey: HOOK])).result.setting.rowValue)
+        assertEquals("\u2026123456", ok(svc("get#Settings", [:])).result.settings.find { it.key == HOOK }.rowValue)
+
+        Map slack = ok(svc("update#Setting", [settingKey: HOOK, value: SLACK_URL])).result.setting
+        assertEquals("\u2026secret", slack.effectiveValue)
+
+        Map reset = ok(svc("reset#Setting", [settingKey: HOOK])).result.setting
+        assertNull(reset.rowValue)
+
+        List<String> audits = auditRows()*.detailText
+        assertEquals(3, audits.size())
+        assertEquals("${HOOK}: null -> \u2026123456".toString(), audits[0])
+        assertEquals("${HOOK}: \u2026123456 -> \u2026secret".toString(), audits[1])
+        audits.each { assertFalse(it.contains("token=") || it.contains("hooks.slack.com") || it.contains("chat.googleapis.com"), "audit holds the whole webhook: ${it}") }
+    }
+
+    @Test
+    void theErrorsWebhookRefusesOtherHostsAndNothingIsSaved() {
+        ["https://evil.example.com/v1/spaces/AAA/messages?key=k&token=t", "http://chat.googleapis.com/v1/spaces/A/messages?key=k&token=t",
+         "https://hooks.slack.com/services/T0000", "not a url"].each { String v ->
+            Map out = svc("update#Setting", [settingKey: HOOK, value: v])
+            assertTrue(out.hasError, "'${v}' must be refused")
+            assertFalse(out.errors.any { it.contains(v) }, "the refusal must not echo the value: ${out.errors}")
+        }
+        assertEquals(0, ec.entity.find("darpan.config.DarpanSetting").disableAuthz().useCache(false).count())
+        assertEquals([], auditRows())
+    }
+
     @Test
     void aRefusedValueSavesNothingAndSaysWhy() {
         ["0", "abc", "", "33"].each { String v ->

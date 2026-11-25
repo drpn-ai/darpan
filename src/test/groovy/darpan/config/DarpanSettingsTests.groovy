@@ -85,6 +85,15 @@ class DarpanSettingsTests {
         assertEquals(url, DarpanSettings.stringValue(ERR_HOOK))
     }
 
+    @Test void aRefusedSecretValueIsNeverEchoedInTheProblem() {
+        String bad = 'x' * 2001
+        String problem = DarpanSettings.problem(ERR_HOOK, bad)
+        assertNotNull(problem)
+        assertFalse(problem.contains(bad), 'the whole value must not come back')
+        assertTrue(problem.contains('\u2026xxxxxx'), problem)
+        assertTrue(DarpanSettings.problem(ERR_TO, bad).contains(bad), 'a non-secret value is still shown')
+    }
+
     @Test void theErrorKeysHaveTheirDefaults() {
         assertEquals(12, DarpanSettings.intValue('errors.digest.hourUtc'))
         assertEquals(30, DarpanSettings.intValue('errors.watchdog.hours'))

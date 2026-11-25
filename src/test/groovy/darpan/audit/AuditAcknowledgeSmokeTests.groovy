@@ -69,7 +69,8 @@ class AuditAcknowledgeSmokeTests {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
         // Each test has its own order, so the shared ledger is recorded once.
-        record(MINE, "R1", ["M101/01", "M101/02", "M102/01", "M103/01", "M104/01", "M105/01", "M106/01", "M107/01"], ["INV-108"])
+        record(MINE, "R1", ["M101/01", "M101/02", "M102/01", "M103/01", "M104/01", "M105/01", "M106/01", "M107/01", "M108/01",
+                            "M109/01"], ["INV-108"])
         record(MINE, "R2", ["M101/01", "M105/01"], [])
         otherFinding = record(OTHER, "R1", ["M901/01"], [])["M901/01"]
         // M104 was fixed this morning.
@@ -100,6 +101,7 @@ class AuditAcknowledgeSmokeTests {
 
     @AfterAll
     void cleanup() {
+        AcknowledgementWrites.resetForTests()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -285,6 +287,55 @@ class AuditAcknowledgeSmokeTests {
         List<Map> evs = events(row, "AUDFE_ACK_REOPENED")
         assertEquals(row.toSet(), evs*.findingId.toSet())
         assertEquals(["AUDAT_USER"], evs*.byTypeEnumId.unique())
+    }
+
+    /**
+     * An unexpected database or service failure while writing reads as one plain line: no table, SQL or note text reaches
+     * the caller, and nothing is written. The rules' own messages (blank note, not open) stay as they are.
+     */
+    @Test
+    void unexpectedFailureReadsPlain() {
+        String raw = "Error creating AuditFindingEvent [findingId:F-1] Referential integrity constraint violation: " +
+                "FK_AUDIT_FINDING_EVENT ('AUDFE_X'); note 'Known: secret' from smoke.customer@example.com"
+        String plain = AcknowledgementWrites.PLAIN
+        String fresh = ids.R1["M108/01"]
+        String taken = ids.R1["M109/01"]
+        assertFalse(call("acknowledge#AuditFinding", [findingId: taken, note: "First"]).hadError as boolean)
+        try {
+            // A write that throws: acknowledge.
+            AcknowledgementWrites.afterWrite = { def ectx, String what -> throw new IllegalStateException(raw) }
+            Map thrown = call("acknowledge#AuditFinding", [findingId: fresh, note: "Known: secret"])
+            assertTrue(thrown.hadError as boolean)
+            assertEquals(plain, thrown.errorText?.toString()?.trim())
+            assertEquals([], acks([fresh]), "rolled back: no acknowledgement")
+            assertEquals([], events([fresh], "AUDFE_ACKNOWLEDGED"), "rolled back: no event")
+
+            // The rules still speak for themselves, before any write.
+            assertTrue((call("acknowledge#AuditFinding", [findingId: fresh, note: "  "]).errorText as String).contains("Add a note"))
+            assertTrue((call("acknowledge#AuditFinding", [findingId: ids.R1["M104/01"], note: "Known"]).errorText as String)
+                    .contains("Only an open finding can be acknowledged"))
+            assertTrue((call("update#AuditFindingAcknowledgement", [findingId: fresh, note: "x", remind: true]).errorText as String)
+                    .contains("is not acknowledged"))
+
+            // A write a nested service fails with an error message: change and reopen.
+            AcknowledgementWrites.afterWrite = { def ectx, String what -> ectx.message.addError(raw) }
+            Map changed = call("update#AuditFindingAcknowledgement", [findingId: taken, note: "Known: secret", remind: false])
+            assertEquals(plain, changed.errorText?.toString()?.trim())
+            assertEquals(["First"], acks([taken])*.note, "rolled back: the note is unchanged")
+            assertEquals([], events([taken], "AUDFE_ACK_CHANGED"))
+            Map reopened = call("delete#AuditFindingAcknowledgement", [findingId: taken])
+            assertEquals(plain, reopened.errorText?.toString()?.trim())
+            assertEquals(1, acks([taken]).size(), "rolled back: still acknowledged")
+            assertEquals([], events([taken], "AUDFE_ACK_REOPENED"))
+        } finally {
+            AcknowledgementWrites.resetForTests()
+        }
+        assertFalse(call("delete#AuditFindingAcknowledgement", [findingId: taken]).hadError as boolean)
+
+        // The log line keeps the failure's shape, never the note, a quoted value or an address.
+        String logged = AcknowledgementWrites.masked(raw, "Known: secret")
+        assertTrue(logged.contains("Referential integrity constraint violation"), logged)
+        ["secret", "AUDFE_X", "smoke.customer@example.com"].each { assertFalse(logged.contains(it), "${it} in ${logged}".toString()) }
     }
 
     private void insert(String entityName, Map<String, Object> fields) {

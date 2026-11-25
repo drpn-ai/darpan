@@ -2,6 +2,7 @@ package darpan.audit
 
 import darpan.config.DarpanSettings
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.conclusion.ConclusionTreeSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
@@ -121,11 +122,16 @@ class FeedbackSupport {
         return recent(ec, tenantId, finding.statementId as String, conclusionCode(ec, finding.conclusionEnumId as String), shownDays)
     }
 
-    /** The finding's diagnosis code, as the finding document's diagnosis.conclusion.code; null for an Unexplained finding. */
+    /**
+     * The finding's diagnosis code, as the finding document's diagnosis.conclusion.code; null for an Unexplained finding:
+     * no cause, or the tree's own UNEXPLAINED conclusion (what the morning check records when a tree concludes nothing), so
+     * every Unexplained note on a statement is one group.
+     */
     static String conclusionCode(def ec, String conclusionEnumId) {
-        if (!conclusionEnumId) return null
+        if (!conclusionEnumId || conclusionEnumId == ConclusionTreeSupport.UNEXPLAINED) return null
         def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", conclusionEnumId).useCache(true).one()
-        return (e?.enumCode ?: conclusionEnumId) as String
+        String code = (e?.enumCode ?: conclusionEnumId) as String
+        return code == ConclusionTreeSupport.UNEXPLAINED ? null : code
     }
 
     /** One tenant's group (statement + cause; a null cause matches only Unexplained notes) sent within the window. */

@@ -126,4 +126,7 @@ Review each record before loading into an environment.
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="next" defaultText="The answer lives in your inbox, not in the app. Forward it if your team was asking the same thing."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="note" defaultText="Still not right? Send a new note from the finding in Darpan."/>
     <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_FEEDBACK_ANSWER" blockId="guides" defaultText="Read the audit page|guides/audits#read-the-audit-page"/>
+    <!-- DAR-BE-361 — the audit run update and digest say how many rows are acknowledged (restated verbatim from EmailCopySeedData.xml). -->
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_RUN" blockId="acknowledged" defaultText="${count} acknowledged. Your team has these in hand until they are fixed, or until the reminder day if one was set."/>
+    <darpan.email.EmailCopyBlock emailTemplateId="DARPAN_AUDIT_DIGEST" blockId="acknowledged" defaultText="${count} acknowledged, parked until fixed or until the reminder day if one was set."/>
 </entity-facade-xml>

@@ -161,19 +161,12 @@
             <set field="remindDay" from="darpan.audit.AcknowledgementSupport.remindDate(today.toLocalDate(),
                     darpan.config.DarpanSettings.intValue('audit.acknowledge.remindDays'), remind as boolean)"/>
             <set field="nowStamp" from="ec.user.nowTimestamp"/>
-            <entity-delete-by-condition entity-name="darpan.audit.AuditFindingAcknowledgement">
-                <econdition field-name="findingId" operator="in" from="memberIds"/>
-                <econdition field-name="companyUserGroupId" from="tenantId"/>
-            </entity-delete-by-condition>
-            <iterate list="memberIds" entry="memberId">
-                <entity-make-value value-field="ack" entity-name="darpan.audit.AuditFindingAcknowledgement"
-                        map="[findingId:memberId, companyUserGroupId:tenantId, note:noteText, acknowledgedByUserId:ec.user.userId,
-                              acknowledgedStamp:nowStamp, remindDate:remindDay ? java.sql.Date.valueOf(remindDay) : null]"/>
-                <entity-create value-field="ack"/>
-                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
-                        in-map="[companyUserGroupId:tenantId, findingId:memberId, eventTypeEnumId:'AUDFE_ACKNOWLEDGED',
-                                 eventStamp:nowStamp, eventDate:today]"/>
-            </iterate>
+            <!-- An unexpected failure reaches the person as one plain line; the detail goes to the log. -->
+            <set field="written" from="darpan.audit.AcknowledgementWrites.run(ec, 'acknowledge',
+                    'audit.AuditLedgerServices.replace#FindingAcknowledgements', [companyUserGroupId:tenantId, findingIds:memberIds,
+                    note:noteText, remindDate:remindDay ? java.sql.Date.valueOf(remindDay) : null, eventStamp:nowStamp,
+                    eventDate:today], tenantId, findingId, noteText)"/>
+            <if condition="written == null"><return error="true"/></if>
             <set field="acknowledgement" from="darpan.audit.AcknowledgementSupport.summary([note:noteText,
                     acknowledgedByUserId:ec.user.userId, acknowledgedStamp:nowStamp, remindDate:remindDay], 'acknowledged',
                     [(ec.user.userId): ec.user.userAccount?.userFullName ?: ec.user.username])"/>
@@ -207,7 +200,7 @@
             <if condition="!noteText"><return error="true" message="Add a note"/></if>
             <if condition="noteText.length() &gt; 4000"><return error="true" message="Keep the note under 4,000 characters"/></if>
             <set field="memberIds" from="darpan.audit.AuditReportAssembler.unitMemberIds(ec, tenantId, findingId)"/>
-            <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList" for-update="true">
+            <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList">
                 <econdition field-name="findingId" operator="in" from="memberIds"/>
                 <econdition field-name="companyUserGroupId" from="tenantId"/>
             </entity-find>
@@ -217,17 +210,12 @@
             <set field="freshDay" from="darpan.audit.AcknowledgementSupport.remindDate(today.toLocalDate(),
                     darpan.config.DarpanSettings.intValue('audit.acknowledge.remindDays'), true)"/>
             <set field="nowStamp" from="ec.user.nowTimestamp"/>
-            <iterate list="ackList" entry="ack">
-                <set field="lapsed" from="ack.remindDate == null || !today.before(ack.remindDate)"/>
-                <set field="ack.note" from="noteText"/>
-                <set field="ack.remindDate" from="!remind ? null : (lapsed ? java.sql.Date.valueOf(freshDay) : ack.remindDate)"/>
-                <set field="ack.lastChangedByUserId" from="ec.user.userId"/>
-                <set field="ack.lastChangedStamp" from="nowStamp"/>
-                <entity-update value-field="ack"/>
-                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
-                        in-map="[companyUserGroupId:tenantId, findingId:ack.findingId, eventTypeEnumId:'AUDFE_ACK_CHANGED',
-                                 eventStamp:nowStamp, eventDate:today]"/>
-            </iterate>
+            <set field="written" from="darpan.audit.AcknowledgementWrites.run(ec, 'change',
+                    'audit.AuditLedgerServices.update#FindingAcknowledgements', [companyUserGroupId:tenantId, findingIds:memberIds,
+                    note:noteText, remind:remind as boolean, freshRemindDate:java.sql.Date.valueOf(freshDay), eventStamp:nowStamp,
+                    eventDate:today], tenantId, findingId, noteText)"/>
+            <if condition="written == null"><return error="true"/></if>
+            <set field="ackList" from="written.ackList ?: ackList"/>
             <set field="shown" from="ackList.find { it.findingId == findingId } ?: ackList[0]"/>
             <entity-find-one entity-name="moqui.security.UserAccount" value-field="byAccount">
                 <field-map field-name="userId" from="shown.acknowledgedByUserId"/></entity-find-one>
@@ -256,18 +244,11 @@
             <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
                 <return error="true" message="Finding ${findingId} was not found"/></if>
             <set field="memberIds" from="darpan.audit.AuditReportAssembler.unitMemberIds(ec, tenantId, findingId)"/>
-            <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList" for-update="true">
-                <econdition field-name="findingId" operator="in" from="memberIds"/>
-                <econdition field-name="companyUserGroupId" from="tenantId"/>
-            </entity-find>
             <set field="today" from="darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, null)"/>
-            <set field="nowStamp" from="ec.user.nowTimestamp"/>
-            <iterate list="ackList" entry="ack">
-                <entity-delete value-field="ack"/>
-                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
-                        in-map="[companyUserGroupId:tenantId, findingId:ack.findingId, eventTypeEnumId:'AUDFE_ACK_REOPENED',
-                                 eventStamp:nowStamp, eventDate:today]"/>
-            </iterate>
+            <set field="written" from="darpan.audit.AcknowledgementWrites.run(ec, 'reopen',
+                    'audit.AuditLedgerServices.delete#FindingAcknowledgements', [companyUserGroupId:tenantId, findingIds:memberIds,
+                    eventStamp:ec.user.nowTimestamp, eventDate:today], tenantId, findingId, null)"/>
+            <if condition="written == null"><return error="true"/></if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

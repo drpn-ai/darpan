@@ -58,6 +58,9 @@ class FeedbackSupportTests {
             insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
             insert("moqui.basic.Enumeration", [enumId: "TFB_CAUSE_A", enumTypeId: "DarpanConclusion", enumCode: "CAUSE_A",
                     description: "Shipped late by the 3PL"])
+            // What the morning check records when a conclusion tree concludes nothing (data/ConclusionCatalogSeedData.xml).
+            insert("moqui.basic.Enumeration", [enumId: "UNEXPLAINED", enumTypeId: "DarpanConclusion", enumCode: "UNEXPLAINED",
+                    description: "Unexplained"])
             insert("moqui.security.UserGroup", [userGroupId: OTHER, description: "Other tenant"])
             [MINE, OTHER].each { String t ->
                 insert("darpan.auth.TenantSetting", [companyUserGroupId: t, timeZone: "America/Los_Angeles"])
@@ -75,7 +78,8 @@ class FeedbackSupportTests {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
         ids.putAll(record(MINE, ["M201/01": "TFB_CAUSE_A", "M202/01": "TFB_CAUSE_A", "M203/01": null, "M204/01": null, "M205/01": null,
-                              "M206/01": null, "M207/01": null]))
+                              "M206/01": null, "M207/01": null, "M208/01": "UNEXPLAINED", "M209/01": null,
+                              "M210/01": "UNEXPLAINED", "M211/01": null]))
         otherFinding = record(OTHER, ["M901/01": null])["M901/01"]
 
         DarpanSettings.rowLoader = { -> webhook ? [("feedback.chat.webhookUrl".toString()): [settingValue: webhook]] : [:] }
@@ -210,6 +214,52 @@ class FeedbackSupportTests {
         assertNull(rows(f)[0].conclusionCode, "Unexplained: no cause")
         assertEquals([], posts)
         assertEquals(["DARPAN_FEEDBACK_RECEIVED"], emails*.templateId)
+    }
+
+    /** Review I2. A tree's own UNEXPLAINED conclusion is Unexplained too: no cause stored, one group with the no-cause notes. */
+    @Test
+    void unexplainedConclusionGroupsWithNoCause() {
+        String treeSaid = ids["M208/01"]
+        String noCause = ids["M209/01"]
+        assertFalse(call("send#AuditFindingFeedback", [findingId: treeSaid, note: "Tree said unexplained"]).hadError as boolean)
+        assertFalse(call("send#AuditFindingFeedback", [findingId: noCause, note: "No cause at all"]).hadError as boolean)
+        assertNull(rows(treeSaid)[0].conclusionCode, "UNEXPLAINED stores no cause")
+        assertNull(rows(noCause)[0].conclusionCode)
+
+        [treeSaid, noCause].each { String f ->
+            Map listed = this.call("get#AuditFindingFeedback", [findingId: f])
+            assertFalse(listed.hadError as boolean, listed.errorText as String)
+            List<String> notes = (listed.notes as List<Map>)*.note
+            assertTrue(notes.containsAll(["Tree said unexplained", "No cause at all"]), "one group from ${f}: ${notes}".toString())
+            int count = ((AuditReportAssembler.assembleFinding(ec, MINE, f).finding as Map).feedback as Map).recentCount as int
+            assertEquals(notes.size(), count, "the badge counts the same group")
+        }
+        assertNull(FeedbackSupport.conclusionCode(ec, "UNEXPLAINED"))
+        assertEquals("CAUSE_A", FeedbackSupport.conclusionCode(ec, "TFB_CAUSE_A"))
+    }
+
+    /** Review I3. The email fails after the save (send#EmailTemplate adds an error, or the send throws): the note is saved and
+     *  listed, the service answers ok with the note, and no error reaches the caller. */
+    @Test
+    void emailFailureAfterSaveStillAnswersOk() {
+        Closure saved = FeedbackSupport.sendEmail
+        try {
+            [["M210/01", { def ectx, String to, String templateId, Map body -> ectx.message.addError("SMTP down for ${to}"); null }],
+             ["M211/01", { def ectx, String to, String templateId, Map body -> throw new IllegalStateException("SMTP down") }]].each { List c ->
+                FeedbackSupport.sendEmail = c[1] as Closure
+                String f = ids[c[0] as String]
+                Map out = this.call("send#AuditFindingFeedback", [findingId: f, note: "Mail is down but this matters"])
+                assertFalse(out.hadError as boolean, "${c[0]}: ${out.errorText}".toString())
+                assertEquals(true, out.ok, c[0] as String)
+                assertEquals([], out.errors ?: [], c[0] as String)
+                assertEquals("Mail is down but this matters", (out.feedback as Map)?.note, c[0] as String)
+                assertEquals(1, rows(f).size(), "${c[0]}: the row is saved".toString())
+                Map listed = this.call("get#AuditFindingFeedback", [findingId: f])
+                assertTrue(((listed.notes as List<Map>)*.feedbackId).contains((out.feedback as Map).feedbackId), "${c[0]}: listed".toString())
+            }
+        } finally {
+            FeedbackSupport.sendEmail = saved
+        }
     }
 
     @Test

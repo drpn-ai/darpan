@@ -518,6 +518,94 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-361. The acknowledgement writes, behind facade.AuditFacadeServices acknowledge#AuditFinding,
+         update#AuditFindingAcknowledgement and delete#AuditFindingAcknowledgement. The facade checks the tenant, the note
+         and the finding first, then runs these through darpan.audit.AcknowledgementWrites, so an unexpected failure reaches
+         the person as one plain line. -->
+    <service verb="replace" noun="FindingAcknowledgements" authenticate="false" allow-remote="false">
+        <description>Replaces the acknowledgement of each finding of a report row: one note and one remind day, by the
+            signed-in user, each with an acknowledged history event.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="findingIds" type="List" required="true"/>
+            <parameter name="note" required="true" allow-html="any"/>
+            <parameter name="remindDate" type="Date"/>
+            <parameter name="eventStamp" type="Timestamp" required="true"/>
+            <parameter name="eventDate" type="Date" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-delete-by-condition entity-name="darpan.audit.AuditFindingAcknowledgement">
+                <econdition field-name="findingId" operator="in" from="findingIds"/>
+                <econdition field-name="companyUserGroupId"/>
+            </entity-delete-by-condition>
+            <iterate list="findingIds" entry="memberId">
+                <entity-make-value value-field="ack" entity-name="darpan.audit.AuditFindingAcknowledgement"
+                        map="[findingId:memberId, companyUserGroupId:companyUserGroupId, note:note,
+                              acknowledgedByUserId:ec.user.userId, acknowledgedStamp:eventStamp, remindDate:remindDate]"/>
+                <entity-create value-field="ack"/>
+                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
+                        in-map="[companyUserGroupId:companyUserGroupId, findingId:memberId, eventTypeEnumId:'AUDFE_ACKNOWLEDGED',
+                                 eventStamp:eventStamp, eventDate:eventDate]"/>
+            </iterate>
+        </actions>
+    </service>
+    <service verb="update" noun="FindingAcknowledgements" authenticate="false" allow-remote="false">
+        <description>Changes the note on each acknowledged finding of a report row and its remind day: remind off clears it;
+            remind on keeps a day not yet reached and takes freshRemindDate when it was off or has passed. Each gets an
+            acknowledgement-changed history event. Returns the changed rows.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="findingIds" type="List" required="true"/>
+            <parameter name="note" required="true" allow-html="any"/>
+            <parameter name="remind" type="Boolean" required="true"/>
+            <parameter name="freshRemindDate" type="Date" required="true"/>
+            <parameter name="eventStamp" type="Timestamp" required="true"/>
+            <parameter name="eventDate" type="Date" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ackList" type="List"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList" for-update="true">
+                <econdition field-name="findingId" operator="in" from="findingIds"/>
+                <econdition field-name="companyUserGroupId"/>
+            </entity-find>
+            <iterate list="ackList" entry="ack">
+                <set field="lapsed" from="ack.remindDate == null || !eventDate.before(ack.remindDate)"/>
+                <set field="ack.note" from="note"/>
+                <set field="ack.remindDate" from="!remind ? null : (lapsed ? freshRemindDate : ack.remindDate)"/>
+                <set field="ack.lastChangedByUserId" from="ec.user.userId"/>
+                <set field="ack.lastChangedStamp" from="eventStamp"/>
+                <entity-update value-field="ack"/>
+                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
+                        in-map="[companyUserGroupId:companyUserGroupId, findingId:ack.findingId, eventTypeEnumId:'AUDFE_ACK_CHANGED',
+                                 eventStamp:eventStamp, eventDate:eventDate]"/>
+            </iterate>
+        </actions>
+    </service>
+    <service verb="delete" noun="FindingAcknowledgements" authenticate="false" allow-remote="false">
+        <description>Removes the acknowledgement of each finding of a report row, each with a reopened history event.
+            Nothing to remove is not an error.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="findingIds" type="List" required="true"/>
+            <parameter name="eventStamp" type="Timestamp" required="true"/>
+            <parameter name="eventDate" type="Date" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList" for-update="true">
+                <econdition field-name="findingId" operator="in" from="findingIds"/>
+                <econdition field-name="companyUserGroupId"/>
+            </entity-find>
+            <iterate list="ackList" entry="ack">
+                <entity-delete value-field="ack"/>
+                <service-call name="audit.AuditLedgerServices.create#UserFindingEvent"
+                        in-map="[companyUserGroupId:companyUserGroupId, findingId:ack.findingId, eventTypeEnumId:'AUDFE_ACK_REOPENED',
+                                 eventStamp:eventStamp, eventDate:eventDate]"/>
+            </iterate>
+        </actions>
+    </service>
+
     <!-- DAR-BE-199: registered migration AUDIT_SCHEDULE_OWNED (data/MigrationRegistrySeedData.xml). -->
     <service verb="migrate" noun="AuditScheduleOwned" authenticate="false" allow-remote="false">
         <description>One-time: every audit that has automations and no schedule of its own is stamped with one

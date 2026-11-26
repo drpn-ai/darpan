@@ -53,6 +53,25 @@ class ErrorChatSupportTests {
     @AfterAll
     void cleanup() { ReconciliationSmokeTestSupport.cleanupMoqui(ec) }
 
+    // DAR-BE-378: what a client room must never get goes to the alerts room as it is; nothing when the room is not set.
+    @Test
+    void anAlertGoesToTheAlertsRoomAsItIsAndNowhereWithoutOne() {
+        String text = "Rails · Month close\nR8, R10 did not run this morning. Darpan has been alerted and is working on a fix."
+        assertTrue(ErrorChatSupport.postAlertText(ec, text))
+        assertEquals([[url: WEBHOOK, text: text]], posted)
+
+        assertFalse(ErrorChatSupport.postAlertText(ec, ""), "no text, nothing posted")
+        webhook = null
+        DarpanSettings.expire()
+        assertFalse(ErrorChatSupport.postAlertText(ec, text), "no alerts room set")
+        assertEquals(1, posted.size())
+
+        webhook = WEBHOOK
+        DarpanSettings.expire()
+        ErrorChatSupport.postHook = { String url, Map payload -> throw new IOException("boom") }
+        assertFalse(ErrorChatSupport.postAlertText(ec, text), "a failed post is false, never thrown")
+    }
+
     private Map event(Map over = [:]) {
         return [tenantId: "OPS_T${++seq}".toString(), tenantName: "Dolls Kill", auditName: "Month close", statementId: "R1",
                 auditId: "AUD1", checkId: "completed-not-billed", automationId: "AUTO1", automationName: "R1 nightly", kind: "DEAD_LETTER", attempts: 3,

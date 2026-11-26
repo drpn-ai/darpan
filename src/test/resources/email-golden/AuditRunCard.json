@@ -31,17 +31,6 @@
                                 }
                             },
                             {
-                                "decoratedText": {
-                                    "text": "<font color=\"#9a6700\">R9 did not run this morning. Darpan has been alerted and is working on a fix.</font>",
-                                    "wrapText": true,
-                                    "startIcon": {
-                                        "materialIcon": {
-                                            "name": "warning"
-                                        }
-                                    }
-                                }
-                            },
-                            {
                                 "buttonList": {
                                     "buttons": [
                                         {

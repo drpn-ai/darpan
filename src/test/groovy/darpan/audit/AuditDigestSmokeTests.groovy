@@ -122,11 +122,12 @@ class AuditDigestSmokeTests {
     }
 
     @Test
-    void theNextMorningsDigestSaysTheCheckDidNotRun() {
+    void theNextMorningsDigestInTheClientsRoomNeverSaysTheCheckDidNotRun() {
         digest("TDG_DAILY", SPACE, "AUDDK_DAILY", "07:00")
         send("2026-10-22", "07:01")
         assertEquals(1, posts.size())
-        assertEquals("R2 did not run this morning. Darpan has been alerted and is working on a fix.", posts[0].text.readLines()[1])
+        // DAR-BE-378: a client room never gets a warning; the email copy keeps the notice (EmailTemplatesRenderTests).
+        assertFalse(posts[0].text.contains("did not run") || posts[0].text.contains("has been alerted"), posts[0].text)
     }
 
     @Test

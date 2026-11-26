@@ -705,11 +705,10 @@ class AutomationExecutionSupportTests {
             FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
             assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
             assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
-            // Exactly one alert, claimed on that one row: two rows would mean two claimable anchors.
-            assertEquals(1, deliveries.size())
+            // Claimed on that one row: two rows would mean two claimable anchors.
             assertNotNull(runResult.notifiedDate)
-            // DAR-BE-015: the client space gets the neutral line, the failure detail goes to Darpan's card.
-            assertEquals("API Automation" + NOT_RUN_SUFFIX, deliveries[0].payload.text)
+            // DAR-BE-378: no line to the client's room; the failure detail goes to Darpan's card.
+            assertEquals(0, deliveries.size())
             assertEquals(1, cards.size())
             assertTrue((cards[0].errorFirstLine as String).contains("was not found"))
         } finally {
@@ -1099,8 +1098,7 @@ class AutomationExecutionSupportTests {
             FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
             String firstRunResultId = execution.reconciliationRunResultId
             assertNotNull(firstRunResultId)
-            assertEquals(1, deliveries.size())
-            assertEquals("API Automation" + NOT_RUN_SUFFIX, deliveries[0].payload.text, "DAR-BE-015: attempt 1's client line is the neutral one")
+            assertEquals(0, deliveries.size(), "DAR-BE-378: attempt 1's error reaches no client room")
             FakeValue firstRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
             assertNotNull(firstRunResult.notifiedDate, "attempt 1's FAILED alert claims that row's notifiedDate")
 
@@ -1125,8 +1123,8 @@ class AutomationExecutionSupportTests {
             assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, secondRunResult.statusEnumId)
             assertNotNull(secondRunResult.notifiedDate)
             // The payload that would go missing under an adopt-the-old-row regression.
-            assertEquals(2, deliveries.size(), "the re-drive's completion alert must not be swallowed as ALREADY_NOTIFIED")
-            assertTrue((deliveries[1].payload.text as String).startsWith("API Automation"))
+            assertEquals(1, deliveries.size(), "the re-drive's completion alert must not be swallowed as ALREADY_NOTIFIED")
+            assertTrue((deliveries[0].payload.text as String).startsWith("API Automation"))
         } finally {
             resetRunErrorSeams()
         }
@@ -1668,10 +1666,8 @@ class AutomationExecutionSupportTests {
             assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
             FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
             assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
-            assertEquals(1, deliveries.size())
-            assertEquals(webhookUrl, deliveries[0].webhookUrl)
-            // DAR-BE-015: the client space gets only the neutral line; the error is on Darpan's card.
-            assertEquals("API Automation" + NOT_RUN_SUFFIX, deliveries[0].payload.text)
+            // DAR-BE-378: the client space gets nothing; the error is on Darpan's card.
+            assertEquals(0, deliveries.size())
             assertEquals(1, cards.size())
             assertEquals("FAILED", cards[0].kind)
             assertTrue((cards[0].errorFirstLine as String).contains("execution status write failed"))
@@ -3883,7 +3879,7 @@ class AutomationExecutionSupportTests {
                 "expected the extract step to carry its record count")
     }
 
-    // --- DAR-BE-015 Task 5: run errors go to Darpan; the client gets one neutral line ---------------
+    // --- DAR-BE-015 Task 5: run errors go to Darpan. DAR-BE-378: never a client chat room; notify-me subscribers get the line ---
 
     private static final String NOT_RUN_SUFFIX = " did not run this morning. Darpan has been alerted and is working on a fix."
     private static final String OPS_WEBHOOK = "https://chat.googleapis.com/v1/spaces/OPS_SPACE/messages?key=test-key&token=test-token"
@@ -3917,12 +3913,8 @@ class AutomationExecutionSupportTests {
             assertEquals(true, cards[0].scheduled)
             assertEquals("scheduled", cards[0].trigger)
             assertEquals("EXEC_DL", cards[0].executionId)
-            assertEquals(1, deliveries.size(), "the client space gets one line")
-            assertEquals(OPS_WEBHOOK, deliveries[0].webhookUrl)
-            assertEquals("Daily Order Reconciliation" + NOT_RUN_SUFFIX, deliveries[0].payload.text)
-            assertFalse(deliveries.toString().contains("orderTypeId"), "no error text reaches the client")
-            assertEquals(["AUTO_API"], capturedClaims*.subjectKey, "the chat-space line took the automation's day slot")
-            assertEquals(["client"], capturedClaims*.triggerType)
+            assertEquals(0, deliveries.size(), "DAR-BE-378: the client's chat space is never told of a run error")
+            assertTrue(capturedClaims.isEmpty(), "no client line, so no client slot is claimed")
         } finally {
             resetRunErrorSeams()
         }
@@ -4088,7 +4080,7 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void anHourlySecondFailureTheSameDaySendsNoSecondLine() {
+    void anHourlyFailureNeverPostsToTheClientSpace() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
@@ -4101,17 +4093,15 @@ class AutomationExecutionSupportTests {
             AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: timestamp("2026-05-01T11:00:00Z")])
 
             assertEquals(2, cards.size(), "both failures reach Darpan (the card dedupes itself)")
-            assertEquals(1, deliveries.size(), "the client space is told once that day")
-            assertEquals(OPS_WEBHOOK, deliveries[0].webhookUrl)
-            assertEquals([[tenantId: "TENANT_A", subjectKey: "AUTO_API", runDay: java.sql.Date.valueOf("2026-05-01"),
-                           triggerType: "client"]] * 2, capturedClaims.collect { it.subMap(["tenantId", "subjectKey", "runDay", "triggerType"]) })
+            assertEquals(0, deliveries.size(), "DAR-BE-378: the client space is never told")
+            assertTrue(capturedClaims.isEmpty())
         } finally {
             resetRunErrorSeams()
         }
     }
 
     @Test
-    void twoFailedWindowsOfOneRunSendOneLine() {
+    void twoFailedWindowsOfOneRunTellDarpanTwiceAndTheClientSpaceNever() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
         FakeValue automation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }
@@ -4127,14 +4117,14 @@ class AutomationExecutionSupportTests {
 
             assertEquals(2, result.failedCount, "42 days split on the month: two windows, both failed: ${result.executionResults*.statusEnumId}")
             assertEquals(2, cards.size())
-            assertEquals(1, deliveries.size(), "one run tells the client once")
+            assertEquals(0, deliveries.size(), "DAR-BE-378: the client space is never told")
         } finally {
             resetRunErrorSeams()
         }
     }
 
     @Test
-    void aRulesFailedRunPostsACardAndTellsTheClientOnlyTheNeutralLine() {
+    void aRulesFailedRunPostsACardAndTellsOnlyItsSubscriberTheNeutralLine() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
@@ -4165,8 +4155,8 @@ class AutomationExecutionSupportTests {
             assertEquals(ruleError, cards[0].errorFirstLine, "the rule's error goes to Darpan")
             assertEquals(ruleError, ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].last().errorMessage,
                     "the execution row carries the rule's error, so the daily email shows it")
-            assertEquals([OPS_WEBHOOK, ME_WEBHOOK] as Set, deliveries*.webhookUrl as Set)
-            assertEquals([[text: "API Automation" + NOT_RUN_SUFFIX]] * 2, deliveries*.payload)
+            assertEquals([ME_WEBHOOK], deliveries*.webhookUrl, "the subscriber who asked to be told; never the client room (DAR-BE-378)")
+            assertEquals([[text: "API Automation" + NOT_RUN_SUFFIX]], deliveries*.payload)
             assertFalse(deliveries.toString().contains("NullPointerException"), "no rule error text reaches a client")
             assertFalse(ec.service.calls.any { it.serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload" },
                     "the run's payload (it carries the rule error) is never built for a client")

@@ -21,9 +21,6 @@ class ErrorChatSupport {
     static final String WEBHOOK_SETTING = "errors.chat.webhookUrl"
     static final int ERROR_MAX_CHARS = 300
 
-    /** The RunErrorNotice slot (triggerType) of an automation's one client "did not run" line a day; never part of a streak. */
-    static final String CLIENT_LINE_SLOT = "client"
-
     /** Seam: replaces the outgoing post, called with (webhookUrl, payload) and returning the delivery map. Null in production. */
     static Closure postHook = null
     /** Seam: replaces the claim service call, called with the slot params and returning [isNew, priorDays]. Null in production. */
@@ -32,6 +29,26 @@ class ErrorChatSupport {
     static void resetForTests() {
         postHook = null
         claimHook = null
+    }
+
+    /**
+     * DAR-BE-378. One plain message to Darpan's alerts room (errors.chat.webhookUrl): a warning a client room must never get.
+     * The caller sends it once (a run update's claim). False when the setting is blank or the post fails; never throws.
+     */
+    static boolean postAlertText(def ec, String text) {
+        String webhookUrl = null
+        try {
+            webhookUrl = DarpanSettings.stringValue(WEBHOOK_SETTING)
+            if (!webhookUrl || !text) return false
+            Map payload = [text: text]
+            Map delivery = (postHook != null ? postHook.call(webhookUrl, payload) :
+                    TenantNotificationSupport.deliverToWebhook(webhookUrl, payload)) as Map
+            if (delivery?.ok != true) logger.warn("Alert was not delivered (status {})", delivery?.statusCode)
+            return delivery?.ok == true
+        } catch (Throwable t) {
+            logger.warn("Alert failed: {}", failureNote(t, webhookUrl))
+            return false
+        }
     }
 
     static boolean postErrorCard(def ec, Map event) {
@@ -60,23 +77,6 @@ class ErrorChatSupport {
             return ok
         } catch (Throwable t) {
             logger.warn("Error card for {} failed: {}", event?.tenantId, failureNote(t, webhookUrl))
-            return false
-        }
-    }
-
-    /**
-     * DAR-BE-015. Claims an automation's one client "did not run" line for its run day: the (tenantId, automationId, day) slot
-     * CLIENT_LINE_SLOT, apart from the card's. True only for the call that won it, so an hourly failure, a second failed window
-     * or a requeue the same day tells the client once. Independent of errors.chat.webhookUrl. Never throws: false when the
-     * claim cannot be made (the client is then not told twice).
-     */
-    static boolean claimClientLine(def ec, Map event) {
-        try {
-            Map claim = claimSlot(ec, [tenantId: event.tenantId, subjectKey: event.automationId, runDay: SqlDate.valueOf(dayOf(event)),
-                    triggerType: CLIENT_LINE_SLOT, errorKind: event.kind, executionId: event.executionId], null)
-            return claim?.isNew == true
-        } catch (Throwable t) {
-            logger.warn("Client line claim for {} failed: {}", event?.tenantId, t.getClass().name)
             return false
         }
     }

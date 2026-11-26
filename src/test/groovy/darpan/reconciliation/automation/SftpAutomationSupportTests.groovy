@@ -216,10 +216,7 @@ class SftpAutomationSupportTests {
         assertEquals("Rule 'price-matches' failed: NullPointerException", execution.errorMessage,
                 "the execution row carries the rule's error, so the daily email shows it")
         assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
-        assertEquals(1, deliveries.size())
-        assertEquals(webhookUrl, deliveries[0].webhookUrl)
-        assertEquals([text: "SFTP Automation did not run this morning. Darpan has been alerted and is working on a fix."], deliveries[0].payload)
-        assertFalse(deliveries.toString().contains("NullPointerException"), "no rule error text reaches a client")
+        assertEquals(0, deliveries.size(), "DAR-BE-378: the automation's chat space is never told of a run error")
         assertEquals(["FAILED"], cards*.kind)
         assertEquals("Rule 'price-matches' failed: NullPointerException", cards[0].errorFirstLine)
         assertFalse(ec.service.calls.any { it.serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload" })
@@ -487,10 +484,8 @@ class SftpAutomationSupportTests {
         FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, execution.statusEnumId)
         assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
-        assertEquals(1, deliveries.size(), "a terminal SFTP failure must alert exactly once, like the API path")
-        assertEquals(webhookUrl, deliveries[0].webhookUrl)
-        // DAR-BE-015: the client space gets only the neutral line; the reason the run died is on Darpan's card.
-        assertEquals("SFTP Automation did not run this morning. Darpan has been alerted and is working on a fix.", deliveries[0].payload.text)
+        // DAR-BE-378: the client space is never told; the reason the run died is on Darpan's card.
+        assertEquals(0, deliveries.size(), "no line to the automation's chat space")
         assertEquals(["FAILED"], cards*.kind)
         assertTrue((cards[0].errorFirstLine as String).contains("AUT_SRC_SFTP"), "the card must carry the reason the run died")
         assertNotNull(runResult.notifiedDate, "the alert must claim the CAS on the one row this run owns")

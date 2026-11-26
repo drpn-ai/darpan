@@ -113,7 +113,7 @@ class AuditRunUpdateSupport {
             reportDate = (latest?.reportDate ?: Date.valueOf(LocalDate.now(AuditDigestSupport.tenantZone(ec, tenantId)))) as Date
             period = period ?: latest?.period as String
         }
-        String stamp = runStamp(ec, tenantId, audit, reportDate, period)
+        String stamp = runStamp(reportDate, period)
         List<Map> outcomes = []
         List<Map> claimed = []
         digests.each { Map digest ->
@@ -142,6 +142,9 @@ class AuditRunUpdateSupport {
                 outcomes << [auditDigestId: digest.auditDigestId, sent: false, reason: "FAILED"]
             }
         }
+        // DAR-BE-378: a run with a check that did not run tells Darpan's alerts room once, with this run's claim; the client
+        // room's card never carries it.
+        if (claimed && built?.alert) darpan.ops.ErrorChatSupport.postAlertText(ec, built.alert as String)
         if (anchorClaimed && built != null) sendUnexplained(ec, tenantId, auditId, built, unexplainedTo)
         reviewReads(ec, tenantId, auditId, built?.readReport as Map)
         return outcomes
@@ -188,6 +191,8 @@ class AuditRunUpdateSupport {
                 html       : AuditRunMessage.emailHtml(facts, words, base, copy),
                 text       : AuditRunMessage.emailText(facts, words, base, copy),
                 card       : AuditRunMessage.card(facts, words, base, copy),
+                // DAR-BE-378: what did not run, for Darpan's alerts room only; null when every check ran.
+                alert      : AuditRunMessage.alertText(facts, base, copy),
                 attachments: csvs.collect { String rule, String body ->
                     [fileName: AuditRunMessage.csvName(facts, rule), contentType: "text/csv; charset=UTF-8", contentText: body]
                 }]
@@ -327,8 +332,12 @@ class AuditRunUpdateSupport {
         return delivered ? [sent: true, reason: null] : [sent: false, reason: "DELIVERY_FAILED"]
     }
 
-    /** A due automation the scan has not submitted yet (its tenant's lane was full) still belongs to this run. */
-    static final long STILL_DUE_MS = 60L * 60 * 1000
+    /**
+     * A due automation the scan has not submitted yet (its tenant's lane was full, the scan was paused) still belongs to this
+     * run. DAR-BE-378: 12 hours, not one: RAILS's checks due 15:15 IST on 2026-11-26 queued past an hour behind dead runs, the
+     * audit read as finished and its update went out with them missing.
+     */
+    static final long STILL_DUE_MS = 12L * 60 * 60 * 1000
 
     /**
      * The audit's whole run has ended: no execution of its automations running or queued for a retry (the run page's
@@ -367,13 +376,12 @@ class AuditRunUpdateSupport {
         return now.time - start.toEpochMilli() < STILL_DUE_MS
     }
 
-    /** Identifies one run: its morning, its period, and the latest end of any execution of the audit's automations. */
-    static String runStamp(def ec, String tenantId, Map audit, Date reportDate, String period) {
-        List ids = AuditSettingsSupport.automationsOfAudit(ec, tenantId, audit)*.automationId
-        def latest = ids ? rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
-                .condition("automationId", EntityCondition.IN, ids).condition("completedDate", EntityCondition.NOT_EQUAL, null)
-                .orderBy("-completedDate").limit(1).list().find() : null
-        return "${reportDate}|${period ?: ''}|${(latest?.completedDate as Timestamp)?.time ?: 0}".toString()
+    /**
+     * Identifies one run: its morning and its period. DAR-BE-378 (Aditi 2026-11-26): one update a morning. The stamp used
+     * to carry the latest execution's end too, so each check that finished after the update had gone out sent another one.
+     */
+    static String runStamp(Date reportDate, String period) {
+        return "${reportDate}|${period ?: ''}".toString()
     }
 
     /**

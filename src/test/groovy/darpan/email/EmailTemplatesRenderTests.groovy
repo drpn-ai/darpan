@@ -206,6 +206,32 @@ class EmailTemplatesRenderTests {
                 AuditRunMessage.card(AuditEmailSamples.runFacts(), AuditEmailSamples.runWords(), AuditEmailSamples.BASE, new EmailCopyReader(ec, "DARPAN_AUDIT_RUN")))))
     }
 
+    // DAR-BE-378 (Aditi 2026-11-26: "never send a notification like this to the client chat room"): a check that did not
+    // run is told to Darpan's alerts room, never in the client's card or the digest's chat copy.
+    @Test
+    void whatDidNotRunGoesToTheAlertsRoomNeverTheClientsRoom() {
+        EmailCopyReader runCopy = new EmailCopyReader(ec, "DARPAN_AUDIT_RUN")
+        Map facts = AuditEmailSamples.runFacts()
+        String card = groovy.json.JsonOutput.toJson(AuditRunMessage.card(facts, AuditEmailSamples.runWords(), AuditEmailSamples.BASE, runCopy))
+        assertFalse(card.contains("did not run") || card.contains("has been alerted"), card)
+
+        String alert = AuditRunMessage.alertText(facts, AuditEmailSamples.BASE, runCopy)
+        List<String> lines = alert.readLines()
+        assertEquals(AuditRunMessage.title(facts), lines[0], alert)
+        assertTrue(lines.contains("R9 did not run this morning. Darpan has been alerted and is working on a fix."), alert)
+        assertTrue(lines.last().startsWith(AuditEmailSamples.BASE + "/audits/"), "the report link, last: ${alert}")
+
+        Map clean = AuditEmailSamples.runFacts()
+        clean.rules.each { Map r -> r.checksNotRun = [] }
+        assertNull(AuditRunMessage.alertText(clean, AuditEmailSamples.BASE, runCopy), "a clean run alerts nobody")
+
+        List v = digestVariants().DigestIncomplete
+        String chat = AuditDigestSupport.render(v[0] as Map, v[1] as String, v[2] as boolean, v[3] as Map, v[4] as String,
+                new EmailCopyReader(ec, "DARPAN_AUDIT_DIGEST"), runCopy, false)
+        assertFalse(chat.contains("did not run"), chat)
+        assertTrue(digest(v).contains("R2 did not run this morning."), "the email copy keeps it")
+    }
+
     @Test
     void theDigestScreenBuildsItsTextFromTheReportSoAPreviewShowsADraft() {
         Map sample = EmailSamples.params("AuditDigest", null)

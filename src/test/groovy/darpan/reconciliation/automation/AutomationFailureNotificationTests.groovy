@@ -37,8 +37,8 @@ import darpan.reconciliation.support.SharedMoqui
  *
  * <p>A failure that is going to be retried is NOT terminal and must stay quiet.</p>
  *
- * <p>DAR-BE-015: what reaches the tenant is one neutral line ("... did not run this morning. Darpan has been alerted and is
- * working on a fix."), never the error; the detail goes to Darpan's own error space (errors.chat.webhookUrl, blank here).</p>
+ * <p>DAR-BE-015: the detail goes to Darpan's own error space (errors.chat.webhookUrl, blank here). DAR-BE-378 (Aditi
+ * 2026-11-26): the tenant's chat space is never told of a run error, not even a neutral line.</p>
  */
 @SharedMoqui
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -48,8 +48,6 @@ class AutomationFailureNotificationTests {
     private static final String TENANT = "KREWE"
     private static final String CHAT_SPACE_ID = "CS_FAIL_NOTIFY"
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
-    private static final String NOT_RUN_LINE =
-            "Failure Notification did not run this morning. Darpan has been alerted and is working on a fix."
 
     private ExecutionContext ec
     private List<Map<String, Object>> deliveries
@@ -98,7 +96,7 @@ class AutomationFailureNotificationTests {
      * permanent, so terminal FAILED with no retry) before any run-result row exists.
      */
     @Test
-    void permanentFailureBeforeAnyOutputNotifiesTheTenant() {
+    void permanentFailureBeforeAnyOutputNeverPostsToTheTenantsChatSpace() {
         failReconcileWith(new IllegalArgumentException(
                 "RuleSet DARPAN_TEST_COMPARE_RS was not found or is not accessible in your active tenant"))
 
@@ -108,30 +106,21 @@ class AutomationFailureNotificationTests {
         ])
 
         assertEquals(1, result.failedCount, "Result: ${result}")
-        assertEquals(1, deliveries.size(),
-                "A terminal automation failure must notify the tenant even when no output was produced")
-        assertEquals(NOT_RUN_LINE, deliveries[0].payload.text,
-                "The tenant is told the run did not run, from the shipped copy, and nothing of the error")
+        assertEquals(0, deliveries.size(), "DAR-BE-378: the tenant's chat space is never posted a run error")
     }
 
-    /**
-     * DAR-BE-015: the tenant's chat space is told once per automation per run day, through the real claim service
-     * (ops.OpsServices.record#RunErrorNotice, slot "client"), even with Darpan's error webhook unset (blank here): an
-     * hourly automation failing all morning must not post "did not run this morning" every hour.
-     */
+    /** DAR-BE-378: an hourly automation failing all morning never posts to the tenant's chat space, and claims no client slot. */
     @Test
-    void anHourlySecondFailureTheSameDaySendsNoSecondLine() {
+    void anHourlyFailureNeverPostsToTheTenantsChatSpace() {
         failReconcileWith(new IllegalArgumentException("extract stage exploded"))
 
         AutomationExecutionSupport.executeAutomation(ec, [automationId: AUTOMATION_ID, scheduledFireTime: Timestamp.valueOf("2026-06-06 10:00:00")])
         AutomationExecutionSupport.executeAutomation(ec, [automationId: AUTOMATION_ID, scheduledFireTime: Timestamp.valueOf("2026-06-06 11:00:00")])
 
-        assertEquals(1, deliveries.size(), "the second failure that day sends no second line")
-        assertEquals(NOT_RUN_LINE, deliveries[0].payload.text)
-        assertFalse((deliveries[0].payload.text as String).contains("exploded"), "no error text reaches the tenant")
-        assertEquals(1, ec.entity.find("darpan.ops.RunErrorNotice").condition([tenantId: TENANT, subjectKey: AUTOMATION_ID,
+        assertEquals(0, deliveries.size(), "no line to the tenant's chat space, either time")
+        assertEquals(0, ec.entity.find("darpan.ops.RunErrorNotice").condition([tenantId: TENANT, subjectKey: AUTOMATION_ID,
                 triggerType: "client"]).condition("runDay", java.sql.Date.valueOf("2026-06-06")).disableAuthz().useCache(false).count(),
-                "one client slot claimed for the day")
+                "no client slot claimed")
     }
 
     /** The failed run must also be visible in run history, not just in the chat space. */
@@ -153,16 +142,13 @@ class AutomationFailureNotificationTests {
 
     /** Retries exhausted — the automation has given up, which is exactly when someone must be told. */
     @Test
-    void deadLetteredExecutionNotifiesTheTenant() {
+    void deadLetteredExecutionNeverPostsToTheTenantsChatSpace() {
         Timestamp now = Timestamp.valueOf("2026-06-03 10:00:00")
         seedExhaustedRetryExecution(Timestamp.valueOf("2026-06-03 09:00:00"))
 
         AutomationExecutionSupport.reprocessDueRetries(ec, now, 100, [:])
 
-        assertEquals(1, deliveries.size(),
-                "Dead-lettering an automation execution must notify the tenant")
-        assertEquals(NOT_RUN_LINE, deliveries[0].payload.text)
-        assertFalse((deliveries[0].payload.text as String).contains("timed out"), "no error text reaches the tenant")
+        assertEquals(0, deliveries.size(), "DAR-BE-378: a dead letter goes to Darpan's error space, never the tenant's chat space")
     }
 
     // -----------------------------------------------------------------------

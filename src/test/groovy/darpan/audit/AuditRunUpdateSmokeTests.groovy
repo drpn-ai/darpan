@@ -192,19 +192,21 @@ class AuditRunUpdateSmokeTests {
         assertFalse(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 9, 30)),
                 "the 08:00 check is held to 23:00: it will still run, so the run's update waits for it")
         assertFalse(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 23, 30)),
-                "released at 23:00 and not yet submitted: still owed for an hour after its start")
+                "released at 23:00 and not yet submitted: still owed for twelve hours after its start")
     }
 
+    // DAR-BE-378 (RAILS 2026-11-26): checks due 15:15 queued over an hour behind dead runs; at one hour the audit read as
+    // finished and its update went out with them missing. A due check now holds the update for twelve hours.
     @Test
-    void withNoPeakPeriodAnOldDueFireNoLongerHoldsTheRunUpdate() {
+    void withNoPeakPeriodADueFireHoldsTheRunUpdateForTwelveHours() {
         Map audit = peakAudit()
         AutomationExecutionSupport.peakWindowsLoader = { def e, String t, LocalDate d -> [] }
         AutomationExecutionSupport.tenantZoneLoader = { def e, String t -> LA }
 
-        assertTrue(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 9, 30)),
-                "due 08:00, 90 minutes ago and never submitted: no scheduler here (STILL_DUE_MS), as before peak periods")
-        assertFalse(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 8, 30)),
-                "due 30 minutes ago: still owed")
+        assertFalse(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 9, 30)),
+                "due 08:00, 90 minutes ago and not yet submitted (the queue was full): still owed")
+        assertTrue(AuditRunUpdateSupport.idle(ec, GORJANA, audit, "TRU_PEAK_0755", la(11, 28, 20, 30)),
+                "due twelve and a half hours ago and never submitted: no scheduler here (STILL_DUE_MS)")
     }
 
     /** A second audit of GORJANA: two checks through two automations due 07:55 and 08:00 Los Angeles on Nov 28. */
@@ -296,7 +298,10 @@ class AuditRunUpdateSmokeTests {
             assertEquals("RUN_NOT_DONE", send(AUTO)[0].reason, "the scan defers it to its next tick")
             insert("darpan.reconciliation.ReconciliationAutomation", [automationId: "TRU_AUTO2",
                     nextScheduledFireTime: new Timestamp(System.currentTimeMillis() - 3 * 3600000)])
-            assertEquals(true, send(AUTO)[0].sent, "due hours ago: no scheduler runs here")
+            assertEquals("RUN_NOT_DONE", send(AUTO)[0].reason, "due three hours ago and not submitted: still owed (DAR-BE-378)")
+            insert("darpan.reconciliation.ReconciliationAutomation", [automationId: "TRU_AUTO2",
+                    nextScheduledFireTime: new Timestamp(System.currentTimeMillis() - 13 * 3600000)])
+            assertEquals(true, send(AUTO)[0].sent, "due thirteen hours ago: no scheduler runs here")
         } finally {
             ec.entity.find("darpan.audit.AuditStatementCheck").condition("checkId", "TRU_CHK2").deleteAll()
             ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "TRU_CHK2").deleteAll()
@@ -329,10 +334,10 @@ class AuditRunUpdateSmokeTests {
         assertEquals([false, true], outcomes*.sent.sort())
         assertEquals("ALREADY_SENT", outcomes.find { !it.sent }.reason)
 
-        // A later execution of the audit ends: a new run, a new update.
+        // DAR-BE-378: a later execution the same morning (a late check) sends no second update: one a morning.
         execution("AUT_STAT_SUCCESS", [completedDate: new Timestamp(System.currentTimeMillis() + 5000)])
-        assertEquals(true, send(AUTO)[0].sent)
-        assertEquals(2, mails.size())
+        assertEquals("ALREADY_SENT", send(AUTO)[0].reason)
+        assertEquals(1, mails.size())
     }
 
     @Test
@@ -411,10 +416,7 @@ class AuditRunUpdateSmokeTests {
             ec.entity.find("darpan.audit.AuditDigest").condition("auditDigestId", "TRU_RUN").updateAll([isActive: "N"])
             execution("AUT_STAT_SUCCESS", [completedDate: new Timestamp(System.currentTimeMillis() + 5000)])
             assertEquals([], send(AUTO), "the tenant's update is off")
-            assertEquals(3, mails.size())
-            assertEquals("review@drpn.example", mails[2].to, "Darpan's CSV still goes")
-            assertEquals([], send(AUTO))
-            assertEquals(3, mails.size(), "once per run")
+            assertEquals(2, mails.size(), "DAR-BE-378: a later execution the same morning is the same run: no second CSV")
         } finally {
             DarpanSettings.resetForTests()
         }

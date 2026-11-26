@@ -52,9 +52,11 @@ class AuditDigestSupport {
      * The digest text. weekAgo is the report of seven mornings before, for a weekly summary; null for a daily one.
      * fullList lists every open finding the report carries, as far as one message holds.
      * DAR-BE-303: the fixed words are DARPAN_AUDIT_DIGEST copy blocks read through copy; the counts, finding rows and the
-     * report link stay here. Chat and email get the same text, so both read the same blocks.
+     * report link stay here. Chat and email get the same text, so both read the same blocks, except the not-run notice:
+     * withNotice false (the chat room's copy) leaves it out, since a client room never gets a warning (DAR-BE-378).
      */
-    static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl, EmailCopyReader copy, EmailCopyReader runCopy) {
+    static String render(Map report, String kindEnumId, boolean fullList, Map weekAgo, String reportUrl, EmailCopyReader copy, EmailCopyReader runCopy,
+                         boolean withNotice = true) {
         Map head = (report?.report ?: [:]) as Map
         Map health = (report?.health ?: [:]) as Map
         Map summary = (report?.summary ?: [:]) as Map
@@ -66,7 +68,7 @@ class AuditDigestSupport {
                    weekly ? copy.text("week", [day: day]) : day].findAll { it }.join(" · "))
         // DAR-BE-363: a morning with a check that did not run carries the run update's neutral notice (DARPAN_AUDIT_RUN
         // blocks, read through runCopy), built from the same rule facts; never health.summary, which names systems and causes.
-        String notice = AuditRunMessage.notRunNotice(AuditRunFacts.build(report, [], null), runCopy)
+        String notice = withNotice ? AuditRunMessage.notRunNotice(AuditRunFacts.build(report, [], null), runCopy) : null
         if (notice) lines.add(notice)
         lines.add("")
 
@@ -210,11 +212,15 @@ class AuditDigestSupport {
         Map report = assemble(ec, tenantId, digest.auditId as String, today)
         if (report == null) return [sent: false, reason: "NO_REPORT"]
         Map weekAgo = weekly ? assemble(ec, tenantId, digest.auditId as String, today.minusDays(7)) : null
-        String text = render(report, digest.kindEnumId as String, digest.fullList == "Y", weekAgo, reportUrl(ec, report),
-                new EmailCopyReader(ec, EMAIL_TEMPLATE), new EmailCopyReader(ec, AuditRunMessage.TEMPLATE))
+        EmailCopyReader digestCopy = new EmailCopyReader(ec, EMAIL_TEMPLATE)
+        EmailCopyReader runCopy = new EmailCopyReader(ec, AuditRunMessage.TEMPLATE)
+        String text = render(report, digest.kindEnumId as String, digest.fullList == "Y", weekAgo, reportUrl(ec, report), digestCopy, runCopy)
         boolean delivered = false
         if (destination != null) {
-            Map delivery = TenantNotificationSupport.deliverToDestination(destination, [text: text])
+            // DAR-BE-378: the client's room gets the digest without the not-run notice.
+            String chatText = render(report, digest.kindEnumId as String, digest.fullList == "Y", weekAgo, reportUrl(ec, report),
+                    digestCopy, runCopy, false)
+            Map delivery = TenantNotificationSupport.deliverToDestination(destination, [text: chatText])
             if (delivery?.ok == true) delivered = true
             // A failed post keeps the day's claim, as a run notification does: no retry storm on a dead webhook.
             else logger.warn("Audit digest {} to space {} returned status {}{}", digest.auditDigestId, chatSpaceId,

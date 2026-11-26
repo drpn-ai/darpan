@@ -3708,11 +3708,9 @@ class AutomationExecutionSupport {
     /**
      * DAR-BE-015. The one path for a run error (FAILED, DEAD_LETTER, ONE_SIDE_EMPTY, KEPT_NOTHING; see RunErrorKinds): the card
      * goes to Darpan's own error space, one per audit check this automation runs or one for a non-audit automation. A client
-     * destination never gets the error, only the neutral line (copy block DARPAN_ERROR_NOTICE / client.notrun):
-     * - notify-me subscribers get it on any run (scheduled, manual, play, audit): they asked to be told;
-     * - the automation's own chat space gets it only for a scheduled non-audit run, once per automation per run day
-     *   (ErrorChatSupport.claimClientLine), so an hourly failure or a second failed window does not repeat it;
-     * - an audit's client line is its run update, so an audit automation's chat space gets none.
+     * destination never gets the error. Notify-me subscribers get only the neutral line (copy block DARPAN_ERROR_NOTICE /
+     * client.notrun) on any run: they asked to be told. DAR-BE-378 (Aditi 2026-11-26): no client chat room is ever posted a
+     * run error, not even the neutral line; the error space is where it goes.
      * Called for the terminal outcome only, never for an attempt that will be retried. Never throws: the run's own outcome
      * must reach the caller unchanged, and its subscriptions never outlive it.
      *
@@ -3732,11 +3730,8 @@ class AutomationExecutionSupport {
                         readField(automation, "automationId"), lookupError.getClass().name)
             }
             Map<String, Object> event = runErrorEvent(ec, automation, execution, kind, reason, runResultId, trigger)
-            String chatSpaceId = normalize(readField(automation, "chatSpaceId"))
-            boolean toChatSpace = chatSpaceId && subjects != null && subjects.isEmpty() && trigger == TRIGGER_SCHEDULED &&
-                    ErrorChatSupport.claimClientLine(ec, event)
-            return [tenantId   : normalize(readField(automation, "companyUserGroupId")), name: event.automationName,
-                    chatSpaceId: toChatSpace ? chatSpaceId : null, cards: (subjects ?: [[:]]).collect { Map subject -> event + subject }]
+            return [tenantId: normalize(readField(automation, "companyUserGroupId")), name: event.automationName,
+                    cards   : (subjects ?: [[:]]).collect { Map subject -> event + subject }]
         }
     }
 
@@ -3770,7 +3765,7 @@ class AutomationExecutionSupport {
                     // the card's day is the tenant's day (an interactive run has no automation zone)
                     zoneId        : TenantNotificationSupport.resolveTenantZone(ec, tenantId)?.id,
             ] as Map<String, Object>
-            return [tenantId: tenantId, name: name, chatSpaceId: null, cards: [event]]
+            return [tenantId: tenantId, name: name, cards: [event]]
         }
     }
 
@@ -3797,10 +3792,9 @@ class AutomationExecutionSupport {
 
     /**
      * DAR-BE-015/362. The one tail of every run error. build returns what to send (null: nothing, the run had no error):
-     * tenantId, name (the client line's ${name}), chatSpaceId (the automation's space, or null for subscribers only) and cards
-     * (each posted to Darpan's error space; a failed post is logged and never stops the rest). Then the neutral line (copy
-     * block blockId of DARPAN_ERROR_NOTICE) goes through notifyRunLine, which claims the run result and purges its
-     * subscriptions. Never throws; when anything fails the run's subscriptions still go, so none outlives the run.
+     * tenantId, name (the subscribers' line's ${name}) and cards (each posted to Darpan's error space; a failed post is logged
+     * and never stops the rest). Then the neutral line (copy block blockId of DARPAN_ERROR_NOTICE) goes through notifyRunLine
+     * to notify-me subscribers only, never a chat room (DAR-BE-378), which claims the run result and purges its subscriptions. Never throws; when anything fails the run's subscriptions still go, so none outlives the run.
      */
     private static void deliverRunError(def ec, String runResultId, String blockId, Closure<Map> build) {
         try {
@@ -3816,7 +3810,7 @@ class AutomationExecutionSupport {
             }
             String line = (errorNoticeCopy != null ? (EmailCopyReader) errorNoticeCopy.call(ec) :
                     new EmailCopyReader(ec, ERROR_NOTICE_TEMPLATE)).text(blockId, [name: plan.name])
-            TenantNotificationSupport.notifyRunLine(ec, plan.tenantId as String, plan.chatSpaceId as String, runResultId, line)
+            TenantNotificationSupport.notifyRunLine(ec, plan.tenantId as String, null, runResultId, line)
         } catch (Throwable notifyError) {
             logger.warn("Run error notification failed (best-effort): {}", notifyError.getClass().name)
             try {

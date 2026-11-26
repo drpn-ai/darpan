@@ -20,7 +20,7 @@ import java.time.format.TextStyle
  */
 class AuditRunMessage {
     /** Chat card colours (Google Chat renders these in its own UI). */
-    static final String RED = "#b3261e", AMBER = "#9a6700", GREEN = "#1e7e34"
+    static final String RED = "#b3261e", GREEN = "#1e7e34"
     /** Email: the theme every Darpan email shares (EmailFrame, DAR-BE-298). */
     private static final String INK = EmailFrame.INK, SOFT = EmailFrame.SOFT, MUTED = EmailFrame.MUTED, DIM = EmailFrame.DIM,
                                 LINE = EmailFrame.LINE, LINE_SOFT = EmailFrame.LINE_SOFT, TILE = EmailFrame.TILE, ACCENT = EmailFrame.ACCENT
@@ -136,7 +136,10 @@ class AuditRunMessage {
         return "${copy.text('rule.partly', [notRun: ((rule.checksNotRun ?: []) as List).size(), total: rule.checksTotal])} ${counts}".toString()
     }
 
-    /** Google Chat cardsV2: the counts, the writer's headline, what did not run, and the report's link. Nothing else. */
+    /**
+     * Google Chat cardsV2 for the client's room: the counts, the writer's headline, the reads line and the report's link.
+     * Never a warning (DAR-BE-378, Aditi 2026-11-26): what did not run goes to Darpan's alerts room (alertText), not here.
+     */
     static Map card(Map facts, Map words, String base, EmailCopyReader copy) {
         Map t = totals(facts)
         List<Map> widgets = [[decoratedText: [text     : "<font color=\"${RED}\">${t.open} open</font>  ·  ${t.newToday} new  ·  " +
@@ -144,9 +147,6 @@ class AuditRunMessage {
                                               wrapText : true, topLabel: "Findings",
                                               startIcon: [materialIcon: [name: "fact_check"]]]]]
         if (words?.headline) widgets << [textParagraph: [text: esc(words.headline as String)]]
-        String notRun = notRunNotice(facts, copy)
-        if (notRun) widgets << [decoratedText: [text     : "<font color=\"${AMBER}\">${esc(notRun)}</font>".toString(),
-                                                wrapText : true, startIcon: [materialIcon: [name: "warning"]]]]
         String reads = readsLine(facts, copy)
         if (reads) widgets << [decoratedText: [text: esc(reads), wrapText: true, startIcon: [materialIcon: [name: "sync"]]]]
         String url = reportUrl(base, facts)
@@ -155,6 +155,16 @@ class AuditRunMessage {
                 cardsV2: [[cardId: "audit-run", card: [
                         header  : [title: title(facts), subtitle: subtitle(facts, copy), imageUrl: "https://drpn.ai/favicon.png", imageType: "CIRCLE"],
                         sections: [[widgets: widgets]]]]]]
+    }
+
+    /**
+     * DAR-BE-378. The alerts room's line for a run with a warning (a check that did not run or partly ran): the tenant and
+     * audit, the notice, and the report's link. Null when every check ran, so a clean run alerts nobody.
+     */
+    static String alertText(Map facts, String base, EmailCopyReader copy) {
+        String notice = notRunNotice(facts, copy)
+        if (!notice) return null
+        return [title(facts), subtitle(facts, copy), notice, reportUrl(base, facts)].findAll { it }.join("\n")
     }
 
     /** DAR-BE-361: "3 acknowledged" when the team set some findings aside today; null when none. */

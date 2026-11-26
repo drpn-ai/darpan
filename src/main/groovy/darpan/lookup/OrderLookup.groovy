@@ -316,7 +316,34 @@ class OrderLookup {
         Pattern p
         try { p = Pattern.compile((read.valueShape as String) ?: DEFAULT_SHAPE) }
         catch (java.util.regex.PatternSyntaxException e) { throw new IllegalArgumentException("bad valueShape ${read.valueShape}".toString()) }
-        return p.matcher(value).matches()
+        // A tenant shape is the tenant's own regex on Java's backtracking engine: run it against a time budget so a
+        // catastrophic pattern ((a+)+b) gives up as a broken read instead of holding a thread.
+        try {
+            return p.matcher(new BudgetedChars(value, System.nanoTime() + SHAPE_BUDGET_NANOS)).matches()
+        } catch (ShapeTimeout ignored) {
+            throw new IllegalArgumentException("value shape ${read.valueShape} took too long".toString())
+        }
+    }
+
+    static final long SHAPE_BUDGET_NANOS = 100_000_000L   // 100 ms
+
+    private static class ShapeTimeout extends RuntimeException {
+        ShapeTimeout() { super(null, null, false, false) }
+    }
+
+    /** The value as the regex engine reads it, checking the clock every 1,000 reads. */
+    private static class BudgetedChars implements CharSequence {
+        private final String text
+        private final long deadline
+        private int reads = 0
+        BudgetedChars(String text, long deadline) { this.text = text; this.deadline = deadline }
+        char charAt(int index) {
+            if (++reads % 1000 == 0 && System.nanoTime() > deadline) throw new ShapeTimeout()
+            return text.charAt(index)
+        }
+        int length() { return text.length() }
+        CharSequence subSequence(int start, int end) { return new BudgetedChars(text.substring(start, end), deadline) }
+        String toString() { return text }
     }
 
     private static List<String> fieldsOf(Map read) {

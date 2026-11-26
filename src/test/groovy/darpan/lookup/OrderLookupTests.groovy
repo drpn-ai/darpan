@@ -203,6 +203,15 @@ class OrderLookupTests {
     }
 
     @Test
+    void "a catastrophic tenant shape is stopped by a time budget, not left to backtrack"() {
+        long start = System.nanoTime()
+        assertThrows(IllegalArgumentException) { OrderLookup.shapeFits([valueShape: "(.*a){12}"], "a" * 40 + "!") }   // runs for minutes unbudgeted on JDK 21
+        assertTrue((System.nanoTime() - start) < 3_000_000_000L, "gave up within the budget")
+        Map out = OrderLookup.run(deps(CHAIN, [reads: READS + [read("EVIL", "OMS", "ORDER", [isFind: "Y", valueShape: "(.*5){12}"])]]), "5" * 40 + "x", false)
+        assertTrue((out.skipped as List<Map>).any { it.readId == "EVIL" && (it.reason as String).startsWith("broken read") })
+    }
+
+    @Test
     void "SuiteQL gets the value only after its shape check, quoted"() {
         assertEquals("SELECT id FROM transaction WHERE tranid = '#GOR123'",
                 OrderLookup.renderSuiteQl("SELECT id FROM transaction WHERE tranid = {value}", "#GOR123", null))

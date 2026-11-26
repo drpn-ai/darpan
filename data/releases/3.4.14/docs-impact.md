@@ -1,7 +1,7 @@
 # Docs Impact For Darpan 3.4.14
 
-Every shipped item needs a decision in each column: the page path you changed
-(for example `guides/audits.mdx`), or `none: <reason>`. `verify_release_docs.py`
+Every shipped item needs a decision in each column: the page path you changed,
+or `none: <reason>`. `verify_release_docs.py`
 fails when a page named here was not changed in its docs repo since the previous
 release tag. Release notes alone do not count as documenting a change.
 
@@ -9,7 +9,7 @@ release tag. Release notes alone do not count as documenting a change.
 
 | Item | Change | How-to | Reference | Troubleshooting | Setup / service details |
 | --- | --- | --- | --- | --- | --- |
-| DAR-CLI-008 (CLI 0.5.0 + findings fix) | `darpan lookup` follows an order through Shopify, HotWax and NetSuite and lists all its open findings | getting-started/set-up-darpan-cli.mdx (Look up any order) | none: no reference page lists lookup behaviour | none: no new message | none: connections unchanged |
+| DAR-CLI-008 (CLI 0.5.0 + findings fix) | `darpan lookup` follows an order through Shopify, HotWax and NetSuite and lists all its open findings | none: the CLI page's "Look up any order" section (CLI 0.5.0) was written with 3.4.13 (darpan-docs 8fe5aa2) and already says a lookup lists the order's open findings | none: no reference page lists lookup behaviour | none: no new message | none: connections unchanged |
 
 ## GraphQL reference (developers.drpn.ai)
 

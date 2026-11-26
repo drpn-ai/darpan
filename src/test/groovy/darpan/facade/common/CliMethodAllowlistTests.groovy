@@ -67,6 +67,7 @@ class CliMethodAllowlistTests {
             "facade.ReconciliationFacadeServices.list#AutomationSourceOptions",
             "facade.TenantConfigFacadeServices.get#TenantConfigVersion",
             "facade.ShopifyFacadeServices.begin#ShopifyInstall",
+            "facade.AuthFacadeServices.get#TwoFactorStatus",
             // the embedded agent: a CLI session already is an agent
             "facade.AgentTurnFacadeServices.send#AgentTurn",
             "facade.AgentTurnFacadeServices.send#AgentQueryTurn",
@@ -90,6 +91,14 @@ class CliMethodAllowlistTests {
             "facade.AuthFacadeServices.save#UserSettings",
             "facade.AuditFacadeServices.verify#AuditFindings",
     ].asImmutable()
+
+    /** Final review Important 2: credentials by name, so a NEW credential service is caught, not only today's names. */
+    private static final java.util.regex.Pattern CREDENTIAL_NOUN = ~/AuthConfig|RestletConfig|SftpServer|TenantChatSpace|LlmSettings|BotToken|Install|Passkey|TwoFactor|Password|Recovery|SecretHandoff|ApiKey|Webhook|Credential|SignIn|Login/
+    /** Getters that return only redaction flags (has*), never the secret; each checked by hand when it was allowed. */
+    private static final Set<String> MASKED_GETTERS = ["facade.SettingsFacadeServices.get#LlmSettings",
+                                                       "facade.ShopifyFacadeServices.get#ShopifyAuthConfig",
+                                                       "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs",
+                                                       "facade.SlackFacadeServices.get#SlackInstall"] as Set
 
     private static List<String> contractMethods() {
         Path methodsFile = ReconciliationSmokeTestSupport.resolveBackendRoot()
@@ -145,6 +154,14 @@ class CliMethodAllowlistTests {
             }
         }.sort()
         assertTrue(leaks.isEmpty(), "sign-in, identity, CLI access and the embedded agent stay in the browser: ${leaks}")
+    }
+
+    @Test
+    void noCredentialNamedMethodIsAllowedBeyondTheMaskedGetters() {
+        List<String> credential = CliMethodAllowlist.ALLOWED.findAll { String method ->
+            !MASKED_GETTERS.contains(method) && CREDENTIAL_NOUN.matcher(method.substring(method.indexOf('#') + 1)).find()
+        }.sort()
+        assertTrue(credential.isEmpty(), "connection credentials and sign-in stay in the app; a masked getter is named in MASKED_GETTERS: ${credential}")
     }
 
     @Test

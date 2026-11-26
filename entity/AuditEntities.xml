@@ -497,7 +497,7 @@
         <field name="findingId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <!-- text-long: text-medium is VARCHAR(255) on MySQL and H2; the facade allows a note of up to 4,000 characters. -->
-        <field name="note" type="text-long" not-null="true"/>
+        <field name="note" type="text-long"><description>Why the problem is known; optional (DAR-UI-152). A database made before 3.4.15 is relaxed by migrate#AcknowledgementNoteNullable.</description></field>
         <field name="acknowledgedByUserId" type="id"/>
         <field name="acknowledgedStamp" type="date-time" not-null="true"/>
         <field name="remindDate" type="date"/>

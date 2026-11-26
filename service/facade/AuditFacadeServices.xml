@@ -201,7 +201,7 @@
             findings. A fixed finding cannot be acknowledged.</description>
         <in-parameters>
             <parameter name="findingId" required="true"><description>Any finding of the row, e.g. F-20761.</description></parameter>
-            <parameter name="note"><description>Why the problem is known; required, at most 4,000 characters.</description></parameter>
+            <parameter name="note"><description>Why the problem is known; optional (blank is no note), at most 4,000 characters.</description></parameter>
             <parameter name="remind" type="Boolean" default="true"><description>Bring the row back to Open after the remind
                 days if it is still open.</description></parameter>
         </in-parameters>
@@ -215,8 +215,8 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
                 <return error="true" message="Finding ${findingId} was not found"/></if>
-            <set field="noteText" from="note?.trim()"/>
-            <if condition="!noteText"><return error="true" message="Add a note"/></if>
+            <!-- DAR-UI-152 (Aditi: "typing something doesnt need to be required"): a blank note is no note. -->
+            <set field="noteText" from="note?.trim() ?: ''"/>
             <if condition="noteText.length() &gt; 4000"><return error="true" message="Keep the note under 4,000 characters"/></if>
             <entity-find entity-name="darpan.audit.AuditFinding" list="findingList">
                 <econdition field-name="findingId"/>
@@ -252,7 +252,7 @@
             (today plus the remind days) when it was off or has passed.</description>
         <in-parameters>
             <parameter name="findingId" required="true"><description>Any finding of the row, e.g. F-20761.</description></parameter>
-            <parameter name="note"><description>The new note; required, at most 4,000 characters.</description></parameter>
+            <parameter name="note"><description>The new note; optional (blank clears it), at most 4,000 characters.</description></parameter>
             <parameter name="remind" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters>
@@ -265,8 +265,8 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
                 <return error="true" message="Finding ${findingId} was not found"/></if>
-            <set field="noteText" from="note?.trim()"/>
-            <if condition="!noteText"><return error="true" message="Add a note"/></if>
+            <!-- DAR-UI-152 (Aditi: "typing something doesnt need to be required"): a blank note is no note. -->
+            <set field="noteText" from="note?.trim() ?: ''"/>
             <if condition="noteText.length() &gt; 4000"><return error="true" message="Keep the note under 4,000 characters"/></if>
             <set field="memberIds" from="darpan.audit.AuditReportAssembler.unitMemberIds(ec, tenantId, findingId)"/>
             <entity-find entity-name="darpan.audit.AuditFindingAcknowledgement" list="ackList">

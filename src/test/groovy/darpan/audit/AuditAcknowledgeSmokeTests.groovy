@@ -196,17 +196,22 @@ class AuditAcknowledgeSmokeTests {
         assertEquals([inv], AuditReportAssembler.unitMemberIds(ec, MINE, inv))
     }
 
+    /** DAR-UI-152 (Aditi: "typing something doesnt need to be required"): a blank note acknowledges, kept empty. */
     @Test
-    void blankNoteRefused() {
+    void blankNoteAcknowledges() {
         String f = ids.R1["M103/01"]
         Map out = call("acknowledge#AuditFinding", [findingId: f, note: "   "])
-        assertTrue(out.hadError as boolean)
-        assertTrue((out.errorText as String).contains("Add a note"), out.errorText as String)
-        assertEquals([], acks([f]))
-        assertEquals([], events([f], "AUDFE_ACKNOWLEDGED"))
-        Map tooLong = call("acknowledge#AuditFinding", [findingId: f, note: "x" * 4001])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals([""], acks([f])*.note.collect { it ?: "" }, "no note")
+        assertEquals(1, events([f], "AUDFE_ACKNOWLEDGED").size())
+        assertEquals("", ((out.acknowledgement as Map).note ?: "") as String)
+        // The registered migration on this database (made from the nullable entity): nothing to do.
+        Map migrated = ec.service.sync().name("audit.AuditLedgerServices.migrate#AcknowledgementNoteNullable")
+                .parameters([dryRun: true]).disableAuthz().call()
+        assertTrue((migrated.messages as List)[0].toString().contains("already allows no value"), migrated.messages.toString())
+        Map tooLong = call("update#AuditFindingAcknowledgement", [findingId: f, note: "x" * 4001, remind: true])
         assertTrue((tooLong.errorText as String).contains("Keep the note under 4,000 characters"), tooLong.errorText as String)
-        assertEquals([], acks([f]))
+        assertEquals([""], acks([f])*.note.collect { it ?: "" }, "a refused change leaves the note")
     }
 
     /** text-medium is VARCHAR(255) on MySQL and H2: a note the facade accepts must fit the column (text-long). */
@@ -269,8 +274,10 @@ class AuditAcknowledgeSmokeTests {
         assertEquals(Date.valueOf(today().plusDays(5)), acks(row)[0].remindDate, "remind back on counts from today")
         assertEquals(3, events(row, "AUDFE_ACK_CHANGED").size())
 
+        // DAR-UI-152: a change may clear the note.
         Map blank = call("update#AuditFindingAcknowledgement", [findingId: row[0], note: " ", remind: true])
-        assertTrue((blank.errorText as String).contains("Add a note"), blank.errorText as String)
+        assertFalse(blank.hadError as boolean, blank.errorText as String)
+        assertEquals("", (acks(row)[0].note ?: "") as String)
         Map none = call("update#AuditFindingAcknowledgement", [findingId: ids.R1["M107/01"], note: "x", remind: true])
         assertTrue((none.errorText as String).contains("is not acknowledged"), none.errorText as String)
     }
@@ -311,7 +318,7 @@ class AuditAcknowledgeSmokeTests {
             assertEquals([], events([fresh], "AUDFE_ACKNOWLEDGED"), "rolled back: no event")
 
             // The rules still speak for themselves, before any write.
-            assertTrue((call("acknowledge#AuditFinding", [findingId: fresh, note: "  "]).errorText as String).contains("Add a note"))
+            assertTrue((call("acknowledge#AuditFinding", [findingId: fresh, note: "x" * 4001]).errorText as String).contains("Keep the note under 4,000 characters"))
             assertTrue((call("acknowledge#AuditFinding", [findingId: ids.R1["M104/01"], note: "Known"]).errorText as String)
                     .contains("Only an open finding can be acknowledged"))
             assertTrue((call("update#AuditFindingAcknowledgement", [findingId: fresh, note: "x", remind: true]).errorText as String)

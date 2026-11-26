@@ -94,7 +94,15 @@ class DisableAuthzRatchetTest {
     // need no per-entity grant; QueryMigration's one-time copy of every tenant's old scripts runs with no user.
     // 18 since DAR-BE-338: AUTOMATION_FILTER_COPY's create write (migration/AutomationFilterCopySupport) rebuilds each automation's
     // own filter rows from its run, cross-tenant, pinned to the automation's tenant; TenantScopedFinder wraps reads only. KEPT BARE.
-    static final int BASELINE = 18
+    // 33 since DAR-BE-374 (ID index; shipped in 3.5.0 with this ratchet red, re-baselined after review in 3.5.3): 15 sites in
+    // darpan/idindex, none tenant-blind. Tenant reads filter on companyUserGroupId explicitly (the tenant filter is skipped
+    // with authz off): IdIndexSearch.liveDeps byIdNorm and byRecord (2), IdIndexDatasetHook's cursor read (1). Product
+    // configuration, not tenant data: IdIndexCatalog's IdIndexSource/IdIndexField reads and field checks (4). Writes keyed by the
+    // tenant's own rows: IdIndexCatalog.markForReindex (1), IdIndexRunHook's connection read by its primary key (1),
+    // IdIndexDatasetHook and IdIndexer restoring authz in finally around the indexing write (2). The nightly
+    // maintain_IdIndex_nightly job, cross-tenant by design with no user: IdIndexMaintain's source and cursor reads (2) and the
+    // sweep's select and delete of rows past darpan.idindex.months (2). KEPT BARE.
+    static final int BASELINE = 33
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>
@@ -179,7 +187,9 @@ class DisableAuthzRatchetTest {
             // 66 again since DAR-BE-338: save#Automation and delete#Automation clear the automation's own filter rows again.
             "darpan service+screen XML .disableAuthz("            : 66, // DAR-BE-279/280: 3 tenant-blind finds -> TenantScopedFinder
             // 35 again since DAR-BE-338: save#Automation creates the automation's own filter rows again.
-            "darpan service+screen XML disable-authz=\"true\""    : 35,
+            // 36 since DAR-BE-374 (re-baselined in 3.5.3): IdIndexFacadeServices save#TenantIdIndexField stores the tenant's own
+            // field after requireActiveTenantWriteAccess, companyUserGroupId set to the active tenant.
+            "darpan service+screen XML disable-authz=\"true\""    : 36,
             // DAR-BE-318: script/rules/RulesTenantGuard.xml, the moqui-rules write guard the rules.* EECAs run. Its one
             // unfiltered read (rulesGuardFind) loads the row written, or a row it names, by primary key to check its owner.
             "darpan script XML .disableAuthz("                    : 1,

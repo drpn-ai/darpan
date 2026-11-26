@@ -1396,7 +1396,8 @@ class AuditReportAssembler {
                 // DAR-UI-081 (Aditi: "add order sales channel and shipping method", "add the IF id"): NetSuite's channel
                 // (custbody_hc_sales_channel), HotWax's ship group method, a NetSuite line's item fulfillments.
                 salesChannel: text("salesChannel") ?: channelWords(text("sourceName") ?: text("salesChannelEnumId")),
-                shipMethod : text("shipmentMethodTypeId") ?: shipMethods(data.get("shipGroups")),
+                // DAR-BE-372: an R10 NetSuite line carries its HotWax item's method (omsItemShipmentMethodTypeId).
+                shipMethod : text("shipmentMethodTypeId") ?: text("omsItemShipmentMethodTypeId") ?: shipMethods(data.get("shipGroups")),
                 fulfillments: (data.get("fulfillments") instanceof List ? ((List) data.get("fulfillments")).collect { it?.toString() }.findAll() : []) ?: null,
                 orderDate  : dayOf(text("omsOrderDate") ?: text("orderDate") ?: (recordType == "order" ? text("createdAt") : null) ?:
                         text("tranDate"), zone),

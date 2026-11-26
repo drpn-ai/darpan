@@ -399,6 +399,23 @@ class AuditAutomationSupport {
     }
 
     /**
+     * A result row as the audit reads it: the document on disk names a row diffType / primaryId / message, the compare's
+     * in-memory rows type / id / note; either is read. DAR-BE-372: `lookedUp` (what the row's conclusion lookups found)
+     * is carried, so recordsOf keeps that record on the finding.
+     */
+    static Map rowOf(Map raw) {
+        return [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
+                note: normalize(raw.message ?: raw.note), data: rowData(raw.data),
+                ids: rowData(raw.ids), sideRecords: rowData(raw.sideRecords),
+                firstKeyRecords: rowData(raw.firstKeyRecords),
+                file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
+                lookedUp: raw.lookedUp instanceof List ? raw.lookedUp : null,
+                systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
+                checks: raw.conclusion instanceof Map ? ((Map) raw.conclusion).checks : null,
+                conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
+    }
+
+    /**
      * The check's findings in one diff document: a row breaks a statement when its type is in the link's diffTypes
      * (blank: any), the rule that raised it is in the link's ruleIds (blank: any; DAR-BE-095) and its cause is not
      * expected (DAR-BE-196: the run marks conclusion.expected; Unexplained counts unless its run marked it, DAR-BE-198). One finding per statement and
@@ -423,14 +440,7 @@ class AuditAutomationSupport {
         DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
             // The document on disk names a row diffType / primaryId / message; the compare's in-memory rows say
             // type / id / note. Read either.
-            Map row = [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
-                       note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
-                       ids: AuditAutomationSupport.rowData(raw.ids), sideRecords: AuditAutomationSupport.rowData(raw.sideRecords),
-                       firstKeyRecords: AuditAutomationSupport.rowData(raw.firstKeyRecords),
-                       file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
-                       systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
-                       checks: raw.conclusion instanceof Map ? ((Map) raw.conclusion).checks : null,
-                       conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
+            Map row = AuditAutomationSupport.rowOf(raw)
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
             // DAR-BE-196: Unexplained counts. DAR-BE-198 (b): unless its run marked it expected (unexplainedExpected).

@@ -45,8 +45,8 @@ class FindingCardRulesTests {
     @Test
     void aNetSuiteLineGivesHotWaxsStatusItsAmountAndItsDay() {
         Map facts = AuditReportAssembler.recordFacts(NETSUITE_LINE, "salesOrderLine")
-        assertEquals(["Approved", "275.00", "2026-11-07", "Web Channel"],
-                [facts.hotwaxStatus, (facts.lineTotal as Map)?.amount?.toString(), facts.orderDate, facts.salesChannel])
+        assertEquals(["Approved", "275.00", "2026-11-07", "Web Channel", "SHIPSI_SM_DAY_DLV"],
+                [facts.hotwaxStatus, (facts.lineTotal as Map)?.amount?.toString(), facts.orderDate, facts.salesChannel, facts.shipMethod])
     }
 
     /** Rule 2 on R13: the Shopify order's status, payment, total and day. */
@@ -64,8 +64,11 @@ class FindingCardRulesTests {
     @Test
     void aRecordALookupFoundIsKeptWholeOnTheFinding() {
         Map hotwax = [orderId: "M1300001", externalId: "19002956775555", statusId: "ORDER_COMPLETED"]
-        Map row = [type: "FINDING", id: "19002956775555", data: SHOPIFY_ORDER,
+        // As the conclusion step writes it to the result document (data a JSON string), read back the way findingsFrom
+        // reads every row: the 3.4.12 cut read rows field by field and dropped lookedUp, so prod R13 still said Missing.
+        Map raw = [diffType: "FINDING", primaryId: "19002956775555", data: groovy.json.JsonOutput.toJson(SHOPIFY_ORDER),
                    lookedUp: [[name: "omsOrder", systemEnumId: "OMS_GQL", record: hotwax]]]
+        Map row = AuditAutomationSupport.rowOf(raw)
         List<Map> records = AuditAutomationSupport.recordsOf([file1RecordType: "order"], row, [systemEnumId: "SHOPIFY"], null)
         Map kept = records.find { it.systemEnumId == "OMS" }
         assertEquals(["order", "M1300001", hotwax], [kept?.recordType, kept?.recordId, kept?.recordData])

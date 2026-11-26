@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Candidate release-scoped upgrade data for Darpan 3.4.12.
-Generated from backend compare range: v3.4.11..HEAD
+Candidate release-scoped upgrade data for Darpan 3.4.13.
+Generated from backend compare range: v3.4.12..HEAD
 Records must also live in generic source data files under runtime/component/darpan/data/.
 Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- No added or modified candidate records were detected between the compared refs. -->
+    <!-- Added records from data/SecuritySeedData.xml -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_LOOKUP_LINK" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.lookup.TenantLookupLink" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_LOOKUP_READ" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.lookup.TenantLookupRead" filterMap="[companyUserGroupId: activeTenantUserGroupId ?: '__NO_ACTIVE_TENANT__']"/>
 </entity-facade-xml>

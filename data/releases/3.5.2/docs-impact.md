@@ -17,7 +17,7 @@ Each shipped item names the page changed in each surface, or none with a reason.
 
 ## Service catalog and public OpenAPI
 
-- `api-reference/service-catalog.mdx`: none: no method changed
+- Service catalog: none: no method changed
 - `api-reference/openapi.json` regenerated with `scripts/public_openapi.py` at version 3.5.2
 - `api-reference/changelog.mdx`: 3.5.2 named under contract 6, no method added or removed
 
